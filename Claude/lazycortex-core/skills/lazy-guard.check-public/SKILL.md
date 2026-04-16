@@ -1,5 +1,5 @@
 ---
-name: lazy-guard.check-public-repo
+name: lazy-guard.check-public
 description: "Use when auditing a public repo for leaked secrets, PII, infrastructure details, or hardcoded local paths. Run before making a repo public, after adding new configs, or as a periodic hygiene check. Reads .guard-waivers.json for accepted exceptions."
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(mkdir -p *), Bash(date *)
 ---
@@ -22,7 +22,7 @@ git ls-files
 
 Read `.guard-waivers.json` from repo root. If absent, use empty waiver set.
 
-**This file also serves as the opt-in signal for the pre-commit hook.** The `lazy-guard.check-public-repo.py` hook only runs in repos that have `.guard-waivers.json` at the root. To enable pre-commit checks on a repo, create this file (even with an empty `waivers` array). To disable, remove the file.
+**This file also serves as the opt-in signal for the pre-commit hook.** The `lazy-guard.check-public.py` hook only runs in repos that have `.guard-waivers.json` at the root. To enable pre-commit checks on a repo, create this file (even with an empty `waivers` array). To disable, remove the file.
 
 Schema:
 
@@ -156,7 +156,7 @@ Before recording any finding, verify:
 ## Phase 4: Report
 
 ```markdown
-## lazy-guard.check-public-repo -- Security Audit
+## lazy-guard.check-public -- Security Audit
 
 **Files scanned**: N (skipped: M encrypted, K excluded)
 **Waivers loaded**: W from .guard-waivers.json
@@ -224,12 +224,12 @@ After all fixes: re-run the scan to show updated summary.
 
 ## Logging
 
-Log to `./.logs/claude/lazy-guard.check-public-repo/YYYY-MM-DD_HH-MM-SS.md`.
+Log to `./.logs/claude/lazy-guard.check-public/YYYY-MM-DD_HH-MM-SS.md`.
 Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
 
 Log format:
 ```markdown
-# lazy-guard.check-public-repo
+# lazy-guard.check-public
 
 **Date**: YYYY-MM-DD HH:MM:SS UTC
 **Input**: <repo path or "current repo">

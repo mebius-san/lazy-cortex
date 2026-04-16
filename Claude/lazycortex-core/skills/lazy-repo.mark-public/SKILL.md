@@ -1,6 +1,6 @@
 ---
 name: lazy-repo.mark-public
-description: "Use when preparing a local/private repo to become public. Runs the full lazy-guard.check-public-repo audit, walks through fixes and waivers, creates .guard-waivers.json to enable the pre-commit hook, and optionally flips the repo to public on GitHub."
+description: "Use when preparing a local/private repo to become public. Runs the full lazy-guard.check-public audit, walks through fixes and waivers, creates .guard-waivers.json to enable the pre-commit hook, and optionally flips the repo to public on GitHub."
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(git remote*), Bash(gh repo*), Bash(gh api*), Bash(mkdir -p *), Bash(date *)
 ---
 
@@ -13,11 +13,11 @@ End-to-end workflow for taking a private/local repo public. Runs the security au
 1. Confirm with the user which repo (default: current working directory)
 2. Check it's a git repo: `git remote -v`
 3. Check current GitHub visibility: `gh repo view --json visibility -q .visibility`
-4. If already public, ask if the user wants to re-audit instead (invoke `/lazy-guard.check-public-repo`)
+4. If already public, ask if the user wants to re-audit instead (invoke `/lazy-guard.check-public`)
 
 ## Step 2: Run full audit
 
-Invoke the `/lazy-guard.check-public-repo` skill. Follow its full Phase 1-4 (Prepare, Scan, Analyze, Report). Do NOT proceed to Phase 5 (Fix) yet — present the full report first.
+Invoke the `/lazy-guard.check-public` skill. Follow its full Phase 1-4 (Prepare, Scan, Analyze, Report). Do NOT proceed to Phase 5 (Fix) yet — present the full report first.
 
 ## Step 3: Resolve findings
 
@@ -39,7 +39,7 @@ If any FAIL findings remain unresolved, do NOT proceed to Step 4.
 
 ## Step 4: Create `.guard-waivers.json`
 
-Write the waiver file to the repo root with all accepted waivers from Step 3. This also activates the pre-commit hook (`lazy-guard.check-public-repo.py`) for future commits.
+Write the waiver file to the repo root with all accepted waivers from Step 3. This also activates the pre-commit hook (`lazy-guard.check-public.py`) for future commits.
 
 Include `global_skip_paths` for vendored/third-party directories if the audit identified any.
 
@@ -73,7 +73,7 @@ If no: tell the user the repo is audit-clean and ready — they can run `gh repo
 ## Step 6: Post-flight
 
 - Confirm the pre-commit hook is active (`.guard-waivers.json` exists = hook fires)
-- Remind: run `/lazy-guard.check-public-repo` periodically or after major changes
+- Remind: run `/lazy-guard.check-public` periodically or after major changes
 - Log results
 
 ## Logging

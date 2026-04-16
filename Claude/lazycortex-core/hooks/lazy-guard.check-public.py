@@ -3,7 +3,7 @@
 leaks before committing to a public repo.
 
 Fires on Bash tool calls matching `git commit`. Checks staged diff content
-against the same patterns used by the lazy-guard.check-public-repo skill.
+against the same patterns used by the lazy-guard.check-public skill.
 
 - FAIL findings (secrets): block the commit
 - WARN findings (PII, infra, paths): inject a warning but allow
@@ -253,7 +253,7 @@ def main():
             msg_parts.extend(warn_findings)
         msg_parts.append("")
         msg_parts.append(
-            "Run /lazy-guard.check-public-repo for details and fixes, "
+            "Run /lazy-guard.check-public for details and fixes, "
             "or add waivers to .guard-waivers.json"
         )
         result = {
@@ -269,7 +269,7 @@ def main():
         msg_parts.extend(warn_findings)
         msg_parts.append("")
         msg_parts.append(
-            "Run /lazy-guard.check-public-repo to review, "
+            "Run /lazy-guard.check-public to review, "
             "or add waivers to .guard-waivers.json"
         )
         result = {

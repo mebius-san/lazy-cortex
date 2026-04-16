@@ -14,7 +14,7 @@ Constraints below are what `lazy-core.audit`, `lazy-core.doctor`, and `lazy-core
 
 ## Naming: dot-namespaces for all artifacts
 
-- **All custom skills, commands, agents, hooks, and rules must use `namespace.name`.** Examples: `lazy-core.audit`, `lazy-core.doctor`, `lazy-guard.check-public-repo`, `lazy-log.logging`.
+- **All custom skills, commands, agents, hooks, and rules must use `namespace.name`.** Examples: `lazy-core.audit`, `lazy-core.doctor`, `lazy-guard.check-public`, `lazy-log.logging`.
 - Never create flat names like `config-sync` or `logging` — always `namespace.name`.
 - Applies to file names and directory names: rule files (`lazy-log.logging.md`, not `logging.md`), skill directories (`lazy-core.audit/`, not `audit/`), hook filenames, command filenames, and agent filenames.
 

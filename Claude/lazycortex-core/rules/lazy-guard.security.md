@@ -4,7 +4,7 @@ description: Security constraints that the lazy-guard.* scanners and pre-commit 
 
 # Guard Security
 
-Constraints below back the `lazy-guard.check-public-repo` skill, the `lazy-repo.mark-public` workflow, and the `lazy-guard.check-public-repo` pre-commit hook.
+Constraints below back the `lazy-guard.check-public` skill, the `lazy-repo.mark-public` workflow, and the `lazy-guard.check-public` pre-commit hook.
 
 ## Credentials
 
