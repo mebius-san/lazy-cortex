@@ -1,0 +1,37 @@
+# ---------------------------------------------------------------------------------------
+# macOS
+
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+
+
+# ---------------------------------------------------------------------------------------
+# Claude Code
+
+.claude/settings.local.json
+.claude/worktrees/
+.logs/
+
+
+# ---------------------------------------------------------------------------------------
+# Obsidian
+
+# Volatile workspace state
+.obsidian/workspace*
+
+# Graph view state
+.obsidian/graph.json
+
+# Cache
+.obsidian/cache/
+
+# Vault trash
+.trash/
+
+# Plugin state files (may contain secrets: API keys, tokens)
+.obsidian/plugins/*/data.json

@@ -1,0 +1,37 @@
+{
+  "description": "LazyCortex core hooks — settings protection and pre-commit security scanning",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/lazy-guard.settings.py\"",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/lazy-guard.check-public-repo.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__git__git_commit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/lazy-guard.check-public-repo.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

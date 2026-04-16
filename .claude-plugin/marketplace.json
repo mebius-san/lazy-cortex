@@ -1,0 +1,19 @@
+{
+  "name": "lazycortex",
+  "description": "AI tooling plugins for Claude Code — skills, agents, and hooks",
+  "owner": {
+    "name": "Alik Tabunov"
+  },
+  "plugins": [
+    {
+      "name": "lazycortex-core",
+      "description": "Core skills and agents for Claude Code",
+      "source": "./Claude/lazycortex-core"
+    },
+    {
+      "name": "lazycortex-specs",
+      "description": "Specification and design skills for Claude Code",
+      "source": "./Claude/lazycortex-specs"
+    }
+  ]
+}

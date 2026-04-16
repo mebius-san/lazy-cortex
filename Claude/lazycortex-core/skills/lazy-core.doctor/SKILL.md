@@ -1,0 +1,188 @@
+---
+name: lazy-core.doctor
+description: "Health check for Claude Code project configuration. Verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files. Reports issues and offers targeted fixes. Run periodically or when something feels off."
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash(python3 *)
+---
+
+# Project Health Check
+
+Systematically verify consistency of all Claude Code configuration in the current project. Report every issue found, then offer fixes.
+
+**CRITICAL PATH RULE**: `~/.claude/` is protected from Bash access (Claude Code's own config dir). Use ONLY Glob and Read tools for any path under `~/.claude/`. Use `wc -c` via Bash ONLY for paths under the project root (e.g., `.claude/`). To measure `~/.claude/` file sizes, use Read and estimate: **size ~ lines x 45 bytes**.
+
+**This is a read-first skill.** Collect all issues before proposing any changes. Never fix silently — always show what's wrong and what the fix would be, then ask before applying.
+
+## Checks
+
+Run every check below. Track issues as: `[PASS]`, `[WARN]`, or `[FAIL]`.
+
+### 1. Rules files
+
+For each `.claude/rules/*.md` (project) and `~/.claude/rules/*.md` (global):
+
+- `[FAIL]` if any rules file > 3 KB — should contain only short constraints, not reference material
+- `[WARN]` if a rules file mentions an agent but no matching agent file exists in `.claude/agents/`
+- `[FAIL]` if a rules file contains code blocks > 10 lines — that's reference material, belongs in agent
+- `[WARN]` if a rules file has no meta-rule section explaining where new rules vs reference go
+- `[WARN]` if a rules file has no YAML frontmatter — rules should have frontmatter with at least a `description` field; domain-specific rules should also have a `paths` glob so they load on-demand instead of at startup (e.g., `paths: ["dotfiles/Docker/n8n/**"]`)
+
+**Fix**: offer to run `lazy-core.optimize` to slim oversized rules. For missing frontmatter, add `---\ndescription: ...\npaths: [...]\n---` — use `paths` for rules scoped to specific files, omit `paths` for rules that apply globally.
+
+### 2. Agent definitions
+
+For each `.claude/agents/*.md`:
+
+- `[FAIL]` if frontmatter is missing or malformed (needs `name`, `description`, `tools`)
+- `[WARN]` if agent references a rules file that doesn't exist
+- `[WARN]` if agent's `model` field is missing (will default to parent model)
+- `[FAIL]` if agent definition > 20 KB — may need splitting or trimming
+- `[WARN]` if agent has a "Mandatory first step: read rules" but the referenced rules file is empty or missing
+
+**Fix**: report which fields to add/fix. Don't auto-edit agent definitions.
+
+### 3. Skills and commands
+
+For each `.claude/skills/*/SKILL.md` (project) and `~/.claude/skills/*/SKILL.md` (global):
+
+- `[FAIL]` if SKILL.md is missing frontmatter (`name`, `description`)
+- `[WARN]` if skill name in frontmatter doesn't match directory name
+- `[WARN]` if skill references tools or agents that don't exist
+
+For each `.claude/commands/*.md` (project) and `~/.claude/commands/*.md` (global):
+
+- `[WARN]` if command file is empty or < 50 bytes
+
+**Namespace check** for all custom skills and commands (skip external plugins with `@`):
+
+- `[FAIL]` if skill/command name has no dot separator — must use `namespace.name` format (e.g., `config.sync` not `config-sync`)
+- `[WARN]` if namespace is inconsistent with the item's domain (e.g., a deploy skill in `config.*`)
+
+**Fix**: report issues. Don't auto-edit skills.
+
+### 4. Settings consistency
+
+Read all four settings files:
+```
+~/.claude/settings.json              (global tracked)
+~/.claude/settings.local.json        (global local)
+.claude/settings.json                (project tracked)
+.claude/settings.local.json          (project local)
+```
+
+- `[FAIL]` if any file is not valid JSON
+- `[FAIL]` if project-specific permissions (service CLIs, additionalDirectories, service MCP servers, domain-specific WebFetch) are in global `settings.json` instead of project `settings.local.json`
+- `[WARN]` if global `settings.local.json` is non-empty (should be empty per lazy-guard.settings hook)
+- `[WARN]` if duplicate permission entries exist across global and project files
+- `[WARN]` if project `settings.json` (tracked) contains machine-specific paths
+- `[FAIL]` if `enabledMcpjsonServers` references a server not defined in the project's `.mcp.json` or `~/.mcp.json`
+
+**Fix**: offer to move entries between files (respecting the split strategy from CLAUDE.md).
+
+### 5. Memory consistency
+
+Find the project memory directory at `~/.claude/projects/*/memory/` (match current project path).
+
+- `[FAIL]` if `MEMORY.md` references a file that doesn't exist
+- `[WARN]` if a memory `.md` file exists but isn't listed in `MEMORY.md`
+- `[WARN]` if `MEMORY.md` > 5 KB (index is getting large, consider consolidation)
+- `[WARN]` if any memory file has no frontmatter (`name`, `description`, `type`)
+- `[WARN]` if memory file's `type` is not one of: `user`, `feedback`, `project`, `reference`
+
+**Fix**: add missing index entries, remove broken links, flag stale memories for review.
+
+### 6. CLAUDE.md files
+
+- `[WARN]` if project `CLAUDE.md` is missing
+- `[WARN]` if project `CLAUDE.md` references files/paths that don't exist in the repo
+- `[WARN]` if project `CLAUDE.md` > 10 KB (consider splitting into rules/agents)
+- `[WARN]` if global `CLAUDE.md` contains project-specific instructions (references to specific services, paths within a single project)
+
+**Fix**: flag sections that might belong elsewhere. Don't auto-edit CLAUDE.md.
+
+### 7. Hooks
+
+For each hook registered in global `settings.json` under `hooks.*`:
+
+- `[FAIL]` if the hook command references a script that doesn't exist
+- `[WARN]` if a hook script imports modules that aren't in stdlib
+- `[WARN]` if hook timeout is > 10s (may slow down interactions)
+- `[WARN]` if hook scripts contain hardcoded project paths without sidecar configs
+
+**Fix**: report missing scripts. For hardcoded paths, suggest sidecar extraction.
+
+### 8. Cross-reference integrity
+
+- `[WARN]` if an agent is referenced in CLAUDE.md but the agent file doesn't exist
+- `[WARN]` if a command is listed in CLAUDE.md but the command file doesn't exist
+- `[WARN]` if rules reference sections/features that have been removed from the project
+- `[FAIL]` if `.claude/` contains files not matching known patterns (agents/*.md, rules/*.md, skills/*/SKILL.md, commands/*.md, settings*.json)
+
+**Fix**: report unexpected files. Don't auto-delete.
+
+### 9. Path hygiene
+
+For every project-level config file (`.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/*/SKILL.md`, `.claude/commands/*.md`, `CLAUDE.md`), grep for hardcoded paths:
+
+- `[FAIL]` if file contains `/Users/` or `/home/` — hardcoded absolute user paths break on other machines
+- `[FAIL]` if file contains `<project>/` prefix — use relative paths (`.claude/...`, `CLAUDE.md`) instead
+- `[WARN]` if file contains `~/Dropbox/` or other user-specific home subdirectories — these won't exist for coworkers
+- `[WARN]` if file references `~/.claude/` for something that is actually project-local (e.g., project settings, project agents) — use relative `.claude/` instead
+
+Allowed `~/.claude/` references (these are genuinely global per-user):
+- `~/.claude/CLAUDE.md` (global instructions)
+- `~/.claude/settings.json` / `~/.claude/settings.local.json` (global settings)
+- `~/.claude/rules/*.md` (global rules)
+- `~/.claude/skills/*/SKILL.md` (global skills)
+- `~/.claude/commands/*.md` (global commands)
+- `~/.claude/projects/*/memory/` (memory storage)
+- `~/.mcp.json` (global MCP config)
+
+**Fix**: replace hardcoded paths with relative equivalents. Show diff before applying.
+
+### 10. MCP server configuration
+
+Check global `~/.claude/settings.json` and project `.claude/settings.json`:
+
+- `[FAIL]` if global `settings.json` has `"enableAllProjectMcpServers": true` — each project must explicitly list its MCP servers
+- `[FAIL]` if project has a `.mcp.json` but project `.claude/settings.json` has no `enabledMcpjsonServers` — servers are declared but none explicitly enabled
+- `[WARN]` if a server is defined in `.mcp.json` but not in any `enabledMcpjsonServers` (declared but unused)
+- `[WARN]` if a server is listed in `enabledMcpjsonServers` but not defined in project `.mcp.json` or `~/.mcp.json`
+- `[FAIL]` if `.mcp.json` or `~/.mcp.json` contains malformed JSON
+
+**Fix**: set `enableAllProjectMcpServers: false` in global settings, add explicit `enabledMcpjsonServers` to project `.claude/settings.json`.
+
+## Output format
+
+```markdown
+## lazy-core.doctor -- Health Report
+
+### Summary
+- Checks run: N
+- PASS: N | WARN: N | FAIL: N
+
+### Issues
+
+#### [FAIL] Rules: openclaw.md is 25 KB (limit: 3 KB)
+Reference material should be in .claude/agents/openclaw-config.md.
+**Fix**: Run `/lazy-core.optimize` to slim rules files.
+
+#### [WARN] Memory: feedback_old_thing.md not in MEMORY.md index
+File exists but has no index entry.
+**Fix**: Add `- [old-thing](feedback_old_thing.md) — <description>` to MEMORY.md
+
+(... one section per issue ...)
+
+### Fixes available
+- [ ] Fix 1: <description> (auto-fixable)
+- [ ] Fix 2: <description> (auto-fixable)
+- [ ] Fix 3: <description> (needs manual review)
+
+Apply all auto-fixable? [y/N]
+```
+
+After showing the report, ask the user which fixes to apply. Apply only what's confirmed.
+
+## Logging
+
+Log to `./.logs/claude/lazy-core.doctor/YYYY-MM-DD_HH-MM-SS.md`.
+Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
