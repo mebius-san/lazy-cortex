@@ -25,6 +25,7 @@ For each `.claude/rules/*.md` (project) and `~/.claude/rules/*.md` (global):
 - `[FAIL]` if a rules file contains code blocks > 10 lines — that's reference material, belongs in agent
 - `[WARN]` if a rules file has no meta-rule section explaining where new rules vs reference go
 - `[WARN]` if a rules file has no YAML frontmatter — rules should have frontmatter with at least a `description` field; domain-specific rules should also have a `paths` glob so they load on-demand instead of at startup (e.g., `paths: ["dotfiles/Docker/n8n/**"]`)
+- `[FAIL]` if the rules filename has no dot separator — must use `namespace.name.md` format (e.g., `lazy-log.logging.md`, not `logging.md`)
 
 **Fix**: offer to run `lazy-core.optimize` to slim oversized rules. For missing frontmatter, add `---\ndescription: ...\npaths: [...]\n---` — use `paths` for rules scoped to specific files, omit `paths` for rules that apply globally.
 
@@ -52,10 +53,11 @@ For each `.claude/commands/*.md` (project) and `~/.claude/commands/*.md` (global
 
 - `[WARN]` if command file is empty or < 50 bytes
 
-**Namespace check** for all custom skills and commands (skip external plugins with `@`):
+**Namespace check** for all custom skills, commands, agents, hooks, and rules (skip external plugins with `@`):
 
-- `[FAIL]` if skill/command name has no dot separator — must use `namespace.name` format (e.g., `config.sync` not `config-sync`)
+- `[FAIL]` if skill/command/agent/hook/rule name has no dot separator — must use `namespace.name` format (e.g., `config.sync` not `config-sync`; `lazy-log.logging.md` not `logging.md`)
 - `[WARN]` if namespace is inconsistent with the item's domain (e.g., a deploy skill in `config.*`)
+- Scope: `.claude/skills/*/SKILL.md`, `.claude/agents/*.md`, `.claude/commands/*.md`, `.claude/hooks/*`, `.claude/rules/*.md`, and their `~/.claude/...` equivalents
 
 **Fix**: report issues. Don't auto-edit skills.
 

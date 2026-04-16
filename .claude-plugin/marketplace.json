@@ -14,6 +14,11 @@
       "name": "lazycortex-specs",
       "description": "Specification and design skills for Claude Code",
       "source": "./Claude/lazycortex-specs"
+    },
+    {
+      "name": "lazycortex-log",
+      "description": "Logging, changelog, and change-history recall for Claude Code",
+      "source": "./Claude/lazycortex-log"
     }
   ]
 }

@@ -1,0 +1,7 @@
+{
+  "name": "lazycortex-log",
+  "description": "Logging, changelog, and change-history recall for Claude Code",
+  "author": {
+    "name": "Alik Tabunov"
+  }
+}

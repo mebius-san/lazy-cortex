@@ -11,7 +11,6 @@ Core skills and hooks for Claude Code — context optimization, project health c
 | `lazy-core.optimize` | Slims oversized rules files, audits global settings for project-specific leakage, checks memory index health. |
 | `lazy-guard.check-public-repo` | Scans git-tracked files for leaked secrets, PII, infrastructure details, and hardcoded paths. Reads `.guard-waivers.json` for exceptions. |
 | `lazy-repo.mark-public` | End-to-end workflow for making a repo public: runs security audit, resolves findings, creates waivers, optionally flips GitHub visibility. |
-| `lazy-project.init` | Bootstrap project settings: creates `settings.json` (tracked: Skill, MCP tools) and `settings.local.json` (local: Edit, Write, Bash, WebSearch). |
 
 ## Hooks
 
@@ -53,7 +52,6 @@ Invoke skills with slash commands:
 /lazy-core.optimize       # optimize context and settings
 /lazy-guard.check-public-repo  # security audit for public repos
 /lazy-repo.mark-public    # make a repo public safely
-/lazy-project.init        # bootstrap project settings
 ```
 
 Hooks activate automatically after installation.

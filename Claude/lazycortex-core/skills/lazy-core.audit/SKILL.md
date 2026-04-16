@@ -79,6 +79,10 @@ Grep all project-level config files (`.claude/agents/*.md`, `.claude/rules/*.md`
 - `~/Dropbox/` or other user-specific home subdirectories
 - `~/.claude/` used for project-local items (agents, project settings, project rules) instead of relative `.claude/`
 
+### Naming hygiene
+
+For each `.claude/skills/*/`, `.claude/agents/*.md`, `.claude/commands/*.md`, `.claude/hooks/*`, and `.claude/rules/*.md` — verify the filename (or directory name for skills) uses dot-namespace (`namespace.name`). Flag anything missing a dot as a naming violation (e.g., `logging.md` should be `<namespace>.logging.md`).
+
 ### Recommendations
 
 - Rules file > 3 KB -> flag for slimming (run `/lazy-core.optimize`)

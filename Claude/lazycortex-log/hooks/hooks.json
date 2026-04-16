@@ -1,0 +1,27 @@
+{
+  "description": "lazycortex-log hooks \u2014 record every git commit to .logs/commits.jsonl",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/lazy-log.commit-recorder.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__git__git_commit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/lazy-log.commit-recorder.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
