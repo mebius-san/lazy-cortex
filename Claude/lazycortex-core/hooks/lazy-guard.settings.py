@@ -138,13 +138,15 @@ def extract_permission_entries(text):
 
 
 def output_block(reason):
-    """Block the tool call — write to stderr, exit 2."""
-    msg = json.dumps({
-        "hookSpecificOutput": {"permissionDecision": "deny"},
-        "systemMessage": reason,
-    })
-    sys.stderr.write(msg)
-    sys.exit(2)
+    """Block the tool call with a deny decision."""
+    json.dump({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }, sys.stdout)
+    sys.exit(0)
 
 
 def output_allow_with_message(message):
