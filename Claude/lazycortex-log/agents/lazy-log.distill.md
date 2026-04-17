@@ -40,7 +40,7 @@ Good:
 - "Added a post-commit hook that records every commit to `.logs/commits.jsonl` for later changelog generation."
 
 Bad (too technical):
-- "Renamed 5 files in `~/Dropbox/Dotfiles/claude/skills/cortex.*` to `Claude/lazycortex-core/skills/lazy-*.*`, updated 11 cross-references across SKILL.md files, fixed 2 log path references."
+- "Renamed 5 files from the `cortex.*` namespace to `lazy-*.*`, updated 11 cross-references across SKILL.md files, fixed 2 log path references."
 
 Bad (too vague):
 - "Updated some skills."

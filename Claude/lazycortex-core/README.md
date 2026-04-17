@@ -8,7 +8,7 @@ Core skills and hooks for Claude Code — context optimization, project health c
 |---|---|
 | `lazy-core.install` | Bootstrap the plugin for a project (or globally): copies the hygiene and security rule templates into the rules directory. Idempotent. |
 | `lazy-core.audit` | Read-only audit of context loading at startup. Shows sizes, loading behavior, and optimization opportunities. |
-| `lazy-core.doctor` | Health check for project configuration. Verifies rules, agents, skills, settings, memory, hooks, and CLAUDE.md consistency. |
+| `lazy-core.doctor` | Health check for project configuration. Verifies rules, agents, skills, settings, memory, hooks, and CLAUDE.md consistency, and delegates to sibling audits (`lazy-guard.check-public`, `lazy-log.audit`) when applicable. |
 | `lazy-core.optimize` | Slims oversized rules files, audits global settings for project-specific leakage, checks memory index health. |
 | `lazy-guard.allow-mcp` | Appends all `mcp__<server>__<tool>` entries to `permissions.allow`, routed to the settings file at the same scope where the MCP server is defined (global / project / project-local). |
 | `lazy-guard.check-public` | Scans git-tracked files for leaked secrets, PII, infrastructure details, and hardcoded paths. Reads `.guard-waivers.json` for exceptions. |

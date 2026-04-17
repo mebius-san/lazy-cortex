@@ -33,7 +33,7 @@ Global installation is supported too (`~/.claude/settings.json`), in which case 
 | Skill | Description |
 |---|---|
 | `lazy-log.install` | Bootstrap the plugin: copies the rule template, creates `docs/changelog.md`, ensures `.gitignore` covers `.logs/`. Detects install scope (user vs project) and targets the right rules directory. |
-| `lazy-log.audit` | Verify all project skills/agents/commands log correctly (have `## Logging` section, reference `git_sha` frontmatter). |
+| `lazy-log.audit` | Verify the project's logging rule is installed and internally coherent. The rule is the single source of truth — per-file `## Logging` sections are optional. |
 
 ## Agents
 

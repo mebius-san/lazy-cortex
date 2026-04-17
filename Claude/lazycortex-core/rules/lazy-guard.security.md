@@ -22,3 +22,17 @@ A repo that is (or will be) public must pass the guard scan before going public,
 Accepted exceptions live in `.guard-waivers.json` at the repo root. Each entry records the check ID, scope glob, match pattern, reason, date added, and optional expiry.
 
 **`.guard-waivers.json` also serves as the opt-in signal for the pre-commit hook** — the hook only runs in repos that have this file. Create it (even with an empty `waivers` array) to enable pre-commit scanning; delete it to disable.
+
+## Public scopes (subtree-public mode)
+
+`.guard-waivers.json` supports an optional top-level `public_scopes` array of path globs. When present, the scan and the pre-commit hook only consider files matching one of the globs — everything else in the repo is implicitly private and ignored by the guard.
+
+This lets an otherwise-private repo publish only a subtree (e.g., `Claude/**`) to an external mirror without having to flip the whole repo public. When `public_scopes` is set:
+
+- `lazy-guard.check-public` reports findings only for files inside the scope
+- The pre-commit hook blocks/warns only on staged lines inside the scope
+- `lazy-repo.mark-public` does NOT flip GitHub visibility — the repo stays private; only the scoped subtree is treated as public
+
+Globs support `**` (any depth) and `*` (single path segment). Paths are evaluated relative to the repo root.
+
+In this dev repo, `public_scopes` is `["Claude/**", "README.public.md", ".gitignore"]` because only those paths ship to the public mirror via the `publish` skill.

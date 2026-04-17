@@ -42,10 +42,18 @@ Read-only audit of context loading for the current project. Do NOT make any chan
 
 List from system context (no tools needed).
 
-Check MCP enablement:
-- Global `~/.claude/settings.json` should have `"enableAllProjectMcpServers": false` (flag if `true`)
-- Project `.claude/settings.json` should have `enabledMcpjsonServers` listing each enabled server
-- Cross-reference: compare servers in `.mcp.json` vs `enabledMcpjsonServers` — flag any declared but not enabled
+Check MCP enablement. Either mode is valid — global `"enableAllProjectMcpServers": true` OR explicit `enabledMcpjsonServers` in the project's settings. Report which mode is in effect and list the enabled servers.
+
+A server counts as enabled if:
+- it lives in `~/.mcp.json` (always available), OR
+- global `enableAllProjectMcpServers: true` AND it lives in project `.mcp.json`, OR
+- its name is in `enabledMcpjsonServers` of project `.claude/settings.json` or `.claude/settings.local.json`.
+
+Cross-reference:
+
+- **If `enableAllProjectMcpServers: true`**: do NOT flag servers that are only in `.mcp.json` but absent from `enabledMcpjsonServers` — they are all implicitly enabled. Suppress "declared but unused" warnings entirely in this mode.
+- **Only if `enableAllProjectMcpServers` is `false` or missing**: flag any server in project `.mcp.json` that is not enabled under any of the rules above (declared but unused), and flag when no `enabledMcpjsonServers` array exists anywhere in project settings despite a non-empty `.mcp.json`.
+- Always: flag any name in `enabledMcpjsonServers` that has no matching definition in `.mcp.json` or `~/.mcp.json` (stale reference).
 
 ## Size estimation
 

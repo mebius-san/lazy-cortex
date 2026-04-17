@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """PreToolUse hook: scan staged git changes for secrets, PII, and infrastructure
-leaks before committing to a public repo.
+leaks before committing to a public repo (or the public subtree of a repo).
 
-Fires on Bash tool calls matching `git commit`. Checks staged diff content
-against the same patterns used by the lazy-guard.check-public skill.
+Fires on Bash tool calls matching `git commit` (and mcp__git__git_commit).
+Checks staged diff content against the same patterns used by the
+lazy-guard.check-public skill.
 
 - FAIL findings (secrets): block the commit
 - WARN findings (PII, infra, paths): inject a warning but allow
 
-Reads .guard-waivers.json from the repo root to suppress known-acceptable
-findings. If the file doesn't exist, no waivers are applied.
+Gating: the hook only runs in repos that have `.guard-waivers.json` at the
+root. That file can also declare a `public_scopes` list of globs — when set,
+only staged files matching one of those globs are scanned; everything else
+is treated as private and ignored. When the field is absent or empty, the
+whole repo is scanned.
+
+Reads waivers from `.guard-waivers.json` to suppress known-acceptable
+findings.
 """
 
 import json
@@ -18,6 +25,46 @@ import re
 import subprocess
 import sys
 from fnmatch import fnmatch
+
+
+def _compile_scope_glob(glob):
+    """Compile a path glob (supporting `**`) to a regex.
+
+    `**` matches any depth (including empty); `*` matches one path segment
+    (no `/`). Patterns are anchored at both ends. Paths are repo-root-
+    relative, forward-slash separated.
+    """
+    parts = []
+    i = 0
+    while i < len(glob):
+        c = glob[i]
+        if c == "*" and i + 1 < len(glob) and glob[i + 1] == "*":
+            parts.append(".*")
+            i += 2
+            # Consume a following slash so `dir/**/file` also matches `dir/file`.
+            if i < len(glob) and glob[i] == "/":
+                parts.append("/?")
+                i += 1
+        elif c == "*":
+            parts.append("[^/]*")
+            i += 1
+        elif c == "?":
+            parts.append("[^/]")
+            i += 1
+        elif c in r".^$+(){}|\\":
+            parts.append(re.escape(c))
+            i += 1
+        else:
+            parts.append(c)
+            i += 1
+    return re.compile("^" + "".join(parts) + "$")
+
+
+def _in_public_scope(path, compiled_globs):
+    """Return True if `path` matches any compiled glob, or if list is empty."""
+    if not compiled_globs:
+        return True
+    return any(rx.match(path) for rx in compiled_globs)
 
 # ---------------------------------------------------------------------------
 # Check categories and patterns
@@ -100,15 +147,29 @@ SAFE_LINE_PATTERNS = [
 # ---------------------------------------------------------------------------
 
 
-def load_waivers(root):
-    """Load .guard-waivers.json from repo root, return list of waiver dicts."""
+def load_config(root):
+    """Load .guard-waivers.json; return (waivers, compiled_scope_globs).
+
+    Missing file or parse errors -> ([], []). An empty list of scope globs
+    means "whole repo is public" (legacy behavior).
+    """
     waiver_path = os.path.join(root, ".guard-waivers.json")
     try:
         with open(waiver_path) as f:
             data = json.load(f)
-        return data.get("waivers", [])
     except (json.JSONDecodeError, OSError):
-        return []
+        return [], []
+    waivers = data.get("waivers", []) or []
+    scopes_raw = data.get("public_scopes", []) or []
+    compiled = []
+    for g in scopes_raw:
+        if not isinstance(g, str) or not g:
+            continue
+        try:
+            compiled.append(_compile_scope_glob(g))
+        except re.error:
+            continue
+    return waivers, compiled
 
 
 def is_waived(check_id, file_path, matched_text, waivers):
@@ -210,7 +271,15 @@ def main():
     if not added_lines:
         return
 
-    waivers = load_waivers(root)
+    waivers, scope_globs = load_config(root)
+
+    # Subtree-public mode: drop changes outside the declared public scopes.
+    # No scopes declared -> treat the whole repo as public (legacy behavior).
+    if scope_globs:
+        added_lines = [(f, c) for f, c in added_lines if _in_public_scope(f, scope_globs)]
+        if not added_lines:
+            return
+
     fail_findings = []
     warn_findings = []
 

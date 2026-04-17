@@ -1,57 +1,57 @@
 ---
 name: lazy-log.audit
-description: "Verify that every project skill, agent, and command has proper logging instructions (has a ## Logging section, references git_sha in frontmatter, uses the correct log path). Reports gaps and offers fixes. Read-first — never modifies files without confirmation."
+description: "Verify that the project's logging rule is installed and coherent. The rule itself is the single source of truth — individual skills/agents/commands do NOT need per-file ## Logging sections. Reports gaps and offers fixes. Read-first — never modifies files without confirmation."
 allowed-tools: Read, Glob, Grep, Bash(mkdir -p *), Bash(date *)
 ---
 
 # Logging Audit
 
-Verify that logging conventions are followed across all project skill/agent/command definitions.
+Verify that the project's logging rule (`.claude/rules/lazy-log.logging.md`) is installed and internally coherent. The rule loads unconditionally at startup, so every skill/agent/command already inherits its instructions — per-file `## Logging` sections are optional restatements, not a requirement.
 
 **Read-first.** Collect all findings, present a report, then ask which to fix.
 
 ## Scope
 
-Check every file matching:
-- `.claude/skills/*/SKILL.md` (project skills)
-- `.claude/agents/*.md` (project agents)
-- `.claude/commands/*.md` (project commands)
+Primary target:
+- `.claude/rules/lazy-log.logging.md` — the rule is the single source of truth
+
+Secondary (only if per-file `## Logging` sections exist, verify they don't contradict the rule):
+- `.claude/skills/*/SKILL.md`
+- `.claude/agents/*.md`
+- `.claude/commands/*.md`
+
+Do NOT flag files that lack a `## Logging` section. The rule covers them.
 
 Do NOT check plugin-shipped skills (they live under `~/.claude/plugins/`) — those are out of scope for the user to fix.
 
 ## Checks
 
-For each file, classify findings as `[PASS]`, `[WARN]`, or `[FAIL]`.
+Classify findings as `[PASS]`, `[WARN]`, or `[FAIL]`.
 
-### 1. Logging section present
+### 1. Rule file installed
 
-- `[FAIL]` if the file has no `## Logging` section (or equivalent heading mentioning logs)
-- `[WARN]` if the `## Logging` section is shorter than 3 lines (probably incomplete)
+- `[FAIL]` if `.claude/rules/lazy-log.logging.md` is missing — tell the user to run `/lazy-log.install`
+- `[WARN]` if the rule file has no YAML frontmatter with a `description`
 
-### 2. Log path format
+### 2. Rule content integrity
 
-- `[FAIL]` if the file references a log path outside `./.logs/claude/<name>/` (e.g., uses `~/.claude/...` or a hardcoded project path)
-- `[WARN]` if the log path uses a timestamp format other than `YYYY-MM-DD_HH-MM-SS`
-- `[WARN]` if the log path uses UTC inconsistently (should always be UTC)
+Read `.claude/rules/lazy-log.logging.md` and verify it covers the core requirements:
 
-### 3. Git reference
+- `[FAIL]` if the rule does not specify a log path under `./.logs/claude/<name>/`
+- `[FAIL]` if the rule does not mention `git_sha` or `git rev-parse HEAD`
+- `[WARN]` if the rule does not mention `git_branch` (both should be in frontmatter)
+- `[WARN]` if the rule does not mention UTC timestamps (`date -u`)
+- `[WARN]` if the rule does not call out "two separate steps: `Bash(mkdir -p ...)` then `Write`"
 
-- `[FAIL]` if the logging instructions do not mention `git_sha` or `git rev-parse HEAD` anywhere
-- `[WARN]` if only `git_sha` is mentioned but not `git_branch` (both should be in frontmatter)
+### 3. Per-file sections (only if present) don't contradict the rule
 
-### 4. Separate mkdir + Write
+For each skill/agent/command that *does* happen to include a `## Logging` section, cross-check against the installed rule:
 
-- `[WARN]` if the logging instructions suggest chaining with `&&` or using `cat > file <<'EOF'`
-- `[PASS]` if the instructions explicitly call out "two separate steps: `Bash(mkdir -p ...)` then `Write`"
+- `[WARN]` if the per-file section references a log path outside `./.logs/claude/<name>/` (e.g., uses `~/.claude/...` or a hardcoded project path)
+- `[WARN]` if the per-file section uses a timestamp format other than `YYYY-MM-DD_HH-MM-SS`
+- `[WARN]` if the per-file section suggests chaining with `&&` or using `cat > file <<'EOF'`
 
-### 5. Consistent with the installed rule
-
-Read `.claude/rules/lazy-log.logging.md` (if present) and check that each skill/agent/command's `## Logging` section doesn't contradict it. Specifically:
-- Same path format
-- Same frontmatter fields (git_sha, git_branch, date, input)
-
-If `.claude/rules/lazy-log.logging.md` is missing:
-- `[WARN]` Tell the user to run `/lazy-log.install` first — the central rule file isn't installed yet.
+Missing `## Logging` sections are **not** a finding — the rule covers them.
 
 ## Output
 
@@ -59,18 +59,18 @@ If `.claude/rules/lazy-log.logging.md` is missing:
 ## lazy-log.audit -- Logging Audit
 
 ### Summary
-- Files checked: N
+- Rule file: installed | missing
+- Files cross-checked: N (those with optional per-file sections)
 - PASS: N | WARN: N | FAIL: N
 
 ### Findings
 
-#### [FAIL] skills/example.skill/SKILL.md — missing ## Logging section
-No logging instructions found. Add a `## Logging` section that logs to
-`./.logs/claude/example.skill/YYYY-MM-DD_HH-MM-SS.md` with git_sha frontmatter.
+#### [FAIL] .claude/rules/lazy-log.logging.md missing
+Run `/lazy-log.install` to install the rule template.
 
-#### [WARN] agents/example.agent.md — log path missing UTC instruction
-Found: `date +%Y-%m-%d_%H-%M-%S`
-Expected: `date -u +%Y-%m-%d_%H-%M-%S`
+#### [WARN] agents/example.agent.md — per-file log path disagrees with rule
+Found: `~/.claude/logs/...`
+Rule says: `./.logs/claude/<name>/...`
 
 (... one section per finding, FAIL first, then WARN ...)
 

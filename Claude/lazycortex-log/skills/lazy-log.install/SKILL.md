@@ -34,12 +34,15 @@ Target paths by scope:
 
 Project root is `git rev-parse --show-toplevel` (or current working directory if not in a git repo — but warn the user).
 
-## Step 3: Copy rule template
+## Step 3: Sync rule template
 
-- Ensure destination directory exists with `mkdir -p`
-- Copy `<installPath>/rules/lazy-log.logging.md` to the target path
-- If the target already exists and has identical content, skip silently
-- If the target exists but differs, show a diff and ask whether to overwrite
+1. Ensure destination directory exists with `mkdir -p`.
+2. Determine state by comparing source and target **byte-for-byte** (read both files and compare content exactly):
+   - **Target missing** → copy source → target. Record state: **created**.
+   - **Target exists, byte-identical to source** → skip. Record state: **unchanged**.
+   - **Target exists, differs from source** → show a unified diff and ask the user whether to overwrite.
+     - Accept → overwrite with source. Record state: **updated**.
+     - Decline → leave target untouched. Record state: **kept-local**.
 
 ## Step 4: Create docs/changelog.md (project scope only)
 
@@ -78,7 +81,8 @@ If `.logs/` is already covered, skip.
 - If `docs/changelog.md` was created, read back its first line
 - Report to the user what was done:
   - Scope detected
-  - Rule installed at `<path>`
+  - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)
+  - Rule: state (**created**, **updated**, **unchanged**, or **kept-local**) and target `<path>`
   - Changelog created at `<path>` (or "already exists")
   - .gitignore updated (or "already covers .logs/")
 
@@ -91,5 +95,6 @@ Use two separate steps: `Bash(mkdir -p ...)` then `Write` tool. Never chain with
 ## Notes
 
 - **Idempotent**: running this skill multiple times is safe. Files are only created/updated when there's a real change.
+- **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does **not** re-sync the rule file into `.claude/rules/`. Re-run this skill after every plugin update to pick up rule changes — otherwise projects keep running the old rule content.
 - **Scope independence**: running at project scope does not affect other projects or the global config.
-- **Next steps shown to user**: remind the user to restart Claude Code if the rule file was just created (the rule is loaded on session start).
+- **Next steps shown to user**: if the rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start).

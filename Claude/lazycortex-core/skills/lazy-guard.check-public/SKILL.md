@@ -1,6 +1,6 @@
 ---
 name: lazy-guard.check-public
-description: "Use when auditing a public repo for leaked secrets, PII, infrastructure details, or hardcoded local paths. Run before making a repo public, after adding new configs, or as a periodic hygiene check. Reads .guard-waivers.json for accepted exceptions."
+description: "Use when auditing a public repo (or a public subtree inside an otherwise private repo) for leaked secrets, PII, infrastructure details, or hardcoded local paths. Run before making a repo/subtree public, after adding new configs, or as a periodic hygiene check. Reads .guard-waivers.json for accepted exceptions and optional `public_scopes` globs."
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(mkdir -p *), Bash(date *)
 ---
 
@@ -29,6 +29,11 @@ Schema:
 ```json
 {
   "version": 1,
+  "public_scopes": [
+    "Claude/**",
+    "README.public.md",
+    ".gitignore"
+  ],
   "waivers": [
     {
       "pattern": "regex matching the finding text (case-insensitive)",
@@ -45,14 +50,30 @@ Schema:
 }
 ```
 
+**`public_scopes`** (optional, default: empty) narrows the guard to a subtree
+of the repo. Use this when the repo itself stays private but a specific
+subtree (e.g., `Claude/**`) gets published elsewhere — the scan and the
+pre-commit hook then only consider files matching one of these globs.
+Absent or empty = legacy whole-repo-public mode (scan everything).
+
+Globs support `**` (any depth) and `*` (single path segment). Paths are
+evaluated relative to the repo root.
+
 ### 1c. Filter file list
 
-Remove from scan:
-- `*.age` files (encrypted)
-- Paths matching `global_skip_paths` globs
-- Binary files (images, fonts, compiled assets)
+Apply filters in this order:
 
-Report: "Scanning N files (skipped M encrypted, K excluded by skip paths)"
+1. If `public_scopes` is non-empty, **retain only** files matching at least
+   one of the globs. Everything outside is implicitly private and skipped.
+2. Remove `*.age` files (encrypted)
+3. Remove paths matching `global_skip_paths` globs
+4. Remove binary files (images, fonts, compiled assets)
+
+Report: "Scanning N files in public scope (O outside scope, M encrypted, K excluded by skip paths)"
+
+When `public_scopes` is empty, drop the "in public scope" / "outside scope"
+numbers from the report and fall back to "Scanning N files (skipped M
+encrypted, K excluded by skip paths)".
 
 ## Phase 2: Scan
 
@@ -158,7 +179,8 @@ Before recording any finding, verify:
 ```markdown
 ## lazy-guard.check-public -- Security Audit
 
-**Files scanned**: N (skipped: M encrypted, K excluded)
+**Public scopes**: `Claude/**`, `README.public.md`, `.gitignore`  (or "whole repo" if unset)
+**Files scanned**: N in scope (O outside, M encrypted, K excluded)
 **Waivers loaded**: W from .guard-waivers.json
 
 | Category | FAIL | WARN | INFO | WAIVED |

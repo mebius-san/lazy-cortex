@@ -22,7 +22,7 @@ A natural-language query, e.g.:
 2. **`.logs/claude/**/*.md`** — skill/agent/command run logs. Each has `git_sha` in frontmatter.
 3. **`.logs/commits.jsonl`** — raw commit metadata (sha, date, author, message, files).
 4. **Git log** — `git log --all --grep "<keywords>" --format="%H %cI %s"` for message search, and `git log --all -S "<keywords>"` for diff content search.
-5. **Memory files** — `~/.claude/projects/<project-key>/memory/*.md`. Project-key format: absolute path with `/` replaced by `-` (e.g., `-Users-alik-Auriglaci-Dropbox-Projects-LazyCortex`).
+5. **Memory files** — `~/.claude/projects/<project-key>/memory/*.md`. Project-key format: the project's absolute path with every `/` replaced by `-` (e.g., `/Users/<user>/<path>/<to>/<repo>` → `-Users-<user>-<path>-<to>-<repo>`).
 
 ## Process
 
