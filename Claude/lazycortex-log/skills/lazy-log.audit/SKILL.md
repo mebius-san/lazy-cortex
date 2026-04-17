@@ -6,54 +6,63 @@ allowed-tools: Read, Glob, Grep, Bash(mkdir -p *), Bash(date *)
 
 # Logging Audit
 
-Verify that the project's logging rule (`.claude/rules/lazy-log.logging.md`) is installed and internally coherent. The rule loads unconditionally at startup, so every skill/agent/command already inherits its instructions — per-file `## Logging` sections are optional restatements, not a requirement.
+Coordinator skill. Checks the rule file inline, then dispatches three **Explore** subagents in parallel to cross-check optional per-file `## Logging` sections across skills / agents / commands.
+
+See `rules/lazy-core.parallel-scan.md` for the coordinator pattern. Severity vocabulary: `PASS` / `WARN` / `FAIL`.
+
+The rule (`.claude/rules/lazy-log.logging.md`) loads unconditionally at startup, so every artifact already inherits its instructions — per-file `## Logging` sections are optional restatements, not a requirement.
 
 **Read-first.** Collect all findings, present a report, then ask which to fix.
 
-## Scope
+## Phase 1 — Inline rule checks (main session)
 
-Primary target:
-- `.claude/rules/lazy-log.logging.md` — the rule is the single source of truth
+Neither step dispatches; both operate on a single file.
 
-Secondary (only if per-file `## Logging` sections exist, verify they don't contradict the rule):
-- `.claude/skills/*/SKILL.md`
-- `.claude/agents/*.md`
-- `.claude/commands/*.md`
+### 1a. Rule file installed
 
-Do NOT flag files that lack a `## Logging` section. The rule covers them.
+- `[FAIL]` if `.claude/rules/lazy-log.logging.md` is missing — tell the user to run `/lazy-log.install`.
+- `[WARN]` if the rule file has no YAML frontmatter with a `description`.
 
-Do NOT check plugin-shipped skills (they live under `~/.claude/plugins/`) — those are out of scope for the user to fix.
+### 1b. Rule content integrity
 
-## Checks
+Read `.claude/rules/lazy-log.logging.md`:
 
-Classify findings as `[PASS]`, `[WARN]`, or `[FAIL]`.
+- `[FAIL]` if the rule does not specify a log path under `./.logs/claude/<name>/`.
+- `[FAIL]` if the rule does not mention `git_sha` or `git rev-parse HEAD`.
+- `[WARN]` if the rule does not mention `git_branch` (both belong in frontmatter).
+- `[WARN]` if the rule does not mention UTC timestamps (`date -u`).
+- `[WARN]` if the rule does not call out "two separate steps: `Bash(mkdir -p ...)` then `Write`".
 
-### 1. Rule file installed
+If Phase 1a reports `[FAIL]` (rule missing), skip Phase 2 and jump to output.
 
-- `[FAIL]` if `.claude/rules/lazy-log.logging.md` is missing — tell the user to run `/lazy-log.install`
-- `[WARN]` if the rule file has no YAML frontmatter with a `description`
+## Phase 2 — Dispatch parallel cross-checks
 
-### 2. Rule content integrity
+Dispatch three Explore agents **in a single message with three Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each agent targets one artifact type and cross-checks any `## Logging` sections against the rule. Each returns the structured report from `rules/lazy-core.parallel-scan.md`. Budget: "Report under 250 words".
 
-Read `.claude/rules/lazy-log.logging.md` and verify it covers the core requirements:
+**Shared cross-check rules** (give to every agent):
 
-- `[FAIL]` if the rule does not specify a log path under `./.logs/claude/<name>/`
-- `[FAIL]` if the rule does not mention `git_sha` or `git rev-parse HEAD`
-- `[WARN]` if the rule does not mention `git_branch` (both should be in frontmatter)
-- `[WARN]` if the rule does not mention UTC timestamps (`date -u`)
-- `[WARN]` if the rule does not call out "two separate steps: `Bash(mkdir -p ...)` then `Write`"
+- Missing `## Logging` sections are **not** a finding — the rule covers them.
+- Do NOT check plugin-shipped skills (those under `~/.claude/plugins/`) — out of scope.
+- For each artifact that *does* include a `## Logging` section:
+  - `[WARN]` if the section references a log path outside `./.logs/claude/<name>/` (e.g., `~/.claude/...` or a hardcoded project path).
+  - `[WARN]` if it uses a timestamp format other than `YYYY-MM-DD_HH-MM-SS`.
+  - `[WARN]` if it suggests chaining with `&&` or using `cat > file <<'EOF'`.
 
-### 3. Per-file sections (only if present) don't contradict the rule
+### Agent A — skills
 
-For each skill/agent/command that *does* happen to include a `## Logging` section, cross-check against the installed rule:
+Scope: `.claude/skills/*/SKILL.md`. Glob the list, then `grep -n '## Logging'` to find sections to inspect. Report one finding per violation.
 
-- `[WARN]` if the per-file section references a log path outside `./.logs/claude/<name>/` (e.g., uses `~/.claude/...` or a hardcoded project path)
-- `[WARN]` if the per-file section uses a timestamp format other than `YYYY-MM-DD_HH-MM-SS`
-- `[WARN]` if the per-file section suggests chaining with `&&` or using `cat > file <<'EOF'`
+### Agent B — agents
 
-Missing `## Logging` sections are **not** a finding — the rule covers them.
+Scope: `.claude/agents/*.md`. Same pattern — Glob + grep for `## Logging` and apply the shared cross-check rules.
 
-## Output
+### Agent C — commands
+
+Scope: `.claude/commands/*.md`. Same pattern.
+
+## Phase 3 — Present + fix
+
+Parse the three returned blocks, merge with Phase 1 findings, and render:
 
 ```markdown
 ## lazy-log.audit -- Logging Audit

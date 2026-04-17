@@ -35,4 +35,4 @@ This lets an otherwise-private repo publish only a subtree (e.g., `Claude/**`) t
 
 Globs support `**` (any depth) and `*` (single path segment). Paths are evaluated relative to the repo root.
 
-In this dev repo, `public_scopes` is `["Claude/**", "README.public.md", ".gitignore"]` because only those paths ship to the public mirror via the `publish` skill.
+In this dev repo, `public_scopes` is `["Claude/**", "README.public.md", ".gitignore"]` because only those paths ship to the public mirror via the `pub.publish` skill.

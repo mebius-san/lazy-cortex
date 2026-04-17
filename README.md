@@ -25,7 +25,7 @@ Each plugin addresses one of these pains without forcing you to adopt the others
 
 Core skills and agents for Claude Code
 
-Ships 7 skills, 1 command, 2 rules, and 2 hooks covering context audit/optimization, project health checks, public-repo security scanning, and one-step MCP permissioning.
+Ships 7 skills, 1 command, 3 rules, and 2 hooks covering context audit/optimization, project health checks, public-repo security scanning, and one-step MCP permissioning.
 
 See [`Claude/lazycortex-core/`](Claude/lazycortex-core/) for details.
 

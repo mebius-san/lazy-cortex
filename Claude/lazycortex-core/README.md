@@ -61,6 +61,7 @@ Claude Code configs drift fast. Rule files bloat. `settings.json` fills with one
 | Rule | Description |
 |---|---|
 | `lazy-core.hygiene` | Project hygiene constraints checked by lazy-core.audit, lazy-core.doctor, and lazy-core.optimize — scope, naming, settings split, MCP scope, and path hygiene. |
+| `lazy-core.parallel-scan` | Coordinator-plus-parallel-Explore pattern for heavy skills that do multiple independent scans before user interaction. Referenced by lazy-core.doctor, lazy-guard.check-public, lazy-core.audit, lazy-log.audit, and the tool.* wrappers. |
 | `lazy-guard.security` | Security constraints that the lazy-guard.* scanners and pre-commit hook enforce — credential safety and public-repo readiness. |
 
 ## Hooks

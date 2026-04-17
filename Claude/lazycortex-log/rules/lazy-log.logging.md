@@ -37,7 +37,11 @@ The `git_sha` in frontmatter is the critical bridge from "the AI did Y" back to 
 
 ## Distill after commits
 
-After making one or more git commits, **consider** invoking the `lazy-log.distill` agent to update `./docs/changelog.md` with a short functional description of what changed.
+After making one or more git commits, **consider** running:
+
+`Agent(subagent_type: "lazycortex-log:lazy-log.distill", prompt: "<brief context on what just changed>")`
+
+to update `./docs/changelog.md` with a short functional description of what changed.
 
 **Skip distill when:**
 - The commit is trivial (typo fix, formatting, whitespace, dependency bump)
@@ -53,10 +57,10 @@ This is guidance, not a hard rule — use judgment. When in doubt, mention it an
 
 ## Recall, timeline, summary
 
-When the user asks "why was X changed?", "when did we change Y?", or similar historical questions:
+When the user asks "why was X changed?", "when did we change Y?", or similar historical questions, use one of:
 
-1. Invoke `lazy-log.recall "<query>"` to search across `docs/changelog.md`, `.logs/claude/**/*.md`, `.logs/commits.jsonl`, git log, and memory
-2. For chronological views of a date range or topic, invoke `lazy-log.timeline`
-3. For a synthesized multi-source summary of a topic, invoke `lazy-log.summary`
+- `Agent(subagent_type: "lazycortex-log:lazy-log.recall", prompt: "<query>")` — searches across `docs/changelog.md`, `.logs/claude/**/*.md`, `.logs/commits.jsonl`, git log, and memory.
+- `Agent(subagent_type: "lazycortex-log:lazy-log.timeline", prompt: "<date range or topic>")` — chronological view of a date range or topic.
+- `Agent(subagent_type: "lazycortex-log:lazy-log.summary", prompt: "<topic>")` — synthesized multi-source summary.
 
-Don't skim these files manually — the recall agent is tuned to rank relevance and return git SHAs for follow-up `git show <sha>`.
+Don't skim these files manually — `lazy-log.recall` is tuned to rank relevance and return git SHAs for follow-up `git show <sha>`.

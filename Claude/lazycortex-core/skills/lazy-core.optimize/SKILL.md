@@ -114,6 +114,58 @@ Check the memory index at `~/.claude/projects/<project-key>/memory/MEMORY.md`:
 
 Report findings. Fix orphaned/broken links automatically, flag stale for user review.
 
+## Phase 6: Heavy-scan delegation audit
+
+Find skills that should be refactored to the coordinator-plus-parallel-Explore-agents pattern described in `rules/lazy-core.parallel-scan.md`. This phase only reports — it never rewrites skills, because coordinator logic is skill-specific.
+
+### Scan scope
+
+- `.claude/skills/*/SKILL.md` (project)
+- `~/.claude/skills/*/SKILL.md` (global)
+- `Claude/*/skills/*/SKILL.md` (plugin sources, if this repo has a `Claude/` tree)
+
+### Heuristics (all four must hit for a candidate)
+
+For each SKILL.md, Read the body (not the frontmatter) and test:
+
+1. **Size**: > 120 lines **or** > 5 KB.
+2. **Multiple independent scan blocks**: ≥ 3 distinct scan-like blocks in the body. Count as a scan block any of:
+   - Numbered check heading (`### N.`, `### Na.`)
+   - Heading like `Check N:` or `Phase N:` where each phase reads a distinct file set
+   - Directive block mentioning a Glob / Grep pattern or a Read of a different file tree than the previous block
+3. **No existing parallel dispatch**: body does NOT contain any of — `subagent_type: "Explore"`, `subagent_type: "general-purpose"`, `in parallel`, `dispatching-parallel-agents`, `rules/lazy-core.parallel-scan.md`, "multiple Agent tool calls".
+4. **Read-heavy before interaction**: the first user prompt (search for `AskUserQuestion`, "ask the user", "confirm", "fix which", `[y/N]`) appears after more than half the scan blocks in (2).
+
+If a skill hits all four, it is a candidate.
+
+### Suggested split (per candidate)
+
+Group the skill's scan blocks by the top-level file tree they read:
+- `rules/`, `agents/`, `skills/`, `commands/` → "artifact" group
+- `settings*.json`, `memory/` → "config+memory" group
+- content greps across project files → "hygiene" group
+- other distinctive buckets (e.g., security-pattern categories) → one group per category
+
+Cap at **4 agents** per skill to keep dispatch cheap and report merging tractable. If natural grouping produces more, combine the smallest.
+
+### Output
+
+Emit one section per positive finding plus a summary table:
+
+```markdown
+## Phase 6: Heavy-scan delegation candidates
+
+| Skill | Size | Scan blocks | Suggested split |
+|---|---|---|---|
+| <skill-name> | N lines / M KB | K | <short split description> |
+
+Each candidate above does K independent scans before any user interaction.
+Refactor to spawn Explore agents in parallel and have the skill itself
+act as coordinator. See rules/lazy-core.parallel-scan.md.
+```
+
+If no candidates found, render "No heavy-scan delegation candidates found." and continue.
+
 ## Output
 
 End with a summary:
@@ -126,6 +178,7 @@ End with a summary:
 | Rules (always-loaded) | X KB | Y KB | -Z% |
 | Settings entries moved | - | N | global -> project |
 | Memory issues fixed | - | N | orphaned/broken |
+| Delegation candidates | - | N | heavy skills to refactor |
 ```
 
 ## Logging

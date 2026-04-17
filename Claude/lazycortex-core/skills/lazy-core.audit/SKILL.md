@@ -6,67 +6,82 @@ allowed-tools: Read, Glob, Grep, Bash(wc *)
 
 # Context Audit
 
-Read-only audit of context loading for the current project. Do NOT make any changes.
+Coordinator skill. Dispatches two **Explore** subagents in parallel to measure context weight and hygiene, then renders the tables. Read-only — no changes made.
 
-**CRITICAL PATH RULE**: `~/.claude/` is protected from Bash access (Claude Code's own config dir). Use ONLY Glob and Read tools for any path under `~/.claude/`. Use `wc -c` via Bash ONLY for paths under the project root (e.g., `.claude/`).
+See `rules/lazy-core.parallel-scan.md` for the pattern.
 
-## Steps
+**CRITICAL PATH RULE** (applies to every dispatched agent): `~/.claude/` is protected from Bash access. Agents must use ONLY Glob and Read under `~/.claude/`. `wc -c` via Bash is allowed ONLY for paths under the project root.
 
-### 1. Always-loaded files
+**Size estimation**: for Read-measured files use `size ~ lines × 45 bytes`; for `wc -c` use exact bytes.
 
-**Global CLAUDE.md** (`~/.claude/CLAUDE.md`): Use Read tool, note last line number.
+## Phase 1 — Dispatch parallel scans
 
-**Project CLAUDE.md** (`CLAUDE.md`): Use Read tool, note last line number.
+Dispatch these two Explore agents **in a single message with two Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each returns the structured report from `rules/lazy-core.parallel-scan.md`. Budget: "Report under 350 words".
 
-**Global rules** (`~/.claude/rules/*.md`): Use Glob to find files, Read each one, note line counts. If the directory is a symlink, resolve and follow it.
+Severity vocabulary for this skill: `INFO` (measurement row) / `WARN` (recommendation). No `FAIL`.
 
-**Project rules** (`.claude/rules/*.md`): Use `wc -c` via Bash (project path, safe). Check frontmatter: rules with `paths` are on-demand (don't count toward startup cost), rules without `paths` are always-loaded.
+### Agent A — always-loaded context
 
-**Memory index** (`~/.claude/projects/*/memory/MEMORY.md`): Use Read tool, note last line number.
+Measure everything that loads at conversation start. Include these sources as one `[INFO]` finding per source, sorted by size desc:
 
-### 2. On-demand files
+- **Global CLAUDE.md** (`~/.claude/CLAUDE.md`) — Read, estimate size.
+- **Project CLAUDE.md** (`CLAUDE.md`) — Read, estimate size.
+- **Global rules** (`~/.claude/rules/*.md`) — Glob + Read. If the directory is a symlink, resolve and follow it. Only rules **without** a `paths` frontmatter field count as always-loaded; rules with `paths` are on-demand and belong to Agent B.
+- **Project rules** (`.claude/rules/*.md`) — `wc -c` via Bash. Same `paths` filtering rule.
+- **Memory index** (`~/.claude/projects/*/memory/MEMORY.md`) — Read, estimate size.
 
-**Agents** (`.claude/agents/*.md`): Use `wc -c` via Bash (project path).
+Also emit `[WARN]` findings for:
 
-**Project commands** (`.claude/commands/*.md`): Use `wc -c` via Bash (project path).
+- Any rules file > 3 KB (suggest `/lazy-core.optimize`).
+- `MEMORY.md` > 5 KB (suggest consolidation).
 
-**Global commands** (`~/.claude/commands/*.md`): Use Glob to find, Read to count lines.
+Include a `total_kb` line in the summary block.
 
-**Project skills** (`.claude/skills/*/SKILL.md`): Use `wc -c` via Bash (project path).
+### Agent B — on-demand assets, MCP, path + naming hygiene
 
-**Global skills** (`~/.claude/skills/*/SKILL.md`): Use Glob to find, Read to count lines.
+Scope covers everything not loaded at startup, plus hygiene grep work.
 
-**Memory files** (individual `~/.claude/projects/*/memory/*.md` except MEMORY.md): Use Glob to count files.
+**On-demand sizing** (one `[INFO]` per source):
 
-### 3. MCP servers
+- Agents (`.claude/agents/*.md`) — `wc -c` via Bash.
+- Project commands (`.claude/commands/*.md`) — `wc -c` via Bash.
+- Global commands (`~/.claude/commands/*.md`) — Glob + Read.
+- Project skills (`.claude/skills/*/SKILL.md`) — `wc -c` via Bash.
+- Global skills (`~/.claude/skills/*/SKILL.md`) — Glob + Read.
+- Memory files (individual `~/.claude/projects/*/memory/*.md` except `MEMORY.md`) — Glob to count.
+- On-demand rules (rules files with a `paths` frontmatter field).
 
-List from system context (no tools needed).
+Include a `total_kb` line for on-demand sources in the summary block.
 
-Check MCP enablement. Either mode is valid — global `"enableAllProjectMcpServers": true` OR explicit `enabledMcpjsonServers` in the project's settings. Report which mode is in effect and list the enabled servers.
+**MCP enablement** — read `~/.mcp.json`, `.mcp.json`, `~/.claude/settings.json`, `~/.claude/settings.local.json`, `.claude/settings.json`, `.claude/settings.local.json`. Determine mode:
 
-A server counts as enabled if:
-- it lives in `~/.mcp.json` (always available), OR
-- global `enableAllProjectMcpServers: true` AND it lives in project `.mcp.json`, OR
-- its name is in `enabledMcpjsonServers` of project `.claude/settings.json` or `.claude/settings.local.json`.
+- Mode A: global `enableAllProjectMcpServers: true` → every project `.mcp.json` entry is implicitly enabled; suppress "declared but unused" warnings.
+- Mode B: `enableAllProjectMcpServers` false or missing → server enabled only if its name appears in `enabledMcpjsonServers` of project settings.
 
-Cross-reference:
+Emit one `[INFO]` per enabled server. Emit `[WARN]`:
 
-- **If `enableAllProjectMcpServers: true`**: do NOT flag servers that are only in `.mcp.json` but absent from `enabledMcpjsonServers` — they are all implicitly enabled. Suppress "declared but unused" warnings entirely in this mode.
-- **Only if `enableAllProjectMcpServers` is `false` or missing**: flag any server in project `.mcp.json` that is not enabled under any of the rules above (declared but unused), and flag when no `enabledMcpjsonServers` array exists anywhere in project settings despite a non-empty `.mcp.json`.
-- Always: flag any name in `enabledMcpjsonServers` that has no matching definition in `.mcp.json` or `~/.mcp.json` (stale reference).
+- Mode B only: server in project `.mcp.json` not enabled under any rule above.
+- Mode B only: non-empty project `.mcp.json` but no `enabledMcpjsonServers` anywhere.
+- Always: name in `enabledMcpjsonServers` with no definition in `.mcp.json` or `~/.mcp.json`.
 
-## Size estimation
+**Path hygiene** — grep every project-level config file (`.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/*/SKILL.md`, `.claude/commands/*.md`, `CLAUDE.md`) and emit `[WARN]` for:
 
-For files measured via Read (line count only): **size ~ lines x 45 bytes**.
-For files measured via `wc -c`: exact bytes.
+- `/Users/` or `/home/` — hardcoded absolute paths.
+- `<project>/` prefix — should be relative.
+- `~/Dropbox/` or other user-specific home subdirectories.
+- `~/.claude/` used for items that are actually project-local (project agents / rules / settings) instead of relative `.claude/`.
 
-## Output
+**Naming hygiene** — for `.claude/skills/*/`, `.claude/agents/*.md`, `.claude/commands/*.md`, `.claude/hooks/*`, `.claude/rules/*.md`: filename (or directory name for skills) must use dot-namespace (`namespace.name`). `[WARN]` for anything missing a dot (e.g., `logging.md` → `<namespace>.logging.md`).
+
+## Phase 2 — Render
+
+Parse both returned blocks. Produce:
 
 ### Always loaded (startup cost)
 
 | Source | Path | Size | Files |
 |---|---|---|---|
-| (one row per source, sorted by size descending) |
+| (one row per Agent A `[INFO]` finding, sorted by size descending) |
 
 **Total always-loaded**: ~X KB
 
@@ -74,26 +89,25 @@ For files measured via `wc -c`: exact bytes.
 
 | Source | Path | Size | Files |
 |---|---|---|---|
-| (one row per source, sorted by size descending) |
+| (one row per Agent B on-demand `[INFO]` finding, sorted by size descending) |
 
 **Total on-demand**: ~X KB
 
+### MCP servers
+
+List enabled servers and the mode in effect. Flag any WARN findings from Agent B's MCP section.
+
 ### Path hygiene
 
-Grep all project-level config files (`.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/*/SKILL.md`, `.claude/commands/*.md`, `CLAUDE.md`) for hardcoded paths. Flag:
-
-- `/Users/` or `/home/` — hardcoded absolute paths
-- `<project>/` prefix — should be relative
-- `~/Dropbox/` or other user-specific home subdirectories
-- `~/.claude/` used for project-local items (agents, project settings, project rules) instead of relative `.claude/`
+One line per Agent B path-hygiene `[WARN]`.
 
 ### Naming hygiene
 
-For each `.claude/skills/*/`, `.claude/agents/*.md`, `.claude/commands/*.md`, `.claude/hooks/*`, and `.claude/rules/*.md` — verify the filename (or directory name for skills) uses dot-namespace (`namespace.name`). Flag anything missing a dot as a naming violation (e.g., `logging.md` should be `<namespace>.logging.md`).
+One line per Agent B naming `[WARN]`.
 
 ### Recommendations
 
-- Rules file > 3 KB -> flag for slimming (run `/lazy-core.optimize`)
-- Memory index > 5 KB -> suggest consolidation
-- Hardcoded paths found -> flag for replacement with relative equivalents (run `/lazy-core.doctor` for details)
+- Rules file > 3 KB → flag for slimming (run `/lazy-core.optimize`).
+- Memory index > 5 KB → suggest consolidation.
+- Hardcoded paths found → run `/lazy-core.doctor` for details.
 - Note: system prompt, skill registry, MCP instructions, deferred tool list are injected by Claude Code and cannot be reduced by the user.
