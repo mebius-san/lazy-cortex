@@ -200,7 +200,7 @@ Before recording any finding, verify:
 
 #### [WARN] B1: Email address
 **File**: `path/to/file:20`
-**Match**: `user@domain.com`
+**Match**: `user@example.com`
 **Fix**: Template-ize or add waiver if intentionally public
 
 (... one section per finding, FAIL first, then WARN, then INFO ...)
