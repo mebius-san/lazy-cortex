@@ -1,6 +1,6 @@
 {
   "name": "lazycortex-log",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Logging, changelog, and change-history recall for Claude Code",
   "author": {
     "name": "Alik Tabunov"

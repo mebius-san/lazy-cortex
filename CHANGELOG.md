@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.0 — 2026-04-17
+
+- New `/lazy-core.help` slash command prints the plugin's purpose and a one-line summary of every skill it ships. Output is verbatim — no tool calls, no log write.
+
 ### 0.1.0 — 2026-04-17
 
 - Initial release.
@@ -14,6 +18,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - **Install** — `lazy-core.install` drops the hygiene and security rule templates into the target project.
 
 ## lazycortex-log
+
+### 0.2.0 — 2026-04-17
+
+- New `/lazy-log.help` slash command prints the plugin's purpose and a one-line summary of every skill and agent it ships. Output is verbatim — no tool calls, no log write.
 
 ### 0.1.0 — 2026-04-17
 

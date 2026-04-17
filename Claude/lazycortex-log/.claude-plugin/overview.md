@@ -1,7 +1,3 @@
-# lazycortex-log
-
-Logging, changelog, and change-history recall for Claude Code
-
 ## Why this plugin
 
 Six weeks after a change lands, "why did we do this?" is expensive to answer. The commit message says `fix`, the PR is closed, the Slack thread is archived, and the LLM is guessing. `lazycortex-log` is designed so that future-you (or the LLM working on behalf of future-you) can actually answer that question.
@@ -41,70 +37,3 @@ Then `lazy-log.recall` searches across all three plus git history and memory, an
 2. Restart Claude Code.
 3. Run `/lazy-log.install` once per project. This drops the `lazy-log.logging` rule into `.claude/rules/`, creates `docs/changelog.md`, and ensures `.gitignore` covers `.logs/`.
 4. From then on, the post-commit hook records every commit. Run `/lazy-log.distill` when you want the human-readable changelog updated. Run `/lazy-log.recall` whenever you're trying to remember something.
-
-## Skills
-
-| Skill | Description |
-|---|---|
-| `lazy-log.audit` | Verify that the project's logging rule is installed and coherent. The rule itself is the single source of truth — individual skills/agents/commands do NOT need per-file ## Logging sections. Reports gaps and offers fixes. Read-first — never modifies files without confirmation. |
-| `lazy-log.install` | Bootstrap the lazycortex-log plugin for the current project (or globally). Copies the logging rule template into the rules directory, creates docs/changelog.md if missing, and ensures .gitignore covers .logs/. Idempotent — safe to re-run. Detects install scope automatically. |
-
-## Agents
-
-| Agent | Description |
-|---|---|
-| `lazy-log.distill` | Convert raw commit entries from .logs/commits.jsonl into functional prose in ./docs/changelog.md. Writes 1-3 sentence entries per commit focused on what changed for the user (not implementation detail). Invoke after meaningful commits (see lazy-log.logging rule) or on demand. |
-| `lazy-log.recall` | Search all change-history sources (run logs, changelog, raw commit log, git history, memory) for a query. Returns ranked matches with git SHAs so the user can jump to the actual commit. Use when the user asks 'why was X changed?' or 'when did we change Y?' |
-| `lazy-log.summary` | Synthesize a multi-paragraph summary of all changes related to a topic across time (not chronological). Use when the user wants to understand 'the whole story' of a feature, refactor, or area of the codebase. |
-| `lazy-log.timeline` | Generate a chronological timeline view of all changes matching a date range or topic. Combines changelog entries, commits, and AI run logs. Use when the user wants a 'what happened when' view. |
-
-## Commands
-
-| Command | Description |
-|---|---|
-| `lazy-log.help` | Show lazycortex-log purpose and a one-line summary of each skill and agent it ships |
-
-## Rules
-
-| Rule | Description |
-|---|---|
-| `lazy-log.logging` | Logging conventions for skills, agents, and commands. Also guides when to run lazy-log.distill after commits. |
-
-## Hooks
-
-| Hook | Trigger | Description |
-|---|---|---|
-| `lazy-log.commit-recorder` | `Bash`, `mcp__git__git_commit` | PostToolUse hook: record every successful git commit to .logs/commits.jsonl. |
-
-## Installation
-
-Add the marketplace and enable the plugin in your global `~/.claude/settings.json`:
-
-```json
-{
-  "extraKnownMarketplaces": {
-    "lazycortex": {
-      "source": {
-        "source": "github",
-        "repo": "mebius-san/lazy-cortex"
-      },
-      "autoUpdate": true
-    }
-  },
-  "enabledPlugins": {
-    "lazycortex-log@lazycortex": true
-  }
-}
-```
-
-Restart Claude Code. Skills appear as `lazycortex-log:<skill.name>`.
-
-## Usage
-
-Invoke skills with slash commands:
-
-```
-/lazy-log.audit
-/lazy-log.help
-/lazy-log.install
-```
