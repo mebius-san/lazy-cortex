@@ -25,14 +25,16 @@ Accepted exceptions live in `.guard-waivers.json` at the repo root. Each entry r
 
 ## Public scopes (subtree-public mode)
 
-`.guard-waivers.json` supports an optional top-level `public_scopes` array of path globs. When present, the scan and the pre-commit hook only consider files matching one of the globs — everything else in the repo is implicitly private and ignored by the guard.
+`.guard-waivers.json` supports an optional top-level `public_scopes` array of path globs. When set, the scan and pre-commit hook consider only files matching one of the globs; everything else is implicitly private. Use this to publish a subtree (e.g., `Claude/**`) from an otherwise-private repo — `lazy-repo.mark-public` with `public_scopes` skips the GitHub-visibility flip. Globs support `**` (any depth) and `*` (single segment), relative to the repo root.
 
-This lets an otherwise-private repo publish only a subtree (e.g., `Claude/**`) to an external mirror without having to flip the whole repo public. When `public_scopes` is set:
+## Author metadata
 
-- `lazy-guard.check-public` reports findings only for files inside the scope
-- The pre-commit hook blocks/warns only on staged lines inside the scope
-- `lazy-repo.mark-public` does NOT flip GitHub visibility — the repo stays private; only the scoped subtree is treated as public
+Author name/email in tracked manifests (`plugin.json`, `package.json`, `pyproject.toml`, `Cargo.toml`, `README`, `CITATION.cff`, etc.) is identity leakage.
 
-Globs support `**` (any depth) and `*` (single path segment). Paths are evaluated relative to the repo root.
+- **Never infer an author** from `git config`, past commits, or system accounts — the local identity is often the user's real name, not what they want published.
+- **Ask the user** for the correct public identity on first use, then record it as `public_author` in `.guard-waivers.json` and read that block on every subsequent write. Re-ask if the block is absent.
+- **Enforcement**: `lazy-guard.check-public` B4 flags every author literal as WARN and auto-waives only those matching `public_author`.
 
-In this dev repo, `public_scopes` is `["Claude/**", "README.public.md", ".gitignore"]` because only those paths ship to the public mirror via the `pub.publish` skill.
+## Meta-rule
+
+All constraints. New security rules → this file; scanner heuristics and fix procedures → `lazy-guard.check-public/SKILL.md`, `lazy-repo.mark-public/SKILL.md`, and the pre-commit hook.

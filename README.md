@@ -35,6 +35,8 @@ Logging, changelog, and change-history recall for Claude Code
 
 Ships 2 skills, 4 agents, 1 command, 1 rule, and 1 hook. Records every commit to a raw log, distills commits into a readable `docs/changelog.md`, tags every skill/agent/command run with the current `git_sha`, and provides recall/timeline/summary agents that search across run logs, changelog, git history, and memory.
 
+Requires: lazycortex-core
+
 See [`Claude/lazycortex-log/`](Claude/lazycortex-log/) for details.
 
 ### lazycortex-specs
@@ -85,4 +87,4 @@ Restart Claude Code after enabling. Each plugin's README explains its setup step
 
 ## Author
 
-Alik Tabunov
+Mebius-san

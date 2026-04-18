@@ -1,8 +1,9 @@
 {
   "name": "lazycortex-log",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Logging, changelog, and change-history recall for Claude Code",
   "author": {
-    "name": "Alik Tabunov"
-  }
+    "name": "Mebius-san"
+  },
+  "dependencies": ["lazycortex-core"]
 }

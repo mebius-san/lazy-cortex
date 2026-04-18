@@ -4,17 +4,17 @@ description: Coordinator-plus-parallel-Explore pattern for heavy skills that do 
 
 # Parallel Scan Coordinator Pattern
 
-Skills that do ≥ 3 independent scans before any user interaction must act as thin **coordinators** that dispatch parallel **Explore** subagents. The skill itself never does the scanning.
+Skills that do ≥ 3 independent scans before user interaction must act as thin **coordinators** that dispatch parallel **Explore** subagents.
 
 ## When this applies
 
-Use the pattern when a skill has all of:
+All of:
 
-- Three or more scan blocks (Glob / Grep / Read loops) that don't depend on each other's output.
-- Heavy read work that happens before the first `AskUserQuestion` or `[y/N]` prompt.
-- Fixes that must stay with the coordinator (Write / Edit permission the agents shouldn't have).
+- Three or more scan blocks (Glob / Grep / Read loops) that don't depend on each other.
+- Heavy read work before the first `AskUserQuestion` or `[y/N]` prompt.
+- Fixes that stay with the coordinator (Write / Edit permission agents shouldn't have).
 
-If a skill has only one scan block, or scans are interleaved with user prompts, skip this pattern — inline is fine.
+Skip the pattern if a skill has one scan block or scans interleave with user prompts.
 
 ## Shape
 
@@ -37,7 +37,7 @@ SKILL.md
 
 ## Structured report contract
 
-Every Explore agent dispatched by a coordinator skill must return a block in this exact shape so the coordinator can split reports mechanically:
+Every Explore agent must return a block in this exact shape:
 
 ```markdown
 ## scan: <scan-name>
@@ -51,7 +51,7 @@ Every Explore agent dispatched by a coordinator skill must return a block in thi
 pass: <n>  warn: <n>  fail: <n>
 ```
 
-`SEVERITY` vocabulary is chosen by the coordinator skill (e.g., `PASS / WARN / FAIL` for doctor-family, `OK / WARN / FAIL` for guard). Each skill documents its severity set near the top of its SKILL.md.
+`SEVERITY` vocabulary is chosen by the coordinator skill (`PASS / WARN / FAIL` for doctor-family, `OK / WARN / FAIL` for guard) and documented at the top of its SKILL.md.
 
 ## Coordinator responsibilities
 
@@ -61,3 +61,7 @@ pass: <n>  warn: <n>  fail: <n>
 - Render the existing user-visible output format — the refactor must not change what the user sees.
 - Handle all Write / Edit operations in the main session after user confirmation.
 - Write the run log to `./.logs/claude/<skill-name>/YYYY-MM-DD_HH-MM-SS.md` per the logging rule. Agents are ephemeral and do not log.
+
+## Meta-rule
+
+All constraints. New pattern-wide rules → this file; per-skill Explore prompts and report schemas → the skill's `SKILL.md`.

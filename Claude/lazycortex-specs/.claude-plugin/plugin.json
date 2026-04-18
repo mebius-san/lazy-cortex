@@ -1,8 +1,8 @@
 {
   "name": "lazycortex-specs",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Specification and design skills for Claude Code",
   "author": {
-    "name": "Alik Tabunov"
+    "name": "Mebius-san"
   }
 }

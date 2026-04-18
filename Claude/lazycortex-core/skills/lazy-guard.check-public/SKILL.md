@@ -54,6 +54,8 @@ Schema:
 
 `public_scopes` (optional, default: empty) narrows the guard to a subtree of the repo. Globs support `**` (any depth) and `*` (single segment), relative to repo root. Absent or empty = legacy whole-repo-public mode (scan everything).
 
+`public_author` (optional, default: absent) records the approved public identity for this repo. Shape: `{ "name": "<string>", "email": <string|null>, "notes": "<string>" }`. When set, B4 matches equal to `public_author.name` (or `public_author.email`, if set) auto-flip to WAIVED in Phase 3. When absent, every B4 match stays WARN and the user must confirm the intended value before any author field is written.
+
 ### 1c. Build the scan file list
 
 Apply filters in this order:
@@ -96,6 +98,13 @@ For each finding the agent records: `check_id`, `file_path`, `line_number`, `mat
 - **B1 Email addresses** — `[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`. Skip `@example.com`, `@example.org`, `@test.com`, `@localhost`, `noreply@`, `no-reply@`, vendored files (bundled JS/CSS), and `Co-Authored-By` git-trailer lines.
 - **B2 Service user IDs in config context** — `(?i)(telegram|tg|user[_-]?id|chat[_-]?id|allow[_-]?from)\s*[=:"'\[]\s*\d{6,12}`. Matches numeric IDs 6–12 digits only when near service/identity keywords.
 - **B3 Personal names in git config** — `(?i)name\s*=\s*\w+\s+\w+` (only in `*gitconfig*` files). Severity INFO (expected in dotfiles, still worth flagging).
+- **B4 Author identity in manifests** — detect literal author name/email in tracked package manifests and doc files. Patterns:
+  - `(?i)"author"\s*:\s*\{[^}]*"name"\s*:\s*"([^"]+)"` — `plugin.json`, `package.json`, `composer.json`.
+  - `(?i)"author"\s*:\s*"([^"]+)"` — short form in the same JSON manifests.
+  - `(?i)^author(s)?\s*=\s*\[?\s*["']([^"']+)["']` — `pyproject.toml`, `Cargo.toml`.
+  - `(?i)^(authors?|name)\s*:\s*(.+)` inside `CITATION.cff`.
+  - A plain body line immediately following a `## Author` / `## Authors` heading in `README*.md`.
+  Severity WARN. Rationale: legitimate authorship is common but every match is a candidate for identity leakage (real name inferred from `git config` instead of the user's chosen public handle). Skip `@example.com` / placeholder values. See Phase 3 for auto-waive against `public_author`.
 
 ### Agent C — Infrastructure (WARN)
 
@@ -118,13 +127,14 @@ For each finding the agent records: `check_id`, `file_path`, `line_number`, `mat
 
 1. **Parse** each returned block by splitting on `## scan:` headings; merge findings from all four agents.
 2. **Deduplicate**: same matched text on multiple lines in the same file becomes one finding with a line range.
-3. **Apply waivers**: a waiver matches when ALL of:
+3. **Auto-waive B4 against `public_author`** (runs before regex-based waiver matching): for any B4 finding, if `public_author.name` is set and the captured match equals it (or equals `public_author.email`, when `public_author.email` is a non-null string), flip the finding to `WAIVED` with the synthetic reason `matches .guard-waivers.json public_author`. No entry in `waivers[]` is needed for this path.
+4. **Apply waivers**: a waiver matches when ALL of:
    - `waiver.check` equals `finding.check_id` OR `waiver.check == "*"`
    - `waiver.scope` glob matches `finding.file_path` (or scope is `"*"`)
    - `waiver.pattern` regex matches `finding.matched_text` (case-insensitive)
    - If `waiver.expires` is set, today's date < expiry
    Matched findings flip to severity `WAIVED`.
-4. **Count**: totals per category and severity.
+5. **Count**: totals per category and severity.
 
 ## Phase 4 — Report
 
@@ -191,6 +201,8 @@ For each confirmed fix strategy:
 }
 ```
 Show for approval, then append to `.guard-waivers.json` (create file if needed).
+
+**Author identity**: prefer setting `public_author` at the top of `.guard-waivers.json` over writing per-match B4 waivers. One `public_author` record governs every author field under `public_scopes`, survives scope changes, and makes the intended identity discoverable instead of scattering it across waiver entries.
 
 **S5 (Template path)**: Replace `/Users/<name>/` with `{{ .chezmoi.homeDir }}/`. For plist files where absolute paths are required, suggest S4 waiver instead.
 

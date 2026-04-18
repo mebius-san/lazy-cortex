@@ -20,7 +20,7 @@ Dispatch these three Explore agents **in a single message with three Agent tool 
 
 ### Agent A — artifact integrity
 
-Scope: rules / agents / skills / commands files, their frontmatter, namespace format, hook scripts, gitignore coverage, and cross-references.
+Scope: rules / agents / skills / commands files, their frontmatter, namespace format, hook scripts, gitignore coverage, cross-references, and `~/.claude/plugins/installed_plugins.json` (read-only).
 
 Checks the agent performs:
 
@@ -28,7 +28,11 @@ Checks the agent performs:
   - `[FAIL]` rules file > 3 KB
   - `[WARN]` mentions an agent that doesn't exist in `.claude/agents/`
   - `[FAIL]` contains code blocks > 10 lines
-  - `[WARN]` no meta-rule section explaining rules-vs-reference split
+  - `[WARN]` no `## Meta-rule` section explaining rules-vs-reference split, when any of:
+    - file size > 2 KB (approaching the 3 KB FAIL threshold — a future split is likely), OR
+    - a paired config agent exists (e.g. `.claude/agents/<namespace>.config.md` for `<namespace>.rules.md`), OR
+    - file has ≥ 3 `##` subsections AND contains at least one fenced code block or Markdown table
+    Pure-constraint rules (short, no code blocks/tables, no paired agent) are exempt.
   - `[WARN]` no YAML frontmatter (need `description`, optional `paths` glob)
   - `[FAIL]` filename lacks dot separator (must be `namespace.name.md`)
 - **Agents** (`.claude/agents/*.md`):
@@ -51,6 +55,10 @@ Checks the agent performs:
   - `[WARN]` command listed in CLAUDE.md but file missing
   - `[WARN]` rules reference removed sections / features
   - `[FAIL]` `.claude/` contains files outside known patterns (`agents/*.md`, `rules/*.md`, `skills/*/SKILL.md`, `commands/*.md`, `settings*.json`)
+- **Plugin dependencies** (read `~/.claude/plugins/installed_plugins.json`):
+  - Build the installed-plugin set by stripping the `@<marketplace>` suffix from each top-level key, keeping only entries whose scope applies to this project (same filter the Phase 3 availability probes use: `scope: "user"`, or `scope: "project"` with `projectPath` matching the current repo).
+  - For each installed plugin, read `<installPath>/.claude-plugin/plugin.json` and collect its `dependencies` array (default empty if absent).
+  - `[WARN]` for each `<dep>` in that array where `<dep>` is not present in the installed-plugin set. Finding: `plugin <name> requires <dep> but <dep> is not installed — install it via its marketplace entry or remove the dependency`.
 
 Agent must not propose fixes beyond one-line hints — coordinator owns fixes.
 
@@ -179,6 +187,7 @@ After the report, ask the user which fixes to apply. Apply only confirmed fixes.
 - Path hygiene: replace hardcoded paths with relative equivalents; show diff before applying.
 - MCP enablement: either set `enableAllProjectMcpServers: true` in global settings or add `enabledMcpjsonServers` to project settings; remove stale entries.
 - Agents / skills / CLAUDE.md / hook scripts — report only, never auto-edit.
+- Plugin dependency warnings — report only; fixing requires enabling the missing plugin in `settings.json` (user's decision) or editing the declaring plugin's manifest.
 
 For any finding surfaced by a delegated audit (Guard / Logging), direct the user to run that sibling skill for fixes. Doctor never auto-fixes issues owned by sibling audits.
 

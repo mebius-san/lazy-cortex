@@ -4,8 +4,6 @@ description: Project hygiene constraints checked by lazy-core.audit, lazy-core.d
 
 # Project Hygiene
 
-Constraints below are what `lazy-core.audit`, `lazy-core.doctor`, and `lazy-core.optimize` enforce. Fix issues at their source; don't silence the checks.
-
 ## Scope: project-local by default
 
 - **Create skills, agents, hooks, rules, and other artifacts at the project level** (`.claude/` in the repo), never under `~/.claude/` without an explicit request.
@@ -35,3 +33,7 @@ Constraints below are what `lazy-core.audit`, `lazy-core.doctor`, and `lazy-core
 - Do not write `/Users/…` or `/home/…` absolute paths into tracked `.claude/` files.
 - Do not write `<project>/` prefixes — use relative paths (`.claude/…`, `CLAUDE.md`).
 - Do not use `~/.claude/` for project-local items (project settings, project agents, project rules) — use relative `.claude/` instead.
+
+## Meta-rule
+
+All constraints. New constraints → this file; procedures → the relevant `lazy-core.*` / `lazy-guard.*` skill.

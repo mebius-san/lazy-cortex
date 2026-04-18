@@ -42,6 +42,12 @@ Then `lazy-log.recall` searches across all three plus git history and memory, an
 3. Run `/lazy-log.install` once per project. This drops the `lazy-log.logging` rule into `.claude/rules/`, creates `docs/changelog.md`, and ensures `.gitignore` covers `.logs/`.
 4. From then on, the post-commit hook records every commit. Run `/lazy-log.distill` when you want the human-readable changelog updated. Run `/lazy-log.recall` whenever you're trying to remember something.
 
+## Dependencies
+
+Requires these plugins from the same marketplace:
+
+- [`lazycortex-core`](../lazycortex-core/) — Core skills and agents for Claude Code
+
 ## Skills
 
 | Skill | Description |
