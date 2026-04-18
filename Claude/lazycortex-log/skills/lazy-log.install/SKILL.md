@@ -1,12 +1,12 @@
 ---
 name: lazy-log.install
-description: "Bootstrap the lazycortex-log plugin for the current project (or globally). Copies the logging rule template into the rules directory, creates docs/changelog.md if missing, and ensures .gitignore covers .logs/. Idempotent — safe to re-run. Detects install scope automatically."
+description: "Bootstrap the lazycortex-log plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, creates docs/changelog.md if missing, and ensures .gitignore covers .logs/. Idempotent — safe to re-run. Detects install scope automatically."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(date *)
 ---
 
 # Install lazycortex-log
 
-Bootstrap the plugin in the right scope: copy the logging rule template, create `docs/changelog.md`, and make sure `.gitignore` covers `.logs/`.
+Bootstrap the plugin in the right scope: copy every rule template shipped by the plugin, create `docs/changelog.md`, and make sure `.gitignore` covers `.logs/`.
 
 ## Step 1: Detect install scope
 
@@ -23,18 +23,22 @@ If no entry is found, the plugin isn't actually installed — abort and tell the
 
 ## Step 2: Determine paths
 
-Plugin source: `${CLAUDE_PLUGIN_ROOT}/rules/lazy-log.logging.md` (absolute path to the plugin's rules template). When reading from a skill, use the `installPath` field from `installed_plugins.json` to construct this path, e.g. `<installPath>/rules/lazy-log.logging.md`.
+Enumerate every rule file shipped by the plugin via `Glob: <installPath>/rules/*.md` — never hardcode filenames. `<installPath>` is the `installPath` field from `installed_plugins.json` for `lazycortex-log@lazycortex`.
 
-Target paths by scope:
+For each source file `<installPath>/rules/<name>.md`, the rule destination by scope is:
 
 | Scope | Rule destination | Changelog | .gitignore update |
 |---|---|---|---|
-| `user` | `~/.claude/rules/lazy-log.logging.md` | (not created — changelog is per-repo) | (not updated) |
-| `project` | `<repo-root>/.claude/rules/lazy-log.logging.md` | `<repo-root>/docs/changelog.md` | `<repo-root>/.gitignore` |
+| `user` | `~/.claude/rules/<name>.md` | (not created — changelog is per-repo) | (not updated) |
+| `project` | `<repo-root>/.claude/rules/<name>.md` | `<repo-root>/docs/changelog.md` | `<repo-root>/.gitignore` |
 
 Project root is `git rev-parse --show-toplevel` (or current working directory if not in a git repo — but warn the user).
 
-## Step 3: Sync rule template
+If the glob returns zero files, abort and tell the user the plugin cache is empty — they likely need to run `/plugin update lazycortex-log@lazycortex` first.
+
+## Step 3: Sync rule templates
+
+For each rule file discovered in Step 2:
 
 1. Ensure destination directory exists with `mkdir -p`.
 2. Determine state by comparing source and target **byte-for-byte** (read both files and compare content exactly):
@@ -77,12 +81,12 @@ If `.logs/` is already covered, skip.
 
 ## Step 6: Verify
 
-- Read back the installed rule file and confirm its `---` frontmatter parses
+- Read back each installed rule file and confirm its `---` frontmatter parses
 - If `docs/changelog.md` was created, read back its first line
 - Report to the user what was done:
   - Scope detected
   - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)
-  - Rule: state (**created**, **updated**, **unchanged**, or **kept-local**) and target `<path>`
+  - For each rule: state (**created**, **updated**, **unchanged**, or **kept-local**) and target `<path>`
   - Changelog created at `<path>` (or "already exists")
   - .gitignore updated (or "already covers .logs/")
 
@@ -95,6 +99,6 @@ Use two separate steps: `Bash(mkdir -p ...)` then `Write` tool. Never chain with
 ## Notes
 
 - **Idempotent**: running this skill multiple times is safe. Files are only created/updated when there's a real change.
-- **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does **not** re-sync the rule file into `.claude/rules/`. Re-run this skill after every plugin update to pick up rule changes — otherwise projects keep running the old rule content.
+- **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does **not** re-sync rule files into `.claude/rules/`. Re-run this skill after every plugin update to pick up rule changes — otherwise projects keep running the old rule content.
 - **Scope independence**: running at project scope does not affect other projects or the global config.
-- **Next steps shown to user**: if the rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start).
+- **Next steps shown to user**: if any rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start).

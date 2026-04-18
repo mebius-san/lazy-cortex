@@ -47,7 +47,7 @@ Then `lazy-log.recall` searches across all three plus git history and memory, an
 | Skill | Description |
 |---|---|
 | `lazy-log.audit` | Verify that the project's logging rule is installed and coherent. The rule itself is the single source of truth — individual skills/agents/commands do NOT need per-file ## Logging sections. Reports gaps and offers fixes. Read-first — never modifies files without confirmation. |
-| `lazy-log.install` | Bootstrap the lazycortex-log plugin for the current project (or globally). Copies the logging rule template into the rules directory, creates docs/changelog.md if missing, and ensures .gitignore covers .logs/. Idempotent — safe to re-run. Detects install scope automatically. |
+| `lazy-log.install` | Bootstrap the lazycortex-log plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, creates docs/changelog.md if missing, and ensures .gitignore covers .logs/. Idempotent — safe to re-run. Detects install scope automatically. |
 
 ## Agents
 

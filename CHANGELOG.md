@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.1 — 2026-04-18
+
+- `/lazy-core.install` now installs every rule file shipped by the plugin, discovered via glob. Previously only `lazy-core.hygiene` and `lazy-guard.security` were copied, so new rule files added upstream silently never reached the target project.
+- Heavy scan skills (`lazy-core.audit`, `lazy-core.doctor`, `lazy-core.optimize`, `lazy-guard.check-public`) now dispatch parallel Explore subagents internally — scans run faster and consume less main-thread context. User-visible output and interaction are unchanged.
+- New `lazy-core.parallel-scan` rule documents the coordinator pattern shared by the refactored scan skills.
+
 ### 0.2.0 — 2026-04-17
 
 - New `/lazy-core.help` slash command prints the plugin's purpose and a one-line summary of every skill it ships. Output is verbatim — no tool calls, no log write.
@@ -18,6 +24,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - **Install** — `lazy-core.install` drops the hygiene and security rule templates into the target project.
 
 ## lazycortex-log
+
+### 0.2.1 — 2026-04-18
+
+- `/lazy-log.install` now installs every rule file shipped by the plugin, discovered via glob. Future-proof for additional rules.
+- `lazy-log.audit` now dispatches parallel Explore subagents internally — runs faster and consumes less main-thread context. User-visible output and interaction are unchanged.
 
 ### 0.2.0 — 2026-04-17
 

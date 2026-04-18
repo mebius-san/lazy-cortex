@@ -1,12 +1,12 @@
 ---
 name: lazy-core.install
-description: "Bootstrap the lazycortex-core plugin for the current project (or globally). Copies the hygiene and security rule templates into the rules directory. Idempotent — safe to re-run. Detects install scope automatically."
+description: "Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory. Idempotent — safe to re-run. Detects install scope automatically."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(date *)
 ---
 
 # Install lazycortex-core
 
-Bootstrap the plugin in the right scope: copy the hygiene and security rule templates into the target `rules/` directory.
+Bootstrap the plugin in the right scope: copy every rule template shipped by the plugin into the target `rules/` directory.
 
 ## Step 1: Detect install scope
 
@@ -23,22 +23,22 @@ If no entry is found, the plugin isn't actually installed — abort and tell the
 
 ## Step 2: Determine paths
 
-Plugin source: `<installPath>/rules/<file>` where `<installPath>` is the `installPath` field from `installed_plugins.json`. The plugin ships two rule files:
-- `rules/lazy-core.hygiene.md`
-- `rules/lazy-guard.security.md`
+Enumerate every rule file shipped by the plugin via `Glob: <installPath>/rules/*.md` — never hardcode filenames. `<installPath>` is the `installPath` field from `installed_plugins.json`.
 
-Target paths by scope:
+For each source file `<installPath>/rules/<name>.md`, the target is:
 
-| Scope | Rule destinations |
+| Scope | Rule destination |
 |---|---|
-| `user` | `~/.claude/rules/lazy-core.hygiene.md`, `~/.claude/rules/lazy-guard.security.md` |
-| `project` | `<repo-root>/.claude/rules/lazy-core.hygiene.md`, `<repo-root>/.claude/rules/lazy-guard.security.md` |
+| `user` | `~/.claude/rules/<name>.md` |
+| `project` | `<repo-root>/.claude/rules/<name>.md` |
 
 Project root is `git rev-parse --show-toplevel` (or current working directory if not in a git repo — warn the user).
 
+If the glob returns zero files, abort and tell the user the plugin cache is empty — they likely need to run `/plugin update lazycortex-core@lazycortex` first.
+
 ## Step 3: Sync rule templates
 
-For each of the two rule files:
+For each rule file discovered in Step 2:
 
 1. Ensure destination directory exists with `mkdir -p`.
 2. Determine state by comparing source and target **byte-for-byte** (read both files and compare content exactly):
