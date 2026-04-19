@@ -187,9 +187,14 @@ Steps:
    - If `source.source == "github"`: run `git -C <installLocation> fetch --quiet origin` with a **5-second timeout** (`timeout 5 git ...` on Linux, `gtimeout` or `perl -e 'alarm 5; exec @ARGV'` fallbacks on macOS). Then read the latest manifest via `git show origin/HEAD:.claude-plugin/marketplace.json`. Non-destructive — working tree untouched, only remote-tracking refs advance.
    - On fetch timeout, fetch failure, or parse failure: fall back to the on-disk `<installLocation>/.claude-plugin/marketplace.json` and emit one `[INFO]` line (see schema).
    - Non-github sources (none today): read the cached manifest directly and treat as fallback.
-4. **Parse remote manifests.** Extract `plugins[].name` and `plugins[].version` from each refreshed `marketplace.json`.
-5. **Compare.** For each installed plugin, look up the marketplace entry by name and compare version strings with plain equality — no semver parsing. A genuine downgrade (marketplace moved backwards) is still surfaced; acceptable.
+4. **Parse remote manifests.** Extract `plugins[].name` and `plugins[].version` from each refreshed `marketplace.json`. A marketplace entry without a `version` field is *unversioned* — the manifest format doesn't carry versions (e.g. GCS-distributed tarballs) so currency is not decidable.
+5. **Compare.** For each installed plugin, look up the marketplace entry by name. **Skip the comparison silently** (no finding of any severity) when either side lacks a comparable version:
+   - Installed `version` is missing, empty, or `"unknown"` in `installed_plugins.json`.
+   - Marketplace entry has no `version` field.
+   Otherwise compare version strings with plain equality — no semver parsing. A genuine downgrade (marketplace moved backwards) is still surfaced; acceptable.
 6. **Emit findings** into the merged list rendered by Phase 4.
+
+Findings are emitted only for plugins where both sides carry a comparable version AND the versions differ. Unversioned plugins (either side) are not a doctor concern — reinstalling doesn't change the manifest format, so warning the user is noise.
 
 Finding schema:
 
@@ -197,10 +202,6 @@ Finding schema:
   `[WARN] plugin <name>@<mp> is outdated (<installed> → <latest>) | installed_plugins.json`
   `detail: scope=<user|project> | path=<installPath>`
   `fix: run `/plugin update <name>` or `/plugin install <name>@<mp>` to upgrade`
-- Unrecorded installed version (installed_plugins.json has `version: "unknown"`):
-  `[WARN] plugin <name>@<mp> has unrecorded version (installed_plugins.json shows "unknown") | installed_plugins.json`
-  `detail: latest in marketplace: <latest>`
-  `fix: reinstall via `/plugin install <name>@<mp>` so the version is recorded`
 - Marketplace cache fallback (one per unreachable marketplace):
   `[INFO] marketplace <mp> unreachable — using cached manifest (last updated <lastUpdated>)`
 
@@ -212,7 +213,7 @@ Runs after Phase 2.5, before delegated audits. **Skipped entirely in local tool 
 
 Build the outdated set from Phase 2.5:
 
-- `outdated_plugins = { p : Phase 2.5 emitted either the "outdated" WARN or the "unrecorded version" WARN for p }`
+- `outdated_plugins = { p : Phase 2.5 emitted the "outdated" WARN for p }`
 
 Filter the merged findings in place:
 

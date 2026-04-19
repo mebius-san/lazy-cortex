@@ -36,3 +36,8 @@ Applies at **both scopes** — `~/.claude/` and project `.claude/`. Tracked `set
 - No `/Users/…` or `/home/…` absolute paths in tracked `.claude/` files.
 - No `<project>/` prefixes — use relative paths (`.claude/…`).
 - Don't use `~/.claude/` for project-local items — use relative `.claude/`.
+
+## Dynamic content in agents/skills
+
+- **Never hardcode dynamic content.** Filenames, folder trees, and enumerations derived from live source data must not appear as concrete names — use patterns (e.g. `<group-key>-paths.md`). Only truly static names are allowed.
+- **Agents discover dynamically.** They scan source at runtime, following naming conventions — no pre-built list of outputs.

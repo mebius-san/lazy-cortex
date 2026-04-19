@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.12 — 2026-04-19
+
+- `/lazy-core.doctor` Phase 2.5 no longer WARNs on plugins with unrecorded versions — neither `installed_plugins.json` entries showing `"unknown"` nor marketplace manifests without a `version` field (e.g. GCS-distributed tarballs). Reinstalling doesn't change the manifest format, so the finding was noise. The comparison is now skipped silently when either side lacks a comparable version, and the Phase 2.6 outdated-plugins set is narrowed to match.
+- The standalone `no-hardcoded-dynamic-content` rule was folded into `lazy-core.hygiene` as a new "Dynamic content in agents/skills" section — one less always-loaded rule file for consumers. The old file had no dot-namespace prefix and was orphaned; `/lazy-core.install` will prompt to remove it on the next run.
+
 ### 0.2.11 — 2026-04-19
 
 - `/lazy-core.doctor` now tracks an **always-loaded context budget**: the summed byte size of `CLAUDE.md` + every rule file without a `paths:` scope. WARN over 20 KB, FAIL over 40 KB. The finding lists per-file sizes largest-first so you can see what's costing tokens on every turn.
