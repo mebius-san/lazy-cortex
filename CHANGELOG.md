@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.5 — 2026-04-19
+
+- **Breaking:** `/lazy-guard.allow-mcp` no longer silently allows every tool of an MCP server. It now classifies each `mcp__<server>__*` tool and splits the entries between `permissions.allow` (read-only — get/list/search/recall/…) and `permissions.ask` (destructive — create/update/delete/write/commit/push/retain/…). Ambiguous tools default to `ask` for safety. Re-running the skill after a previous "allow everything" run will **promote** destructive tools from `allow` to `ask`; the Phase 7 report shows `→ allow`, `→ ask`, and `allow→ask` counts so the promotions are explicit.
+- `/lazy-guard.allow-mcp` now also strips redundant `mcp__*` entries from `./.claude/settings.local.json` after writing the same entries to the project-tracked `settings.json`. No more stale duplicates accumulating from one-off click-through approvals.
+- `/lazy-core.doctor` gains an MCP permissions completeness scan: for every enabled MCP server, it WARNs when a runtime tool is missing from both `permissions.allow` and `permissions.ask`, and WARNs again when a destructive tool is mis-placed in `allow` instead of `ask`. Both findings point at `/lazy-guard.allow-mcp <server>` for the fix.
+
 ### 0.2.3 — 2026-04-19
 
 - `/lazy-core.doctor` now cross-references installed rules in `.claude/rules/` against the source files in each owning plugin. Drift (byte-level mismatch) and orphans (namespaced rules the plugin no longer ships) are flagged as WARN and point you at `/<namespace>.install` for reconciliation. Missing rules are intentionally not flagged — the install skill's per-rule prompt lets you skip them deliberately.

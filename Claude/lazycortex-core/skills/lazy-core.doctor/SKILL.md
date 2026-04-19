@@ -106,6 +106,18 @@ Checks the agent performs:
   - Mode A only: suppress "declared but not enabled" warnings.
   - Mode B only: `[WARN]` server in project `.mcp.json` but absent from any `enabledMcpjsonServers`; `[WARN]` non-empty project `.mcp.json` but no `enabledMcpjsonServers` anywhere
   - Always: `[WARN]` name in `enabledMcpjsonServers` but not defined in project `.mcp.json` or `~/.mcp.json`
+- **MCP permissions completeness** — for every *enabled* MCP server, verify every tool it exposes is registered (in `permissions.allow` OR `permissions.ask`) in the correct settings file, and that destructive tools landed in `ask` rather than `allow`:
+  - Enumerate runtime tools by listing every tool name visible in your own tool list whose name matches `mcp__<server>__<tool>`, grouped by `<server>`. Do NOT invent names — only use names literally present. Claude Code matches exact strings in both `allow` and `ask`; no wildcards.
+  - A server counts as *enabled* iff it's defined in `~/.mcp.json` or `./.mcp.json` AND (Mode A, OR listed in `enabledMcpjsonServers` in either `./.claude/settings.json` or `./.claude/settings.local.json`). Skip servers that are defined-but-disabled, and skip servers that produced zero runtime tools (the server isn't loaded — a restart issue, not a permissions issue).
+  - Resolve the target settings file per server using the routing table from `lazy-guard.allow-mcp` (SKILL.md Phase 4):
+    - Global-defined server → `~/.claude/settings.json`
+    - Project-defined server enabled via project `.claude/settings.json` (Mode A or Mode B) → `./.claude/settings.json`
+    - Project-defined server enabled only via `./.claude/settings.local.json` → `./.claude/settings.local.json`
+  - Classify each runtime tool as `read` (should live in `allow`) or `write` (should live in `ask`) using the same heuristic as `lazy-guard.allow-mcp` Phase 3: read verbs (get/list/search/query/recall/reflect/resolve/diff/status/show/log-as-read/fetch/refresh/audit) → `allow`; anything mutating (add/create/update/delete/remove/clear/write/commit/reset/push/force/retain/sync/set/cancel/checkout/merge/stash/rebase/restore/revert) → `ask`; default when uncertain → `ask`.
+  - Two comparisons per server:
+    1. `missing = runtime_tools \ (permissions.allow ∪ permissions.ask)` → `[WARN] MCP tools not registered: <server> (<N> missing) | <target>`; `detail:` list missing tool names, noting each tool's expected bucket in parens (e.g. `git_commit (ask)`, `git_status (allow)`); `fix: run lazy-guard.allow-mcp <server>`.
+    2. `misclassified = { t ∈ permissions.allow : t matches mcp__<server>__* AND classifier(t) == "write" }` → `[WARN] Destructive MCP tools in allow list: <server> (<N> entries) | <target>`; `detail:` list the mis-placed tool names (`should be in permissions.ask — they mutate state and must prompt each time`); `fix: run lazy-guard.allow-mcp <server>` — allow-mcp's Phase 5 reconcile step will move them from `allow` to `ask`.
+  - Emit at most two findings per server (one per check). Do NOT emit per-tool findings — grouped lines keep the report scannable.
 
 ### Agent C — path hygiene
 
@@ -193,6 +205,7 @@ After the report, ask the user which fixes to apply. Apply only confirmed fixes.
 - Gitignore coverage: append missing patterns under a dedicated language section.
 - Path hygiene: replace hardcoded paths with relative equivalents; show diff before applying.
 - MCP enablement: either set `enableAllProjectMcpServers: true` in global settings or add `enabledMcpjsonServers` to project settings; remove stale entries.
+- MCP tools not whitelisted: invoke `lazy-guard.allow-mcp <server>` for each confirmed finding — do NOT write `permissions.allow` directly from doctor. `allow-mcp` owns scope-routing, dedup, and cross-scope cleanup; reusing it keeps both skills consistent.
 - Agents / skills / CLAUDE.md / hook scripts — report only, never auto-edit.
 - Plugin dependency warnings — report only; fixing requires enabling the missing plugin in `settings.json` (user's decision) or editing the declaring plugin's manifest.
 
