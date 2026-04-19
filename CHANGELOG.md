@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.3 — 2026-04-19
+
+- `/lazy-core.doctor` now cross-references installed rules in `.claude/rules/` against the source files in each owning plugin. Drift (byte-level mismatch) and orphans (namespaced rules the plugin no longer ships) are flagged as WARN and point you at `/<namespace>.install` for reconciliation. Missing rules are intentionally not flagged — the install skill's per-rule prompt lets you skip them deliberately.
+- `/lazy-core.install` now asks per rule on install (accept / skip) instead of silently copying every template, shows a diff on drift, and offers to delete orphaned `lazy-core.*` / `lazy-guard.*` rules left over from older plugin versions.
+- The coordinator-pattern reference (`lazy-core.parallel-scan`) no longer loads as a rule — it moved under `references/` and is read on-demand by scan skills at dispatch time, shrinking the always-loaded rule set to `lazy-core.hygiene` + `lazy-guard.security`.
+
 ### 0.2.2 — 2026-04-18
 
 - New **B4 Author identity in manifests** check in `/lazy-guard.check-public` flags literal author name/email in tracked package manifests (`plugin.json`, `package.json`, `pyproject.toml`, `Cargo.toml`, `CITATION.cff`, `README*.md`) and auto-waives matches equal to a new `public_author` block in `.guard-waivers.json`. Setting `public_author` records the approved public identity for a repo so every scan — and every collaborator — sees the same answer without scattering per-match waivers.
@@ -32,6 +38,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-log
 
+### 0.2.3 — 2026-04-19
+
+- `/lazy-log.install` now asks per rule on install (accept / skip), shows a diff on drift, and offers to delete orphaned `lazy-log.*` rules from older plugin versions. Matches the new `/lazy-core.install` flow.
+- `lazy-log.audit` now reads `lazy-core.parallel-scan` from `lazycortex-core`'s on-demand `references/` directory, matching the core plugin's rule-slimming pass.
+
 ### 0.2.2 — 2026-04-18
 
 - `lazycortex-log` now declares `lazycortex-core` as a dependency in `plugin.json`. Users installing only this plugin will see `/lazy-core.doctor` WARN pointing them to install the required sibling.
@@ -57,6 +68,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 0.1.2 — 2026-04-19
+
+- Internal plumbing — removed an empty `settings.json` stub. No functional changes.
+
 ### 0.1.1 — 2026-04-18
 
 - Internal manifest metadata update; no functional changes.
@@ -64,3 +79,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ### 0.1.0 — 2026-04-17
 
 - Initial release.
+
+## lazycortex-obsidian
+
+### 0.1.1 — 2026-04-19
+
+- Initial public release.
+- **`/lazy-obsidian.config`** — 10-phase greenfield/audit flow that aligns a project's `.obsidian/` with a curated snapshot. Detects greenfield vs existing; syncs musthave and optional plugins with per-plugin diff prompts (overwrite / keep-local / merge-missing-keys); regenerates `community-plugins.json` in dependency-aware load order; drops in the canonical Obsidian `.gitignore` block; prompts for a vault nickname; optionally wires `obsidian-mcp` into project `.mcp.json` with `OBSIDIAN_VAULT_PATH="."` so it travels cleanly across machines.
+- **`/lazy-obsidian.iconize-file`** — mechanics-only Python primitive for the Iconize plugin's `data.json` (`obsidian-icon-folder`). Supports `set` / `clear` / `get` / `list` / bulk-apply / `reconcile`. Concurrent-safe via mtime guard + retry. Callable standalone or as a primitive from other skills.
+- **`/lazy-obsidian.install`** — per-rule-ask + orphan-delete install flow consistent with `lazy-core.install` / `lazy-log.install`. Currently ships no rules; primary job is cleaning up orphans from earlier plugin versions.
+- **`/lazy-obsidian.help`** — one-line summary of every skill the plugin ships.
+- Depends on `lazycortex-core`.

@@ -8,7 +8,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash
 
 Coordinator skill. Dispatches three **Explore** subagents in parallel to scan the project, merges their reports, presents a unified report, then applies user-confirmed fixes.
 
-See `rules/lazy-core.parallel-scan.md` for the pattern. Severity vocabulary: `PASS` / `WARN` / `FAIL`.
+Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispatching for the coordinator pattern. Severity vocabulary: `PASS` / `WARN` / `FAIL`.
 
 **CRITICAL PATH RULE** (applies to every dispatched agent): `~/.claude/` is protected from Bash access. Agents must use ONLY Glob and Read under `~/.claude/`. Only project-root paths may use `wc -c`. For `~/.claude/` file sizes, estimate as `lines × 45 bytes`.
 
@@ -16,7 +16,7 @@ See `rules/lazy-core.parallel-scan.md` for the pattern. Severity vocabulary: `PA
 
 ## Phase 1 — Dispatch parallel scans
 
-Dispatch these three Explore agents **in a single message with three Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each prompt ends with the structured report contract from `rules/lazy-core.parallel-scan.md` and a "Report under 400 words" budget.
+Dispatch these three Explore agents **in a single message with three Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each prompt ends with the structured report contract from `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` and a "Report under 400 words" budget.
 
 ### Agent A — artifact integrity
 
@@ -59,6 +59,12 @@ Checks the agent performs:
   - Build the installed-plugin set by stripping the `@<marketplace>` suffix from each top-level key, keeping only entries whose scope applies to this project (same filter the Phase 3 availability probes use: `scope: "user"`, or `scope: "project"` with `projectPath` matching the current repo).
   - For each installed plugin, read `<installPath>/.claude-plugin/plugin.json` and collect its `dependencies` array (default empty if absent).
   - `[WARN]` for each `<dep>` in that array where `<dep>` is not present in the installed-plugin set. Finding: `plugin <name> requires <dep> but <dep> is not installed — install it via its marketplace entry or remove the dependency`.
+- **Plugin rule sync** (same installed-plugin set as above) — for each installed plugin that ships a `rules/` directory:
+  - Glob `<installPath>/rules/*.md` → source-rule set; empty set → skip this plugin.
+  - Compute the plugin's owned namespaces: the set of leading dot-segments from source-rule filenames (e.g. `lazy-log.logging.md` → `lazy-log`). One plugin may own multiple namespaces (e.g. `lazycortex-core` ships `lazy-core.*` and `lazy-guard.*`).
+  - **Drift**: for each source rule whose filename also exists at `.claude/rules/<filename>` (or `~/.claude/rules/<filename>` for user-scoped installs), compare contents. If bytes differ → `[WARN] rule <filename> drifted from <plugin> source — run /<namespace>.install to reconcile (per-rule overwrite/keep-local/merge prompt)`.
+  - **Orphan**: any file in target rules dir whose filename matches one of the plugin's owned namespaces but is NOT in the source-rule set → `[WARN] rule <filename> is an orphan from <plugin> (removed between versions) — run /<namespace>.install to offer deletion`.
+  - Missing rules (in source but not in target) are NOT a finding — users deliberately skip rules at install time via the per-rule `AskUserQuestion` prompt.
 
 Agent must not propose fixes beyond one-line hints — coordinator owns fixes.
 
@@ -180,6 +186,7 @@ Apply all auto-fixable? [y/N]
 After the report, ask the user which fixes to apply. Apply only confirmed fixes. Fixes available in-coordinator:
 
 - Rules oversized → suggest running `/lazy-core.optimize`; don't auto-slim here.
+- Rule drift / orphans → direct the user to run the owning plugin's install skill (`/<namespace>.install`, e.g. `/lazy-log.install` for `lazy-log.*` rules). Do NOT auto-overwrite here — the install skill's per-rule `AskUserQuestion` is the sanctioned reconciliation flow.
 - Missing rules frontmatter → add `---\ndescription: ...\npaths: [...]\n---` (use `paths` for scoped rules, omit for global rules).
 - Memory index: add missing entries, remove broken links; flag stale for review.
 - Settings leakage: offer to move entries between files (respect the split in `rules/lazy-core.hygiene.md`).

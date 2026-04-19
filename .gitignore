@@ -41,5 +41,10 @@ __pycache__/
 # Vault trash
 .trash/
 
-# Plugin state files (may contain secrets: API keys, tokens)
-.obsidian/plugins/*/data.json
+# Plugin state files
+# Most plugin data.json files contain only settings and feature state, and are
+# tracked so the same config applies across machines and clones. A few plugins
+# store (or have fields reserved for) API keys / tokens — those stay ignored.
+.obsidian/plugins/copilot-auto-completion/data.json
+.obsidian/plugins/quickadd/data.json
+.obsidian/plugins/obsidian-excalidraw-plugin/data.json

@@ -1,0 +1,9 @@
+{
+  "name": "lazycortex-obsidian",
+  "version": "0.1.1",
+  "description": "Obsidian vault bootstrap and configuration management for Claude Code",
+  "author": {
+    "name": "Mebius-san"
+  },
+  "dependencies": ["lazycortex-core"]
+}

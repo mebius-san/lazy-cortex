@@ -1,7 +1,7 @@
 ---
 name: lazy-core.install
 description: "Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory. Idempotent — safe to re-run. Detects install scope automatically."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(date *)
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *)
 ---
 
 # Install lazycortex-core
@@ -36,17 +36,31 @@ Project root is `git rev-parse --show-toplevel` (or current working directory if
 
 If the glob returns zero files, abort and tell the user the plugin cache is empty — they likely need to run `/plugin update lazycortex-core@lazycortex` first.
 
-## Step 3: Sync rule templates
+## Step 3: Sync rule templates (per-rule + orphan detection)
 
-For each rule file discovered in Step 2:
+Rules eat context on every session — the user owns the decision to install each one.
 
-1. Ensure destination directory exists with `mkdir -p`.
-2. Determine state by comparing source and target **byte-for-byte** (read both files and compare content exactly):
-   - **Target missing** → copy source → target. Record state: **created**.
-   - **Target exists, byte-identical to source** → skip. Record state: **unchanged**.
-   - **Target exists, differs from source** → show a unified diff and ask the user whether to overwrite.
-     - Accept → overwrite with source. Record state: **updated**.
-     - Decline → leave target untouched. Record state: **kept-local**.
+### Enumerate source and target
+
+- Source rules: `Glob <installPath>/rules/*.md`.
+- Owned namespaces: the plugin name minus the `lazycortex-` prefix (so `lazycortex-core` → `lazy-core`), plus every unique `<ns>.` prefix appearing in source rule filenames (for this plugin that includes both `lazy-core` and `lazy-guard`).
+- Target candidates: `Glob <targetRulesDir>/<ns>.*.md` for each owned namespace. Union them.
+- Ensure the destination directory exists with `mkdir -p`.
+
+### Per-rule decision (wizard-style, one question at a time)
+
+For every rule name in (source ∪ target), determine its state and act:
+
+1. **New** — target missing, source present → `AskUserQuestion`: "Install rule `<name>`? (<first-line-of-description>)" with options **install** / **skip**. Install → copy source to target, state **installed**. Skip → state **skipped**.
+2. **Unchanged** — both present, byte-identical → no prompt. State **unchanged**.
+3. **Drift** — both present, differ → show unified diff. `AskUserQuestion`: **overwrite** / **keep-local**. State **updated** or **kept-local**.
+4. **Orphan** — target present, source missing → `AskUserQuestion`: "Rule `<name>` is no longer shipped by the plugin. Delete from `<targetDir>`?" with options **delete** / **keep**. Delete → `rm <target>`, state **deleted**. Keep → state **kept-orphan**.
+
+One `AskUserQuestion` at a time — wait for the answer before the next prompt.
+
+### Namespace-scoped deletion
+
+Orphan detection only considers target files whose filename starts with one of this plugin's owned namespaces. Rules from other plugins and user-authored rules in unrelated namespaces are never offered for deletion.
 
 ## Step 4: Verify
 

@@ -8,7 +8,7 @@ allowed-tools: Read, Glob, Grep, Bash(wc *)
 
 Coordinator skill. Dispatches two **Explore** subagents in parallel to measure context weight and hygiene, then renders the tables. Read-only — no changes made.
 
-See `rules/lazy-core.parallel-scan.md` for the pattern.
+Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispatching for the coordinator pattern.
 
 **CRITICAL PATH RULE** (applies to every dispatched agent): `~/.claude/` is protected from Bash access. Agents must use ONLY Glob and Read under `~/.claude/`. `wc -c` via Bash is allowed ONLY for paths under the project root.
 
@@ -16,7 +16,7 @@ See `rules/lazy-core.parallel-scan.md` for the pattern.
 
 ## Phase 1 — Dispatch parallel scans
 
-Dispatch these two Explore agents **in a single message with two Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each returns the structured report from `rules/lazy-core.parallel-scan.md`. Budget: "Report under 350 words".
+Dispatch these two Explore agents **in a single message with two Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each returns the structured report from `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md`. Budget: "Report under 350 words".
 
 Severity vocabulary for this skill: `INFO` (measurement row) / `WARN` (recommendation). No `FAIL`.
 

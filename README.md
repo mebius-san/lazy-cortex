@@ -39,6 +39,16 @@ Requires: lazycortex-core
 
 See [`Claude/lazycortex-log/`](Claude/lazycortex-log/) for details.
 
+### lazycortex-obsidian
+
+Obsidian vault bootstrap and configuration management for Claude Code
+
+Ships 3 skills and 1 command. Greenfield/audit-mode vault configuration with per-plugin drift prompts, canonical `.gitignore`, `community-plugins.json` load-order regeneration, optional `obsidian-mcp` wiring, and a concurrent-safe Iconize `data.json` primitive for programmatic folder/file icon assignment.
+
+Requires: lazycortex-core
+
+See [`Claude/lazycortex-obsidian/`](Claude/lazycortex-obsidian/) for details.
+
 ### lazycortex-specs
 
 Specification and design skills for Claude Code
@@ -78,6 +88,7 @@ All plugins live in a single Claude Code marketplace. Add the marketplace and en
   "enabledPlugins": {
     "lazycortex-core@lazycortex": true,
     "lazycortex-log@lazycortex": true,
+    "lazycortex-obsidian@lazycortex": true,
     "lazycortex-specs@lazycortex": true
   }
 }

@@ -8,7 +8,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(mkdir -p
 
 Coordinator skill. Dispatches four **Explore** subagents in parallel — one per finding category — merges their findings, applies waivers, presents a unified report, then walks the user through fixes.
 
-See `rules/lazy-core.parallel-scan.md` for the pattern. Severity vocabulary: `FAIL` / `WARN` / `INFO` (and `WAIVED` after waiver matching).
+Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispatching for the coordinator pattern. Severity vocabulary: `FAIL` / `WARN` / `INFO` (and `WAIVED` after waiver matching).
 
 **Read-first**. Never fix silently.
 
@@ -71,7 +71,7 @@ Hand the final file list to every dispatched agent.
 
 ## Phase 2 — Dispatch parallel scans
 
-Dispatch these four Explore agents **in a single message with four Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each agent receives the filtered file list from Phase 1, the shared false-positive rules below, and the category-specific patterns. Each must return the structured report from `rules/lazy-core.parallel-scan.md`. Budget: "Report under 400 words".
+Dispatch these four Explore agents **in a single message with four Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each agent receives the filtered file list from Phase 1, the shared false-positive rules below, and the category-specific patterns. Each must return the structured report from `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md`. Budget: "Report under 400 words".
 
 ### Shared false-positive rules (give to every agent)
 

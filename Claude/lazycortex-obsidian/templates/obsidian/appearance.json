@@ -1,0 +1,8 @@
+{
+  "cssTheme": "Minimal",
+  "accentColor": "#41728b",
+  "showViewHeader": true,
+  "showRibbon": true,
+  "baseFontSizeAction": false,
+  "baseFontSize": 16
+}

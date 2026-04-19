@@ -116,7 +116,7 @@ Report findings. Fix orphaned/broken links automatically, flag stale for user re
 
 ## Phase 6: Heavy-scan delegation audit
 
-Find skills that should be refactored to the coordinator-plus-parallel-Explore-agents pattern described in `rules/lazy-core.parallel-scan.md`. This phase only reports — it never rewrites skills, because coordinator logic is skill-specific.
+Find skills that should be refactored to the coordinator-plus-parallel-Explore-agents pattern described in `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md`. This phase only reports — it never rewrites skills, because coordinator logic is skill-specific.
 
 ### Scan scope
 
@@ -133,7 +133,7 @@ For each SKILL.md, Read the body (not the frontmatter) and test:
    - Numbered check heading (`### N.`, `### Na.`)
    - Heading like `Check N:` or `Phase N:` where each phase reads a distinct file set
    - Directive block mentioning a Glob / Grep pattern or a Read of a different file tree than the previous block
-3. **No existing parallel dispatch**: body does NOT contain any of — `subagent_type: "Explore"`, `subagent_type: "general-purpose"`, `in parallel`, `dispatching-parallel-agents`, `rules/lazy-core.parallel-scan.md`, "multiple Agent tool calls".
+3. **No existing parallel dispatch**: body does NOT contain any of — `subagent_type: "Explore"`, `subagent_type: "general-purpose"`, `in parallel`, `dispatching-parallel-agents`, `references/lazy-core.parallel-scan.md`, `rules/lazy-core.parallel-scan.md`, "multiple Agent tool calls".
 4. **Read-heavy before interaction**: the first user prompt (search for `AskUserQuestion`, "ask the user", "confirm", "fix which", `[y/N]`) appears after more than half the scan blocks in (2).
 
 If a skill hits all four, it is a candidate.
@@ -161,7 +161,7 @@ Emit one section per positive finding plus a summary table:
 
 Each candidate above does K independent scans before any user interaction.
 Refactor to spawn Explore agents in parallel and have the skill itself
-act as coordinator. See rules/lazy-core.parallel-scan.md.
+act as coordinator. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md`.
 ```
 
 If no candidates found, render "No heavy-scan delegation candidates found." and continue.

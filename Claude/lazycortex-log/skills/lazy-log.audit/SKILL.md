@@ -8,7 +8,7 @@ allowed-tools: Read, Glob, Grep, Bash(mkdir -p *), Bash(date *)
 
 Coordinator skill. Checks the rule file inline, then dispatches three **Explore** subagents in parallel to cross-check optional per-file `## Logging` sections across skills / agents / commands.
 
-See `lazycortex-core`'s `lazy-core.parallel-scan` rule for the coordinator pattern. Severity vocabulary: `PASS` / `WARN` / `FAIL`.
+Resolve the `lazycortex-core` install path from `~/.claude/plugins/installed_plugins.json` entry `lazycortex-core@lazycortex` and Read `<installPath>/references/lazy-core.parallel-scan.md` before dispatching for the coordinator pattern. Severity vocabulary: `PASS` / `WARN` / `FAIL`.
 
 The rule (`.claude/rules/lazy-log.logging.md`) loads unconditionally at startup, so every artifact already inherits its instructions — per-file `## Logging` sections are optional restatements, not a requirement.
 
@@ -37,7 +37,7 @@ If Phase 1a reports `[FAIL]` (rule missing), skip Phase 2 and jump to output.
 
 ## Phase 2 — Dispatch parallel cross-checks
 
-Dispatch three Explore agents **in a single message with three Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each agent targets one artifact type and cross-checks any `## Logging` sections against the rule. Each returns the structured report contract in `lazycortex-core`'s `lazy-core.parallel-scan` rule. Budget: "Report under 250 words".
+Dispatch three Explore agents **in a single message with three Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each agent targets one artifact type and cross-checks any `## Logging` sections against the rule. Each returns the structured report contract from `lazycortex-core`'s `references/lazy-core.parallel-scan.md`. Budget: "Report under 250 words".
 
 **Shared cross-check rules** (give to every agent):
 
