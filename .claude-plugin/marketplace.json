@@ -2,7 +2,7 @@
   "name": "lazycortex",
   "description": "AI tooling plugins for Claude Code — skills, agents, and hooks",
   "owner": {
-    "name": "Alik Tabunov"
+    "name": "Mebius-san"
   },
   "plugins": [
     {
@@ -11,14 +11,19 @@
       "source": "./Claude/lazycortex-core"
     },
     {
-      "name": "lazycortex-specs",
-      "description": "Specification and design skills for Claude Code",
-      "source": "./Claude/lazycortex-specs"
-    },
-    {
       "name": "lazycortex-log",
       "description": "Logging, changelog, and change-history recall for Claude Code",
       "source": "./Claude/lazycortex-log"
+    },
+    {
+      "name": "lazycortex-obsidian",
+      "description": "Obsidian vault bootstrap and configuration management for Claude Code",
+      "source": "./Claude/lazycortex-obsidian"
+    },
+    {
+      "name": "lazycortex-specs",
+      "description": "Specification and design skills for Claude Code",
+      "source": "./Claude/lazycortex-specs"
     }
   ]
 }
