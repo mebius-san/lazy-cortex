@@ -1,16 +1,20 @@
 ---
 name: lazy-guard.allow-mcp
-description: "Register all tools of one or more MCP servers in Claude Code settings — read-only tools into permissions.allow, destructive/mutating tools into permissions.ask so they keep prompting. Writes to the settings file at the same scope where the server is defined (global ~/.claude/settings.json for ~/.mcp.json servers, project .claude/settings.json for project-defined servers, project settings.local.json when the server is only enabled locally). Also strips redundant mcp__ entries from the paired settings.local.json after promotion. Use when the user says 'allow context7 mcp', 'allow all mcp tools', 'trust the brave-search MCP server', or similar."
+description: "Register tools of one or more MCP servers in Claude Code settings using a 3-bucket classifier — safe/reversible tools into permissions.allow (no prompt), truly destructive tools into permissions.ask (always prompt), and medium-risk tools skipped entirely so Claude Code prompts once per call and the user decides. Writes to settings.local.json (gitignored) by default to keep personal permissions out of tracked settings shared with teammates. For globally defined servers, asks whether to register at the global scope (~/.claude/settings.local.json) or per-project (./.claude/settings.local.json). Also strips redundant mcp__ entries from paired tracked settings.json after promotion. Use when the user says 'allow context7 mcp', 'allow all mcp tools', 'trust the brave-search MCP server', or similar."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(date -u *), Bash(git rev-parse *)
 ---
 
 # Register MCP Server Tools
 
-Register every `mcp__<server>__<tool>` entry for one or more MCP servers in the settings file at the **same scope** where the server is defined — splitting them between `permissions.allow` (read-only tools, no prompt) and `permissions.ask` (destructive tools, always prompt).
+Register `mcp__<server>__<tool>` entries for one or more MCP servers using a **3-bucket classifier**:
 
-**Destructive tools MUST go to `permissions.ask`, never `permissions.allow`.** The point of this skill is to stop per-tool prompts for safe reads while keeping explicit confirmation on anything that mutates state. Silent `allow` of destructive tools defeats that safety and is forbidden.
+- **`permissions.allow`** — safe/reversible tools. No prompt. Reads + low-risk writes the user has judged acceptable.
+- **`permissions.ask`** — truly destructive tools (irreversible data loss, remote state mutation). Prompt every call.
+- **Skip** — medium-risk tools. **Neither list.** Claude Code falls back to its built-in per-call prompt so the user decides in-context.
 
-**This skill mutates settings files.** Never write silently — always show the planned diff (both `allow` and `ask` additions) and get confirmation first.
+**Default target: `settings.local.json` (gitignored), not `settings.json` (tracked).** Permission choices are personal and machine-local — they must not leak into commits that teammates inherit. The skill writes to `settings.json` only when the user explicitly opts in (rare).
+
+**Never write silently** — always show the planned diff (allow adds, ask adds, skipped tools, cross-scope cleanup) and get confirmation first.
 
 ## Phase 1: Parse input
 
@@ -20,7 +24,7 @@ Accepted input forms:
 - `<server1> <server2> ...` — allow listed servers
 - empty / `all` / `*` — allow every discovered server
 
-If the user also passed `--dry-run` (or says "preview"), run all phases except the final `Edit` — just print the planned change.
+If the user also passed `--dry-run` (or says "preview"), run all phases except the final write — just print the planned change.
 
 ## Phase 2: Discover MCP servers
 
@@ -28,9 +32,8 @@ Read these files (skip any that don't exist; never create them in this phase):
 
 - `~/.mcp.json` — global MCP server definitions
 - `./.mcp.json` — project MCP server definitions
-- `~/.claude/settings.json` — check `enableAllProjectMcpServers`
-- `./.claude/settings.json` — check `enabledMcpjsonServers`
-- `./.claude/settings.local.json` — check local-only `enabledMcpjsonServers`
+- `~/.claude/settings.json`, `~/.claude/settings.local.json` — check `enableAllProjectMcpServers` and global `enabledMcpjsonServers`
+- `./.claude/settings.json`, `./.claude/settings.local.json` — check project `enabledMcpjsonServers`
 
 Build an in-memory map for every server you find:
 
@@ -52,89 +55,122 @@ For each target server, enumerate every tool name currently available to you in 
 
 If a server is defined but has zero matching tools in the current session, skip it and warn: the server isn't loaded — the user must restart Claude Code and re-run the skill.
 
-### Classify each tool → `allow` or `ask`
+### Classify each tool → `allow` / `ask` / `skip`
 
-For every enumerated tool, decide whether invoking it *reads* remote/local state or *mutates* it. Use this rule:
+The classifier has three buckets. The goal: stop per-call prompts on things the user already trusts, keep hard stops on irreversible destruction, and **leave medium-risk tools alone** so Claude Code's default behavior (prompt once per call, user decides) applies.
 
-- **`permissions.allow` (read-only — no prompt)**: the tool only retrieves, inspects, or searches. Its action name matches one of: `get_*`, `list_*`, `search*`, `query*`, `read*`, `recall*`, `reflect*`, `resolve*`, `diff*`, `status*`, `show*`, `log*` (as a read, e.g. `git_log`), `fetch*`, `refresh*`, `audit*`.
-- **`permissions.ask` (destructive/mutating — prompt every time)**: anything that writes, creates, deletes, updates, commits, resets, pushes, or changes persistent state. Action names with: `add*`, `create_*`, `update_*`, `delete_*`, `remove_*`, `clear_*`, `write*`, `commit*`, `reset*`, `push*`, `force*`, `retain*`, `sync_*`, `set_*`, `cancel_*`, `checkout*`, `merge*`, `stash*`, `rebase*`, `restore*`, `revert*`, or any verb you'd consider a mutation.
-- **Default when uncertain: `ask`.** Never default to `allow`. If a tool name is ambiguous, the safe choice is to prompt.
+- **`allow` (safe/reversible — no prompt).** The tool reads, or writes in a way the user considers trivially reversible:
+  - All read verbs: `get_*`, `list_*`, `search*`, `query*`, `read*`, `recall*`, `reflect*`, `resolve*`, `diff*`, `status*`, `show*`, `log*` (as a read, e.g. `git_log`), `fetch*`, `refresh*`, `audit*`.
+  - Low-risk writes that stage/create content the user can easily undo: staging changes, creating new isolated entities (branches, directives, mental models), appending to bank-style stores.
 
-Apply the same rule regardless of server. A read-shaped tool on a "dangerous" server still goes to `allow`; a write-shaped tool on a "safe" server still goes to `ask`. Tool-level classification, not server-level trust.
+- **`ask` (truly destructive — always prompt).** The tool causes irreversible or hard-to-recover change:
+  - Deletion verbs: `delete_*`, `remove_*`, `clear_*`, `drop_*`.
+  - Working-tree mutations that throw away local state: `reset`, `checkout` (branch switch discards unstaged changes), `restore`, `revert`.
+  - Force-pushes and anything that rewrites shared history: `push --force`, `force*`, history-rewrites on published refs.
+  - Bulk destructive ops on remote stores.
+
+- **Skip (medium-risk — neither list).** The tool has real consequences but is neither trivially reversible nor catastrophic. Examples: `git_commit` (creates a new commit — reversible locally with `reset`, but worth an acknowledgement per run), `cancel_operation`, network-side creates without a straightforward undo. **Do not write these to either list.** Claude Code will prompt the first time and remember the user's per-call choice.
+
+**When uncertain → skip, not allow.** Never silently allow an unknown-shape mutation. Skip is the safe default for ambiguity.
+
+Apply the same rule regardless of server. A read-shaped tool on a "dangerous" server still goes to `allow`; a destructive tool on a "safe" server still goes to `ask`. Tool-level classification, not server-level trust.
 
 Concrete examples (canonical servers seen in this project):
 
-| Tool name                                   | Bucket  |
-|---------------------------------------------|---------|
-| `mcp__context7__resolve-library-id`         | allow   |
-| `mcp__context7__query-docs`                 | allow   |
-| `mcp__brave-search__brave_web_search`       | allow   |
-| `mcp__git__git_status` / `git_diff` / `git_log` / `git_show` / `git_branch` | allow |
-| `mcp__git__git_add` / `git_commit` / `git_reset` / `git_checkout` / `git_create_branch` | ask |
-| `mcp__memory-*__recall` / `reflect` / `get_*` / `list_*` / `refresh_mental_model` | allow |
-| `mcp__memory-*__retain` / `sync_retain` / `create_*` / `update_*` / `delete_*` / `clear_memories` / `cancel_operation` | ask |
+| Tool name                                                                           | Bucket |
+|-------------------------------------------------------------------------------------|--------|
+| `mcp__context7__resolve-library-id` / `query-docs`                                  | allow  |
+| `mcp__brave-search__brave_web_search` / `brave_local_search`                        | allow  |
+| `mcp__git__git_status` / `git_diff*` / `git_log` / `git_show` / `git_branch`        | allow  |
+| `mcp__git__git_add` / `git_create_branch`                                           | allow  |
+| `mcp__git__git_commit`                                                              | skip   |
+| `mcp__git__git_reset` / `git_checkout`                                              | ask    |
+| `mcp__memory-*__get_*` / `list_*` / `recall` / `reflect` / `refresh_mental_model`   | allow  |
+| `mcp__memory-*__retain` / `sync_retain` / `create_directive` / `create_mental_model` / `update_bank` / `update_mental_model` | allow |
+| `mcp__memory-*__cancel_operation`                                                   | skip   |
+| `mcp__memory-*__delete_*` / `clear_memories`                                        | ask    |
 
-Build the per-server output as two sets: `to_allow` and `to_ask`.
+Build the per-server output as three sets: `to_allow`, `to_ask`, `to_skip`.
 
 ## Phase 4: Route each server to the correct settings file
 
-Apply this decision table (the "same level" rule):
+### 4a. Default target: `settings.local.json`
 
-| Server defined in | Enabled by | Write permissions to |
-|---|---|---|
-| `~/.mcp.json` | always available | `~/.claude/settings.json` |
-| `./.mcp.json` | `enableAllProjectMcpServers: true` in `~/.claude/settings.json` | `./.claude/settings.json` |
-| `./.mcp.json` | `enabledMcpjsonServers` in `./.claude/settings.json` | `./.claude/settings.json` |
-| `./.mcp.json` | `enabledMcpjsonServers` only in `./.claude/settings.local.json` | `./.claude/settings.local.json` |
-| both global and project definitions exist | — | ask the user which scope to target |
+Permission choices are per-developer, per-machine. Writing them into tracked `settings.json` leaks them to teammates who may have different risk preferences. **The default target is always the `settings.local.json` at the appropriate scope.**
 
-Never write MCP permissions to `~/.claude/settings.local.json` — that file should stay empty per the project's configuration hygiene rules.
+| Server defined in         | Default target                      |
+|---------------------------|-------------------------------------|
+| `./.mcp.json` (project)   | `./.claude/settings.local.json`     |
+| `~/.mcp.json` (global)    | ask the user — see 4b               |
+
+The skill never writes to tracked `settings.json` unless the user explicitly overrides the default in Phase 5 confirmation. Direct writes to tracked settings are reserved for enablement flags (`enabledPlugins`, `enabledMcpjsonServers`, `hooks`) — not per-tool permission lists.
+
+### 4b. Globally-defined servers: ask for scope
+
+When a server is defined in `~/.mcp.json`, a permission entry at either scope is valid:
+
+- **Global scope** (`~/.claude/settings.local.json`): one registration covers every project on this machine.
+- **Project scope** (`./.claude/settings.local.json`): the registration only applies inside this repo.
+
+Use `AskUserQuestion` with two options — "Global (all projects on this machine)" and "Project only (this repo)". Ask once per run, covering all globally-defined servers in the batch. Default recommendation: **Project only** — smaller blast radius, easier to revert by deleting the file.
+
+If both a global and project definition exist for the same name, ask which server definition is authoritative before routing.
+
+### 4c. Never add to `~/.claude/settings.local.json` unless user explicitly chose "Global" in 4b
+
+Global `settings.local.json` is normally kept empty by the `lazy-guard.settings.py` PreToolUse hook. The hook has a narrow exception for entries added through this skill after the user confirms the global-scope choice — the confirmation is the audit trail. Without that confirmation, never write to it.
 
 ## Phase 5: Reconcile and preview
 
-The Phase 3 classifier is the source of truth — every `mcp__<server>__*` tool must exist exactly once in the correct list (read→`allow`, write→`ask`). Reconcile, don't just append.
+The Phase 3 classifier is the source of truth — every `mcp__<server>__*` tool must exist at most once across the target file's `allow` + `ask` lists, and not at all if classified as `skip`. Reconcile, don't just append.
 
-For each target settings file:
+For each target settings file (always a `settings.local.json` unless user overrode):
 
 1. Read current JSON. If the file doesn't exist, target content is `{"permissions":{"allow":[],"ask":[]}}`.
-2. For the servers routed to this file, compute four disjoint sets:
-   - `to_allow_new   = read-tools classified to this server   \ current permissions.allow`  (excluding any already in `ask` — covered by "to_move").
-   - `to_ask_new     = write-tools classified to this server  \ current permissions.ask`    (excluding any already in `allow` — covered by "to_move").
-   - `to_move_to_ask = { t : classifier(t)=="write" AND t ∈ permissions.allow }` — destructive tools that are currently (mis-)allowed. Remove from `allow`, add to `ask`.
-   - `to_move_to_allow = { t : classifier(t)=="read" AND t ∈ permissions.ask }` — read tools pinned to always-prompt. This is a valid user choice (they're stricter than the heuristic), so **do NOT move these automatically**. Surface as an info note in the preview only: "<tool> is in ask but classified as read — left as-is (stricter than default)".
-3. Also compute **cross-scope duplicates** to strip, per Phase 6.5: for each server whose target is a higher-scope file, inspect the paired `settings.local.json` and list any `mcp__<server>__*` entry that also exists in the higher-scope file's `allow` OR `ask` array.
+2. For the servers routed to this file, compute five disjoint sets:
+   - `to_allow_new     = allow-tools  \ current permissions.allow` (excluding any already in `ask` — handled by `to_move`).
+   - `to_ask_new       = ask-tools    \ current permissions.ask`   (excluding any already in `allow` — handled by `to_move`).
+   - `to_remove_skip   = skip-tools   ∩ (current permissions.allow ∪ current permissions.ask)` — medium-risk tools that were previously pinned. Remove from whichever list they're in; do not re-add.
+   - `to_move_to_ask   = { t : classifier(t)=="ask"   AND t ∈ permissions.allow }` — truly-destructive tools that are currently (mis-)allowed. Remove from `allow`, add to `ask`.
+   - `to_move_to_allow = { t : classifier(t)=="allow" AND t ∈ permissions.ask }` — safe tools pinned to always-prompt. A valid user choice (stricter than the heuristic), so **do NOT move these automatically**. Surface as an info note only: "<tool> is in ask but classified as allow — left as-is (stricter than default)".
+3. Compute **cross-scope duplicates** to strip (Phase 6.5): for each server whose target is `settings.local.json`, inspect the paired tracked `settings.json` and list any `mcp__<server>__*` entry still there. Tracked settings shouldn't own per-tool permissions, so anything found is a leak to clean up.
 4. Print a diff-style preview per file:
    ```
-   <target file, absolute path>
+   <target file, absolute path>  (settings.local.json — gitignored)
      allow:
-       + mcp__<server>__<read-tool1>          # new
-       - mcp__<server>__<write-tool-misplaced># promoting to ask (destructive)
+       + mcp__<server>__<safe-tool>            # new
+       - mcp__<server>__<destructive-tool>     # promoting to ask
+       - mcp__<server>__<medium-risk-tool>     # removing (now skip — Claude Code will prompt per call)
      ask:
-       + mcp__<server>__<write-tool1>         # new
-       + mcp__<server>__<write-tool-misplaced># promoted from allow
-
+       + mcp__<server>__<destructive-tool>     # new
+       + mcp__<server>__<destructive-tool>     # promoted from allow
+       - mcp__<server>__<medium-risk-tool>     # removing (now skip)
+     skip (not written anywhere):
+       mcp__<server>__<medium-risk-tool-1>
+       mcp__<server>__<medium-risk-tool-2>
      notes:
-       mcp__<server>__<read-tool> is in ask but classified as read — left as-is
+       mcp__<server>__<safe-tool> is in ask but classified as allow — left as-is
 
-   <paired lower-scope file, absolute path>
+   <paired tracked file, absolute path>  (settings.json — tracked — cleaning up leak)
      allow:
-       - mcp__<server>__<tool3>               # redundant with <target file>
+       - mcp__<server>__<any>                  # permissions belong in settings.local.json
      ask:
-       - mcp__<server>__<tool4>               # redundant with <target file>
+       - mcp__<server>__<any>
    ```
-   Omit any sub-block (allow / ask / notes / lower-scope) with no entries.
-5. Ask the user to confirm before any write. One confirmation covers: additions to both lists, promotions from allow→ask, and lower-scope removals. If `--dry-run`, stop here.
+   Omit any sub-block with no entries.
+5. Ask the user to confirm before any write. One confirmation covers: additions to both lists, promotions from allow→ask, skip-category removals, and tracked-scope cleanup. If `--dry-run`, stop here.
 
 ## Phase 6: Write
 
 For each approved file:
 
-- If the file exists: use the `Edit` tool to apply the four changes from Phase 5:
-  1. Remove `to_move_to_ask` entries from the `allow` array.
-  2. Append `to_allow_new` entries to the `allow` array.
-  3. Append `to_ask_new ∪ to_move_to_ask` entries to the `ask` array (creating the array if absent).
+- If the file exists: use the `Edit` tool to apply the changes from Phase 5, in order:
+  1. Remove `to_remove_skip ∪ to_move_to_ask` entries from the `allow` array.
+  2. Remove `to_remove_skip` entries from the `ask` array.
+  3. Append `to_allow_new` entries to the `allow` array.
+  4. Append `to_ask_new ∪ to_move_to_ask` entries to the `ask` array (creating the array if absent).
   Preserve original formatting, comments, and unrelated keys. Separate `Edit` calls per array are acceptable when ranges don't overlap.
-- If the file doesn't exist: use the `Write` tool to create it with `{"permissions":{"allow":[<to_allow_new>],"ask":[<to_ask_new>]}}` plus a trailing newline. Omit either key if its list is empty. (Promotions are N/A on a fresh file.)
+- If the file doesn't exist: use the `Write` tool to create it with `{"permissions":{"allow":[<to_allow_new>],"ask":[<to_ask_new>]}}` plus a trailing newline. Omit either key if its list is empty.
 
 Never introduce any non-`mcp__*` entries. No `Bash(*)`, no `Edit`, no `Write` — MCP tool names only. The `lazy-guard.settings.py` PreToolUse hook will reject broad or destructive additions to `allow`.
 
@@ -143,24 +179,24 @@ After writing, re-read each file and assert:
 - Every `to_allow_new` entry is now in `allow`.
 - Every `to_ask_new` and `to_move_to_ask` entry is now in `ask`.
 - No `to_move_to_ask` entry remains in `allow`.
+- No `to_remove_skip` entry remains in either list.
 - No tool appears in both lists simultaneously.
 
-## Phase 6.5: Strip cross-scope duplicates
+## Phase 6.5: Strip cross-scope leaks from tracked settings
 
-Once additions have landed in the higher-scope file, strip the same entries from the paired lower-scope `settings.local.json` — they were redundant the moment the higher-scope file took ownership.
+Permission entries should not live in tracked `settings.json`. Once the target `settings.local.json` owns the entries, strip any redundant `mcp__<server>__*` entries from the paired tracked `settings.json`.
 
 For each server processed this run:
 
-1. Identify the **higher-scope** target (the file Phase 4 picked).
-2. Identify the paired **lower-scope** file:
-   - Higher = `./.claude/settings.json` → Lower = `./.claude/settings.local.json`.
-   - Higher = `~/.claude/settings.json` → no cleanup. `~/.claude/settings.local.json` must stay empty per project hygiene, and the `lazy-guard.settings.py` PreToolUse hook enforces that invariant by blocking any non-empty-producing edit. If it truly is empty (the enforced state), there's nothing to remove; if it somehow isn't, fixing that is out-of-scope here. Skip.
-   - Higher = `./.claude/settings.local.json` → no lower scope; skip.
-3. Load the lower-scope file. Skip if it doesn't exist or both `permissions.allow` and `permissions.ask` are empty/absent.
-4. Compute per-list removals — both arrays are candidates for cleanup:
-   - `to_remove_allow = { e ∈ lower.permissions.allow : e startswith "mcp__<server>__" AND e ∈ (higher.permissions.allow ∪ higher.permissions.ask) }`
-   - `to_remove_ask   = { e ∈ lower.permissions.ask   : e startswith "mcp__<server>__" AND e ∈ (higher.permissions.allow ∪ higher.permissions.ask) }`
-   Only entries owned by servers processed this run qualify — never touch unrelated entries.
+1. Identify the **target** (a `settings.local.json`, per Phase 4).
+2. Identify the paired **tracked** file:
+   - Target = `./.claude/settings.local.json` → Tracked = `./.claude/settings.json`.
+   - Target = `~/.claude/settings.local.json` → Tracked = `~/.claude/settings.json`.
+3. Load the tracked file. Skip if it doesn't exist or both `permissions.allow` and `permissions.ask` are empty/absent for this server.
+4. Compute removals (both arrays are candidates; entries for servers processed this run only):
+   - `to_remove_tracked_allow = { e ∈ tracked.permissions.allow : e startswith "mcp__<server>__" }`
+   - `to_remove_tracked_ask   = { e ∈ tracked.permissions.ask   : e startswith "mcp__<server>__" }`
+   The removal is unconditional: tracked `settings.json` should not carry per-tool permission entries at all. Any matching entry is a leak regardless of whether the target file already has it.
 5. If both sets are empty, skip this file.
 6. Use `Edit` with minimal old/new replacements that drop only those entries. Preserve every other key, entry, and formatting detail. If a removal empties an array, leave `"allow": []` / `"ask": []` — do not delete the key.
 7. Re-read the file; assert JSON still parses and each removed entry is gone.
@@ -169,7 +205,6 @@ Safety:
 
 - Never removes non-`mcp__` entries.
 - Never removes entries for servers not processed in the current run.
-- Never removes an entry from the lower-scope file unless the same entry is already present in either list of the higher-scope file.
 - Pure subtraction → idempotent on re-run.
 
 ## Phase 7: Report
@@ -179,17 +214,17 @@ Print a short summary:
 ```
 ## Allow-MCP Result
 
-| Server          | Source      | Target file              | → allow | → ask | allow→ask | Removed from local |
-|-----------------|-------------|--------------------------|---------|-------|-----------|--------------------|
-| context7        | ./.mcp.json | ./.claude/settings.json  |    2    |   0   |     0     |         0          |
-| memory-personal | ~/.mcp.json | ~/.claude/settings.json  |    5    |   7   |     0     |         0          |
-| obsidian        | ./.mcp.json | ./.claude/settings.json  |    3    |   2   |     0     |         3          |
-| git             | ~/.mcp.json | ~/.claude/settings.json  |    0    |   2   |     4     |         0          |
+| Server          | Source      | Target file                        | → allow | → ask | skipped | allow→ask | Removed from tracked |
+|-----------------|-------------|------------------------------------|---------|-------|---------|-----------|----------------------|
+| context7        | ./.mcp.json | ./.claude/settings.local.json      |    2    |   0   |    0    |     0     |          0           |
+| memory-project  | ./.mcp.json | ./.claude/settings.local.json      |   19    |   6   |    1    |     0     |          3           |
+| git             | ~/.mcp.json | ./.claude/settings.local.json      |    9    |   2   |    1    |     3     |          0           |
 ```
 
 - `→ allow` / `→ ask`: entries newly added to each list this run.
-- `allow→ask`: destructive tools promoted from a pre-existing (mis-placed) `allow` entry to `ask`. A non-zero value here means the user previously ran with the old "allow everything" behavior and those entries are now being moved to the safer bucket.
-- `Removed from local`: entries stripped from the paired `settings.local.json` during Phase 6.5 (across both lists).
+- `skipped`: tools classified as medium-risk and deliberately left out of both lists this run.
+- `allow→ask`: destructive tools promoted from a pre-existing (mis-placed) `allow` entry to `ask`.
+- `Removed from tracked`: entries stripped from the paired tracked `settings.json` during Phase 6.5.
 
 Include warnings for:
 - servers that were defined but had zero tools loaded in this session
@@ -208,14 +243,15 @@ Frontmatter must include:
 - `date` — UTC timestamp
 - `input` — the server names / flags passed in, or `none`
 
-Body sections: `## Actions` (bullet list: files read, servers resolved, entries added to allow, entries added to ask, entries promoted allow→ask, entries removed from paired local, files written) and `## Result` (success / warnings / skipped).
+Body sections: `## Actions` (bullet list: files read, servers resolved, scope chosen for global servers, entries added to allow, entries added to ask, entries skipped, entries promoted allow→ask, entries removed from paired tracked settings, files written) and `## Result` (success / warnings / skipped).
 
 ## Safety notes
 
-- **Destructive → `ask`, never `allow`.** Any tool that writes, creates, deletes, updates, or otherwise mutates state goes to `permissions.ask`. Silent `allow` of destructive MCP tools is forbidden. When in doubt, classify as `ask`.
+- **3-bucket classifier.** Safe/reversible → `allow`. Truly destructive → `ask`. Medium-risk → skip (neither list). When uncertain → skip, not allow.
+- **Default target is `settings.local.json` (gitignored).** Permissions are personal. Never write per-tool permission entries into tracked `settings.json`.
 - **No wildcards.** Enumerate every tool by its exact name. Claude Code matches exact strings in both `allow` and `ask`.
-- **Never *adds* to `~/.claude/settings.local.json`** (global local must stay empty — enforced by `lazy-guard.settings.py`).
-- **Phase 6.5 may only remove** `mcp__*` entries from `./.claude/settings.local.json` (project local) — never from the global local file, and never entries that aren't also present in the higher-scope file (in either `allow` or `ask`).
+- **Global scope requires explicit user confirmation** via Phase 4b `AskUserQuestion`.
+- **Phase 6.5 may only remove** `mcp__*` entries from the paired tracked `settings.json` — never from unrelated files, never non-`mcp__*` entries.
 - **Never adds non-`mcp__` entries.** **Never removes non-`mcp__` entries.**
-- **Confirmation required before every write.** One confirmation covers Phase 6 additions (to both `allow` and `ask`) plus Phase 6.5 removals.
-- **Idempotent.** Re-running adds nothing new when everything is already registered, and removes nothing when no cross-scope duplicates remain.
+- **Confirmation required before every write.** One confirmation covers Phase 6 additions + Phase 6.5 tracked-scope cleanup.
+- **Idempotent.** Re-running adds nothing new when everything is already registered, and removes nothing when no cross-scope leaks remain.

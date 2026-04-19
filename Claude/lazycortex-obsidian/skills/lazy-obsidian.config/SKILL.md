@@ -148,7 +148,7 @@ Canonical entry:
 
 `OBSIDIAN_VAULT_PATH` **must** be `"."` — the MCP server already runs with its project dir as cwd, so `"."` resolves to the repo root for every clone. Never write a `/Users/...` or `$HOME`-expanded absolute path into tracked `.mcp.json` (global CLAUDE.md rule).
 
-Logic (ported verbatim from `~/dotfiles/.claude/agents/obsidian.setup.md` §4):
+Logic:
 
 - `<repo_root>/.mcp.json` does not exist → create it with `{"mcpServers": {"obsidian": <entry>}}`. State: **created**.
 - Exists, `mcpServers.obsidian` missing → add the `obsidian` key with the canonical entry; do not touch other servers. State: **added-obsidian-entry**.
@@ -159,7 +159,7 @@ Use `Edit` (not full-file `Write`) when correcting an existing file, to preserve
 
 ## Phase 10 — Report and log
 
-Print a structured report (mirror the dotfiles agent's shape, adapted):
+Print a structured report:
 
 ```
 ### setup

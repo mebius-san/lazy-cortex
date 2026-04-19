@@ -3,12 +3,18 @@
 
 Fires on every Edit/Write tool call. Fast-exits for non-settings files (~1ms).
 For settings files, enforces:
-  - Global ~/.claude/settings.local.json must stay empty
   - No broad wildcards (Bash(*), Edit(*), Write(*)) in allow lists
   - No destructive commands promoted from deny to allow
   - No removal of critical deny rules
+  - Warns on per-tool permission additions to tracked settings.json
+    (permissions belong in the paired gitignored settings.local.json)
   - Warns on bulk permission additions, broad MCP wildcards, dangerous flags
   - Reports newly granted permissions so Claude stops re-asking
+
+Note: under the current policy, ~/.claude/settings.local.json is a valid
+destination for globally-scoped per-tool permissions (opt-in via
+lazy-guard.allow-mcp). The earlier "must stay empty" rule was removed
+when settings.local.json became the default target for permissions.
 """
 
 import json
@@ -160,31 +166,27 @@ def output_allow_with_message(message):
 # ---------------------------------------------------------------------------
 
 
-def check_global_local_guard(classification, tool_name, payload):
-    """Block any non-empty write to global settings.local.json."""
-    if not classification["is_global_local"]:
-        return
+def check_tracked_permissions_leak(classification, old_text, new_text):
+    """Warn (non-blocking) when per-tool permissions are added to tracked settings.json.
 
-    tool_input = payload.get("tool_input", {})
-
-    if tool_name == "Write":
-        content = tool_input.get("content", "")
-        parsed = try_parse_json(content)
-        if parsed is not None and not is_empty_settings(parsed):
-            output_block(
-                "Global ~/.claude/settings.local.json must stay empty. "
-                "Add permissions to project-level .claude/settings.local.json "
-                "or (if truly global) to ~/.claude/settings.json instead."
-            )
-    elif tool_name == "Edit":
-        new_string = tool_input.get("new_string", "")
-        old_string = tool_input.get("old_string", "")
-        if new_string.strip() and new_string.strip() != old_string.strip():
-            output_block(
-                "Global ~/.claude/settings.local.json must stay empty. "
-                "Add permissions to project-level .claude/settings.local.json "
-                "or (if truly global) to ~/.claude/settings.json instead."
-            )
+    Per-tool permissions are personal and belong in the paired gitignored
+    settings.local.json. Adding them to tracked settings.json leaks them to
+    anyone who shares the repo / dotfiles. This is a warning only — the user
+    may intentionally want a tracked permission (rare, but legitimate).
+    """
+    if classification["is_local"] or not classification["is_settings"]:
+        return None
+    old_perms = extract_permission_entries(old_text) if old_text else set()
+    new_perms = extract_permission_entries(new_text)
+    added = new_perms - old_perms
+    if not added:
+        return None
+    return (
+        f"Per-tool permissions are being added to tracked settings.json "
+        f"({len(added)} new entr{'y' if len(added) == 1 else 'ies'}). "
+        f"Consider moving to the paired settings.local.json (gitignored) "
+        f"so they don't ship to teammates."
+    )
 
 
 def check_blocked_allow_patterns(new_text):
@@ -282,9 +284,6 @@ def main():
     if not classification["is_settings"]:
         sys.exit(0)
 
-    # Guard: global settings.local.json must stay empty
-    check_global_local_guard(classification, tool_name, payload)
-
     # Extract content for analysis
     if tool_name == "Write":
         old_text = None
@@ -312,6 +311,9 @@ def main():
     messages = []
 
     warnings = collect_warnings(old_text, new_text)
+    leak = check_tracked_permissions_leak(classification, old_text, new_text)
+    if leak:
+        warnings.append(leak)
     if warnings:
         messages.append("Settings guardian warnings:\n" + "\n".join(f"  - {w}" for w in warnings))
 

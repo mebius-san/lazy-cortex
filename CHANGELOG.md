@@ -4,6 +4,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.9 — 2026-04-19
+
+- **Breaking:** `/lazy-guard.allow-mcp` now uses a 3-bucket classifier. Safe/reversible tools go into `permissions.allow` (no prompt), truly destructive tools go into `permissions.ask` (always prompt), and medium-risk tools stay out of both lists so Claude Code prompts once per call and you decide each time. Default write target flipped to `settings.local.json` (gitignored) so personal permission choices don't leak to teammates through tracked settings. For globally-defined MCP servers the skill asks whether to register at global or project scope. Phase 6.5 strips leaked `mcp__*` entries from the paired tracked `settings.json`.
+- `/lazy-core.doctor` now flags per-tool permissions sitting in tracked `settings.json` as leakage and offers an in-place migration to the paired `settings.local.json`. Its MCP hygiene check switched to the same 3-bucket logic — flags destructive tools mis-pinned in `allow`, flags medium-risk tools pinned into either list, and no longer warns about "missing" tools (since `skip` is a valid choice).
+- New Phase 2.5 in `/lazy-core.doctor` verifies installed plugins are at the latest marketplace version. Reads `installed_plugins.json`, refreshes each referenced marketplace with a 5s `git fetch` timeout, and WARNs on outdated or unrecorded installs. Transient refresh failures surface as non-blocking INFO.
+- The `lazy-core.hygiene` rule's settings-split policy now applies uniformly at both `~/.claude/` and project `.claude/` scopes: tracked `settings.json` owns only enablement flags (`enabledPlugins`, hooks, env, model, statusLine, marketplace registrations) while gitignored `settings.local.json` owns the entire `permissions` block plus machine-specific paths. The `lazy-guard.settings` PreToolUse hook dropped its obsolete "global `settings.local.json` must stay empty" block and now emits a non-blocking warning when per-tool permissions are added to tracked `settings.json`, nudging the edit toward the paired local file.
+
 ### 0.2.5 — 2026-04-19
 
 - **Breaking:** `/lazy-guard.allow-mcp` no longer silently allows every tool of an MCP server. It now classifies each `mcp__<server>__*` tool and splits the entries between `permissions.allow` (read-only — get/list/search/recall/…) and `permissions.ask` (destructive — create/update/delete/write/commit/push/retain/…). Ambiguous tools default to `ask` for safety. Re-running the skill after a previous "allow everything" run will **promote** destructive tools from `allow` to `ask`; the Phase 7 report shows `→ allow`, `→ ask`, and `allow→ask` counts so the promotions are explicit.
@@ -74,6 +81,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 0.1.4 — 2026-04-19
+
+- Internal plumbing — seeded `.claude-plugin/overview.md` so the plugin meets the minimum marketplace surface required by `tool.doctor`. Still a namespace placeholder with no shipped skills; downstream plugins and the marketplace can now depend on the namespace ahead of the first real skill landing. No functional changes.
+
 ### 0.1.2 — 2026-04-19
 
 - Internal plumbing — removed an empty `settings.json` stub. No functional changes.
@@ -87,6 +98,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 0.1.2 — 2026-04-19
+
+- Internal cleanup only: dropped two stale doc references to a legacy dotfiles agent in `/lazy-obsidian.config`. No functional changes.
 
 ### 0.1.1 — 2026-04-19
 

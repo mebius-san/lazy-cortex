@@ -18,9 +18,13 @@ description: Project hygiene constraints checked by lazy-core.audit, lazy-core.d
 
 ## Settings split strategy
 
-- **`settings.json`** (git-tracked): project-inherent permissions — MCP tools, git write ops, log paths, skills. Anything a contributor needs regardless of machine.
-- **`settings.local.json`** (gitignored): machine-specific permissions — personal env files, local docker paths, machine-specific CLIs, service-specific permissions tied to one setup.
-- **Prefer project-level over global.** A permission specific to one project goes in that project's `.claude/settings.local.json`, not the global `~/.claude/settings.local.json`. The global file should only contain permissions that genuinely apply to every project.
+Applies at **both scopes** — `~/.claude/` and project `.claude/`. The split is the same: tracked `settings.json` owns enablement flags, gitignored `settings.local.json` owns per-tool permissions.
+
+- **`settings.json`** (git-tracked, shared via the repo or dotfiles): enablement and shared configuration only — `enabledPlugins`, `enabledMcpjsonServers`, `enableAllProjectMcpServers`, `hooks`, non-secret `env` vars, `model`, `statusLine`, marketplace registrations. Anything every contributor / every machine needs identically.
+- **`settings.local.json`** (gitignored, per-user + per-machine): the entire `permissions` block (`allow` / `ask` / `deny` / `defaultMode`), plus machine-specific paths (`additionalDirectories`, `PUBLIC_REPO` and similar env values), plus any permission choices that are personal preferences rather than project requirements.
+- **Per-tool permissions never belong in tracked `settings.json`** — not at the project scope and not at the global scope. Permission choices are personal. A teammate (or your future self on a different machine) may have a different risk posture. Put them in the paired `settings.local.json`.
+- **Prefer project-level over global.** A permission specific to one project goes in that project's `.claude/settings.local.json`, not `~/.claude/settings.local.json`. The global `settings.local.json` should only hold permissions that genuinely apply to every project on this machine.
+- **Machine-specific paths also live in `settings.local.json`.** Public-repo mirror paths, Docker socket paths, local service paths, and any value that varies by machine goes in the local file (`additionalDirectories`, `env`, etc.). Never in tracked `settings.json`.
 
 ## MCP servers
 
