@@ -4,6 +4,16 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.11 — 2026-04-19
+
+- `/lazy-core.doctor` now tracks an **always-loaded context budget**: the summed byte size of `CLAUDE.md` + every rule file without a `paths:` scope. WARN over 20 KB, FAIL over 40 KB. The finding lists per-file sizes largest-first so you can see what's costing tokens on every turn.
+- New WARN in `/lazy-core.doctor` for rule files whose frontmatter has neither a `paths:` folder scope nor an `always_loaded: <one-line reason>` waiver. Every unscoped rule without a waiver burns tokens on every turn for every user — the waiver makes the intent explicit. The plugin-shipped `lazy-core.hygiene` and `lazy-guard.security` rules now carry the waiver.
+- `/lazy-core.doctor` detects **MCP permission entries with wildcards** (`*`, `?`, `{…}`) and flags them as silent no-ops. Claude Code matches MCP permissions as exact strings, so `mcp__github__*` never matches — the allow/ask never takes effect and every call falls through to the per-call prompt. Fix points at `/lazy-guard.allow-mcp <server>` which enumerates concrete names.
+- `/lazy-core.doctor` now distinguishes **local-tool mode** (this repo authors plugins under `Claude/**`) from **release mode** (consumer repos). In release mode, if a plugin is outdated per the marketplace-version check, content-level findings on its owned rule files are suppressed — upgrade the plugin first, then re-run to surface any remaining issues. A per-plugin INFO line reports the suppression count.
+- `/lazy-core.doctor` trims several never-firing or low-signal checks (Meta-rule mandatory, missing model field, `.claude` allowed-set whitelist, medium-risk-pinned, project `CLAUDE.md` missing, and a handful of others) so the report stays focused on real hygiene issues. Broken-artifact-reference and hook-imports checks are reformulated to reduce false positives.
+- `/lazy-core.optimize` thresholds now match the doctor's summed-budget WARN/FAIL so running both in sequence produces consistent verdicts.
+- The plugin-shipped `lazy-core.hygiene` and `lazy-guard.security` rule files were slimmed (Meta-rule sections removed, prose compressed) to fit well under the per-file cap with the waiver line added.
+
 ### 0.2.9 — 2026-04-19
 
 - **Breaking:** `/lazy-guard.allow-mcp` now uses a 3-bucket classifier. Safe/reversible tools go into `permissions.allow` (no prompt), truly destructive tools go into `permissions.ask` (always prompt), and medium-risk tools stay out of both lists so Claude Code prompts once per call and you decide each time. Default write target flipped to `settings.local.json` (gitignored) so personal permission choices don't leak to teammates through tracked settings. For globally-defined MCP servers the skill asks whether to register at global or project scope. Phase 6.5 strips leaked `mcp__*` entries from the paired tracked `settings.json`.
@@ -50,6 +60,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - **Install** — `lazy-core.install` drops the hygiene and security rule templates into the target project.
 
 ## lazycortex-log
+
+### 0.2.5 — 2026-04-19
+
+- **Breaking:** the `lazy-log.logging` rule now **mandates** running `/lazy-log.distill` after any non-trivial commit. Previously this was worded as "consider" / "guidance, not a hard rule", and in practice distill was skipped and `docs/changelog.md` stayed empty. Trivial commits (typos, formatting, dep bumps) and explicit per-turn user opt-outs still skip.
+- The `lazy-log.logging` rule now carries an `always_loaded: <reason>` frontmatter waiver — a new `/lazy-core.doctor` check (see `lazycortex-core` 0.2.11) requires every unscoped rule to justify being in context every turn. No behavior change for existing installs beyond the waiver line.
 
 ### 0.2.3 — 2026-04-19
 

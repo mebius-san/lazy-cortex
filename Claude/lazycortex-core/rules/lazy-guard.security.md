@@ -1,5 +1,6 @@
 ---
 description: Security constraints that the lazy-guard.* scanners and pre-commit hook enforce — credential safety and public-repo readiness.
+always_loaded: safety posture applied to every action
 ---
 
 # Guard Security
@@ -34,7 +35,3 @@ Author name/email in tracked manifests (`plugin.json`, `package.json`, `pyprojec
 - **Never infer an author** from `git config`, past commits, or system accounts — the local identity is often the user's real name, not what they want published.
 - **Ask the user** for the correct public identity on first use, then record it as `public_author` in `.guard-waivers.json` and read that block on every subsequent write. Re-ask if the block is absent.
 - **Enforcement**: `lazy-guard.check-public` B4 flags every author literal as WARN and auto-waives only those matching `public_author`.
-
-## Meta-rule
-
-All constraints. New security rules → this file; scanner heuristics and fix procedures → `lazy-guard.check-public/SKILL.md`, `lazy-repo.mark-public/SKILL.md`, and the pre-commit hook.

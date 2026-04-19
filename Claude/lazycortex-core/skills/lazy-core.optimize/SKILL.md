@@ -12,19 +12,17 @@ Reduce startup context weight and fix settings layer violations for the current 
 
 Measure everything that loads at conversation start.
 
-### 1a. Always-loaded files
+### 1a. Always-loaded context budget
 
-Measure byte sizes of:
+Measure byte sizes of everything Claude Code loads into every session's context on every turn:
 
-```
-~/.claude/CLAUDE.md                          (global instructions)
-CLAUDE.md                                    (project instructions)
-~/.claude/rules/*.md                         (global rules — resolve symlinks)
-.claude/rules/*.md                           (project rules)
-~/.claude/projects/<project-key>/memory/MEMORY.md  (memory index)
-```
+- `~/.claude/CLAUDE.md` (global instructions)
+- `<project>/.claude/CLAUDE.md` (project instructions) — also `CLAUDE.md` at repo root if present
+- Every `~/.claude/rules/*.md` **without** a `paths:` key in YAML frontmatter (scoped rules only load when files matching their glob are touched, so they don't count)
+- Every `<project>/.claude/rules/*.md` **without** a `paths:` key
+- `~/.claude/projects/<project-key>/memory/MEMORY.md` (memory index — auto-loaded)
 
-Also check for additional CLAUDE.md files in subdirectories and any global rules files outside the symlinked directory.
+Thresholds (mirror `lazy-core.doctor`): total > 20 KB → WARN, > 40 KB → FAIL. This is the real token budget — each turn pays this cost.
 
 ### 1b. On-demand files (no startup cost)
 
@@ -58,7 +56,6 @@ For each rules file **over 3 KB**:
 4. Rewrite:
    - Rules file: keep only constraints as a bullet list (target < 2 KB)
    - Agent file: absorb all reference sections, organized under `## Reference: <topic>` headers
-   - Update meta-rules in both files to clarify: constraints -> rules, reference -> agent
 
 5. After rewriting, re-measure and show the before/after comparison.
 
@@ -66,10 +63,10 @@ For each rules file **over 3 KB**:
 
 Read these files:
 ```
-~/.claude/settings.json           (global)
-~/.claude/settings.local.json     (global local — should be empty or near-empty)
-.claude/settings.json             (project tracked)
-.claude/settings.local.json       (project local)
+~/.claude/settings.json           (global tracked — enablement only)
+~/.claude/settings.local.json     (global local — owns global permissions)
+.claude/settings.json             (project tracked — enablement only)
+.claude/settings.local.json       (project local — owns project permissions)
 ```
 
 For every entry in global `settings.json`, classify as:
@@ -98,8 +95,6 @@ For each PROJECT-SPECIFIC entry found in global settings:
 1. Add it to `.claude/settings.local.json` (merge into existing arrays, don't duplicate)
 2. Remove it from `~/.claude/settings.json`
 3. Validate both files parse as JSON after each edit
-
-**Important**: The global `settings.local.json` may have a guardian hook preventing writes. Check for `lazy-guard.settings` hook and respect its constraints.
 
 After all moves, show a summary: N entries moved, from which global section to which project file.
 

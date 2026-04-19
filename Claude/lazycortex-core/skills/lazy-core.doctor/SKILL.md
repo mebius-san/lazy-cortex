@@ -14,6 +14,15 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispat
 
 **Read-first**: collect all findings before any fix. Never fix silently.
 
+## Phase 0 — Mode detection
+
+Detect mode at the start of the run; pass the result to every dispatched agent and to Phase 2.6.
+
+- **Local tool mode** — this repo *authors* plugins. Detected by `Glob("Claude/**/.claude-plugin/plugin.json")` returning any match. Every content check also applies to plugin sources under `Claude/**` (see per-agent scope expansions below). Outdated-plugin suppression (Phase 2.6) is **disabled** — the sources are authored here, so full integrity is required regardless of installed-plugin currency.
+- **Release mode** (default) — this repo *consumes* installed plugins. Plugin-owned rule files in `.claude/rules/` and `~/.claude/rules/` are synced copies; if the owning plugin is outdated (per Phase 2.5), content-level findings on those files are suppressed by Phase 2.6 and only the version-outdated WARN is surfaced (upgrading will overwrite the stale content).
+
+The per-plugin "owned namespaces" set computed by Agent A's Plugin rule sync check is the key used to decide plugin ownership of any given rule filename.
+
 ## Phase 1 — Dispatch parallel scans
 
 Dispatch these three Explore agents **in a single message with three Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each prompt ends with the structured report contract from `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` and a "Report under 400 words" budget.
@@ -22,25 +31,38 @@ Dispatch these three Explore agents **in a single message with three Agent tool 
 
 Scope: rules / agents / skills / commands files, their frontmatter, namespace format, hook scripts, gitignore coverage, cross-references, and `~/.claude/plugins/installed_plugins.json` (read-only).
 
+**Local tool mode scope expansion**: when the coordinator reports local tool mode, also apply every rules / agents / skills / commands / hooks check below to the plugin sources at:
+
+- `Claude/**/rules/*.md`
+- `Claude/**/skills/*/SKILL.md`
+- `Claude/**/agents/*.md`
+- `Claude/**/commands/*.md`
+- `Claude/**/hooks/**`
+
+Findings from plugin sources must carry a `source: plugin` marker so Phase 2.6 can distinguish them from release-mode sync'd copies.
+
+**Plugin-ownership tagging (both modes)**: when emitting any finding on a file under `.claude/rules/` or `~/.claude/rules/`, record `plugin_owner: <name>` if the filename's leading dot-segment matches an installed plugin's owned namespace (see Plugin rule sync check). Leave the field absent for user-authored rules. Phase 2.6 uses this to suppress release-mode findings on outdated plugins.
+
 Checks the agent performs:
 
 - **Rules files** (`.claude/rules/*.md`, `~/.claude/rules/*.md`):
   - `[FAIL]` rules file > 3 KB
-  - `[WARN]` mentions an agent that doesn't exist in `.claude/agents/`
+  - `[WARN]` contains a **broken artifact reference** — any of the below that doesn't exist at its expected location:
+    - slash-command `/name` → no matching skill/command found
+    - `Agent(subagent_type: "plugin:name")` or `subagent_type: "X"` → no matching agent/skill
+    - `<namespace>.<name>.md` literal filename mentioned → file not present in rules dir
+    - `references/...` or `${CLAUDE_PLUGIN_ROOT}/references/...` path → file missing
+    - `hooks/...` script path → file missing
+    - `skills/<name>/SKILL.md` path → file missing
+    Markdown section headings (`## Phase 2.5`) are NOT checked — internal document structure.
   - `[FAIL]` contains code blocks > 10 lines
-  - `[WARN]` no `## Meta-rule` section explaining rules-vs-reference split, when any of:
-    - file size > 2 KB (approaching the 3 KB FAIL threshold — a future split is likely), OR
-    - a paired config agent exists (e.g. `.claude/agents/<namespace>.config.md` for `<namespace>.rules.md`), OR
-    - file has ≥ 3 `##` subsections AND contains at least one fenced code block or Markdown table
-    Pure-constraint rules (short, no code blocks/tables, no paired agent) are exempt.
-  - `[WARN]` no YAML frontmatter (need `description`, optional `paths` glob)
+  - `[WARN]` no YAML frontmatter (need at minimum `description`, plus scope or waiver — see next bullet)
+  - `[WARN]` frontmatter has **neither `paths:` scope nor `always_loaded:` waiver** — every unscoped rule burns tokens on every turn for every user. A rule must either declare a folder scope (`paths: ["glob", ...]` — only loaded when matching files are touched) or carry a short `always_loaded: <one-line reason>` waiver justifying why it must be in context every turn (e.g. governs every skill, constrains the main agent, encodes a safety posture applied to every action). The value IS the waiver — empty / boolean `true` is not accepted. Finding: `rule lacks scope and waiver | <path>`; `detail: frontmatter has neither paths nor always_loaded`; `fix: add paths: ["<glob>"] if scoped, or always_loaded: <reason> if truly global`. Coordinator-owned fix.
   - `[FAIL]` filename lacks dot separator (must be `namespace.name.md`)
 - **Agents** (`.claude/agents/*.md`):
   - `[FAIL]` missing / malformed frontmatter (`name`, `description`, `tools`)
   - `[WARN]` references a missing rules file
-  - `[WARN]` missing `model` field
   - `[FAIL]` agent definition > 20 KB
-  - `[WARN]` "Mandatory first step: read rules" but referenced rules file is empty / missing
 - **Skills + commands** (`.claude/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`, `.claude/commands/*.md`, `~/.claude/commands/*.md`):
   - `[FAIL]` SKILL.md missing frontmatter (`name`, `description`)
   - `[WARN]` skill name in frontmatter doesn't match directory name
@@ -48,13 +70,10 @@ Checks the agent performs:
   - `[WARN]` command file empty or < 50 bytes
 - **Namespace** (skills / commands / agents / hooks / rules, skip `@`-prefixed external plugins):
   - `[FAIL]` name lacks dot separator
-  - `[WARN]` namespace inconsistent with item's domain
 - **Hook-language gitignore coverage**: if project has `*.py`, `.gitignore` must cover `__pycache__/` and `*.py[cod]`; `*.rb` → `*.rbc`; `*.js`/`*.ts`/`package.json` → `node_modules/`. `[WARN]` when missing, only for languages actually used.
 - **Cross-reference integrity**:
   - `[WARN]` agent referenced in CLAUDE.md but file missing
   - `[WARN]` command listed in CLAUDE.md but file missing
-  - `[WARN]` rules reference removed sections / features
-  - `[FAIL]` `.claude/` contains files outside known patterns (`agents/*.md`, `rules/*.md`, `skills/*/SKILL.md`, `commands/*.md`, `settings*.json`)
 - **Plugin dependencies** (read `~/.claude/plugins/installed_plugins.json`):
   - Build the installed-plugin set by stripping the `@<marketplace>` suffix from each top-level key, keeping only entries whose scope applies to this project (same filter the Phase 3 availability probes use: `scope: "user"`, or `scope: "project"` with `projectPath` matching the current repo).
   - For each installed plugin, read `<installPath>/.claude-plugin/plugin.json` and collect its `dependencies` array (default empty if absent).
@@ -81,7 +100,6 @@ Checks the agent performs:
   ```
   - `[FAIL]` any file is not valid JSON
   - `[FAIL]` project-specific permissions (service CLIs, `additionalDirectories`, service MCP servers, domain-specific WebFetch) in global `settings.json` instead of project `settings.local.json`
-  - `[WARN]` global `settings.local.json` non-empty (except entries added via `lazy-guard.allow-mcp` with the user's explicit global-scope choice)
   - `[WARN]` duplicate permission entries across global + project files
   - `[WARN]` project `settings.json` (tracked) contains machine-specific paths
 - **Permissions leakage into tracked `settings.json`** (both `~/.claude/settings.json` and `./.claude/settings.json`):
@@ -95,13 +113,18 @@ Checks the agent performs:
   - `[WARN]` any memory file missing frontmatter (`name`, `description`, `type`)
   - `[WARN]` memory `type` not one of: `user`, `feedback`, `project`, `reference`
 - **CLAUDE.md files**:
-  - `[WARN]` project `CLAUDE.md` missing
   - `[WARN]` project `CLAUDE.md` references paths that don't exist
   - `[WARN]` project `CLAUDE.md` > 10 KB
   - `[WARN]` global `CLAUDE.md` contains project-specific instructions
+- **Always-loaded context budget** — sum the byte size of everything Claude Code auto-loads into every session's context on every turn:
+  - `~/.claude/CLAUDE.md`
+  - `<project>/.claude/CLAUDE.md`
+  - Every `~/.claude/rules/*.md` **without** a `paths:` key in YAML frontmatter (scoped rules only load when files under their glob are touched, so they don't count toward the always-loaded budget)
+  - Every `<project>/.claude/rules/*.md` **without** a `paths:` key in YAML frontmatter
+  Thresholds: `[WARN]` total > 20 KB, `[FAIL]` total > 40 KB. This is the real token budget — individual per-file limits are a crude proxy; the sum is what hits every turn. Finding must list per-file breakdown (largest first) so the user knows what to cut.
 - **Hooks** (registered in global `settings.json` under `hooks.*`):
   - `[FAIL]` hook command references a missing script
-  - `[WARN]` hook script imports modules outside stdlib
+  - `[WARN]` hook script imports a module that is **not stdlib AND not declared in a project dependency manifest** (`requirements.txt`, `pyproject.toml`, `package.json`, `Gemfile`, `Cargo.toml` — match by interpreter). Declared third-party deps are fine; undeclared ones create install risk for teammates and slow every hook invocation.
   - `[WARN]` hook timeout > 10s
   - `[WARN]` hook scripts contain hardcoded project paths without sidecar configs
 - **MCP server configuration** — check `~/.claude/settings.json`, `~/.claude/settings.local.json`, project `.claude/settings.json`, `~/.mcp.json`, `.mcp.json`:
@@ -110,7 +133,10 @@ Checks the agent performs:
   - Mode A only: suppress "declared but not enabled" warnings.
   - Mode B only: `[WARN]` server in project `.mcp.json` but absent from any `enabledMcpjsonServers`; `[WARN]` non-empty project `.mcp.json` but no `enabledMcpjsonServers` anywhere
   - Always: `[WARN]` name in `enabledMcpjsonServers` but not defined in project `.mcp.json` or `~/.mcp.json`
-- **MCP permissions hygiene** — for every *enabled* MCP server, verify that (a) destructive tools aren't sitting in `allow`, and (b) medium-risk tools haven't been pinned into either list. The doctor **does not** flag "missing" tools — `skip` is a valid classification and per-call prompting is the intended fallback. Completeness is `lazy-guard.allow-mcp`'s job when the user invokes it; here we only catch *wrong-bucket* entries.
+- **MCP permission wildcard detection** — Claude Code matches `permissions.allow` / `permissions.ask` / `permissions.deny` entries as **exact strings**. Wildcards (`*`, `?`) and brace expansions (`{foo,bar}`) in MCP permission entries are silently no-ops: the entry never matches any real tool call, so the "allow" or "ask" never takes effect and every invocation falls through to the default per-call prompt. Scan every permissions file (all four settings files listed above) and flag:
+  - `[WARN]` MCP permission entry contains a wildcard — `entry matches /^mcp__/ AND entry contains any of: *, ?, {`. Finding: `MCP permission entry will never match — wildcards/braces are not expanded | <path>`; `detail:` quote the offending entry (e.g. `mcp__github__*`) and the owning list (`allow` / `ask` / `deny`); `fix: enumerate the exact mcp__<server>__<tool> names via lazy-guard.allow-mcp <server>` — that skill reads the runtime tool list and writes concrete entries.
+  - A leading `^mcp__` guard on the regex avoids flagging non-MCP entries like `Bash(git push *)` or `Read(~/.claude/**)` which legitimately use Claude Code's own glob matcher. Only `mcp__*` entries are affected by this restriction.
+- **MCP permissions hygiene** — for every *enabled* MCP server, verify that destructive tools aren't sitting in `allow`. The doctor **does not** flag "missing" tools — `skip` is a valid classification and per-call prompting is the intended fallback. The doctor also **does not** flag medium-risk (`skip`-classified) tools that the user pinned into `allow` or `ask` — that's a deliberate user decision, not a hygiene issue. Completeness and bucket re-shuffling are `lazy-guard.allow-mcp`'s job when the user invokes it; here we only catch truly destructive entries sitting in `allow` where they bypass confirmation.
   - Enumerate runtime tools by listing every tool name visible in your own tool list whose name matches `mcp__<server>__<tool>`, grouped by `<server>`. Do NOT invent names — only use names literally present. Claude Code matches exact strings in both `allow` and `ask`; no wildcards.
   - A server counts as *enabled* iff it's defined in `~/.mcp.json` or `./.mcp.json` AND (Mode A, OR listed in `enabledMcpjsonServers` in either `./.claude/settings.json` or `./.claude/settings.local.json`). Skip servers that are defined-but-disabled, and skip servers that produced zero runtime tools (the server isn't loaded — a restart issue, not a permissions issue).
   - Resolve the target settings file per server using the routing rule from `lazy-guard.allow-mcp` Phase 4: default target is **`settings.local.json`** at the scope matching the server definition (global servers → `~/.claude/settings.local.json` if the user registered globally; else `./.claude/settings.local.json`). Doctor checks both the target and the paired tracked `settings.json` (for leakage).
@@ -118,15 +144,16 @@ Checks the agent performs:
     - **`allow`** — read verbs (get/list/search/query/recall/reflect/resolve/diff/status/show/log-as-read/fetch/refresh/audit) AND low-risk writes the user already trusts (`git_add`, `git_create_branch`, `retain`, `sync_retain`, `create_directive`, `create_mental_model`, `update_bank`, `update_mental_model`).
     - **`ask`** — irreversible destruction: `delete_*`, `remove_*`, `clear_*`, `reset*`, `checkout*`, `restore*`, `revert*`, force-pushes, bulk destructive ops.
     - **`skip`** — medium-risk verbs that should *not* be in either list: `commit*`, `cancel_*`, and anything ambiguous. Skipped tools trigger Claude Code's per-call prompt.
-  - Three comparisons per server (on the target `settings.local.json`):
+  - Two comparisons per server (on the target `settings.local.json`):
     1. `misclassified_destructive = { t ∈ permissions.allow : t matches mcp__<server>__* AND classifier(t) == "ask" }` → `[WARN] Destructive MCP tools in allow list: <server> (<N> entries) | <target>`; `detail:` list the mis-placed tool names (`should be in permissions.ask — they cause irreversible loss and must prompt each time`); `fix: run lazy-guard.allow-mcp <server>` — allow-mcp will move them.
-    2. `pinned_medium_risk = { t : t matches mcp__<server>__* AND classifier(t) == "skip" AND t ∈ (permissions.allow ∪ permissions.ask) }` → `[WARN] Medium-risk MCP tools pinned into allow/ask: <server> (<N> entries) | <target>`; `detail:` list tool names and which list they're in (`medium-risk — should be skipped from both lists so Claude Code prompts per call`); `fix: run lazy-guard.allow-mcp <server>` — it will remove them.
-    3. `leaked_into_tracked = { t ∈ (tracked.permissions.allow ∪ tracked.permissions.ask) : t matches mcp__<server>__* }` → covered by the "Permissions leakage into tracked `settings.json`" check above; cross-reference but don't double-emit.
-  - Emit at most two findings per server (misclassified + pinned). Do NOT emit per-tool findings — grouped lines keep the report scannable.
+    2. `leaked_into_tracked = { t ∈ (tracked.permissions.allow ∪ tracked.permissions.ask) : t matches mcp__<server>__* }` → covered by the "Permissions leakage into tracked `settings.json`" check above; cross-reference but don't double-emit.
+  - Emit at most one finding per server (misclassified). Do NOT emit per-tool findings — grouped lines keep the report scannable. Medium-risk (`skip`-classified) tools pinned to `allow` or `ask` are a user decision and never a finding.
 
 ### Agent C — path hygiene
 
 Scope: every project-level config file (`.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/*/SKILL.md`, `.claude/commands/*.md`, `CLAUDE.md`), grepping for hardcoded paths.
+
+**Local tool mode scope expansion**: when the coordinator reports local tool mode, also grep for the same hardcoded-path patterns across `Claude/**/rules/*.md`, `Claude/**/skills/*/SKILL.md`, `Claude/**/agents/*.md`, `Claude/**/commands/*.md`, and `Claude/**/hooks/**`. Self-referential documentation of the path-hygiene rule itself (files whose purpose is to describe the bad patterns — e.g. `lazy-core.hygiene.md`, `lazy-guard.security.md`, `lazy-core.doctor/SKILL.md`, `lazy-guard.check-public/SKILL.md`) must be excluded via the `source: doc-of-rule` marker to avoid false positives.
 
 Checks the agent performs:
 
@@ -178,6 +205,27 @@ Finding schema:
   `[INFO] marketplace <mp> unreachable — using cached manifest (last updated <lastUpdated>)`
 
 Worst-case latency: 5 s × number of referenced marketplaces (sequential today; parallelize if it bites).
+
+## Phase 2.6 — Release-mode outdated-plugin suppression
+
+Runs after Phase 2.5, before delegated audits. **Skipped entirely in local tool mode** (Phase 0 disables it — plugin sources are authored here, so every check must surface).
+
+Build the outdated set from Phase 2.5:
+
+- `outdated_plugins = { p : Phase 2.5 emitted either the "outdated" WARN or the "unrecorded version" WARN for p }`
+
+Filter the merged findings in place:
+
+- For any finding whose `path` starts with `.claude/rules/` or `~/.claude/rules/` AND whose `plugin_owner` field (set by Agent A) is in `outdated_plugins`, **drop the finding from the merged list** and increment a `suppressed_by_outdated_plugin` counter keyed by plugin.
+- Findings with no `plugin_owner` (user-authored rules) are never suppressed.
+- Findings from Agent A Plugin rule sync (drift / orphan) are never suppressed — drift is exactly what an upgrade resolves, and the finding itself is the pointer.
+- Findings from any other agent / scope (Agent B, Agent C, cross-reference integrity, etc.) are never suppressed.
+
+For each plugin with a non-zero `suppressed_by_outdated_plugin` counter, emit one summary line alongside the existing version WARN:
+
+`[INFO] <N> content findings on <plugin>-owned rules suppressed — upgrade via `/plugin update <name>` to re-validate.`
+
+This keeps the user focused on the root cause (stale install) instead of chasing content issues that the upgrade will overwrite. Re-run the doctor after upgrading to surface any remaining issues.
 
 ## Phase 3 — Delegated audits (inline, not dispatched)
 
@@ -235,7 +283,8 @@ After the report, ask the user which fixes to apply. Apply only confirmed fixes.
 
 - Rules oversized → suggest running `/lazy-core.optimize`; don't auto-slim here.
 - Rule drift / orphans → direct the user to run the owning plugin's install skill (`/<namespace>.install`, e.g. `/lazy-log.install` for `lazy-log.*` rules). Do NOT auto-overwrite here — the install skill's per-rule `AskUserQuestion` is the sanctioned reconciliation flow.
-- Missing rules frontmatter → add `---\ndescription: ...\npaths: [...]\n---` (use `paths` for scoped rules, omit for global rules).
+- Missing rules frontmatter → add `---\ndescription: ...\npaths: [...]\n---` for scoped rules, or `---\ndescription: ...\nalways_loaded: <one-line reason>\n---` for rules that must load every turn.
+- Rule lacks scope AND waiver → ask the user, per rule, whether the rule is legitimately always-loaded. If yes, add `always_loaded: <reason>` (reason must be substantive — one line explaining *why* every turn needs it, not `true`). If no, add `paths: ["<glob>"]` narrowing it to the folders where it applies. Show the proposed frontmatter diff before writing. Never auto-pick a scope — only the user knows the rule's true audience.
 - Memory index: add missing entries, remove broken links; flag stale for review.
 - Settings leakage: offer to move entries between files (respect the split in `rules/lazy-core.hygiene.md`).
 - Permissions leakage into tracked `settings.json`: offer an in-place migration — move the entire `permissions.*` block (both `allow` and `ask` arrays) from tracked `settings.json` to the paired `settings.local.json`. Merge with any existing entries there, preserving order and deduplicating. Leave `enabledPlugins`, `hooks`, `env`, `enabledMcpjsonServers`, and similar enablement flags in the tracked file untouched. Show the diff before writing; apply only on explicit user confirmation.
@@ -245,7 +294,7 @@ After the report, ask the user which fixes to apply. Apply only confirmed fixes.
 - MCP tools not whitelisted: invoke `lazy-guard.allow-mcp <server>` for each confirmed finding — do NOT write `permissions.allow` directly from doctor. `allow-mcp` owns scope-routing, dedup, and cross-scope cleanup; reusing it keeps both skills consistent.
 - Agents / skills / CLAUDE.md / hook scripts — report only, never auto-edit.
 - Plugin dependency warnings — report only; fixing requires enabling the missing plugin in `settings.json` (user's decision) or editing the declaring plugin's manifest.
-- Plugin outdated / unrecorded version (Phase 2.5) — report only; direct the user to run `/plugin update <name>` or reinstall. Doctor never shells out to `claude plugin update`.
+- Plugin outdated / unrecorded version (Phase 2.5) — report only; direct the user to run `/plugin update <name>` or reinstall. Doctor never shells out to `claude plugin update`. In release mode, Phase 2.6 suppresses content findings on this plugin's owned rules — the suppression counter is surfaced so the user knows to re-run after upgrading.
 
 For any finding surfaced by a delegated audit (Guard / Logging), direct the user to run that sibling skill for fixes. Doctor never auto-fixes issues owned by sibling audits.
 
