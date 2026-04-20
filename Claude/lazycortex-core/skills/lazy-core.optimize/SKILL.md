@@ -59,6 +59,112 @@ For each rules file **over 3 KB**:
 
 5. After rewriting, re-measure and show the before/after comparison.
 
+## Phase 2.5: LLM-readability audit
+
+Every file under this phase's scope is authored for the LLM, not humans. Detect constructs that look clear on a page but hurt LLM comprehension — decision-logic tables, narrative preamble, cross-references without anchors, decorative markers, and long prose where bullets would serialize better. Rewrites require per-finding user confirmation.
+
+### 2.5a. Scope
+
+Scan every LLM-consumed artifact file:
+
+- `.claude/rules/*.md`, `~/.claude/rules/*.md`
+- `.claude/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`
+- `.claude/agents/*.md`, `~/.claude/agents/*.md`
+- `.claude/commands/*.md`, `~/.claude/commands/*.md`
+- `.claude/skills/*/references/*.md`, `~/.claude/skills/*/references/*.md`
+
+**Excluded:** `README*.md`, `CHANGELOG.md`, `docs/**`, `CLAUDE.md` at any scope, and any non-`.md` file.
+
+### 2.5b. Dispatch parallel scan
+
+Dispatch up to 5 Explore subagents in parallel — one per file-group (rules / skills / agents / commands / references) — in a single message with N Agent tool calls. Each uses `subagent_type: "Explore"`, `mode: "dontAsk"`. The prompt passes the scope glob list and the pattern catalog (2.5c). Budget: "Report under 600 words". If a group has zero files, skip its dispatch.
+
+Each agent returns a finding list with this shape per entry:
+
+```
+- file: <project-relative path>
+  line_start: <int>
+  line_end: <int>
+  pattern: P1 | P2 | P3 | P4 | P5 | P6
+  original: <verbatim snippet, ≤400 chars; elide with "…" if longer>
+  rewrite_class: <short label, e.g. "table→numbered-cases">
+  reason: <one-line rationale>
+```
+
+### 2.5c. Pattern catalog
+
+Agents flag a finding for each occurrence of any of:
+
+- **P1 — Decision-logic table.** Markdown table with ≥2 rows where at least one column contains conditional verbs (`if`, `when`, `unless`, `else`, `otherwise`, `except when`), imperatives (`must`, `should`, `do not`, `always`, `never`), or action verb-phrases. `rewrite_class: "table→numbered-cases"`.
+- **P2 — Abstract-header lookup table.** Column headers are abstract (e.g. `Stage | Inputs | Outputs | Rule`, `Step | Trigger | Action`) AND cells contain verb phrases requiring the reader to cross-reference headers to recover meaning. `rewrite_class: "table→named-entries"`.
+- **P3 — Narrative preamble.** The first non-frontmatter, non-heading paragraph contains no constraint, no instruction, and no behavior-changing fact. Markers: `"This skill..."`, `"Welcome to..."`, `"This guide walks you through..."`, `"The purpose of this document is..."`. `rewrite_class: "delete-or-fold-to-description"`.
+- **P4 — Restated cross-reference without anchor.** Phrases like `"as mentioned above"`, `"see the section below"`, `"the previous section"` without a concrete section name, heading anchor, or file path. `rewrite_class: "inline-or-anchor"`.
+- **P5 — Decorative markers without semantic content.** Emoji/symbol prefixes (`✅`, `❌`, `🔴`, `⚠️`, `→`) used as visual bullets where semantics are already carried by surrounding text. `rewrite_class: "strip-decoration"`.
+- **P6 — Long explanatory paragraph.** A paragraph >3 sentences where each sentence introduces an independent fact (detectable by "First… Second… Finally…" patterns or conjunction density without topic continuity). `rewrite_class: "prose→bullets"`.
+
+**Must NOT flag (preserve):**
+
+- Key→value lookup tables with ≤5 rows where both columns are concrete nouns (no verbs).
+- Ordinal/step tables where one column is a step number, phase index, or sequence position.
+- Self-contained paired tables where every row is one independent fact (canonical example: `Thought | Reality` in `superpowers:using-superpowers`).
+- YAML frontmatter, code blocks, DOT/graphviz diagrams, ASCII art.
+- Tables under `## Reference:` headings in agent definitions.
+
+### 2.5d. Merge, classify, waiver reconciliation
+
+Coordinator deduplicates findings by `(file, line_start, pattern)` and groups by file. For every finding, assign:
+
+- `check_id`: `llm-readability.<pattern-slug>` — one of `decision-table`, `abstract-header-table`, `narrative-preamble`, `restated-cross-ref`, `decorative-marker`, `long-prose`.
+- `scope`: `project` (path inside the repo) or `personal` (path under `~/.claude/**`).
+- `fingerprint`: `(check_id, normalized_path, detail_hash)` where `detail_hash` is the first 8 hex chars of `sha256(normalized_original)` — whitespace collapsed, line numbers stripped.
+
+Load waivers from both stores (same format as `lazy-core.doctor` Phase 2.7b):
+
+- `~/.claude/projects/<slug>/memory/doctor.waivers/*.md` (project)
+- `~/.claude/memory/doctor.waivers/*.md` (personal)
+
+For each finding whose fingerprint matches a waiver's `check_id + normalized_path + detail_hash`, move it to a `waived_findings` list. Render waived count in the summary header, same as doctor.
+
+### 2.5e. Present and resolve
+
+Render a summary block:
+
+```
+## Phase 2.5 — LLM-readability audit
+
+- Files scanned: N (rules=A, skills=B, agents=C, commands=D, references=E)
+- Findings: M across K files
+- By pattern: P1=x, P2=x, P3=x, P4=x, P5=x, P6=x
+- Waived: W
+```
+
+Then, per non-waived finding, render:
+
+```
+#### [P1] decision-logic table in <file>:<line_start>–<line_end>
+<reason>
+--- original ---
+<snippet>
+--- proposed rewrite class ---
+<rewrite_class>
+```
+
+`AskUserQuestion` with three options:
+
+- **Apply rewrite** *(default-recommended for clear cases)* — coordinator generates the rewritten snippet, shows the diff via a second `AskUserQuestion` ("Apply this diff? / Edit further / Cancel"), and on confirmation writes via the Edit tool.
+- **Skip for now** — no action; finding reappears next run.
+- **Waive permanently** — opens the permanence confirmation sub-prompt (same wording as doctor Phase 4a), then writes a waiver file via `Bash(mkdir -p <doctor.waivers-dir>)` followed by the `Write` tool (never chained). File path: `<doctor.waivers-dir>/llm-readability.<pattern-slug>__<detail_hash>.md`. Frontmatter shape matches the template in `lazy-core.doctor` Phase 2.7d.
+
+**Rewrites are generated by the main coordinator, not the scan agent.** Scan agents identify constructs; the coordinator synthesizes the rewrite so the user can review the diff in the same turn.
+
+### 2.5f. Summary row
+
+Append one row to the final Optimization Results table (Phase 6 Output):
+
+```
+| LLM-readability rewrites | - | N | applied: A, skipped: S, waived: W |
+```
+
 ## Phase 3: Audit global settings for project leakage
 
 Read these files:
@@ -174,9 +280,18 @@ End with a summary:
 | Settings entries moved | - | N | global -> project |
 | Memory issues fixed | - | N | orphaned/broken |
 | Delegation candidates | - | N | heavy skills to refactor |
+| LLM-readability rewrites | - | N | applied / skipped / waived |
 ```
 
 ## Logging
 
 Log to `./.logs/claude/lazy-core.optimize/YYYY-MM-DD_HH-MM-SS.md`.
 Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
+
+The log's `## Actions` section must include an `## llm-readability audit` subsection when Phase 2.5 ran:
+
+- Files scanned (count per group).
+- Findings (count per pattern).
+- Waived (count, per `check_id`).
+- One line per finding decision: `<file>:<line_start> <pattern> → apply | skip | waive`.
+- One line per newly written waiver: `waiver written: llm-readability.<pattern-slug> | <normalized_path>`.

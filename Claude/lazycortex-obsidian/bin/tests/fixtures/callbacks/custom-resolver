@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Emits a fixed icon.
+cat >/dev/null
+echo '{"iconName": "LiZap", "iconColor": "#abcdef"}'

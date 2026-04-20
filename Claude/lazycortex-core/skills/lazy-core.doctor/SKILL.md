@@ -1,7 +1,7 @@
 ---
 name: lazy-core.doctor
 description: "Health check for Claude Code project configuration. Verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, checks that installed plugins are at the latest marketplace version, and delegates to sibling audit skills (lazy-guard.check-public, lazy-log.audit) when they apply. Reports issues and offers targeted fixes. Run periodically or when something feels off."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash(python3 *)
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash(python3 *), mcp__*__recall, mcp__*__retain
 ---
 
 # Project Health Check
@@ -58,7 +58,7 @@ Checks the agent performs:
   - `[FAIL]` contains code blocks > 10 lines
   - `[WARN]` no YAML frontmatter (need at minimum `description`, plus scope or waiver — see next bullet)
   - `[WARN]` frontmatter has **neither `paths:` scope nor `always_loaded:` waiver** — every unscoped rule burns tokens on every turn for every user. A rule must either declare a folder scope (`paths: ["glob", ...]` — only loaded when matching files are touched) or carry a short `always_loaded: <one-line reason>` waiver justifying why it must be in context every turn (e.g. governs every skill, constrains the main agent, encodes a safety posture applied to every action). The value IS the waiver — empty / boolean `true` is not accepted. Finding: `rule lacks scope and waiver | <path>`; `detail: frontmatter has neither paths nor always_loaded`; `fix: add paths: ["<glob>"] if scoped, or always_loaded: <reason> if truly global`. Coordinator-owned fix.
-  - `[FAIL]` filename lacks dot separator (must be `namespace.name.md`)
+  - `[WARN]` filename lacks dot separator (must be `namespace.name.md`)
 - **Agents** (`.claude/agents/*.md`):
   - `[FAIL]` missing / malformed frontmatter (`name`, `description`, `tools`)
   - `[WARN]` references a missing rules file
@@ -69,7 +69,7 @@ Checks the agent performs:
   - `[WARN]` skill references tools / agents that don't exist
   - `[WARN]` command file empty or < 50 bytes
 - **Namespace** (skills / commands / agents / hooks / rules, skip `@`-prefixed external plugins):
-  - `[FAIL]` name lacks dot separator
+  - `[WARN]` name lacks dot separator
 - **Hook-language gitignore coverage**: if project has `*.py`, `.gitignore` must cover `__pycache__/` and `*.py[cod]`; `*.rb` → `*.rbc`; `*.js`/`*.ts`/`package.json` → `node_modules/`. `[WARN]` when missing, only for languages actually used.
 - **Cross-reference integrity**:
   - `[WARN]` agent referenced in CLAUDE.md but file missing
@@ -112,6 +112,7 @@ Checks the agent performs:
   - `[WARN]` `MEMORY.md` > 5 KB
   - `[WARN]` any memory file missing frontmatter (`name`, `description`, `type`)
   - `[WARN]` memory `type` not one of: `user`, `feedback`, `project`, `reference`
+  - **Exempt from these checks**: any file under `doctor.waivers/` (both project `~/.claude/projects/<slug>/memory/doctor.waivers/` and personal `~/.claude/memory/doctor.waivers/`). Waivers are doctor-internal memory entries intentionally kept out of `MEMORY.md` to avoid always-loaded-context bloat; they carry their own frontmatter shape (see Phase 2.7d).
 - **CLAUDE.md files**:
   - `[WARN]` project `CLAUDE.md` references paths that don't exist
   - `[WARN]` project `CLAUDE.md` > 10 KB
@@ -175,6 +176,21 @@ Allowed `~/.claude/` references (agent must exclude these from WARN):
 
 Parse each returned block by splitting on `## scan:` headings. Deduplicate findings when two agents report the same `<path>:<line>` + title (happens rarely; A vs B overlap is minimal). Sum the three `### summary` blocks into overall `PASS / WARN / FAIL` counts.
 
+### 2a. Coordinator-assigned fields (enable waiver matching)
+
+For every finding after merge, the coordinator attaches three internal fields. Agents don't emit them — the coordinator derives them from the finding's title + path. These fields never appear in the printed report; they're used only by Phase 2.7 and the logs.
+
+- **`check_id`** — a stable slug of the form `<area>.<rule>` that identifies the check the finding came from (e.g. `rules.broken-artifact-reference`, `rules.oversize`, `rules.unscoped-no-waiver`, `agents.filename-no-dot`, `agents.frontmatter-malformed`, `skills.name-dir-mismatch`, `commands.filename-no-dot`, `settings.tracked-owns-permissions`, `memory.not-indexed`, `memory.oversize`, `claude-md.path-missing`, `budget.always-loaded-warn`, `budget.always-loaded-fail`, `hooks.import-undeclared`, `mcp.entry-wildcard`, `mcp.destructive-in-allow`, `paths.user-home-abs`, `paths.user-home-subdir`, `paths.project-prefix`, `paths.claude-home-for-local`). The coordinator maintains an explicit title→slug table; new titles must be added to the table with their slug before shipping.
+- **`scope`** — one of `project` / `personal` / `ambiguous`. Derived from the finding's primary path:
+  - path inside the repo (no leading `~`, no `/Users/…`) → `project`
+  - path under `~/.claude/**` or `~/.mcp.json` → `personal`
+  - plugin-outdated WARN → `personal` (version applies machine-wide)
+  - path spans both scopes (e.g. a hook file at global scope referencing a project path) → `ambiguous`
+  - findings with no path (e.g. `budget.always-loaded-warn`) default to `project` if the sum was computed primarily from project files, else `personal`
+- **`fingerprint`** — the tuple `(check_id, normalized_path, detail_hash)` used by Phase 2.7 to match findings against stored waivers:
+  - `normalized_path` — project-relative (`./.claude/rules/foo.md`), `~`-prefixed (`~/.claude/CLAUDE.md`), or `*` for findings with no path.
+  - `detail_hash` — first 8 hex chars of sha256 of a normalized detail string (drop whitespace, drop byte counts, keep the referenced symbol / path / tool name). Specific enough that "missing agent X" is waived independently of "missing agent Y"; stable enough that whitespace edits don't re-surface the same finding.
+
 ## Phase 2.5 — Plugin version currency
 
 Coordinator-owned inline check (not an Explore agent — it performs a `git fetch`, which violates the parallel-scan read-only contract). Runs in the main session after the merge above and before delegated audits.
@@ -228,6 +244,74 @@ For each plugin with a non-zero `suppressed_by_outdated_plugin` counter, emit on
 
 This keeps the user focused on the root cause (stale install) instead of chasing content issues that the upgrade will overwrite. Re-run the doctor after upgrading to surface any remaining issues.
 
+## Phase 2.7 — Waiver reconciliation
+
+Suppress `WARN` findings the user has previously waived. `FAIL` findings are **never** checked against the waiver set — a stale waiver must not mask broken state.
+
+### 2.7a. Discover memory backends (once per run, cached for Phase 4)
+
+The coordinator supports two backend shapes. It never names a specific MCP server; it probes for whatever is available and uses the first reachable option per scope.
+
+1. **File-based store (preferred — always accessible, no MCP required).**
+   - Project-scoped waivers live under `~/.claude/projects/<slug>/memory/doctor.waivers/`.
+   - Personal-scoped waivers live under `~/.claude/memory/doctor.waivers/`.
+   - `<slug>` is the project memory slug Claude Code already writes to at session start (same directory that owns the project's `MEMORY.md` — the existing Phase 1 memory checks already operate on it). Resolve `<slug>` from the running session's own auto-memory path; never construct it from the current `pwd`.
+   - A missing directory is a silent zero-match, not an error.
+
+2. **MCP-backed memory (opt-in fallback only).**
+   - Probe the runtime tool list for any tool name matching both `mcp__<server>__retain` AND `mcp__<server>__recall` for the same `<server>`. If any such pair exists, mark MCP available.
+   - The coordinator never writes the matched server name into the skill text — it uses whichever tool name is present at runtime. One or multiple servers are fine.
+
+3. **If neither backend is reachable** for a given scope, Phase 4 downgrades the "Waive permanently" option to "Skip for now" with a visible warning and writes nothing.
+
+### 2.7b. Load waivers
+
+1. **File-based** — `Glob` both scoped `doctor.waivers/` directories. `Read` each match; parse its YAML frontmatter into a waiver record (see §2.7d).
+2. **MCP (only if discovered)** — call the discovered `recall`-shaped tool with `tags: ["doctor-waiver"]`. A tool error is a soft-fail: log it, continue with only file-based waivers.
+3. Build `waiver_set = { fingerprint → {reason, date, scope, backend, location} }`. If the same fingerprint exists in both file and MCP backends, the **file entry wins** and an `INFO` note is appended to the run log so the user notices the drift. No automatic cleanup.
+
+### 2.7c. Suppress matching findings
+
+For every `WARN` finding in the merged list:
+
+- Compute its `fingerprint` (see Phase 2a).
+- If `fingerprint` is in `waiver_set`, move the finding from the merged list to a separate `waived_findings` list. Phase 4 renders `waived_findings` under a collapsed "Waived (N)" section.
+- `FAIL` findings are left untouched regardless of any matching waiver.
+
+### 2.7d. Waiver record shape (backend-agnostic)
+
+A waiver carries these fields regardless of where it's stored:
+
+- `check_id` — stable check slug (Phase 2a table).
+- `normalized_path` — project-relative, `~`-prefixed, or `*`.
+- `detail_hash` — 8-hex fingerprint of the normalized detail.
+- `reason` — one-line free-text; defaults to the finding's own message + `accepted permanently on <YYYY-MM-DD>`.
+
+**File-based encoding** — `<doctor.waivers-dir>/<fingerprint>.md` where `<fingerprint>` is `<check_id>__<detail_hash>` (path-safe). Frontmatter mirrors the shape the doctor already validates for memory entries (so this dir doesn't itself trip a memory-index WARN):
+
+```
+---
+name: doctor waiver: <check_id>
+description: <finding title — short>
+type: reference
+tags: [doctor-waiver, severity:warn, check:<check_id>, scope:<scope>]
+check_id: <check_id>
+normalized_path: <normalized_path>
+detail_hash: <detail_hash>
+scope: <project|personal>
+added: <YYYY-MM-DD>
+---
+
+<reason>
+```
+
+Do **not** link the waiver file from `MEMORY.md` — waivers are doctor-internal and must not enter always-loaded context. (Phase 1's `memory.not-indexed` WARN does not fire for entries inside `doctor.waivers/` — add an exemption in Agent A's memory check so this dir is excluded.)
+
+**MCP encoding** — invoke the discovered `retain`-shaped tool with:
+- `content`: `"Doctor waiver: <finding title — short> | <normalized_path>. Accepted permanently on <YYYY-MM-DD>."`
+- `tags`: `["doctor-waiver", "severity:warn", "check:<check_id>", "scope:<scope>"]`
+- `context`: object carrying `check_id`, `normalized_path`, `detail_hash`, `reason`, `added`.
+
 ## Phase 3 — Delegated audits (inline, not dispatched)
 
 Doctor delegates to sibling audit skills for scope-specific checks rather than replicating their logic. Each sub-check verifies the sibling skill is reachable, then checks its run condition, and silently skips if either fails. Doctor never warns about missing sibling plugins.
@@ -249,16 +333,16 @@ Each delegation follows four steps:
 - *Run condition*: same as availability — plugin installation is the opt-in.
 - *On invoke*: fold audit findings into a **Logging** subsection.
 
-## Phase 4 — Present + fix
+## Phase 4 — Present + fix + waive
 
-Render in the existing format:
+Render in the existing format, with a new "Waived" tail section covering findings Phase 2.7 suppressed:
 
 ```markdown
 ## lazy-core.doctor -- Health Report
 
 ### Summary
 - Checks run: N
-- PASS: N | WARN: N | FAIL: N
+- PASS: N | WARN: N | FAIL: N | Waived: N
 
 ### Issues
 
@@ -272,6 +356,10 @@ File exists but has no index entry.
 
 (... one section per issue, followed by Guard and Logging subsections if delegated audits ran ...)
 
+### Waived (<N>)
+- <check_id> | <normalized_path> — waived <YYYY-MM-DD>, backend=<file|mcp>, location=<abs path or mcp memory-id>, reason="<reason>"
+(omit the whole section when N == 0)
+
 ### Fixes available
 - [ ] Fix 1: <description> (auto-fixable)
 - [ ] Fix 2: <description> (auto-fixable)
@@ -280,7 +368,7 @@ File exists but has no index entry.
 Apply all auto-fixable? [y/N]
 ```
 
-After the report, ask the user which fixes to apply. Apply only confirmed fixes. Fixes available in-coordinator:
+After the report, ask the user which fixes to apply. Apply only confirmed fixes. Then enter the **per-WARN waive loop** described in 4a below. Fixes available in-coordinator:
 
 - Rules oversized → suggest running `/lazy-core.optimize`; don't auto-slim here.
 - Rule drift / orphans → direct the user to run the owning plugin's install skill (`/<namespace>.install`, e.g. `/lazy-log.install` for `lazy-log.*` rules). Do NOT auto-overwrite here — the install skill's per-rule `AskUserQuestion` is the sanctioned reconciliation flow.
@@ -299,7 +387,47 @@ After the report, ask the user which fixes to apply. Apply only confirmed fixes.
 
 For any finding surfaced by a delegated audit (Guard / Logging), direct the user to run that sibling skill for fixes. Doctor never auto-fixes issues owned by sibling audits.
 
+### 4a. Per-WARN waive loop
+
+After the fix batch is applied (or declined), iterate the remaining `WARN` findings — i.e. every WARN that was not auto-fixed and not already suppressed by Phase 2.7. `FAIL` findings are **never** offered a waive option.
+
+For each remaining WARN, `AskUserQuestion` with two options:
+
+- **Skip for now** *(default-recommended — safest)* — no persistent effect; the finding will reappear on the next doctor run.
+- **Waive permanently** — opens the permanence confirmation sub-prompt.
+
+If the user picks **Waive permanently**, a second `AskUserQuestion`:
+
+> This will write a permanent waiver to `<resolved backend + location>`. Future doctor runs will suppress this finding. **This is not a temporary skip — the waiver persists across sessions.** Confirm?
+>
+> - **Confirm permanent waiver** — writes to the resolved backend.
+> - **Cancel — treat as a skip** — no write; finding reappears next run.
+
+If the finding's `scope` is `ambiguous`, insert a **storage-choice** question between the permanence confirmation and the write:
+
+- **Save under this project** *(default-recommended — smaller blast radius, easy to revert by deleting the file)* — project scope.
+- **Save for all projects on this machine** — personal scope.
+
+On confirmation, resolve the backend via the Phase 2.7a priority ladder using the finding's `scope`:
+
+- **File-based (preferred)** — `Bash(mkdir -p <doctor.waivers-dir>)` in one step, then the `Write` tool in a separate step (never chained; per `lazy-log.logging`) to create `<doctor.waivers-dir>/<check_id>__<detail_hash>.md` with the frontmatter from Phase 2.7d.
+- **MCP fallback (only if discovered and the user opted in)** — call the discovered `retain`-shaped tool with the payload from Phase 2.7d. The skill reads the discovered tool name from the runtime tool list — no specific server name is written here.
+
+**Reachability fallback.** If the preferred backend write fails (filesystem error, permission denied, MCP tool error), retry via the next backend in the Phase 2.7a ladder and append a one-line note to the report: `note: <X> unreachable, waiver saved to <Y>`. If every backend for the resolved scope fails, downgrade the "Waive permanently" option to "Skip for now" with a visible warning and write nothing.
+
+**No free-text reason is solicited by default.** The waiver stores the finding's own short title + date, which is enough for future recall to explain itself. If the user wants to record a reason, they can supply it via the `AskUserQuestion` "Other" field on the permanence prompt — whatever they type becomes the `reason` field.
+
+**Un-waiving is out of scope for this skill.** To remove a waiver the user deletes the file (for file-based) or deletes the memory entry via their existing memory tooling (for MCP-backed). On the next doctor run, the finding reappears in the main WARN list.
+
 ## Logging
 
 Log to `./.logs/claude/lazy-core.doctor/YYYY-MM-DD_HH-MM-SS.md`.
 Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
+
+The `## Actions` section must include, in addition to the usual run details:
+
+- **Backend discovery** — one line per scope recording which backends were reachable (e.g. `backend discovery (project): file=ok, mcp=<discovered server name or 'none'>`).
+- **Waiver recall counts** — per backend / per scope (`recall: file=<N>, mcp=<N>`), plus an `INFO` line for any fingerprint held by both backends (`both-backends: <fingerprint> (file wins)`).
+- **Suppressed findings** — one line per finding dropped by Phase 2.7: `waived finding suppressed: <check_id> | <normalized_path>`.
+- **Newly written waivers** — one line per write: `waiver written: <check_id> | <normalized_path> → <backend>:<location>`.
+- **Waive-option downgrades** — one line per finding where every backend for the resolved scope failed and the option was gracefully downgraded to Skip: `waive unreachable: <check_id> | <normalized_path> — all backends failed, treated as skip`.

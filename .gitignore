@@ -17,6 +17,12 @@
 .claude/worktrees/
 .logs/
 
+# Superpowers scratch area (plans, specs, notes — machine-local)
+docs/superpowers/
+docs/plans/
+docs/tasks/
+docs/specs/
+
 
 # ---------------------------------------------------------------------------------------
 # Python

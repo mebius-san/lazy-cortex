@@ -1,0 +1,57 @@
+{
+  "version": "1.0.0",
+  "registries": {
+    "roles": {
+      "design": { "iconName": "LiDraftingCompass" }
+    },
+    "steps": {
+      "draft-design": { "iconName": "LiPencil", "iconColor": "#fde68a" }
+    },
+    "requests": {
+      "classification": {
+        "feature": { "iconName": "LiSparkles" }
+      },
+      "status_color": {
+        "new": "#fef3c7",
+        "ready": "#d1fae5"
+      }
+    }
+  },
+  "stage_colors": {
+    "empty":     "#e2e8f0",
+    "draft":     "#fde68a",
+    "review":    "#fef3c7",
+    "done":      "#d1fae5",
+    "rejected":  "#f87171",
+    "cancelled": "#cbd5e1"
+  },
+  "matchers": [
+    {
+      "id": "authored-doc",
+      "when": {
+        "basename_in": ["design.md", "tech.md", "plan.md"],
+        "role_matches_basename": true
+      },
+      "resolve": {
+        "iconName":  { "from": "registries.roles",  "key": "{{frontmatter.role}}",  "field": "iconName" },
+        "iconColor": { "from": "stage_colors",      "key": "{{frontmatter.stage}}" }
+      },
+      "emit": ["self"]
+    },
+    {
+      "id": "status-file",
+      "when": { "basename": "_folder.md" },
+      "resolve": {
+        "base": {
+          "iconName":  { "from": "registries.steps", "key": "{{frontmatter.stage}}", "field": "iconName" },
+          "iconColor": { "from": "registries.steps", "key": "{{frontmatter.stage}}", "field": "iconColor" }
+        },
+        "overlays": [
+          { "when": { "frontmatter.cancelled": true }, "iconName": "LiXCircle",  "iconColor": "#e2e8f0", "priority": 2 },
+          { "when": { "frontmatter.blocked":   true }, "iconName": "LiOctagonX", "iconColor": "#f87171", "priority": 1 }
+        ]
+      },
+      "emit": ["self", "parent_dir"]
+    }
+  ]
+}

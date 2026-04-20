@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.13 — 2026-04-21
+
+- `/lazy-core.optimize` now ships the Phase 2.5 LLM-readability audit: it scans rules, skills, agents, commands, and references for human-oriented constructs (decision-logic tables, narrative preamble, restated cross-references, decorative markers, long explanatory prose) with per-finding Apply / Skip / Waive prompts. Waivers share `lazy-core.doctor`'s `doctor.waivers/` store under the `llm-readability.*` check_id namespace so suppressions carry across both skills.
+- `/lazy-core.doctor` gains a permanent WARN-waiver system so reviewed findings can be suppressed across runs. Waivers live in file-based auto-memory by default (reviewable, version-controlled) with a memory-MCP fallback as opt-in; the MCP server name is discovered from the environment rather than hardcoded. Also demotes two "filename lacks dot separator" checks from FAIL to WARN.
+- `/lazy-guard.allow-mcp` now infers scope automatically when existing `mcp__<server>__*` entries already pin the server to one scope (global vs. project), eliminating the redundant "which scope?" prompt in the common case. The prompt still appears for first-time server registration or when entries are split across both scopes.
+
 ### 0.2.12 — 2026-04-19
 
 - `/lazy-core.doctor` Phase 2.5 no longer WARNs on plugins with unrecorded versions — neither `installed_plugins.json` entries showing `"unknown"` nor marketplace manifests without a `version` field (e.g. GCS-distributed tarballs). Reinstalling doesn't change the manifest format, so the finding was noise. The comparison is now skipped silently when either side lacks a comparable version, and the Phase 2.6 outdated-plugins set is narrowed to match.
@@ -118,6 +124,16 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 0.1.22 — 2026-04-21
+
+- **Breaking:** Removed `/lazy-obsidian.iconize-file`. Its set/clear/get/list/bulk-apply/reconcile surface over the Iconize plugin's `data.json` is now covered by the new iconize-sync system described below.
+- New **iconize-sync** workflow for declarative, frontmatter-driven Obsidian icon assignment, backed by a standalone worker at `bin/iconize_sync.py` and three user-facing skills:
+  - `/lazy-obsidian.iconize-install` — per-file scaffolding wizard that drops the protocol doc, local icon-map, pre-commit shim, and PostToolUse hook entry into the vault's git repo. Asks before creating, shows diffs on drift, offers orphan deletion; idempotent.
+  - `/lazy-obsidian.iconize-configure` — interactive wizard for adding, editing, or removing registry entries (roles, steps, requests, or any custom registry) in the vault's local `.claude/obsidian-iconize/icon-map.json`. Validates `iconName` / `iconColor` through the worker at prompt time so invalid entries never land.
+  - `/lazy-obsidian.iconize-sync` — wraps the worker with five subcommands: `sync <path>`, `sync-staged` (pre-commit), `reconcile [--prefix]`, `install-hooks`, `check-versions`. Concurrent-safe writes into `obsidian-icon-folder/data.json` via mtime-guarded compare-and-swap; preserves `settings`, `rules`, and `recentlyUsedIcons`. Callable standalone, from `.githooks/pre-commit`, or from Claude Code's PostToolUse hook.
+- New `obsidian.gen-tag-pages` agent that regenerates Obsidian tag pages from `tags:` frontmatter across every `.md` file in the vault. Six-phase flow (collect → compute parent tags → inventory → diff → delete stale → create new → report). Reads its page template from the consumer repo at `.claude/templates/obsidian.tag-page-template.md` (scaffolded by `/lazy-obsidian.install`), substituting `{{TAG_PATH}}` and `{{SUMMARY}}`. Never overwrites existing tag pages; cleans up empty directories after stale deletions.
+- New `/lazy-obsidian.audit` semantic self-check (delegated from `lazy-core.doctor` Phase 3). Verifies iconize-sync coherence: worker `PROTOCOL_VERSION` / `HOOK_VERSION` constants match the `HOOK_VERSION:` markers in the pre-commit shim and post-tool-use snippet; the icon-map template parses and covers at least one authored-doc + one status-file matcher; the protocol template's `owner_skill` points at an existing skill. Read-first; presents findings, then asks which to fix.
 
 ### 0.1.2 — 2026-04-19
 

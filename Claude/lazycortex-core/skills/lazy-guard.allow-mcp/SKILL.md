@@ -105,16 +105,27 @@ Permission choices are per-developer, per-machine. Writing them into tracked `se
 
 The skill never writes to tracked `settings.json` unless the user explicitly overrides the default in Phase 5 confirmation. Direct writes to tracked settings are reserved for enablement flags (`enabledPlugins`, `enabledMcpjsonServers`, `hooks`) — not per-tool permission lists.
 
-### 4b. Globally-defined servers: ask for scope
+### 4b. Globally-defined servers: detect existing scope first, only ask if ambiguous
 
 When a server is defined in `~/.mcp.json`, a permission entry at either scope is valid:
 
 - **Global scope** (`~/.claude/settings.local.json`): one registration covers every project on this machine.
 - **Project scope** (`./.claude/settings.local.json`): the registration only applies inside this repo.
 
-Use `AskUserQuestion` with two options — "Global (all projects on this machine)" and "Project only (this repo)". Ask once per run, covering all globally-defined servers in the batch. Default recommendation: **Project only** — smaller blast radius, easier to revert by deleting the file.
+**Check existing state before asking.** For each globally-defined server, inspect both `~/.claude/settings.local.json` and `./.claude/settings.local.json` for any `mcp__<server>__*` entries in `permissions.allow` or `permissions.ask`. Decide scope by inference, not by prompt:
 
-If both a global and project definition exist for the same name, ask which server definition is authoritative before routing.
+| Existing `mcp__<server>__*` entries found in      | Action                                                                 |
+|---------------------------------------------------|------------------------------------------------------------------------|
+| Global only                                       | Route to **global**. Do not ask.                                       |
+| Project only                                      | Route to **project**. Do not ask.                                      |
+| Neither                                           | Ask via `AskUserQuestion` (default recommendation: **Project only**).  |
+| Both scopes                                       | Ask via `AskUserQuestion` — state is ambiguous; user must pick one and the other scope's entries will be surfaced as a cross-scope leak in Phase 6.5. |
+
+**Silence on no-ops is mandatory.** If the inferred target scope already contains every tool the Phase 3 classifier would route to `allow`/`ask` for that server, there is nothing to write — skip the question entirely and let Phase 5 report the idempotent no-op. Only prompt when a write is actually going to happen *and* the scope is genuinely undetermined.
+
+When a prompt is required, use `AskUserQuestion` with two options — "Global (all projects on this machine)" and "Project only (this repo)". Ask at most once per run, batched across all servers that still need a scope decision. Default recommendation: **Project only** — smaller blast radius, easier to revert by deleting the file.
+
+If both a global and project definition exist for the same server name in `.mcp.json` sources, ask which server definition is authoritative before routing.
 
 ### 4c. Never add to `~/.claude/settings.local.json` unless user explicitly chose "Global" in 4b
 
@@ -250,7 +261,8 @@ Body sections: `## Actions` (bullet list: files read, servers resolved, scope ch
 - **3-bucket classifier.** Safe/reversible → `allow`. Truly destructive → `ask`. Medium-risk → skip (neither list). When uncertain → skip, not allow.
 - **Default target is `settings.local.json` (gitignored).** Permissions are personal. Never write per-tool permission entries into tracked `settings.json`.
 - **No wildcards.** Enumerate every tool by its exact name. Claude Code matches exact strings in both `allow` and `ask`.
-- **Global scope requires explicit user confirmation** via Phase 4b `AskUserQuestion`.
+- **Global scope requires explicit user confirmation** via Phase 4b `AskUserQuestion` — but only when the scope is genuinely undetermined. If existing `mcp__<server>__*` entries already pin the server to global or project scope, infer from state and skip the prompt.
+- **No-op runs are silent.** If the classifier produces no new writes at the inferred scope, do not ask the scope question and do not request a write confirmation — just report the idempotent no-op.
 - **Phase 6.5 may only remove** `mcp__*` entries from the paired tracked `settings.json` — never from unrelated files, never non-`mcp__*` entries.
 - **Never adds non-`mcp__` entries.** **Never removes non-`mcp__` entries.**
 - **Confirmation required before every write.** One confirmation covers Phase 6 additions + Phase 6.5 tracked-scope cleanup.

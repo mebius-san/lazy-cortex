@@ -25,7 +25,7 @@ Each plugin addresses one of these pains without forcing you to adopt the others
 
 Core skills and agents for Claude Code
 
-Ships 7 skills, 1 command, 2 rules, and 2 hooks covering context audit/optimization, project health checks, public-repo security scanning, and one-step MCP permissioning.
+Ships 7 skills, 1 command, 2 rules, and 2 hooks.
 
 See [`Claude/lazycortex-core/`](Claude/lazycortex-core/) for details.
 
@@ -33,7 +33,7 @@ See [`Claude/lazycortex-core/`](Claude/lazycortex-core/) for details.
 
 Logging, changelog, and change-history recall for Claude Code
 
-Ships 2 skills, 4 agents, 1 command, 1 rule, and 1 hook. Records every commit to a raw log, distills commits into a readable `docs/changelog.md`, tags every skill/agent/command run with the current `git_sha`, and provides recall/timeline/summary agents that search across run logs, changelog, git history, and memory.
+Ships 2 skills, 4 agents, 1 command, 1 rule, and 1 hook.
 
 Requires: lazycortex-core
 
@@ -43,7 +43,7 @@ See [`Claude/lazycortex-log/`](Claude/lazycortex-log/) for details.
 
 Obsidian vault bootstrap and configuration management for Claude Code
 
-Ships 3 skills and 1 command. Greenfield/audit-mode vault configuration with per-plugin drift prompts, canonical `.gitignore`, `community-plugins.json` load-order regeneration, optional `obsidian-mcp` wiring, and a concurrent-safe Iconize `data.json` primitive for programmatic folder/file icon assignment.
+Ships 6 skills, 1 agent, and 1 command.
 
 Requires: lazycortex-core
 
