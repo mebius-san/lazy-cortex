@@ -6,17 +6,17 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 
 ## Who it's for
 
-- **Developers who keep project docs in Obsidian** and want the same baseline (Iconize, Folder Notes, Templater, Git, Linter) on every repo they clone.
+- **Developers who keep project docs in Obsidian** and want the same baseline (Iconize, Folder Notes, Templater) on every repo they clone.
 - **Teams standardizing on a vault template** who need new clones to pick up the config without manual setup.
 - **AI-assisted workflows** that want the `obsidian-mcp` server wired into `.mcp.json` for every project, with `OBSIDIAN_VAULT_PATH="."` so it works on any machine.
 - **Plugin authors** who need a programmatic way to paint folder/file icons via the Iconize plugin's `data.json` without running Obsidian, driven by a declarative registry the worker syncs on demand.
 
 ## Scenarios
 
-- *"Fresh repo, no `.obsidian/` yet."* — `/lazy-obsidian.config` copies the curated snapshot, prompts for optional plugins, regenerates `community-plugins.json` in correct load order, wires `.gitignore`, sets the vault nickname, and optionally adds the MCP server.
+- *"Fresh repo, no `.obsidian/` yet."* — `/lazy-obsidian.config` fetches the latest release of every musthave plugin straight into `<vault>/plugins/`, applies opinionated settings overrides, and writes `community-plugins.json` in correct load order.
 - *"Repo already has a vault that's drifted."* — the same skill runs in audit mode, diffs each musthave plugin's `data.json` against the snapshot, and asks per plugin: overwrite / keep-local / merge-missing-keys.
 - *"I want Iconize set up in this vault from scratch."* — `/lazy-obsidian.iconize-install` scaffolds the worker, registry, and config into the vault, copying from `templates/obsidian-iconize/`.
-- *"I need to edit which folders get which icons."* — `/lazy-obsidian.iconize-configure` is a wizard for editing the Iconize registry (the declarative mapping of paths to icons).
+- *"I need to edit which folders get which icons."* — `/lazy-obsidian.iconize-config` is a wizard for editing the Iconize registry (the declarative mapping of paths to icons).
 - *"I need to apply the current registry to Iconize's `data.json`."* — `/lazy-obsidian.iconize-sync` wraps the worker (`bin/iconize_sync.py`) to reconcile the registry into `obsidian-icon-folder/data.json`, concurrent-safe.
 - *"What does this plugin do?"* — `/lazy-obsidian.help`.
 
@@ -26,7 +26,8 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 - **Obsidian** (the app) — for the config to take effect. The skills run without Obsidian running.
 - **git** — `lazy-obsidian.config` resolves the vault target via `git rev-parse --show-toplevel`.
 - **Python 3** — the iconize-sync worker (`bin/iconize_sync.py`) is Python-stdlib only.
-- **`jq`** — used by `lazy-obsidian.config` for merge-missing-keys and vault-nickname writes.
+- **`jq`** — used by `lazy-obsidian.config` for merge-missing-keys on plugin `data.json`.
+- **`curl`** — used by `lazy-obsidian.config` to refresh plugin templates from the Obsidian community registry on every run.
 - **`lazycortex-core` (required)** — dependency declared in `plugin.json`; `lazy-obsidian.install` reuses the install pattern and `tool.doctor` validates the plugin surface.
 
 ## Quick start
@@ -36,4 +37,4 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 3. Run `/lazy-obsidian.install` once per project. The plugin ships no rules today — run the skill anyway to clean up rules from earlier versions if you're upgrading.
 4. Run `/lazy-obsidian.config` to bootstrap or audit the vault. Re-run any time — it's idempotent.
 5. Run `/lazy-obsidian.iconize-install` once to scaffold the Iconize worker, registry, and config into the vault (copied from `templates/obsidian-iconize/`).
-6. Edit the registry via `/lazy-obsidian.iconize-configure`, then apply it with `/lazy-obsidian.iconize-sync` whenever you need to reconcile icons into `obsidian-icon-folder/data.json`.
+6. Edit the registry via `/lazy-obsidian.iconize-config`, then apply it with `/lazy-obsidian.iconize-sync` whenever you need to reconcile icons into `obsidian-icon-folder/data.json`.

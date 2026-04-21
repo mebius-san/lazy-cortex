@@ -1,8 +1,8 @@
 ---
 name: lazy-obsidian.iconize-sync
-description: "Resolve Obsidian file/folder icons from frontmatter and write them to the Iconize plugin's `data.json`. Driven by a local declarative icon-map (`.claude/obsidian-iconize/icon-map.json`). Subcommands: `sync`, `sync-staged`, `reconcile`, `install-hooks`, `check-versions`. Callable from `.githooks/pre-commit` and Claude Code's PostToolUse hook."
+description: "Resolve Obsidian file/folder icons from frontmatter and write them to the Iconize plugin's `data.json`. Driven by a local declarative icon-map (`.claude/obsidian-iconize/icon-map.json`). Subcommands: `sync`, `sync-staged`, `reconcile`, `reconcile-dirty`, `install-hooks`, `check-versions`. Callable from `.githooks/pre-commit`, Claude Code's PostToolUse hook, and Claude Code's Stop hook."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Write
-argument-hint: "<subcommand> [args] | sync <path> | sync-staged | reconcile [--prefix PATH] | install-hooks | check-versions"
+argument-hint: "<subcommand> [args] | sync <path> | sync-staged | reconcile [--prefix PATH] | reconcile-dirty | install-hooks | check-versions"
 ---
 
 # Iconize Sync (Obsidian)
@@ -43,6 +43,16 @@ Walk every `.md` file (under `--prefix` if given, else whole vault), compute
 desired entries, apply them, drop any stale in-prefix path-keys that aren't
 desired anymore. Reserved keys (`settings`, `rules`, `recentlyUsedIcons`) are
 never touched. Use after bulk frontmatter changes.
+
+### `reconcile-dirty`
+
+Safety-net for edits that bypass the PostToolUse `Write|Edit` hook (anything
+written via `Bash`, a shell script, a bulk rename, etc.). Queries `git status`
+for dirty `.md` files — modified, added, deleted, untracked, and renamed — and
+reconciles the unique parent directories of those paths in one pass. Silent
+no-op on a clean tree or a non-git vault.
+
+Invoked by: Claude Code's `Stop` hook (fires at the end of every agent turn).
 
 ### `install-hooks`
 

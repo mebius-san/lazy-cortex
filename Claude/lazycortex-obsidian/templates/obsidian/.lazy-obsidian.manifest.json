@@ -3,42 +3,15 @@
   "musthave": [
     "dataview",
     "obsidian-icon-folder",
-    "obsidian-linter",
+    "iconize-reloader",
     "templater-obsidian",
-    "obsidian-git",
-    "vault-nickname",
     "folder-notes"
-  ],
-  "optional": [
-    "obsidian-admonition",
-    "calendar",
-    "obsidian-charts",
-    "obsidian-excalidraw-plugin",
-    "editing-toolbar",
-    "omnisearch",
-    "quickadd",
-    "obsidian-tasks-plugin"
   ],
   "loadOrder": [
-    "obsidian-admonition",
-    "calendar",
-    "obsidian-charts",
     "dataview",
-    "obsidian-excalidraw-plugin",
-    "editing-toolbar",
     "obsidian-icon-folder",
-    "obsidian-linter",
-    "omnisearch",
-    "quickadd",
-    "obsidian-tasks-plugin",
+    "iconize-reloader",
     "templater-obsidian",
-    "obsidian-git",
-    "vault-nickname",
     "folder-notes"
-  ],
-  "credentialBearing": [
-    "copilot-auto-completion",
-    "quickadd",
-    "obsidian-excalidraw-plugin"
   ]
 }

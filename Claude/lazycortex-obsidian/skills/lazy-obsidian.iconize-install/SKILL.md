@@ -145,7 +145,7 @@ Summarize:
 - Whether a legacy PostToolUse entry was **stripped**, **kept**, or **not present**.
 - Schema migration result: **added** / **upgraded** / **none needed** / **blocker**.
 - Shim HOOK_VERSION installed.
-- Next steps: "run `lazy-obsidian.iconize-configure` to seed your registries,
+- Next steps: "run `lazy-obsidian.iconize-config` to seed your registries,
   then run `lazy-obsidian.iconize-sync reconcile` for a first full sweep."
 
 ## Step 7 — Log the run

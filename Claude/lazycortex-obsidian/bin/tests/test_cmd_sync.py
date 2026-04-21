@@ -45,3 +45,24 @@ def test_sync_dry_run_writes_nothing(tmp_path):
     assert r.returncode == 0
     after = (vault / ".obsidian/plugins/obsidian-icon-folder/data.json").read_text()
     assert before == after
+
+def test_sync_accepts_absolute_path_inside_vault(tmp_path):
+    """PostToolUse hooks always pass absolute paths (Claude Code's tool_input.file_path
+    is always absolute). The worker must relativize against the vault, not reject."""
+    vault = _prep(tmp_path)
+    abs_path = str(vault / "app" / "design.md")
+    r = _run(vault, "sync", abs_path)
+    assert r.returncode == 0, r.stderr
+    data = json.loads((vault / ".obsidian/plugins/obsidian-icon-folder/data.json").read_text())
+    assert data["app/design.md"] == {"iconName": "LiDraftingCompass", "iconColor": "#fde68a"}
+
+def test_sync_noop_for_absolute_path_outside_vault(tmp_path):
+    """Paths outside the vault are common when the hook fires on an unrelated edit —
+    silently no-op, don't fail."""
+    vault = _prep(tmp_path)
+    outside = tmp_path / "outside.md"
+    outside.write_text("---\nrole: design\n---\n")
+    r = _run(vault, "sync", str(outside))
+    assert r.returncode == 0, r.stderr
+    data = json.loads((vault / ".obsidian/plugins/obsidian-icon-folder/data.json").read_text())
+    assert str(outside) not in data

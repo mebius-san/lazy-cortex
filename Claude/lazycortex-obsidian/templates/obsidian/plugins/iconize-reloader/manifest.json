@@ -1,0 +1,10 @@
+{
+  "id": "iconize-reloader",
+  "name": "Iconize Reloader",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Watches obsidian-icon-folder/data.json and soft-reloads Iconize when it changes externally (CLI edits, cloud sync).",
+  "author": "local",
+  "authorUrl": "",
+  "isDesktopOnly": true
+}

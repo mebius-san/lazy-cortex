@@ -125,6 +125,16 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 0.2.4 — 2026-04-22
+
+- New **Stop-hook safety net** closes a gap in the PostToolUse `Write|Edit` hook: edits that land through `Bash`, shell scripts, bulk renames, or `rg | xargs sed` no longer leave Iconize's `data.json` drifting from your icon-map. At the end of every agent turn, a new `iconize_sync.py reconcile-dirty` subcommand scans `git status` for dirty Markdown files and reconciles each dirty prefix in one batched write. Silent no-op on clean trees, non-git vaults, or when the icon-map isn't installed.
+- **Fix (regression in 0.2.0):** the plugin-shipped PostToolUse hook wasn't actually writing icons on agent-initiated edits. Claude Code always supplies an absolute `file_path`, but the worker rejected anything starting with `/` — and the hook swallowed stderr, so the failure was invisible. The worker now relativizes absolute paths against the vault root and silently no-ops for paths outside the vault; the hook stopped discarding stderr so future worker errors surface.
+- **Breaking:** `/lazy-obsidian.iconize-configure` is renamed to `/lazy-obsidian.iconize-config`. Update any references in your notes or shell history.
+- `/lazy-obsidian.config` is now plugin-scope only — it no longer manages top-level Obsidian settings, `.gitignore`, the vault nickname, or MCP wiring. `vault-nickname`, `obsidian-git`, and `obsidian-linter` were dropped from the musthave list. If you relied on any of these phases, manage them separately.
+- Community-plugin binaries are no longer vendored with the plugin. `/lazy-obsidian.config` now fetches the latest `manifest.json` / `main.js` / `styles.css` from each plugin's GitHub release at runtime, and only when the installed version is older than the remote. Plugin updates are always fresh; first-run installs don't download binaries they won't use.
+- New opinionated per-plugin override blocks in `templates/obsidian/plugin-settings.json` are deep-merged onto each vault's `<plugin-id>/data.json` after every binary sync via `jq`. Any user keys outside the override block are preserved.
+- Companion `iconize-reloader` Obsidian plugin (bundled) watches `obsidian-icon-folder/data.json` and soft-reloads Iconize when the worker writes to it, so new icons appear without restarting Obsidian or toggling the plugin.
+
 ### 0.2.0 — 2026-04-21
 
 - **Breaking:** the iconize-sync PostToolUse hook is now shipped by the plugin itself (auto-loaded from `hooks/hooks.json`) instead of being written into your `.claude/settings.json` with a hardcoded plugin path. Consumers upgrading from 0.1.23 or earlier **must re-run `/lazy-obsidian.iconize-install` once** — the install wizard detects and offers to delete the stale PostToolUse entry and migrate the icon-map to the new schema.

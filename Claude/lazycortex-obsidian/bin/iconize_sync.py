@@ -195,7 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--icon-map", help="path to icon-map.json (default: <repo>/.claude/obsidian-iconize/icon-map.json)")
     p.add_argument("--dry-run", action="store_true")
     sub = p.add_subparsers(dest="cmd", parser_class=_Parser)
-    for name in ("sync", "sync-staged", "reconcile", "install-hooks", "check-versions"):
+    for name in ("sync", "sync-staged", "reconcile", "reconcile-dirty", "install-hooks", "check-versions"):
         sp = sub.add_parser(name)
         if name == "sync":
             sp.add_argument("path", help="file path relative to vault root")
@@ -228,13 +228,36 @@ def _read_frontmatter_for(vault: Path, vault_rel: str) -> dict:
     return parse_frontmatter(p.read_text(encoding="utf-8", errors="ignore"))
 
 
+def _vault_relative_or_none(vault: Path, raw: str) -> str | None:
+    """Coerce `raw` to a vault-relative POSIX path.
+
+    Accepts absolute or `~`-prefixed paths (as Claude Code's PostToolUse hook supplies
+    `tool_input.file_path`) and relativizes them against the vault. Returns `None` when
+    the path is outside the vault — a common case for PostToolUse, which fires on every
+    Write/Edit regardless of whether the file is in the iconize-driven vault. Returns a
+    normalized vault-relative string when the path is inside the vault, or delegates to
+    `normalize_path` for already-relative inputs.
+    """
+    if raw.startswith("/") or raw.startswith("~"):
+        try:
+            abs_path = Path(raw).expanduser().resolve()
+            rel = abs_path.relative_to(vault.resolve())
+        except (ValueError, OSError):
+            return None
+        return normalize_path(str(PurePosixPath(rel)))
+    return normalize_path(raw)
+
+
 def cmd_sync(args) -> int:
     vault = find_vault(args.vault)
     data_path = find_data_path(vault)
     icon_map = load_icon_map(_resolve_icon_map_path(vault, args.icon_map))
     if _preflight_incompatible(icon_map):
         return EXIT_OK
-    rel = normalize_path(args.path)
+    rel = _vault_relative_or_none(vault, args.path)
+    if rel is None:
+        # Path lives outside this vault — hook fired on an unrelated edit. No-op.
+        return EXIT_OK
     fm = _read_frontmatter_for(vault, rel)
     entries = resolve_matchers(icon_map, rel, fm)
     if args.dry_run:
@@ -347,6 +370,109 @@ def cmd_reconcile(args) -> int:
     with_retry(data_path, mutate)
     print(json.dumps({"op": "reconcile", "prefix": prefix, "declared": len(desired)},
                      ensure_ascii=False))
+    return EXIT_OK
+
+
+_EXCLUDED_DIRS = (".obsidian", ".git", ".claude", ".githooks")
+
+
+def _dirty_md_files(vault: Path) -> list[str]:
+    """Return vault-relative POSIX paths of every dirty `.md` file.
+
+    'Dirty' means anything `git status --porcelain` reports: modified, added, deleted,
+    untracked, or renamed/copied. For renames/copies we return BOTH the old and new
+    paths so `reconcile-dirty` can clean up the stale path-key in the old parent dir
+    as well as emit the new one.
+
+    Returns `[]` silently on any non-git vault or git failure — the Stop hook is a
+    safety-net, not a blocker.
+    """
+    r = subprocess.run(
+        ["git", "-C", str(vault), "status", "-z", "--porcelain=v1"],
+        capture_output=True, text=False)
+    if r.returncode != 0:
+        return []
+    paths: set[str] = set()
+    # -z output: each record is `XY<space><path>` terminated by NUL. For R/C codes the
+    # record is `XY<space><new>\x00<old>`, so the *following* record is the original
+    # path (no preceding status bytes). We track whether the previous record was R/C.
+    records = r.stdout.split(b"\x00")
+    expect_origin = False
+    for rec in records:
+        if not rec:
+            expect_origin = False
+            continue
+        if expect_origin:
+            # Record is the pre-rename/copy original path, no XY prefix.
+            path_bytes = rec
+            expect_origin = False
+        else:
+            if len(rec) < 4:  # "XY " + at least one byte of path
+                continue
+            xy = rec[:2]
+            path_bytes = rec[3:]
+            if xy[:1] in (b"R", b"C") or xy[1:2] in (b"R", b"C"):
+                expect_origin = True
+        try:
+            path = path_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if not path.endswith(".md"):
+            continue
+        parts = PurePosixPath(path).parts
+        if parts and parts[0] in _EXCLUDED_DIRS:
+            continue
+        paths.add(path)
+    return sorted(paths)
+
+
+def cmd_reconcile_dirty(args) -> int:
+    vault = find_vault(args.vault)
+    data_path = find_data_path(vault)
+    icon_map = load_icon_map(_resolve_icon_map_path(vault, args.icon_map))
+    if _preflight_incompatible(icon_map):
+        return EXIT_OK
+    paths = _dirty_md_files(vault)
+    if not paths:
+        return EXIT_OK  # nothing dirty (or non-git vault) — silent no-op
+    # Unique parent dirs. A file at the vault root yields prefix "" which reconciles
+    # the whole vault; only happens when a root-level .md is actually dirty.
+    prefixes = sorted({"/".join(PurePosixPath(p).parts[:-1]) for p in paths})
+    desired: dict[str, dict] = {}
+    for prefix in prefixes:
+        for rel in _walk_md_files(vault, prefix or None):
+            fm = _read_frontmatter_for(vault, rel)
+            for emit_path, entry in resolve_matchers(icon_map, rel, fm):
+                desired[emit_path] = entry
+
+    def in_any_prefix(k: str) -> bool:
+        if "" in prefixes:
+            return True
+        return any(k == p or k.startswith(p + "/") for p in prefixes)
+
+    def mutate(d):
+        for k in list(d.keys()):
+            if k in RESERVED_KEYS:
+                continue
+            if in_any_prefix(k) and k not in desired:
+                del d[k]
+        for k, entry in desired.items():
+            d[k] = entry
+        return d
+
+    if args.dry_run:
+        cur, _ = load_data(data_path)
+        plan = {
+            "op": "reconcile-dirty", "dry_run": True, "prefixes": prefixes,
+            "add_or_update": sorted(k for k in desired if cur.get(k) != desired[k]),
+            "drop": sorted(k for k in cur
+                           if k not in RESERVED_KEYS and in_any_prefix(k) and k not in desired),
+        }
+        print(json.dumps(plan, ensure_ascii=False))
+        return EXIT_OK
+    with_retry(data_path, mutate)
+    print(json.dumps({"op": "reconcile-dirty", "prefixes": prefixes,
+                      "declared": len(desired)}, ensure_ascii=False))
     return EXIT_OK
 
 
@@ -502,6 +628,7 @@ DISPATCH = {
     "sync": cmd_sync,
     "sync-staged": cmd_sync_staged,
     "reconcile": cmd_reconcile,
+    "reconcile-dirty": cmd_reconcile_dirty,
     "install-hooks": cmd_install_hooks,
     "check-versions": cmd_check_versions,
 }
@@ -523,7 +650,7 @@ def main(argv=None) -> int:
             print(f"error: {e}", file=sys.stderr); return EXIT_VALIDATION
         return EXIT_OK
     if not args.cmd:
-        print("usage: iconize_sync <sync|sync-staged|reconcile|install-hooks|check-versions> ...", file=sys.stderr)
+        print("usage: iconize_sync <sync|sync-staged|reconcile|reconcile-dirty|install-hooks|check-versions> ...", file=sys.stderr)
         return EXIT_VALIDATION
     handler = DISPATCH.get(args.cmd)
     if handler is None:

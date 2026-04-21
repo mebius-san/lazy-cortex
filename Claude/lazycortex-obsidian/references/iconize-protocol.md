@@ -8,9 +8,10 @@ owner_skill: lazy-obsidian.iconize-sync
 
 Single source of truth for how file/folder icons are computed from frontmatter
 and written to `.obsidian/plugins/obsidian-icon-folder/data.json` in this vault.
-Read by `lazy-obsidian.iconize-sync`, the `.githooks/pre-commit` shim, and the
-plugin-shipped PostToolUse hook (auto-loaded from the plugin's `hooks/hooks.json`
-when `lazycortex-obsidian` is enabled).
+Read by `lazy-obsidian.iconize-sync`, the `.githooks/pre-commit` shim, and two
+plugin-shipped Claude Code hooks — PostToolUse (per-file `sync`) and Stop
+(per-turn `reconcile-dirty` safety-net) — both auto-loaded from the plugin's
+`hooks/hooks.json` when `lazycortex-obsidian` is enabled.
 
 This file describes the MECHANICS (resolver inputs/outputs, entry format,
 version policy). The declarative resolver rules live in
@@ -95,6 +96,17 @@ commit.
 - Installing icon packs.
 - Writing frontmatter (consumer skills own that).
 
+## Live refresh
+
+After `lazy-obsidian.iconize-sync` writes `data.json`, the companion
+`iconize-reloader` plugin (shipped via `templates/obsidian/plugins/iconize-reloader/`
+and bootstrapped by `lazy-obsidian.config`) detects the change via filesystem
+watch and soft-reloads Iconize so the in-memory icon map stays in sync with
+disk — no Obsidian restart, no disable/enable click. See
+`docs/tasks/iconize-reloader-helper.md` for the underlying Iconize limitation
+this works around (no `onExternalSettingsChange()`, no vault watcher on its own
+`data.json`).
+
 ## For plugin maintainers
 
 This mirror of the vault-facing protocol exists so the `lazy-obsidian.audit` skill can cross-check code against spec.
@@ -117,5 +129,6 @@ This mirror of the vault-facing protocol exists so the `lazy-obsidian.audit` ski
 | sync | cmd_sync |
 | sync-staged | cmd_sync_staged |
 | reconcile | cmd_reconcile |
+| reconcile-dirty | cmd_reconcile_dirty |
 | install-hooks | cmd_install_hooks |
 | check-versions | cmd_check_versions |
