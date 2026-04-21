@@ -21,7 +21,7 @@ per-vault.
 
 | Artifact | Target path | Source |
 |---|---|---|
-| Protocol doc | `.claude/protocol/obsidian.iconizeize.md` | `${CLAUDE_PLUGIN_ROOT}/templates/obsidian-iconize/protocol.md` |
+| Protocol doc | `.claude/protocol/obsidian.iconize.md` | `${CLAUDE_PLUGIN_ROOT}/templates/obsidian-iconize/protocol.md` |
 | Icon-map | `.claude/obsidian-iconize/icon-map.json` | `${CLAUDE_PLUGIN_ROOT}/templates/obsidian-iconize/icon-map.json` |
 | Pre-commit shim | `.githooks/pre-commit` | Rendered from `pre-commit-shim.sh` via the worker's `install-hooks` |
 | PostToolUse entry | `.claude/settings.json` | Rendered from `post-tool-use.snippet.json` via the worker's `install-hooks` |
@@ -92,7 +92,7 @@ per the logging rule. Two-step write: `Bash(mkdir -p ...)` then `Write`.
 ## Idempotency
 
 Safe to re-run. Drift prompts only fire when content actually differs.
-Orphan detection: if `.claude/protocol/obsidian.iconizeize.md` exists but the
+Orphan detection: if `.claude/protocol/obsidian.iconize.md` exists but the
 plugin no longer ships `protocol.md`, offer deletion. Same for
 `icon-map.json`.
 

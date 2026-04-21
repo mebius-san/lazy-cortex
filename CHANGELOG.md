@@ -125,6 +125,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 0.1.23 — 2026-04-21
+
+- `/lazy-obsidian.iconize-install` now scaffolds the protocol doc at the correct path `.claude/protocol/obsidian.iconize.md`. Previously a typo in the skill's artifact table and orphan-detection note misspelled the filename as `obsidian.iconizeize.md`, so the install would have dropped the protocol at the wrong path.
+
 ### 0.1.22 — 2026-04-21
 
 - **Breaking:** Removed `/lazy-obsidian.iconize-file`. Its set/clear/get/list/bulk-apply/reconcile surface over the Iconize plugin's `data.json` is now covered by the new iconize-sync system described below.
