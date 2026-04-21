@@ -22,7 +22,6 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 - *"I want Iconize set up in this vault from scratch."* — `/lazy-obsidian.iconize-install` scaffolds the worker, registry, and config into the vault, copying from `templates/obsidian-iconize/`.
 - *"I need to edit which folders get which icons."* — `/lazy-obsidian.iconize-configure` is a wizard for editing the Iconize registry (the declarative mapping of paths to icons).
 - *"I need to apply the current registry to Iconize's `data.json`."* — `/lazy-obsidian.iconize-sync` wraps the worker (`bin/iconize_sync.py`) to reconcile the registry into `obsidian-icon-folder/data.json`, concurrent-safe.
-- *"Regenerate tag pages from note frontmatter."* — the `obsidian.gen-tag-pages` agent scans every `.md` file for `tags:` frontmatter and creates, keeps, or deletes tag pages under `Tags/` from a project-local template scaffolded by `/lazy-obsidian.install`.
 - *"What does this plugin do?"* — `/lazy-obsidian.help`.
 
 ## Requirements
@@ -55,22 +54,28 @@ Requires these plugins from the same marketplace:
 |---|---|
 | `lazy-obsidian.audit` | Semantic audit for the lazycortex-obsidian plugin. Verifies iconize-sync artifacts stay coherent: worker version constants match template HOOK_VERSION markers, icon-map template parses and covers at least one authored-doc + one status-file matcher, protocol template's `owner_skill` points at an existing skill, hook templates carry parseable version markers. Read-first; presents findings, then asks which to fix. Delegated from `lazy-core.doctor` Phase 3. |
 | `lazy-obsidian.config` | Bootstrap or audit the current project's Obsidian vault against the plugin's curated snapshot. Greenfield mode (no .obsidian/) copies the full snapshot. Audit mode (existing .obsidian/) diffs each musthave plugin's data.json and asks per-plugin whether to overwrite, keep local, or merge missing keys. Prompts for each optional plugin, regenerates community-plugins.json in correct load order, updates .gitignore with the canonical Obsidian block, and optionally wires the obsidian-mcp server into .mcp.json. Idempotent — safe to re-run. |
-| `lazy-obsidian.iconize-configure` | Wizard for editing the Iconize registry — the declarative mapping of vault paths to icons that the sync worker reconciles into Iconize's `data.json`. Adds, removes, and updates entries without hand-editing JSON. |
-| `lazy-obsidian.iconize-install` | Scaffold-into-vault wizard. Copies the iconize-sync worker, registry, and config into the current vault from `templates/obsidian-iconize/`. Idempotent — safe to re-run. |
-| `lazy-obsidian.iconize-sync` | Wrapper around the standalone worker at `bin/iconize_sync.py`. Applies the registry to `.obsidian/plugins/obsidian-icon-folder/data.json` — concurrent-safe (mtime guard + retry). Preserves `settings`, `rules`, and `recentlyUsedIcons`. Callable standalone or as a primitive from other skills. |
+| `lazy-obsidian.iconize-configure` | Interactively add, edit, or remove registry entries in the local `.claude/obsidian-iconize/icon-map.json` (roles, steps, requests, or any custom registry). Re-runnable. Writes back JSON with stable formatting. Use when the resolver misses a role/step/etc. — this skill is the canonical way to seed the missing registry entry without hand-editing. |
+| `lazy-obsidian.iconize-install` | Scaffold the iconize-sync system into an Obsidian vault: protocol doc, local icon-map, and pre-commit shim. Per-file wizard — asks before creating, shows diff on drift, offers deletion for orphans, strips legacy worker-written PostToolUse entries, migrates icon-map schema. Re-runnable; idempotent. Must be run from the consumer vault's git root. PostToolUse is plugin-shipped — no consumer settings.json mutation. |
+| `lazy-obsidian.iconize-sync` | Resolve Obsidian file/folder icons from frontmatter and write them to the Iconize plugin's `data.json`. Driven by a local declarative icon-map (`.claude/obsidian-iconize/icon-map.json`). Subcommands: `sync`, `sync-staged`, `reconcile`, `install-hooks`, `check-versions`. Callable from `.githooks/pre-commit` and Claude Code's PostToolUse hook. |
 | `lazy-obsidian.install` | Bootstrap the lazycortex-obsidian plugin for the current project (or globally). Syncs rule templates shipped by the plugin (currently none), scaffolds the tag-page template used by the `obsidian.gen-tag-pages` agent (project scope only), and cleans up orphaned rules from previous versions. Idempotent — safe to re-run. Detects install scope automatically. Does not mutate any Obsidian vault — that's `lazy-obsidian.config`. |
 
 ## Agents
 
 | Agent | Description |
 |---|---|
-| `obsidian.gen-tag-pages` | Regenerate Obsidian tag pages from `tags:` frontmatter across every `.md` file in the vault. Six-phase flow (collect → compute parent tags → inventory → diff → delete stale → create new → report). Reads its template from `.claude/templates/obsidian.tag-page-template.md` in the consumer repo (scaffolded by `lazy-obsidian.install`), substituting `{{TAG_PATH}}` and `{{SUMMARY}}`. Never overwrites existing tag pages; cleans up empty directories after stale deletions. |
+| `obsidian.gen-tag-pages` | Use this agent to generate or update Obsidian tag pages from tags used across the vault's notes. Scans all `.md` files for `tags:` frontmatter, then creates/updates/removes tag pages under `Tags/` keeping the folder hierarchy matching the tag hierarchy. Template is read from the consumer repo at `.claude/templates/obsidian.tag-page-template.md` (bootstrap via `lazy-obsidian.install`). |
 
 ## Commands
 
 | Command | Description |
 |---|---|
 | `lazy-obsidian.help` | Show lazycortex-obsidian purpose and a one-line summary of each skill it ships |
+
+## Hooks
+
+| Hook | Trigger | Description |
+|---|---|---|
+| `iconize_sync` | `Write\|Edit` | PostToolUse hook: after a Markdown file is written or edited, invoke `bin/iconize_sync.py sync` so Obsidian Iconize `data.json` stays in sync with the local icon-map. |
 
 ## Installation
 
@@ -102,6 +107,7 @@ Invoke skills with slash commands:
 ```
 /lazy-obsidian.audit
 /lazy-obsidian.config
+/lazy-obsidian.help
 /lazy-obsidian.iconize-configure
 /lazy-obsidian.iconize-install
 /lazy-obsidian.iconize-sync

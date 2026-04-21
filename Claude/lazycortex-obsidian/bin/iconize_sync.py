@@ -7,6 +7,14 @@ from pathlib import Path, PurePosixPath
 PROTOCOL_VERSION = "1.0.0"
 HOOK_VERSION = "1.0.0"
 
+# Schema versioning for icon-map.json (bilateral handshake).
+# - SCHEMA_VERSION: the version this worker writes on install/migrate.
+# - SUPPORTED_SCHEMA: integers this worker can consume at runtime; mismatch → preflight
+#   exits the hook cleanly (EXIT_OK) with a stderr diagnostic. Consumers bump by re-running
+#   lazy-obsidian.iconize-install.
+SCHEMA_VERSION = 1
+SUPPORTED_SCHEMA = {1}
+
 EXIT_OK = 0
 EXIT_VALIDATION = 1
 EXIT_DATAFILE_MISSING = 2
@@ -224,6 +232,8 @@ def cmd_sync(args) -> int:
     vault = find_vault(args.vault)
     data_path = find_data_path(vault)
     icon_map = load_icon_map(_resolve_icon_map_path(vault, args.icon_map))
+    if _preflight_incompatible(icon_map):
+        return EXIT_OK
     rel = normalize_path(args.path)
     fm = _read_frontmatter_for(vault, rel)
     entries = resolve_matchers(icon_map, rel, fm)
@@ -258,6 +268,8 @@ def cmd_sync_staged(args) -> int:
     vault = find_vault(args.vault)
     data_path = find_data_path(vault)
     icon_map = load_icon_map(_resolve_icon_map_path(vault, args.icon_map))
+    if _preflight_incompatible(icon_map):
+        return EXIT_OK
     all_entries: list = []
     for rel in _staged_md_files(vault):
         fm = _read_frontmatter_for(vault, rel)
@@ -299,6 +311,8 @@ def cmd_reconcile(args) -> int:
     vault = find_vault(args.vault)
     data_path = find_data_path(vault)
     icon_map = load_icon_map(_resolve_icon_map_path(vault, args.icon_map))
+    if _preflight_incompatible(icon_map):
+        return EXIT_OK
     prefix = normalize_path(args.prefix) if args.prefix else ""
     # Build desired entries
     desired: dict[str, dict] = {}
@@ -337,10 +351,11 @@ def cmd_reconcile(args) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Hook version management — install-hooks + check-versions
+# Hook + schema version management — install-hooks + check-versions + preflight
 # ---------------------------------------------------------------------------
 
 HOOK_VERSION_RE = re.compile(r"HOOK_VERSION:\s*(\d+)\.(\d+)\.(\d+)")
+SEMVER_RE = re.compile(r"^\s*(\d+)\.(\d+)\.(\d+)\s*$")
 
 
 def _plugin_root() -> Path:
@@ -348,25 +363,8 @@ def _plugin_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _plugin_bin_path() -> Path:
-    return _plugin_root() / "bin"
-
-
 def _template_path(name: str) -> Path:
     return _plugin_root() / "templates" / "obsidian-iconize" / name
-
-
-def _render_shim() -> str:
-    tpl = _template_path("pre-commit-shim.sh").read_text(encoding="utf-8")
-    return tpl.replace("{{PLUGIN_BIN_PATH}}", str(_plugin_bin_path()))
-
-
-def _render_post_tool_use_snippet() -> dict:
-    tpl = _template_path("post-tool-use.snippet.json").read_text(encoding="utf-8")
-    # JSON-escape the path so `"` or `\` in a plugin path cannot break json.loads.
-    escaped = json.dumps(str(_plugin_bin_path()))[1:-1]
-    rendered = tpl.replace("{{PLUGIN_BIN_PATH}}", escaped)
-    return json.loads(rendered)
 
 
 def _parse_hook_version(text: str) -> tuple[int, int, int] | None:
@@ -376,8 +374,15 @@ def _parse_hook_version(text: str) -> tuple[int, int, int] | None:
     return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
 
 
+def _parse_semver(text: str) -> tuple[int, int, int] | None:
+    m = SEMVER_RE.match(text)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
 def _current_version() -> tuple[int, int, int]:
-    v = _parse_hook_version(f"HOOK_VERSION: {HOOK_VERSION}")
+    v = _parse_semver(HOOK_VERSION)
     assert v is not None
     return v
 
@@ -389,42 +394,32 @@ def _shim_installed_version(vault: Path) -> tuple[int, int, int] | None:
     return _parse_hook_version(shim.read_text(encoding="utf-8", errors="ignore"))
 
 
-def _post_tool_use_installed_version(vault: Path) -> tuple[int, int, int] | None:
-    settings_path = vault / ".claude" / "settings.json"
-    if not settings_path.is_file():
-        return None
-    try:
-        s = json.loads(settings_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(s, dict):
-        return None
-    hooks = s.get("hooks")
-    if not isinstance(hooks, dict):
-        return None
-    post = hooks.get("PostToolUse")
-    if not isinstance(post, list):
-        return None
-    for group in post:
-        if not isinstance(group, dict):
-            continue
-        for h in group.get("hooks", []) or []:
-            if not isinstance(h, dict):
-                continue
-            cmd = h.get("command", "")
-            if isinstance(cmd, str) and "iconize_sync.py" in cmd:
-                v = _parse_hook_version(cmd)
-                if v is not None:
-                    return v
-    return None
+def _preflight_incompatible(icon_map: dict) -> bool:
+    """Return True if the loaded icon-map is incompatible with this worker.
 
+    Writes a stderr diagnostic so `2>/dev/null || true` hook wrappers stay quiet in
+    CI/tty but a curious user can `unset` the redirect and see why hooks went inert.
+    Returns True → caller should short-circuit with EXIT_OK (hooks must never block).
 
-def _is_iconize_sync_post_tool_use_group(group: dict) -> bool:
-    """True if a PostToolUse group is an iconize_sync entry (for replacement)."""
-    if not isinstance(group, dict):
-        return False
-    for h in group.get("hooks", []) or []:
-        if isinstance(h, dict) and "iconize_sync.py" in (h.get("command") or ""):
+    Back-compat: a missing `schema_version` is treated as schema 1 — pre-handshake
+    vaults keep working silently.
+    """
+    schema = icon_map.get("schema_version", 1)
+    if not isinstance(schema, int) or schema not in SUPPORTED_SCHEMA:
+        sys.stderr.write(
+            f"iconize_sync: icon-map schema_version={schema!r} not in {sorted(SUPPORTED_SCHEMA)}; "
+            f"hook inert. Run lazy-obsidian.iconize-install to migrate.\n")
+        return True
+    min_hv = icon_map.get("min_hook_version")
+    if isinstance(min_hv, str):
+        required = _parse_semver(min_hv)
+        if required is None:
+            sys.stderr.write(
+                f"iconize_sync: icon-map min_hook_version={min_hv!r} not valid semver; ignoring.\n")
+        elif _current_version() < required:
+            sys.stderr.write(
+                f"iconize_sync: HOOK_VERSION {HOOK_VERSION} < icon-map min_hook_version {min_hv}; "
+                f"hook inert. Upgrade lazycortex-obsidian plugin.\n")
             return True
     return False
 
@@ -433,50 +428,21 @@ def _install_shim(vault: Path) -> Path:
     hooks_dir = vault / ".githooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
     shim = hooks_dir / "pre-commit"
-    shim.write_text(_render_shim(), encoding="utf-8")
+    # Shim is path-agnostic: it resolves the plugin at exec time. Copy the template
+    # verbatim — no substitution, no /Users/... leakage, no version-pinned path.
+    shim.write_text(_template_path("pre-commit-shim.sh").read_text(encoding="utf-8"),
+                    encoding="utf-8")
     shim.chmod(0o755)
     return shim
-
-
-def _install_post_tool_use(vault: Path) -> Path:
-    claude_dir = vault / ".claude"
-    claude_dir.mkdir(parents=True, exist_ok=True)
-    settings_path = claude_dir / "settings.json"
-    settings: dict = {}
-    if settings_path.exists():
-        try:
-            loaded = json.loads(settings_path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                settings = loaded
-        except json.JSONDecodeError:
-            settings = {}  # defensive: malformed → reset
-    hooks = settings.get("hooks")
-    if not isinstance(hooks, dict):
-        hooks = {}
-    post_list = hooks.get("PostToolUse")
-    if not isinstance(post_list, list):
-        post_list = []
-    # Strip any prior iconize_sync entries so re-install is idempotent
-    post_list = [g for g in post_list if not _is_iconize_sync_post_tool_use_group(g)]
-    snippet = _render_post_tool_use_snippet()
-    iconize_sync_groups = snippet["hooks"]["PostToolUse"]
-    post_list.extend(iconize_sync_groups)
-    hooks["PostToolUse"] = post_list
-    settings["hooks"] = hooks
-    settings_path.write_text(
-        json.dumps(settings, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    return settings_path
 
 
 def cmd_install_hooks(args) -> int:
     vault = find_vault(args.vault)
     shim = _install_shim(vault)
-    settings_path = _install_post_tool_use(vault)
     print(json.dumps({
         "op": "install-hooks",
         "HOOK_VERSION": HOOK_VERSION,
         "shim": str(shim),
-        "settings": str(settings_path),
     }, ensure_ascii=False))
     return EXIT_OK
 
@@ -485,7 +451,6 @@ def cmd_check_versions(args) -> int:
     vault = find_vault(args.vault)
     current = _current_version()
     pre = _shim_installed_version(vault)
-    post = _post_tool_use_installed_version(vault)
 
     def _status(installed):
         if installed is None:
@@ -497,19 +462,37 @@ def cmd_check_versions(args) -> int:
         return "ok"
 
     pre_status = _status(pre)
-    post_status = _status(post)
-    drift = any(s in ("missing", "major-drift") for s in (pre_status, post_status))
+
+    # Icon-map schema handshake (bilateral): report both the schema the vault declares
+    # and whether this worker's HOOK_VERSION satisfies its min_hook_version, if any.
+    schema_block: dict = {"declared": None, "status": "missing", "min_hook_version": None}
+    try:
+        icon_map = load_icon_map(_resolve_icon_map_path(vault, getattr(args, "icon_map", None)))
+    except IconizeError:
+        icon_map = None
+    if icon_map is not None:
+        schema = icon_map.get("schema_version", 1)
+        min_hv = icon_map.get("min_hook_version")
+        schema_block["declared"] = schema
+        schema_block["min_hook_version"] = min_hv if isinstance(min_hv, str) else None
+        compatible = isinstance(schema, int) and schema in SUPPORTED_SCHEMA
+        if compatible and isinstance(min_hv, str):
+            required = _parse_semver(min_hv)
+            if required is not None and current < required:
+                compatible = False
+        schema_block["status"] = "ok" if compatible else "incompatible"
+
+    drift = pre_status in ("missing", "major-drift") or schema_block["status"] == "incompatible"
     report = {
         "op": "check-versions",
         "HOOK_VERSION": HOOK_VERSION,
+        "SCHEMA_VERSION": SCHEMA_VERSION,
+        "SUPPORTED_SCHEMA": sorted(SUPPORTED_SCHEMA),
         "pre_commit": {
             "installed": ".".join(map(str, pre)) if pre else None,
             "status": pre_status,
         },
-        "post_tool_use": {
-            "installed": ".".join(map(str, post)) if post else None,
-            "status": post_status,
-        },
+        "icon_map_schema": schema_block,
     }
     print(json.dumps(report, ensure_ascii=False))
     return EXIT_VERSION_DRIFT if drift else EXIT_OK

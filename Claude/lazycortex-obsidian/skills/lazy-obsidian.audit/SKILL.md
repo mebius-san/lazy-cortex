@@ -14,18 +14,23 @@ this skill owns the domain-specific invariants.
 ## Phase 1 — Version coherence
 
 - Read `${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py`; extract
-  `PROTOCOL_VERSION` and `HOOK_VERSION` constants.
+  `PROTOCOL_VERSION`, `HOOK_VERSION`, `SCHEMA_VERSION`, and `SUPPORTED_SCHEMA`
+  constants.
 - Grep `HOOK_VERSION:` markers out of:
   - `templates/obsidian-iconize/pre-commit-shim.sh`
-  - `templates/obsidian-iconize/post-tool-use.snippet.json`
-- **FAIL** if MAJOR differs between worker and any template.
+  - `hooks/hooks.json` (plugin-shipped PostToolUse entry)
+- **FAIL** if MAJOR differs between worker and any template/hook.
 - **WARN** if MINOR/PATCH differs.
+- **FAIL** if `SCHEMA_VERSION` is not a member of `SUPPORTED_SCHEMA` (the worker
+  would refuse its own written config).
+- **FAIL** if `templates/obsidian-iconize/icon-map.json`'s `schema_version`
+  does not equal the worker's `SCHEMA_VERSION`.
 
 ## Phase 2 — Icon-map template sanity
 
 - Load `templates/obsidian-iconize/icon-map.json`.
 - **FAIL** if JSON doesn't parse.
-- **FAIL** if required top-level keys missing (`version`, `matchers`).
+- **FAIL** if required top-level keys missing (`schema_version`, `matchers`).
 - **WARN** if no authored-doc-style matcher is present (no matcher with
   `basename_in` containing common authored-doc basenames OR no
   `role_matches_basename` shorthand).

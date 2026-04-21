@@ -125,6 +125,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 0.2.0 — 2026-04-21
+
+- **Breaking:** the iconize-sync PostToolUse hook is now shipped by the plugin itself (auto-loaded from `hooks/hooks.json`) instead of being written into your `.claude/settings.json` with a hardcoded plugin path. Consumers upgrading from 0.1.23 or earlier **must re-run `/lazy-obsidian.iconize-install` once** — the install wizard detects and offers to delete the stale PostToolUse entry and migrate the icon-map to the new schema.
+- The `.githooks/pre-commit` shim now resolves the worker's plugin path at runtime instead of baking in an absolute `/Users/.../plugins/cache/.../<version>/bin/` path. The shim survives plugin upgrades and machine-to-machine moves, and no longer leaks a local user path into your tracked git hooks.
+- New bilateral version handshake between the worker's `SCHEMA_VERSION` / `HOOK_VERSION` constants and the vault's `icon-map.json` — on incompatible drift the hook self-disables silently (exit 0 + stderr diagnostic) so git commits and editor writes never block. `/lazy-obsidian.iconize-sync check-versions` reports the handshake state.
+- `/lazy-obsidian.audit` (Phase 1) now cross-checks the schema-handshake constants instead of the deleted PostToolUse snippet template.
+
 ### 0.1.23 — 2026-04-21
 
 - `/lazy-obsidian.iconize-install` now scaffolds the protocol doc at the correct path `.claude/protocol/obsidian.iconize.md`. Previously a typo in the skill's artifact table and orphan-detection note misspelled the filename as `obsidian.iconizeize.md`, so the install would have dropped the protocol at the wrong path.

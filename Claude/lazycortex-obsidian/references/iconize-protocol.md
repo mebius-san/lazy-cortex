@@ -8,8 +8,9 @@ owner_skill: lazy-obsidian.iconize-sync
 
 Single source of truth for how file/folder icons are computed from frontmatter
 and written to `.obsidian/plugins/obsidian-icon-folder/data.json` in this vault.
-Read by `lazy-obsidian.iconize-sync`, the `.githooks/pre-commit` hook, and the
-PostToolUse hook in `.claude/settings.json`.
+Read by `lazy-obsidian.iconize-sync`, the `.githooks/pre-commit` shim, and the
+plugin-shipped PostToolUse hook (auto-loaded from the plugin's `hooks/hooks.json`
+when `lazycortex-obsidian` is enabled).
 
 This file describes the MECHANICS (resolver inputs/outputs, entry format,
 version policy). The declarative resolver rules live in

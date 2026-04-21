@@ -46,15 +46,24 @@ never touched. Use after bulk frontmatter changes.
 
 ### `install-hooks`
 
-Write `.githooks/pre-commit` (shim that execs the plugin worker, with
-`HOOK_VERSION` marker) and merge the PostToolUse entry into
-`.claude/settings.json`. Idempotent — removes any prior iconize_sync entries
-before re-inserting.
+Write `.githooks/pre-commit` (shim that runtime-resolves the plugin's
+`iconize_sync.py` at exec time, carrying a `HOOK_VERSION` marker). Does **not**
+touch consumer `.claude/settings.json` — the PostToolUse hook is shipped by
+the plugin itself via `hooks/hooks.json` and is auto-loaded when the plugin
+is enabled. Idempotent.
 
 ### `check-versions`
 
-Compare installed shim's `HOOK_VERSION` marker vs the worker's current
-`HOOK_VERSION`. Exit 0 on MAJOR match, exit 5 on MAJOR drift. Run after
+Reports two independent drift axes:
+
+- **Shim** — compares the installed `.githooks/pre-commit` `HOOK_VERSION`
+  marker vs the worker's current `HOOK_VERSION`.
+- **Icon-map schema** — checks the vault's `icon-map.json` `schema_version`
+  against the worker's `SUPPORTED_SCHEMA` set, and verifies `HOOK_VERSION`
+  satisfies the icon-map's optional `min_hook_version`.
+
+Exits 0 when both are ok or schema is merely "missing" (vault not opted in);
+exits 5 on shim MAJOR drift, shim missing, or schema incompatible. Run after
 `/plugin update lazycortex-obsidian@lazycortex`.
 
 ## How to run
