@@ -72,6 +72,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-log
 
+### 0.2.7 — 2026-04-22
+
+- `/lazy-log.install` now gitignores `docs/changelog.md` in addition to `.logs/`. The distilled changelog is a per-contributor local cache feeding Claude's change-history recall — tracking it in git would cause merge conflicts between teammates, since every distill run rewrites the same file with a single `last-distilled-sha` marker. Existing installs: re-run `/lazy-log.install` to have the skill add `docs/changelog.md` to `.gitignore`. The file stays on disk; only git-tracking changes.
+
 ### 0.2.5 — 2026-04-19
 
 - **Breaking:** the `lazy-log.logging` rule now **mandates** running `/lazy-log.distill` after any non-trivial commit. Previously this was worded as "consider" / "guidance, not a hard rule", and in practice distill was skipped and `docs/changelog.md` stayed empty. Trivial commits (typos, formatting, dep bumps) and explicit per-turn user opt-outs still skip.
@@ -124,6 +128,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 0.2.7 — 2026-04-22
+
+- (No user-facing changes; version autobumped during an internal plugin README re-sync.)
 
 ### 0.2.6 — 2026-04-22
 

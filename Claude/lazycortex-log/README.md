@@ -39,7 +39,7 @@ Then `lazy-log.recall` searches across all three plus git history and memory, an
 
 1. Enable the plugin at **project scope** — logs and changelog belong to a specific repo, so this usually isn't a global install.
 2. Restart Claude Code.
-3. Run `/lazy-log.install` once per project. This drops the `lazy-log.logging` rule into `.claude/rules/`, creates `docs/changelog.md`, and ensures `.gitignore` covers `.logs/`.
+3. Run `/lazy-log.install` once per project. This drops the `lazy-log.logging` rule into `.claude/rules/`, creates `docs/changelog.md`, and ensures `.gitignore` covers `.logs/` and `docs/changelog.md` (both are per-contributor local — the structured commit log and distilled prose memory for your local Claude session).
 4. From then on, the post-commit hook records every commit. Run `/lazy-log.distill` when you want the human-readable changelog updated. Run `/lazy-log.recall` whenever you're trying to remember something.
 
 ## Dependencies
@@ -53,7 +53,7 @@ Requires these plugins from the same marketplace:
 | Skill | Description |
 |---|---|
 | `lazy-log.audit` | Verify that the project's logging rule is installed and coherent. The rule itself is the single source of truth — individual skills/agents/commands do NOT need per-file ## Logging sections. Reports gaps and offers fixes. Read-first — never modifies files without confirmation. |
-| `lazy-log.install` | Bootstrap the lazycortex-log plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, creates docs/changelog.md if missing, and ensures .gitignore covers .logs/. Idempotent — safe to re-run. Detects install scope automatically. |
+| `lazy-log.install` | Bootstrap the lazycortex-log plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, creates docs/changelog.md if missing, and ensures .gitignore covers .logs/ and docs/changelog.md. Idempotent — safe to re-run. Detects install scope automatically. |
 
 ## Agents
 

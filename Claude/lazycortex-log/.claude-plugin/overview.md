@@ -35,5 +35,5 @@ Then `lazy-log.recall` searches across all three plus git history and memory, an
 
 1. Enable the plugin at **project scope** — logs and changelog belong to a specific repo, so this usually isn't a global install.
 2. Restart Claude Code.
-3. Run `/lazy-log.install` once per project. This drops the `lazy-log.logging` rule into `.claude/rules/`, creates `docs/changelog.md`, and ensures `.gitignore` covers `.logs/`.
+3. Run `/lazy-log.install` once per project. This drops the `lazy-log.logging` rule into `.claude/rules/`, creates `docs/changelog.md`, and ensures `.gitignore` covers `.logs/` and `docs/changelog.md` (both are per-contributor local — the structured commit log and distilled prose memory for your local Claude session).
 4. From then on, the post-commit hook records every commit. Run `/lazy-log.distill` when you want the human-readable changelog updated. Run `/lazy-log.recall` whenever you're trying to remember something.

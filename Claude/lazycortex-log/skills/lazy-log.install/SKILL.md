@@ -1,6 +1,6 @@
 ---
 name: lazy-log.install
-description: "Bootstrap the lazycortex-log plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, creates docs/changelog.md if missing, and ensures .gitignore covers .logs/. Idempotent — safe to re-run. Detects install scope automatically."
+description: "Bootstrap the lazycortex-log plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, creates docs/changelog.md if missing, and ensures .gitignore covers .logs/ and docs/changelog.md. Idempotent — safe to re-run. Detects install scope automatically."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *)
 ---
 
@@ -82,16 +82,19 @@ If it already exists, leave it alone.
 
 ## Step 5: Update .gitignore (project scope only)
 
-Read `<repo-root>/.gitignore`. If it does not contain `.logs/` (either as a standalone line or part of a directory pattern), append a Claude Code block:
+Read `<repo-root>/.gitignore`. Ensure it covers both `.logs/` and `docs/changelog.md` — both are per-contributor local artifacts (structured commit log + distilled prose memory for the local Claude session). Add whichever is missing.
+
+If neither is covered, append a Claude Code block:
 
 ```
 # ---------------------------------------------------------------------------------------
 # Claude Code logs (lazycortex-log)
 
 .logs/
+docs/changelog.md
 ```
 
-If `.logs/` is already covered, skip.
+If the block already exists but is missing one of the two entries, add the missing entry to it. If both are already covered (either by this block or equivalent patterns), skip.
 
 ## Step 6: Verify
 

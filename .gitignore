@@ -16,6 +16,7 @@
 .claude/settings.local.json
 .claude/worktrees/
 .logs/
+docs/changelog.md
 
 # Superpowers scratch area (plans, specs, notes — machine-local)
 docs/superpowers/
