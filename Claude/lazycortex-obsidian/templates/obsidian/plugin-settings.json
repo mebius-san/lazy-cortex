@@ -78,7 +78,7 @@
     "openInNewTab": false,
     "focusExistingTab": false,
     "oldFolderNoteName": "{{folder_name}}",
-    "folderNoteName": "_folder",
+    "folderNoteName": "{{folder_name}}",
     "folderNoteType": ".md",
     "disableFolderHighlighting": false,
     "newFolderNoteName": "{{folder_name}}",

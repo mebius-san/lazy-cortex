@@ -5,8 +5,8 @@ const fs = require('fs');
 const path = require('path');
 
 const TARGET_PLUGIN_ID = 'obsidian-icon-folder';
+const FILE_EXPLORER_ID = 'file-explorer';
 const DEBOUNCE_MS = 250;
-const SELF_WRITE_MUTE_MS = 2000;
 
 class IconizeReloaderPlugin extends Plugin {
   async onload() {
@@ -22,27 +22,78 @@ class IconizeReloaderPlugin extends Plugin {
     try { lastMtime = fs.statSync(dataFile).mtimeMs; } catch (e) { /* not present yet */ }
 
     let debounceTimer = null;
-    let mutedUntil = 0;
+    let running = false;
 
-    const softReload = async () => {
+    // Refresh iconize WITHOUT disabling it. Sequence:
+    //   1. Pull fresh data.json into iconize's in-memory `data` via its own
+    //      Plugin.loadData() — same shape iconize itself uses.
+    //   2. Strip existing `.iconize-icon` DOM nodes from every file-explorer
+    //      tree-item. Required because addAll's `children.length === 2 || === 1`
+    //      check fails for folders that already have an icon (folder baseline
+    //      = 2 children: collapse-indicator + inner-title; with icon = 3, check
+    //      fails, painting skipped). Stripping returns baseline to 2 (folder)
+    //      / 1 (file) so the check passes.
+    //   3. Clear iconize.registeredFileExplorers — otherwise addAll's outer
+    //      loop skips already-registered explorers (it's designed for
+    //      first-mount, not re-paint).
+    //   4. Call iconize.handleChangeLayout() — re-paints file-explorer, tabs
+    //      and title icons from the now-fresh `data`. No window reload, no
+    //      plugin toggle, no race with iconize's onunload writeback.
+    const refreshTree = async () => {
+      if (running) return;
+      running = true;
       try {
-        mutedUntil = Date.now() + SELF_WRITE_MUTE_MS;
-        await this.app.plugins.disablePlugin(TARGET_PLUGIN_ID);
-        await this.app.plugins.enablePlugin(TARGET_PLUGIN_ID);
-        console.log('[iconize-reloader] soft-reloaded', TARGET_PLUGIN_ID);
+        const iconize = this.app.plugins.plugins[TARGET_PLUGIN_ID];
+        if (iconize && typeof iconize.loadData === 'function') {
+          const fresh = await iconize.loadData();
+          if (fresh && typeof iconize.data === 'object' && iconize.data !== null) {
+            for (const k of Object.keys(iconize.data)) delete iconize.data[k];
+            Object.assign(iconize.data, fresh);
+          } else {
+            iconize.data = fresh;
+          }
+        }
+
+        if (iconize) {
+          let stripped = 0;
+          const leaves = this.app.workspace.getLeavesOfType(FILE_EXPLORER_ID);
+          for (const leaf of leaves) {
+            const fileItems = leaf.view && leaf.view.fileItems;
+            if (!fileItems) continue;
+            for (const p of Object.keys(fileItems)) {
+              const item = fileItems[p];
+              const titleEl = item && (item.selfEl || item.titleEl || item.el);
+              if (!titleEl) continue;
+              const existing = titleEl.querySelector(':scope > .iconize-icon');
+              if (existing) { existing.remove(); stripped++; }
+            }
+          }
+
+          if (iconize.registeredFileExplorers && typeof iconize.registeredFileExplorers.clear === 'function') {
+            iconize.registeredFileExplorers.clear();
+          }
+
+          if (typeof iconize.handleChangeLayout === 'function') {
+            iconize.handleChangeLayout();
+          } else {
+            this.app.workspace.trigger('layout-change');
+          }
+          console.log('[iconize-reloader] refresh done; stripped', stripped, 'existing icon nodes');
+        }
       } catch (e) {
-        console.error('[iconize-reloader] reload failed', e);
+        console.error('[iconize-reloader] refresh failed', e);
+      } finally {
+        running = false;
       }
     };
 
     const onChange = () => {
-      if (Date.now() < mutedUntil) return;
       let m = 0;
       try { m = fs.statSync(dataFile).mtimeMs; } catch (e) { return; }
       if (m === lastMtime) return;
       lastMtime = m;
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => { debounceTimer = null; softReload(); }, DEBOUNCE_MS);
+      debounceTimer = setTimeout(() => { debounceTimer = null; refreshTree(); }, DEBOUNCE_MS);
     };
 
     // Watch the parent dir and filter — survives atomic rename (Dropbox/iCloud).
@@ -55,7 +106,7 @@ class IconizeReloaderPlugin extends Plugin {
     this.addCommand({
       id: 'reload-iconize',
       name: 'Reload Iconize now',
-      callback: softReload,
+      callback: refreshTree,
     });
 
     console.log('[iconize-reloader] watching', dataFile);

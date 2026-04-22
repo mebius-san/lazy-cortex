@@ -101,8 +101,12 @@ commit.
 After `lazy-obsidian.iconize-sync` writes `data.json`, the companion
 `iconize-reloader` plugin (shipped via `templates/obsidian/plugins/iconize-reloader/`
 and bootstrapped by `lazy-obsidian.config`) detects the change via filesystem
-watch and soft-reloads Iconize so the in-memory icon map stays in sync with
-disk — no Obsidian restart, no disable/enable click. See
+watch and refreshes Iconize in place: it reloads `iconize.data` via the
+standard `Plugin.loadData()` API, strips stale `.iconize-icon` DOM nodes from
+the file-explorer, clears `iconize.registeredFileExplorers`, and calls
+`iconize.handleChangeLayout()` to re-paint from the fresh data. Iconize is
+never disabled/re-enabled — earlier toggle-based versions raced with iconize's
+`onunload` writeback and could clobber just-written `data.json` entries. See
 `docs/tasks/iconize-reloader-helper.md` for the underlying Iconize limitation
 this works around (no `onExternalSettingsChange()`, no vault watcher on its own
 `data.json`).

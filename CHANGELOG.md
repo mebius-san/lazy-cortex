@@ -125,6 +125,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 0.2.6 — 2026-04-22
+
+- **Fix:** the bundled `iconize-reloader` companion plugin no longer toggles Iconize on every `data.json` change. The previous toggle behavior raced with Iconize's `onunload` writeback — whenever the icon-map worker wrote fresh entries, the reloader fired, Iconize unloaded, and its stale in-memory state clobbered the fresh write (in Dropbox-synced vaults this also produced `(conflicted copy)` files). It also defeated manual disables: turning Iconize off in Settings sprang it back on within ~250ms. The new reloader refreshes Iconize in place via its `loadData()` + `handleChangeLayout()` API and strips stale icon DOM nodes so folders re-paint correctly. If you manually disable Iconize, it now stays disabled.
+
+### 0.2.5 — 2026-04-22
+
+- **Breaking:** `folderNoteName` in the `folder-notes` plugin override (`templates/obsidian/plugin-settings.json`) changed from `"_folder"` to `"{{folder_name}}"`, matching the existing `newFolderNoteName` / `oldFolderNoteName` templates. After the next `/lazy-obsidian.config` run, the `folder-notes` plugin recognizes `<FolderName>.md` inside each folder as the folder note instead of `_folder.md`. If you have existing `_folder.md` files, rename them to the folder's own name to restore folder-note behavior.
+
 ### 0.2.4 — 2026-04-22
 
 - New **Stop-hook safety net** closes a gap in the PostToolUse `Write|Edit` hook: edits that land through `Bash`, shell scripts, bulk renames, or `rg | xargs sed` no longer leave Iconize's `data.json` drifting from your icon-map. At the end of every agent turn, a new `iconize_sync.py reconcile-dirty` subcommand scans `git status` for dirty Markdown files and reconciles each dirty prefix in one batched write. Silent no-op on clean trees, non-git vaults, or when the icon-map isn't installed.
