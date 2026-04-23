@@ -27,7 +27,7 @@ Core skills and agents for Claude Code
 
 Ships 7 skills, 1 command, 2 rules, and 2 hooks.
 
-See [`Claude/lazycortex-core/`](Claude/lazycortex-core/) for details.
+See [`claude/lazycortex-core/`](claude/lazycortex-core/) for details.
 
 ### lazycortex-log
 
@@ -37,7 +37,7 @@ Ships 2 skills, 4 agents, 1 command, 1 rule, and 1 hook.
 
 Requires: lazycortex-core
 
-See [`Claude/lazycortex-log/`](Claude/lazycortex-log/) for details.
+See [`claude/lazycortex-log/`](claude/lazycortex-log/) for details.
 
 ### lazycortex-obsidian
 
@@ -47,7 +47,7 @@ Ships 6 skills, 1 agent, 1 command, and 2 hooks.
 
 Requires: lazycortex-core
 
-See [`Claude/lazycortex-obsidian/`](Claude/lazycortex-obsidian/) for details.
+See [`claude/lazycortex-obsidian/`](claude/lazycortex-obsidian/) for details.
 
 ### lazycortex-specs
 
@@ -55,7 +55,7 @@ Specification and design skills for Claude Code
 
 Ships 1 command.
 
-See [`Claude/lazycortex-specs/`](Claude/lazycortex-specs/) for details.
+See [`claude/lazycortex-specs/`](claude/lazycortex-specs/) for details.
 
 ## Requirements
 

@@ -1,9 +1,8 @@
 ---
 name: lazy-guard.allow-mcp
-description: "Register tools of one or more MCP servers in Claude Code settings using a 3-bucket classifier — safe/reversible tools into permissions.allow (no prompt), truly destructive tools into permissions.ask (always prompt), and medium-risk tools skipped entirely so Claude Code prompts once per call and the user decides. Writes to settings.local.json (gitignored) by default to keep personal permissions out of tracked settings shared with teammates. For globally defined servers, asks whether to register at the global scope (~/.claude/settings.local.json) or per-project (./.claude/settings.local.json). Also strips redundant mcp__ entries from paired tracked settings.json after promotion. Use when the user says 'allow context7 mcp', 'allow all mcp tools', 'trust the brave-search MCP server', or similar."
+description: "Register tools of one or more MCP servers in Claude Code settings using a 3-bucket classifier — safe/reversible tools into permissions.allow (no prompt), truly destructive tools into permissions.ask (always prompt), and medium-risk tools skipped entirely so Claude Code prompts once per call and the user decides. Writes to settings.local.json (gitignored) by default to keep personal permissions out of tracked settings shared with teammates. For globally defined servers, asks whether to register at the global scope (~/.claude/settings.local.json) or per-project (./.claude/settings.local.json). Also strips redundant mcp__ entries from paired tracked settings.json after promotion. Optionally installs a SessionStart preload hook (in tracked settings.json) that tells the agent to resolve the server's tool schemas via ToolSearch at session start — eliminates the deferred-loading round-trip that otherwise causes drift to Bash equivalents. Use when the user says 'allow context7 mcp', 'allow all mcp tools', 'trust the brave-search MCP server', or similar."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(date -u *), Bash(git rev-parse *)
 ---
-
 # Register MCP Server Tools
 
 Register `mcp__<server>__<tool>` entries for one or more MCP servers using a **3-bucket classifier**:
@@ -218,24 +217,133 @@ Safety:
 - Never removes entries for servers not processed in the current run.
 - Pure subtraction → idempotent on re-run.
 
-## Phase 7: Report
+## Phase 7: Optional — SessionStart preload hook for deferred MCP tool schemas
+
+**Why.** MCP tools are surfaced to the agent as **deferred** — only tool names appear at session start; calling one requires a prior `ToolSearch` round-trip to load its schema. That friction is asymmetric with the always-loaded `Bash` tool, so the agent drifts to shell equivalents (e.g. `Bash(git status)` instead of `mcp__git__git_status`) even when a rule forbids it. A SessionStart hook can inject a short instruction telling the agent to resolve specific MCP tool schemas via `ToolSearch` on the first turn — one-time cost ≈1.1k tokens per session, and MCP tools become first-class for the rest of the session.
+
+**Scope target.** Hooks are **enablement**, not permission, and by the hygiene rule they belong in **tracked `settings.json`** (not `settings.local.json`). This is the only phase in this skill that writes to tracked settings.
+
+### 7a. Decide which servers to preload
+
+Only offer preload for servers that had **at least one tool enumerated in Phase 3** (no point preloading a server with zero live tools). The preload set for each server is the **full Phase 3 enumeration** — `allow` + `ask` + `skip` — because `ToolSearch` friction affects every bucket, not just allowed tools.
+
+Skip this phase entirely if Phase 3 produced an empty preload set across every processed server.
+
+### 7b. Detect existing hook state, then ask only if ambiguous
+
+Inspect both tracked settings files for an existing SessionStart hook whose command mentions `ToolSearch` and `select:mcp__`:
+
+- `~/.claude/settings.json`
+- `./.claude/settings.json`
+
+Routing rules (mirror Phase 4b's "infer first, ask only if undetermined"):
+
+| Existing preload hook found in | Action |
+|--------------------------------|--------|
+| Global only                    | Route to **global**. Merge new tool names into its `select:` list. Do not ask scope. |
+| Project only                   | Route to **project**. Merge new tool names into its `select:` list. Do not ask scope. |
+| Both scopes                    | Ask via `AskUserQuestion` — state is ambiguous. Surface the other scope as a note in Phase 8. |
+| Neither                        | Ask via `AskUserQuestion`: first whether to install the hook at all, then scope if yes. |
+
+**Two separate `AskUserQuestion` calls in the "neither" case** — never combined (one question at a time is mandatory per the interaction rule):
+
+1. **Install?** options:
+   - `Yes — install SessionStart preload hook (Recommended)` — description: "Pays ≈1.1k tokens per session so MCP tools are first-class; the alternative `ENABLE_TOOL_SEARCH=false` costs ≈13–16k tokens per session by loading every tool upfront."
+   - `No — skip, accept ToolSearch round-trips per call` — description: "Keeps session-start context minimal. The agent may still drift to Bash equivalents when MCP schemas feel expensive to fetch."
+2. **Scope?** (only if the user chose Yes) options:
+   - `Project (./.claude/settings.json) (Recommended)` — description: "Smaller blast radius; easier to revert by deleting the hook entry. Right choice when the servers being registered are project-specific."
+   - `Global (~/.claude/settings.json)` — description: "One install covers every project on this machine. Right choice when the server is always loaded everywhere (e.g. `git`, `memory-personal`)."
+
+If the user chose **No** on a prior run, re-ask on subsequent runs — hook presence/absence is the only persistent state; don't treat a past decline as permanent.
+
+**Silence on no-ops.** If the inferred-target hook's `select:` list already contains every tool name in the preload set (union equals the current list), there is nothing to write — skip the prompt and report an idempotent no-op.
+
+### 7c. Hook shape
+
+Exactly one SessionStart hook per scope. Matcher covers `startup`, `resume`, and `clear` so the preload fires whenever the session resets:
+
+```jsonc
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "printf '%s' 'Preload MCP tool schemas now: before your next action, call ToolSearch with query \"select:mcp__<server1>__<tool1>,mcp__<server1>__<tool2>,mcp__<server2>__<tool1>,...\" so the schemas are resident and you do not drift to Bash equivalents.'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Tool names in the `select:` list are **sorted alphabetically** and **comma-separated with no spaces**. Always regenerate the full list from the union of existing + new — don't append — so output is deterministic and dedup-safe.
+
+### 7d. Merge logic
+
+For the chosen scope's `settings.json`:
+
+1. If the file doesn't exist: create it with `{"hooks": {"SessionStart": [ … the hook above … ]}}` plus trailing newline.
+2. If `hooks.SessionStart` is absent: add the SessionStart array with the single entry.
+3. If a SessionStart matcher entry exists whose `hooks[].command` contains `ToolSearch` and `select:mcp__`: replace its `select:...` argument with the union (sorted, deduped) of the existing list and the new preload set. Do not touch any other field of the entry.
+4. If SessionStart matcher entries exist but none of their commands contain `ToolSearch`: append a **new** hook entry under its own matcher block rather than mutating unrelated entries. Never clobber hooks owned by other features.
+5. Preserve all other keys, entries, formatting, and comments. Use `Edit` with minimal old/new ranges.
+
+### 7e. Preview + confirm
+
+Extend the Phase 5 preview with a `hooks:` block when a write is planned, e.g.:
+
+```
+<target file, absolute path>  (settings.json — tracked — hooks = enablement)
+  SessionStart preload:
+    + mcp__git__git_add
+    + mcp__git__git_commit
+    + mcp__git__git_diff
+    …
+    (merging into existing select: list of N entries → new list of M entries)
+  cost: ≈1.1k tokens per session, one-time at session start
+```
+
+Request a second confirmation specifically for this write — Phase 5's confirmation covered only permissions + cross-scope cleanup. One tool call per question per Phase 7b.
+
+### 7f. Post-write verification
+
+After the `Edit`/`Write`:
+
+- Re-read the file; assert JSON parses.
+- Assert `hooks.SessionStart` exists and contains exactly one entry whose command mentions `ToolSearch`.
+- Assert that entry's `select:` list is sorted, deduped, and contains every tool name in the preload set.
+- Assert no unrelated hook entry was altered.
+
+### 7g. Safety
+
+- **Tracked `settings.json` only.** Never install this hook into `settings.local.json`. Permissions stay local; enablement (including hooks) goes tracked.
+- **No arbitrary shell.** The hook's `command` is `printf` (or equivalent `echo`) of a fixed preload-instruction string. Never any other binary, no network calls, no file writes.
+- **Union-only mutations.** The hook's `select:` list only ever grows or stays the same during this phase. Removing tools from the preload list is out of scope for `lazy-guard.allow-mcp` — the user does it by hand, or via a future `lazy-guard.revoke-mcp`.
+- **Idempotent.** Re-running with the same server set produces no change.
+
+## Phase 8: Report
 
 Print a short summary:
 
 ```
 ## Allow-MCP Result
 
-| Server          | Source      | Target file                        | → allow | → ask | skipped | allow→ask | Removed from tracked |
-|-----------------|-------------|------------------------------------|---------|-------|---------|-----------|----------------------|
-| context7        | ./.mcp.json | ./.claude/settings.local.json      |    2    |   0   |    0    |     0     |          0           |
-| memory-project  | ./.mcp.json | ./.claude/settings.local.json      |   19    |   6   |    1    |     0     |          3           |
-| git             | ~/.mcp.json | ./.claude/settings.local.json      |    9    |   2   |    1    |     3     |          0           |
+| Server          | Source      | Target file                        | → allow | → ask | skipped | allow→ask | Removed from tracked | Preload hook |
+|-----------------|-------------|------------------------------------|---------|-------|---------|-----------|----------------------|--------------|
+| context7        | ./.mcp.json | ./.claude/settings.local.json      |    2    |   0   |    0    |     0     |          0           | project (+2) |
+| memory-project  | ./.mcp.json | ./.claude/settings.local.json      |   19    |   6   |    1    |     0     |          3           | project (+26)|
+| git             | ~/.mcp.json | ./.claude/settings.local.json      |    9    |   2   |    1    |     3     |          0           | global (+12) |
 ```
 
 - `→ allow` / `→ ask`: entries newly added to each list this run.
 - `skipped`: tools classified as medium-risk and deliberately left out of both lists this run.
 - `allow→ask`: destructive tools promoted from a pre-existing (mis-placed) `allow` entry to `ask`.
 - `Removed from tracked`: entries stripped from the paired tracked `settings.json` during Phase 6.5.
+- `Preload hook`: scope of the SessionStart preload hook (`global` / `project` / `—` for declined / `—` for no-op), plus the number of tool names added to its `select:` list.
 
 Include warnings for:
 - servers that were defined but had zero tools loaded in this session
@@ -254,7 +362,7 @@ Frontmatter must include:
 - `date` — UTC timestamp
 - `input` — the server names / flags passed in, or `none`
 
-Body sections: `## Actions` (bullet list: files read, servers resolved, scope chosen for global servers, entries added to allow, entries added to ask, entries skipped, entries promoted allow→ask, entries removed from paired tracked settings, files written) and `## Result` (success / warnings / skipped).
+Body sections: `## Actions` (bullet list: files read, servers resolved, scope chosen for global servers, entries added to allow, entries added to ask, entries skipped, entries promoted allow→ask, entries removed from paired tracked settings, preload-hook install choice + scope + tool names added to `select:`, files written) and `## Result` (success / warnings / skipped).
 
 ## Safety notes
 
@@ -265,5 +373,6 @@ Body sections: `## Actions` (bullet list: files read, servers resolved, scope ch
 - **No-op runs are silent.** If the classifier produces no new writes at the inferred scope, do not ask the scope question and do not request a write confirmation — just report the idempotent no-op.
 - **Phase 6.5 may only remove** `mcp__*` entries from the paired tracked `settings.json` — never from unrelated files, never non-`mcp__*` entries.
 - **Never adds non-`mcp__` entries.** **Never removes non-`mcp__` entries.**
-- **Confirmation required before every write.** One confirmation covers Phase 6 additions + Phase 6.5 tracked-scope cleanup.
+- **Confirmation required before every write.** One confirmation covers Phase 6 additions + Phase 6.5 tracked-scope cleanup. Phase 7 (SessionStart preload hook) requires its own separate confirmation — it's the only write that lands in tracked `settings.json`.
+- **Phase 7 writes tracked `settings.json`, never `settings.local.json`.** Hooks are enablement; permissions are personal. That split is the hygiene rule, and this phase respects it.
 - **Idempotent.** Re-running adds nothing new when everything is already registered, and removes nothing when no cross-scope leaks remain.

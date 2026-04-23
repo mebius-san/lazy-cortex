@@ -8,22 +8,22 @@
     {
       "name": "lazycortex-core",
       "description": "Core skills and agents for Claude Code",
-      "source": "./Claude/lazycortex-core"
+      "source": "./claude/lazycortex-core"
     },
     {
       "name": "lazycortex-log",
       "description": "Logging, changelog, and change-history recall for Claude Code",
-      "source": "./Claude/lazycortex-log"
+      "source": "./claude/lazycortex-log"
     },
     {
       "name": "lazycortex-obsidian",
       "description": "Obsidian vault bootstrap and configuration management for Claude Code",
-      "source": "./Claude/lazycortex-obsidian"
+      "source": "./claude/lazycortex-obsidian"
     },
     {
       "name": "lazycortex-specs",
       "description": "Specification and design skills for Claude Code",
-      "source": "./Claude/lazycortex-specs"
+      "source": "./claude/lazycortex-specs"
     }
   ]
 }

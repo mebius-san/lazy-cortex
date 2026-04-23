@@ -3,7 +3,6 @@ name: lazy-core.optimize
 description: "Optimize Claude Code context loading for the current project. Slims oversized rules files by moving reference material to agent definitions, audits global settings for project-specific leakage and moves entries to local settings. Run when startup feels slow or after adding new rules/agents."
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir -p *)
 ---
-
 # Context Optimization
 
 Reduce startup context weight and fix settings layer violations for the current project.
@@ -223,7 +222,7 @@ Find skills that should be refactored to the coordinator-plus-parallel-Explore-a
 
 - `.claude/skills/*/SKILL.md` (project)
 - `~/.claude/skills/*/SKILL.md` (global)
-- `Claude/*/skills/*/SKILL.md` (plugin sources, if this repo has a `Claude/` tree)
+- `claude/*/skills/*/SKILL.md` (plugin sources, if this repo has a `claude/` tree)
 
 ### Heuristics (all four must hit for a candidate)
 

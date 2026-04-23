@@ -3,7 +3,6 @@ name: lazy-guard.check-public
 description: "Use when auditing a public repo (or a public subtree inside an otherwise private repo) for leaked secrets, PII, infrastructure details, or hardcoded local paths. Run before making a repo/subtree public, after adding new configs, or as a periodic hygiene check. Reads .guard-waivers.json for accepted exceptions and optional `public_scopes` globs."
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(mkdir -p *), Bash(date *)
 ---
-
 # Public Repo Security Audit
 
 Coordinator skill. Dispatches four **Explore** subagents in parallel — one per finding category — merges their findings, applies waivers, presents a unified report, then walks the user through fixes.
@@ -32,7 +31,7 @@ Schema:
 {
   "version": 1,
   "public_scopes": [
-    "Claude/**",
+    "claude/**",
     "README.public.md",
     ".gitignore"
   ],
@@ -141,7 +140,7 @@ For each finding the agent records: `check_id`, `file_path`, `line_number`, `mat
 ```markdown
 ## lazy-guard.check-public -- Security Audit
 
-**Public scopes**: `Claude/**`, `README.public.md`, `.gitignore`  (or "whole repo" if unset)
+**Public scopes**: `claude/**`, `README.public.md`, `.gitignore`  (or "whole repo" if unset)
 **Files scanned**: N in scope (O outside, M encrypted, K excluded)
 **Waivers loaded**: W from .guard-waivers.json
 

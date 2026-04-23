@@ -4,7 +4,6 @@ description: "Resolve Obsidian file/folder icons from frontmatter and write them
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Write
 argument-hint: "<subcommand> [args] | sync <path> | sync-staged | reconcile [--prefix PATH] | reconcile-dirty | install-hooks | check-versions"
 ---
-
 # Iconize Sync (Obsidian)
 
 Drives icon resolution for Obsidian vaults that follow a frontmatter-based
@@ -104,4 +103,3 @@ per `lazy-log.logging`. Use two separate steps: `Bash(mkdir -p ...)` then `Write
 
 - Managing the Iconize `rules` array.
 - Installing icon packs.
-- Writing frontmatter (consumer skills own that).

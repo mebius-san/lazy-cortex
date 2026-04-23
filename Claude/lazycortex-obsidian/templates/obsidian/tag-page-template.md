@@ -1,7 +1,6 @@
 ---
 Aliases: [ "#{{TAG_PATH}}" ]
 ---
-
 # Summary
 
 {{SUMMARY}}

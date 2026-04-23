@@ -1,10 +1,9 @@
 ---
 name: lazy-repo.mark-public
-description: "Use when preparing a local/private repo — or a subtree inside one — to become public. Runs the full lazy-guard.check-public audit, walks through fixes and waivers, creates .guard-waivers.json to enable the pre-commit hook, and optionally flips the repo to public on GitHub. Accepts an optional scope argument to mark a subtree public (e.g., `Claude/**`) without touching GitHub visibility."
-argument-hint: "[scope-glob ...]  # optional; e.g. 'Claude/** README.public.md .gitignore' for subtree-public mode"
+description: "Use when preparing a local/private repo — or a subtree inside one — to become public. Runs the full lazy-guard.check-public audit, walks through fixes and waivers, creates .guard-waivers.json to enable the pre-commit hook, and optionally flips the repo to public on GitHub. Accepts an optional scope argument to mark a subtree public (e.g., `claude/**`) without touching GitHub visibility."
+argument-hint: "[scope-glob ...]  # optional; e.g. 'claude/** README.public.md .gitignore' for subtree-public mode"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(git remote*), Bash(gh repo*), Bash(gh api*), Bash(mkdir -p *), Bash(date *)
 ---
-
 # Make a Repo (or Subtree) Public
 
 End-to-end workflow for taking a private/local repo public — or for marking a subtree inside a repo as the "public surface" while the repo itself stays private. Runs the security audit, resolves all findings, creates the waiver file (which activates the pre-commit hook), and in whole-repo mode optionally changes GitHub visibility.
@@ -21,9 +20,9 @@ End-to-end workflow for taking a private/local repo public — or for marking a 
 Two modes, decided by the argument list:
 
 - **Whole-repo mode** (no args): the entire repo is going public. Proceed with the existing flow; Step 5 may flip GitHub visibility.
-- **Subtree-public mode** (one or more glob args, e.g. `Claude/** README.public.md .gitignore`): only the listed paths are treated as the public surface. The repo stays private on GitHub; Step 5 is skipped.
+- **Subtree-public mode** (one or more glob args, e.g. `claude/** README.public.md .gitignore`): only the listed paths are treated as the public surface. The repo stays private on GitHub; Step 5 is skipped.
 
-Record the chosen scope for use in Steps 2 and 4. Confirm the interpretation back to the user in one line before continuing (e.g., "Scoped mode — auditing `Claude/**` only; repo visibility will NOT change").
+Record the chosen scope for use in Steps 2 and 4. Confirm the interpretation back to the user in one line before continuing (e.g., "Scoped mode — auditing `claude/**` only; repo visibility will NOT change").
 
 ## Step 2: Run full audit
 

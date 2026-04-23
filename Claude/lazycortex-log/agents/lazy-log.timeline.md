@@ -4,7 +4,6 @@ description: "Generate a chronological timeline view of all changes matching a d
 tools: Read, Glob, Grep, Bash
 model: inherit
 ---
-
 # Change Timeline
 
 Produce a chronological (oldest → newest, or newest → oldest on request) timeline of changes matching a filter.

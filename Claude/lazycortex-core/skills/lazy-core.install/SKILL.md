@@ -3,7 +3,6 @@ name: lazy-core.install
 description: "Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory. Idempotent — safe to re-run. Detects install scope automatically."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *)
 ---
-
 # Install lazycortex-core
 
 Bootstrap the plugin in the right scope: copy every rule template shipped by the plugin into the target `rules/` directory.

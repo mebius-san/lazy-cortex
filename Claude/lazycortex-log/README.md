@@ -1,3 +1,7 @@
+---
+iconize_icon: LiInfo
+iconize_color: "#eab308"
+---
 # lazycortex-log
 
 Logging, changelog, and change-history recall for Claude Code

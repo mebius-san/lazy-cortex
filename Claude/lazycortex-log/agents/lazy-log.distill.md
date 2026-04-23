@@ -4,7 +4,6 @@ description: "Convert raw commit entries from .logs/commits.jsonl into functiona
 tools: Read, Write, Edit, Glob, Bash
 model: inherit
 ---
-
 # Distill Commits → Changelog
 
 Turn raw commit entries into human-readable functional prose in `./docs/changelog.md`.
@@ -72,7 +71,7 @@ The most recent changes appear at the top.
 ## 2026-04-15
 
 - Migrated cortex skills into the `lazycortex-core` plugin; renamed to `lazy-core.*` / `lazy-guard.*` / `lazy-repo.*` (`8ab5c73`).
-- Added the `publish` skill that syncs this repo's `Claude/` dir to the public repo (`06dc71c`).
+- Added the `publish` skill that syncs this repo's `claude/` dir to the public repo (`06dc71c`).
 
 (older entries below, unchanged)
 ```

@@ -1,14 +1,13 @@
 ---
 name: lazy-obsidian.install
-description: "Bootstrap the lazycortex-obsidian plugin for the current project (or globally). Syncs rule templates shipped by the plugin (currently none), scaffolds the tag-page template used by the `obsidian.gen-tag-pages` agent (project scope only), and cleans up orphaned rules from previous versions. Idempotent — safe to re-run. Detects install scope automatically. Does not mutate any Obsidian vault — that's `lazy-obsidian.config`."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *)
+description: "Bootstrap the lazycortex-obsidian plugin for the current project (or globally). Syncs rule templates shipped by the plugin (currently none), scaffolds the tag-page template used by the `obsidian.gen-tag-pages` agent (project scope only), and cleans up orphaned rules from previous versions. At project scope, also installs the Dataview Obsidian plugin into `<repo-root>/.obsidian/` via `/lazy-obsidian.update-plugin` (Dataview renders the `Index` section of tag pages) and offers to chain into `/lazy-obsidian.iconize-install` so the full vault setup runs from one entry point. Idempotent — safe to re-run. Detects install scope automatically."
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), AskUserQuestion
 ---
-
 # Install lazycortex-obsidian
 
-Bootstrap the plugin in the right scope: sync rule templates shipped by the plugin into the matching rules directory, scaffold the tag-page template consumed by the `obsidian.gen-tag-pages` agent (project scope only), and offer to delete orphans (rules the plugin dropped between versions). Vault configuration lives in the separate `lazy-obsidian.config` skill — this skill only handles rule and template scaffolding.
+Bootstrap the plugin in the right scope: sync rule templates shipped by the plugin into the matching rules directory, scaffold the tag-page template consumed by the `obsidian.gen-tag-pages` agent (project scope only), and offer to delete orphans (rules the plugin dropped between versions). At project scope, this skill is the root entry point for the plugin family — after the rule/template work it installs Dataview (needed by tag pages) and optionally chains into `/lazy-obsidian.iconize-install` so a fresh vault reaches a usable state in one pass.
 
-The plugin currently ships **zero rules** — vault-hygiene guidance is inlined into `lazy-obsidian.config/SKILL.md` because it only applied to that one skill. If you installed an earlier version of the plugin that shipped `lazy-obsidian.vault-hygiene.md`, this skill will offer to delete it as an orphan.
+The plugin currently ships **zero rules**. If you installed an earlier version of the plugin that shipped `lazy-obsidian.vault-hygiene.md`, this skill will offer to delete it as an orphan.
 
 ## Step 1: Detect install scope
 
@@ -60,7 +59,7 @@ For every rule name in (source ∪ target), determine its state and act:
 
 One `AskUserQuestion` at a time — wait for the answer before the next prompt.
 
-With zero source rules, only orphan prompts fire. Users upgrading from an earlier version see a deletion prompt for `lazy-obsidian.vault-hygiene.md` (the rule was inlined into `lazy-obsidian.config`).
+With zero source rules, only orphan prompts fire. Users upgrading from an earlier version see a deletion prompt for `lazy-obsidian.vault-hygiene.md` (the rule was retired when `lazy-obsidian.config` was removed; vault-plugin setup now lives in `/lazy-obsidian.update-plugin` + `/lazy-obsidian.iconize-install`).
 
 ### Namespace-scoped deletion
 
@@ -91,22 +90,42 @@ No orphan detection is needed — the plugin owns exactly one template file unde
 
 The agent itself (`obsidian.gen-tag-pages`) is shipped by the plugin at `<installPath>/agents/obsidian.gen-tag-pages.md` and becomes available automatically when the plugin is enabled — nothing to copy into the consumer repo. Only the template is project-local.
 
-## Step 5: Dataview dependency check (project scope only, warn-only)
+## Step 5: Install Dataview (project scope only)
 
-Tag pages rely on the Dataview Obsidian plugin to render the `Index` section. Check presence **and print a warning if missing — do not block or prompt**. Skip this step entirely when scope is `user`.
+Tag pages rely on the Dataview Obsidian plugin to render the `Index` section. Skip this step entirely when scope is `user` — tag pages are a vault concern.
 
-Presence signal (either is sufficient):
+Presence probe (either is sufficient):
 
 - `<repo-root>/.obsidian/community-plugins.json` exists and contains `"dataview"`, OR
 - `<repo-root>/.obsidian/plugins/dataview/manifest.json` exists.
 
-If neither is present, print:
+### Present
 
-> Warning: Dataview Obsidian plugin not detected in this vault. Tag pages will render their `Summary` section correctly but the `Index` DataviewJS block will stay blank until Dataview is installed. Run `/lazy-obsidian.config` to bootstrap the vault (Dataview is in the musthave set).
+Invoke `/lazy-obsidian.update-plugin dataview` unconditionally — it is idempotent and no-ops when the vault is current, so re-runs just re-enforce the opinionated override block from `plugin-settings.json`. Record its state tuple (`binary=... overrides=... community=...`) for the final report.
 
-Record this as an INFO line in the step report; do not fail or prompt.
+### Absent
 
-## Step 6: Verify
+`AskUserQuestion`: **install** / **skip**.
+
+- **install** → invoke `/lazy-obsidian.update-plugin dataview`. Record its state tuple.
+- **skip** → print:
+
+  > Skipped Dataview install. Tag pages will render their `Summary` section correctly but the `Index` DataviewJS block will stay blank until Dataview is installed. Re-run `/lazy-obsidian.update-plugin dataview` when you're ready.
+
+  Record **skipped** for the report.
+
+## Step 6: Chain to `/lazy-obsidian.iconize-install`? (project scope only)
+
+Skip this step when scope is `user` — iconize-sync is a vault concern.
+
+Skip also when this skill is being re-run on a vault that already has the iconize-sync artifacts in place: detect by probing `<repo-root>/.claude/obsidian-iconize/icon-map.json`. If present, print an INFO line ("iconize-sync already scaffolded — run `/lazy-obsidian.iconize-install` directly if you need to re-audit it") and continue to Step 7.
+
+Otherwise `AskUserQuestion`: **run-iconize-install** / **skip**.
+
+- **run-iconize-install** → invoke `/lazy-obsidian.iconize-install` as the next skill call. That skill is self-contained (installs Iconize + Folder Notes + iconize-reloader via `/lazy-obsidian.update-plugin`, scaffolds the protocol doc, icon-map, pre-commit shim, etc.) and handles its own wizard prompts. Record **chained** for the report.
+- **skip** → record **skipped**. Print: "Run `/lazy-obsidian.iconize-install` later when you want the iconize-sync system scaffolded into the vault."
+
+## Step 7: Verify
 
 - Read back each installed rule file and confirm its `---` frontmatter parses.
 - If the tag-page template was installed or updated this run, read back the target and confirm it still contains both `{{TAG_PATH}}` and `{{SUMMARY}}` substitution tokens. Warn (do not fail) if either is missing — the consumer may have customized them away intentionally.
@@ -115,9 +134,10 @@ Record this as an INFO line in the step report; do not fail or prompt.
   - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)
   - For each rule: state (**created**, **updated**, **unchanged**, or **kept-local**) and target `<path>`
   - Tag-page template: state (**installed**, **updated**, **unchanged**, **kept-local**, **skipped**) and target `<path>` — omit when scope is `user`
-  - Dataview check: **present** or **missing (warned)** — omit when scope is `user`
+  - Dataview install: `update-plugin` state tuple (`binary=... overrides=... community=...`) or **skipped** — omit when scope is `user`
+  - iconize-install chain: **chained** / **skipped** / **already-scaffolded** — omit when scope is `user`
 
-## Step 7: Log the run
+## Step 8: Log the run
 
 Log to `./.logs/claude/lazy-obsidian.install/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter).
 
@@ -129,4 +149,4 @@ Use two separate steps: `Bash(mkdir -p ...)` then `Write` tool. Never chain with
 - **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does **not** re-sync rule or template files into the consumer repo. Re-run this skill after every plugin update to pick up changes.
 - **Scope independence**: running at project scope does not affect other projects or the global config.
 - **User scope is rule-only**: the tag-page template and Dataview check are project-only concerns (they require a vault).
-- **Next steps shown to user**: if any rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start). If the tag-page template was **installed** or **updated**, mention that the consumer is expected to customize it and that `/lazy-obsidian.install` will prompt on future drift. For Obsidian vault setup itself, tell them to run `lazy-obsidian.config` next.
+- **Next steps shown to user**: if any rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start). If the tag-page template was **installed** or **updated**, mention that the consumer is expected to customize it and that `/lazy-obsidian.install` will prompt on future drift. If the user **skipped** Dataview, remind them they can re-run `/lazy-obsidian.update-plugin dataview` later. If the user **skipped** the iconize-install chain, remind them they can run `/lazy-obsidian.iconize-install` later to scaffold the iconize-sync system.

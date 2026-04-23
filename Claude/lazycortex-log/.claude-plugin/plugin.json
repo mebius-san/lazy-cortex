@@ -1,6 +1,6 @@
 {
   "name": "lazycortex-log",
-  "version": "0.2.7",
+  "version": "0.2.19",
   "description": "Logging, changelog, and change-history recall for Claude Code",
   "author": {
     "name": "Mebius-san"

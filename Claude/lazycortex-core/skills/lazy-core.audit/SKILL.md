@@ -3,7 +3,6 @@ name: lazy-core.audit
 description: "Quick read-only audit of what gets loaded into conversation context at startup. Shows sizes, loading behavior, and optimization opportunities. No changes made."
 allowed-tools: Read, Glob, Grep, Bash(wc *)
 ---
-
 # Context Audit
 
 Coordinator skill. Dispatches two **Explore** subagents in parallel to measure context weight and hygiene, then renders the tables. Read-only — no changes made.

@@ -1,3 +1,7 @@
+---
+iconize_icon: LiInfo
+iconize_color: "#eab308"
+---
 # lazycortex-specs
 
 Specification and design skills for Claude Code

@@ -4,7 +4,6 @@ description: "Semantic audit for the lazycortex-obsidian plugin. Verifies iconiz
 allowed-tools: Read, Glob, Grep, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), AskUserQuestion, Write
 argument-hint: "(no arguments — runs the full plugin audit)"
 ---
-
 # lazycortex-obsidian audit
 
 Semantic integrity check for the plugin. Orthogonal to `lazy-core.doctor`'s
@@ -31,11 +30,42 @@ this skill owns the domain-specific invariants.
 - Load `templates/obsidian-iconize/icon-map.json`.
 - **FAIL** if JSON doesn't parse.
 - **FAIL** if required top-level keys missing (`schema_version`, `matchers`).
+- **FAIL** if `schema_version != 2` (the current worker schema). v1 icon-maps
+  in the template are a release-blocking regression — the template is the
+  canonical reference for consumers.
+- **FAIL** if any matcher contains an `emit` key (retired at schema 2;
+  folder emission is now driven by Folder Notes template, not matcher
+  output).
 - **WARN** if no authored-doc-style matcher is present (no matcher with
   `basename_in` containing common authored-doc basenames OR no
   `role_matches_basename` shorthand).
-- **WARN** if no status-file-style matcher with `emit: ["self", "parent_dir"]`
-  is present.
+- **WARN** if no matcher targets status-file basenames (`status.md`,
+  `README.md`, etc.) — retaining visibility of the "decorate-the-parent"
+  use case even without the `emit` field (now achieved by having the
+  status file co-located with its folder's folder-note).
+
+## Phase 2.5 — Cross-artifact coherence for the two-writer model
+
+- Read `templates/obsidian/plugin-settings.json`.
+- **FAIL** if `obsidian-icon-folder.settings.iconInFrontmatterEnabled` is
+  not `true`.
+- **FAIL** if `obsidian-icon-folder.settings.iconInFrontmatterFieldName`
+  is not `"iconize_icon"`.
+- **FAIL** if `obsidian-icon-folder.settings.iconColorInFrontmatterFieldName`
+  is not `"iconize_color"`.
+- **FAIL** if `folder-notes` is absent from the top-level override blocks
+  (the reloader depends on the `folderNoteName` template being set).
+- **WARN** if `folder-notes.folderNoteName` is not `"{{folder_name}}"` — the
+  plugin supports other templates but the protocol doc documents the default.
+
+- Read `templates/obsidian/plugins/iconize-reloader/manifest.json`.
+- Extract `version`.
+- Grep `RELOADER_VERSION` from `templates/obsidian/plugins/iconize-reloader/main.js`.
+- **FAIL** if the manifest version does not match the `RELOADER_VERSION`
+  constant — the reloader's runtime version marker is the handshake the
+  audit surfaces to `lazy-core.doctor`.
+- **FAIL** if the manifest version's MAJOR is `< 2` — the v1 reloader
+  predates the folder-note writer.
 
 ## Phase 3 — Protocol template sanity
 
@@ -63,6 +93,16 @@ what needs manual attention.
 Follow the coordinator pattern documented in `lazycortex-core`'s
 `references/lazy-core.parallel-scan.md` if the audit scans enough artifacts to
 warrant parallel Explore subagents. Today's audit is small enough to run inline.
+
+## Phase 6 — Protocol doc content checks
+
+- Read `templates/obsidian-iconize/protocol.md`.
+- **FAIL** if the protocol still describes `emit: ["self", "parent_dir"]`
+  as a matcher output (retired at schema 2).
+- **FAIL** if the protocol does not describe the two-writer model (worker
+  writes frontmatter; reloader writes folder-keyed `data.json` entries).
+- **WARN** if the protocol does not name `iconize_icon` / `iconize_color` as
+  the canonical frontmatter keys.
 
 ## Logging
 

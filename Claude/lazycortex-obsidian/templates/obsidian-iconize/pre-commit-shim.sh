@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# HOOK_VERSION: 1.0.0
+# HOOK_VERSION: 2.0.0
 # HOOK_PROTOCOL: obsidian.iconize-sync
 # This file is managed by `lazy-obsidian.iconize-install`.
 # Re-run that command if the plugin layout changes (rare).

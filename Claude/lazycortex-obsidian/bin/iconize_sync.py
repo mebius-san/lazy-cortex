@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Generic iconize-sync worker. See Claude/lazycortex-obsidian/references/iconize-protocol.md."""
+"""Generic iconize-sync worker. See claude/lazycortex-obsidian/references/iconize-protocol.md."""
 from __future__ import annotations
 import argparse, json, os, re, subprocess, sys, time
 from pathlib import Path, PurePosixPath
 
-PROTOCOL_VERSION = "1.0.0"
-HOOK_VERSION = "1.0.0"
+PROTOCOL_VERSION = "2.0.0"
+HOOK_VERSION = "2.0.0"
 
 # Schema versioning for icon-map.json (bilateral handshake).
 # - SCHEMA_VERSION: the version this worker writes on install/migrate.
 # - SUPPORTED_SCHEMA: integers this worker can consume at runtime; mismatch → preflight
 #   exits the hook cleanly (EXIT_OK) with a stderr diagnostic. Consumers bump by re-running
 #   lazy-obsidian.iconize-install.
-SCHEMA_VERSION = 1
-SUPPORTED_SCHEMA = {1}
+SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA = {2}
 
 EXIT_OK = 0
 EXIT_VALIDATION = 1
@@ -250,28 +250,38 @@ def _vault_relative_or_none(vault: Path, raw: str) -> str | None:
 
 def cmd_sync(args) -> int:
     vault = find_vault(args.vault)
-    data_path = find_data_path(vault)
+    # data.json presence still required as an install sanity check; worker does not write it.
+    find_data_path(vault)
     icon_map = load_icon_map(_resolve_icon_map_path(vault, args.icon_map))
     if _preflight_incompatible(icon_map):
         return EXIT_OK
     rel = _vault_relative_or_none(vault, args.path)
     if rel is None:
-        # Path lives outside this vault — hook fired on an unrelated edit. No-op.
+        return EXIT_OK
+    note_path = vault / rel
+    if not note_path.is_file():
+        # Nothing to rewrite; silent no-op (hook may fire on transient states).
         return EXIT_OK
     fm = _read_frontmatter_for(vault, rel)
     entries = resolve_matchers(icon_map, rel, fm)
+    # Schema 2: entries is [] or [(self_path, entry)]. Extract icon/color or None/None.
+    icon, color = (None, None)
+    if entries:
+        _, entry = entries[0]
+        icon = entry.get("iconName")
+        color = entry.get("iconColor")
     if args.dry_run:
-        print(json.dumps({"op": "sync", "dry_run": True, "path": rel, "entries": entries}, ensure_ascii=False))
+        print(json.dumps({
+            "op": "sync", "dry_run": True, "path": rel,
+            "icon": icon, "color": color,
+        }, ensure_ascii=False))
         return EXIT_OK
-    if not entries:
-        print(json.dumps({"op": "sync", "path": rel, "entries": []}, ensure_ascii=False))
-        return EXIT_OK
-    def mutate(d):
-        for p, entry in entries:
-            d[p] = entry
-        return d
-    with_retry(data_path, mutate)
-    print(json.dumps({"op": "sync", "path": rel, "entries": entries}, ensure_ascii=False))
+    from frontmatter_rewriter import rewrite_file
+    changed = rewrite_file(note_path, icon=icon, color=color)
+    print(json.dumps({
+        "op": "sync", "path": rel, "changed": changed,
+        "icon": icon, "color": color,
+    }, ensure_ascii=False))
     return EXIT_OK
 
 
@@ -289,31 +299,48 @@ def _staged_md_files(vault: Path) -> list[str]:
 
 def cmd_sync_staged(args) -> int:
     vault = find_vault(args.vault)
-    data_path = find_data_path(vault)
+    find_data_path(vault)  # sanity
     icon_map = load_icon_map(_resolve_icon_map_path(vault, args.icon_map))
     if _preflight_incompatible(icon_map):
         return EXIT_OK
-    all_entries: list = []
+
+    from frontmatter_rewriter import rewrite_file
+    touched: list[str] = []
+    planned: list[dict] = []
+
     for rel in _staged_md_files(vault):
         fm = _read_frontmatter_for(vault, rel)
-        all_entries.extend(resolve_matchers(icon_map, rel, fm))
+        entries = resolve_matchers(icon_map, rel, fm)
+        icon, color = (None, None)
+        if entries:
+            _, entry = entries[0]
+            icon = entry.get("iconName")
+            color = entry.get("iconColor")
+        note_path = vault / rel
+        if not note_path.is_file():
+            continue
+        if args.dry_run:
+            planned.append({"path": rel, "icon": icon, "color": color})
+            continue
+        if rewrite_file(note_path, icon=icon, color=color):
+            touched.append(rel)
+
     if args.dry_run:
-        print(json.dumps({"op": "sync-staged", "dry_run": True, "entries": all_entries},
+        print(json.dumps({"op": "sync-staged", "dry_run": True, "planned": planned},
                          ensure_ascii=False))
         return EXIT_OK
-    if not all_entries:
-        return EXIT_OK
-    def mutate(d):
-        for p, entry in all_entries:
-            d[p] = entry
-        return d
-    with_retry(data_path, mutate)
-    # Re-stage data.json so the commit includes our write.
-    rs = subprocess.run(["git", "-C", str(vault), "add",
-                         ".obsidian/plugins/obsidian-icon-folder/data.json"],
-                        capture_output=True, text=True)
-    if rs.returncode != 0:
-        sys.stderr.write(f"warning: re-stage of data.json failed: {rs.stderr.strip()}\n")
+
+    if touched:
+        # Re-stage the .md files whose frontmatter we just rewrote.
+        rs = subprocess.run(
+            ["git", "-C", str(vault), "add", "--"] + touched,
+            capture_output=True, text=True,
+        )
+        if rs.returncode != 0:
+            sys.stderr.write(
+                f"warning: re-stage of modified notes failed: {rs.stderr.strip()}\n")
+
+    print(json.dumps({"op": "sync-staged", "touched": touched}, ensure_ascii=False))
     return EXIT_OK
 
 
@@ -332,44 +359,38 @@ def _walk_md_files(vault: Path, prefix: str | None) -> list[str]:
 
 def cmd_reconcile(args) -> int:
     vault = find_vault(args.vault)
-    data_path = find_data_path(vault)
+    find_data_path(vault)
     icon_map = load_icon_map(_resolve_icon_map_path(vault, args.icon_map))
     if _preflight_incompatible(icon_map):
         return EXIT_OK
     prefix = normalize_path(args.prefix) if args.prefix else ""
-    # Build desired entries
-    desired: dict[str, dict] = {}
+
+    from frontmatter_rewriter import rewrite_file
+    touched: list[str] = []
+    planned: list[dict] = []
+
     for rel in _walk_md_files(vault, prefix or None):
         fm = _read_frontmatter_for(vault, rel)
-        for p, entry in resolve_matchers(icon_map, rel, fm):
-            desired[p] = entry
-
-    def in_prefix(k: str) -> bool:
-        if not prefix: return True
-        return k == prefix or k.startswith(prefix + "/")
-
-    def mutate(d):
-        # Drop stale in-prefix path-keys that aren't desired
-        for k in list(d.keys()):
-            if k in RESERVED_KEYS: continue
-            if in_prefix(k) and k not in desired:
-                del d[k]
-        # Add/update desired
-        for k, entry in desired.items(): d[k] = entry
-        return d
+        entries = resolve_matchers(icon_map, rel, fm)
+        icon, color = (None, None)
+        if entries:
+            _, entry = entries[0]
+            icon = entry.get("iconName")
+            color = entry.get("iconColor")
+        note_path = vault / rel
+        if args.dry_run:
+            planned.append({"path": rel, "icon": icon, "color": color})
+            continue
+        if rewrite_file(note_path, icon=icon, color=color):
+            touched.append(rel)
 
     if args.dry_run:
-        cur, _ = load_data(data_path)
-        plan = {
-            "op": "reconcile", "dry_run": True, "prefix": prefix,
-            "add_or_update": sorted(k for k in desired if cur.get(k) != desired[k]),
-            "drop": sorted(k for k in cur
-                           if k not in RESERVED_KEYS and in_prefix(k) and k not in desired),
-        }
-        print(json.dumps(plan, ensure_ascii=False)); return EXIT_OK
-    with_retry(data_path, mutate)
-    print(json.dumps({"op": "reconcile", "prefix": prefix, "declared": len(desired)},
-                     ensure_ascii=False))
+        print(json.dumps({"op": "reconcile", "dry_run": True, "prefix": prefix,
+                          "planned": planned}, ensure_ascii=False))
+        return EXIT_OK
+
+    print(json.dumps({"op": "reconcile", "prefix": prefix,
+                      "touched_count": len(touched)}, ensure_ascii=False))
     return EXIT_OK
 
 
@@ -428,51 +449,45 @@ def _dirty_md_files(vault: Path) -> list[str]:
 
 def cmd_reconcile_dirty(args) -> int:
     vault = find_vault(args.vault)
-    data_path = find_data_path(vault)
+    find_data_path(vault)
     icon_map = load_icon_map(_resolve_icon_map_path(vault, args.icon_map))
     if _preflight_incompatible(icon_map):
         return EXIT_OK
+
     paths = _dirty_md_files(vault)
     if not paths:
-        return EXIT_OK  # nothing dirty (or non-git vault) — silent no-op
-    # Unique parent dirs. A file at the vault root yields prefix "" which reconciles
-    # the whole vault; only happens when a root-level .md is actually dirty.
+        return EXIT_OK
+
     prefixes = sorted({"/".join(PurePosixPath(p).parts[:-1]) for p in paths})
-    desired: dict[str, dict] = {}
+
+    from frontmatter_rewriter import rewrite_file
+    touched: list[str] = []
+    planned: list[dict] = []
+
     for prefix in prefixes:
         for rel in _walk_md_files(vault, prefix or None):
             fm = _read_frontmatter_for(vault, rel)
-            for emit_path, entry in resolve_matchers(icon_map, rel, fm):
-                desired[emit_path] = entry
-
-    def in_any_prefix(k: str) -> bool:
-        if "" in prefixes:
-            return True
-        return any(k == p or k.startswith(p + "/") for p in prefixes)
-
-    def mutate(d):
-        for k in list(d.keys()):
-            if k in RESERVED_KEYS:
+            entries = resolve_matchers(icon_map, rel, fm)
+            icon, color = (None, None)
+            if entries:
+                _, entry = entries[0]
+                icon = entry.get("iconName")
+                color = entry.get("iconColor")
+            note_path = vault / rel
+            if args.dry_run:
+                planned.append({"path": rel, "icon": icon, "color": color})
                 continue
-            if in_any_prefix(k) and k not in desired:
-                del d[k]
-        for k, entry in desired.items():
-            d[k] = entry
-        return d
+            if rewrite_file(note_path, icon=icon, color=color):
+                touched.append(rel)
 
     if args.dry_run:
-        cur, _ = load_data(data_path)
-        plan = {
-            "op": "reconcile-dirty", "dry_run": True, "prefixes": prefixes,
-            "add_or_update": sorted(k for k in desired if cur.get(k) != desired[k]),
-            "drop": sorted(k for k in cur
-                           if k not in RESERVED_KEYS and in_any_prefix(k) and k not in desired),
-        }
-        print(json.dumps(plan, ensure_ascii=False))
+        print(json.dumps({"op": "reconcile-dirty", "dry_run": True,
+                          "prefixes": prefixes, "planned": planned},
+                         ensure_ascii=False))
         return EXIT_OK
-    with_retry(data_path, mutate)
+
     print(json.dumps({"op": "reconcile-dirty", "prefixes": prefixes,
-                      "declared": len(desired)}, ensure_ascii=False))
+                      "touched_count": len(touched)}, ensure_ascii=False))
     return EXIT_OK
 
 
@@ -849,22 +864,16 @@ def _callback_resolve(callback_id: str, frontmatter: dict, icon_map: dict) -> di
     return entry
 
 def resolve_matchers(icon_map: dict, path: str, frontmatter: dict) -> list:
-    """Return list of (emit_path, entry_dict)."""
+    """Return list of (emit_path, entry_dict). Schema 2: always [(self, entry)] or []."""
     basename = _basename(path)
     for matcher in icon_map.get("matchers", []):
         when = matcher.get("when", {})
-        if not eval_when(when, path, frontmatter): continue
+        if not eval_when(when, path, frontmatter):
+            continue
         entry = _build_entry(matcher.get("resolve", {}), icon_map, frontmatter, basename, path)
-        # First-match-wins: once `when` matches, this matcher owns the file.
-        # Resolution miss → return []; do not fall through to later matchers.
-        if not entry: return []
-        out = []
-        for target in matcher.get("emit", ["self"]):
-            if target == "self": out.append((normalize_path(path), entry))
-            elif target == "parent_dir":
-                parent = "/".join(path.split("/")[:-1])
-                if parent: out.append((normalize_path(parent), dict(entry)))
-        return out
+        if not entry:
+            return []
+        return [(normalize_path(path), entry)]
     return []
 
 

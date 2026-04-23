@@ -1,7 +1,6 @@
 ---
 description: Show lazycortex-log purpose and a one-line summary of each skill and agent it ships
 ---
-
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.
 
 ---

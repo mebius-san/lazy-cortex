@@ -2,7 +2,6 @@
 description: Security constraints that the lazy-guard.* scanners and pre-commit hook enforce — credential safety and public-repo readiness.
 always_loaded: safety posture applied to every action
 ---
-
 # Guard Security
 
 Constraints below back the `lazy-guard.check-public` skill, the `lazy-repo.mark-public` workflow, and the `lazy-guard.check-public` pre-commit hook.
@@ -26,7 +25,7 @@ Accepted exceptions live in `.guard-waivers.json` at the repo root. Each entry r
 
 ## Public scopes (subtree-public mode)
 
-`.guard-waivers.json` supports an optional top-level `public_scopes` array of path globs. When set, the scan and pre-commit hook consider only files matching one of the globs; everything else is implicitly private. Use this to publish a subtree (e.g., `Claude/**`) from an otherwise-private repo — `lazy-repo.mark-public` with `public_scopes` skips the GitHub-visibility flip. Globs support `**` (any depth) and `*` (single segment), relative to the repo root.
+`.guard-waivers.json` supports an optional top-level `public_scopes` array of path globs. When set, the scan and pre-commit hook consider only files matching one of the globs; everything else is implicitly private. Use this to publish a subtree (e.g., `claude/**`) from an otherwise-private repo — `lazy-repo.mark-public` with `public_scopes` skips the GitHub-visibility flip. Globs support `**` (any depth) and `*` (single segment), relative to the repo root.
 
 ## Author metadata
 

@@ -38,8 +38,8 @@
       "iconInTitleEnabled": true,
       "iconInTitlePosition": "inline",
       "iconInFrontmatterEnabled": true,
-      "iconInFrontmatterFieldName": "icon",
-      "iconColorInFrontmatterFieldName": "iconColor",
+      "iconInFrontmatterFieldName": "iconize_icon",
+      "iconColorInFrontmatterFieldName": "iconize_color",
       "iconsBackgroundCheckEnabled": true,
       "iconsInNotesEnabled": true,
       "iconsInLinksEnabled": true,
@@ -48,17 +48,6 @@
       "debugMode": false,
       "useInternalPlugins": false
     }
-  },
-  "templater-obsidian": {
-    "command_timeout": 5,
-    "trigger_on_file_creation": true,
-    "auto_jump_to_cursor": false,
-    "enable_system_commands": false,
-    "enable_folder_templates": true,
-    "enable_file_templates": false,
-    "syntax_highlighting": true,
-    "syntax_highlighting_mobile": true,
-    "intellisense_render": 1
   },
   "folder-notes": {
     "syncFolderName": true,

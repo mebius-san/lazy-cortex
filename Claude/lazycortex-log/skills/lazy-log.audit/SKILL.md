@@ -3,7 +3,6 @@ name: lazy-log.audit
 description: "Verify that the project's logging rule is installed and coherent. The rule itself is the single source of truth — individual skills/agents/commands do NOT need per-file ## Logging sections. Reports gaps and offers fixes. Read-first — never modifies files without confirmation."
 allowed-tools: Read, Glob, Grep, Bash(mkdir -p *), Bash(date *)
 ---
-
 # Logging Audit
 
 Coordinator skill. Checks the rule file inline, then dispatches three **Explore** subagents in parallel to cross-check optional per-file `## Logging` sections across skills / agents / commands.

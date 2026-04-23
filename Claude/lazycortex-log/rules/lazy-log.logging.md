@@ -2,7 +2,6 @@
 description: Logging conventions for skills, agents, and commands. Also guides when to run lazy-log.distill after commits.
 always_loaded: every skill/agent/command must log on every run
 ---
-
 # Run Logging (MANDATORY)
 
 Every skill, agent, and command **must** log each run to `./.logs/claude/<name>/YYYY-MM-DD_HH-MM-SS.md` in the current working repository.

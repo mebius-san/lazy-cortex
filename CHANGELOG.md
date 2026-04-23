@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.28 — 2026-04-24
+
+- (Internal release catch-up; no user-facing changes since 0.2.13 — these autobumps accumulated during development. See `docs/changelog.md` for commit-level detail.)
+
 ### 0.2.13 — 2026-04-21
 
 - `/lazy-core.optimize` now ships the Phase 2.5 LLM-readability audit: it scans rules, skills, agents, commands, and references for human-oriented constructs (decision-logic tables, narrative preamble, restated cross-references, decorative markers, long explanatory prose) with per-finding Apply / Skip / Waive prompts. Waivers share `lazy-core.doctor`'s `doctor.waivers/` store under the `llm-readability.*` check_id namespace so suppressions carry across both skills.
@@ -20,7 +24,7 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `/lazy-core.doctor` now tracks an **always-loaded context budget**: the summed byte size of `CLAUDE.md` + every rule file without a `paths:` scope. WARN over 20 KB, FAIL over 40 KB. The finding lists per-file sizes largest-first so you can see what's costing tokens on every turn.
 - New WARN in `/lazy-core.doctor` for rule files whose frontmatter has neither a `paths:` folder scope nor an `always_loaded: <one-line reason>` waiver. Every unscoped rule without a waiver burns tokens on every turn for every user — the waiver makes the intent explicit. The plugin-shipped `lazy-core.hygiene` and `lazy-guard.security` rules now carry the waiver.
 - `/lazy-core.doctor` detects **MCP permission entries with wildcards** (`*`, `?`, `{…}`) and flags them as silent no-ops. Claude Code matches MCP permissions as exact strings, so `mcp__github__*` never matches — the allow/ask never takes effect and every call falls through to the per-call prompt. Fix points at `/lazy-guard.allow-mcp <server>` which enumerates concrete names.
-- `/lazy-core.doctor` now distinguishes **local-tool mode** (this repo authors plugins under `Claude/**`) from **release mode** (consumer repos). In release mode, if a plugin is outdated per the marketplace-version check, content-level findings on its owned rule files are suppressed — upgrade the plugin first, then re-run to surface any remaining issues. A per-plugin INFO line reports the suppression count.
+- `/lazy-core.doctor` now distinguishes **local-tool mode** (this repo authors plugins under `claude/**`) from **release mode** (consumer repos). In release mode, if a plugin is outdated per the marketplace-version check, content-level findings on its owned rule files are suppressed — upgrade the plugin first, then re-run to surface any remaining issues. A per-plugin INFO line reports the suppression count.
 - `/lazy-core.doctor` trims several never-firing or low-signal checks (Meta-rule mandatory, missing model field, `.claude` allowed-set whitelist, medium-risk-pinned, project `CLAUDE.md` missing, and a handful of others) so the report stays focused on real hygiene issues. Broken-artifact-reference and hook-imports checks are reformulated to reduce false positives.
 - `/lazy-core.optimize` thresholds now match the doctor's summed-budget WARN/FAIL so running both in sequence produces consistent verdicts.
 - The plugin-shipped `lazy-core.hygiene` and `lazy-guard.security` rule files were slimmed (Meta-rule sections removed, prose compressed) to fit well under the per-file cap with the waiver line added.
@@ -128,6 +132,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 0.2.49 — 2026-04-24
+
+- (No user-facing changes; version autobumped during an internal plugin README re-sync.)
+
+### 0.2.48 — 2026-04-24
+
+- **Breaking:** `/lazy-obsidian.config` is removed. Vault-plugin install/update behaviour is now factored into a reusable primitive `/lazy-obsidian.update-plugin <id>` and invoked from two entry points: `/lazy-obsidian.install` (installs Dataview for tag-page rendering; offers to chain into `/lazy-obsidian.iconize-install`) and `/lazy-obsidian.iconize-install` (installs the three iconize-sync hard-dependency plugins itself — `obsidian-icon-folder`, `folder-notes`, and the bundled `iconize-reloader`). `/lazy-obsidian.install` is now the root entry point for the plugin family: a single run bootstraps rules, the tag-page template, Dataview, and optionally the iconize-sync system. The deleted skill's opinionated override merges survive unchanged in `templates/obsidian/plugin-settings.json` — `update-plugin` is the new applier. Templates only referenced by the old config skill (`.lazy-obsidian.manifest.json`, `templates/obsidian/community-plugins.json`) were removed. If you relied on running `/lazy-obsidian.config` directly, switch to `/lazy-obsidian.install` or invoke `/lazy-obsidian.update-plugin <id>` for a single plugin.
 
 ### 0.2.7 — 2026-04-22
 

@@ -26,6 +26,28 @@ docs/specs/
 
 
 # ---------------------------------------------------------------------------------------
+# Plugin folder notes (Obsidian folder-notes convention — dev-local visual state)
+#
+# Maintained by `.githooks/folder-notes-autoignore.py`: whenever a staged file
+# whose basename equals its parent directory's basename is spotted under
+# `claude/`, the hook appends its path to the managed block below, unstages
+# the file, and re-stages `.gitignore`. `pub.publish` consumes this block at
+# publish time (via `git ls-files --others --ignored --exclude-standard`) so
+# the public mirror never receives these files. Hand-edits survive — but are
+# unnecessary.
+
+# >>> folder-notes-autoignore (managed) >>>
+# Entries below are appended by .githooks/folder-notes-autoignore.py
+# when a file whose basename equals its parent-dir basename is staged under claude/.
+# Safe to reorder or remove entries; the hook re-adds any staged match.
+/claude/lazycortex-core/lazycortex-core.md
+/claude/lazycortex-log/lazycortex-log.md
+/claude/lazycortex-obsidian/lazycortex-obsidian.md
+/claude/lazycortex-specs/lazycortex-specs.md
+# <<< folder-notes-autoignore (managed) <<<
+
+
+# ---------------------------------------------------------------------------------------
 # Python
 
 __pycache__/
@@ -55,3 +77,4 @@ __pycache__/
 .obsidian/plugins/copilot-auto-completion/data.json
 .obsidian/plugins/quickadd/data.json
 .obsidian/plugins/obsidian-excalidraw-plugin/data.json
+.obsidian/plugins/obsidian-icon-folder/data.json

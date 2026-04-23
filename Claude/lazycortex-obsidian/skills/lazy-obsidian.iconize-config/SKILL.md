@@ -4,7 +4,6 @@ description: "Interactively add, edit, or remove registry entries in the local `
 allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(date *), AskUserQuestion
 argument-hint: "[registry-name] — e.g. roles | steps | requests.classification | requests.status_color"
 ---
-
 # Configure iconize-sync icon-map
 
 Reads the vault's local `.claude/obsidian-iconize/icon-map.json` and walks the

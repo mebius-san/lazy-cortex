@@ -3,7 +3,6 @@ name: lazy-log.install
 description: "Bootstrap the lazycortex-log plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, creates docs/changelog.md if missing, and ensures .gitignore covers .logs/ and docs/changelog.md. Idempotent — safe to re-run. Detects install scope automatically."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *)
 ---
-
 # Install lazycortex-log
 
 Bootstrap the plugin in the right scope: copy every rule template shipped by the plugin, create `docs/changelog.md`, and make sure `.gitignore` covers `.logs/`.

@@ -3,7 +3,6 @@ name: lazy-core.doctor
 description: "Health check for Claude Code project configuration. Verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, checks that installed plugins are at the latest marketplace version, and delegates to sibling audit skills (lazy-guard.check-public, lazy-log.audit) when they apply. Reports issues and offers targeted fixes. Run periodically or when something feels off."
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash(python3 *), mcp__*__recall, mcp__*__retain
 ---
-
 # Project Health Check
 
 Coordinator skill. Dispatches three **Explore** subagents in parallel to scan the project, merges their reports, presents a unified report, then applies user-confirmed fixes.
@@ -18,7 +17,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispat
 
 Detect mode at the start of the run; pass the result to every dispatched agent and to Phase 2.6.
 
-- **Local tool mode** — this repo *authors* plugins. Detected by `Glob("Claude/**/.claude-plugin/plugin.json")` returning any match. Every content check also applies to plugin sources under `Claude/**` (see per-agent scope expansions below). Outdated-plugin suppression (Phase 2.6) is **disabled** — the sources are authored here, so full integrity is required regardless of installed-plugin currency.
+- **Local tool mode** — this repo *authors* plugins. Detected by `Glob("claude/**/.claude-plugin/plugin.json")` returning any match. Every content check also applies to plugin sources under `claude/**` (see per-agent scope expansions below). Outdated-plugin suppression (Phase 2.6) is **disabled** — the sources are authored here, so full integrity is required regardless of installed-plugin currency.
 - **Release mode** (default) — this repo *consumes* installed plugins. Plugin-owned rule files in `.claude/rules/` and `~/.claude/rules/` are synced copies; if the owning plugin is outdated (per Phase 2.5), content-level findings on those files are suppressed by Phase 2.6 and only the version-outdated WARN is surfaced (upgrading will overwrite the stale content).
 
 The per-plugin "owned namespaces" set computed by Agent A's Plugin rule sync check is the key used to decide plugin ownership of any given rule filename.
@@ -33,11 +32,11 @@ Scope: rules / agents / skills / commands files, their frontmatter, namespace fo
 
 **Local tool mode scope expansion**: when the coordinator reports local tool mode, also apply every rules / agents / skills / commands / hooks check below to the plugin sources at:
 
-- `Claude/**/rules/*.md`
-- `Claude/**/skills/*/SKILL.md`
-- `Claude/**/agents/*.md`
-- `Claude/**/commands/*.md`
-- `Claude/**/hooks/**`
+- `claude/**/rules/*.md`
+- `claude/**/skills/*/SKILL.md`
+- `claude/**/agents/*.md`
+- `claude/**/commands/*.md`
+- `claude/**/hooks/**`
 
 Findings from plugin sources must carry a `source: plugin` marker so Phase 2.6 can distinguish them from release-mode sync'd copies.
 
@@ -154,7 +153,7 @@ Checks the agent performs:
 
 Scope: every project-level config file (`.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/*/SKILL.md`, `.claude/commands/*.md`, `CLAUDE.md`), grepping for hardcoded paths.
 
-**Local tool mode scope expansion**: when the coordinator reports local tool mode, also grep for the same hardcoded-path patterns across `Claude/**/rules/*.md`, `Claude/**/skills/*/SKILL.md`, `Claude/**/agents/*.md`, `Claude/**/commands/*.md`, and `Claude/**/hooks/**`. Self-referential documentation of the path-hygiene rule itself (files whose purpose is to describe the bad patterns — e.g. `lazy-core.hygiene.md`, `lazy-guard.security.md`, `lazy-core.doctor/SKILL.md`, `lazy-guard.check-public/SKILL.md`) must be excluded via the `source: doc-of-rule` marker to avoid false positives.
+**Local tool mode scope expansion**: when the coordinator reports local tool mode, also grep for the same hardcoded-path patterns across `claude/**/rules/*.md`, `claude/**/skills/*/SKILL.md`, `claude/**/agents/*.md`, `claude/**/commands/*.md`, and `claude/**/hooks/**`. Self-referential documentation of the path-hygiene rule itself (files whose purpose is to describe the bad patterns — e.g. `lazy-core.hygiene.md`, `lazy-guard.security.md`, `lazy-core.doctor/SKILL.md`, `lazy-guard.check-public/SKILL.md`) must be excluded via the `source: doc-of-rule` marker to avoid false positives.
 
 Checks the agent performs:
 
@@ -323,14 +322,22 @@ Each delegation follows four steps:
 3. **On skip** — if either fails, skip silently; no entry in the report.
 4. **On invoke** — fold the sibling's summary into a named subsection; direct the user to run the sibling for interactive fixes. Do NOT re-run its fix flow.
 
+**Availability probe — canonical signal set.** A sibling plugin counts as available if **any** of these signals is true (not just the first):
+
+1. `~/.claude/plugins/installed_plugins.json` contains a top-level entry `<plugin>@<marketplace>` whose scope applies to this project (`scope: "user"`, or `scope: "project"` with `projectPath` matching the current repo).
+2. **Local tool mode** — `claude/<plugin>/.claude-plugin/plugin.json` exists in the current repo (the plugin is authored here; all its skills are reachable via the local path).
+3. **Enabled via settings** — `enabledPlugins["<plugin>@<marketplace>"] === true` in any of `~/.claude/settings.json`, `~/.claude/settings.local.json`, `./.claude/settings.json`, `./.claude/settings.local.json`. This catches the case where the user enabled the plugin via `/plugin install` flow that wrote to settings but where `installed_plugins.json` lacks a matching `projectPath` record (common when multiple machines / Dropbox-synced project paths diverge).
+
+Any one signal is sufficient — doctor should not skip a delegated audit just because one signal is absent. If none are true, skip silently.
+
 **11a. Public-repo guard** → `lazy-guard.check-public`
-- *Availability*: `lazycortex-core` appears in `~/.claude/plugins/installed_plugins.json` for a scope applying to this project.
+- *Availability*: `lazycortex-core` meets the canonical signal set above.
 - *Run condition*: `.guard-waivers.json` exists at the repo root.
 - *On invoke*: fold guard's summary (category × severity counts, waivered count) and FAIL/WARN findings into a **Guard** subsection.
 
 **11b. Logging coverage** → `lazy-log.audit`
-- *Availability*: `lazycortex-log` appears in `~/.claude/plugins/installed_plugins.json` for a scope applying to this project.
-- *Run condition*: same as availability — plugin installation is the opt-in.
+- *Availability*: `lazycortex-log` meets the canonical signal set above.
+- *Run condition*: same as availability — plugin installation / enablement is the opt-in.
 - *On invoke*: fold audit findings into a **Logging** subsection.
 
 ## Phase 4 — Present + fix + waive

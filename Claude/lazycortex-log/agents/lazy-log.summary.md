@@ -4,7 +4,6 @@ description: "Synthesize a multi-paragraph summary of all changes related to a t
 tools: Read, Glob, Grep, Bash
 model: inherit
 ---
-
 # Topic Summary
 
 Aggregate every change related to a topic and write a synthesized summary. Unlike `lazy-log.timeline`, which lists items chronologically, this agent produces a **narrative** grouped by theme, not date.
