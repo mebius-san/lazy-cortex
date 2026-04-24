@@ -1,6 +1,6 @@
 {
   "name": "lazycortex-core",
-  "version": "0.2.30",
+  "version": "0.2.32",
   "description": "Core skills and agents for Claude Code",
   "author": {
     "name": "Mebius-san"

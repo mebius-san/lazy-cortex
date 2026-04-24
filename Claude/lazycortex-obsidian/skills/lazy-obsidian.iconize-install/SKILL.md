@@ -96,11 +96,28 @@ For each row, in order (each is its own TaskCreate task — 1.5a / 1.5b / 1.5c):
 
 ## Step 2 — Scaffold protocol doc (per-file prompt)
 
+**Purpose of the protocol doc** (same text used in every prompt description below):
+
+> `protocol.md` is the vault-local human-readable reference for how file/folder
+> icons are computed and written. It documents the two cooperating writers
+> (Iconize plugin for direct Iconize frontmatter, and the `iconize-sync`
+> worker for resolved icons via `.claude/obsidian-iconize/icon-map.json`
+> matchers), the frontmatter key contract, and the resolution precedence.
+> It is **referenced by name** from icon-map matchers and from the
+> `iconize-sync` worker — vault owners typically customize it (adding
+> matcher rationales, edge cases, etc.).
+
 State machine (one `AskUserQuestion` per file):
 
-- **New** (target missing) → install / skip.
+- **New** (target missing) → `AskUserQuestion` with:
+  - question: `Install the iconize-sync protocol doc into this vault?`
+  - description: ``<protocol-doc purpose from above>\n\n**What this does:** Copies the shipped template to `<targetPath>`. You can customize it freely afterward — future installs will show a drift diff, not silently overwrite.``
+  - options: **install** / **skip**.
 - **Unchanged** (byte-identical) → no prompt.
-- **Drift** (differ) → show unified diff, ask: **overwrite** / **keep-local**.
+- **Drift** (differ) → `AskUserQuestion` with:
+  - question: `Protocol doc has drift — overwrite with shipped version?`
+  - description: ``<protocol-doc purpose from above>\n\n**What changed:** <one-sentence summary of the diff>\n\n**Why this matters:** You likely customized this file (matcher notes, edge-case docs, project-specific conventions). Overwriting will discard those edits. Keep-local preserves your version but means you won't pick up template improvements — re-run this skill later to resolve.\n\n**Full diff:**\n```diff\n<unified diff, truncated to ~40 lines if longer>\n`````
+  - options: **overwrite** / **keep-local**.
 
 **Scope**: protocol doc only. The icon-map is handled in Step 2.7 (its drift
 decision is schema-aware, so a generic byte-diff prompt would hide the

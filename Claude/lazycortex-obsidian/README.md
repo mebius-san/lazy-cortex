@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#eab308"
+iconize_color: "#22c55e"
 ---
 # lazycortex-obsidian
 

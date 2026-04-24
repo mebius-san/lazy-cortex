@@ -1,6 +1,6 @@
 {
   "name": "lazycortex-obsidian",
-  "version": "0.2.51",
+  "version": "0.2.52",
   "description": "Obsidian vault bootstrap and configuration management for Claude Code",
   "author": {
     "name": "Mebius-san"

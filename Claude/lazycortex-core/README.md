@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#eab308"
+iconize_color: "#22c55e"
 ---
 # lazycortex-core
 
@@ -46,6 +46,7 @@ Claude Code configs drift fast. Rule files bloat. `settings.json` fills with one
 
 | Skill | Description |
 |---|---|
+| `lazy-core.agent-models` | Interactively assign model tiers (haiku/sonnet/opus/inherit) to every dispatchable subagent missing from `lazy.settings.json`. Auto-routes each entry to its structurally-correct scope: `_user.*` → global file, `_project.*` → project file, `_builtin.*` → global (override with `--scope=project\|global`). Cheap, standalone, idempotent — safe to re-run. Invoked directly or by `lazy-core.optimize` Phase 7. |
 | `lazy-core.audit` | Quick read-only audit of what gets loaded into conversation context at startup plus skill-writing, agent-writing, and rule-writing compliance. Shows sizes, loading behavior, optimization opportunities, Execution-Discipline preamble presence, no-Optional headings, narrative-padding heuristics, and rule-file frontmatter/size/code-block/scope enforcement. No changes made. |
 | `lazy-core.doctor` | Health check for Claude Code project configuration. Verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, checks that installed plugins are at the latest marketplace version, and delegates to sibling audit skills (lazy-guard.check-public, lazy-log.audit) when they apply. Reports issues and offers targeted fixes. Run periodically or when something feels off. |
 | `lazy-core.install` | Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory. Idempotent — safe to re-run. Detects install scope automatically. |
@@ -64,14 +65,17 @@ Claude Code configs drift fast. Rule files bloat. `settings.json` fills with one
 
 | Rule | Description |
 |---|---|
+| `lazy-core.agent-writing` | Authoring contract for agents (subagents dispatched via the Agent tool). Covers frontmatter requirements, single-response execution model, reporting contract, tool-allowlist hygiene, and cross-references to the shared Execution-Discipline preamble in lazy-core.skill-writing. |
 | `lazy-core.hygiene` | Project hygiene constraints checked by lazy-core.audit, lazy-core.doctor, and lazy-core.optimize — scope, naming, settings split, MCP scope, and path hygiene. |
+| `lazy-core.rule-writing` | Authoring contract for rule files. Mandatory frontmatter (description + paths scope OR always_loaded waiver), size budget, dot-namespace filename, no large code blocks, artifact-reference integrity, no narrative padding, plugin-vs-local scoping. |
+| `lazy-core.skill-writing` | Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, and the plugin audit-skill contract. |
 | `lazy-guard.security` | Security constraints that the lazy-guard.* scanners and pre-commit hook enforce — credential safety and public-repo readiness. |
 
 ## Hooks
 
 | Hook | Trigger | Description |
 |---|---|---|
-| `lazy-core.agent-model-router` | `Agent` | PreToolUse hook — route Agent dispatches to a configured model via `.claude/lazy.settings.json`, capped by `LAZY_AGENT_MODEL_FLOOR`. |
+| `lazy-core.agent-model-router` | `Agent` | PreToolUse hook — route Agent dispatches to a configured model. |
 | `lazy-guard.check-public` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: scan staged git changes for secrets, PII, and infrastructure leaks before committing to a public repo (or the public subtree of a repo). |
 | `lazy-guard.settings` | `Edit\|Write` | PreToolUse hook: guard Claude Code settings files against dangerous changes. |
 
@@ -103,6 +107,7 @@ Restart Claude Code. Skills appear as `lazycortex-core:<skill.name>`.
 Invoke skills with slash commands:
 
 ```
+/lazy-core.agent-models
 /lazy-core.audit
 /lazy-core.doctor
 /lazy-core.help

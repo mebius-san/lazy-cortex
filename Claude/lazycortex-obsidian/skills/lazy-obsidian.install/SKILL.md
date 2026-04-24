@@ -123,7 +123,11 @@ Invoke `/lazy-obsidian.update-plugin dataview` unconditionally — it is idempot
 
 ### Absent
 
-`AskUserQuestion`: **install** / **skip**.
+`AskUserQuestion` with:
+
+- question: `Install the Dataview community plugin for this vault?`
+- description: ``**Purpose:** Dataview is a third-party Obsidian community plugin that indexes frontmatter across the vault and renders live query results inside notes.\n\n**Why this skill is asking:** The tag pages scaffolded by `obsidian.gen-tag-pages` contain an `Index` section built with a DataviewJS block that lists every note carrying the tag. Without Dataview installed and enabled, the `Summary` section still renders correctly but the `Index` block stays blank.\n\n**Either choice is reversible** — you can run `/lazy-obsidian.update-plugin dataview` later to install it, or disable it in Obsidian's Community Plugins settings to remove it.``
+- options: **install** / **skip**.
 
 - **install** → invoke `/lazy-obsidian.update-plugin dataview`. Record its state tuple.
 - **skip** → print:

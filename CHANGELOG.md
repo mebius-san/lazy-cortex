@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.32 — 2026-04-24
+
+- New `/lazy-core.agent-models` standalone wizard for assigning per-agent model tiers (`haiku` / `sonnet` / `opus` / `inherit`) without paying for the full `/lazy-core.optimize` pipeline. `--scope=auto` (default) routes each entry to its structurally-correct file: `_user.*` and `_builtin.*` go global, `_project.*` goes project, plugin-domain groups follow the plugin's install scope. `--scope=project|global` overrides; `--dry-run` previews. A single run can write to both global and project `lazy.settings.json` files. `/lazy-core.optimize` Phase 7 now delegates here.
+- `/lazy-core.install` per-rule prompts now surface each rule's `description:` from frontmatter as **Purpose:** so you can decide install / overwrite / delete on a New, Drift, or Orphan rule without remembering what the file does. Drift prompts show the full diff inline with What-changed and Why-you-are-seeing-this framing; orphan prompts explain that the plugin no longer ships the rule. Step 5 (`lazy.settings.json` seed) now prints scope, structure, auto-routing, and precedence context above the permission prompt.
+- Stripped narrative padding from the `lazy-guard.security` rule — removed a glob-syntax tutorial and a `claude/**` example that was triggering cosmetic drift on every consumer install of the rule and bloating an always-loaded file.
+
 ### 0.2.30 — 2026-04-24
 
 - New `lazy-core.agent-model-router` PreToolUse hook routes every `Agent` dispatch to a configured model (`haiku` / `sonnet` / `opus` / `inherit`) via a shared `.claude/lazy.settings.json`. Agents that ship with `model: inherit` can now be cheap-by-default per project without plugins having to hardcode a tier. Set `LAZY_AGENT_MODEL_FLOOR=haiku|sonnet|opus` for a session-wide cap (wins over caller-supplied `model`). Config uses a grouped schema: `_builtin` (Explore, Plan, general-purpose), `_user` (`~/.claude/agents/*.md`), `_project` (`./.claude/agents/*.md`), and per-vendor domains for installed plugins.
@@ -85,6 +91,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-log
 
+### 0.2.10 — 2026-04-24
+
+- `/lazy-log.install` per-rule prompts now surface each rule's `description:` from frontmatter as **Purpose:** so you can install / overwrite / delete a rule on first sight, without remembering what the file does. Drift prompts show the full diff inline with What-changed framing; orphan prompts explain that the plugin no longer ships the rule. Same UX as the polished `/lazy-core.install`.
+
 ### 0.2.9 — 2026-04-24
 
 - New `lazy-log.distill-trigger` Stop hook: at session end, compares `.logs/commits.jsonl` against the `last-distilled-sha` marker in `docs/changelog.md` and, when commits are pending, asks Claude to run `lazycortex-log:lazy-log.distill` before the turn ends. Loop-safe via `stop_hook_active`. You no longer need to remember to run distill manually.
@@ -151,6 +161,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 0.2.52 — 2026-04-24
+
+- `/lazy-obsidian.install` Dataview-install prompt and `/lazy-obsidian.iconize-install` protocol-doc prompts now include pre-write context — what the artifact is, why it's being installed, and what you're approving — so per-file decisions during a fresh vault bootstrap have the surrounding rationale instead of just a path.
 
 ### 0.2.51 — 2026-04-24
 

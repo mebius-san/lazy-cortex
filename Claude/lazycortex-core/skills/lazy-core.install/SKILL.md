@@ -64,12 +64,26 @@ Rules eat context on every session — the user owns the decision to install eac
 
 ### Per-rule decision (wizard-style, one question at a time)
 
+Every per-rule prompt MUST surface the rule's **purpose** so the user (who may not remember what a given rule file does) can make an informed decision. Extract `description:` from the rule file's frontmatter — from the **source** file for New/Drift, from the **target** file for Orphan (source is gone). If the description is longer than ~200 chars, use its first sentence. If no `description:` field exists, fall back to the first non-heading line of the body, and flag the missing-description as a WARN in the report.
+
 For every rule name in (source ∪ target), determine its state and act:
 
-1. **New** — target missing, source present → `AskUserQuestion`: "Install rule `<name>`? (<first-line-of-description>)" with options **install** / **skip**. Install → copy source to target, state **installed**. Skip → state **skipped**.
+1. **New** — target missing, source present → `AskUserQuestion` with:
+   - question: ``Install rule `<name>.md`?``
+   - description: ``**Purpose:** <source description>\n\n**What this does:** Copies the shipped rule into `<targetPath>`. Rules are auto-loaded into every Claude Code session (when `always_loaded`) or when editing files matching their `paths:` scope.``
+   - options: **install** / **skip**.
+   - Install → copy source to target, state **installed**. Skip → state **skipped**.
 2. **Unchanged** — both present, byte-identical → no prompt. State **unchanged**.
-3. **Drift** — both present, differ → show unified diff. `AskUserQuestion`: **overwrite** / **keep-local**. State **updated** or **kept-local**.
-4. **Orphan** — target present, source missing → `AskUserQuestion`: "Rule `<name>` is no longer shipped by the plugin. Delete from `<targetDir>`?" with options **delete** / **keep**. Delete → `rm <target>`, state **deleted**. Keep → state **kept-orphan**.
+3. **Drift** — both present, differ → `AskUserQuestion` with:
+   - question: ``Rule `<name>.md` has drift — overwrite with shipped version?``
+   - description: ``**Purpose:** <source description>\n\n**What changed:** <one-sentence summary of the diff — e.g. \"source removes a blank line and lowercases `Claude/**` → `claude/**` in an example\">\n\n**Full diff:**\n```diff\n<unified diff, truncated to ~40 lines if longer>\n`````
+   - options: **overwrite** / **keep-local**.
+   - Overwrite → copy source to target, state **updated**. Keep-local → state **kept-local**.
+4. **Orphan** — target present, source missing → `AskUserQuestion` with:
+   - question: ``Rule `<name>.md` is no longer shipped by the plugin — delete from `<targetDir>`?``
+   - description: ``**Purpose (from your local copy):** <target description>\n\n**Why you're seeing this:** The plugin used to ship this rule but no longer does (renamed, merged into another rule, or deprecated). Keeping it means it stays loaded into your sessions but will never receive updates.``
+   - options: **delete** / **keep**.
+   - Delete → `rm <target>`, state **deleted**. Keep → state **kept-orphan**.
 
 One `AskUserQuestion` at a time — wait for the answer before the next prompt.
 
@@ -118,6 +132,25 @@ Per-key semantics (write back only if anything changed):
 - **different** → leave the user's value untouched. State **kept-local** (report value).
 
 Never touch `_user` or `_project` entries — those slots are filled interactively by `lazy-core.optimize`.
+
+### Pre-write context (MANDATORY before Write)
+
+Before calling `Write` on a **newly-created** file (target was missing or unparseable), print this explanation in the conversation so the subsequent permission prompt has context above it:
+
+> Creating `<targetPath>` at **<scope>** scope (`user` = `~/.claude/lazy.settings.json` applies to every project; `project` = `<repo-root>/.claude/lazy.settings.json` applies to this repo only).
+>
+> This file routes subagent dispatches to model tiers (`haiku` / `sonnet` / `opus` / `inherit`). Structure:
+> - `_builtin` — defaults for the three built-in subagent types (seeded now).
+> - `_user` — your globally-authored agents (filled later by `/lazy-core.agent-models`, writes to the global file).
+> - `_project` — this project's agents (filled later by `/lazy-core.agent-models`, writes to the project file).
+>
+> **Routing rule**: `/lazy-core.agent-models` auto-routes by group — `_user.*` → global file, `_project.*` → project file, plugin-domain groups → the plugin's own install scope. Override with `--scope=project|global` for deliberate deviations.
+>
+> **Scope precedence when both files exist**: reads merge with **project wins per-group** — a duplicate group in the project file shadows the global file's copy.
+>
+> The file looks mostly empty because `_user` / `_project` are reserved slots waiting for `/lazy-core.agent-models` to populate them based on the agents you actually have.
+
+For **existing files** (mutations to an already-present file), print a one-line context instead: `Updating <targetPath>: <N> _builtin default(s) added.` No permission prompt is expected for in-place edits the user already owns, but the context line keeps the report grounded.
 
 ### Write back
 
