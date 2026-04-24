@@ -8,6 +8,22 @@ model: inherit
 
 Aggregate every change related to a topic and write a synthesized summary. Unlike `lazy-log.timeline`, which lists items chronologically, this agent produces a **narrative** grouped by theme, not date.
 
+## Execution discipline (MANDATORY — read before any action)
+
+This agent has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+
+1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Step 1 — Extract keywords`
+   - `Step 2 — Gather matches`
+   - `Step 3 — Read relevant commit bodies`
+   - `Step 4 — Cluster by sub-theme`
+   - `Step 5 — Write the summary`
+   - `Step 6 — Report`
+   - `Step 7 — Log the run`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
+
 ## Input
 
 A topic. Examples:

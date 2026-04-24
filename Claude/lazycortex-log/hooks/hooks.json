@@ -1,5 +1,5 @@
 {
-  "description": "lazycortex-log hooks \u2014 record every git commit to .logs/commits.jsonl",
+  "description": "lazycortex-log hooks \u2014 record every git commit to .logs/commits.jsonl and trigger distill at session end when commits are pending",
   "hooks": {
     "PostToolUse": [
       {
@@ -18,6 +18,17 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/lazy-log.commit-recorder.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/lazy-log.distill-trigger.py\"",
             "timeout": 5
           }
         ]

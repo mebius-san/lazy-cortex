@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.iconize-install
 description: "Scaffold the iconize-sync system into an Obsidian vault: protocol doc, local icon-map, pre-commit shim, and a `.gitignore` entry for Iconize's live `data.json` (it's rewritten on every icon click + by the iconize-sync worker, so it's runtime state, not source). Per-file wizard — asks before creating, shows diff on drift, offers deletion for orphans, strips legacy worker-written PostToolUse entries, migrates icon-map schema. Re-runnable; idempotent. Must be run from the consumer vault's git root. Installs all three iconize-sync hard-dependency plugins — `obsidian-icon-folder` (Iconize), `folder-notes`, and the bundled `iconize-reloader` — via the `/lazy-obsidian.update-plugin` primitive, which also deep-merges opinionated settings from `plugin-settings.json`. PostToolUse is plugin-shipped — no consumer settings.json mutation."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(chmod *), Bash(python3 *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), Bash(jq *), AskUserQuestion
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(chmod *), Bash(python3 *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), Bash(jq *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList
 argument-hint: "[--dry-run] — scaffolds into <repo-root>/.claude/ and <repo-root>/.githooks/"
 ---
 # Install iconize-sync (Obsidian)
@@ -15,6 +15,29 @@ directory somewhere — typically at repo root).
 
 Project-local only. There is no global scope — iconize-sync is inherently
 per-vault.
+
+## Execution discipline (MANDATORY — read before any action)
+
+This skill has 14 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+
+1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Step 1 — Locate repo root and vault`
+   - `Step 1.5a — Install/update folder-notes`
+   - `Step 1.5b — Install/update obsidian-icon-folder`
+   - `Step 1.5c — Install/update iconize-reloader (bundled)`
+   - `Step 2 — Scaffold protocol doc`
+   - `Step 2.5 — Strip legacy PostToolUse entries`
+   - `Step 2.6 — Assert Iconize frontmatter-feature settings`
+   - `Step 2.7 — Icon-map scaffold (schema-aware)`
+   - `Step 3 — Install the pre-commit shim`
+   - `Step 4 — Create callbacks dir`
+   - `Step 4.5 — Ensure iconize data.json is gitignored`
+   - `Step 5 — Verify`
+   - `Step 6 — Report`
+   - `Step 7 — Log the run`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
 ## Architecture note (why this skill is smaller than before)
 
@@ -43,83 +66,33 @@ no plugin awareness. The shim resolves the plugin at exec time (no baked path).
 - Vault: walk from repo root looking for `.obsidian/`. If none found, abort
   with a message telling the user to initialize Obsidian first.
 
-## Step 1.5 — Install hard-dependency vault plugins
+## Step 1.5 — Install/update hard-dependency plugins
 
-Iconize-sync has three hard dependencies on Obsidian community plugins. All
-three are installed / updated via `/lazy-obsidian.update-plugin`, which:
+Three MANDATORY hard deps. No prompt, no skip. The user opted into
+iconize-install — iconize-sync is non-functional without all three, so
+asking "install folder-notes?" here would be pointless ceremony and
+(worse) invites the agent to silently treat "skip" as a valid outcome.
 
-- fetches the latest release from GitHub (or copies from the bundled source
-  for `iconize-reloader`);
-- deep-merges the opinionated override block from
-  `${CLAUDE_PLUGIN_ROOT}/templates/obsidian/plugin-settings.json` onto the
-  vault's `plugins/<id>/data.json` (this is how Iconize gets configured to
-  read `iconize_icon` / `iconize_color` from frontmatter and Folder Notes
-  gets its `folderNoteName: "{{folder_name}}"` template);
-- registers `<id>` in `<vault>/community-plugins.json`.
+`update-plugin` is version-aware and idempotent — always invoke it; never
+short-circuit because a manifest probe looked green. "Manifest present"
+does NOT mean "already current" — that's `update-plugin`'s job.
 
-`update-plugin` is version-aware and idempotent — on re-runs it no-ops when
-the vault is already current and re-enforces overrides.
+| id | flag |
+|---|---|
+| `folder-notes` | — |
+| `obsidian-icon-folder` | — |
+| `iconize-reloader` | `--bundled` |
 
-### 1.5a — Folder Notes
+For each row, in order (each is its own TaskCreate task — 1.5a / 1.5b / 1.5c):
 
-Iconize-sync's folder-icon model reads folder-note frontmatter
-(`<folder>/<folderNoteName>.md`, per Folder Notes plugin's `folderNoteName`
-template — the opinionated override sets this to `{{folder_name}}`).
-Without Folder Notes, the reloader can't map folders → folder-notes and
-folder icons will never paint.
-
-1. Probe `<vault>/plugins/folder-notes/manifest.json`. If present → invoke
-   `/lazy-obsidian.update-plugin folder-notes` directly (it will no-op when
-   current, update when the remote is newer).
-2. If absent → `AskUserQuestion`: **install** / **skip**.
-   - **install** → invoke `/lazy-obsidian.update-plugin folder-notes`.
-     Record its reported state tuple in this skill's final report.
-   - **skip** → note in the final report that folder icons will not paint
-     until Folder Notes is installed. Continue with Step 1.5b.
-
-### 1.5b — Iconize (`obsidian-icon-folder`)
-
-Iconize itself is the target the worker writes to. Without it, there is no
-`data.json` to reconcile and the frontmatter-icon feature has no renderer.
-The opinionated override configures Iconize to read from `iconize_icon` /
-`iconize_color` (see Step 2.6 for the audit assertion).
-
-1. Probe `<vault>/plugins/obsidian-icon-folder/manifest.json`. If present →
-   invoke `/lazy-obsidian.update-plugin obsidian-icon-folder` directly.
-2. If absent → `AskUserQuestion`: **install** / **skip**.
-   - **install** → invoke `/lazy-obsidian.update-plugin obsidian-icon-folder`.
-     Record its reported state tuple.
-   - **skip** → note in the final report that iconize-sync cannot function
-     until Iconize is installed. Continue with Step 1.5c.
-
-### 1.5c — iconize-reloader (bundled)
-
-`iconize-reloader` is the runtime half of the iconize-sync two-writer model:
-it watches folder-note frontmatter events (write / rename / delete) and
-propagates changes into `data.json`, including **purging folder-keyed
-entries whose folder-note no longer exists**. Without it, the worker writes
-frontmatter but nothing closes the loop back to `data.json` — stale folder
-icons persist and orphans never get purged.
-
-Unlike the other two, `iconize-reloader` is iconize-sync-specific — it has
-no standalone value, isn't in the Obsidian community registry, and ships
-bundled inside this plugin at
-`${CLAUDE_PLUGIN_ROOT}/templates/obsidian/plugins/iconize-reloader/`.
-
-1. Probe `<vault>/plugins/iconize-reloader/manifest.json`. If present →
-   invoke `/lazy-obsidian.update-plugin iconize-reloader --bundled`
-   (copies from the bundled source if the version differs).
-2. If absent → `AskUserQuestion`: **install** / **skip**.
-   - **install** → invoke `/lazy-obsidian.update-plugin iconize-reloader --bundled`.
-     Record its reported state tuple.
-   - **skip** → note in the final report that folder-icon sync and orphan
-     purging will not function until the reloader is installed.
-
-### Step 1.5 report
-
-Capture each invocation's state tuple (`binary=... overrides=... community=...`)
-and surface all three in the final Step 6 report. If any of the three was
-skipped, flag the consequence in the report's "next steps" block.
+1. Invoke `/lazy-obsidian.update-plugin <id> [<flag>]`.
+2. Record the state tuple (`binary=... overrides=... community=...`) for
+   the Step 6 report.
+3. If `update-plugin` returns **FAIL** → **ABORT the entire skill** with a
+   clear error: "Hard dependency `<id>` could not be installed/updated
+   (`<reason>`). iconize-sync requires all three. Resolve and re-run." Do
+   not continue to subsequent rows or steps. No silent `skipped`, no
+   continue-anyway. A failed hard dep is a failed install.
 
 ## Step 2 — Scaffold protocol doc (per-file prompt)
 
@@ -129,7 +102,9 @@ State machine (one `AskUserQuestion` per file):
 - **Unchanged** (byte-identical) → no prompt.
 - **Drift** (differ) → show unified diff, ask: **overwrite** / **keep-local**.
 
-Apply the same state machine to the icon-map.
+**Scope**: protocol doc only. The icon-map is handled in Step 2.7 (its drift
+decision is schema-aware, so a generic byte-diff prompt would hide the
+migration option).
 
 Reading source templates: use `Glob` against `${CLAUDE_PLUGIN_ROOT}/templates/obsidian-iconize/*`.
 Copy with `Read` + `Write` so diffs are visible to the wizard. Create missing
@@ -195,36 +170,62 @@ Wizard discipline: one `AskUserQuestion` for the whole drift block (not one
 per key) — the three settings are conceptually a single "frontmatter feature"
 toggle and make no sense partial.
 
-## Step 2.7 — Schema handshake migration
+## Step 2.7 — Icon-map scaffold (schema-aware)
 
-Icon-map uses a bilateral version handshake (`schema_version` + optional
+The icon-map uses a bilateral version handshake (`schema_version` + optional
 `min_hook_version`). The worker's preflight renders hooks inert (exit 0, stderr
 diagnostic) on mismatch — so a stale schema silently disables syncing.
 
-1. Read the vault's `.claude/obsidian-iconize/icon-map.json` (if present).
-2. If the top-level `schema_version` key is absent → this is a pre-handshake
-   vault (schema 1 implicit). Treat as schema 1 and proceed to the v1 → v2
-   branch below.
-3. If `schema_version == SCHEMA_VERSION` (current — 2 at time of this plan)
-   → **ok**, no migration.
-4. If `schema_version == 1` and `SCHEMA_VERSION == 2` → **v1-to-v2 migration
-   available**. Diff preview: count matchers that contain an `emit` key;
-   show the count and the first ~5 matcher ids that would have `emit`
-   stripped. `AskUserQuestion`: **upgrade** / **keep**.
-   - **upgrade**: drop every `emit` key from every matcher, set
-     `schema_version: 2`, write back. Preserve all other keys (registries,
-     stage_colors, version, matchers' other fields, key order).
-   - **keep**: hooks remain inert until resolved; surface a FAIL in the
-     report.
-5. If `schema_version` is outside `SUPPORTED_SCHEMA` in the other direction
-   (future version the installed worker doesn't know) → **plugin too old**.
-   Report as a blocker; do not edit the icon-map.
-6. If `schema_version == 2` but `min_hook_version` exceeds the installed
-   `HOOK_VERSION` → same "plugin too old" blocker.
+This step is the **single decision point for the icon-map** — byte-drift and
+schema migration are handled together so the user sees one coherent prompt,
+not two sequential ones where `migrate` (the in-place upgrade that preserves
+authored registries and matchers) is easy to miss behind an overwrite /
+keep-local drift prompt.
 
 Retrieve `SCHEMA_VERSION`, `SUPPORTED_SCHEMA`, and `HOOK_VERSION` from the
-worker: `python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py check-versions`
-emits them in the report.
+worker: `python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py check-versions`.
+
+### Decision matrix
+
+Read `.claude/obsidian-iconize/icon-map.json` and dispatch:
+
+1. **Target missing** → install the plugin's template at
+   `${CLAUDE_PLUGIN_ROOT}/templates/obsidian-iconize/icon-map.json`. No prompt
+   (mirrors Step 2's "New" branch for the protocol doc). State: **installed**.
+2. **Target present, `schema_version == SCHEMA_VERSION`** (handshake OK):
+   - Byte-identical to template → no prompt. State: **unchanged**.
+   - Byte-differs (authored customizations on the current schema) → show
+     unified diff, `AskUserQuestion`: **overwrite** / **keep-local**.
+3. **Target present, `schema_version == 1` (or absent, treated as implicit v1)
+   and `SCHEMA_VERSION == 2`** → v1-to-v2 migration is available. Preview:
+   count matchers that contain an `emit` key and list the first ~5 matcher ids
+   that would have `emit` stripped. Then issue a **single** `AskUserQuestion`
+   with three options:
+   - **migrate** — in-place upgrade. Drop every `emit` key from every matcher,
+     set `schema_version: 2`, preserve all other keys (registries,
+     stage_colors, version, matchers' other fields, key order). Implementation:
+     `jq '.schema_version = 2 | .matchers = (.matchers | map(del(.emit)))'`
+     with an atomic write (`icon-map.json.tmp` → `mv`). State: **v1-to-v2-upgraded**.
+   - **overwrite** — replace with the plugin's empty v2 template. The prompt
+     description MUST spell out that this wipes all authored registries,
+     matchers, and stage-colors. State: **overwritten**.
+   - **keep-local** — leave the v1 file untouched. Hooks remain inert (exit 0
+     with stderr diagnostic) until the user migrates. State: **v1-kept**,
+     surface as a FAIL in the Step 6 report.
+4. **Target present, `schema_version` outside `SUPPORTED_SCHEMA` on the high
+   side** (future version the installed worker doesn't know) → **plugin too
+   old** blocker. Report and do not edit. State: **blocker-plugin-too-old**.
+5. **Target present, `schema_version == 2` but `min_hook_version` exceeds the
+   installed `HOOK_VERSION`** → same **plugin too old** blocker.
+
+### Wizard discipline
+
+Cases 2-drift and 3 each use **one** `AskUserQuestion`. Never ask a generic
+drift prompt (overwrite / keep-local) and then a second schema prompt
+(upgrade / keep) — when the drift is explained by a schema version bump,
+`migrate` must appear as a first-class option inside the same prompt as
+`overwrite` and `keep-local`, so the user doesn't have to pick `keep-local`
+just to unlock the migration path.
 
 ## Step 3 — Install the pre-commit shim
 
@@ -298,20 +299,22 @@ full sweep would do. Do not apply.
 
 ## Step 6 — Report
 
-Summarize:
-- Which artifacts were **created**, **updated**, **unchanged**, or **kept-local**.
-- Hard-dependency plugins — one line per plugin with the `update-plugin`
-  state tuple (or **skipped** if the user opted out):
-  - `folder-notes`: `binary=... overrides=... community=...` / **skipped**
-  - `obsidian-icon-folder`: `binary=... overrides=... community=...` / **skipped**
-  - `iconize-reloader`: `binary=... overrides=... community=...` / **skipped**
-- Whether a legacy PostToolUse entry was **stripped**, **kept**, or **not present**.
-- Iconize frontmatter settings: **asserted** / **fixed** / **kept-local** / **skipped** / **iconize-absent**.
-- Schema migration result: **none-needed** / **v1-to-v2-upgraded** / **v1-kept** / **blocker-plugin-too-old**.
-- Shim HOOK_VERSION installed.
-- `.gitignore` (iconize data.json): **added** / **already-ignored** / **gitignore-created** / **skipped** — plus WARN line if the file is currently tracked.
-- Next steps: "run `lazy-obsidian.iconize-config` to seed your registries,
-  then run `lazy-obsidian.iconize-sync reconcile` for a first full sweep."
+One bullet per step, in order — missing bullet = skipped step, back up and run it.
+
+- **Step 1** — repo-root + vault paths (or abort reason).
+- **Step 1.5a** `folder-notes`: state tuple (`binary=created|updated-<x>-to-<y>|unchanged overrides=... community=...`). Never `skipped` — hard deps abort the skill instead.
+- **Step 1.5b** `obsidian-icon-folder`: state tuple. Never `skipped`.
+- **Step 1.5c** `iconize-reloader`: state tuple. Never `skipped`.
+- **Step 2** protocol doc: **installed** / **unchanged** / **overwritten** / **kept-local**.
+- **Step 2.5** legacy PostToolUse: **stripped** (count) / **kept** / **not-present**.
+- **Step 2.6** Iconize frontmatter settings: **asserted** / **fixed** / **kept-local** / **skipped** / **iconize-absent**.
+- **Step 2.7** icon-map: **installed** / **unchanged** / **overwritten** / **kept-local** / **v1-to-v2-upgraded** / **v1-kept** / **blocker-plugin-too-old**.
+- **Step 3** pre-commit shim: HOOK_VERSION + `core.hooksPath` (**set** / **already-set** / **left-as-is**).
+- **Step 4** callbacks dir: **created** / **already-present** / **.gitkeep-added**.
+- **Step 4.5** `.gitignore` (iconize data.json): **added** / **already-ignored** / **gitignore-created** / **skipped**; WARN if `git ls-files --error-unmatch` exits 0 (user runs `git rm --cached`, never auto).
+- **Step 5** verify: `check-versions` status + `reconcile --dry-run` summary.
+
+Next steps: "run `lazy-obsidian.iconize-config` to seed registries, then `lazy-obsidian.iconize-sync reconcile`." Add consequence lines for any **kept-local** / **skipped** assertion (2.6, 2.7, 4.5 only — hard-dep skips don't reach Step 6).
 
 ## Step 7 — Log the run
 
@@ -330,4 +333,8 @@ after the first re-run strips them, subsequent runs find nothing to strip.
 
 Every decision point uses `AskUserQuestion`, one question at a time. Never
 bundle "install protocol? install icon-map?" into a single multi-select
-prompt. Legacy-stripping and schema-migration each get their own prompt.
+prompt. Legacy-stripping gets its own prompt. The icon-map gets **one**
+schema-aware prompt (Step 2.7) whose options depend on the drift/schema case —
+so a v1-vs-v2 situation offers `migrate` alongside `overwrite` and
+`keep-local`, not a sequential drift-then-migration pair where `migrate` is
+hidden behind a prior choice.

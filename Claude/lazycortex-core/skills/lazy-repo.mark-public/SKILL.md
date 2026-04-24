@@ -8,6 +8,23 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(git remo
 
 End-to-end workflow for taking a private/local repo public — or for marking a subtree inside a repo as the "public surface" while the repo itself stays private. Runs the security audit, resolves all findings, creates the waiver file (which activates the pre-commit hook), and in whole-repo mode optionally changes GitHub visibility.
 
+## Execution discipline (MANDATORY — read before any action)
+
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+
+1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Step 1 — Preflight`
+   - `Step 1b — Determine scope`
+   - `Step 2 — Run full audit`
+   - `Step 3 — Resolve findings`
+   - `Step 4 — Create .guard-waivers.json`
+   - `Step 5 — Go public on GitHub (whole-repo mode only)`
+   - `Step 6 — Post-flight (Report)`
+   - `Log the run`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
+
 ## Step 1: Preflight
 
 1. Confirm with the user which repo (default: current working directory)

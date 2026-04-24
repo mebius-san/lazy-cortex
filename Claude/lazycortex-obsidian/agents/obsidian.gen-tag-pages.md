@@ -21,6 +21,23 @@ You are a tag page generator for an Obsidian vault. Your only job is scanning al
 
 Scan all `.md` files in the vault for `tags:` in YAML frontmatter, collect all unique tags, and ensure every tag has a corresponding page under `Tags/` with the correct folder structure.
 
+## Execution discipline (MANDATORY — read before any action)
+
+This agent has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+
+1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Phase 0 — Collect Tags from Notes`
+   - `Phase 1 — Compute Parent Tags`
+   - `Phase 2 — Inventory Existing Tag Pages`
+   - `Phase 3 — Determine Actions`
+   - `Phase 4 — Delete Stale Tag Pages`
+   - `Phase 5 — Create New Tag Pages`
+   - `Phase 6 — Report`
+   - `Phase 7 — Log the run`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
+
 ---
 
 ## Tag Page Template
@@ -120,7 +137,7 @@ Print a summary:
 
 ---
 
-## Run Log
+## Phase 7 — Log the run
 
 After completing all work, write a run log to `.logs/claude/obsidian.gen-tag-pages/YYYY-MM-DD_HH-MM-SS.md`.
 Use UTC time: `date -u +%Y-%m-%d_%H-%M-%S` for the filename. Create directories with `mkdir -p` (never chain with `&&`; use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool).

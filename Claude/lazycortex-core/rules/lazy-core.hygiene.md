@@ -7,8 +7,7 @@ always_loaded: constrains main agent on every artifact create/edit
 ## Scope: project-local by default
 
 - Create skills, agents, hooks, rules, and other artifacts at the project level (`.claude/`), never under `~/.claude/` without an explicit request.
-- Never modify global `~/.claude/` config without the user's explicit command.
-- Only truly cross-project artifacts belong globally — even then, ask first.
+- Never modify global `~/.claude/` config without the user's explicit command. Only truly cross-project artifacts belong globally — even then, ask first.
 
 ## Naming: dot-namespaces for all artifacts
 
@@ -17,12 +16,12 @@ always_loaded: constrains main agent on every artifact create/edit
 
 ## Settings split strategy
 
-Applies at **both scopes** — `~/.claude/` and project `.claude/`. Tracked `settings.json` owns enablement; gitignored `settings.local.json` owns permissions and machine-specific values.
+Applies at both scopes (`~/.claude/`, project `.claude/`).
 
-- **`settings.json`** (tracked): enablement only — `enabledPlugins`, `enabledMcpjsonServers`, `enableAllProjectMcpServers`, `hooks`, non-secret `env`, `model`, `statusLine`, marketplace registrations. What every contributor/machine needs identically.
-- **`settings.local.json`** (gitignored): entire `permissions` block (`allow`/`ask`/`deny`/`defaultMode`), `additionalDirectories`, machine-specific `env` (public-repo mirror paths, Docker sockets, etc.), and personal permission choices.
-- **Per-tool permissions never belong in tracked `settings.json`** — at either scope. Permission posture is personal.
-- **Prefer project-level over global.** A permission specific to one project goes in that project's `.claude/settings.local.json`, not `~/.claude/settings.local.json`.
+- **`settings.json`** (tracked): enablement only — `enabledPlugins`, `enabledMcpjsonServers`, `enableAllProjectMcpServers`, `hooks`, non-secret `env`, `model`, `statusLine`, marketplace registrations.
+- **`settings.local.json`** (gitignored): `permissions` block (`allow`/`ask`/`deny`/`defaultMode`), `additionalDirectories`, machine-specific `env`, personal permission choices.
+- **Per-tool permissions never belong in tracked `settings.json`** at either scope — permission posture is personal.
+- **Prefer project-level over global** for any permission specific to one project.
 
 ## MCP servers
 
@@ -31,9 +30,7 @@ Applies at **both scopes** — `~/.claude/` and project `.claude/`. Tracked `set
 
 ## Path hygiene (for tracked config files)
 
-- Never hardcode paths that can be derived. Prefer `$HOME`, `~`, `$XDG_*`, or templating variables. Hardcode only when unavoidable and identical on every machine.
-- No `/Users/…` or `/home/…` absolute paths in tracked `.claude/` files.
-- No `<project>/` prefixes — use relative paths (`.claude/…`).
+- No hardcoded absolute paths (`/Users/…`, `/home/…`) or `<project>/` prefixes in tracked `.claude/` files. Prefer `$HOME`, `~`, `$XDG_*`, templating vars, or relative `.claude/…` paths.
 - Don't use `~/.claude/` for project-local items — use relative `.claude/`.
 
 ## Dynamic content in agents/skills

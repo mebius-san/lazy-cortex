@@ -4,6 +4,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.30 — 2026-04-24
+
+- New `lazy-core.agent-model-router` PreToolUse hook routes every `Agent` dispatch to a configured model (`haiku` / `sonnet` / `opus` / `inherit`) via a shared `.claude/lazy.settings.json`. Agents that ship with `model: inherit` can now be cheap-by-default per project without plugins having to hardcode a tier. Set `LAZY_AGENT_MODEL_FLOOR=haiku|sonnet|opus` for a session-wide cap (wins over caller-supplied `model`). Config uses a grouped schema: `_builtin` (Explore, Plan, general-purpose), `_user` (`~/.claude/agents/*.md`), `_project` (`./.claude/agents/*.md`), and per-vendor domains for installed plugins.
+- `/lazy-core.install` now seeds `.claude/lazy.settings.json` with defaults for the three built-in dispatch names (`Explore`→haiku, `Plan`→opus, `general-purpose`→inherit) plus empty `_user` / `_project` slots for `/lazy-core.optimize` to fill.
+- `/lazy-core.audit` and `/lazy-core.doctor` gain a **Model routing** section: merged-with-provenance view across project + global scopes, orphan/gap detection, invalid-value reporting, env-var status, and a WARN when no `lazy.settings.json` is found at either scope.
+- `/lazy-core.optimize` gains a Phase 7 wizard: enumerates every dispatchable agent (built-ins, user-authored, project-authored, plugin-shipped) and fires one `AskUserQuestion` per missing entry — heuristic-driven default tier, or pick haiku/sonnet/opus/inherit/skip. When the config is missing entirely, the wizard first offers to create it (project / global / skip).
+- New `lazy.settings.recommended.md` reference doc with copy-paste entries for well-known third-party agents (superpowers, claude-code-guide, statusline-setup, etc.).
+- **Rule reorganization:** the authoring-contract rule was split three ways — `lazy-core.skill-writing` (scoped to `.claude/skills/**` and `.claude/commands/**`), `lazy-core.agent-writing` (`.claude/agents/**`), and `lazy-core.rule-writing` (`.claude/rules/**`). Each scope is loaded only when editing the matching artifact type, so authoring a skill no longer drags the agent-frontmatter contract into context (and vice versa). Re-run `/lazy-core.install` to pick up the new rule files.
+
 ### 0.2.28 — 2026-04-24
 
 - (Internal release catch-up; no user-facing changes since 0.2.13 — these autobumps accumulated during development. See `docs/changelog.md` for commit-level detail.)
@@ -76,6 +85,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-log
 
+### 0.2.9 — 2026-04-24
+
+- New `lazy-log.distill-trigger` Stop hook: at session end, compares `.logs/commits.jsonl` against the `last-distilled-sha` marker in `docs/changelog.md` and, when commits are pending, asks Claude to run `lazycortex-log:lazy-log.distill` before the turn ends. Loop-safe via `stop_hook_active`. You no longer need to remember to run distill manually.
+- The `lazy-log.logging` rule's "distill after commits (MANDATORY)" section was rewritten to describe the Stop-hook-driven flow. The hard-skip override ("user says don't distill") still applies.
+- `/lazy-log.install` seeds four routing entries into `.claude/lazy.settings.json` under the shared `lazycortex` domain group — `lazy-log.distill` and `lazy-log.timeline` default to `haiku` (mechanical rewriters); `lazy-log.recall` and `lazy-log.summary` default to `sonnet` (ranked retrieval / synthesis). Paired with `lazycortex-core` 0.2.30, this cuts distill cost to a fraction of what it was when subagents inherited Opus from the caller.
+
 ### 0.2.7 — 2026-04-22
 
 - `/lazy-log.install` now gitignores `docs/changelog.md` in addition to `.logs/`. The distilled changelog is a per-contributor local cache feeding Claude's change-history recall — tracking it in git would cause merge conflicts between teammates, since every distill run rewrites the same file with a single `last-distilled-sha` marker. Existing installs: re-run `/lazy-log.install` to have the skill add `docs/changelog.md` to `.gitignore`. The file stays on disk; only git-tracking changes.
@@ -115,6 +130,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 0.1.5 — 2026-04-24
+
+- (No user-facing changes; internal plumbing — execution-discipline waiver added to the `lazy-specs.help` command and plugin-dev folder-note gitignore cleanup.)
+
 ### 0.1.4 — 2026-04-19
 
 - Internal plumbing — seeded `.claude-plugin/overview.md` so the plugin meets the minimum marketplace surface required by `tool.doctor`. Still a namespace placeholder with no shipped skills; downstream plugins and the marketplace can now depend on the namespace ahead of the first real skill landing. No functional changes.
@@ -132,6 +151,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 0.2.51 — 2026-04-24
+
+- `/lazy-obsidian.install` seeds `obsidian.gen-tag-pages=sonnet` into `.claude/lazy.settings.json` under the shared `lazycortex` domain group — the tag-page generator blends mechanical indexing with curated summaries, so sonnet is the appropriate default tier.
+- **Fix:** `/lazy-obsidian.iconize-install` now enforces structural checklist discipline and installs all three hard-dependency plugins (`obsidian-icon-folder`, `folder-notes`, `iconize-reloader`) up front in a single pass. Previously the dependency installs could be silently skipped mid-run, leaving an inconsistent iconize setup that failed to sync icons on save.
 
 ### 0.2.49 — 2026-04-24
 

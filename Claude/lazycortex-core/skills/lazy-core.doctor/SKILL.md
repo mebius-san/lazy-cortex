@@ -13,6 +13,24 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispat
 
 **Read-first**: collect all findings before any fix. Never fix silently.
 
+## Execution discipline (MANDATORY — read before any action)
+
+This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+
+1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Phase 0 — Mode detection`
+   - `Phase 1 — Dispatch parallel scans`
+   - `Phase 2 — Collect + merge`
+   - `Phase 2.5 — Plugin version currency`
+   - `Phase 2.6 — Release-mode outdated-plugin suppression`
+   - `Phase 2.7 — Waiver reconciliation`
+   - `Phase 3 — Delegated audits`
+   - `Phase 4 — Present + fix + waive (Report)`
+   - `Log the run`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
+
 ## Phase 0 — Mode detection
 
 Detect mode at the start of the run; pass the result to every dispatched agent and to Phase 2.6.
@@ -44,20 +62,7 @@ Findings from plugin sources must carry a `source: plugin` marker so Phase 2.6 c
 
 Checks the agent performs:
 
-- **Rules files** (`.claude/rules/*.md`, `~/.claude/rules/*.md`):
-  - `[FAIL]` rules file > 3 KB
-  - `[WARN]` contains a **broken artifact reference** — any of the below that doesn't exist at its expected location:
-    - slash-command `/name` → no matching skill/command found
-    - `Agent(subagent_type: "plugin:name")` or `subagent_type: "X"` → no matching agent/skill
-    - `<namespace>.<name>.md` literal filename mentioned → file not present in rules dir
-    - `references/...` or `${CLAUDE_PLUGIN_ROOT}/references/...` path → file missing
-    - `hooks/...` script path → file missing
-    - `skills/<name>/SKILL.md` path → file missing
-    Markdown section headings (`## Phase 2.5`) are NOT checked — internal document structure.
-  - `[FAIL]` contains code blocks > 10 lines
-  - `[WARN]` no YAML frontmatter (need at minimum `description`, plus scope or waiver — see next bullet)
-  - `[WARN]` frontmatter has **neither `paths:` scope nor `always_loaded:` waiver** — every unscoped rule burns tokens on every turn for every user. A rule must either declare a folder scope (`paths: ["glob", ...]` — only loaded when matching files are touched) or carry a short `always_loaded: <one-line reason>` waiver justifying why it must be in context every turn (e.g. governs every skill, constrains the main agent, encodes a safety posture applied to every action). The value IS the waiver — empty / boolean `true` is not accepted. Finding: `rule lacks scope and waiver | <path>`; `detail: frontmatter has neither paths nor always_loaded`; `fix: add paths: ["<glob>"] if scoped, or always_loaded: <reason> if truly global`. Coordinator-owned fix.
-  - `[WARN]` filename lacks dot separator (must be `namespace.name.md`)
+- **Rules files** (`.claude/rules/*.md`, `~/.claude/rules/*.md`): contract defined by `lazy-core.rule-writing`. Agent runs the checks enumerated there — mandatory frontmatter (`description` + `paths:` scope OR `always_loaded:` waiver), size budget (3 KB for `always_loaded:`, 10 KB WARN / 25 KB FAIL for `paths:`-scoped), no code blocks > 10 lines, dot-namespace filename, broken-artifact-reference scan, narrative-padding heuristic. Severities as defined in that rule. `lazy-core.rule-writing` auto-loads on this scan because the rule's `paths:` glob matches `.claude/rules/**`.
 - **Agents** (`.claude/agents/*.md`):
   - `[FAIL]` missing / malformed frontmatter (`name`, `description`, `tools`)
   - `[WARN]` references a missing rules file
@@ -83,6 +88,18 @@ Checks the agent performs:
   - **Drift**: for each source rule whose filename also exists at `.claude/rules/<filename>` (or `~/.claude/rules/<filename>` for user-scoped installs), compare contents. If bytes differ → `[WARN] rule <filename> drifted from <plugin> source — run /<namespace>.install to reconcile (per-rule overwrite/keep-local/merge prompt)`.
   - **Orphan**: any file in target rules dir whose filename matches one of the plugin's owned namespaces but is NOT in the source-rule set → `[WARN] rule <filename> is an orphan from <plugin> (removed between versions) — run /<namespace>.install to offer deletion`.
   - Missing rules (in source but not in target) are NOT a finding — users deliberately skip rules at install time via the per-rule `AskUserQuestion` prompt.
+- **`lazy.settings.json` validation** — read both `./.claude/lazy.settings.json` (project) and `~/.claude/lazy.settings.json` (user).
+  - `[WARN] no lazy.settings.json found at either scope — agent routing disabled. Run /lazy-core.optimize to create and fill.` when BOTH scopes are missing. Skip the remaining checks in this section.
+  - For each present file:
+  - `[FAIL]` not valid JSON, or top-level `version != 1`, or `agent_models` not an object.
+  - `[WARN]` any value under `agent_models` is not an object — finding: `malformed group <name> in <path>`.
+  - `[WARN]` unexpected reserved group — any group whose name starts with `_` and is NOT one of `_builtin`, `_user`, `_project`. Finding: `unknown reserved group <name> in <path> — reserved prefix`.
+  - `[WARN]` cross-group duplicate keys — same dispatch string appearing in more than one group. Finding: `duplicate key <dispatch> in groups <a>, <b> (<path>) — router last-wins is non-deterministic`.
+  - `[WARN]` invalid value — any value not in `{"haiku", "sonnet", "opus", "inherit"}`. Finding: `invalid value <x> for <group>.<key> in <path>`.
+  - `[WARN]` orphan — dispatch string in any group that does NOT resolve to any discovered agent (see Agent discovery under `lazy-core.audit` / `lazy-core.optimize`). Finding: `orphan agent_models entry: <group>.<key> (<path>)`.
+  - `[INFO]` gap — discovered agent with no entry in any group (except those explicitly set to `"inherit"`, which are NOT gaps). Finding: `no agent_models entry for <dispatch-string> — run /lazy-core.optimize to fill`.
+  - `[INFO]` env-var status — current `LAZY_AGENT_MODEL_FLOOR` value if set, plus tier-order note `haiku < sonnet < opus`.
+  All non-blocking.
 
 Agent must not propose fixes beyond one-line hints — coordinator owns fixes.
 

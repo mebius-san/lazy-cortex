@@ -10,6 +10,23 @@ Semantic integrity check for the plugin. Orthogonal to `lazy-core.doctor`'s
 generic structural checks (filename format, frontmatter presence, etc.) —
 this skill owns the domain-specific invariants.
 
+## Execution discipline (MANDATORY — read before any action)
+
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+
+1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Phase 1 — Version coherence`
+   - `Phase 2 — Icon-map template sanity`
+   - `Phase 2.5 — Cross-artifact coherence for the two-writer model`
+   - `Phase 3 — Protocol template sanity`
+   - `Phase 4 — Skill cross-refs`
+   - `Phase 6 — Protocol doc content checks`
+   - `Phase 5 — Report + fix loop`
+   - `Phase 7 — Log the run`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
+
 ## Phase 1 — Version coherence
 
 - Read `${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py`; extract
@@ -104,7 +121,7 @@ warrant parallel Explore subagents. Today's audit is small enough to run inline.
 - **WARN** if the protocol does not name `iconize_icon` / `iconize_color` as
   the canonical frontmatter keys.
 
-## Logging
+## Phase 7 — Log the run
 
 `./.logs/claude/lazy-obsidian.audit/YYYY-MM-DD_HH-MM-SS.md` per the logging
 rule.

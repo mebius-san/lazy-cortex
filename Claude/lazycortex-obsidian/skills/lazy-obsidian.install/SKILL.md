@@ -9,6 +9,24 @@ Bootstrap the plugin in the right scope: sync rule templates shipped by the plug
 
 The plugin currently ships **zero rules**. If you installed an earlier version of the plugin that shipped `lazy-obsidian.vault-hygiene.md`, this skill will offer to delete it as an orphan.
 
+## Execution discipline (MANDATORY — read before any action)
+
+This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+
+1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Step 1 — Detect install scope`
+   - `Step 2 — Determine paths`
+   - `Step 3 — Sync rule templates`
+   - `Step 4 — Sync the tag-page template`
+   - `Step 5 — Install Dataview`
+   - `Step 6 — Chain to /lazy-obsidian.iconize-install`
+   - `Step 7 — Verify / Report`
+   - `Step 8 — Seed lazy.settings.json`
+   - `Step 9 — Log the run`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
+
 ## Step 1: Detect install scope
 
 Read `~/.claude/plugins/installed_plugins.json` and find the entry for `lazycortex-obsidian@lazycortex`. The `scope` field is either:
@@ -114,16 +132,16 @@ Invoke `/lazy-obsidian.update-plugin dataview` unconditionally — it is idempot
 
   Record **skipped** for the report.
 
-## Step 6: Chain to `/lazy-obsidian.iconize-install`? (project scope only)
+## Step 6: Chain to `/lazy-obsidian.iconize-install` (project scope only, MANDATORY)
 
-Skip this step when scope is `user` — iconize-sync is a vault concern.
+Skip this step ONLY when scope is `user` — iconize-sync is a vault concern.
 
-Skip also when this skill is being re-run on a vault that already has the iconize-sync artifacts in place: detect by probing `<repo-root>/.claude/obsidian-iconize/icon-map.json`. If present, print an INFO line ("iconize-sync already scaffolded — run `/lazy-obsidian.iconize-install` directly if you need to re-audit it") and continue to Step 7.
+**Always ask** in project scope, even when `.claude/obsidian-iconize/icon-map.json` already exists. The presence of the icon map does not imply the rest of the iconize-sync system is current: `/lazy-obsidian.iconize-install` also handles the schema v1→v2 migration on `emit` keys, strips legacy PostToolUse hooks, asserts the three Iconize `data.json` keys (`frontmatterIconKey`, `frontmatterIconColorKey`, `frontmatterColorKey`), rewrites the pre-commit shim, updates `.gitignore`, and version-checks Iconize + Folder Notes + iconize-reloader via `/lazy-obsidian.update-plugin`. None of those states are observable from the icon-map file alone, so the parent skill must not short-circuit on it.
 
-Otherwise `AskUserQuestion`: **run-iconize-install** / **skip**.
+`AskUserQuestion`: **run-iconize-install** / **skip**. Frame the question so the user knows it's safe to re-run even if previously installed — phrase it "(Re-)run `/lazy-obsidian.iconize-install` to install or re-audit iconize-sync?" and mention in the description of the **run-iconize-install** option that the child skill is fully idempotent and will no-op unchanged artifacts.
 
 - **run-iconize-install** → invoke `/lazy-obsidian.iconize-install` as the next skill call. That skill is self-contained (installs Iconize + Folder Notes + iconize-reloader via `/lazy-obsidian.update-plugin`, scaffolds the protocol doc, icon-map, pre-commit shim, etc.) and handles its own wizard prompts. Record **chained** for the report.
-- **skip** → record **skipped**. Print: "Run `/lazy-obsidian.iconize-install` later when you want the iconize-sync system scaffolded into the vault."
+- **skip** → record **skipped**. Print: "Run `/lazy-obsidian.iconize-install` later when you want the iconize-sync system scaffolded or re-audited."
 
 ## Step 7: Verify
 
@@ -135,9 +153,50 @@ Otherwise `AskUserQuestion`: **run-iconize-install** / **skip**.
   - For each rule: state (**created**, **updated**, **unchanged**, or **kept-local**) and target `<path>`
   - Tag-page template: state (**installed**, **updated**, **unchanged**, **kept-local**, **skipped**) and target `<path>` — omit when scope is `user`
   - Dataview install: `update-plugin` state tuple (`binary=... overrides=... community=...`) or **skipped** — omit when scope is `user`
-  - iconize-install chain: **chained** / **skipped** / **already-scaffolded** — omit when scope is `user`
+  - iconize-install chain: **chained** / **skipped** — omit when scope is `user`. This line is mandatory in project scope; emit it unconditionally so a missing line is a visible gap in the report.
 
-## Step 8: Log the run
+## Step 8: Seed lazy.settings.json
+
+Non-destructively seed the `lazycortex` domain group in `agent_models` with the subagent this plugin ships.
+
+### Target file
+
+| Scope | Path |
+|---|---|
+| `user` | `~/.claude/lazy.settings.json` |
+| `project` | `<repo-root>/.claude/lazy.settings.json` |
+
+### Read or initialize
+
+Read the target file. If missing or unparseable, treat its contents as `{"version": 1, "agent_models": {}}`.
+
+### Ensure domain group exists
+
+Ensure `agent_models.lazycortex` exists as an object (create empty `{}` if absent — never overwrite existing content, and never touch other groups).
+
+### Seed defaults
+
+| Dispatch string | Default model |
+|---|---|
+| `lazycortex-obsidian:obsidian.gen-tag-pages` | `sonnet` |
+
+Per-key semantics (write back only if anything changed):
+
+- **absent** → add the entry with its default value. State **added**.
+- **equal** → leave untouched. State **unchanged**.
+- **different** → leave the user's value untouched. State **kept-local** (report value).
+
+Never touch other `lazycortex` entries (e.g. `lazycortex-log:*` seeded by `lazy-log.install`).
+
+### Write back
+
+If any mutation happened, write the file with `version: 1` at the top.
+
+### Report outcome
+
+One line per seeded default: `lazycortex.<key> = <value> (<state>)`. Append to the Step 7 report.
+
+## Step 9: Log the run
 
 Log to `./.logs/claude/lazy-obsidian.install/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter).
 

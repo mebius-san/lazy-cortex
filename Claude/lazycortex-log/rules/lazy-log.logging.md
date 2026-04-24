@@ -1,5 +1,5 @@
 ---
-description: Logging conventions for skills, agents, and commands. Also guides when to run lazy-log.distill after commits.
+description: Logging conventions for skills, agents, and commands.
 always_loaded: every skill/agent/command must log on every run
 ---
 # Run Logging (MANDATORY)
@@ -27,13 +27,15 @@ Body: `# <name>` heading, then `## Actions` (bullet list of actions, files modif
 
 Always include `git_sha` — it bridges "the AI did Y" back to the actual commit.
 
-## Distill after commits (MANDATORY)
+## Distill after commits (automatic via Stop hook)
 
-After every non-trivial commit (or batch of commits in one turn), you **must** run `Agent(subagent_type: "lazycortex-log:lazy-log.distill", prompt: "<context>")` to update `./docs/changelog.md`. Do not ask — just run it. Do not defer it to "later" or "the next turn" — run it in the same turn as the commit.
+The `lazycortex-log` plugin ships a Stop hook (`lazy-log.distill-trigger`) that fires at session end. It checks `.logs/commits.jsonl` against the `last-distilled-sha` marker in `docs/changelog.md`; when commits are pending, it asks Claude to run `Agent(subagent_type: "lazycortex-log:lazy-log.distill", ...)` before ending the turn. You do not need to trigger distill manually.
 
-**Skip only when ALL of these are true**: commit is purely trivial (typo, whitespace, dep bump, comment-only), no user-visible behavior changed, and no new file was added. "I already distilled this session" is NOT a skip reason — re-run after each new commit batch; distill is idempotent on already-processed SHAs.
+If the hook fires and you are in the middle of a task, run distill and then resume.
 
 **Hard skip override**: only when the user explicitly says "don't distill" / "skip the changelog" in the current turn.
+
+`stop_hook_active` prevents re-entry loops. The model is read from `.claude/lazy.settings.json` (`agent_models["lazycortex-log:lazy-log.distill"]`, default `haiku`), optionally capped by `LAZY_AGENT_MODEL_FLOOR`.
 
 ## Recall, timeline, summary
 

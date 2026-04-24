@@ -7,6 +7,22 @@ allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), 
 
 Bootstrap the plugin in the right scope: copy every rule template shipped by the plugin into the target `rules/` directory.
 
+## Execution discipline (MANDATORY — read before any action)
+
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+
+1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Step 1 — Detect install scope`
+   - `Step 2 — Determine paths`
+   - `Step 3 — Sync rule templates`
+   - `Step 4 — Verify`
+   - `Step 5 — Seed lazy.settings.json`
+   - `Step 6 — Report`
+   - `Step 7 — Log the run`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
+
 ## Step 1: Detect install scope
 
 Read `~/.claude/plugins/installed_plugins.json` and find the entry for `lazycortex-core@lazycortex`. The `scope` field is either:
@@ -68,12 +84,58 @@ For each installed rule file:
 - Read it back and confirm its `---` frontmatter parses
 - Confirm the file is under 3 KB (per the `lazy-core.doctor` rule-size threshold)
 
+## Step 5: Seed lazy.settings.json
+
+Non-destructively seed the `agent_models` section with the three built-in subagents and create empty reserved slots for user- and project-authored agents.
+
+### Target file
+
+| Scope | Path |
+|---|---|
+| `user` | `~/.claude/lazy.settings.json` |
+| `project` | `<repo-root>/.claude/lazy.settings.json` |
+
+### Read or initialize
+
+Read the target file. If missing or unparseable, treat its contents as `{"version": 1, "agent_models": {}}`.
+
+### Ensure reserved groups exist
+
+Ensure `agent_models._builtin`, `agent_models._user`, and `agent_models._project` exist as objects (create empty `{}` if absent — never overwrite existing content).
+
+### Seed `_builtin` defaults
+
+| Dispatch string | Default model |
+|---|---|
+| `Explore` | `haiku` |
+| `Plan` | `opus` |
+| `general-purpose` | `inherit` |
+
+Per-key semantics (write back only if anything changed):
+
+- **absent** → add the entry with its default value. State **added**.
+- **equal** → leave untouched. State **unchanged**.
+- **different** → leave the user's value untouched. State **kept-local** (report value).
+
+Never touch `_user` or `_project` entries — those slots are filled interactively by `lazy-core.optimize`.
+
+### Write back
+
+If any mutation happened, write the file with `version: 1` at the top. Preserve existing groups (plugin-domain groups like `lazycortex`, third-party groups, etc.) verbatim.
+
+### Report outcome
+
+One line per seeded default: `_builtin.<key> = <value> (<state>)`. Plus `_user`, `_project`: `created (empty)` if new, `unchanged` otherwise.
+
+## Step 6: Report
+
 Report to the user:
 - Scope detected (user vs project)
 - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)
 - For each rule: state (**created**, **updated**, **unchanged**, or **kept-local**) and target `<path>`
+- Per-key `agent_models` seed outcome from Step 5
 
-## Step 5: Log the run
+## Step 7: Log the run
 
 Log to `./.logs/claude/lazy-core.install/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter).
 

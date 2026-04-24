@@ -7,6 +7,25 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir -p *)
 
 Reduce startup context weight and fix settings layer violations for the current project.
 
+## Execution discipline (MANDATORY — read before any action)
+
+This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+
+1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Phase 1 — Audit context weight`
+   - `Phase 2 — Fix oversized rules files`
+   - `Phase 2.5 — LLM-readability audit`
+   - `Phase 3 — Audit global settings for project leakage`
+   - `Phase 4 — Fix settings leakage`
+   - `Phase 5 — Memory index health`
+   - `Phase 6 — Heavy-scan delegation audit`
+   - `Phase 7 — Fill agent_models wizard`
+   - `Report (Output / Optimization Results)`
+   - `Log the run`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
+
 ## Phase 1: Audit context weight
 
 Measure everything that loads at conversation start.
@@ -266,6 +285,88 @@ act as coordinator. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-sca
 
 If no candidates found, render "No heavy-scan delegation candidates found." and continue.
 
+## Phase 7: Fill agent_models wizard
+
+Enumerate every dispatchable agent across all sources and interactively assign a model tier to any that is missing from `lazy.settings.json`.
+
+### 7a. Detect missing config and offer creation
+
+Before doing anything else, check whether either `./.claude/lazy.settings.json` (project) or `~/.claude/lazy.settings.json` (user) exists.
+
+If **both are missing**:
+
+1. Emit a WARN finding for the phase report (wording matches `lazy-core.audit` and `lazy-core.doctor`): `no lazy.settings.json found (project: ./.claude/lazy.settings.json, global: ~/.claude/lazy.settings.json) — agent routing disabled.`
+2. Fire a single `AskUserQuestion` with exactly three options:
+   - **create at project** *(default-recommended — scoped to this repo)* — initialize `./.claude/lazy.settings.json` as `{"version": 1, "agent_models": {}}`, then continue Phase 7 with this as the chosen write scope (skip 7e's scope prompt).
+   - **create at global** — initialize `~/.claude/lazy.settings.json` as `{"version": 1, "agent_models": {}}`, then continue Phase 7 with this as the chosen write scope (skip 7e's scope prompt).
+   - **skip** — end Phase 7 with outcome `config missing, creation declined`. No writes. Report line: `agent_models entries | - | 0 | config missing, creation declined`.
+
+If **at least one file exists**, proceed to 7b without prompting. 7e still runs to let the user pick the write scope for this session.
+
+### 7b. Agent discovery
+
+Shared helper — same enumeration as `lazy-core.audit` and `lazy-core.doctor`. Deduped by full dispatch string:
+
+1. **Built-ins** — hardcoded list: `Explore`, `Plan`, `general-purpose`, `statusline-setup`. Group: `_builtin`. Dispatch string: bare name.
+2. **User-authored, global** — `~/.claude/agents/*.md`. Group: `_user`. Dispatch string: bare filename stem.
+3. **User-authored, project** — `./.claude/agents/*.md`. Group: `_project`. Dispatch string: bare filename stem.
+4. **Plugin-shipped** — `~/.claude/plugins/cache/**/agents/*.md`. Extract plugin name from path. Group: **domain** derived via the domain-extraction rule (plugin name up to first `-`, else whole name). Dispatch string: `<plugin-name>:<stem>`.
+
+For each discovered agent, record: dispatch string, target group, plugin name (if applicable), source path, and whether a matching `agent_models` entry exists in the merged config.
+
+### 7c. Load merged config
+
+Read `./.claude/lazy.settings.json` (project) and `~/.claude/lazy.settings.json` (user). Merge with project wins per-group. Flatten to `{dispatch_string: value}` for lookup.
+
+### 7d. Build missing-entries list
+
+For each discovered agent, if its dispatch string is absent from the flat map, add it to the missing list. Entries already set to `"inherit"` in either scope are explicit decisions — exclude them from the missing list.
+
+If the missing list is empty, skip to 7g with outcome `nothing to do`.
+
+### 7e. Decide write scope (single AskUserQuestion)
+
+If 7a already initialized a file, that is the write scope — skip this step. Otherwise, ask the user ONCE which file to write into:
+
+- **project** *(default-recommended — scoped to this repo)* — `./.claude/lazy.settings.json`
+- **global** — `~/.claude/lazy.settings.json`
+
+Note in the option descriptions: `_user` entries naturally belong in the global file, `_project` entries in the project file — but the user can override per run.
+
+### 7f. Wizard loop (one AskUserQuestion per agent)
+
+For each missing agent in the list, fire a single `AskUserQuestion`. The question body includes:
+
+- Agent dispatch string, target group (from discovery), source path.
+- A one-line description from the agent's frontmatter `description:` field (if readable; fall back to `(no description)`).
+- A **suggested tier** computed by this heuristic:
+  - Group `_builtin`: `Explore`→haiku, `Plan`→opus, `general-purpose`→inherit, `statusline-setup`→haiku.
+  - Dispatch string matches any of `*log*`, `*distill*`, `*tag*`, `*timeline*` AND description mentions "rewriter/formatter/distill/prose/mechanical" → haiku.
+  - Dispatch string matches any of `*review*`, `*audit*`, `*plan*`, `*design*` → opus.
+  - Everything else → sonnet (safe middle).
+
+Options (exactly these six):
+
+- `add as <suggested>` *(default-recommended)*
+- `add as haiku`
+- `add as sonnet`
+- `add as opus`
+- `add as inherit`
+- `skip`
+
+On answer:
+
+- `skip` → record **skipped** for this agent; no write. Next run will re-prompt.
+- any `add as <tier>` → write the entry into the chosen scope's `lazy.settings.json`, under the agent's target group (creating the group if absent). The target file is guaranteed to exist by this point (7a creates it if both were missing; otherwise the chosen scope already had a file). Preserve existing keys; never overwrite — this loop only runs for *missing* entries. Record **added** with the chosen tier.
+
+One `AskUserQuestion` at a time — wait for the answer before the next prompt.
+
+### 7g. Report outcome
+
+Append a row to the Phase 8 Output table: `agent_models entries | - | N | added: A, skipped: S`. Plus a one-line scope note: `wrote to: <path>` (or `no writes — config missing, creation declined` when 7a ended the phase).
+
+Idempotency: a second run on a fully-configured vault shows "nothing to do".
+
 ## Output
 
 End with a summary:
@@ -280,6 +381,7 @@ End with a summary:
 | Memory issues fixed | - | N | orphaned/broken |
 | Delegation candidates | - | N | heavy skills to refactor |
 | LLM-readability rewrites | - | N | applied / skipped / waived |
+| agent_models entries | - | N | added / skipped (wrote to: <path>) |
 ```
 
 ## Logging

@@ -1,6 +1,6 @@
 ---
 name: lazy-guard.allow-mcp
-description: "Register tools of one or more MCP servers in Claude Code settings using a 3-bucket classifier — safe/reversible tools into permissions.allow (no prompt), truly destructive tools into permissions.ask (always prompt), and medium-risk tools skipped entirely so Claude Code prompts once per call and the user decides. Writes to settings.local.json (gitignored) by default to keep personal permissions out of tracked settings shared with teammates. For globally defined servers, asks whether to register at the global scope (~/.claude/settings.local.json) or per-project (./.claude/settings.local.json). Also strips redundant mcp__ entries from paired tracked settings.json after promotion. Optionally installs a SessionStart preload hook (in tracked settings.json) that tells the agent to resolve the server's tool schemas via ToolSearch at session start — eliminates the deferred-loading round-trip that otherwise causes drift to Bash equivalents. Use when the user says 'allow context7 mcp', 'allow all mcp tools', 'trust the brave-search MCP server', or similar."
+description: "Register tools of one or more MCP servers in Claude Code settings using a 3-bucket classifier — safe/reversible tools into permissions.allow (no prompt), truly destructive tools into permissions.ask (always prompt), and medium-risk tools skipped entirely so Claude Code prompts once per call and the user decides. Writes to settings.local.json (gitignored) by default to keep personal permissions out of tracked settings shared with teammates. For globally defined servers, asks whether to register at the global scope (~/.claude/settings.local.json) or per-project (./.claude/settings.local.json). Also strips redundant mcp__ entries from paired tracked settings.json after promotion. Optionally installs a SessionStart preload hook (in gitignored settings.local.json — a personal optimization, not universal enablement) that tells the agent to resolve the server's tool schemas via ToolSearch at session start — eliminates the deferred-loading round-trip that otherwise causes drift to Bash equivalents. Use when the user says 'allow context7 mcp', 'allow all mcp tools', 'trust the brave-search MCP server', or similar."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(date -u *), Bash(git rev-parse *)
 ---
 # Register MCP Server Tools
@@ -14,6 +14,25 @@ Register `mcp__<server>__<tool>` entries for one or more MCP servers using a **3
 **Default target: `settings.local.json` (gitignored), not `settings.json` (tracked).** Permission choices are personal and machine-local — they must not leak into commits that teammates inherit. The skill writes to `settings.json` only when the user explicitly opts in (rare).
 
 **Never write silently** — always show the planned diff (allow adds, ask adds, skipped tools, cross-scope cleanup) and get confirmation first.
+
+## Execution discipline (MANDATORY — read before any action)
+
+This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+
+1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Phase 1 — Parse input`
+   - `Phase 2 — Discover MCP servers`
+   - `Phase 3 — Enumerate and classify tools per server`
+   - `Phase 4 — Route each server to the correct settings file`
+   - `Phase 5 — Reconcile and preview`
+   - `Phase 6 — Write`
+   - `Phase 6.5 — Strip cross-scope leaks`
+   - `Phase 7 — SessionStart preload hook`
+   - `Phase 8 — Report`
+   - `Log the run`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
 ## Phase 1: Parse input
 
@@ -168,7 +187,13 @@ For each target settings file (always a `settings.local.json` unless user overro
        - mcp__<server>__<any>
    ```
    Omit any sub-block with no entries.
-5. Ask the user to confirm before any write. One confirmation covers: additions to both lists, promotions from allow→ask, skip-category removals, and tracked-scope cleanup. If `--dry-run`, stop here.
+5. **Per-tool confirmation for every reversal of a prior trust choice.** Any entry in `to_remove_skip` (user previously pinned → classifier now says skip) or `to_move_to_ask` (user previously allowed → classifier now says destructive) is a reversal of a choice the user made in a past run or by hand. These MUST NOT be bundled into the general write confirmation — each needs its own `AskUserQuestion`, one at a time:
+
+   - For each `t ∈ to_remove_skip ∩ current permissions.allow`: `AskUserQuestion` **"Remove `<t>` from `allow`? Classifier marks it medium-risk; removing means Claude Code will prompt on every call."** options: `remove` (default, matches classifier) / `keep` (retain user's prior trust). On `keep`, drop `t` from `to_remove_skip` for this run.
+   - For each `t ∈ to_remove_skip ∩ current permissions.ask`: `AskUserQuestion` **"Remove `<t>` from `ask`? Classifier marks it medium-risk; removing means Claude Code will prompt per call instead of always-prompt."** options: `remove` / `keep`. On `keep`, drop `t` from `to_remove_skip`.
+   - For each `t ∈ to_move_to_ask`: `AskUserQuestion` **"Promote `<t>` from `allow` to `ask`? Classifier marks it destructive; promotion means Claude Code prompts every call."** options: `promote` (default) / `keep-in-allow`. On `keep-in-allow`, drop `t` from `to_move_to_ask` for this run (and surface as a note: "left in allow per user override — classifier considered it destructive").
+
+   One tool call per question — never combined. After all per-tool answers are collected, re-render the preview reflecting the user's overrides, then ask a single bundled confirmation covering: additions to both lists, any promotions/removals the user approved, and tracked-scope cleanup. If `--dry-run`, stop here after the per-tool questions (preview reflects the dry-run outcome).
 
 ## Phase 6: Write
 
@@ -192,36 +217,54 @@ After writing, re-read each file and assert:
 - No `to_remove_skip` entry remains in either list.
 - No tool appears in both lists simultaneously.
 
-## Phase 6.5: Strip cross-scope leaks from tracked settings
+## Phase 6.5: Strip cross-scope leaks
 
-Permission entries should not live in tracked `settings.json`. Once the target `settings.local.json` owns the entries, strip any redundant `mcp__<server>__*` entries from the paired tracked `settings.json`.
+Two kinds of leak must be cleaned up, both per-entry with explicit user confirmation. **Never silently flag-and-continue; never silently remove.**
 
 For each server processed this run:
+
+### 6.5a. Paired tracked `settings.json` (permissions in the wrong *file*)
+
+Permission entries should not live in tracked `settings.json`. Once the target `settings.local.json` owns the entries, any leftover `mcp__<server>__*` in the paired tracked file is a leak.
 
 1. Identify the **target** (a `settings.local.json`, per Phase 4).
 2. Identify the paired **tracked** file:
    - Target = `./.claude/settings.local.json` → Tracked = `./.claude/settings.json`.
    - Target = `~/.claude/settings.local.json` → Tracked = `~/.claude/settings.json`.
-3. Load the tracked file. Skip if it doesn't exist or both `permissions.allow` and `permissions.ask` are empty/absent for this server.
-4. Compute removals (both arrays are candidates; entries for servers processed this run only):
-   - `to_remove_tracked_allow = { e ∈ tracked.permissions.allow : e startswith "mcp__<server>__" }`
-   - `to_remove_tracked_ask   = { e ∈ tracked.permissions.ask   : e startswith "mcp__<server>__" }`
-   The removal is unconditional: tracked `settings.json` should not carry per-tool permission entries at all. Any matching entry is a leak regardless of whether the target file already has it.
-5. If both sets are empty, skip this file.
-6. Use `Edit` with minimal old/new replacements that drop only those entries. Preserve every other key, entry, and formatting detail. If a removal empties an array, leave `"allow": []` / `"ask": []` — do not delete the key.
-7. Re-read the file; assert JSON still parses and each removed entry is gone.
+3. Load the tracked file. Skip if it doesn't exist or has no `mcp__<server>__*` entries in `permissions.allow` or `permissions.ask`.
+4. Enumerate every such entry (both arrays):
+   - `tracked_leaks = { e ∈ allow ∪ ask : e startswith "mcp__<server>__" }`
+5. **For each leak**, `AskUserQuestion` (one at a time): **"`<entry>` is in tracked `<tracked-file>` — permissions belong in `settings.local.json`. Remove from tracked?"** options: `remove` (default) / `keep`. On `keep`, leave untouched and record as a "user-kept leak" note in Phase 8.
+6. For every leak the user approved, use `Edit` with minimal old/new replacements to drop just that entry. Preserve all other keys, entries, formatting, and comments. If a removal empties an array, leave `"allow": []` / `"ask": []` — do not delete the key.
+7. Re-read the file; assert JSON still parses and each approved removal is gone.
 
-Safety:
+### 6.5b. Opposite-scope `settings.local.json` (permissions in the wrong *scope*)
+
+A project-scoped server's permissions should live in `./.claude/settings.local.json`; a global-scoped server's in `~/.claude/settings.local.json`. Entries for a project server that ended up in the global local file (or vice versa) are wrong-scope leaks.
+
+1. Identify the **target scope** chosen in Phase 4 for this server.
+2. Identify the **opposite-scope `settings.local.json`**:
+   - Target = `./.claude/settings.local.json` → Opposite = `~/.claude/settings.local.json`.
+   - Target = `~/.claude/settings.local.json` → Opposite = `./.claude/settings.local.json`.
+3. Load the opposite file. Skip if it doesn't exist or has no `mcp__<server>__*` entries.
+4. Enumerate every such entry in both `permissions.allow` and `permissions.ask`:
+   - `opposite_scope_leaks = { e ∈ allow ∪ ask : e startswith "mcp__<server>__" }`
+5. **For each leak**, `AskUserQuestion` (one at a time): **"`<entry>` is in `<opposite-file>` (wrong scope — `<server>` is routed to `<target-scope>`). Remove from `<opposite-file>`?"** options: `remove` (default) / `keep` (retain out-of-scope entry). On `keep`, record as a "user-kept wrong-scope entry" note in Phase 8.
+6. For every leak the user approved, `Edit` with minimal old/new replacements. Same preservation rules as 6.5a.
+7. Re-read and re-verify.
+
+### Safety
 
 - Never removes non-`mcp__` entries.
 - Never removes entries for servers not processed in the current run.
-- Pure subtraction → idempotent on re-run.
+- **Never removes without a per-entry `AskUserQuestion`.** A user-kept leak becomes a Phase 8 note, not a silent pass.
+- Pure subtraction → idempotent on re-run. Previously-kept leaks will be re-asked next run (hook presence/absence is not remembered; re-asking is safe because the default is `remove`).
 
-## Phase 7: Optional — SessionStart preload hook for deferred MCP tool schemas
+## Phase 7 — SessionStart preload hook for deferred MCP tool schemas
 
 **Why.** MCP tools are surfaced to the agent as **deferred** — only tool names appear at session start; calling one requires a prior `ToolSearch` round-trip to load its schema. That friction is asymmetric with the always-loaded `Bash` tool, so the agent drifts to shell equivalents (e.g. `Bash(git status)` instead of `mcp__git__git_status`) even when a rule forbids it. A SessionStart hook can inject a short instruction telling the agent to resolve specific MCP tool schemas via `ToolSearch` on the first turn — one-time cost ≈1.1k tokens per session, and MCP tools become first-class for the rest of the session.
 
-**Scope target.** Hooks are **enablement**, not permission, and by the hygiene rule they belong in **tracked `settings.json`** (not `settings.local.json`). This is the only phase in this skill that writes to tracked settings.
+**Scope target.** This preload hook is a **personal optimization** (≈1.1k tokens/session cost, whose value each user weighs differently), not universal enablement. The global hygiene rule carves out personal-optimization hooks to `settings.local.json`, so Phase 7 writes there — never to tracked `settings.json`. The user still chooses **global** (`~/.claude/settings.local.json`) vs **project** (`./.claude/settings.local.json`).
 
 ### 7a. Decide which servers to preload
 
@@ -231,10 +274,10 @@ Skip this phase entirely if Phase 3 produced an empty preload set across every p
 
 ### 7b. Detect existing hook state, then ask only if ambiguous
 
-Inspect both tracked settings files for an existing SessionStart hook whose command mentions `ToolSearch` and `select:mcp__`:
+Inspect both gitignored local settings files for an existing SessionStart hook whose command mentions `ToolSearch` and `select:mcp__`:
 
-- `~/.claude/settings.json`
-- `./.claude/settings.json`
+- `~/.claude/settings.local.json`
+- `./.claude/settings.local.json`
 
 Routing rules (mirror Phase 4b's "infer first, ask only if undetermined"):
 
@@ -251,8 +294,8 @@ Routing rules (mirror Phase 4b's "infer first, ask only if undetermined"):
    - `Yes — install SessionStart preload hook (Recommended)` — description: "Pays ≈1.1k tokens per session so MCP tools are first-class; the alternative `ENABLE_TOOL_SEARCH=false` costs ≈13–16k tokens per session by loading every tool upfront."
    - `No — skip, accept ToolSearch round-trips per call` — description: "Keeps session-start context minimal. The agent may still drift to Bash equivalents when MCP schemas feel expensive to fetch."
 2. **Scope?** (only if the user chose Yes) options:
-   - `Project (./.claude/settings.json) (Recommended)` — description: "Smaller blast radius; easier to revert by deleting the hook entry. Right choice when the servers being registered are project-specific."
-   - `Global (~/.claude/settings.json)` — description: "One install covers every project on this machine. Right choice when the server is always loaded everywhere (e.g. `git`, `memory-personal`)."
+   - `Project (./.claude/settings.local.json) (Recommended)` — description: "Smaller blast radius; easier to revert by deleting the hook entry. Right choice when the servers being registered are project-specific."
+   - `Global (~/.claude/settings.local.json)` — description: "One install covers every project on this machine (personal preference — not shared with other contributors since this is gitignored). Right choice when the server is always loaded everywhere (e.g. `git`, `memory-personal`)."
 
 If the user chose **No** on a prior run, re-ask on subsequent runs — hook presence/absence is the only persistent state; don't treat a past decline as permanent.
 
@@ -284,7 +327,7 @@ Tool names in the `select:` list are **sorted alphabetically** and **comma-separ
 
 ### 7d. Merge logic
 
-For the chosen scope's `settings.json`:
+For the chosen scope's `settings.local.json`:
 
 1. If the file doesn't exist: create it with `{"hooks": {"SessionStart": [ … the hook above … ]}}` plus trailing newline.
 2. If `hooks.SessionStart` is absent: add the SessionStart array with the single entry.
@@ -297,7 +340,7 @@ For the chosen scope's `settings.json`:
 Extend the Phase 5 preview with a `hooks:` block when a write is planned, e.g.:
 
 ```
-<target file, absolute path>  (settings.json — tracked — hooks = enablement)
+<target file, absolute path>  (settings.local.json — gitignored — personal optimization)
   SessionStart preload:
     + mcp__git__git_add
     + mcp__git__git_commit
@@ -320,7 +363,7 @@ After the `Edit`/`Write`:
 
 ### 7g. Safety
 
-- **Tracked `settings.json` only.** Never install this hook into `settings.local.json`. Permissions stay local; enablement (including hooks) goes tracked.
+- **Gitignored `settings.local.json` only.** Never install this hook into tracked `settings.json`. The preload hook is a personal optimization (≈1.1k tokens/session) whose cost/value each user weighs differently — it must not leak into commits shared with teammates.
 - **No arbitrary shell.** The hook's `command` is `printf` (or equivalent `echo`) of a fixed preload-instruction string. Never any other binary, no network calls, no file writes.
 - **Union-only mutations.** The hook's `select:` list only ever grows or stays the same during this phase. Removing tools from the preload list is out of scope for `lazy-guard.allow-mcp` — the user does it by hand, or via a future `lazy-guard.revoke-mcp`.
 - **Idempotent.** Re-running with the same server set produces no change.
@@ -341,9 +384,15 @@ Print a short summary:
 
 - `→ allow` / `→ ask`: entries newly added to each list this run.
 - `skipped`: tools classified as medium-risk and deliberately left out of both lists this run.
-- `allow→ask`: destructive tools promoted from a pre-existing (mis-placed) `allow` entry to `ask`.
-- `Removed from tracked`: entries stripped from the paired tracked `settings.json` during Phase 6.5.
+- `allow→ask`: destructive tools promoted from a pre-existing (mis-placed) `allow` entry to `ask` **after explicit per-tool confirmation** (Phase 5 step 5).
+- `Removed from tracked`: entries stripped from the paired tracked `settings.json` during Phase 6.5a (each removed after explicit confirmation).
+- `Removed wrong-scope`: entries stripped from the opposite-scope `settings.local.json` during Phase 6.5b (each removed after explicit confirmation).
 - `Preload hook`: scope of the SessionStart preload hook (`global` / `project` / `—` for declined / `—` for no-op), plus the number of tool names added to its `select:` list.
+
+Include notes for:
+- **user-kept skip-removals** — per-tool `keep` answers in Phase 5 (user overrode the classifier's "remove" suggestion)
+- **user-kept allow→ask overrides** — per-tool `keep-in-allow` answers in Phase 5 (user overrode the classifier's promote-to-ask)
+- **user-kept leaks** — per-entry `keep` answers in Phase 6.5a / 6.5b (user chose to leave a leak in place)
 
 Include warnings for:
 - servers that were defined but had zero tools loaded in this session
@@ -371,8 +420,9 @@ Body sections: `## Actions` (bullet list: files read, servers resolved, scope ch
 - **No wildcards.** Enumerate every tool by its exact name. Claude Code matches exact strings in both `allow` and `ask`.
 - **Global scope requires explicit user confirmation** via Phase 4b `AskUserQuestion` — but only when the scope is genuinely undetermined. If existing `mcp__<server>__*` entries already pin the server to global or project scope, infer from state and skip the prompt.
 - **No-op runs are silent.** If the classifier produces no new writes at the inferred scope, do not ask the scope question and do not request a write confirmation — just report the idempotent no-op.
-- **Phase 6.5 may only remove** `mcp__*` entries from the paired tracked `settings.json` — never from unrelated files, never non-`mcp__*` entries.
+- **Never silently reverses a user's prior trust choice.** Every `allow`→removal (skip-category) and every `allow`→`ask` promotion requires an explicit per-tool `AskUserQuestion` in Phase 5. Bundling these into a single "approve the whole diff" confirmation is forbidden — a user's prior `allow` entry is a durable choice and must be unmade deliberately, one tool at a time.
+- **Phase 6.5 may only remove** `mcp__*` entries, and only after a per-entry `AskUserQuestion`. It cleans two kinds of leak: (6.5a) the paired tracked `settings.json`, and (6.5b) the opposite-scope `settings.local.json`. Never silently flag-and-continue on a leak — ask, then remove or record as user-kept.
 - **Never adds non-`mcp__` entries.** **Never removes non-`mcp__` entries.**
-- **Confirmation required before every write.** One confirmation covers Phase 6 additions + Phase 6.5 tracked-scope cleanup. Phase 7 (SessionStart preload hook) requires its own separate confirmation — it's the only write that lands in tracked `settings.json`.
-- **Phase 7 writes tracked `settings.json`, never `settings.local.json`.** Hooks are enablement; permissions are personal. That split is the hygiene rule, and this phase respects it.
+- **Confirmation required before every write.** Per-tool confirmations in Phase 5 (skip-removals, allow→ask promotions) + per-entry confirmations in Phase 6.5 (paired tracked leaks, opposite-scope leaks) + one bundled confirmation for the remaining additions. Phase 7 (SessionStart preload hook) requires its own separate confirmation.
+- **Phase 7 writes gitignored `settings.local.json`, never tracked `settings.json`.** The preload hook is a personal optimization — ≈1.1k tokens/session cost that each user weighs differently — not universal enablement. Personal-optimization hooks follow the same personal/local rule as permissions.
 - **Idempotent.** Re-running adds nothing new when everything is already registered, and removes nothing when no cross-scope leaks remain.

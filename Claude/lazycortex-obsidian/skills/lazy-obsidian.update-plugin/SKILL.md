@@ -8,6 +8,24 @@ argument-hint: "<plugin-id> [--bundled]"
 
 Primitive skill. Installs or updates a single Obsidian community plugin into the current repo's vault at `<repo-root>/.obsidian/`. Version-aware — no-ops when the vault is already at the latest version. Always re-applies the opinionated override block from `plugin-settings.json` on top of the vault plugin's `data.json`, so re-running is cheap and idempotent.
 
+## Execution discipline (MANDATORY — read before any action)
+
+This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+
+1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Step 1 — Locate plugin install path and vault`
+   - `Step 2 — Determine source version`
+   - `Step 3 — Determine vault version`
+   - `Step 4 — Compare and decide`
+   - `Step 5 — Install/update binaries`
+   - `Step 6 — Apply opinionated overrides`
+   - `Step 7 — Register in community-plugins.json`
+   - `Step 8 — Report`
+   - `Step 9 — Log the run`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
+
 ## Input
 
 One required argument: the plugin id (e.g. `dataview`, `obsidian-icon-folder`, `folder-notes`, `iconize-reloader`).

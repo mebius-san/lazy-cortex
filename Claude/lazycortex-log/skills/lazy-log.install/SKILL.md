@@ -7,6 +7,23 @@ allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), 
 
 Bootstrap the plugin in the right scope: copy every rule template shipped by the plugin, create `docs/changelog.md`, and make sure `.gitignore` covers `.logs/`.
 
+## Execution discipline (MANDATORY — read before any action)
+
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+
+1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Step 1 — Detect install scope`
+   - `Step 2 — Determine paths`
+   - `Step 3 — Sync rule templates`
+   - `Step 4 — Create docs/changelog.md`
+   - `Step 5 — Update .gitignore`
+   - `Step 6 — Seed lazy.settings.json`
+   - `Step 7 — Verify`
+   - `Step 8 — Log the run`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
+
 ## Step 1: Detect install scope
 
 Read `~/.claude/plugins/installed_plugins.json` and find the entry for `lazycortex-log@lazycortex`. The `scope` field is either:
@@ -95,7 +112,51 @@ docs/changelog.md
 
 If the block already exists but is missing one of the two entries, add the missing entry to it. If both are already covered (either by this block or equivalent patterns), skip.
 
-## Step 6: Verify
+## Step 6: Seed lazy.settings.json
+
+Non-destructively seed the `lazycortex` domain group in `agent_models` with the four subagents this plugin ships.
+
+### Target file
+
+| Scope | Path |
+|---|---|
+| `user` | `~/.claude/lazy.settings.json` |
+| `project` | `<repo-root>/.claude/lazy.settings.json` |
+
+### Read or initialize
+
+Read the target file. If missing or unparseable, treat its contents as `{"version": 1, "agent_models": {}}`.
+
+### Ensure domain group exists
+
+Ensure `agent_models.lazycortex` exists as an object (create empty `{}` if absent — never overwrite existing content, and never touch other groups).
+
+### Seed defaults
+
+| Dispatch string | Default model |
+|---|---|
+| `lazycortex-log:lazy-log.distill` | `haiku` |
+| `lazycortex-log:lazy-log.timeline` | `haiku` |
+| `lazycortex-log:lazy-log.recall` | `sonnet` |
+| `lazycortex-log:lazy-log.summary` | `sonnet` |
+
+Per-key semantics (write back only if anything changed):
+
+- **absent** → add the entry with its default value. State **added**.
+- **equal** → leave untouched. State **unchanged**.
+- **different** → leave the user's value untouched. State **kept-local** (report value).
+
+Never touch other `lazycortex` entries (e.g. `lazycortex-obsidian:*` seeded by `lazy-obsidian.install`).
+
+### Write back
+
+If any mutation happened, write the file with `version: 1` at the top.
+
+### Report outcome
+
+One line per seeded default: `lazycortex.<key> = <value> (<state>)`.
+
+## Step 7: Verify
 
 - Read back each installed rule file and confirm its `---` frontmatter parses
 - If `docs/changelog.md` was created, read back its first line
@@ -105,8 +166,9 @@ If the block already exists but is missing one of the two entries, add the missi
   - For each rule: state (**created**, **updated**, **unchanged**, or **kept-local**) and target `<path>`
   - Changelog created at `<path>` (or "already exists")
   - .gitignore updated (or "already covers .logs/")
+  - Per-key `agent_models` seed outcome from Step 6
 
-## Step 7: Log the run
+## Step 8: Log the run
 
 Log to `./.logs/claude/lazy-log.install/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter).
 

@@ -78,13 +78,14 @@ Requires these plugins from the same marketplace:
 
 | Rule | Description |
 |---|---|
-| `lazy-log.logging` | Logging conventions for skills, agents, and commands. Also guides when to run lazy-log.distill after commits. |
+| `lazy-log.logging` | Logging conventions for skills, agents, and commands. |
 
 ## Hooks
 
 | Hook | Trigger | Description |
 |---|---|---|
 | `lazy-log.commit-recorder` | `Bash`, `mcp__git__git_commit` | PostToolUse hook: record every successful git commit to .logs/commits.jsonl. |
+| `lazy-log.distill-trigger` | `Stop` | Stop hook — trigger distill when commits are pending (compares `.logs/commits.jsonl` against the `last-distilled-sha` marker in `docs/changelog.md`). |
 
 ## Installation
 
