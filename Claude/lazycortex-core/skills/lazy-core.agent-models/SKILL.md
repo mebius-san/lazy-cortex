@@ -24,7 +24,7 @@ Optional flags on invocation:
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. Canonical list (titles verbatim):
    - `Step 1 — Parse arguments`
@@ -32,9 +32,10 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 3 — Discover agents`
    - `Step 4 — Build missing-entries list`
    - `Step 5 — Resolve scope per entry`
-   - `Step 6 — Wizard loop`
-   - `Step 7 — Write back`
-   - `Step 8 — Report and log`
+   - `Step 6 — Offer entries in three ordered batches`
+   - `Step 7 — Per-agent wizard loop (review-bound only)`
+   - `Step 8 — Write back`
+   - `Step 9 — Report and log`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** A no-op counts only if it produced an explicit outcome line in the Report (e.g. `nothing to do`, `dry-run — N entries would write`).
 3. **Do not reach Report until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per step above. A missing line is a bug.
@@ -77,7 +78,7 @@ For each, record: dispatch string, target group, plugin name (if applicable), so
 
 For each discovered agent, if its dispatch string is absent from the flat map from Step 2, add it to the missing list. Entries explicitly set to `"inherit"` in either scope count as decided — exclude them.
 
-If the missing list is empty → skip Steps 5–7, go to Step 8 with outcome `nothing to do`.
+If the missing list is empty → skip Steps 5–8, go to Step 9 with outcome `nothing to do`.
 
 ## Step 5: Resolve scope per entry
 
@@ -106,11 +107,48 @@ Record the resolved destination per entry for Step 6's question body and Step 7'
 
 ### File existence guarantee
 
-If any resolved destination file does not yet exist, initialize it in memory as `{"version": 1, "agent_models": {}}`. Actual file creation happens in Step 7 only if that destination receives at least one new entry.
+If any resolved destination file does not yet exist, initialize it in memory as `{"version": 1, "agent_models": {}}`. Actual file creation happens in Step 8 only if that destination receives at least one new entry.
 
-## Step 6: Wizard loop (one AskUserQuestion per agent)
+## Step 6: Offer entries in three ordered batches
 
-For each missing entry, fire a single `AskUserQuestion`:
+Group missing entries into three batches in this order. Offer each non-empty batch as one `AskUserQuestion`. **Never present individual agents in Step 6** — only batches. Per-agent prompts happen in Step 7 only for entries the user explicitly routes there via `review each individually`.
+
+Read `${CLAUDE_PLUGIN_ROOT}/skills/lazy-core.agent-models/default-tiers.json` once. The `defaults` map is dispatch-string → tier for curated agents (built-ins + LazyCortex plugin agents).
+
+### Batch composition
+
+| Batch | Order | Members | Suggested tier source |
+|---|---|---|---|
+| **1. Curated defaults** | First | Entries whose dispatch is a key in `default-tiers.json` (built-ins + LazyCortex plugin agents). | template tier from `defaults` |
+| **2. System & other plugins** | Second | Remaining entries in groups `_user`, `_builtin` (none expected — built-ins are in batch 1), or any plugin-domain group NOT covered by the template. | heuristic (Step 7's resolver) |
+| **3. Project agents** | Third | Remaining entries in group `_project`. | heuristic (Step 7's resolver) |
+
+If a batch is empty, skip it and move to the next.
+
+### Per-batch prompt
+
+For each non-empty batch, fire one `AskUserQuestion`:
+
+- **question**: `Batch <N>/<total>: <batch-name> — <count> agent(s). Apply suggested tiers?`
+- **description**: Render a compact table — one row per entry: `<dispatch> → <suggested-tier>  (→ <destination>)`. Below the table, summarize: `Accept = plan all <count> writes now. Review each = drop into per-agent wizard for this batch only. Skip for now = leave undecided; re-prompts on next run.`
+- **options** (exactly four — `AskUserQuestion` caps at 4):
+  1. `accept all suggestions` *(Recommended)*
+  2. `review each individually` — defer this batch's entries to Step 7's per-agent wizard. Suggested tier carries forward.
+  3. `mass-set to inherit` — record every entry in the batch as **planned** with tier `inherit`. Useful when a batch isn't worth tier-tuning right now but you want it out of the wizard.
+  4. `skip this batch for now` — record every entry as **skipped**; next run re-prompts the same batch.
+
+On answer:
+
+- `accept all` → for each entry: record **planned** `(destination, group, dispatch, suggested-tier)`. Remove from missing list.
+- `review each individually` → leave entries in missing list, tagged `review-bound` so Step 7 picks them up.
+- `mass-set to inherit` → record **planned** with tier `inherit` for every entry. Remove from missing list.
+- `skip this batch` → record **skipped** for every entry. Remove from missing list.
+
+Process batches strictly in order (1 → 2 → 3). Wait for the answer to each before showing the next.
+
+## Step 7: Per-agent wizard loop (only for `review each individually` entries)
+
+For each entry tagged `review-bound` in Step 6 (and only those), fire a single `AskUserQuestion`:
 
 - **question**: `` `<dispatch-string>` — assign model tier? ``
 - **description**:
@@ -119,21 +157,27 @@ For each missing entry, fire a single `AskUserQuestion`:
   **Source:** <path or "(built-in)">
   **Description:** <agent's frontmatter `description:` field, or "(no description)">
   **Will write to:** <resolved destination path> (<scopeMode>)
-  **Suggested tier:** <heuristic-tier>
+  **Suggested tier:** <suggested-tier>
 
-  Heuristic:
-  - _builtin: Explore→haiku, Plan→opus, general-purpose→inherit, statusline-setup→haiku.
-  - *log*/*distill*/*tag*/*timeline* + description mentions rewriter/formatter/distill/prose/mechanical → haiku.
-  - *review*/*audit*/*plan*/*design* → opus.
-  - Otherwise → sonnet.
+  Suggested tier resolution order:
+  1. `templateTier` from `default-tiers.json` if this dispatch string is in the template (always wins).
+  2. Heuristic fallback:
+     - _builtin: Explore→haiku, Plan→opus, general-purpose→inherit, statusline-setup→haiku.
+     - *log*/*distill*/*tag*/*timeline* + description mentions rewriter/formatter/distill/prose/mechanical → haiku.
+     - *review*/*audit*/*plan*/*design* → opus.
+     - Otherwise → sonnet.
   ```
-- **options** (exactly six):
-  - `add as <suggested>` *(Recommended)*
-  - `add as haiku`
-  - `add as sonnet`
-  - `add as opus`
-  - `add as inherit`
-  - `skip`
+- **options** (exactly four — `AskUserQuestion` caps at 4):
+  1. `add as <suggested>` *(Recommended)*
+  2. `add as inherit` — fall back to global / harness default; use when this agent doesn't need a project-specific tier.
+  3. `add as <neighbor>` — the next-closest tier to the suggestion, picked deterministically:
+     - suggested = `haiku` → neighbor = `sonnet`
+     - suggested = `sonnet` → neighbor = `opus` (upgrade path; haiku is rarely the right manual override for a sonnet-default agent)
+     - suggested = `opus` → neighbor = `sonnet`
+     - suggested = `inherit` → option 1 already covers inherit; replace option 2 with `add as sonnet` and option 3 with `add as haiku` (so the four become: `add as inherit (Recommended)`, `add as sonnet`, `add as haiku`, `skip`).
+  4. `skip` — decide later. Next run re-prompts.
+
+Rationale: `AskUserQuestion` allows at most 4 options. Showing every tier would force dropping options arbitrarily; this curated set always includes the recommendation, the inherit escape hatch, one explicit alternate near the recommendation, and skip.
 
 On answer:
 
@@ -142,16 +186,16 @@ On answer:
 
 One `AskUserQuestion` at a time. Wait for each answer before the next prompt.
 
-## Step 7: Write back
+## Step 8: Write back
 
-Group the planned writes from Step 6 by destination file. For each destination that has at least one planned entry:
+Group the planned writes from Steps 6 and 7 by destination file. For each destination that has at least one planned entry:
 
 1. If the file does not yet exist, `Write` with `{"version": 1, "agent_models": {}}` as base (creating parent dir with `mkdir -p` first if needed).
 2. Read the file fresh, apply all planned entries for this destination (creating missing groups on demand, preserving all existing keys — never overwrite; this loop only writes *missing* entries), and write back.
 
 If `dryRun = true`, skip all writes. Report what *would* have been written, per destination.
 
-## Step 8: Report and log
+## Step 9: Report and log
 
 ### Report
 

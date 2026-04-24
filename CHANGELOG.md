@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.34 — 2026-04-24
+
+- `/lazy-core.agent-models` is now batch-mode: three grouped prompts (curated defaults / system + other plugins / project agents) each let you accept-all, review one-by-one, mass-set every entry in the batch to `inherit`, or skip the batch — instead of one prompt per agent. The per-agent picker (now only fired when you explicitly choose "review each individually") offers four choices: suggested tier / `inherit` / next-closest tier / skip — restoring the previously-missing `inherit` option that the prior six-option layout dropped.
+- New canonical-tier template at `claude/lazycortex-core/skills/lazy-core.agent-models/default-tiers.json` records the recommended tier per known dispatch string — built-ins (`Explore=haiku`, `Plan=opus`, `general-purpose=inherit`, `statusline-setup=haiku`), LazyCortex agents (`lazy-log.summary=opus`, `lazy-log.distill=haiku`, `lazy-log.recall=sonnet`, `lazy-log.timeline=haiku`, `obsidian.gen-tag-pages=sonnet`), and `superpowers:code-reviewer=opus`. The wizard's first batch is built from this template, so accepting it routes ~10 agents in one prompt.
+- New `lazy-core.agent-writing § 8`: when creating a new agent in a repo where `lazy.settings.json` exists, the author MUST register its model tier (consult `default-tiers.json` first, heuristic fallback) — and promote canonical defaults back to the template when the dispatch is one every install should get. `lazy-core.audit` Agent B coverage extended to enforce.
+
 ### 0.2.32 — 2026-04-24
 
 - New `/lazy-core.agent-models` standalone wizard for assigning per-agent model tiers (`haiku` / `sonnet` / `opus` / `inherit`) without paying for the full `/lazy-core.optimize` pipeline. `--scope=auto` (default) routes each entry to its structurally-correct file: `_user.*` and `_builtin.*` go global, `_project.*` goes project, plugin-domain groups follow the plugin's install scope. `--scope=project|global` overrides; `--dry-run` previews. A single run can write to both global and project `lazy.settings.json` files. `/lazy-core.optimize` Phase 7 now delegates here.
@@ -91,6 +97,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-log
 
+### 0.2.11 — 2026-04-24
+
+- (No user-facing changes; version autobumped during a publish-state reconciliation commit. See `docs/changelog.md` for commit-level detail.)
+
 ### 0.2.10 — 2026-04-24
 
 - `/lazy-log.install` per-rule prompts now surface each rule's `description:` from frontmatter as **Purpose:** so you can install / overwrite / delete a rule on first sight, without remembering what the file does. Drift prompts show the full diff inline with What-changed framing; orphan prompts explain that the plugin no longer ships the rule. Same UX as the polished `/lazy-core.install`.
@@ -161,6 +171,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 0.2.53 — 2026-04-24
+
+- (No user-facing changes; version autobumped during a publish-state reconciliation commit. See `docs/changelog.md` for commit-level detail.)
 
 ### 0.2.52 — 2026-04-24
 

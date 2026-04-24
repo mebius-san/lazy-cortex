@@ -42,6 +42,19 @@ Apply identically to agents; see `lazy-core.skill-writing`: § 2 (no Optional he
 
 Non-ephemeral agents log per `lazy-log.logging` to `./.logs/claude/<agent-name>/<timestamp>.md`. Ephemeral Explore dispatches are exempt — coordinator owns the log.
 
+## 8. Model tier registration
+
+When creating a new agent (under `.claude/agents/` or a plugin's `<plugin>/agents/`), the author MUST register a model tier for it in `lazy.settings.json` if any such config file exists at either scope (`./.claude/lazy.settings.json` or `~/.claude/lazy.settings.json`). Skipping registration leaves the agent inheriting whatever the harness picks, which is fine for ad-hoc tools but inconsistent for shipped artifacts.
+
+Procedure:
+
+1. **Pick the tier**. Consult `${CLAUDE_PLUGIN_ROOT}/skills/lazy-core.agent-models/default-tiers.json` first — if the dispatch string is in `defaults`, use that. Otherwise pick by the heuristic in `lazy-core.agent-models § Step 7` (build/audit/plan/design → opus; mechanical formatters → haiku; retrieval/synthesis → sonnet; catch-all delegators → inherit).
+2. **Pick the scope**. Project agents (`.claude/agents/*.md`) → `./.claude/lazy.settings.json` under group `_project`. Plugin agents (`<plugin>/agents/*.md`) → follow the plugin's install scope; default global. Built-ins are seeded by `lazy-core.install`.
+3. **Write the entry**. Add `"<dispatch>": "<tier>"` under the correct group in `agent_models`. Preserve all other keys.
+4. **If the dispatch is now a canonical default for the ecosystem** (i.e. it's a built-in or LazyCortex plugin agent that every install should get the same tier for), also add it to `${CLAUDE_PLUGIN_ROOT}/skills/lazy-core.agent-models/default-tiers.json` so the wizard offers it as a template default to future installs.
+
+If `lazy.settings.json` does not exist at either scope (uninstalled / opted out), this step is a WARN — record the chosen tier in the agent's PR description so a later `lazy-core.install` + `lazy-core.agent-models` run can seed it.
+
 ## Enforcement
 
-`lazy-core.audit` Agent B enforces §§ 1, 2, 5 (frontmatter complete, no AskUserQuestion, tool allowlist) on `.claude/agents/*.md` and `claude/*/agents/*.md`. Preamble presence per § 4 reuses the skill-writing check.
+`lazy-core.audit` Agent B enforces §§ 1, 2, 5, 8 (frontmatter complete, no AskUserQuestion, tool allowlist, model tier registered when config exists) on `.claude/agents/*.md` and `claude/*/agents/*.md`. Preamble presence per § 4 reuses the skill-writing check.

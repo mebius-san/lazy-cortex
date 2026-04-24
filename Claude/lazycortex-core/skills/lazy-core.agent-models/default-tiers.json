@@ -1,0 +1,16 @@
+{
+  "_comment": "Canonical default model tier per known agent dispatch string. Used by lazy-core.agent-models as the 'accept all template defaults' batch and by lazy-core.agent-writing when seeding a new agent's tier into lazy.settings.json. Override per-entry in the wizard or by editing lazy.settings.json directly.",
+  "_schema_version": 1,
+  "defaults": {
+    "Explore": "haiku",
+    "Plan": "opus",
+    "general-purpose": "inherit",
+    "statusline-setup": "haiku",
+    "lazycortex-log:lazy-log.timeline": "haiku",
+    "lazycortex-log:lazy-log.recall": "sonnet",
+    "lazycortex-log:lazy-log.summary": "opus",
+    "lazycortex-log:lazy-log.distill": "haiku",
+    "lazycortex-obsidian:obsidian.gen-tag-pages": "sonnet",
+    "superpowers:code-reviewer": "opus"
+  }
+}
