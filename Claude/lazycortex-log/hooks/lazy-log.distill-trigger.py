@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
-"""Stop hook — trigger distill when commits are pending.
+"""Stop hook — trigger distill when a fresh commit landed this turn.
 
-Checks `.logs/commits.jsonl` against the `last-distilled-sha` marker in
-`docs/changelog.md`. When commits are pending and the hook has not
-already fired this turn (`stop_hook_active`), exits 2 with a stderr
-message asking Claude to run the `lazycortex-log:lazy-log.distill`
-agent before ending the turn.
+Two-gate model:
+  1. `.logs/commits.jsonl` mtime > stored mtime in
+     `.logs/.distill-trigger-last-mtime` (i.e. a commit was recorded
+     during the just-finished turn).
+  2. `commits.jsonl` has entries newer than the `last-distilled-sha`
+     marker in `docs/changelog.md` (i.e. there is real work to do).
+
+Both gates must pass to exit 2 (asking Claude to run the
+`lazycortex-log:lazy-log.distill` agent before ending the turn).
+Otherwise: silent no-op (exit 0). The marker is updated in a `finally`
+block whenever gate 1 passes, so a missed write doesn't permanently
+re-arm the hook.
 
 Silent no-op when:
   - `stop_hook_active` is true (prevent re-entry loop)
-  - `.logs/commits.jsonl` is missing or empty
-  - `docs/changelog.md` is missing or has no marker
-  - no pending commits
+  - `.logs/commits.jsonl` is missing
+  - gate 1 fails (no fresh commit this turn)
+  - gate 2 fails (no pending commits / no marker / empty file)
   - any exception (pass-through, never block stop)
 
 Protocol reference: https://code.claude.com/docs/en/hooks.md
@@ -27,6 +34,27 @@ import sys
 TIER = {"haiku": 1, "sonnet": 2, "opus": 3}
 SENTINELS = {"inherit", None, ""}
 MARKER_RE = re.compile(r"<!--\s*lazy-log:\s*last-distilled-sha\s*=\s*([0-9a-f]+)\s*-->")
+COMMITS_REL = ".logs/commits.jsonl"
+MTIME_MARKER_REL = ".logs/.distill-trigger-last-mtime"
+
+
+def read_last_mtime(path: str) -> float:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return float(f.read().strip())
+    except Exception:
+        return 0.0
+
+
+def write_last_mtime(path: str, mtime: float) -> None:
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(f"{mtime}\n")
+        os.replace(tmp, path)
+    except Exception:
+        pass
 
 
 def _try_json(path: str) -> dict | None:
@@ -148,32 +176,51 @@ def main() -> None:
     cwd = payload.get("cwd")
     root = git_toplevel(cwd) or cwd or os.getcwd()
 
-    commits = read_jsonl(os.path.join(root, ".logs/commits.jsonl"))
-    if not commits:
+    commits_path = os.path.join(root, COMMITS_REL)
+    marker_path = os.path.join(root, MTIME_MARKER_REL)
+
+    if not os.path.isfile(commits_path):
         sys.exit(0)
 
-    marker = extract_marker(os.path.join(root, "docs/changelog.md"))
-    if marker is None:
+    current_mtime = os.path.getmtime(commits_path)
+    last_mtime = read_last_mtime(marker_path)
+
+    # Gate 1: did a commit land during the just-finished turn?
+    if current_mtime <= last_mtime:
         sys.exit(0)
 
-    pending = commits_after(commits, marker)
-    if not pending:
-        sys.exit(0)
+    try:
+        commits = read_jsonl(commits_path)
+        if not commits:
+            sys.exit(0)
 
-    cfg = load_config(root)
-    flat = build_flat_map(cfg)
-    model = flat.get("lazycortex-log:lazy-log.distill")
-    if model in SENTINELS or model not in TIER:
-        model = "haiku"
+        marker = extract_marker(os.path.join(root, "docs/changelog.md"))
+        if marker is None:
+            sys.exit(0)
 
-    print(
-        f"{len(pending)} commit(s) pending distill since {marker}. "
-        f'Run: Agent(subagent_type="lazycortex-log:lazy-log.distill", '
-        f'model="{model}", prompt="distill pending commits"). '
-        f"Skip ONLY if the user said 'don't distill' this turn.",
-        file=sys.stderr,
-    )
-    sys.exit(2)
+        # Gate 2: is there real distill work to do?
+        pending = commits_after(commits, marker)
+        if not pending:
+            sys.exit(0)
+
+        cfg = load_config(root)
+        flat = build_flat_map(cfg)
+        model = flat.get("lazycortex-log:lazy-log.distill")
+        if model in SENTINELS or model not in TIER:
+            model = "haiku"
+
+        print(
+            f"{len(pending)} commit(s) pending distill since {marker}. "
+            f'Run: Agent(subagent_type="lazycortex-log:lazy-log.distill", '
+            f'model="{model}", prompt="distill pending commits"). '
+            f"Skip ONLY if the user said 'don't distill' this turn.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    finally:
+        # Always advance the marker once gate 1 passed, so a missed
+        # write doesn't permanently re-arm the hook.
+        write_last_mtime(marker_path, current_mtime)
 
 
 if __name__ == "__main__":

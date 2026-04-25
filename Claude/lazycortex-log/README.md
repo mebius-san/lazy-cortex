@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#22c55e"
+iconize_color: "#eab308"
 ---
 # lazycortex-log
 
@@ -85,7 +85,7 @@ Requires these plugins from the same marketplace:
 | Hook | Trigger | Description |
 |---|---|---|
 | `lazy-log.commit-recorder` | `Bash`, `mcp__git__git_commit` | PostToolUse hook: record every successful git commit to .logs/commits.jsonl. |
-| `lazy-log.distill-trigger` | `Stop` | Stop hook — trigger distill when commits are pending (compares `.logs/commits.jsonl` against the `last-distilled-sha` marker in `docs/changelog.md`). |
+| `lazy-log.distill-trigger` | `Stop` | Stop hook — trigger distill when a fresh commit landed this turn. |
 
 ## Installation
 

@@ -97,6 +97,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-log
 
+### 0.2.12 — 2026-04-26
+
+- The `lazy-log.distill-trigger` Stop hook no longer fires on every turn — it now activates only on turns where a commit was actually recorded. Two gates must both pass: `.logs/commits.jsonl` mtime advanced this turn, and pending commits exist beyond the `last-distilled-sha` marker. No-commit turns are silent, killing the per-turn distill noise that hit dev-heavy repos hardest. Commits made outside Claude (terminal, cron) don't trip the hook — invoke the distill agent manually to catch up. The mtime is tracked in `.logs/.distill-trigger-last-mtime` (gitignored under `.logs/`).
+
 ### 0.2.11 — 2026-04-24
 
 - (No user-facing changes; version autobumped during a publish-state reconciliation commit. See `docs/changelog.md` for commit-level detail.)

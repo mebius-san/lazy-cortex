@@ -29,13 +29,11 @@ Always include `git_sha` — it bridges "the AI did Y" back to the actual commit
 
 ## Distill after commits (automatic via Stop hook)
 
-The `lazycortex-log` plugin ships a Stop hook (`lazy-log.distill-trigger`) that fires at session end. It checks `.logs/commits.jsonl` against the `last-distilled-sha` marker in `docs/changelog.md`; when commits are pending, it asks Claude to run `Agent(subagent_type: "lazycortex-log:lazy-log.distill", ...)` before ending the turn. You do not need to trigger distill manually.
+The `lazycortex-log` Stop hook fires **only on turns where a commit was recorded** — gates: (1) `.logs/commits.jsonl` mtime advanced this turn, (2) pending commits beyond the `last-distilled-sha` marker in `docs/changelog.md`. When both pass, it asks Claude to run `Agent(subagent_type: "lazycortex-log:lazy-log.distill", ...)`. No-commit turns are silent.
 
-If the hook fires and you are in the middle of a task, run distill and then resume.
+**Hard skip**: only if the user says "don't distill" this turn. **Catch-up** (e.g. terminal commits): invoke the distill agent manually.
 
-**Hard skip override**: only when the user explicitly says "don't distill" / "skip the changelog" in the current turn.
-
-`stop_hook_active` prevents re-entry loops. The model is read from `.claude/lazy.settings.json` (`agent_models["lazycortex-log:lazy-log.distill"]`, default `haiku`), optionally capped by `LAZY_AGENT_MODEL_FLOOR`.
+`stop_hook_active` prevents re-entry. Model from `.claude/lazy.settings.json` `agent_models["lazycortex-log:lazy-log.distill"]` (default `haiku`), capped by `LAZY_AGENT_MODEL_FLOOR`.
 
 ## Recall, timeline, summary
 
