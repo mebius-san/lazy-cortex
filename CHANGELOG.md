@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.39 — 2026-04-26
+
+- New `/lazy-core.setup` meta-installer brings the current project up-to-date with every enabled plugin's install + post-install configurator chain in a single run. Discovery is convention-based: any `<namespace>.install` skill in an enabled plugin participates automatically, and any skill that opts in via `lazy_setup_phase:` frontmatter (e.g. `lazy-guard.allow-mcp`, `lazy-core.agent-models`) joins the plan in the right phase (pre-install → per-plugin → post-install) without an edit to the meta-installer. Use after `/plugin update`, on a fresh clone, or after enabling a new plugin. Idempotent. Optional `--dry-run` previews the plan without executing.
+- New `lazy-core.setup-phases` rule documents the `lazy_setup_phase:` frontmatter contract — allowed values, ordering, and the anti-pattern for skills already chained from inside another install flow (so they don't double-run).
+- `/lazy-core.audit` Agent B gains a fourth skill-writing check: WARNs when a `SKILL.md` declares `lazy_setup_phase:` with a value outside `{pre-install, per-plugin, post-install}`.
+
 ### 0.2.38 — 2026-04-26
 
 - New `/lazy-core.checkup` unified read-only health command that orchestrates every audit/doctor skill this repo ships (`lazy-core.audit`, `lazy-core.doctor`, `tool.audit`, `tool.doctor`), merges findings into a per-plugin table, and prompts for which mutating fix-flow to run next (`lazy-core.optimize`, `tool.optimize`, doctor fix loops, or `pub.status`). Gracefully handles consumer-only repos by probing for author-side skills before invoking them.

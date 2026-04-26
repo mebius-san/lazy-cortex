@@ -92,11 +92,12 @@ Emit WARN only when the match survives all three gates.
 
 **Naming hygiene** — for `.claude/skills/*/`, `.claude/agents/*.md`, `.claude/commands/*.md`, `.claude/hooks/*`, `.claude/rules/*.md`: filename (or directory name for skills) must use dot-namespace (`namespace.name`). `[WARN]` for anything missing a dot (e.g., `logging.md` → `<namespace>.logging.md`).
 
-**Skill-writing compliance** — see `lazy-core.skill-writing` (plugin) / `.claude/rules/dev.skill-writing.md` (local pointer). File set: `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md` (commands exempt from the preamble check). Three checks:
+**Skill-writing compliance** — see `lazy-core.skill-writing` (plugin) / `.claude/rules/dev.skill-writing.md` (local pointer). File set: `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md` (commands exempt from the preamble check). Four checks:
 
 1. **Preamble present** — grep each file for `^## Execution discipline (MANDATORY`. Absent AND no `execution-discipline-waiver:` in frontmatter → `[FAIL]`. Frontmatter carries a non-empty `execution-discipline-waiver: "<reason>"` string → `[INFO]` with the waiver reason (visible, not silent). Frontmatter carries `execution-discipline-waiver: true` / `yes` / `""` → `[FAIL]` (invalid waiver).
 2. **No "Optional" in phase/step headings** — grep for `^##+ .*[Pp]hase.*[Oo]ptional`, `^##+ .*[Ss]tep.*[Oo]ptional`, and any `^### .*[Oo]ptional`. Match → `[FAIL]`.
 3. **Narrative padding (heuristic)** — grep the body (exclude frontmatter) for the denylist: `\bv\d+\.\d+\.\d+`, `user had to`, `we got burned`, `in a past session`, `in a previous run`, `user had to patch`. Match → `[WARN]` with the offending line. Final decision is the author's — heuristic, not structural.
+4. **Valid `lazy_setup_phase` value** — grep frontmatter for `^lazy_setup_phase:`. Value outside `{pre-install, per-plugin, post-install}` → `[WARN]` with the offending value. See `lazy-core.setup-phases` for the contract.
 
 **Agent-writing compliance** — see `lazy-core.agent-writing` (plugin) / `.claude/rules/dev.agent-writing.md` (local pointer). File set: `.claude/agents/*.md`, `claude/*/agents/*.md`. Checks:
 
@@ -172,6 +173,7 @@ One line per Agent B naming `[WARN]`.
 - **"Optional" in phase/step heading** (FAIL) — one line per match.
 - **Waivered files** (INFO) — one line per file with `execution-discipline-waiver: "<reason>"`.
 - **Narrative-padding heuristic** (WARN) — one line per match with the offending line.
+- **Invalid `lazy_setup_phase` value** (WARN) — one line per match with the offending value.
 
 ### Agent-writing compliance
 
