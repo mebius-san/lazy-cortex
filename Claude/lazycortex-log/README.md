@@ -1,10 +1,12 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#eab308"
+iconize_color: "#fde68a"
 ---
 # lazycortex-log
 
 Logging, changelog, and change-history recall for Claude Code
+
+> **Versioning** — On upgrade from a previous public release: a **patch bump** is safe to drop in. A **minor bump** means re-run `/lazy-log.install` to pick up new rules, settings, or templates. A **major bump** means user-data migration is required — see the release notes in [`CHANGELOG.public.md`](../../CHANGELOG.public.md).
 
 ## Why this plugin
 
@@ -31,6 +33,7 @@ Then `lazy-log.recall` searches across all three plus git history and memory, an
 - *"Summarize the whole story of the auth refactor."* — Run `/lazy-log.summary "auth refactor"` for a multi-source synthesized summary (not chronological).
 - *"I just landed a batch of commits."* — Run `/lazy-log.distill` to update `docs/changelog.md` with user-facing prose for each new commit.
 - *"Is the logging rule actually being followed?"* — Run `/lazy-log.audit` to verify the rule is installed and internally coherent. The rule is the single source of truth; individual skill/agent definitions do not need their own `## Logging` sections.
+- *"My `.logs/claude/` is full of folders from skills I no longer have."* — Run `/lazy-log.clean` to walk every subfolder, surface orphans (renamed skills, anonymous subagent runs), offer to distill substantive logs into memory, and delete what's safe to drop. Read-first; nothing is mutated until you approve every action.
 
 ## Requirements
 
@@ -57,6 +60,7 @@ Requires these plugins from the same marketplace:
 | Skill | Description |
 |---|---|
 | `lazy-log.audit` | Verify that the project's logging rule is installed and coherent. The rule itself is the single source of truth — individual skills/agents/commands do NOT need per-file ## Logging sections. Reports gaps and offers fixes. Read-first — never modifies files without confirmation. |
+| `lazy-log.clean` | Interactive housekeeping for `./.logs/claude/`. Classifies each subdirectory against the live set of canonical skills/agents/commands; offers merge / distill-to-memory / delete / leave per orphan, batched by pattern when a cluster of anonymous folders (e.g. `task-N`) would otherwise produce dozens of prompts. Read-first — no folder is touched until the user has approved every action. |
 | `lazy-log.install` | Bootstrap the lazycortex-log plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, creates docs/changelog.md if missing, and ensures .gitignore covers .logs/ and docs/changelog.md. Idempotent — safe to re-run. Detects install scope automatically. |
 
 ## Agents
@@ -116,6 +120,7 @@ Invoke skills with slash commands:
 
 ```
 /lazy-log.audit
+/lazy-log.clean
 /lazy-log.help
 /lazy-log.install
 ```

@@ -1,10 +1,12 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#22c55e"
+iconize_color: "#93c5fd"
 ---
 # lazycortex-core
 
 Core skills and agents for Claude Code
+
+> **Versioning** — On upgrade from a previous public release: a **patch bump** is safe to drop in. A **minor bump** means re-run `/lazy-core.install` to pick up new rules, settings, or templates. A **major bump** means user-data migration is required — see the release notes in [`CHANGELOG.public.md`](../../CHANGELOG.public.md).
 
 ## Why this plugin
 
@@ -59,6 +61,7 @@ Claude Code configs drift fast. Rule files bloat. `settings.json` fills with one
 
 | Command | Description |
 |---|---|
+| `lazy-core.checkup` | Single entry point that runs every read-only audit/doctor in this repo (consumer + author trios), merges findings into one per-plugin table, then prompts for the mutating fix-flow to run. |
 | `lazy-core.help` | Show lazycortex-core purpose and a one-line summary of each skill it ships |
 
 ## Rules
@@ -109,6 +112,7 @@ Invoke skills with slash commands:
 ```
 /lazy-core.agent-models
 /lazy-core.audit
+/lazy-core.checkup
 /lazy-core.doctor
 /lazy-core.help
 /lazy-core.install

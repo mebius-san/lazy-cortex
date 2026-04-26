@@ -18,6 +18,11 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-guard.allow-mcp` — add all tools of one or more MCP servers to `permissions.allow` at the correct scope.
 - `lazy-repo.mark-public` — walk a repo through the check-public audit, create a waivers file, optionally flip GitHub visibility.
 
-No agents. No other commands.
+**Commands** (invoke as `/<name>`):
+
+- `lazy-core.checkup` — single entry point: runs every read-only audit/doctor (consumer + author trios), merges findings into one per-plugin table, then prompts for the mutating fix-flow to run.
+- `lazy-core.help` — this listing.
+
+No agents.
 
 See `README.md` in the plugin for full scenarios and examples.

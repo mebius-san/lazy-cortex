@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
 """Stop hook — trigger distill when a fresh commit landed this turn.
 
-Two-gate model:
-  1. `.logs/commits.jsonl` mtime > stored mtime in
-     `.logs/.distill-trigger-last-mtime` (i.e. a commit was recorded
-     during the just-finished turn).
-  2. `commits.jsonl` has entries newer than the `last-distilled-sha`
-     marker in `docs/changelog.md` (i.e. there is real work to do).
-
-Both gates must pass to exit 2 (asking Claude to run the
-`lazycortex-log:lazy-log.distill` agent before ending the turn).
-Otherwise: silent no-op (exit 0). The marker is updated in a `finally`
-block whenever gate 1 passes, so a missed write doesn't permanently
-re-arm the hook.
+Single-gate model: `.logs/commits.jsonl` mtime > stored mtime in
+`.logs/.distill-trigger-last-mtime` (i.e. a commit was recorded during
+the just-finished turn). When the gate passes, exit 2 (asking Claude
+to run the `lazycortex-log:lazy-log.distill` agent before ending the
+turn). Otherwise: silent no-op (exit 0). The mtime marker is updated
+in a `finally` block whenever the gate passes, so a missed write
+doesn't permanently re-arm the hook.
 
 Silent no-op when:
   - `stop_hook_active` is true (prevent re-entry loop)
   - `.logs/commits.jsonl` is missing
-  - gate 1 fails (no fresh commit this turn)
-  - gate 2 fails (no pending commits / no marker / empty file)
+  - first run in this repo (no baseline marker yet — record and exit)
+  - gate fails (no fresh commit this turn)
   - any exception (pass-through, never block stop)
 
 Protocol reference: https://code.claude.com/docs/en/hooks.md
@@ -27,13 +22,11 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 
 TIER = {"haiku": 1, "sonnet": 2, "opus": 3}
 SENTINELS = {"inherit", None, ""}
-MARKER_RE = re.compile(r"<!--\s*lazy-log:\s*last-distilled-sha\s*=\s*([0-9a-f]+)\s*-->")
 COMMITS_REL = ".logs/commits.jsonl"
 MTIME_MARKER_REL = ".logs/.distill-trigger-last-mtime"
 
@@ -111,63 +104,6 @@ def git_toplevel(cwd: str | None) -> str | None:
     return None
 
 
-def read_jsonl(path: str) -> list[dict]:
-    if not os.path.isfile(path):
-        return []
-    out: list[dict] = []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    out.append(json.loads(line))
-                except Exception:
-                    continue
-    except Exception:
-        return []
-    return out
-
-
-def extract_marker(changelog_path: str) -> str | None:
-    if not os.path.isfile(changelog_path):
-        return None
-    try:
-        with open(changelog_path, "r", encoding="utf-8") as f:
-            for line in f:
-                m = MARKER_RE.search(line)
-                if m:
-                    return m.group(1)
-    except Exception:
-        return None
-    return None
-
-
-def commits_after(commits: list[dict], marker_sha: str) -> list[dict]:
-    """Return commits newer than marker_sha.
-
-    `commits.jsonl` is append-only chronological, so we take entries after
-    the marker's line. If marker isn't found in the file, treat all
-    commits as pending (conservative — at worst prompts a no-op distill).
-    """
-    marker_prefix = (marker_sha or "").strip()
-    if not marker_prefix:
-        return commits
-    found = False
-    tail: list[dict] = []
-    for entry in commits:
-        sha = (entry.get("sha") or "").strip()
-        if not found:
-            if sha.startswith(marker_prefix) or marker_prefix.startswith(sha):
-                found = True
-            continue
-        tail.append(entry)
-    if not found:
-        return commits
-    return tail
-
-
 def main() -> None:
     payload = json.load(sys.stdin)
     if payload.get("stop_hook_active"):
@@ -183,26 +119,20 @@ def main() -> None:
         sys.exit(0)
 
     current_mtime = os.path.getmtime(commits_path)
+
+    # Bootstrap: no baseline yet. Record current mtime and stay silent —
+    # only future mtime advances (real commits) should fire the hook.
+    if not os.path.isfile(marker_path):
+        write_last_mtime(marker_path, current_mtime)
+        sys.exit(0)
+
     last_mtime = read_last_mtime(marker_path)
 
-    # Gate 1: did a commit land during the just-finished turn?
+    # Gate: did a commit land during the just-finished turn?
     if current_mtime <= last_mtime:
         sys.exit(0)
 
     try:
-        commits = read_jsonl(commits_path)
-        if not commits:
-            sys.exit(0)
-
-        marker = extract_marker(os.path.join(root, "docs/changelog.md"))
-        if marker is None:
-            sys.exit(0)
-
-        # Gate 2: is there real distill work to do?
-        pending = commits_after(commits, marker)
-        if not pending:
-            sys.exit(0)
-
         cfg = load_config(root)
         flat = build_flat_map(cfg)
         model = flat.get("lazycortex-log:lazy-log.distill")
@@ -210,15 +140,15 @@ def main() -> None:
             model = "haiku"
 
         print(
-            f"{len(pending)} commit(s) pending distill since {marker}. "
+            "A commit landed this turn. "
             f'Run: Agent(subagent_type="lazycortex-log:lazy-log.distill", '
-            f'model="{model}", prompt="distill pending commits"). '
-            f"Skip ONLY if the user said 'don't distill' this turn.",
+            f'model="{model}", prompt="distill commits from this turn"). '
+            "Skip ONLY if the user said 'don't distill' this turn.",
             file=sys.stderr,
         )
         sys.exit(2)
     finally:
-        # Always advance the marker once gate 1 passed, so a missed
+        # Always advance the marker once the gate passed, so a missed
         # write doesn't permanently re-arm the hook.
         write_last_mtime(marker_path, current_mtime)
 

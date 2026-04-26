@@ -25,7 +25,7 @@ Each plugin addresses one of these pains without forcing you to adopt the others
 
 Core skills and agents for Claude Code
 
-Ships 8 skills, 1 command, 5 rules, and 3 hooks.
+Ships 8 skills, 2 commands, 5 rules, and 3 hooks.
 
 See [`claude/lazycortex-core/`](claude/lazycortex-core/) for details.
 
@@ -33,7 +33,7 @@ See [`claude/lazycortex-core/`](claude/lazycortex-core/) for details.
 
 Logging, changelog, and change-history recall for Claude Code
 
-Ships 2 skills, 4 agents, 1 command, 1 rule, and 2 hooks.
+Ships 3 skills, 4 agents, 1 command, 1 rule, and 2 hooks.
 
 Requires: lazycortex-core
 

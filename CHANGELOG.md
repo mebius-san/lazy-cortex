@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.38 — 2026-04-26
+
+- New `/lazy-core.checkup` unified read-only health command that orchestrates every audit/doctor skill this repo ships (`lazy-core.audit`, `lazy-core.doctor`, `tool.audit`, `tool.doctor`), merges findings into a per-plugin table, and prompts for which mutating fix-flow to run next (`lazy-core.optimize`, `tool.optimize`, doctor fix loops, or `pub.status`). Gracefully handles consumer-only repos by probing for author-side skills before invoking them.
+- **Fix:** `/lazy-core.doctor`'s destructive-command guard now explicitly excludes `mcp__git__git_commit` from the `ask` bucket, preventing future drift. Doctor agents had been extending the `ask` bucket by analogy and misclassifying git-commit; the exclusion is now locked down in code.
+
 ### 0.2.34 — 2026-04-24
 
 - `/lazy-core.agent-models` is now batch-mode: three grouped prompts (curated defaults / system + other plugins / project agents) each let you accept-all, review one-by-one, mass-set every entry in the batch to `inherit`, or skip the batch — instead of one prompt per agent. The per-agent picker (now only fired when you explicitly choose "review each individually") offers four choices: suggested tier / `inherit` / next-closest tier / skip — restoring the previously-missing `inherit` option that the prior six-option layout dropped.
@@ -97,6 +102,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-log
 
+### 0.3.1 — 2026-04-26
+
+- New `/lazy-log.clean` skill — interactive housekeeping for `./.logs/claude/`. It classifies every subdirectory against the live set of canonical skills, agents, and commands; surfaces orphans (renamed skills, anonymous subagent runs); and offers per-orphan choices (merge, distill-to-memory, delete, leave) with anonymous subagent clusters batched by pattern so a folder of 25 `task-N` runs becomes one prompt instead of 25. Read-first — every action waits for explicit approval; nothing is mutated until you confirm. Re-run `/lazy-log.install` after upgrade to register the new skill.
+- **Fix:** `lazy-log.distill-trigger` Stop hook now stays silent on first run. When `.logs/.distill-trigger-last-mtime` didn't exist (fresh checkout, first install, or never-distilled repo), the hook's gate trivially passed and it fired regardless of whether commits were actually recorded. Bootstrap now writes the current `commits.jsonl` mtime as the baseline and exits silently; only real future advances trigger the distill nudge.
+
 ### 0.2.12 — 2026-04-26
 
 - The `lazy-log.distill-trigger` Stop hook no longer fires on every turn — it now activates only on turns where a commit was actually recorded. Two gates must both pass: `.logs/commits.jsonl` mtime advanced this turn, and pending commits exist beyond the `last-distilled-sha` marker. No-commit turns are silent, killing the per-turn distill noise that hit dev-heavy repos hardest. Commits made outside Claude (terminal, cron) don't trip the hook — invoke the distill agent manually to catch up. The mtime is tracked in `.logs/.distill-trigger-last-mtime` (gitignored under `.logs/`).
@@ -154,6 +164,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 0.1.7 — 2026-04-26
+
+- (No user-facing changes; internal autobumps from cross-cutting commits — versioning callout sync and a logging-rule description sync. See `docs/changelog.md` for commit-level detail.)
+
 ### 0.1.5 — 2026-04-24
 
 - (No user-facing changes; internal plumbing — execution-discipline waiver added to the `lazy-specs.help` command and plugin-dev folder-note gitignore cleanup.)
@@ -175,6 +189,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 0.3.0 — 2026-04-26
+
+- **Fix:** the bundled `iconize-reloader` companion plugin now survives Folder Notes' class-strip race condition. When a folder and its folder-note were created simultaneously, Folder Notes' CSS-class management would strip the icon classes that iconize-reloader had just applied, leaving the note rendering as a sibling until you restarted Obsidian. v2.0.8 polls for elements with a 6-second timeout and attaches MutationObservers that revert any class strips instantly. Re-run `/lazy-obsidian.iconize-install` (or `/lazy-obsidian.update-plugin iconize-reloader`) to pick up the new bundle.
+- **Fix:** `/lazy-obsidian.update-plugin` no longer silently resets your Iconize plugin toggles on every update. The shipped `obsidian-icon-folder` settings override was inherited wholesale from an older `data.json` snapshot and re-asserted every Iconize default each run — including `iconsInLinksEnabled: true`, which would clobber any user-set value. The override is now pruned to the three keys iconize-sync actually requires (`iconInFrontmatterEnabled`, `iconInFrontmatterFieldName`, `iconColorInFrontmatterFieldName`); all other user choices survive updates. Re-run `/lazy-obsidian.install` to pick up the slimmer override.
+- Removed two `lazy-obsidian.audit` Phase 2 WARNs that scanned the icon-map template for matcher coverage. The template ships with empty matchers by design — consumers author their own in their vault's local `icon-map.json` — so those WARNs always fired on a clean release with no fix path. Matcher-coverage auditing now belongs only to a consumer-side audit of the actual vault's icon-map.
 
 ### 0.2.53 — 2026-04-24
 

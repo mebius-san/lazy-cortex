@@ -1,6 +1,6 @@
 ---
 name: lazy-obsidian.audit
-description: "Semantic audit for the lazycortex-obsidian plugin. Verifies iconize-sync artifacts stay coherent: worker version constants match template HOOK_VERSION markers, icon-map template parses and covers at least one authored-doc + one status-file matcher, protocol template's `owner_skill` points at an existing skill, hook templates carry parseable version markers. Read-first; presents findings, then asks which to fix. Delegated from `lazy-core.doctor` Phase 3."
+description: "Semantic audit for the lazycortex-obsidian plugin. Verifies iconize-sync artifacts stay coherent: worker version constants match template HOOK_VERSION markers, icon-map template parses at the current schema with no retired keys, protocol template's `owner_skill` points at an existing skill, hook templates carry parseable version markers. Read-first; presents findings, then asks which to fix. Delegated from `lazy-core.doctor` Phase 3."
 allowed-tools: Read, Glob, Grep, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), AskUserQuestion, Write
 argument-hint: "(no arguments — runs the full plugin audit)"
 ---
@@ -48,18 +48,14 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 - **FAIL** if JSON doesn't parse.
 - **FAIL** if required top-level keys missing (`schema_version`, `matchers`).
 - **FAIL** if `schema_version != 2` (the current worker schema). v1 icon-maps
-  in the template are a release-blocking regression — the template is the
-  canonical reference for consumers.
+  in the template are a release-blocking regression — consumers copy this
+  file as their starter.
 - **FAIL** if any matcher contains an `emit` key (retired at schema 2;
   folder emission is now driven by Folder Notes template, not matcher
   output).
-- **WARN** if no authored-doc-style matcher is present (no matcher with
-  `basename_in` containing common authored-doc basenames OR no
-  `role_matches_basename` shorthand).
-- **WARN** if no matcher targets status-file basenames (`status.md`,
-  `README.md`, etc.) — retaining visibility of the "decorate-the-parent"
-  use case even without the `emit` field (now achieved by having the
-  status file co-located with its folder's folder-note).
+
+The template ships with `matchers: []` by design (consumers author their own
+rules); matcher-coverage checks belong in a consumer-side audit, not here.
 
 ## Phase 2.5 — Cross-artifact coherence for the two-writer model
 

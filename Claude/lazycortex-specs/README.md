@@ -1,10 +1,12 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#22c55e"
+iconize_color: "#93c5fd"
 ---
 # lazycortex-specs
 
 Specification and design skills for Claude Code
+
+> **Versioning** — On upgrade from a previous public release: a **patch bump** is safe to drop in. A **minor bump** means re-run the plugin's install command to pick up new rules, settings, or templates. A **major bump** means user-data migration is required — see the release notes in [`CHANGELOG.public.md`](../../CHANGELOG.public.md).
 
 ## Why this plugin
 

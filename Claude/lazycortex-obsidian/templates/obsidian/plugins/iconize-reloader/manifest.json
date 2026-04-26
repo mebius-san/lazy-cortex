@@ -1,7 +1,7 @@
 {
   "id": "iconize-reloader",
   "name": "Iconize Reloader",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "minAppVersion": "1.4.0",
   "description": "Watches obsidian-icon-folder/data.json and refreshes Iconize in place (reloads its data and re-paints the file-explorer) when the file changes externally — no plugin toggle, no window reload.",
   "author": "local",

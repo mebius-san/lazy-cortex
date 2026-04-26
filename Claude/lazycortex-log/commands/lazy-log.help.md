@@ -12,6 +12,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 - `lazy-log.install` — bootstrap the plugin into a project (or globally); drops the logging rule, creates `docs/changelog.md`, updates `.gitignore`. Idempotent.
 - `lazy-log.audit` — verify the logging rule is installed and coherent. Read-first; never modifies without confirmation.
+- `lazy-log.clean` — interactive housekeeping for `./.logs/claude/`: classify each folder against the live set of canonical skills/agents/commands, batch anonymous subagent runs, offer to distill substantive logs to memory before deleting. Read-first; deletions deferred until you've approved every action.
 
 **Agents** (invoke via Agent tool):
 

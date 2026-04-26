@@ -29,7 +29,7 @@ Always include `git_sha` — it bridges "the AI did Y" back to the actual commit
 
 ## Distill after commits (automatic via Stop hook)
 
-The `lazycortex-log` Stop hook fires **only on turns where a commit was recorded** — gates: (1) `.logs/commits.jsonl` mtime advanced this turn, (2) pending commits beyond the `last-distilled-sha` marker in `docs/changelog.md`. When both pass, it asks Claude to run `Agent(subagent_type: "lazycortex-log:lazy-log.distill", ...)`. No-commit turns are silent.
+The `lazycortex-log` Stop hook fires **only on turns where a commit was recorded this turn** — single gate: `.logs/commits.jsonl` mtime advanced since the last Stop. When it passes, it asks Claude to run `Agent(subagent_type: "lazycortex-log:lazy-log.distill", ...)`. No-commit turns are silent. The `last-distilled-sha` marker in `docs/changelog.md` is consulted by the distill *agent* itself to decide what to process — not by the hook.
 
 **Hard skip**: only if the user says "don't distill" this turn. **Catch-up** (e.g. terminal commits): invoke the distill agent manually.
 

@@ -1,6 +1,6 @@
 'use strict';
 
-const RELOADER_VERSION = '2.0.7';
+const RELOADER_VERSION = '2.0.8';
 
 const { Plugin } = require('obsidian');
 const fs = require('fs');
@@ -340,22 +340,96 @@ class IconizeReloaderPlugin extends Plugin {
     };
     this.registerEvent(this.app.metadataCache.on('changed', onChangedFile));
 
-    // Nudge Folder Notes' CSS classes onto the folder + folder-note elements.
-    // Folder Notes itself only applies these classes during its vault.on('create')
-    // handler (without retry) — if the file-explorer DOM hasn't rendered the new
-    // file yet, the class silently fails to apply and the note appears as a
-    // sibling instead of merging into the folder. We retry until the element
-    // shows up or we hit MAX_RETRIES.
-    const FN_RETRY_MAX = 10;
-    const FN_RETRY_DELAY = 150;
-    const nudgeFolderNoteCSS = (folderPath, filePath, count = 0) => {
-      const folderEl = document.querySelector(`.nav-folder-title[data-path="${CSS.escape(folderPath)}"]`);
-      const fileEl = document.querySelector(`.nav-file-title[data-path="${CSS.escape(filePath)}"]`);
-      if (folderEl) folderEl.classList.add('has-folder-note');
-      if (fileEl) fileEl.classList.add('is-folder-note');
-      if ((!folderEl || !fileEl) && count < FN_RETRY_MAX) {
-        setTimeout(() => nudgeFolderNoteCSS(folderPath, filePath, count + 1), FN_RETRY_DELAY);
-      }
+    // Nudge Folder Notes' CSS classes onto the folder + folder-note elements,
+    // and KEEP them on. Two failure modes are covered:
+    //   (1) File-explorer hasn't rendered the new folder/file yet — poll for
+    //       both elements up to 6s in 200ms ticks. (Heavy vaults — many
+    //       plugins, large file counts — can lag well past the previous 1.5s
+    //       budget, which left the classes never applied at all.)
+    //   (2) Folder Notes' `updateCSSClassesForFolder` runs while its own
+    //       `getFolderNote(folder)` still returns null (folder not yet a
+    //       TFolder in the vault index, or children not linked). In that
+    //       path Folder Notes calls `removeCSSClassFromFileExplorerEL` and
+    //       STRIPS the classes we just applied (folder-notes 1.8.x:
+    //       main.js ~L2099). A short-lived class-attribute MutationObserver
+    //       on each element reverts any strip immediately. Observers
+    //       disconnect once Folder Notes' state catches up — signalled by
+    //       `metadataCache.changed` for the new file — or after a hard cap.
+    //       This avoids re-emitting `layout-change` in a loop, which would
+    //       re-iterate every folder dozens of times in a heavy vault.
+    const FN_FIND_MAX = 30;
+    const FN_FIND_DELAY = 200;
+    const FN_OBSERVE_HARD_CAP_MS = 6000;
+    const FN_OBSERVE_STABLE_MS = 1500;
+    const nudgeFolderNoteCSS = (folderPath, filePath) => {
+      const startedAt = Date.now();
+      let folderEl = null;
+      let fileEl = null;
+      let folderObs = null;
+      let fileObs = null;
+      let stableTimer = null;
+      let hardCapTimer = null;
+      let metaRef = null;
+      let done = false;
+
+      const cleanup = () => {
+        if (done) return;
+        done = true;
+        if (folderObs) folderObs.disconnect();
+        if (fileObs) fileObs.disconnect();
+        if (stableTimer) clearTimeout(stableTimer);
+        if (hardCapTimer) clearTimeout(hardCapTimer);
+        if (metaRef) this.app.metadataCache.offref(metaRef);
+      };
+
+      const armStable = () => {
+        if (stableTimer) clearTimeout(stableTimer);
+        stableTimer = setTimeout(cleanup, FN_OBSERVE_STABLE_MS);
+      };
+
+      const ensureFolder = () => {
+        if (folderEl && !folderEl.classList.contains('has-folder-note')) {
+          folderEl.classList.add('has-folder-note');
+          armStable();
+        }
+      };
+      const ensureFile = () => {
+        if (fileEl && !fileEl.classList.contains('is-folder-note')) {
+          fileEl.classList.add('is-folder-note');
+          armStable();
+        }
+      };
+
+      const onFound = () => {
+        ensureFolder();
+        ensureFile();
+
+        folderObs = new MutationObserver(ensureFolder);
+        folderObs.observe(folderEl, { attributes: true, attributeFilter: ['class'] });
+        fileObs = new MutationObserver(ensureFile);
+        fileObs.observe(fileEl, { attributes: true, attributeFilter: ['class'] });
+
+        armStable();
+        const remaining = Math.max(0, FN_OBSERVE_HARD_CAP_MS - (Date.now() - startedAt));
+        hardCapTimer = setTimeout(cleanup, remaining);
+
+        metaRef = this.app.metadataCache.on('changed', (file) => {
+          if (file && file.path === filePath) cleanup();
+        });
+      };
+
+      let attempts = 0;
+      const find = () => {
+        if (done) return;
+        folderEl = document.querySelector(`.nav-folder-title[data-path="${CSS.escape(folderPath)}"]`);
+        fileEl = document.querySelector(`.nav-file-title[data-path="${CSS.escape(filePath)}"]`);
+        if (folderEl && fileEl) {
+          onFound();
+        } else if (++attempts < FN_FIND_MAX) {
+          setTimeout(find, FN_FIND_DELAY);
+        }
+      };
+      find();
     };
 
     // Create: when a new folder-note appears (externally or from the worker's

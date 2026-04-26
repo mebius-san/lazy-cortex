@@ -23,6 +23,7 @@ Then `lazy-log.recall` searches across all three plus git history and memory, an
 - *"Summarize the whole story of the auth refactor."* — Run `/lazy-log.summary "auth refactor"` for a multi-source synthesized summary (not chronological).
 - *"I just landed a batch of commits."* — Run `/lazy-log.distill` to update `docs/changelog.md` with user-facing prose for each new commit.
 - *"Is the logging rule actually being followed?"* — Run `/lazy-log.audit` to verify the rule is installed and internally coherent. The rule is the single source of truth; individual skill/agent definitions do not need their own `## Logging` sections.
+- *"My `.logs/claude/` is full of folders from skills I no longer have."* — Run `/lazy-log.clean` to walk every subfolder, surface orphans (renamed skills, anonymous subagent runs), offer to distill substantive logs into memory, and delete what's safe to drop. Read-first; nothing is mutated until you approve every action.
 
 ## Requirements
 
