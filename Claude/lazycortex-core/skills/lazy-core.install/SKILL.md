@@ -1,24 +1,25 @@
 ---
 name: lazy-core.install
-description: "Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory. Idempotent — safe to re-run. Detects install scope automatically."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *)
+description: "Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, syncs authoring templates into `.claude/templates/core/`, and bootstraps the scaffold registry. Idempotent — safe to re-run. Detects install scope automatically."
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *)
 ---
 # Install lazycortex-core
 
-Bootstrap the plugin in the right scope: copy every rule template shipped by the plugin into the target `rules/` directory.
+Bootstrap the plugin in the right scope: copy every rule template shipped by the plugin into the target `rules/` directory, sync authoring templates into the consumer's `templates/core/` directory, and ensure the scaffold registry is in place.
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Detect install scope`
    - `Step 2 — Determine paths`
    - `Step 3 — Sync rule templates`
-   - `Step 4 — Verify`
-   - `Step 5 — Seed lazy.settings.json`
-   - `Step 6 — Report`
-   - `Step 7 — Log the run`
+   - `Step 4 — Sync authoring templates`
+   - `Step 5 — Verify`
+   - `Step 6 — Seed lazy.settings.json`
+   - `Step 7 — Report`
+   - `Step 8 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -42,10 +43,10 @@ Enumerate every rule file shipped by the plugin via `Glob: <installPath>/rules/*
 
 For each source file `<installPath>/rules/<name>.md`, the target is:
 
-| Scope | Rule destination |
-|---|---|
-| `user` | `~/.claude/rules/<name>.md` |
-| `project` | `<repo-root>/.claude/rules/<name>.md` |
+| Scope | Rule destination | Templates destination |
+|---|---|---|
+| `user` | `~/.claude/rules/<name>.md` | `~/.claude/templates/core/` |
+| `project` | `<repo-root>/.claude/rules/<name>.md` | `<repo-root>/.claude/templates/core/` |
 
 Project root is `git rev-parse --show-toplevel` (or current working directory if not in a git repo — warn the user).
 
@@ -91,14 +92,42 @@ One `AskUserQuestion` at a time — wait for the answer before the next prompt.
 
 Orphan detection only considers target files whose filename starts with one of this plugin's owned namespaces. Rules from other plugins and user-authored rules in unrelated namespaces are never offered for deletion.
 
-## Step 4: Verify
+## Step 4: Sync authoring templates
+
+The plugin ships authoring templates under `<installPath>/templates/core/` that other plugins and customer-authored scaffolds reference via `.claude/templates/core/...`. Sync them into the consumer scope so the scaffold registry's paths resolve.
+
+### Enumerate
+
+- Source: `Glob <installPath>/templates/core/*.md`. If empty, abort the step with outcome `absent` (the plugin cache is broken).
+- Target dir: `<consumerScope>/templates/core/` (where `<consumerScope>` is `~/.claude/` for user scope, `<repo-root>/.claude/` for project scope).
+- Ensure target dir exists with `mkdir -p`.
+
+### Per-template decision
+
+For each source template, compute state and act:
+
+1. **New** — target missing → copy source to target. State **installed**.
+2. **Unchanged** — both present, byte-identical (`diff -q`) → no action. State **unchanged**.
+3. **Drift** — both present, differ → `AskUserQuestion`:
+   - question: ``Template `<name>` has drift — overwrite with shipped version?``
+   - description: ``**What this is:** `.claude/templates/core/<name>` is referenced by `lazy-core.scaffold` for new artifact authoring.\n\n**Full diff:**\n```diff\n<unified diff, truncated to ~40 lines if longer>\n`````
+   - options: **overwrite** / **keep-local**.
+   - Overwrite → copy source to target, state **updated**. Keep-local → state **kept-local**.
+
+No orphan detection — the plugin owns the `core/` group exclusively, but customer-edited copies are valid keep-local outcomes.
+
+### Outcome
+
+One line per template: `<name>: <state> → <targetPath>`.
+
+## Step 5: Verify
 
 For each installed rule file:
 
 - Read it back and confirm its `---` frontmatter parses
 - Confirm the file is under 3 KB (per the `lazy-core.doctor` rule-size threshold)
 
-## Step 5: Seed lazy.settings.json
+## Step 6: Seed lazy.settings.json
 
 Non-destructively seed the `agent_models` section with the three built-in subagents and create empty reserved slots for user- and project-authored agents.
 
@@ -119,19 +148,17 @@ Ensure `agent_models._builtin`, `agent_models._user`, and `agent_models._project
 
 ### Seed `_builtin` defaults
 
-| Dispatch string | Default model |
-|---|---|
-| `Explore` | `haiku` |
-| `Plan` | `opus` |
-| `general-purpose` | `inherit` |
+Pull tier values from `${CLAUDE_PLUGIN_ROOT}/skills/lazy-core.agent-models/default-tiers.json` — single source of truth for both this seed step and the `lazy-core.agent-models` wizard. Select every entry under `defaults` whose key matches the built-in dispatch set `{Explore, Plan, general-purpose, statusline-setup}` (bare names with no `:`). Those are the entries to seed under `_builtin`, key + tier verbatim from the JSON.
+
+If `default-tiers.json` is missing or unparseable → FAIL with `default-tiers.json missing or invalid at <path>; reinstall lazycortex-core`. Don't fall back to hardcoded values — silent drift between this seed and the wizard's "accept all template defaults" batch is exactly what the SOT is meant to prevent.
 
 Per-key semantics (write back only if anything changed):
 
-- **absent** → add the entry with its default value. State **added**.
+- **absent** in `agent_models._builtin` → add the entry with the JSON's tier. State **added**.
 - **equal** → leave untouched. State **unchanged**.
-- **different** → leave the user's value untouched. State **kept-local** (report value).
+- **different** → leave the user's value untouched. State **kept-local** (report user's value alongside the JSON's).
 
-Never touch `_user` or `_project` entries — those slots are filled interactively by `lazy-core.optimize`.
+Never touch `_user` or `_project` entries — those slots are filled interactively by `lazy-core.agent-models`.
 
 ### Pre-write context (MANDATORY before Write)
 
@@ -160,15 +187,16 @@ If any mutation happened, write the file with `version: 1` at the top. Preserve 
 
 One line per seeded default: `_builtin.<key> = <value> (<state>)`. Plus `_user`, `_project`: `created (empty)` if new, `unchanged` otherwise.
 
-## Step 6: Report
+## Step 7: Report
 
 Report to the user:
 - Scope detected (user vs project)
 - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)
 - For each rule: state (**created**, **updated**, **unchanged**, or **kept-local**) and target `<path>`
-- Per-key `agent_models` seed outcome from Step 5
+- For each authoring template: state and target `<path>` (Step 4)
+- Per-key `agent_models` seed outcome from Step 6
 
-## Step 7: Log the run
+## Step 8: Log the run
 
 Log to `./.logs/claude/lazy-core.install/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter).
 

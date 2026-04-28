@@ -1,12 +1,18 @@
 ---
-description: Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, and the plugin audit-skill contract.
-paths: [".claude/skills/**", ".claude/commands/**"]
+description: Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, the plugin audit-skill contract, and the plugin help-command contract.
+paths:
+  - ".claude/skills/**"
+  - ".claude/commands/**"
+  - ".claude/templates/core/skill-template.md"
+  - ".claude/templates/core/command-template.md"
 ---
 # Skill / Command Authoring
 
 Audience: anyone authoring a skill, command, or runnable script the main agent will execute. Applies to every runnable artifact under `.claude/skills/**`, `.claude/commands/**`, and the plugin equivalents.
 
 This file is the single source of truth for **how to write** these artifacts. For agent-specific authoring see `lazy-core.agent-writing`. For how to write rule files themselves see `lazy-core.rule-writing`. Behavioral rules enforced at every run live elsewhere and are cross-referenced below — do not copy them here.
+
+**Template:** `${CLAUDE_PLUGIN_ROOT}/templates/core/skill-template.md` — start from this when creating a new skill or command. The template carries the Execution-Discipline preamble and the section skeleton; copy its body, fill placeholders, delete the trailing authoring-notes block.
 
 ## 1. Execution-Discipline preamble (MANDATORY)
 
@@ -20,7 +26,7 @@ Every skill, command, and runnable script MUST carry an `Execution discipline` p
 
 ### Required template
 
-The full canonical template to copy verbatim lives at `${CLAUDE_PLUGIN_ROOT}/templates/execution-discipline-preamble.md` — `Read` it and paste the code-fenced block into your skill after the H1 and opening paragraph, before any `##` step heading. Substitute the `«…»` items; never abbreviate the step list.
+The preamble ships pre-filled inside the full skill / command templates — `${CLAUDE_PLUGIN_ROOT}/templates/core/skill-template.md` and `${CLAUDE_PLUGIN_ROOT}/templates/core/command-template.md`. Start a new artifact from the matching template (per `lazy-core.scaffold`); the preamble block is already in place between the H1/opening paragraph and the first `##` phase heading. Substitute the `<…>` placeholders, expand the canonical task list to one entry per phase, and never abbreviate the list.
 
 Contract shape at a glance (the full template is longer; this is the "what it enforces" summary, not the thing to copy):
 
@@ -109,6 +115,25 @@ No `<namespace>.doctor` — doctor-level orchestration (waivers, currency, fix/w
 
 `lazy-core.doctor` Phase 3 delegates by hardcoded list (availability + run-condition probe). When adding a plugin audit, register it there: availability = plugin in `~/.claude/plugins/installed_plugins.json`; run condition = opt-in gate if one exists. Discovery-based delegation (glob for `<namespace>.audit`) is a future refactor — keep the hardcoded list in sync.
 
+## 7. Plugin help command contract
+
+### The rule
+
+Every plugin in `claude/<plugin>/` ships a `<namespace>.help` command. Location: `claude/<plugin>/commands/<namespace>.help.md`. Filename matches the plugin's *primary* namespace — the one the plugin is named after (`lazy-core` for `lazycortex-core`). Plugins that ship multiple namespaces still expose a single help command at the primary namespace; the help block lists every namespace's surface.
+
+Same status as § 6: a plugin missing its `<namespace>.help` command is a `tool.doctor` `[FAIL]`, not a stylistic gap.
+
+### Minimum contract
+
+1. **Verbatim-block pattern** — frontmatter carries `description:` only. Body opens with the literal instruction `Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.` followed by a `---` separator and the help block.
+2. **Help block content** — short purpose statement plus one-line bullet per skill / agent / command / rule / hook the plugin ships. Stays in sync with the plugin's actual surface: any artifact added or removed updates the help block in the same edit.
+3. **Execution-discipline waiver** — help commands are static text. Declare `execution-discipline-waiver: "static help text — no executable steps"` in frontmatter (per § 1 Waiver). Surfaces as `INFO` in `lazy-core.audit`, never `FAIL`.
+4. **Logging** — exempt from `lazy-log.logging` by virtue of the verbatim "Do not log this run" instruction.
+
+### Surface reference
+
+The full plugin-surface contract (required files, forbidden empty stubs, namespace-naming rationale) lives at `.claude/skills/tool.doctor/references/plugin-surface.md`. § 7 here is the authoring-side counterpart; the surface reference is the enforcement-side specification.
+
 ## Cross-referenced contracts (not copied here)
 
 - `lazy-core.agent-writing` — agent-specific authoring (single-response model, tool allowlist, structured-report contract).
@@ -117,11 +142,14 @@ No `<namespace>.doctor` — doctor-level orchestration (waivers, currency, fix/w
 - `lazy-core.hygiene` — scope, naming (dot-namespace), settings split, MCP scope, path hygiene.
 - `lazy-guard.security` — public-repo credential/PII rules.
 
+Opting a skill into `lazy-core.setup`: see `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases.md` (`lazy_setup_phase:` frontmatter contract — read on demand, not auto-loaded).
+
 ## Enforcement
 
 - `lazy-core.audit` Agent B enforces §§ 1–4 (preamble presence, no-Optional, narrative-padding heuristic). Absent preamble and "Optional" in heading are `FAIL`; narrative-padding denylist match is `WARN`.
 - `lazy-core.doctor` surfaces these findings in Phase 3 and prompts the user to fix or waive.
 - § 6 is an author-side contract — `lazy-core.doctor` flags plugin-structure violations (missing `<namespace>.audit`, shipped `<namespace>.doctor`, non-compliant install skills) in its plugin-structure pass.
+- § 7 is enforced by `tool.doctor`: missing `commands/<namespace>.help.md` is `[FAIL]`; filename / namespace mismatch is `[WARN]`. See `.claude/skills/tool.doctor/references/plugin-surface.md`.
 
 ## Scope
 

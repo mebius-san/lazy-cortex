@@ -5,12 +5,20 @@
     "Explore": "haiku",
     "Plan": "opus",
     "general-purpose": "inherit",
-    "statusline-setup": "haiku",
+    "statusline-setup": "inherit",
     "lazycortex-log:lazy-log.timeline": "haiku",
     "lazycortex-log:lazy-log.recall": "sonnet",
-    "lazycortex-log:lazy-log.summary": "opus",
-    "lazycortex-log:lazy-log.distill": "haiku",
+    "lazycortex-log:lazy-log.summary": "sonnet",
+    "lazycortex-log:lazy-log.distill": "sonnet",
+    "lazycortex-log:lazy-log.bullets": "sonnet",
     "lazycortex-obsidian:obsidian.gen-tag-pages": "sonnet",
-    "superpowers:code-reviewer": "opus"
+    "superpowers:code-reviewer": "opus",
+    "superpowers:brainstorming": "opus",
+    "superpowers:writing-plans": "opus",
+    "superpowers:subagent-driven-development": "sonnet",
+    "superpowers:requesting-code-review": "sonnet",
+    "claude-code-guide:claude-code-guide": "sonnet",
+    "memory.optimise": "sonnet",
+    "plugin.extractor": "opus"
   }
 }

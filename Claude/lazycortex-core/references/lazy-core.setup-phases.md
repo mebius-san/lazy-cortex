@@ -1,7 +1,3 @@
----
-description: "Frontmatter contract for `lazy_setup_phase`. Documents the allowed values, execution ordering inside `lazy-core.setup`, and the anti-pattern for skills already chained from inside another install flow."
-paths: ["claude/*/skills/*/SKILL.md", ".claude/skills/*/SKILL.md"]
----
 # `lazy_setup_phase` frontmatter contract
 
 Skills opt into the `lazy-core.setup` meta-installer by declaring `lazy_setup_phase:` in their `SKILL.md` frontmatter. The meta-installer discovers participating skills dynamically — no central registry to edit.

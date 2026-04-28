@@ -358,6 +358,11 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 - *Run condition*: same as availability — plugin installation / enablement is the opt-in.
 - *On invoke*: fold audit findings into a **Logging** subsection.
 
+**11c. Diagram coverage** → `lazy-diagram.audit`
+- *Availability*: `lazycortex-diagram` meets the canonical signal set above.
+- *Run condition*: same as availability — plugin installation / enablement is the opt-in.
+- *On invoke*: fold audit findings into a **Diagram** subsection.
+
 ## Phase 4 — Present + fix + waive
 
 Render in the existing format, with a new "Waived" tail section covering findings Phase 2.7 suppressed:
@@ -397,8 +402,10 @@ After the report, ask the user which fixes to apply. Apply only confirmed fixes.
 
 - Rules oversized → suggest running `/lazy-core.optimize`; don't auto-slim here.
 - Rule drift / orphans → direct the user to run the owning plugin's install skill (`/<namespace>.install`, e.g. `/lazy-log.install` for `lazy-log.*` rules). Do NOT auto-overwrite here — the install skill's per-rule `AskUserQuestion` is the sanctioned reconciliation flow.
-- Missing rules frontmatter → add `---\ndescription: ...\npaths: [...]\n---` for scoped rules, or `---\ndescription: ...\nalways_loaded: <one-line reason>\n---` for rules that must load every turn.
-- Rule lacks scope AND waiver → ask the user, per rule, whether the rule is legitimately always-loaded. If yes, add `always_loaded: <reason>` (reason must be substantive — one line explaining *why* every turn needs it, not `true`). If no, add `paths: ["<glob>"]` narrowing it to the folders where it applies. Show the proposed frontmatter diff before writing. Never auto-pick a scope — only the user knows the rule's true audience.
+- Missing rules frontmatter → add `---\ndescription: ...\npaths:\n  - "<glob>"\n---` (YAML block-list per Claude Code docs) for scoped rules, or `---\ndescription: ...\nalways_loaded: <one-line reason>\n---` for rules that must load every turn.
+- Rule lacks scope AND waiver → ask the user, per rule, whether the rule is legitimately always-loaded. If yes, add `always_loaded: <reason>` (reason must be substantive — one line explaining *why* every turn needs it, not `true`). If no, add a `paths:` block-list narrowing it to the folders where it applies. Show the proposed frontmatter diff before writing. Never auto-pick a scope — only the user knows the rule's true audience.
+- Inline-array `paths:` shape (FAIL from `lazy-core.audit` rule-writing check 3) → in-place migration to canonical YAML block-list. Parse the existing `paths: ["a", "b", ...]` line, preserve all globs verbatim (including quote style), rewrite as a key on its own line followed by one `  - "<glob>"` per array element. The conversion is mechanical (no semantic change) but always show the diff before writing — the rule file is loaded into context for whoever's editing files in its scope, so even a YAML-shape change deserves explicit user confirmation. Apply per-rule via `AskUserQuestion`; batch only on explicit "apply all" from the user.
+- Authoring rule without template reference (WARN from `lazy-core.audit` rule-writing check 9) → ask the user, per finding, whether to scaffold a template. Two-step fix: (1) derive `<artifact-type>` from the rule filename (`*.writing.md` → strip `-writing`/`.writing` and pluralize as needed; e.g. `dev.skill-writing.md` → `skill`), copy the matching base template (`<plugin>/templates/core/{rule,skill,agent}-template.md`) to `<plugin>/templates/<group>/<derived-name>-template.md` — default `<group>` to the plugin's primary namespace (`core` for `lazycortex-core`); ask the user if they prefer a different group name. (2) Prepend `**Template:** ${CLAUDE_PLUGIN_ROOT}/templates/<group>/<derived-name>-template.md — start here when creating a new <artifact-type>.` immediately after the rule's H1 + orientation paragraph, before the first `## ` section. Show the full diff (new template file + rule edit) before writing; apply only on explicit user confirmation. Per `lazy-core.scaffold`.
 - Memory index: add missing entries, remove broken links; flag stale for review.
 - Settings leakage: offer to move entries between files (respect the split in `rules/lazy-core.hygiene.md`).
 - Permissions leakage into tracked `settings.json`: offer an in-place migration — move the entire `permissions.*` block (both `allow` and `ask` arrays) from tracked `settings.json` to the paired `settings.local.json`. Merge with any existing entries there, preserving order and deduplicating. Leave `enabledPlugins`, `hooks`, `env`, `enabledMcpjsonServers`, and similar enablement flags in the tracked file untouched. Show the diff before writing; apply only on explicit user confirmation.

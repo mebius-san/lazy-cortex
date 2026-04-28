@@ -18,12 +18,6 @@
 .logs/
 docs/changelog.md
 
-# Superpowers scratch area (plans, specs, notes — machine-local)
-docs/superpowers/
-docs/plans/
-docs/tasks/
-docs/specs/
-
 
 # ---------------------------------------------------------------------------------------
 # Plugin folder notes (Obsidian folder-notes convention — dev-local visual state)
@@ -41,6 +35,7 @@ docs/specs/
 # when a file whose basename equals its parent-dir basename is staged under claude/.
 # Safe to reorder or remove entries; the hook re-adds any staged match.
 /claude/lazycortex-core/lazycortex-core.md
+/claude/lazycortex-diagram/lazycortex-diagram.md
 /claude/lazycortex-log/lazycortex-log.md
 /claude/lazycortex-obsidian/lazycortex-obsidian.md
 /claude/lazycortex-specs/lazycortex-specs.md

@@ -1,7 +1,7 @@
 ---
 name: lazy-core.audit
 description: "Quick read-only audit of what gets loaded into conversation context at startup plus skill-writing, agent-writing, and rule-writing compliance. Shows sizes, loading behavior, optimization opportunities, Execution-Discipline preamble presence, no-Optional headings, narrative-padding heuristics, and rule-file frontmatter/size/code-block/scope enforcement. No changes made."
-allowed-tools: Read, Glob, Grep, Bash(wc *)
+allowed-tools: Read, Glob, Grep, Bash(wc *), Bash(command -v python3), Bash(python3 --version)
 ---
 # Context Audit
 
@@ -75,6 +75,15 @@ Emit one `[INFO]` per enabled server. Emit `[WARN]`:
 - Mode B only: non-empty project `.mcp.json` but no `enabledMcpjsonServers` anywhere.
 - Always: name in `enabledMcpjsonServers` with no definition in `.mcp.json` or `~/.mcp.json`.
 
+**Python runtime** — every `lazycortex-*` plugin ships hooks that shebang `python3` and the project `.claude/hooks/pub.*.py` are invoked as `python3 ...` from `settings.json`. If `python3` is missing or too old, hooks silently fail and the user loses distill-after-commit, settings/public guards, agent-model routing, and pub.autobump. Run two short Bash probes:
+
+- `command -v python3` — empty output → `[FAIL] python3 not in PATH — every hook in .claude/settings.json and claude/lazycortex-*/hooks/*.py will fail to execute.`
+- `python3 --version 2>&1` — parse `Python X.Y.Z`. Floor is **3.8** (hooks use `from __future__ import annotations`, f-strings, `pathlib`, all stdlib — no third-party deps, but 3.7 is EOL since 2023-06). Emit:
+  - `[INFO] python3 path=<path> version=<X.Y.Z>` when found and ≥ 3.8.
+  - `[WARN] python3 version <X.Y.Z> below floor 3.8 — hooks may break on newer syntax additions.` when found and < 3.8.
+
+Skip both probes silently if neither runs (sandbox restriction); the renderer treats the section as absent.
+
 **Path hygiene** — grep every project-level config file (`.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/*/SKILL.md`, `.claude/commands/*.md`, `CLAUDE.md`) and emit `[WARN]` for:
 
 - `/Users/` or `/home/` — hardcoded absolute paths.
@@ -97,7 +106,7 @@ Emit WARN only when the match survives all three gates.
 1. **Preamble present** — grep each file for `^## Execution discipline (MANDATORY`. Absent AND no `execution-discipline-waiver:` in frontmatter → `[FAIL]`. Frontmatter carries a non-empty `execution-discipline-waiver: "<reason>"` string → `[INFO]` with the waiver reason (visible, not silent). Frontmatter carries `execution-discipline-waiver: true` / `yes` / `""` → `[FAIL]` (invalid waiver).
 2. **No "Optional" in phase/step headings** — grep for `^##+ .*[Pp]hase.*[Oo]ptional`, `^##+ .*[Ss]tep.*[Oo]ptional`, and any `^### .*[Oo]ptional`. Match → `[FAIL]`.
 3. **Narrative padding (heuristic)** — grep the body (exclude frontmatter) for the denylist: `\bv\d+\.\d+\.\d+`, `user had to`, `we got burned`, `in a past session`, `in a previous run`, `user had to patch`. Match → `[WARN]` with the offending line. Final decision is the author's — heuristic, not structural.
-4. **Valid `lazy_setup_phase` value** — grep frontmatter for `^lazy_setup_phase:`. Value outside `{pre-install, per-plugin, post-install}` → `[WARN]` with the offending value. See `lazy-core.setup-phases` for the contract.
+4. **Valid `lazy_setup_phase` value** — grep frontmatter for `^lazy_setup_phase:`. Value outside `{pre-install, per-plugin, post-install}` → `[WARN]` with the offending value. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases.md` for the contract.
 
 **Agent-writing compliance** — see `lazy-core.agent-writing` (plugin) / `.claude/rules/dev.agent-writing.md` (local pointer). File set: `.claude/agents/*.md`, `claude/*/agents/*.md`. Checks:
 
@@ -125,15 +134,17 @@ Emit WARN only when the match survives all three gates.
 3. **User-authored, project** — `./.claude/agents/*.md`. Group: `_project`. Dispatch string: bare filename stem. (Project entries shadow global entries of the same stem — both still listed separately with provenance.)
 4. **Plugin-shipped** — `~/.claude/plugins/cache/**/agents/*.md`. Extract plugin name from path (`~/.claude/plugins/cache/<marketplace>/<plugin-name>/<version>/agents/<agent>.md` → plugin = `<plugin-name>`). Group: **domain** derived from plugin name via the domain-extraction rule (first `-`-delimited segment, or full name if no `-`). Dispatch string: `<plugin-name>:<stem>`.
 
-**Rule-writing compliance** — see `lazy-core.rule-writing` (plugin) / `.claude/rules/dev.rule-writing.md` (local pointer). File set: `.claude/rules/*.md`, `~/.claude/rules/*.md`, `claude/*/rules/*.md`. Checks:
+**Rule-writing compliance** — see `lazy-core.rule-writing` (plugin) / `.claude/rules/dev.rule-writing.md` (local pointer). File set: `.claude/rules/*.md`, `~/.claude/rules/*.md`, `claude/*/rules/*.md`. **Exclude** `**/templates/**/*-template.md` from every check below — templates are skeletons, not rules; their placeholder frontmatter and example clauses would otherwise misfire. Checks:
 
 1. **Frontmatter present** — YAML frontmatter with at minimum `description:`. Absent → `[FAIL]`.
-2. **Scope or waiver** — frontmatter must carry EITHER `paths: ["<glob>", ...]` OR `always_loaded: "<reason>"`. Neither present → `[FAIL]`. `always_loaded: true` / `always_loaded: ""` → `[FAIL]` (invalid waiver).
-3. **Size budget** — `always_loaded:` rule > 3 KB → `[FAIL]`. `paths:`-scoped rule > 10 KB → `[WARN]`. `paths:`-scoped rule > 25 KB → `[FAIL]`.
-4. **Code-block size** — any fenced code block > 10 lines → `[FAIL]`.
-5. **Dot-namespace filename** — filename without dot separator → `[WARN]`.
-6. **Broken artifact reference** — slash-commands, subagent-types, rule filenames, `references/…` paths, hook paths, `skills/<name>/SKILL.md` paths that don't resolve on disk → `[WARN]`. Markdown section headings (`## Phase 2.5`) are NOT checked.
-7. **Narrative padding (heuristic)** — same denylist as skill-writing §3 → `[WARN]`.
+2. **Scope or waiver** — frontmatter must carry EITHER `paths:` (YAML block-list of globs, per Claude Code docs) OR `always_loaded: "<reason>"`. Neither present → `[FAIL]`. `always_loaded: true` / `always_loaded: ""` → `[FAIL]` (invalid waiver).
+3. **Canonical `paths:` shape** — when `paths:` is present, it MUST be a YAML **block-list** (one `- "<glob>"` per line). Inline-array shape (`paths: ["<glob>", ...]`) → `[FAIL]`. Detection: any line in the frontmatter matching `^paths:\s*\[`. This includes single-element inline arrays (`paths: ["x"]`); the canonical form has the `paths:` key on its own line followed by hyphen-prefixed entries. Per `lazy-core.rule-writing § 1`. Finding text: `non-canonical paths: shape — inline-array form, must be block-list per code.claude.com/docs/en/memory#path-specific-rules`.
+4. **Size budget** — `always_loaded:` rule > 3 KB → `[FAIL]`. `paths:`-scoped rule > 10 KB → `[WARN]`. `paths:`-scoped rule > 25 KB → `[FAIL]`.
+5. **Code-block size** — any fenced code block > 10 lines → `[FAIL]`. **Exemption** per `lazy-core.rule-writing § 3`: fenced `yaml`, `json`, or `toml` blocks that constitute the rule's primary payload (e.g. a registry or schema the rule exists to publish) are not subject to the cap. Heuristic for "primary payload": the rule's prose introduces the block as authoritative content (phrases like "registry", "schema", "canonical mapping") rather than as an example or illustration.
+6. **Dot-namespace filename** — filename without dot separator → `[WARN]`.
+7. **Broken artifact reference** — slash-commands, subagent-types, rule filenames, `references/…` paths, hook paths, `skills/<name>/SKILL.md` paths that don't resolve on disk → `[WARN]`. Markdown section headings (`## Phase 2.5`) are NOT checked.
+8. **Narrative padding (heuristic)** — same denylist as skill-writing §3 → `[WARN]`.
+9. **Authoring contract without template** — a rule counts as an *authoring contract* when its filename matches `*.writing.md` OR its body contains a heading line matching `^##\s.*[Aa]uthoring`. Authoring contracts MUST reference a template path under `<plugin>/templates/`; detection: grep the body for `templates/.*-template\.md`. No match → `[WARN]`. Finding text: `authoring rule has no template reference — Claude composing a new artifact from scratch can't see the contract; add a **Template:** pointer per lazy-core.scaffold`.
 
 ## Phase 2 — Render
 
@@ -158,6 +169,10 @@ Parse both returned blocks. Produce:
 ### MCP servers
 
 List enabled servers and the mode in effect. Flag any WARN findings from Agent B's MCP section.
+
+### Python runtime
+
+One line for the `[INFO]` finding (path + version), or the `[FAIL]` / `[WARN]` if the probe found a problem. Omit the section if Agent B reported neither.
 
 ### Path hygiene
 
@@ -213,18 +228,23 @@ One line per entry. Below the table:
 
 - **Missing frontmatter** (FAIL) — one line per rule without YAML frontmatter.
 - **Missing scope or waiver** (FAIL) — neither `paths:` nor `always_loaded:`, or invalid `always_loaded` (true/empty).
+- **Non-canonical `paths:` shape** (FAIL) — one line per rule using inline-array form (`paths: [...]`) instead of the canonical YAML block-list.
 - **Size over budget** (FAIL / WARN) — `always_loaded:` > 3 KB; `paths:` > 10 KB (WARN) or > 25 KB (FAIL).
 - **Code block > 10 lines** (FAIL) — one line per match.
 - **Filename lacks dot separator** (WARN) — one line per match.
 - **Broken artifact reference** (WARN) — one line per unresolved reference.
 - **Narrative-padding heuristic** (WARN) — one line per match.
+- **Authoring rule without template reference** (WARN) — one line per authoring rule with no `templates/**/*-template.md` mention in the body.
 
 ### Recommendations
 
 - Memory index > 5 KB → suggest consolidation.
+- `python3` missing or below 3.8 → install/upgrade Python so plugin hooks (distill-trigger, lazy-guard.*, agent-model-router, pub.*) can run.
 - Hardcoded paths found → run `/lazy-core.doctor` for details.
 - Missing Execution-Discipline preamble → add per `lazy-core.skill-writing § 1` (or `lazy-core.agent-writing § 4`), or declare `execution-discipline-waiver: "<reason>"` in frontmatter with a concrete justification.
-- Rule missing scope or waiver → add `paths: ["<glob>"]` (preferred) or `always_loaded: "<reason>"` per `lazy-core.rule-writing § 1`.
+- Rule missing scope or waiver → add a `paths:` block-list (preferred) or `always_loaded: "<reason>"` per `lazy-core.rule-writing § 1`.
+- Rule using inline-array `paths:` form → migrate to canonical block-list shape per `lazy-core.rule-writing § 1`. `lazy-core.doctor` Phase 4 offers an in-place migration that preserves all globs.
+- Authoring rule without template reference → create `<plugin>/templates/<group>/<artifact>-template.md` (e.g. `templates/core/rule-template.md`) and add a `**Template:** <path>` pointer at the top of the rule body, per `lazy-core.scaffold`. `lazy-core.doctor` Phase 4 offers a templated fix.
 - Rule over size budget → move long guidance to `<plugin>/skills/<skill>/references/*.md` per `lazy-core.rule-writing § 2`.
 - "Optional" in phase/step heading → rename the heading; the user's accept/decline choice belongs inside an `AskUserQuestion`, not at the heading level.
 - Narrative-padding match → review and drop the passage if its removal leaves executable behavior unchanged.

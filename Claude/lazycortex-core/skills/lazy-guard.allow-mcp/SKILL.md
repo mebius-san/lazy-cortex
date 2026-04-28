@@ -88,7 +88,7 @@ The classifier has three buckets. The goal: stop per-call prompts on things the 
   - Force-pushes and anything that rewrites shared history: `push --force`, `force*`, history-rewrites on published refs.
   - Bulk destructive ops on remote stores.
 
-- **Skip (medium-risk — neither list).** The tool has real consequences but is neither trivially reversible nor catastrophic. Examples: `git_commit` (creates a new commit — reversible locally with `reset`, but worth an acknowledgement per run), `cancel_operation`, network-side creates without a straightforward undo. **Do not write these to either list.** Claude Code will prompt the first time and remember the user's per-call choice.
+- **Skip (medium-risk — neither list).** The tool has real consequences but is neither trivially reversible nor catastrophic. Examples: `git_commit` (creates a new commit — reversible locally with `reset`, but worth an acknowledgement per run), `cancel_operation`, network-side creates without a straightforward undo. **Do not write these to either list, and do not touch them if they are already pinned by the user.** A user who explicitly pinned a skip-bucket tool to `allow` or `ask` made a deliberate trust decision; this skill never re-asks or removes it. Claude Code will prompt the first time and remember the user's per-call choice for tools that aren't pinned.
 
 **When uncertain → skip, not allow.** Never silently allow an unknown-shape mutation. Skip is the safe default for ambiguity.
 
@@ -157,12 +157,13 @@ The Phase 3 classifier is the source of truth — every `mcp__<server>__*` tool 
 For each target settings file (always a `settings.local.json` unless user overrode):
 
 1. Read current JSON. If the file doesn't exist, target content is `{"permissions":{"allow":[],"ask":[]}}`.
-2. For the servers routed to this file, compute five disjoint sets:
+2. For the servers routed to this file, compute four disjoint sets:
    - `to_allow_new     = allow-tools  \ current permissions.allow` (excluding any already in `ask` — handled by `to_move`).
    - `to_ask_new       = ask-tools    \ current permissions.ask`   (excluding any already in `allow` — handled by `to_move`).
-   - `to_remove_skip   = skip-tools   ∩ (current permissions.allow ∪ current permissions.ask)` — medium-risk tools that were previously pinned. Remove from whichever list they're in; do not re-add.
    - `to_move_to_ask   = { t : classifier(t)=="ask"   AND t ∈ permissions.allow }` — truly-destructive tools that are currently (mis-)allowed. Remove from `allow`, add to `ask`.
    - `to_move_to_allow = { t : classifier(t)=="allow" AND t ∈ permissions.ask }` — safe tools pinned to always-prompt. A valid user choice (stricter than the heuristic), so **do NOT move these automatically**. Surface as an info note only: "<tool> is in ask but classified as allow — left as-is (stricter than default)".
+
+   **Skip-bucket tools are deliberately not reconciled.** A skip-classified tool that the user has pinned to `allow` or `ask` stays exactly where it is — no comparison, no removal, no prompt. This avoids re-asking the same "remove `git_commit`?" question on every run. Skip-bucket tools that are *not* pinned simply aren't written; Claude Code's per-call prompt handles them.
 3. Compute **cross-scope duplicates** to strip (Phase 6.5): for each server whose target is `settings.local.json`, inspect the paired tracked `settings.json` and list any `mcp__<server>__*` entry still there. Tracked settings shouldn't own per-tool permissions, so anything found is a leak to clean up.
 4. Print a diff-style preview per file:
    ```
@@ -170,16 +171,15 @@ For each target settings file (always a `settings.local.json` unless user overro
      allow:
        + mcp__<server>__<safe-tool>            # new
        - mcp__<server>__<destructive-tool>     # promoting to ask
-       - mcp__<server>__<medium-risk-tool>     # removing (now skip — Claude Code will prompt per call)
      ask:
        + mcp__<server>__<destructive-tool>     # new
        + mcp__<server>__<destructive-tool>     # promoted from allow
-       - mcp__<server>__<medium-risk-tool>     # removing (now skip)
-     skip (not written anywhere):
+     skip (not written anywhere — pinned skip-bucket entries left untouched):
        mcp__<server>__<medium-risk-tool-1>
        mcp__<server>__<medium-risk-tool-2>
      notes:
        mcp__<server>__<safe-tool> is in ask but classified as allow — left as-is
+       mcp__<server>__<medium-risk-tool-3> is in allow but classified as skip — left as-is (user-pinned)
 
    <paired tracked file, absolute path>  (settings.json — tracked — cleaning up leak)
      allow:
@@ -188,11 +188,11 @@ For each target settings file (always a `settings.local.json` unless user overro
        - mcp__<server>__<any>
    ```
    Omit any sub-block with no entries.
-5. **Per-tool confirmation for every reversal of a prior trust choice.** Any entry in `to_remove_skip` (user previously pinned → classifier now says skip) or `to_move_to_ask` (user previously allowed → classifier now says destructive) is a reversal of a choice the user made in a past run or by hand. These MUST NOT be bundled into the general write confirmation — each needs its own `AskUserQuestion`, one at a time:
+5. **Per-tool confirmation for every reversal of a prior trust choice.** Any entry in `to_move_to_ask` (user previously allowed → classifier now says destructive) is a reversal of a choice the user made in a past run or by hand. These MUST NOT be bundled into the general write confirmation — each needs its own `AskUserQuestion`, one at a time:
 
-   - For each `t ∈ to_remove_skip ∩ current permissions.allow`: `AskUserQuestion` **"Remove `<t>` from `allow`? Classifier marks it medium-risk; removing means Claude Code will prompt on every call."** options: `remove` (default, matches classifier) / `keep` (retain user's prior trust). On `keep`, drop `t` from `to_remove_skip` for this run.
-   - For each `t ∈ to_remove_skip ∩ current permissions.ask`: `AskUserQuestion` **"Remove `<t>` from `ask`? Classifier marks it medium-risk; removing means Claude Code will prompt per call instead of always-prompt."** options: `remove` / `keep`. On `keep`, drop `t` from `to_remove_skip`.
    - For each `t ∈ to_move_to_ask`: `AskUserQuestion` **"Promote `<t>` from `allow` to `ask`? Classifier marks it destructive; promotion means Claude Code prompts every call."** options: `promote` (default) / `keep-in-allow`. On `keep-in-allow`, drop `t` from `to_move_to_ask` for this run (and surface as a note: "left in allow per user override — classifier considered it destructive").
+
+   Skip-bucket tools that the user pinned in a prior run are **never** subject to this confirmation — Phase 5 step 2 deliberately omits a `to_remove_skip` set. The user's pin stands until they un-pin it by hand.
 
    One tool call per question — never combined. After all per-tool answers are collected, re-render the preview reflecting the user's overrides, then ask a single bundled confirmation covering: additions to both lists, any promotions/removals the user approved, and tracked-scope cleanup. If `--dry-run`, stop here after the per-tool questions (preview reflects the dry-run outcome).
 
@@ -201,10 +201,9 @@ For each target settings file (always a `settings.local.json` unless user overro
 For each approved file:
 
 - If the file exists: use the `Edit` tool to apply the changes from Phase 5, in order:
-  1. Remove `to_remove_skip ∪ to_move_to_ask` entries from the `allow` array.
-  2. Remove `to_remove_skip` entries from the `ask` array.
-  3. Append `to_allow_new` entries to the `allow` array.
-  4. Append `to_ask_new ∪ to_move_to_ask` entries to the `ask` array (creating the array if absent).
+  1. Remove `to_move_to_ask` entries from the `allow` array.
+  2. Append `to_allow_new` entries to the `allow` array.
+  3. Append `to_ask_new ∪ to_move_to_ask` entries to the `ask` array (creating the array if absent).
   Preserve original formatting, comments, and unrelated keys. Separate `Edit` calls per array are acceptable when ranges don't overlap.
 - If the file doesn't exist: use the `Write` tool to create it with `{"permissions":{"allow":[<to_allow_new>],"ask":[<to_ask_new>]}}` plus a trailing newline. Omit either key if its list is empty.
 
@@ -215,8 +214,8 @@ After writing, re-read each file and assert:
 - Every `to_allow_new` entry is now in `allow`.
 - Every `to_ask_new` and `to_move_to_ask` entry is now in `ask`.
 - No `to_move_to_ask` entry remains in `allow`.
-- No `to_remove_skip` entry remains in either list.
 - No tool appears in both lists simultaneously.
+- Skip-bucket entries that were pre-existing in `allow` or `ask` remain exactly where they were (the skill never touches them).
 
 ## Phase 6.5: Strip cross-scope leaks
 
@@ -391,7 +390,7 @@ Print a short summary:
 - `Preload hook`: scope of the SessionStart preload hook (`global` / `project` / `—` for declined / `—` for no-op), plus the number of tool names added to its `select:` list.
 
 Include notes for:
-- **user-kept skip-removals** — per-tool `keep` answers in Phase 5 (user overrode the classifier's "remove" suggestion)
+- **user-pinned skip-bucket entries** — skip-classified tools that were already present in the target file's `allow` or `ask` and were left untouched (informational; not a finding)
 - **user-kept allow→ask overrides** — per-tool `keep-in-allow` answers in Phase 5 (user overrode the classifier's promote-to-ask)
 - **user-kept leaks** — per-entry `keep` answers in Phase 6.5a / 6.5b (user chose to leave a leak in place)
 
@@ -421,9 +420,9 @@ Body sections: `## Actions` (bullet list: files read, servers resolved, scope ch
 - **No wildcards.** Enumerate every tool by its exact name. Claude Code matches exact strings in both `allow` and `ask`.
 - **Global scope requires explicit user confirmation** via Phase 4b `AskUserQuestion` — but only when the scope is genuinely undetermined. If existing `mcp__<server>__*` entries already pin the server to global or project scope, infer from state and skip the prompt.
 - **No-op runs are silent.** If the classifier produces no new writes at the inferred scope, do not ask the scope question and do not request a write confirmation — just report the idempotent no-op.
-- **Never silently reverses a user's prior trust choice.** Every `allow`→removal (skip-category) and every `allow`→`ask` promotion requires an explicit per-tool `AskUserQuestion` in Phase 5. Bundling these into a single "approve the whole diff" confirmation is forbidden — a user's prior `allow` entry is a durable choice and must be unmade deliberately, one tool at a time.
+- **Never silently reverses a user's prior trust choice.** Every `allow`→`ask` promotion requires an explicit per-tool `AskUserQuestion` in Phase 5. Bundling these into a single "approve the whole diff" confirmation is forbidden — a user's prior `allow` entry is a durable choice and must be unmade deliberately, one tool at a time. Skip-bucket pins are stronger still: the skill never even asks about them — a user who pinned a skip-classified tool gets to keep it pinned silently.
 - **Phase 6.5 may only remove** `mcp__*` entries, and only after a per-entry `AskUserQuestion`. It cleans two kinds of leak: (6.5a) the paired tracked `settings.json`, and (6.5b) the opposite-scope `settings.local.json`. Never silently flag-and-continue on a leak — ask, then remove or record as user-kept.
 - **Never adds non-`mcp__` entries.** **Never removes non-`mcp__` entries.**
-- **Confirmation required before every write.** Per-tool confirmations in Phase 5 (skip-removals, allow→ask promotions) + per-entry confirmations in Phase 6.5 (paired tracked leaks, opposite-scope leaks) + one bundled confirmation for the remaining additions. Phase 7 (SessionStart preload hook) requires its own separate confirmation.
+- **Confirmation required before every write.** Per-tool confirmations in Phase 5 (allow→ask promotions only) + per-entry confirmations in Phase 6.5 (paired tracked leaks, opposite-scope leaks) + one bundled confirmation for the remaining additions. Phase 7 (SessionStart preload hook) requires its own separate confirmation.
 - **Phase 7 writes gitignored `settings.local.json`, never tracked `settings.json`.** The preload hook is a personal optimization — ≈1.1k tokens/session cost that each user weighs differently — not universal enablement. Personal-optimization hooks follow the same personal/local rule as permissions.
 - **Idempotent.** Re-running adds nothing new when everything is already registered, and removes nothing when no cross-scope leaks remain.

@@ -4,6 +4,32 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.2.49 — 2026-04-28
+
+- `default-tiers.json` is now the single source of truth for per-agent model tiers. The previous `lazy.settings.recommended.md` rule duplicated each plugin's tier block; it has been rewritten as a schema-only document (group definitions, floor cap, tier-choice heuristic, pointers to the canonical JSON). `/lazy-core.install`, `/lazy-log.install`, and `/lazy-obsidian.install` now read tier seeds from `default-tiers.json` at runtime via the cross-plugin cache (`~/.claude/plugins/cache/lazycortex/lazycortex-core/...`) and fail fast if the SOT is missing — no more hardcoded tables to drift.
+- Tier flips in `default-tiers.json`: `statusline-setup` haiku → inherit (cheap built-in should not be pinned), `lazy-log.distill` haiku → sonnet, `lazy-log.summary` opus → sonnet. New canonical entries: `lazy-log.bullets` = sonnet (release-block drafting), plus explicit tiers for `superpowers:code-reviewer`, `claude-code-guide`, `memory.optimise`, and `plugin.extractor`.
+- `claude/lazycortex-core/references/scaffold-registry.md` renamed to `lazy-core.scaffold-registry.md` so the filename matches the dot-namespace convention already used by its siblings (`lazy-core.parallel-scan.md`, `lazy-core.setup-phases.md`) and the existing log directory. The pointer in `lazy-core.scaffold.md` was updated.
+
+### 0.2.47 — 2026-04-28
+
+- `lazy-core.scaffold` reshaped into a cross-plugin **registry**: a single always-loaded fenced YAML block keyed by plugin directory name (`<plugin-dir>: → template-path → [globs]`). Each plugin owns exactly one top-level key and mutates only that key during install; the reserved `_local:` key carries customer-authored entries and is never touched by install skills. Replaces the previous "every plugin needs its own scaffold" pattern. Structural-keys shape was chosen so ownership is data-level (no comment markers, no out-of-band annotations) and so other plugins' keys survive any install/uninstall cycle byte-for-byte.
+- `lazy-core.rule-writing § 3` ("No large code blocks") gains an explicit exemption for fenced data blocks (`yaml`, `json`, `toml`) that are the rule's primary payload — the 10-line cap was written for embedded runnable templates and should not block a registry/schema rule from publishing its content. `lazy-core.audit` rule-writing-compliance check 5 now honors the exemption.
+- Template paths in the registry are consumer-relative (`.claude/templates/core/...`) — once the rule is copied into the consumer's `.claude/rules/`, plugin-root expansion no longer applies. Plugins copy their templates into `.claude/templates/<group>/` during install and point their registry entries at the local copies; customers can edit those copies freely.
+- Each `lazy-core.*-writing` rule's `paths:` now also covers its own template path under `.claude/templates/core/`, so reading a template at create-time auto-loads the matching authoring contract — the chain (always-loaded scaffold → Read template → path-scoped contract loads) closes without taxing every turn.
+- `lazy-core.rule-writing § 1.2` rewrites the `paths:` shape clause: the inline-array form `paths: ["a", "b"]` is **silently ignored by the Claude Code loader** (rules don't fire, no error). Block-list (`- "<glob>"` per line) is the only form that loads. Audit detection unchanged; doc text now matches runtime behaviour.
+- Plugin rules `lazy-core.skill-writing`, `lazy-core.agent-writing`, `lazy-core.setup-phases`, and `lazy-diagram.authoring` migrated from inline-array `paths:` to canonical block-list — they were silently not loading at runtime before this fix.
+- `/lazy-core.install` gains Step 4 ("Sync authoring templates"): copies `<installPath>/templates/core/*` into `<consumerScope>/templates/core/`, per-template New / Unchanged / Drift handling with diff-shown overwrite prompts. Step list grew from 7 to 8; existing steps renumbered.
+- New `claude/lazycortex-core/references/scaffold-registry.md` documents the registry contract end-to-end: schema, plain-scalar policy, install-skill responsibilities (upsert own key, never touch `_local` or other plugins' keys), and `lazy-core.audit` validation hooks (single fenced YAML block, parses valid, no orphan plugin keys). Other plugins' install skills read this when they need to register Class A authoring-contract templates.
+- Authoring-notes block in core templates (`{rule,skill,agent,command}-template.md`) renamed from "delete before shipping" to "delete before saving" — there is no shipping step; the file is just `Write`-saved.
+- Frontmatter on `lazy-core.scaffold` slimmed to one-line `description:` + terse `always_loaded:` (matching `lazy-core.hygiene` / `lazy-guard.security` shape) — every byte counts in always-loaded context.
+
+### 0.2.46 — 2026-04-28
+
+- New `lazy-core.scaffold` always-loaded index points new artifact creations at copy-pasteable templates under `${CLAUDE_PLUGIN_ROOT}/templates/core/{rule,skill,agent}-template.md`. Closes the create-time gap where path-scoped authoring rules (`lazy-core.{rule,skill,agent}-writing`) only fire on `Read` of an existing matching file — now Claude composing a brand-new rule/skill/agent has a structural pointer to the contract before writing the first line.
+- Four new templates under `claude/lazycortex-core/templates/core/`: `rule-template.md` carries canonical block-list `paths:` and the rule-writing clause skeleton; `skill-template.md` carries the Execution-Discipline preamble and phase scaffolding; `agent-template.md` carries the single-response model contract and structured-report block; `command-template.md` carries the multi-phase coordinator shape with an alternative verbatim-output (help-style) shape documented in authoring notes. Each authoring rule (`lazy-core.{rule,skill,agent}-writing`) now opens with a `**Template:**` pointer at the canonical path so the Read-time path also surfaces the link.
+- `/lazy-core.audit` rule-writing compliance gains check 9: authoring contracts (`*.writing.md` filenames, or bodies with an "authoring" `## ` heading) WARN when they don't reference a template path under `<plugin>/templates/`. Files matching `**/templates/**/*-template.md` are excluded from all rule-writing checks (skeletons, not rules).
+- `/lazy-core.doctor` Phase 4 offers a two-step templated fix for the new WARN: copy the base template to `<plugin>/templates/<group>/<derived-name>-template.md` and prepend a `**Template:**` pointer to the rule body, both shown as a diff before any write.
+
 ### 0.2.39 — 2026-04-26
 
 - New `/lazy-core.setup` meta-installer brings the current project up-to-date with every enabled plugin's install + post-install configurator chain in a single run. Discovery is convention-based: any `<namespace>.install` skill in an enabled plugin participates automatically, and any skill that opts in via `lazy_setup_phase:` frontmatter (e.g. `lazy-guard.allow-mcp`, `lazy-core.agent-models`) joins the plan in the right phase (pre-install → per-plugin → post-install) without an edit to the meta-installer. Use after `/plugin update`, on a fresh clone, or after enabling a new plugin. Idempotent. Optional `--dry-run` previews the plan without executing.
@@ -278,3 +304,9 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - **`/lazy-obsidian.install`** — per-rule-ask + orphan-delete install flow consistent with `lazy-core.install` / `lazy-log.install`. Currently ships no rules; primary job is cleaning up orphans from earlier plugin versions.
 - **`/lazy-obsidian.help`** — one-line summary of every skill the plugin ships.
 - Depends on `lazycortex-core`.
+
+## lazycortex-diagram
+
+### 0.1.0 — 2026-04-27
+
+- Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.

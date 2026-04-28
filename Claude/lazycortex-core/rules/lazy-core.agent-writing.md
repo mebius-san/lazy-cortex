@@ -1,10 +1,14 @@
 ---
 description: Authoring contract for agents (subagents dispatched via the Agent tool). Covers frontmatter requirements, single-response execution model, reporting contract, tool-allowlist hygiene, and cross-references to the shared Execution-Discipline preamble in lazy-core.skill-writing.
-paths: [".claude/agents/**"]
+paths:
+  - ".claude/agents/**"
+  - ".claude/templates/core/agent-template.md"
 ---
 # Agent Authoring
 
 Agents are dispatched as one-shot subagents via the `Agent` tool. Their output is their return value. This rule covers what differs from skills/commands; shared rules (Execution-Discipline preamble, no-Optional, narrative padding) cross-reference `lazy-core.skill-writing`.
+
+**Template:** `${CLAUDE_PLUGIN_ROOT}/templates/core/agent-template.md` — start from this when creating a new agent. The template carries the single-response model contract, structured-report block, and tool-allowlist hygiene reminders; copy its body, fill placeholders, delete the trailing authoring-notes block.
 
 ## 1. Frontmatter requirements (FAIL if missing)
 

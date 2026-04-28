@@ -51,7 +51,7 @@ Claude Code configs drift fast. Rule files bloat. `settings.json` fills with one
 | `lazy-core.agent-models` | Interactively assign model tiers (haiku/sonnet/opus/inherit) to every dispatchable subagent missing from `lazy.settings.json`. Auto-routes each entry to its structurally-correct scope: `_user.*` → global file, `_project.*` → project file, `_builtin.*` → global (override with `--scope=project\|global`). Cheap, standalone, idempotent — safe to re-run. Invoked directly or by `lazy-core.optimize` Phase 7. |
 | `lazy-core.audit` | Quick read-only audit of what gets loaded into conversation context at startup plus skill-writing, agent-writing, and rule-writing compliance. Shows sizes, loading behavior, optimization opportunities, Execution-Discipline preamble presence, no-Optional headings, narrative-padding heuristics, and rule-file frontmatter/size/code-block/scope enforcement. No changes made. |
 | `lazy-core.doctor` | Health check for Claude Code project configuration. Verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, checks that installed plugins are at the latest marketplace version, and delegates to sibling audit skills (lazy-guard.check-public, lazy-log.audit) when they apply. Reports issues and offers targeted fixes. Run periodically or when something feels off. |
-| `lazy-core.install` | Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory. Idempotent — safe to re-run. Detects install scope automatically. |
+| `lazy-core.install` | Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, syncs authoring templates into `.claude/templates/core/`, and bootstraps the scaffold registry. Idempotent — safe to re-run. Detects install scope automatically. |
 | `lazy-core.optimize` | Optimize Claude Code context loading for the current project. Slims oversized rules files by moving reference material to agent definitions, audits global settings for project-specific leakage and moves entries to local settings. Run when startup feels slow or after adding new rules/agents. |
 | `lazy-core.setup` | Meta-installer that runs every applicable plugin install + post-install configurator for the current project. Discovers `<namespace>.install` skills in enabled plugins and any skill carrying `lazy_setup_phase:` frontmatter, builds an ordered plan, runs each child, and reports results. Idempotent — safe to re-run after every plugin update or on a fresh project. Use after `/plugin update`, on a fresh clone, or after enabling a new plugin. Optional `--dry-run` previews the plan without executing. |
 | `lazy-guard.allow-mcp` | Register tools of one or more MCP servers in Claude Code settings using a 3-bucket classifier — safe/reversible tools into permissions.allow (no prompt), truly destructive tools into permissions.ask (always prompt), and medium-risk tools skipped entirely so Claude Code prompts once per call and the user decides. Writes to settings.local.json (gitignored) by default to keep personal permissions out of tracked settings shared with teammates. For globally defined servers, asks whether to register at the global scope (~/.claude/settings.local.json) or per-project (./.claude/settings.local.json). Also strips redundant mcp__ entries from paired tracked settings.json after promotion. Optionally installs a SessionStart preload hook (in gitignored settings.local.json — a personal optimization, not universal enablement) that tells the agent to resolve the server's tool schemas via ToolSearch at session start — eliminates the deferred-loading round-trip that otherwise causes drift to Bash equivalents. Use when the user says 'allow context7 mcp', 'allow all mcp tools', 'trust the brave-search MCP server', or similar. |
@@ -62,7 +62,7 @@ Claude Code configs drift fast. Rule files bloat. `settings.json` fills with one
 
 | Command | Description |
 |---|---|
-| `lazy-core.checkup` | Single entry point that runs every read-only audit/doctor in this repo (consumer + author trios), merges findings into one per-plugin table, then prompts for the mutating fix-flow to run. |
+| `lazy-core.checkup` | One entry point that runs every read-only audit/doctor in this repo (consumer + author trios), merges findings into a per-plugin table, then prompts once for which mutating fix-flow to run. Read-only by default. |
 | `lazy-core.help` | Show lazycortex-core purpose and a one-line summary of each skill it ships |
 
 ## Rules
@@ -72,8 +72,8 @@ Claude Code configs drift fast. Rule files bloat. `settings.json` fills with one
 | `lazy-core.agent-writing` | Authoring contract for agents (subagents dispatched via the Agent tool). Covers frontmatter requirements, single-response execution model, reporting contract, tool-allowlist hygiene, and cross-references to the shared Execution-Discipline preamble in lazy-core.skill-writing. |
 | `lazy-core.hygiene` | Project hygiene constraints checked by lazy-core.audit, lazy-core.doctor, and lazy-core.optimize — scope, naming, settings split, MCP scope, and path hygiene. |
 | `lazy-core.rule-writing` | Authoring contract for rule files. Mandatory frontmatter (description + paths scope OR always_loaded waiver), size budget, dot-namespace filename, no large code blocks, artifact-reference integrity, no narrative padding, plugin-vs-local scoping. |
-| `lazy-core.setup-phases` | Frontmatter contract for `lazy_setup_phase`. Documents the allowed values, execution ordering inside `lazy-core.setup`, and the anti-pattern for skills already chained from inside another install flow. |
-| `lazy-core.skill-writing` | Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, and the plugin audit-skill contract. |
+| `lazy-core.scaffold` | Registry of authoring templates for any new artifact a plugin registers. |
+| `lazy-core.skill-writing` | Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, the plugin audit-skill contract, and the plugin help-command contract. |
 | `lazy-guard.security` | Security constraints that the lazy-guard.* scanners and pre-commit hook enforce — credential safety and public-repo readiness. |
 
 ## Hooks
@@ -81,7 +81,7 @@ Claude Code configs drift fast. Rule files bloat. `settings.json` fills with one
 | Hook | Trigger | Description |
 |---|---|---|
 | `lazy-core.agent-model-router` | `Agent` | PreToolUse hook — route Agent dispatches to a configured model. |
-| `lazy-guard.check-public` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: scan staged git changes for secrets, PII, and infrastructure leaks before committing to a public repo (or the public subtree of a repo). |
+| `lazy-guard.check-public` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: scan staged git changes for secrets, PII, and infrastructure leaks before committing to a public repo. |
 | `lazy-guard.settings` | `Edit\|Write` | PreToolUse hook: guard Claude Code settings files against dangerous changes. |
 
 ## Installation
