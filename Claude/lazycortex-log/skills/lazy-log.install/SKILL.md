@@ -1,11 +1,11 @@
 ---
 name: lazy-log.install
-description: "Bootstrap the lazycortex-log plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, creates docs/changelog.md if missing, and ensures .gitignore covers .logs/ and docs/changelog.md. Idempotent — safe to re-run. Detects install scope automatically."
+description: "Bootstrap the lazycortex-log plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, creates .logs/changelog.md if missing, and ensures .gitignore covers .logs/. Idempotent — safe to re-run. Detects install scope automatically."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *)
 ---
 # Install lazycortex-log
 
-Bootstrap the plugin in the right scope: copy every rule template shipped by the plugin, create `docs/changelog.md`, and make sure `.gitignore` covers `.logs/`.
+Bootstrap the plugin in the right scope: copy every rule template shipped by the plugin, create `.logs/changelog.md`, and make sure `.gitignore` covers `.logs/`.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -15,7 +15,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 1 — Detect install scope`
    - `Step 2 — Determine paths`
    - `Step 3 — Sync rule templates`
-   - `Step 4 — Create docs/changelog.md`
+   - `Step 4 — Create .logs/changelog.md`
    - `Step 5 — Update .gitignore`
    - `Step 6 — Seed lazy.settings.json`
    - `Step 7 — Verify`
@@ -46,7 +46,7 @@ For each source file `<installPath>/rules/<name>.md`, the rule destination by sc
 | Scope | Rule destination | Changelog | .gitignore update |
 |---|---|---|---|
 | `user` | `~/.claude/rules/<name>.md` | (not created — changelog is per-repo) | (not updated) |
-| `project` | `<repo-root>/.claude/rules/<name>.md` | `<repo-root>/docs/changelog.md` | `<repo-root>/.gitignore` |
+| `project` | `<repo-root>/.claude/rules/<name>.md` | `<repo-root>/.logs/changelog.md` | `<repo-root>/.gitignore` |
 
 Project root is `git rev-parse --show-toplevel` (or current working directory if not in a git repo — but warn the user).
 
@@ -92,11 +92,11 @@ One `AskUserQuestion` at a time — wait for the answer before the next prompt.
 
 Orphan detection only considers target files whose filename starts with one of this plugin's owned namespaces. Rules from other plugins and user-authored rules in unrelated namespaces are never offered for deletion.
 
-## Step 4: Create docs/changelog.md (project scope only)
+## Step 4: Create .logs/changelog.md (project scope only)
 
-If `<repo-root>/docs/changelog.md` does not exist:
+If `<repo-root>/.logs/changelog.md` does not exist:
 
-1. `mkdir -p <repo-root>/docs`
+1. `mkdir -p <repo-root>/.logs`
 2. `Write` a seed file:
    ```markdown
    # Changelog
@@ -112,23 +112,24 @@ If it already exists, leave it alone.
 
 ## Step 5: Update .gitignore (project scope only)
 
-Read `<repo-root>/.gitignore`. Ensure it covers both `.logs/` and `docs/changelog.md` — both are per-contributor local artifacts (structured commit log + distilled prose memory for the local Claude session). Add whichever is missing.
+Read `<repo-root>/.gitignore`. Ensure it covers `.logs/` — the structured commit log + distilled changelog + run logs all live there as per-contributor local artifacts.
 
-If neither is covered, append a Claude Code block:
+If `.logs/` (or an equivalent prefix that covers it) is already present, skip.
+
+Otherwise append a Claude Code block:
 
 ```
 # ---------------------------------------------------------------------------------------
 # Claude Code logs (lazycortex-log)
 
 .logs/
-docs/changelog.md
 ```
 
-If the block already exists but is missing one of the two entries, add the missing entry to it. If both are already covered (either by this block or equivalent patterns), skip.
+Do **not** add `docs/changelog.md` — the changelog now lives under `.logs/` and is covered by the parent rule.
 
 ## Step 6: Seed lazy.settings.json
 
-Non-destructively seed the `lazycortex` domain group in `agent_models` with the four subagents this plugin ships.
+Non-destructively seed the `lazycortex` domain group in `agent_models` with the subagents this plugin ships. **Tier values are read from `lazycortex-core`'s `default-tiers.json` at runtime** — there is no hardcoded table here. Adding/removing a `lazy-log.*` agent and updating `default-tiers.json` is enough; this step picks the change up automatically.
 
 ### Target file
 
@@ -145,20 +146,25 @@ Read the target file. If missing or unparseable, treat its contents as `{"versio
 
 Ensure `agent_models.lazycortex` exists as an object (create empty `{}` if absent — never overwrite existing content, and never touch other groups).
 
-### Seed defaults
+### Build the seed set from `default-tiers.json`
 
-| Dispatch string | Default model |
-|---|---|
-| `lazycortex-log:lazy-log.distill` | `haiku` |
-| `lazycortex-log:lazy-log.timeline` | `haiku` |
-| `lazycortex-log:lazy-log.recall` | `sonnet` |
-| `lazycortex-log:lazy-log.summary` | `sonnet` |
+`lazycortex-core` is a declared dependency (`plugin.json`), so its plugin cache must be present. Locate the canonical defaults file:
 
-Per-key semantics (write back only if anything changed):
+```bash
+ls ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/skills/lazy-core.agent-models/default-tiers.json | sort -V | tail -1
+```
 
-- **absent** → add the entry with its default value. State **added**.
+The newest version wins. Read the file, parse the JSON, and select every key under `defaults` that starts with `lazycortex-log:`. Those are the entries to seed (key + tier verbatim).
+
+If the file is absent → FAIL with `lazycortex-core not installed; install it before /lazy-log.install`. Don't fall through to a hardcoded fallback — silent drift is exactly what the SOT is meant to prevent.
+
+### Apply per-key semantics
+
+For each `(dispatch, tier)` pulled from the JSON (write back only if anything changed):
+
+- **absent** in `agent_models.lazycortex` → add the entry with the JSON's tier. State **added**.
 - **equal** → leave untouched. State **unchanged**.
-- **different** → leave the user's value untouched. State **kept-local** (report value).
+- **different** → leave the user's value untouched. State **kept-local** (report user's value alongside the JSON's).
 
 Never touch other `lazycortex` entries (e.g. `lazycortex-obsidian:*` seeded by `lazy-obsidian.install`).
 
@@ -168,12 +174,12 @@ If any mutation happened, write the file with `version: 1` at the top.
 
 ### Report outcome
 
-One line per seeded default: `lazycortex.<key> = <value> (<state>)`.
+One line per seeded entry: `lazycortex.<key> = <value> (<state>)`. Include the resolved `default-tiers.json` path so the user can see where the defaults came from.
 
 ## Step 7: Verify
 
 - Read back each installed rule file and confirm its `---` frontmatter parses
-- If `docs/changelog.md` was created, read back its first line
+- If `.logs/changelog.md` was created, read back its first line
 - Report to the user what was done:
   - Scope detected
   - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)

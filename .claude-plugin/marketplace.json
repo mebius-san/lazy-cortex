@@ -11,6 +11,11 @@
       "source": "./claude/lazycortex-core"
     },
     {
+      "name": "lazycortex-diagram",
+      "description": "Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.",
+      "source": "./claude/lazycortex-diagram"
+    },
+    {
       "name": "lazycortex-log",
       "description": "Logging, changelog, and change-history recall for Claude Code",
       "source": "./claude/lazycortex-log"

@@ -35,7 +35,7 @@ If no input is given, default to "everything in the last 7 days".
 
 ## Sources
 
-1. `./docs/changelog.md`
+1. `./.logs/changelog.md`
 2. `.logs/claude/**/*.md` (frontmatter `date` and `git_sha`)
 3. `.logs/commits.jsonl` (raw commits)
 4. `git log --all --since "<start>" --until "<end>" --format="%H%x00%cI%x00%s"` for dates outside the log files

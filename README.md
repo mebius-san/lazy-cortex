@@ -29,11 +29,21 @@ Ships 9 skills, 2 commands, 6 rules, and 3 hooks.
 
 See [`claude/lazycortex-core/`](claude/lazycortex-core/) for details.
 
+### lazycortex-diagram
+
+Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
+
+Ships 3 skills, 3 agents, 1 command, and 1 rule.
+
+Requires: lazycortex-core
+
+See [`claude/lazycortex-diagram/`](claude/lazycortex-diagram/) for details.
+
 ### lazycortex-log
 
 Logging, changelog, and change-history recall for Claude Code
 
-Ships 3 skills, 4 agents, 1 command, 1 rule, and 2 hooks.
+Ships 3 skills, 5 agents, 1 command, 1 rule, and 2 hooks.
 
 Requires: lazycortex-core
 
@@ -43,7 +53,7 @@ See [`claude/lazycortex-log/`](claude/lazycortex-log/) for details.
 
 Obsidian vault bootstrap and configuration management for Claude Code
 
-Ships 6 skills, 1 agent, 1 command, and 2 hooks.
+Ships 7 skills, 1 agent, 1 command, and 2 hooks.
 
 Requires: lazycortex-core
 
@@ -87,6 +97,7 @@ All plugins live in a single Claude Code marketplace. Add the marketplace and en
   },
   "enabledPlugins": {
     "lazycortex-core@lazycortex": true,
+    "lazycortex-diagram@lazycortex": true,
     "lazycortex-log@lazycortex": true,
     "lazycortex-obsidian@lazycortex": true,
     "lazycortex-specs@lazycortex": true

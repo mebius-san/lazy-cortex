@@ -27,19 +27,23 @@ Body: `# <name>` heading, then `## Actions` (bullet list of actions, files modif
 
 Always include `git_sha` — it bridges "the AI did Y" back to the actual commit.
 
-## Distill after commits (automatic via Stop hook)
+## Distill cadence (qualitative + 4h throttle)
 
-The `lazycortex-log` Stop hook fires **only on turns where a commit was recorded this turn** — single gate: `.logs/commits.jsonl` mtime advanced since the last Stop. When it passes, it asks Claude to run `Agent(subagent_type: "lazycortex-log:lazy-log.distill", ...)`. No-commit turns are silent. The `last-distilled-sha` marker in `docs/changelog.md` is consulted by the distill *agent* itself to decide what to process — not by the hook.
+After a commit lands in this session, judge whether to invoke
+`Agent(subagent_type: "lazycortex-log:lazy-log.distill", prompt: "distill pending commits")` this turn:
 
-**Hard skip**: only if the user says "don't distill" this turn. **Catch-up** (e.g. terminal commits): invoke the distill agent manually.
+- **Run when** the change is meaningful enough to narrate (notable feature, fix, or refactor — Claude judges qualitatively) **AND** `mtime(./.logs/changelog.md)` is older than 4 hours.
+- **Skip otherwise.** Pending commits accumulate in `.logs/commits.jsonl`; the next eligible turn catches up.
+- **Hard skip**: user said "don't distill" this turn.
+- **Manual catch-up**: invoke when the user asks (no throttle).
 
-`stop_hook_active` prevents re-entry. Model from `.claude/lazy.settings.json` `agent_models["lazycortex-log:lazy-log.distill"]` (default `haiku`), capped by `LAZY_AGENT_MODEL_FLOOR`.
+The 4h floor on `mtime(.logs/changelog.md)` is a ceiling, not a target — even on big changes, don't run more often.
 
 ## Recall, timeline, summary
 
 For historical questions ("why was X changed?", "when did we change Y?"), use one of:
 
-- `Agent(subagent_type: "lazycortex-log:lazy-log.recall", prompt: "<query>")` — searches across `docs/changelog.md`, `.logs/claude/**/*.md`, `.logs/commits.jsonl`, git log, and memory.
+- `Agent(subagent_type: "lazycortex-log:lazy-log.recall", prompt: "<query>")` — searches across `.logs/changelog.md`, `.logs/claude/**/*.md`, `.logs/commits.jsonl`, git log, and memory.
 - `Agent(subagent_type: "lazycortex-log:lazy-log.timeline", prompt: "<date range or topic>")` — chronological view of a date range or topic.
 - `Agent(subagent_type: "lazycortex-log:lazy-log.summary", prompt: "<topic>")` — synthesized multi-source summary.
 

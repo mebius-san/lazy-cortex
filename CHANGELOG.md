@@ -134,6 +134,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-log
 
+### 0.3.5 — 2026-04-28
+
+- New `lazy-log.bullets` agent — converts one plugin's commit range into a user-facing release block (filters internal/refactor/chore commits, rewrites the rest as outcome-led bullets grouped by scope). Dispatched at sonnet tier from `pub.publish` Step 1 so the heavy rewriting doesn't consume opus tokens in the parent session.
+- **Fix:** `lazy-log.distill` Stop-hook gate is now per-session — it scans the current session's own transcript for a `git commit` tool call before invoking the distill agent, instead of comparing `.logs/commits.jsonl` mtime (which was shared across all concurrent sessions in the repo and could fire false-positive nudges, including from a Dropbox-sync mtime bump). The standalone `lazy-log.distill-trigger` hook is gone; the replacement lives inside the plugin's `Stop` hook config. The `.logs/.distill-trigger-last-mtime` marker is also gone — no shared state remains.
+- **Fix:** `lazy-log.distill` agent's `tools:` allowlist now includes `TaskCreate`. Previously the agent fell back to writing its 7-step checklist into `/tmp/tasks.txt` via Bash heredoc, popping a permission prompt on every distill run.
+- The distilled prose changelog moved from `docs/changelog.md` → `.logs/changelog.md`, joining the raw commit log and run logs as a per-contributor local artifact under `.logs/`. `lazy-log.install` migrates the existing `docs/changelog.md` to the new path automatically on next run.
+- Per-agent model-tier defaults moved out of `lazy-log.install` into the central `default-tiers.json` shipped by `lazycortex-core` (read at install time from the cross-plugin cache, fail-fast if missing). Tier flips: `lazy-log.distill` haiku → sonnet, `lazy-log.summary` opus → sonnet; new `lazy-log.bullets` entry added at sonnet.
+
 ### 0.3.1 — 2026-04-26
 
 - New `/lazy-log.clean` skill — interactive housekeeping for `./.logs/claude/`. It classifies every subdirectory against the live set of canonical skills, agents, and commands; surfaces orphans (renamed skills, anonymous subagent runs); and offers per-orphan choices (merge, distill-to-memory, delete, leave) with anonymous subagent clusters batched by pattern so a folder of 25 `task-N` runs becomes one prompt instead of 25. Read-first — every action waits for explicit approval; nothing is mutated until you confirm. Re-run `/lazy-log.install` after upgrade to register the new skill.

@@ -6,7 +6,7 @@ commit with: sha, date, author, branch, message, files_changed, insertions,
 deletions.
 
 This is the raw commit feed that `lazy-log.distill` later converts into
-functional prose in docs/changelog.md, and that `lazy-log.recall` searches.
+functional prose in .logs/changelog.md, and that `lazy-log.recall` searches.
 
 Design:
 - No LLM call, no network, fast (~50ms)

@@ -34,7 +34,7 @@ A topic. Examples:
 ## Sources
 
 Same as `lazy-log.recall` and `lazy-log.timeline`:
-1. `./docs/changelog.md`
+1. `./.logs/changelog.md`
 2. `.logs/claude/**/*.md`
 3. `.logs/commits.jsonl`
 4. `git log --all --grep "<keyword>"` and `git log --all -S "<keyword>"`

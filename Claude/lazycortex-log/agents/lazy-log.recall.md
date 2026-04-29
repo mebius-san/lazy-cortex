@@ -33,7 +33,7 @@ A natural-language query, e.g.:
 
 ## Sources (in priority order)
 
-1. **`./docs/changelog.md`** — functional summaries. Fastest match, already written in user-facing language.
+1. **`./.logs/changelog.md`** — functional summaries. Fastest match, already written in user-facing language.
 2. **`.logs/claude/**/*.md`** — skill/agent/command run logs. Each has `git_sha` in frontmatter.
 3. **`.logs/commits.jsonl`** — raw commit metadata (sha, date, author, message, files).
 4. **Git log** — `git log --all --grep "<keywords>" --format="%H %cI %s"` for message search, and `git log --all -S "<keywords>"` for diff content search.
@@ -46,7 +46,7 @@ A natural-language query, e.g.:
 2. **Search each source** using Grep with the keywords. Collect matches as `(source, path, line_or_sha, snippet, timestamp_or_sha)`.
 
 3. **Rank matches**:
-   - Tier 1 (strongest): multiple keywords match on the same line/entry in `docs/changelog.md` or a run log's `## Actions` or `## Result`
+   - Tier 1 (strongest): multiple keywords match on the same line/entry in `.logs/changelog.md` or a run log's `## Actions` or `## Result`
    - Tier 2: single keyword match in functional prose (changelog, run log result)
    - Tier 3: match in commit messages or raw commit metadata
    - Tier 4: match in git diff content only (no message match)
