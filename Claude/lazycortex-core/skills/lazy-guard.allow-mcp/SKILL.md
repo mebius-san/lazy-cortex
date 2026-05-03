@@ -399,6 +399,11 @@ Include warnings for:
 - servers the user asked for but weren't discovered
 - target files skipped because everything was already allowed (idempotent no-op)
 
+## Failure modes
+
+- **`/lazy-guard.allow-mcp` stops: "server not found — discovered servers are: …"** — the server name passed as input is not defined in `~/.mcp.json` or `./.mcp.json` → check the server name against the list shown, correct the typo or add the server to `.mcp.json`, then re-run.
+- **Server skipped with warning: "server isn't loaded — restart Claude Code and re-run"** — the server is defined in `.mcp.json` but has zero matching tools in the current session → restart Claude Code so the server loads, then re-run `/lazy-guard.allow-mcp`.
+
 ## Logging
 
 Log to `./.logs/claude/lazy-guard.allow-mcp/YYYY-MM-DD_HH-MM-SS.md` (UTC timestamp).

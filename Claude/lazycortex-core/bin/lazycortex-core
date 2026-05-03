@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""lazycortex-core CLI dispatcher."""
+import os, sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+
+USAGE = "usage: lazycortex-core <subcommand> [args...]\nSubcommands: expert-pump-once, runtime"
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print(USAGE, file=sys.stderr); return 2
+    sub = sys.argv[1]
+    repo = Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
+    if sub == "expert-pump-once":
+        from expert_pump import pump
+        result = pump(repo)
+        print(f"experts={result['experts']} processed={result['processed']} cleaned={result['cleaned']}")
+        return 0
+    elif sub == "runtime":
+        from runtime_daemon import run
+        run(repo); return 0
+    else:
+        print(f"unknown subcommand: {sub}\n{USAGE}", file=sys.stderr); return 2
+
+if __name__ == "__main__":
+    sys.exit(main())

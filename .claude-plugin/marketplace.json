@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "lazycortex-core",
-      "description": "Core skills and agents for Claude Code",
+      "description": "Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-model routing + settings management)",
       "source": "./claude/lazycortex-core"
     },
     {

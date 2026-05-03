@@ -5,9 +5,9 @@ description: One entry point that runs every read-only audit/doctor in this repo
 
 Single entry point that runs every read-only health check this repo ships, merges all findings into one per-plugin table, then prompts the user once for which mutating fix-flow(s) to run.
 
-This is pure orchestration — it does **not** re-implement scan logic. It calls existing skills via the `Skill` tool, captures their merged-findings blocks, reformats, and asks. Mutating skills (`lazy-core.optimize`, `tool.optimize`, doctors' interactive fix loops, `pub.status`) only run after explicit user choice in Phase 4.
+This is pure orchestration — it does **not** re-implement scan logic. It calls existing skills via the `Skill` tool (and the `pub.status` agent via the `Agent` tool), captures their merged-findings blocks, reformats, and asks. Mutating flows (`lazy-core.optimize`, `tool.optimize`, doctors' interactive fix loops, `pub.status`) only run after explicit user choice in Phase 4.
 
-Author-side skills (`tool.*`, `pub.status`) live in `.claude/skills/` of the LazyCortex authoring repo and are not always present. Probe each with `Glob` before invoking; if absent, skip and emit an `INFO` row noting unavailability.
+Author-side artifacts (`tool.*` skills under `.claude/skills/`, `pub.status` agent under `.claude/agents/`) live in the LazyCortex authoring repo and are not always present. Probe each with `Glob` before invoking; if absent, skip and emit an `INFO` row noting unavailability.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -74,7 +74,7 @@ Call `AskUserQuestion` with `multiSelect: true`, header `Fix-flows`, and these o
 5. `Run pub.status` — refresh per-plugin pending-changes folder notes + iconize colors
 6. `Nothing — done`
 
-If the user picks `Nothing — done` (or selects nothing else), proceed directly to the log step. Otherwise, invoke each chosen skill in the order listed above via `Skill(skill: "<name>")`. Skills run sequentially in the main agent — let each finish before invoking the next.
+If the user picks `Nothing — done` (or selects nothing else), proceed directly to the log step. Otherwise, invoke each chosen item in the order listed above — skills via `Skill(skill: "<name>")`, and `pub.status` via `Agent(subagent_type: "pub.status", prompt: "refresh per-plugin folder notes + iconize colors")`. Items run sequentially in the main agent — let each finish before invoking the next.
 
 Outcome word: `dispatched` (or `skipped-per-user-choice` if user picked Nothing).
 

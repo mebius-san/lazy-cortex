@@ -1,7 +1,7 @@
 ---
 name: lazy-core.audit
 description: "Quick read-only audit of what gets loaded into conversation context at startup plus skill-writing, agent-writing, and rule-writing compliance. Shows sizes, loading behavior, optimization opportunities, Execution-Discipline preamble presence, no-Optional headings, narrative-padding heuristics, and rule-file frontmatter/size/code-block/scope enforcement. No changes made."
-allowed-tools: Read, Glob, Grep, Bash(wc *), Bash(command -v python3), Bash(python3 --version)
+allowed-tools: Read, Glob, Grep, Bash(wc *), Bash(command -v python3), Bash(python3 --version), Bash(python3 *)
 ---
 # Context Audit
 
@@ -9,7 +9,9 @@ Coordinator skill. Dispatches two **Explore** subagents in parallel to measure c
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispatching for the coordinator pattern.
 
-**CRITICAL PATH RULE** (applies to every dispatched agent): `~/.claude/` is protected from Bash access. Agents must use ONLY Glob and Read under `~/.claude/`. `wc -c` via Bash is allowed ONLY for paths under the project root.
+**CRITICAL PATH RULE** (applies to every dispatched agent): `$HOME/.claude/` is protected from Bash access. Agents must use ONLY Glob and Read under `$HOME/.claude/`. `wc -c` via Bash is allowed ONLY for paths under the project root.
+
+**Path expansion** (mandatory): Glob and Read do **not** shell-expand `~` or `$HOME`. Before any Glob/Read targeting a home-relative path, run `Bash(echo $HOME)` once and substitute the result (or read the absolute home path from the session env block). A literal `~/.claude/rules/*.md` or `$HOME/.claude/rules/*.md` passed to Glob will match nothing and silently report "empty".
 
 **Size estimation**: for Read-measured files use `size ~ lines × 45 bytes`; for `wc -c` use exact bytes.
 
@@ -27,7 +29,7 @@ This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Phase 1 — Dispatch parallel scans
 
-Dispatch these two Explore agents **in a single message with two Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each returns the structured report from `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md`. Budget: "Report under 350 words".
+Dispatch these four Explore agents **in a single message with four Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each returns the structured report from `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md`. Budget: "Report under 350 words".
 
 Severity vocabulary for this skill: `INFO` (measurement row or visible waiver) / `WARN` (recommendation or heuristic flag) / `FAIL` (structural violation — Agent B compliance checks across skill-writing, agent-writing, and rule-writing: missing preamble, invalid waiver, "Optional" heading, missing rule frontmatter or scope, oversize rule, code block > 10 lines, `AskUserQuestion` inside agent body).
 
@@ -35,11 +37,11 @@ Severity vocabulary for this skill: `INFO` (measurement row or visible waiver) /
 
 Measure everything that loads at conversation start. Include these sources as one `[INFO]` finding per source, sorted by size desc:
 
-- **Global CLAUDE.md** (`~/.claude/CLAUDE.md`) — Read, estimate size.
+- **Global CLAUDE.md** (`$HOME/.claude/CLAUDE.md`) — Read, estimate size.
 - **Project CLAUDE.md** (`CLAUDE.md`) — Read, estimate size.
-- **Global rules** (`~/.claude/rules/*.md`) — Glob + Read. If the directory is a symlink, resolve and follow it. Only rules **without** a `paths` frontmatter field count as always-loaded; rules with `paths` are on-demand and belong to Agent B.
+- **Global rules** (`$HOME/.claude/rules/*.md`) — Glob + Read. If the directory is a symlink, resolve and follow it. Only rules **without** a `paths` frontmatter field count as always-loaded; rules with `paths` are on-demand and belong to Agent B.
 - **Project rules** (`.claude/rules/*.md`) — `wc -c` via Bash. Same `paths` filtering rule.
-- **Memory index** (`~/.claude/projects/*/memory/MEMORY.md`) — Read, estimate size.
+- **Memory index** (`$HOME/.claude/projects/*/memory/MEMORY.md`) — Read, estimate size.
 
 Also emit `[WARN]` findings for:
 
@@ -56,15 +58,15 @@ Scope covers everything not loaded at startup, plus hygiene grep work.
 
 - Agents (`.claude/agents/*.md`) — `wc -c` via Bash.
 - Project commands (`.claude/commands/*.md`) — `wc -c` via Bash.
-- Global commands (`~/.claude/commands/*.md`) — Glob + Read.
+- Global commands (`$HOME/.claude/commands/*.md`) — Glob + Read.
 - Project skills (`.claude/skills/*/SKILL.md`) — `wc -c` via Bash.
-- Global skills (`~/.claude/skills/*/SKILL.md`) — Glob + Read.
-- Memory files (individual `~/.claude/projects/*/memory/*.md` except `MEMORY.md`) — Glob to count.
+- Global skills (`$HOME/.claude/skills/*/SKILL.md`) — Glob + Read.
+- Memory files (individual `$HOME/.claude/projects/*/memory/*.md` except `MEMORY.md`) — Glob to count.
 - On-demand rules (rules files with a `paths` frontmatter field).
 
 Include a `total_kb` line for on-demand sources in the summary block.
 
-**MCP enablement** — read `~/.mcp.json`, `.mcp.json`, `~/.claude/settings.json`, `~/.claude/settings.local.json`, `.claude/settings.json`, `.claude/settings.local.json`. Determine mode:
+**MCP enablement** — read `$HOME/.mcp.json`, `.mcp.json`, `$HOME/.claude/settings.json`, `$HOME/.claude/settings.local.json`, `.claude/settings.json`, `.claude/settings.local.json`. Determine mode:
 
 - Mode A: global `enableAllProjectMcpServers: true` → every project `.mcp.json` entry is implicitly enabled; suppress "declared but unused" warnings.
 - Mode B: `enableAllProjectMcpServers` false or missing → server enabled only if its name appears in `enabledMcpjsonServers` of project settings.
@@ -73,7 +75,7 @@ Emit one `[INFO]` per enabled server. Emit `[WARN]`:
 
 - Mode B only: server in project `.mcp.json` not enabled under any rule above.
 - Mode B only: non-empty project `.mcp.json` but no `enabledMcpjsonServers` anywhere.
-- Always: name in `enabledMcpjsonServers` with no definition in `.mcp.json` or `~/.mcp.json`.
+- Always: name in `enabledMcpjsonServers` with no definition in `.mcp.json` or `$HOME/.mcp.json`.
 
 **Python runtime** — every `lazycortex-*` plugin ships hooks that shebang `python3` and the project `.claude/hooks/pub.*.py` are invoked as `python3 ...` from `settings.json`. If `python3` is missing or too old, hooks silently fail and the user loses distill-after-commit, settings/public guards, agent-model routing, and pub.autobump. Run two short Bash probes:
 
@@ -89,7 +91,7 @@ Skip both probes silently if neither runs (sandbox restriction); the renderer tr
 - `/Users/` or `/home/` — hardcoded absolute paths.
 - `<project>/` prefix — should be relative.
 - `~/Dropbox/` or other user-specific home subdirectories.
-- `~/.claude/` used for items that are actually project-local (project agents / rules / settings) instead of relative `.claude/`.
+- `$HOME/.claude/` used for items that are actually project-local (project agents / rules / settings) instead of relative `.claude/`.
 
 **Exclusions** (suppress the match — do not emit a WARN if any gate matches):
 
@@ -117,24 +119,36 @@ Emit WARN only when the match survives all three gates.
 5. **No "Optional" in phase/step headings** — same as skill-writing §2 → `[FAIL]`.
 6. **Narrative padding (heuristic)** — same denylist as skill-writing §3 → `[WARN]`.
 
-**Model routing** — read both `./.claude/lazy.settings.json` (project scope) AND `~/.claude/lazy.settings.json` (user scope); missing files are silent no-op, not a finding. Build a merged-with-provenance view of `agent_models`:
+**Model routing** — load both settings files via `bin/lazy_settings.py`:
 
-1. **Files present** — emit `[INFO]` per scope: `lazy.settings.json scope=project path=<path>` or `lazy.settings.json scope=project (missing)`; same for `global`.
-2. **No config anywhere** — if BOTH scopes are missing, emit `[WARN] no lazy.settings.json found (project: <path>, global: <path>) — agent routing disabled. Run /lazy-core.optimize to create and fill.` Skip the remaining checks (merged view / orphans / gaps / invalid values) since there is nothing to validate.
-3. **Merged entries** — for every dispatch-string key across both scopes, emit one `[INFO]`: `agent_models <group>.<key> = <value> (<provenance>)`. Provenance is `project`, `global`, or `project, overrides global=<other>` when both scopes carry the same key with different values. Group entries together in the report render by their top-level group name.
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_section
+from pathlib import Path
+proj = load_section(Path('.claude/lazy.settings.json'), 'agent_models')
+user = load_section(Path.home() / '.claude/lazy.settings.json', 'agent_models')
+# missing file → section dict with only _version returned automatically; no error
+")
+```
+
+Missing files are a silent no-op — `load_section` returns a stub with `_version` intact. Do not add a manual file-existence guard. Build a merged-with-provenance view of `agent_models`:
+
+1. **Files present / `_version` provenance** — emit `[INFO]` per scope: `lazy.settings.json scope=project path=<path> agent_models._version=<N>` or `lazy.settings.json scope=project (missing)`; same for `global`. Surfacing `_version` makes settings-version drift visible — e.g. a global file at `agent_models._version: 1` while the project file is at `_version: 2` after a migration.
+2. **No config anywhere** — if BOTH scopes are missing (both returned only the stub `_version` key and nothing else), emit `[WARN] no lazy.settings.json found (project: <path>, global: <path>) — agent routing disabled. Run /lazy-core.optimize to create and fill.` Skip the remaining checks (merged view / orphans / gaps / invalid values) since there is nothing to validate.
+3. **Merged entries** — for every dispatch-string key across both scopes, emit one `[INFO]`: `agent_models <group>.<key> = <value> (<provenance>)`. Provenance is `project`, `global`, or `project, overrides global=<other>` when both scopes carry the same key with different values. Group entries together in the report render by their top-level group name. Skip any top-level key whose value is not a dict (e.g. `_version: int`) — only group sub-dicts carry dispatch mappings. (Filter by shape, not by name, because `_user` / `_project` / `_builtin` are legitimate group-name keys that share the underscore prefix.)
 4. **Orphans** — any key in either scope that does NOT resolve to a discovered agent (see Agent discovery below). Finding: `[WARN] orphan agent_models entry: <group>.<key> (<scope>)`.
-5. **Gaps** — discovered agents with no entry in any scope (exclude agents explicitly set to `"inherit"` in either scope — those are explicit decisions, not gaps). Finding: `[INFO] no agent_models entry for <dispatch-string> (from <source>) — run /lazy-core.optimize to fill`.
-6. **Invalid values** — any value not in `{"haiku", "sonnet", "opus", "inherit"}`. Finding: `[WARN] invalid value <x> for <group>.<key> (<scope>)`.
+5. **Gaps** — discovered agents with no entry in any scope (exclude agents explicitly set to `"default"` in either scope — those are explicit decisions, not gaps). Finding: `[INFO] no agent_models entry for <dispatch-string> (from <source>) — run /lazy-core.optimize to fill`.
+6. **Invalid values** — any value not in `{"haiku", "sonnet", "opus", "default"}`. Finding: `[WARN] invalid value <x> for <group>.<key> (<scope>)`.
 7. **Env-var status** — emit `[INFO]` with `LAZY_AGENT_MODEL_FLOOR=<value>` and a tier-order note (`haiku < sonnet < opus`), else `LAZY_AGENT_MODEL_FLOOR=(unset)`.
 
 **Agent discovery (shared helper — used by audit, optimize, doctor)**. Deduped by full dispatch string:
 
 1. **Built-ins** — hardcoded list: `Explore`, `Plan`, `general-purpose`, `statusline-setup`. Group: `_builtin`. Dispatch string: bare name.
-2. **User-authored, global** — `~/.claude/agents/*.md`. Group: `_user`. Dispatch string: bare filename stem.
+2. **User-authored, global** — `$HOME/.claude/agents/*.md`. Group: `_user`. Dispatch string: bare filename stem.
 3. **User-authored, project** — `./.claude/agents/*.md`. Group: `_project`. Dispatch string: bare filename stem. (Project entries shadow global entries of the same stem — both still listed separately with provenance.)
-4. **Plugin-shipped** — `~/.claude/plugins/cache/**/agents/*.md`. Extract plugin name from path (`~/.claude/plugins/cache/<marketplace>/<plugin-name>/<version>/agents/<agent>.md` → plugin = `<plugin-name>`). Group: **domain** derived from plugin name via the domain-extraction rule (first `-`-delimited segment, or full name if no `-`). Dispatch string: `<plugin-name>:<stem>`.
+4. **Plugin-shipped** — `$HOME/.claude/plugins/cache/**/agents/*.md`. Extract plugin name from path (`$HOME/.claude/plugins/cache/<marketplace>/<plugin-name>/<version>/agents/<agent>.md` → plugin = `<plugin-name>`). Group: **domain** derived from plugin name via the domain-extraction rule (first `-`-delimited segment, or full name if no `-`). Dispatch string: `<plugin-name>:<stem>`.
 
-**Rule-writing compliance** — see `lazy-core.rule-writing` (plugin) / `.claude/rules/dev.rule-writing.md` (local pointer). File set: `.claude/rules/*.md`, `~/.claude/rules/*.md`, `claude/*/rules/*.md`. **Exclude** `**/templates/**/*-template.md` from every check below — templates are skeletons, not rules; their placeholder frontmatter and example clauses would otherwise misfire. Checks:
+**Rule-writing compliance** — see `lazy-core.rule-writing` (plugin) / `.claude/rules/dev.rule-writing.md` (local pointer). File set: `.claude/rules/*.md`, `$HOME/.claude/rules/*.md`, `claude/*/rules/*.md`. **Exclude** `**/templates/**/*-template.md` from every check below — templates are skeletons, not rules; their placeholder frontmatter and example clauses would otherwise misfire. Checks:
 
 1. **Frontmatter present** — YAML frontmatter with at minimum `description:`. Absent → `[FAIL]`.
 2. **Scope or waiver** — frontmatter must carry EITHER `paths:` (YAML block-list of globs, per Claude Code docs) OR `always_loaded: "<reason>"`. Neither present → `[FAIL]`. `always_loaded: true` / `always_loaded: ""` → `[FAIL]` (invalid waiver).
@@ -146,9 +160,224 @@ Emit WARN only when the match survives all three gates.
 8. **Narrative padding (heuristic)** — same denylist as skill-writing §3 → `[WARN]`.
 9. **Authoring contract without template** — a rule counts as an *authoring contract* when its filename matches `*.writing.md` OR its body contains a heading line matching `^##\s.*[Aa]uthoring`. Authoring contracts MUST reference a template path under `<plugin>/templates/`; detection: grep the body for `templates/.*-template\.md`. No match → `[WARN]`. Finding text: `authoring rule has no template reference — Claude composing a new artifact from scratch can't see the contract; add a **Template:** pointer per lazy-core.scaffold`.
 
+### Agent C — help-doc coverage and staleness
+
+Per-plugin scan of `claude/<plugin>/` for help-doc completeness against `## Scenarios` and chapter staleness against source-skill mtime. Both checks emit `[WARN]` only — there is no manual fix path, and `pub.publish` Step 0b regenerates chapters at the next bump.
+
+Discover plugins: `claude/*/.claude-plugin/plugin.json`. For each plugin:
+
+#### Check H1 — Help-doc scenario coverage
+
+For every plugin under `claude/<plugin>/`:
+
+- Read each bullet under `## Scenarios` in `claude/<plugin>/README.md`. Skip the plugin if the README has no `## Scenarios` section.
+- For each bullet, look for a corresponding `claude/<plugin>/help/walkthroughs/<slug>.md`. Slug-match algorithm matches `pub.help-draft` Step 2: lowercase the first 4–6 keywords of the bullet, hyphenate, strip non-alphanumeric. A walkthrough chapter also matches when its frontmatter `summary` substring-matches the bullet text.
+- Missing match → `[WARN]` with detail `scenario "<bullet>" has no walkthrough chapter in claude/<plugin>/help/walkthroughs/`.
+
+#### Check H2 — Help-doc staleness
+
+For every chapter under `claude/<plugin>/help/**/*.md`:
+
+- Read the chapter's frontmatter `last_regen` and `source_skills`. Skip the chapter if either field is absent.
+- For each skill in `source_skills`, find the most recent commit mtime via `git log -1 --format=%cI -- claude/<plugin>/skills/<skill>/SKILL.md`. Also include `claude/<plugin>/README.md`'s mtime.
+- If any source's mtime is newer than `last_regen` → `[WARN]` with detail `chapter <path> is stale; clears at next publish bump for <plugin>`.
+
+These warnings are advisory — there is no manual fix path. The next `pub.publish` regenerates the chapters per the patch-bump short-circuit logic in `pub.help-draft`.
+
+Severity vocabulary: `INFO` (advisory note about a passing chapter or scenario, optional) / `WARN` (H1 missing chapter, H2 stale chapter). Never emit `FAIL` from this agent.
+
+### Agent D — expert runtime
+
+Scope: `experts.settings.json`, `lazy.settings.json[lazy-core.runtime]`, `.jobs/` directories, runtime daemon liveness. Severity vocabulary: `INFO` (informational, non-actionable) / `WARN` (advisory or degraded state) / `FAIL` (structural violation or unresolvable reference).
+
+**CRITICAL PATH RULE** applies: no Bash under `$HOME/.claude/`. Expand `$HOME` once via `Bash(echo $HOME)` then substitute.
+
+**Path layout constant**: plugin cache lives under `$HOME/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>`.
+
+Perform these 9 sub-checks in order:
+
+**D1 — `experts.settings.json` schema**
+
+Read `experts.settings.json` at the repo root. If absent: emit `[INFO] experts.settings.json absent — no experts configured` and skip D2–D4, D7–D8. If present but not valid JSON: `[FAIL] experts.settings.json is not valid JSON | experts.settings.json`.
+
+For every top-level key that is not `_version` (filter by shape — skip keys whose value is not an object, so `_version: int` is excluded without name-checking):
+
+- Verify the expert entry has all four required fields: `agent`, `protocol`, `git_author.name`, `git_author.email`. Missing any field → `[FAIL] expert <key> missing required field(s): <list> | experts.settings.json`.
+
+Emit `[INFO] experts.settings.json: <N> experts defined` when at least one expert passes.
+
+**D2 — Reference resolution (agent)**
+
+For each expert entry (from D1 that passed schema):
+
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from reference_resolver import resolve
+import json, sys
+result = resolve(sys.argv[1])
+print(json.dumps({'ok': result is not None, 'resolved': str(result) if result else None}))
+" '<expert.agent value>')
+```
+
+Failure (non-zero exit or `ok: false`) → `[FAIL] expert <key>: agent reference '<value>' did not resolve | experts.settings.json` (category: logical).
+
+**D3 — Reference resolution (protocol)**
+
+Same pattern as D2, but for `expert.protocol`. Failure → `[FAIL] expert <key>: protocol reference '<value>' did not resolve | experts.settings.json` (category: logical).
+
+**D4 — Protocol contract**
+
+For each expert where D3 resolved a protocol path: `Read` the resolved protocol file. Check it contains all five required sections from `expert-protocols-contract.md`:
+- A `kind` enum (heading or table listing at least two kind values).
+- A `role` vocabulary (heading or table listing at least one role).
+- An `outcome` enum (heading or table listing outcome values).
+- A `source` conventions section.
+- A `result` conventions section.
+
+Missing any required section → `[WARN] protocol for expert <key> missing required section(s): <list> | <protocol path>`.
+
+**D5 — Standard request fields enforcement**
+
+For each resolved protocol file: grep the file for a JSON Schema block (fenced ` ```json ` block containing `"required":`). If a schema block is present, verify it lists all three standard fields: `kind`, `role`, `request` under `"required"`. Any standard field absent from the schema → `[WARN] protocol for expert <key> JSON Schema missing standard required fields: <list> | <protocol path>`.
+
+If no JSON Schema block is present in the protocol file, skip this check silently.
+
+**D6 — `lazy.settings.json[lazy-core.runtime]` schema**
+
+Read `.claude/lazy.settings.json`. If absent: `[INFO] lazy.settings.json absent — runtime section not configured` and skip D6 sub-checks. If present, extract the `lazy-core.runtime` section (treat missing section as an empty object):
+
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_section
+from pathlib import Path
+import json
+s = load_section(Path('.claude/lazy.settings.json'), 'lazy-core.runtime')
+print(json.dumps(s))
+")
+```
+
+Validate the returned section:
+
+- `_version` must equal `1`. Wrong value or absent → `[FAIL] lazy-core.runtime section _version mismatch (expected 1) | .claude/lazy.settings.json`.
+- `daemon` block must be a dict and contain: `git` (string or bool), `polling_interval_sec` (positive int), `cleanup_completed_after` (string or int), `cleanup_failed_after` (string or int). Any missing key → `[FAIL] lazy-core.runtime daemon block missing key(s): <list> | .claude/lazy.settings.json`.
+- `routines` must be a dict (may be empty). Non-dict value → `[FAIL] lazy-core.runtime routines is not a dict | .claude/lazy.settings.json`.
+- When D1 found at least one expert AND `routines` does not contain a `lazy-expert.pump` entry → `[WARN] experts configured but lazy-expert.pump routine absent from lazy-core.runtime.routines | .claude/lazy.settings.json`.
+
+**D7 — Routine command resolvability**
+
+For each key/value in `lazy-core.runtime.routines` (skip if D6 found the section absent):
+
+- Read the routine object's `command` field. If absent → `[FAIL] routine <name> has no command field | .claude/lazy.settings.json`.
+- The `command` value must be a plugin bin path under the 4-level plugin cache layout: `$HOME/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>`. Resolve `$HOME` via `Bash(echo $HOME)`. Check path existence via `Bash(test -f '<path>' && echo ok || echo missing)`. Missing → `[FAIL] routine <name> command path does not exist: <path> | .claude/lazy.settings.json`.
+
+**D8 — Orphan jobs**
+
+Glob `.jobs/*/` (one level deep). For each subdirectory name `<expert>`:
+
+- If `<expert>` is not a key in `experts.settings.json` (from D1) → `[WARN] orphan job directory .jobs/<expert>/ — expert not in experts.settings.json | .jobs/<expert>/`.
+
+**D9 — Stale DONE jobs**
+
+From D6, obtain `cleanup_completed_after` and `cleanup_failed_after` (default to `"7d"` if absent or D6 was skipped). Convert to seconds (parse `<N>d` → `N*86400`, `<N>h` → `N*3600`, int → use directly).
+
+For each job dir under `.jobs/*/` (recurse one more level: `.jobs/<expert>/<job-id>/`): read the `status` field from the job's `job.json` if present. For jobs with status `DONE` or `FAILED`:
+
+```
+Bash(python3 -c "
+import os, time, sys
+threshold_sec = int(sys.argv[1])
+path = sys.argv[2]
+mtime = os.path.getmtime(path)
+age_sec = time.time() - mtime
+print('stale' if age_sec > threshold_sec else 'ok')
+" '<threshold>' '.jobs/<expert>/<job-id>')
+```
+
+Stale → `[WARN] stale completed/failed job not yet cleaned: .jobs/<expert>/<job-id>/ (age > threshold) — pump may not be running | .jobs/<expert>/<job-id>/`.
+
+**D10 — Daemon liveness**
+
+Best-effort check. Three signals (any one passing = alive):
+
+1. `Bash(pgrep -f bin/runner 2>/dev/null && echo running || echo stopped)` → `running`.
+2. `Bash(launchctl list com.lazycortex.runtime.$(basename $(pwd)) 2>/dev/null | grep -q '"PID"' && echo running || echo stopped)` → `running`.
+3. Compute `5 × max(polling_interval_sec)` across all routines (default 300 s if not available). Find newest `.logs/lazy-core/runtime/*.jsonl` via `Bash(ls -t .logs/lazy-core/runtime/*.jsonl 2>/dev/null | head -1)`. If a file is found, check its mtime:
+   ```
+   Bash(python3 -c "
+   import os, time, sys
+   path = sys.argv[1]; threshold = int(sys.argv[2])
+   age = time.time() - os.path.getmtime(path)
+   print('ok' if age < threshold else 'stale')
+   " '<newest jsonl>' '<threshold>')
+   ```
+   `ok` → alive.
+
+If all three signals indicate stopped/stale/absent → `[WARN] runtime daemon appears stale — no pgrep match, no launchctl PID, and no JSONL log line in the last <threshold>s | .logs/lazy-core/runtime/`.
+
+If none of the three probes run (e.g. not on macOS, no runtime configured) → skip silently.
+
+### Structured report shape (Agents A, B, C — unchanged)
+
+```
+## scan: lazy-core.audit/help-docs
+
+### help_doc_coverage
+- [WARN] scenario "<bullet>" has no walkthrough chapter | claude/<plugin>/README.md
+  detail: <bullet text>
+  fix: regenerated automatically by pub.publish on next bump
+
+### help_doc_staleness
+- [WARN] chapter <path> is stale | claude/<plugin>/help/walkthroughs/<slug>.md
+  detail: source_skills mtime > last_regen
+  fix: regenerated automatically by pub.publish on next bump
+
+### summary
+plugins_scanned: <n>  warn: <m>
+```
+
+### Structured report shape (Agent D)
+
+```
+## scan: lazy-core.audit/expert-runtime
+
+### experts_settings
+- [INFO] experts.settings.json: <N> experts defined
+- [FAIL] experts.settings.json is not valid JSON | experts.settings.json
+- [FAIL] expert <key> missing required field(s): <list> | experts.settings.json
+
+### reference_resolution
+- [FAIL] expert <key>: agent reference '<value>' did not resolve | experts.settings.json
+- [FAIL] expert <key>: protocol reference '<value>' did not resolve | experts.settings.json
+
+### protocol_contract
+- [WARN] protocol for expert <key> missing required section(s): <list> | <protocol path>
+- [WARN] protocol for expert <key> JSON Schema missing standard required fields: <list> | <protocol path>
+
+### runtime_settings
+- [INFO] lazy.settings.json absent — runtime section not configured
+- [FAIL] lazy-core.runtime section _version mismatch (expected 1) | .claude/lazy.settings.json
+- [FAIL] lazy-core.runtime daemon block missing key(s): <list> | .claude/lazy.settings.json
+- [FAIL] lazy-core.runtime routines is not a dict | .claude/lazy.settings.json
+- [WARN] experts configured but lazy-expert.pump routine absent from lazy-core.runtime.routines | .claude/lazy.settings.json
+- [FAIL] routine <name> has no command field | .claude/lazy.settings.json
+- [FAIL] routine <name> command path does not exist: <path> | .claude/lazy.settings.json
+
+### orphan_jobs
+- [WARN] orphan job directory .jobs/<expert>/ — expert not in experts.settings.json | .jobs/<expert>/
+
+### stale_jobs
+- [WARN] stale completed/failed job not yet cleaned: .jobs/<expert>/<job-id>/ (age > threshold) — pump may not be running | .jobs/<expert>/<job-id>/
+
+### daemon_liveness
+- [WARN] runtime daemon appears stale — no pgrep match, no launchctl PID, and no JSONL log line in the last <threshold>s | .logs/lazy-core/runtime/
+
+### summary
+pass: <n>  warn: <n>  fail: <n>
+```
+
 ## Phase 2 — Render
 
-Parse both returned blocks. Produce:
+Parse all four returned blocks. Produce:
 
 ### Always loaded (startup cost)
 
@@ -199,9 +428,23 @@ One line per Agent B naming `[WARN]`.
 - **"Optional" in heading** (FAIL) — one line per match.
 - **Narrative-padding heuristic** (WARN) — one line per match.
 
+### Help-doc compliance
+
+- **Missing walkthrough chapter** (WARN) — one line per Agent C H1 finding (scenario without a chapter).
+- **Stale chapter** (WARN) — one line per Agent C H2 finding (source_skills mtime newer than chapter `last_regen`).
+
+Both clear automatically at the next `pub.publish` bump for the affected plugin — no manual fix path.
+
 ### Model routing
 
-Render the merged-with-provenance view grouped by top-level group name:
+Render the `_version` provenance line first — one line per scope that was present:
+
+```
+lazy.settings.json scope=project  agent_models._version=<N>
+lazy.settings.json scope=global   agent_models._version=<N>
+```
+
+Then render the merged-with-provenance view grouped by top-level group name:
 
 ```
 [_builtin]
@@ -236,6 +479,22 @@ One line per entry. Below the table:
 - **Narrative-padding heuristic** (WARN) — one line per match.
 - **Authoring rule without template reference** (WARN) — one line per authoring rule with no `templates/**/*-template.md` mention in the body.
 
+### Expert runtime
+
+Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings are all `[INFO]` and print only the summary line instead.
+
+**Expert configuration** — one line per `[FAIL]` from D1 (schema) and D2/D3 (reference resolution). Show the `[INFO]` experts count line when all schema checks pass.
+
+**Protocol checks** — one line per `[WARN]` from D4 (protocol contract) and D5 (standard request fields). Omit the section if no warnings.
+
+**Loop settings** — one line per `[FAIL]` or `[WARN]` from D6 (schema) and D7 (routine command resolvability). Omit the section if all pass.
+
+**Job hygiene** — one line per `[WARN]` from D8 (orphan jobs) and D9 (stale DONE jobs). Omit the section if no warnings.
+
+**Daemon liveness** — one line per `[WARN]` from D10. Omit the section if no warnings.
+
+**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D10 findings).
+
 ### Recommendations
 
 - Memory index > 5 KB → suggest consolidation.
@@ -248,4 +507,18 @@ One line per entry. Below the table:
 - Rule over size budget → move long guidance to `<plugin>/skills/<skill>/references/*.md` per `lazy-core.rule-writing § 2`.
 - "Optional" in phase/step heading → rename the heading; the user's accept/decline choice belongs inside an `AskUserQuestion`, not at the heading level.
 - Narrative-padding match → review and drop the passage if its removal leaves executable behavior unchanged.
+- `experts.settings.json` FAIL → add missing fields per the expert schema; run `/lazy-core.install` wizard step to re-scaffold.
+- Reference resolution FAIL → verify the agent/protocol reference uses a valid format (`<plugin>:<name>`, `user:<name>`, or bare `<name>`) and that the referenced artifact exists.
+- Loop settings FAIL → re-run `/lazy-core.install` to scaffold or repair the `lazy-core.runtime` section in `lazy.settings.json`.
+- Routine command FAIL → install the missing plugin or remove the unresolvable routine entry.
+- Daemon stalled → run `/lazy-core.doctor` for the restart fix-offer.
 - Note: system prompt, skill registry, MCP instructions, deferred tool list are injected by Claude Code and cannot be reduced by the user.
+
+## Failure modes
+
+- **`/lazy-core.audit` exits with "experts.settings.json is not valid JSON"** — the file was hand-edited and broke JSON syntax → fix the syntax or re-scaffold via `/lazy-core.install`.
+- **Agent D reports "reference did not resolve" for an expert** — the `agent` or `protocol` field uses an unrecognised format or points to a non-existent artifact. Check the reference format (`<plugin>:<name>`, `user:<name>`, or bare `<name>`) and verify the artifact is installed → run `/lazy-core.install` to re-register.
+- **`protocol contract` WARN fires even though sections exist** — the protocol file uses non-standard headings. Section detection looks for the literal keywords (kind, role, outcome, source, result) in headings → align the protocol file headings with `expert-protocols-contract.md`.
+- **Routine command FAIL when the plugin is installed** — the plugin cache uses a 4-level path `<registry>/<plugin>/<version>/bin/<plugin>`; an older install used a 3-level layout. Re-install the plugin to refresh the bin path in the routine entry.
+- **D10 daemon liveness check always WARN on first use** — the runtime hasn't been started yet; this is expected after initial install → start the daemon via `launchctl load` or `systemctl --user start` as offered by `/lazy-core.install`.
+- **Agent D silently reports nothing** — `PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin` was not resolved (sandboxed environment or missing plugin path). Verify `${CLAUDE_PLUGIN_ROOT}` resolves to the plugin install path and `bin/lazy_settings.py` is present.

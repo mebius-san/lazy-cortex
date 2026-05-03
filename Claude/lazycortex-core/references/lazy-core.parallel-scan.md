@@ -34,6 +34,14 @@ SKILL.md
 - Cap at **4 agents per skill**. More than 4 makes report merging painful and latency unpredictable.
 - Each agent prompt must include: narrow read-only scope (specific globs / Grep patterns / files), the structured-report contract below, and a word budget (typically "Report under 300 words").
 
+## Path expansion (mandatory in every dispatched prompt)
+
+Glob and Read **do not shell-expand** `~` or `$HOME` — patterns like `~/.claude/rules/*.md` match nothing and the agent silently reports "empty". Every dispatch prompt that targets a home-relative path MUST include this clause verbatim:
+
+> Paths shown as `$HOME/...` are not auto-expanded by Glob/Read. Before any tool call, run `Bash(echo $HOME)` once and substitute the result, or use the absolute home path from the session env block. Never pass a literal `~` or `$HOME` to Glob/Read.
+
+Coordinator skills should write home paths as `$HOME/.claude/...` (not `~/.claude/...`) so the dependency is explicit.
+
 ## Structured report contract
 
 Every Explore agent must return a block in this exact shape:

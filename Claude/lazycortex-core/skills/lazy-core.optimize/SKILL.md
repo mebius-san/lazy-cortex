@@ -7,6 +7,8 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir -p *)
 
 Reduce startup context weight and fix settings layer violations for the current project.
 
+**Path expansion** (applies to this skill and every dispatched agent): Glob and Read do **not** shell-expand `~` or `$HOME`. Before any Glob/Read targeting a home-relative path, run `Bash(echo $HOME)` once and substitute the result (or read the absolute home path from the session env block). A literal `~/.claude/rules/*.md` or `$HOME/.claude/rules/*.md` passed to Glob will match nothing and silently report "empty".
+
 ## Execution discipline (MANDATORY — read before any action)
 
 This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
@@ -34,11 +36,11 @@ Measure everything that loads at conversation start.
 
 Measure byte sizes of everything Claude Code loads into every session's context on every turn:
 
-- `~/.claude/CLAUDE.md` (global instructions)
+- `$HOME/.claude/CLAUDE.md` (global instructions)
 - `<project>/.claude/CLAUDE.md` (project instructions) — also `CLAUDE.md` at repo root if present
-- Every `~/.claude/rules/*.md` **without** a `paths:` key in YAML frontmatter (scoped rules only load when files matching their glob are touched, so they don't count)
+- Every `$HOME/.claude/rules/*.md` **without** a `paths:` key in YAML frontmatter (scoped rules only load when files matching their glob are touched, so they don't count)
 - Every `<project>/.claude/rules/*.md` **without** a `paths:` key
-- `~/.claude/projects/<project-key>/memory/MEMORY.md` (memory index — auto-loaded)
+- `$HOME/.claude/projects/<project-key>/memory/MEMORY.md` (memory index — auto-loaded)
 
 Thresholds (mirror `lazy-core.doctor`): total > 20 KB → WARN, > 40 KB → FAIL. This is the real token budget — each turn pays this cost.
 
@@ -48,8 +50,8 @@ Count and total sizes of:
 - `.claude/agents/*.md`
 - `.claude/skills/*/SKILL.md`
 - `.claude/commands/*.md`
-- `~/.claude/commands/*.md` (global commands)
-- `~/.claude/skills/*/SKILL.md` (global skills)
+- `$HOME/.claude/commands/*.md` (global commands)
+- `$HOME/.claude/skills/*/SKILL.md` (global skills)
 - Individual memory files (everything in memory dir except MEMORY.md)
 
 ### 1c. Report
@@ -85,11 +87,11 @@ Every file under this phase's scope is authored for the LLM, not humans. Detect 
 
 Scan every LLM-consumed artifact file:
 
-- `.claude/rules/*.md`, `~/.claude/rules/*.md`
-- `.claude/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`
-- `.claude/agents/*.md`, `~/.claude/agents/*.md`
-- `.claude/commands/*.md`, `~/.claude/commands/*.md`
-- `.claude/skills/*/references/*.md`, `~/.claude/skills/*/references/*.md`
+- `.claude/rules/*.md`, `$HOME/.claude/rules/*.md`
+- `.claude/skills/*/SKILL.md`, `$HOME/.claude/skills/*/SKILL.md`
+- `.claude/agents/*.md`, `$HOME/.claude/agents/*.md`
+- `.claude/commands/*.md`, `$HOME/.claude/commands/*.md`
+- `.claude/skills/*/references/*.md`, `$HOME/.claude/skills/*/references/*.md`
 
 **Excluded:** `README*.md`, `CHANGELOG.md`, `docs/**`, `CLAUDE.md` at any scope, and any non-`.md` file.
 
@@ -133,13 +135,13 @@ Agents flag a finding for each occurrence of any of:
 Coordinator deduplicates findings by `(file, line_start, pattern)` and groups by file. For every finding, assign:
 
 - `check_id`: `llm-readability.<pattern-slug>` — one of `decision-table`, `abstract-header-table`, `narrative-preamble`, `restated-cross-ref`, `decorative-marker`, `long-prose`.
-- `scope`: `project` (path inside the repo) or `personal` (path under `~/.claude/**`).
+- `scope`: `project` (path inside the repo) or `personal` (path under `$HOME/.claude/**`).
 - `fingerprint`: `(check_id, normalized_path, detail_hash)` where `detail_hash` is the first 8 hex chars of `sha256(normalized_original)` — whitespace collapsed, line numbers stripped.
 
 Load waivers from both stores (same format as `lazy-core.doctor` Phase 2.7b):
 
-- `~/.claude/projects/<slug>/memory/doctor.waivers/*.md` (project)
-- `~/.claude/memory/doctor.waivers/*.md` (personal)
+- `$HOME/.claude/projects/<slug>/memory/doctor.waivers/*.md` (project)
+- `$HOME/.claude/memory/doctor.waivers/*.md` (personal)
 
 For each finding whose fingerprint matches a waiver's `check_id + normalized_path + detail_hash`, move it to a `waived_findings` list. Render waived count in the summary header, same as doctor.
 
@@ -217,14 +219,14 @@ For each item classified as PROJECT-SPECIFIC, check if it already exists in the 
 For each PROJECT-SPECIFIC entry found in global settings:
 
 1. Add it to `.claude/settings.local.json` (merge into existing arrays, don't duplicate)
-2. Remove it from `~/.claude/settings.json`
+2. Remove it from `$HOME/.claude/settings.json`
 3. Validate both files parse as JSON after each edit
 
 After all moves, show a summary: N entries moved, from which global section to which project file.
 
 ## Phase 5: Memory index health
 
-Check the memory index at `~/.claude/projects/<project-key>/memory/MEMORY.md`:
+Check the memory index at `$HOME/.claude/projects/<project-key>/memory/MEMORY.md`:
 
 1. **Oversized index**: if > 5 KB, suggest consolidating related entries
 2. **Orphaned files**: memory files that exist but aren't in the index
@@ -240,7 +242,7 @@ Find skills that should be refactored to the coordinator-plus-parallel-Explore-a
 ### Scan scope
 
 - `.claude/skills/*/SKILL.md` (project)
-- `~/.claude/skills/*/SKILL.md` (global)
+- `$HOME/.claude/skills/*/SKILL.md` (global)
 - `claude/*/skills/*/SKILL.md` (plugin sources, if this repo has a `claude/` tree)
 
 ### Heuristics (all four must hit for a candidate)

@@ -4,6 +4,22 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 0.6.4 — 2026-05-03 UTC
+
+- **New expert runtime system.** Four new `lazy-expert.*` skills (`lazy-expert.dispatch-job`, `lazy-expert.collect-job`, `lazy-expert.list-jobs`, `lazy-expert.cancel-job`) let you submit work to background expert agents and retrieve results. Two new `lazy-routine.*` skills (`lazy-routine.register`, `lazy-routine.unregister`) manage the routines the daemon runs on each iteration.
+- **Serial runtime daemon ships with the plugin.** A per-repo daemon runs registered routines one at a time, syncs the repo with git at each iteration boundary, and writes structured logs under `.logs/lazy-core/runtime/`. launchd (macOS) and systemd (Linux) supervisor templates are included so the daemon can run as a background service.
+- **`lazy-core.install` bootstraps the runtime.** Re-running `lazy-core.install` now creates the daemon shim, offers supervisor setup, and walks the expert-system configuration wizard.
+- **`lazy-core.audit` and `lazy-core.doctor` cover the runtime.** `lazy-core.audit` gained expert-runtime and daemon health checks; `lazy-core.doctor` gained targeted fix offers for runtime issues and a corrected root-version check.
+- **Breaking: CLI subcommand and supervisor units renamed `loop` → `runtime`.** Invoke the daemon CLI as `lazycortex-core runtime …` (was `loop`). Supervisor unit names updated to `com.lazycortex.runtime.*`. Re-run `lazy-core.install` to land updated units. Skills `lazy-core.routine-register` / `lazy-core.routine-unregister` are now `lazy-routine.register` / `lazy-routine.unregister`. The `lazy-core.loop` settings key auto-migrates to `lazy-core.runtime` on first read — no manual edit needed.
+- **Breaking: runtime shim relocated.** The per-repo daemon shim moved from `<repo>/.experts/run.sh` to `<repo>/.claude/bin/lazy.runtime.sh`; the job queue moved from `.claude/experts/.jobs/` to `.experts/.jobs/`. Re-run `lazy-core.install` to land the new paths. Supervisor units now reference the shim directly and survive `/plugin update` without re-rendering.
+- **Runtime daemon stabilized.** Fixed 9 bugs found during live testing: pump invocation now passes `-p` and `--permission-mode bypassPermissions`; `unregister_routine()` refuses to remove the protected `lazy-expert.pump` routine; git `pull`/`push` now pass `origin <branch>` explicitly so they work on branches without upstream tracking. Also fixed routine-command and reference-resolver cache resolution, both of which previously skipped the version directory and could silently resolve the wrong binary.
+- **`lazy.settings.json` hook no longer writes on every read.** The `load_section` helper now tracks a dirty flag and skips the atomic write when nothing changed, eliminating spurious file writes on every pre-tool-use hook invocation. The config tier value `"inherit"` is renamed to `"default"` in `lazy.settings.json`; a per-section `_version` migration ladder auto-upgrades settings on read for this and future schema changes. Malformed settings now emit a one-line diagnostic instead of failing silently.
+
+### 0.3.0 — 2026-04-30 UTC
+
+- `lazy-core.audit` now warns when help-doc chapters are missing (scenarios without a walkthrough) or stale (source skills updated since the chapter's `last_regen` timestamp).
+- `lazy-core.agent-models` ships default tiers for lazycortex-review agents, removing the need for manual configuration after enabling that plugin.
+
 ### 0.2.49 — 2026-04-28
 
 - `default-tiers.json` is now the single source of truth for per-agent model tiers. The previous `lazy.settings.recommended.md` rule duplicated each plugin's tier block; it has been rewritten as a schema-only document (group definitions, floor cap, tier-choice heuristic, pointers to the canonical JSON). `/lazy-core.install`, `/lazy-log.install`, and `/lazy-obsidian.install` now read tier seeds from `default-tiers.json` at runtime via the cross-plugin cache (`~/.claude/plugins/cache/lazycortex/lazycortex-core/...`) and fail fast if the SOT is missing — no more hardcoded tables to drift.
@@ -318,3 +334,9 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ### 0.1.0 — 2026-04-27
 
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
+
+## lazycortex-review
+
+### 0.1.0 — 2026-04-30
+
+- Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).

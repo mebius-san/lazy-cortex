@@ -1,0 +1,13 @@
+[Unit]
+Description=lazycortex-core runtime daemon for {REPO_NAME}
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory={REPO_ROOT}
+ExecStart={REPO_ROOT}/.claude/bin/lazy.runtime.sh {REPO_ROOT}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

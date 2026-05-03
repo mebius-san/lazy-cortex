@@ -134,6 +134,32 @@ Same status as § 6: a plugin missing its `<namespace>.help` command is a `tool.
 
 The full plugin-surface contract (required files, forbidden empty stubs, namespace-naming rationale) lives at `.claude/skills/tool.doctor/references/plugin-surface.md`. § 7 here is the authoring-side counterpart; the surface reference is the enforcement-side specification.
 
+## 8. Failure modes section (optional, agent-grounding)
+
+Skills MAY include a `## Failure modes` section near the bottom — between the last phase and any logging/safety sections. The section grounds the `pub.help-writer` agent's troubleshooting chapters in documented behaviour rather than agent-reconstructed guesses.
+
+### Shape
+
+The section is a flat bullet list, one entry per documented user-visible abort or surfaced error:
+
+```markdown
+## Failure modes
+
+- **<symptom shown to user>** — <likely cause> → <fix or `lazy-<x>.<y>` skill that fixes it>.
+- **<symptom>** — <cause> → <fix>.
+```
+
+Phrase symptoms in the user's voice ("`/lazy-core.install` aborts saying X"), not the agent's internal vocabulary.
+
+### When to include the section
+
+- **Include** when the skill has user-visible aborts, surfaced errors, or failure paths the user can encounter in normal use.
+- **Omit** when no such failure modes exist; do not write `## Failure modes` followed by "(none)".
+
+### Audit signal
+
+`lazy-core.audit` Agent B emits `INFO` (not `WARN`) when a SKILL.md body contains an explicit abort, "if X then error", or "fails when" phrase but no `## Failure modes` section. INFO because author judgment governs whether the abort is user-visible vs. internal.
+
 ## Cross-referenced contracts (not copied here)
 
 - `lazy-core.agent-writing` — agent-specific authoring (single-response model, tool allowlist, structured-report contract).
@@ -150,6 +176,7 @@ Opting a skill into `lazy-core.setup`: see `${CLAUDE_PLUGIN_ROOT}/references/laz
 - `lazy-core.doctor` surfaces these findings in Phase 3 and prompts the user to fix or waive.
 - § 6 is an author-side contract — `lazy-core.doctor` flags plugin-structure violations (missing `<namespace>.audit`, shipped `<namespace>.doctor`, non-compliant install skills) in its plugin-structure pass.
 - § 7 is enforced by `tool.doctor`: missing `commands/<namespace>.help.md` is `[FAIL]`; filename / namespace mismatch is `[WARN]`. See `.claude/skills/tool.doctor/references/plugin-surface.md`.
+- § 8 is informational: `lazy-core.audit` Agent B emits `INFO` when a SKILL.md with documented aborts lacks a `## Failure modes` section.
 
 ## Scope
 

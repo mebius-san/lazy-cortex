@@ -141,6 +141,11 @@ Log to `./.logs/claude/lazy-core.setup/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.log
 
 Frontmatter: `git_sha`, `git_branch`, `date`, `input` (the args passed, or `none`). Body: `# lazy-core.setup` heading, `## Actions` (per-step bullets including each dispatched child + its outcome), `## Result` (success / partial-failure / dry-run / aborted).
 
+## Failure modes
+
+- **`/lazy-core.setup` stops at Step 4: user chose "abort"** — the setup confirmation was declined → re-run when ready to proceed; individual children are idempotent and safe to re-run.
+- **One or more child skills failed during Step 5** — the report shows which children returned `failed: <reason>` → fix the root cause reported per child, then re-run `/lazy-core.setup` (idempotent).
+
 ## Notes
 
 - **Idempotent.** Children are individually idempotent; re-running after fixing a failure brings everything to current.

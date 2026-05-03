@@ -15,6 +15,7 @@ Agents are dispatched as one-shot subagents via the `Agent` tool. Their output i
 - `name:` — dot-namespaced (`<namespace>.<name>`).
 - `description:` — must state *when* to dispatch this agent, not just what it does. The coordinator reads this to decide.
 - `tools:` — explicit allowlist. See § 5.
+- `model: inherit` — always set to `inherit`. This is Claude Code's native keyword meaning "use the parent's model". Actual model routing is handled by `lazy.settings.json` via the `lazy-core.agent-model-router` hook; the frontmatter value is the fallback when no config override exists.
 
 ## 2. Single-response execution model
 
@@ -52,7 +53,7 @@ When creating a new agent (under `.claude/agents/` or a plugin's `<plugin>/agent
 
 Procedure:
 
-1. **Pick the tier**. Consult `${CLAUDE_PLUGIN_ROOT}/skills/lazy-core.agent-models/default-tiers.json` first — if the dispatch string is in `defaults`, use that. Otherwise pick by the heuristic in `lazy-core.agent-models § Step 7` (build/audit/plan/design → opus; mechanical formatters → haiku; retrieval/synthesis → sonnet; catch-all delegators → inherit).
+1. **Pick the tier**. Consult `${CLAUDE_PLUGIN_ROOT}/skills/lazy-core.agent-models/default-tiers.json` first — if the dispatch string is in `defaults`, use that. Otherwise pick by the heuristic in `lazy-core.agent-models § Step 7` (build/audit/plan/design → opus; mechanical formatters → haiku; retrieval/synthesis → sonnet; catch-all delegators → default).
 2. **Pick the scope**. Project agents (`.claude/agents/*.md`) → `./.claude/lazy.settings.json` under group `_project`. Plugin agents (`<plugin>/agents/*.md`) → follow the plugin's install scope; default global. Built-ins are seeded by `lazy-core.install`.
 3. **Write the entry**. Add `"<dispatch>": "<tier>"` under the correct group in `agent_models`. Preserve all other keys.
 4. **If the dispatch is now a canonical default for the ecosystem** (i.e. it's a built-in or LazyCortex plugin agent that every install should get the same tier for), also add it to `${CLAUDE_PLUGIN_ROOT}/skills/lazy-core.agent-models/default-tiers.json` so the wizard offers it as a template default to future installs.

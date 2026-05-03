@@ -32,6 +32,15 @@ This skill has <N> ordered steps. The executing agent MUST NOT skip, merge, reor
 One line per task in the canonical list, with its outcome word. A missing line is a bug.
 
 <!--
+## Failure modes
+
+Optional. Include only when the skill has documented user-visible aborts.
+Shape: bullet per failure with symptom → cause → fix. See `lazy-core.skill-writing § 8`.
+
+- **<symptom>** — <cause> → <fix>.
+-->
+
+<!--
 Authoring notes (delete before saving):
 
 - Conform to `lazy-core.skill-writing`:

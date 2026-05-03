@@ -116,6 +116,11 @@ If no: tell the user the repo is audit-clean and ready — they can run `gh repo
 - Remind: run `/lazy-guard.check-public` periodically or after major changes
 - Log results
 
+## Failure modes
+
+- **Step 4 won't proceed: "FAIL findings remain unresolved"** — at least one secret (category A) was not encrypted, template-ized, or redacted → re-run Step 3, choose encrypt / template-ize / redact for every FAIL finding, then continue.
+- **`gh repo edit --visibility public` was not run** — `gh` is not on PATH or is unauthenticated → install GitHub CLI and run `gh auth login`, then execute `gh repo edit --visibility public` manually when ready.
+
 ## Logging
 
 Log to `./.logs/claude/lazy-repo.mark-public/YYYY-MM-DD_HH-MM-SS.md`.

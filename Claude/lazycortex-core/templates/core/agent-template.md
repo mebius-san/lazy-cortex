@@ -2,6 +2,7 @@
 name: <namespace.name>
 description: <when to dispatch this agent, not just what it does — coordinator reads this to decide>
 tools: Read, Glob, Grep
+model: inherit
 ---
 # <Agent Title>
 

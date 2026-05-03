@@ -1,7 +1,7 @@
 ---
 name: lazy-core.agent-models
-description: "Interactively assign model tiers (haiku/sonnet/opus/inherit) to every dispatchable subagent missing from `lazy.settings.json`. Auto-routes each entry to its structurally-correct scope: `_user.*` → global file, `_project.*` → project file, `_builtin.*` → global (override with `--scope=project|global`). Cheap, standalone, idempotent — safe to re-run. Invoked directly or by `lazy-core.optimize` Phase 7."
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(date *), Bash(test *)
+description: "Interactively assign model tiers (haiku/sonnet/opus/default) to every dispatchable subagent missing from `lazy.settings.json`. Auto-routes each entry to its structurally-correct scope: `_user.*` → global file, `_project.*` → project file, `_builtin.*` → global (override with `--scope=project|global`). Cheap, standalone, idempotent — safe to re-run. Invoked directly or by `lazy-core.optimize` Phase 7."
+allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(date *), Bash(test *), Bash(python3 *)
 lazy_setup_phase: post-install
 ---
 # Fill agent_models
@@ -53,16 +53,23 @@ Record the parsed values in the report.
 
 ## Step 2: Load or initialize configs
 
-Read both `./.claude/lazy.settings.json` (project) and `~/.claude/lazy.settings.json` (user). For each:
+Load both settings files via `bin/lazy_settings.py`:
 
-- Missing or unparseable → treat as `{"version": 1, "agent_models": {}}` *in memory only*. Don't write yet.
-- Parseable → use as-is.
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_section
+from pathlib import Path
+proj = load_section(Path('.claude/lazy.settings.json'), 'agent_models')
+user = load_section(Path.home() / '.claude/lazy.settings.json', 'agent_models')
+# proj and user are section dicts; missing file → section dict containing only _version metadata returned automatically
+")
+```
 
-Project root is `git rev-parse --show-toplevel` or cwd (warn if not in a git repo).
+`load_section` handles missing files and applies any pending migrations — no manual "treat as empty" branching needed.
 
-Build an in-memory merged view: `projectConfig` wins per-group over `userConfig`. Flatten to `{dispatch_string: value}` for lookup in Step 4.
+Build an in-memory merged view: `projectConfig` wins per-group over `userConfig`. Flatten to `{dispatch_string: value}` for lookup in Step 4. Skip any top-level key whose value is not a dict (e.g. `_version: int`) — only group sub-dicts carry dispatch mappings. (Filter by shape, not by name, because `_user` / `_project` / `_builtin` are legitimate group-name keys that share the underscore prefix.)
 
-**Do not write in this step.** Writes happen in Step 7 only for scopes that actually receive new entries.
+**Do not write in this step.** Writes happen in Step 8 only for scopes that actually receive new entries.
 
 ## Step 3: Discover agents
 
@@ -77,7 +84,7 @@ For each, record: dispatch string, target group, plugin name (if applicable), so
 
 ## Step 4: Build missing-entries list
 
-For each discovered agent, if its dispatch string is absent from the flat map from Step 2, add it to the missing list. Entries explicitly set to `"inherit"` in either scope count as decided — exclude them.
+For each discovered agent, if its dispatch string is absent from the flat map from Step 2, add it to the missing list. Entries explicitly set to `"default"` in either scope count as decided — exclude them.
 
 If the missing list is empty → skip Steps 5–8, go to Step 9 with outcome `nothing to do`.
 
@@ -106,10 +113,6 @@ Per-group routing:
 
 Record the resolved destination per entry for Step 6's question body and Step 7's write plan.
 
-### File existence guarantee
-
-If any resolved destination file does not yet exist, initialize it in memory as `{"version": 1, "agent_models": {}}`. Actual file creation happens in Step 8 only if that destination receives at least one new entry.
-
 ## Step 6: Offer entries in three ordered batches
 
 Group missing entries into three batches in this order. Offer each non-empty batch as one `AskUserQuestion`. **Never present individual agents in Step 6** — only batches. Per-agent prompts happen in Step 7 only for entries the user explicitly routes there via `review each individually`.
@@ -135,14 +138,14 @@ For each non-empty batch, fire one `AskUserQuestion`:
 - **options** (exactly four — `AskUserQuestion` caps at 4):
   1. `accept all suggestions` *(Recommended)*
   2. `review each individually` — defer this batch's entries to Step 7's per-agent wizard. Suggested tier carries forward.
-  3. `mass-set to inherit` — record every entry in the batch as **planned** with tier `inherit`. Useful when a batch isn't worth tier-tuning right now but you want it out of the wizard.
+  3. `mass-set to default` — record every entry in the batch as **planned** with tier `default`. Useful when a batch isn't worth tier-tuning right now but you want it out of the wizard.
   4. `skip this batch for now` — record every entry as **skipped**; next run re-prompts the same batch.
 
 On answer:
 
 - `accept all` → for each entry: record **planned** `(destination, group, dispatch, suggested-tier)`. Remove from missing list.
 - `review each individually` → leave entries in missing list, tagged `review-bound` so Step 7 picks them up.
-- `mass-set to inherit` → record **planned** with tier `inherit` for every entry. Remove from missing list.
+- `mass-set to default` → record **planned** with tier `default` for every entry. Remove from missing list.
 - `skip this batch` → record **skipped** for every entry. Remove from missing list.
 
 Process batches strictly in order (1 → 2 → 3). Wait for the answer to each before showing the next.
@@ -163,22 +166,22 @@ For each entry tagged `review-bound` in Step 6 (and only those), fire a single `
   Suggested tier resolution order:
   1. `templateTier` from `default-tiers.json` if this dispatch string is in the template (always wins).
   2. Heuristic fallback:
-     - _builtin: Explore→haiku, Plan→opus, general-purpose→inherit, statusline-setup→haiku.
+     - _builtin: Explore→haiku, Plan→opus, general-purpose→default, statusline-setup→haiku.
      - *log*/*distill*/*tag*/*timeline* + description mentions rewriter/formatter/distill/prose/mechanical → haiku.
      - *review*/*audit*/*plan*/*design* → opus.
      - Otherwise → sonnet.
   ```
 - **options** (exactly four — `AskUserQuestion` caps at 4):
   1. `add as <suggested>` *(Recommended)*
-  2. `add as inherit` — fall back to global / harness default; use when this agent doesn't need a project-specific tier.
+  2. `add as default` — fall back to agent frontmatter / harness default; use when this agent doesn't need a project-specific tier.
   3. `add as <neighbor>` — the next-closest tier to the suggestion, picked deterministically:
      - suggested = `haiku` → neighbor = `sonnet`
      - suggested = `sonnet` → neighbor = `opus` (upgrade path; haiku is rarely the right manual override for a sonnet-default agent)
      - suggested = `opus` → neighbor = `sonnet`
-     - suggested = `inherit` → option 1 already covers inherit; replace option 2 with `add as sonnet` and option 3 with `add as haiku` (so the four become: `add as inherit (Recommended)`, `add as sonnet`, `add as haiku`, `skip`).
+     - suggested = `default` → option 1 already covers default; replace option 2 with `add as sonnet` and option 3 with `add as haiku` (so the four become: `add as default (Recommended)`, `add as sonnet`, `add as haiku`, `skip`).
   4. `skip` — decide later. Next run re-prompts.
 
-Rationale: `AskUserQuestion` allows at most 4 options. Showing every tier would force dropping options arbitrarily; this curated set always includes the recommendation, the inherit escape hatch, one explicit alternate near the recommendation, and skip.
+Rationale: `AskUserQuestion` allows at most 4 options. Showing every tier would force dropping options arbitrarily; this curated set always includes the recommendation, the default escape hatch, one explicit alternate near the recommendation, and skip.
 
 On answer:
 
@@ -191,8 +194,24 @@ One `AskUserQuestion` at a time. Wait for each answer before the next prompt.
 
 Group the planned writes from Steps 6 and 7 by destination file. For each destination that has at least one planned entry:
 
-1. If the file does not yet exist, `Write` with `{"version": 1, "agent_models": {}}` as base (creating parent dir with `mkdir -p` first if needed).
-2. Read the file fresh, apply all planned entries for this destination (creating missing groups on demand, preserving all existing keys — never overwrite; this loop only writes *missing* entries), and write back.
+1. Load the current section from the destination file via `load_section` (handles missing file transparently — no separate existence check needed).
+2. Apply all planned entries for this destination to the loaded section dict (creating missing group sub-keys on demand, preserving all existing keys — never overwrite; this loop only writes *missing* entries).
+3. Persist via `save_section`:
+
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_section, save_section
+from pathlib import Path
+dest = Path('<resolved-destination>')
+section = load_section(dest, 'agent_models')
+# apply planned entries:
+section.setdefault('<group>', {})
+section['<group>']['<dispatch>'] = '<tier>'
+save_section(dest, 'agent_models', section)
+")
+```
+
+`save_section` performs an atomic write and never discards unrelated sections in the file.
 
 If `dryRun = true`, skip all writes. Report what *would* have been written, per destination.
 
@@ -218,6 +237,10 @@ If the missing list was empty in Step 4, render: `nothing to do — all agents h
 ### Log
 
 Log the run to `./.logs/claude/lazy-core.agent-models/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (`git_sha` frontmatter, Actions + Result body). Use two separate steps: `Bash(mkdir -p ...)` then `Write`.
+
+## Failure modes
+
+- **`/lazy-core.agent-models` fails immediately: "invalid --scope value"** — an unrecognised flag or token was passed (only `--scope=auto|project|global` and `--dry-run` are accepted) → re-run with a valid flag.
 
 ## Notes
 

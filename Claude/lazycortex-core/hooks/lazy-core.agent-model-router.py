@@ -26,34 +26,53 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
+
+# Hooks run as standalone scripts (no package context). Add the plugin's
+# bin/ to sys.path so `lazy_settings` is importable.
+sys.path.insert(0, str(Path(__file__).parent.parent / "bin"))
+from lazy_settings import load_section  # noqa: E402
 
 TIER = {"haiku": 1, "sonnet": 2, "opus": 3}
-SENTINELS = {"inherit", None, ""}
+SENTINELS = {"default", None, ""}
 
 
-def _try_json(path: str) -> dict | None:
+def _safe_load(path: Path) -> dict:
+    """Load agent_models section, falling back to {} on any IO or parse error."""
+    if not path.exists():
+        return {}
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else None
-    except Exception:
-        return None
+        return load_section(path, "agent_models")
+    except (json.JSONDecodeError, OSError) as e:
+        print(
+            f"[lazy-core.agent-model-router] failed to load {path}: {e}",
+            file=sys.stderr,
+        )
+        return {}
 
 
 def load_config(cwd: str | None) -> dict:
-    """Merge user-scope config under project-scope (project wins per-group)."""
-    proj = _try_json(os.path.join(cwd or ".", ".claude", "lazy.settings.json")) or {}
-    user = _try_json(os.path.expanduser("~/.claude/lazy.settings.json")) or {}
-    merged: dict = {"agent_models": {}}
-    for src in (user, proj):  # project wins on key collisions within a group
-        groups = src.get("agent_models") if isinstance(src, dict) else None
-        if not isinstance(groups, dict):
-            continue
-        for g, entries in groups.items():
+    """Merge user-scope config under project-scope (project wins per-group).
+
+    Each scope is loaded via lazy_settings.load_section so that on-disk
+    migration runs transparently. The merge logic matches the original:
+    user groups are applied first, project groups win on collision.
+    """
+    user_path = Path.home() / ".claude" / "lazy.settings.json"
+    proj_path = Path(cwd or ".") / ".claude" / "lazy.settings.json"
+
+    user_section = _safe_load(user_path)
+    proj_section = _safe_load(proj_path)
+
+    merged: dict = {}
+    for section in (user_section, proj_section):  # project wins on key collisions within a group
+        for g, entries in section.items():
             if not isinstance(entries, dict):
-                continue
-            merged["agent_models"].setdefault(g, {}).update(entries)
-    return merged
+                continue  # skip metadata (`_version: int`, future timestamp fields, etc.).
+                          # Filtering by shape, not name, because `_user`/`_project`/`_builtin`
+                          # are legitimate group keys that share the underscore prefix.
+            merged.setdefault(g, {}).update(entries)
+    return {"agent_models": merged}
 
 
 def build_flat_map(cfg: dict) -> dict:
@@ -101,7 +120,7 @@ def main() -> None:
     elif configured is not None and configured not in TIER:
         print(
             f"[lazy-core.agent-model-router] unknown model {configured!r} "
-            f"for {subagent!r}, treating as inherit",
+            f"for {subagent!r}, treating as default",
             file=sys.stderr,
         )
         configured = None

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.lazycortex.runtime.{REPO_NAME}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{REPO_ROOT}/.claude/bin/lazy.runtime.sh</string>
+        <string>{REPO_ROOT}</string>
+    </array>
+    <key>WorkingDirectory</key><string>{REPO_ROOT}</string>
+    <key>KeepAlive</key><true/>
+    <key>RunAtLoad</key><true/>
+    <key>StandardOutPath</key><string>{REPO_ROOT}/.logs/lazy-core/runtime/launchd.out.log</string>
+    <key>StandardErrorPath</key><string>{REPO_ROOT}/.logs/lazy-core/runtime/launchd.err.log</string>
+</dict>
+</plist>
