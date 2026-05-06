@@ -7,6 +7,8 @@ from typing import Any
 CURRENT_VERSIONS = {
     "agent_models": 1,
     "lazy-core.runtime": 1,
+    "lazy-core.git": 1,
+    "lazycortex-review": 1,
 }
 
 def _migrations(section_key: str) -> dict[int, callable]:

@@ -50,15 +50,35 @@ def cancel_job(repo: Path, expert: str, job_id: str) -> None:
     if d.exists():
         shutil.rmtree(d)
 
-def register_routine(repo: Path, name: str, command: list[str], interval_sec: int, *, timeout_sec: int | None = None) -> None:
+def register_routine(repo: Path, name: str, cfg: dict | None = None, *,
+                     command: list[str] | None = None,
+                     interval_sec: int | None = None,
+                     timeout_sec: int | None = None) -> None:
+    """Register a routine in lazy-core.runtime.routines.
+
+    Two call shapes:
+      - Typed:  register_routine(repo, name, {"type": "inbox", "inbox_dir": ..., ...})
+      - Legacy: register_routine(repo, name, command=[...], interval_sec=N, timeout_sec=...)
+                (equivalent to type="subprocess")
+
+    Either way the cfg is validated via routine_types.validate_routine_entry
+    before being written.
+    """
+    from routine_types import validate_routine_entry
+    if cfg is None:
+        if command is None or interval_sec is None:
+            raise TypeError(
+                "register_routine: pass `cfg` (typed shape), "
+                "or pass `command` + `interval_sec` (legacy subprocess shape)"
+            )
+        cfg = {"command": list(command), "interval_sec": interval_sec}
+        if timeout_sec is not None:
+            cfg["timeout_sec"] = timeout_sec
+    validate_routine_entry(name, cfg)
     from lazy_settings import load_section, save_section
     settings = Path(repo) / ".claude/lazy.settings.json"
     section = load_section(settings, "lazy-core.runtime")
-    section.setdefault("routines", {})[name] = {
-        "interval_sec": interval_sec,
-        "command": command,
-        **({"timeout_sec": timeout_sec} if timeout_sec else {}),
-    }
+    section.setdefault("routines", {})[name] = cfg
     save_section(settings, "lazy-core.runtime", section)
 
 PROTECTED_ROUTINES = {"lazy-expert.pump"}

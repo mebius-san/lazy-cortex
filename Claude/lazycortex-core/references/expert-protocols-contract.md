@@ -9,10 +9,10 @@ A protocol file is the formal contract between a **consumer** (skill, agent, or 
 A protocol file is a plain markdown file at:
 
 ```
-<plugin>/.claude/protocols/<name>.md
+<plugin>/references/<name>.md
 ```
 
-It is referenced in `experts.settings.json` as `<plugin>:<name>` (e.g. `lazycortex-review:doc-review`).
+It is referenced in `experts.settings.json` as `<plugin>:<name>` (e.g. `lazycortex-review:doc-review`). The runtime resolver (`reference_resolver.resolve(ref, category="protocols", ...)`) maps the `protocols` category to the plugin's `references/` dir, matching the repo-wide convention used by every plugin's protocol/contract docs.
 
 **Scope**: a protocol file defines only the protocol-specific contract — the `kind` enum, `role` vocabulary, field shapes, and side-effect rules for one protocol. Standard job-dir and JSON shapes (§§ 2–3) apply universally and are not repeated per protocol.
 
@@ -241,4 +241,4 @@ Failures surface as `FAIL` findings; missing-but-optional content (e.g. § 4.5 "
 
 ## 7. Worked example
 
-See `lazycortex-review/.claude/protocols/doc-review.md` (forward reference — created by the dev-stage review redesign, not this document). That file is the canonical implementation of a full protocol against this contract.
+See `lazycortex-review/references/doc-review.md` (forward reference — created by the dev-stage review redesign, not this document). That file is the canonical implementation of a full protocol against this contract.

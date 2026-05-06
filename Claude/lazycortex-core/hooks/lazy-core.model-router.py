@@ -45,7 +45,7 @@ def _safe_load(path: Path) -> dict:
         return load_section(path, "agent_models")
     except (json.JSONDecodeError, OSError) as e:
         print(
-            f"[lazy-core.agent-model-router] failed to load {path}: {e}",
+            f"[lazy-core.model-router] failed to load {path}: {e}",
             file=sys.stderr,
         )
         return {}
@@ -92,7 +92,7 @@ def build_flat_map(cfg: dict) -> dict:
         for key, val in entries.items():
             if key in out and out[key] != val:
                 print(
-                    f"[lazy-core.agent-model-router] duplicate key {key!r} "
+                    f"[lazy-core.model-router] duplicate key {key!r} "
                     f"across groups; using {val!r}",
                     file=sys.stderr,
                 )
@@ -119,7 +119,7 @@ def main() -> None:
         configured = None  # explicit no-route
     elif configured is not None and configured not in TIER:
         print(
-            f"[lazy-core.agent-model-router] unknown model {configured!r} "
+            f"[lazy-core.model-router] unknown model {configured!r} "
             f"for {subagent!r}, treating as default",
             file=sys.stderr,
         )
@@ -136,7 +136,7 @@ def main() -> None:
             proposed = floor
     elif floor:
         print(
-            f"[lazy-core.agent-model-router] unknown "
+            f"[lazy-core.model-router] unknown "
             f"LAZY_AGENT_MODEL_FLOOR={floor!r}, ignoring",
             file=sys.stderr,
         )

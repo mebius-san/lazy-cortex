@@ -31,7 +31,7 @@ This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 Dispatch these four Explore agents **in a single message with four Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each returns the structured report from `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md`. Budget: "Report under 350 words".
 
-Severity vocabulary for this skill: `INFO` (measurement row or visible waiver) / `WARN` (recommendation or heuristic flag) / `FAIL` (structural violation — Agent B compliance checks across skill-writing, agent-writing, and rule-writing: missing preamble, invalid waiver, "Optional" heading, missing rule frontmatter or scope, oversize rule, code block > 10 lines, `AskUserQuestion` inside agent body).
+Severity vocabulary for this skill: `INFO` (measurement row or visible waiver, including dirty-tree waiver acknowledgements) / `WARN` (recommendation or heuristic flag, including dirty-tree write-without-commit findings) / `FAIL` (structural violation — Agent B compliance checks across skill-writing, agent-writing, hook-writing, and rule-writing: missing preamble, invalid waiver, "Optional" heading, missing rule frontmatter or scope, oversize rule, code block > 10 lines, `AskUserQuestion` inside agent body, hook script missing shebang, hook script crashing on malformed stdin).
 
 ### Agent A — always-loaded context
 
@@ -159,6 +159,15 @@ Missing files are a silent no-op — `load_section` returns a stub with `_versio
 7. **Broken artifact reference** — slash-commands, subagent-types, rule filenames, `references/…` paths, hook paths, `skills/<name>/SKILL.md` paths that don't resolve on disk → `[WARN]`. Markdown section headings (`## Phase 2.5`) are NOT checked.
 8. **Narrative padding (heuristic)** — same denylist as skill-writing §3 → `[WARN]`.
 9. **Authoring contract without template** — a rule counts as an *authoring contract* when its filename matches `*.writing.md` OR its body contains a heading line matching `^##\s.*[Aa]uthoring`. Authoring contracts MUST reference a template path under `<plugin>/templates/`; detection: grep the body for `templates/.*-template\.md`. No match → `[WARN]`. Finding text: `authoring rule has no template reference — Claude composing a new artifact from scratch can't see the contract; add a **Template:** pointer per lazy-core.scaffold`.
+
+**Dirty-tree write-without-commit (cross-cutting)** — applies to skill/command bodies, agent bodies, and hook scripts in scope:
+
+10. **Dirty-tree write-without-commit** — for every skill/command body, agent body, and hook script in scope, scan for write paths and verify each is paired with a commit:
+
+    - **Write paths to flag:** Markdown skill/agent/command bodies that invoke the `Write`, `Edit`, or `NotebookEdit` tools without an accompanying `mcp__git__git_commit` / Bash `git commit` reference in the same file. Python source bodies (`.py` files under hooks or skill `bin/` dirs) where `.write_text(`, `.write(`, or `subprocess.run(["git", ..., "add"`, etc., calls have no matching `subprocess.run(["git", ..., "commit"`, etc., reference.
+    - **Severity:** `[WARN]` by default. Downgrade to `[INFO]` when the file declares `dirty-tree-waiver: "<reason>"` in frontmatter (skills/agents/commands) or `# dirty-tree-waiver: <reason>` as a comment header (hooks/scripts).
+    - **Reference:** `lazy-core.skill-writing § 6` (canonical clause) and `lazy-core.hook-writing § 4` (hook-specific framing).
+    - **Heuristic note:** the check is a regex/grep heuristic, not a static analyzer. False positives (e.g., a write that is committed by a parent caller in a different file) can be silenced via the waiver. Author judgement governs.
 
 ### Agent C — help-doc coverage and staleness
 
@@ -498,7 +507,7 @@ Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings
 ### Recommendations
 
 - Memory index > 5 KB → suggest consolidation.
-- `python3` missing or below 3.8 → install/upgrade Python so plugin hooks (distill-trigger, lazy-guard.*, agent-model-router, pub.*) can run.
+- `python3` missing or below 3.8 → install/upgrade Python so plugin hooks (distill-trigger, lazy-guard.*, model-router, pub.*) can run.
 - Hardcoded paths found → run `/lazy-core.doctor` for details.
 - Missing Execution-Discipline preamble → add per `lazy-core.skill-writing § 1` (or `lazy-core.agent-writing § 4`), or declare `execution-discipline-waiver: "<reason>"` in frontmatter with a concrete justification.
 - Rule missing scope or waiver → add a `paths:` block-list (preferred) or `always_loaded: "<reason>"` per `lazy-core.rule-writing § 1`.

@@ -1,76 +1,77 @@
 ---
 role: plugin-status
-stage: minor
+stage: major
 plugin: lazycortex-core
-current_version: 0.6.4
-published_version: 0.3.0
-generated_at: 2026-05-03 16:29:09 UTC
+current_version: 1.3.0
+published_version: 0.6.4
+generated_at: 2026-05-06 10:57:45 UTC
 iconize_icon: LiFileClock
-iconize_color: "#fde68a"
+iconize_color: "#fca5a5"
 ---
-
 # lazycortex-core — pending changes
 
-**Status**: changed — `plugin.json` version `0.6.4` has not been published yet (last recorded release: `0.3.0`).
+**Status**: changed — `plugin.json` version `1.3.0` has not been published yet (last recorded release: `0.6.4`).
 
-## Commits since `0.3.0` (56)
+## Highlights since `0.6.4`
 
-- `4736e0f` docs(lazycortex-core): add 5 expert-runtime walkthroughs + 2 new scenarios
-- `87a0fd5` refactor(lazycortex-core): move runtime shim to .claude/bin/lazy.runtime.sh
-- `ac5a41c` fix(lazycortex-core): runtime daemon stabilization + .experts/ FS layout
-- `7bcf21e` refactor(pub.status): convert from skill to agent
-- `9a71ab0` fix(lazycortex-core): drop stale SKILL.md leftovers from incomplete expert→lazy-expert rename
-- `0e0a654` refactor(lazycortex-core)!: rename loop→runtime everywhere (loop_daemon.py, templates/loop/, plist, service, CLI subcommand, prose)
-- `858bf76` refactor(lazycortex-core): rename lazy-core.loop → lazy-core.runtime + lazy-core.routine-* → lazy-routine.*
-- `b8f041a` refactor(lazycortex-core): rename lazy-core.expert* skills and routine to lazy-expert.* namespace
-- `fcc515f` docs(specs): brainstorm expert runtime + review architecture redesign
-- `5a0c5a3` chore(lazycortex-core): sync READMEs and marketplace.json after expert runtime addition
-- `59afe3f` fix(lazycortex-core): restore A3+A4 fix-ups silently reverted by C2 commit
-- `7a72d1f` chore(lazycortex-core): sync READMEs and marketplace.json after expert runtime addition
-- `db4ca7a` docs(lazycortex-core): add expert runtime + loop daemon to overview and README
-- `09d1aaa` feat(lazycortex-core): bump minor version for expert runtime + loop daemon
-- `69e9f7d` feat(lazycortex-core): add loop runtime fix offers to lazy-core.doctor
-- `a7442ec` feat(lazycortex-core): extend lazy-core.audit with expert + loop runtime checks
-- `982945b` feat(lazycortex-core): extend lazy-core.install with loop bootstrap, expert wizard, and supervisor offer
-- `519e4e7` feat(lazycortex-core): add lazy-core.routine-unregister skill
-- `0dafbaf` feat(lazycortex-core): add lazy-core.routine-register skill
-- `dd158e7` feat(lazycortex-core): add lazy-core.expert-cancel-job skill
-- `c6c89e1` feat(lazycortex-core): add lazy-core.expert-list-jobs skill
-- `5991248` feat(lazycortex-core): add lazy-core.expert-collect-job skill
-- `f2a5b6a` feat(lazycortex-core): add lazy-core.expert-dispatch-job skill
-- `a59cc9f` docs(lazycortex-core): add lazy-core.settings-v2 architecture reference
-- `7220087` docs(lazycortex-core): add lazy-core.loop-runtime architecture reference
-- `eb0972c` docs(lazycortex-core): add expert-protocols-contract reference
-- `d7d9eae` fix(lazycortex-core): correct resolve_routine_command cache layout (registry/plugin/version/bin)
-- `89e0f22` test(lazycortex-core): e2e loop daemon integration test
-- `50e61cf` feat(lazycortex-core): bootstrap default expert-pump routine in loop registry
-- `22e52c3` feat(lazycortex-core): add CLI dispatcher with expert-pump-once and loop subcommands
-- `3975074` feat(lazycortex-core): implement expert-pump-once with retry policy and cleanup
-- `4850148` fix(lazycortex-core): correct reference_resolver cache layout (registry/plugin/version/category)
-- `0d8d9fe` feat(lazycortex-core): add reference_resolver for agent/protocol references
-- `0575441` feat(lazycortex-core): add expert_runtime helpers (dispatch/collect/list/cancel/register_routine)
-- `902b52a` feat(lazycortex-core): add launchd plist and systemd unit templates for loop daemon
-- `7049d24` feat(lazycortex-core): structured per-routine logs under .logs/lazy-core/loop/
-- `40b2d94` docs(lazycortex-core): clarify retry boundary lives in routine implementations, not loop daemon
-- `174c1c3` test(lazycortex-core): cover routine timeout enforcement; add daemon -B intent comment + git stderr passthrough
-- `0cdfd70` feat(lazycortex-core): add daemon.git checkout/pull/push at iteration boundaries
-- `b011709` feat(lazycortex-core): resolve routine commands via plugin cache and run via subprocess
-- `5cecabf` feat(lazycortex-core): scaffold loop_daemon.py with serial scheduling primitives
-- `5b4cc2a` fix(lazycortex-core): correct lazy-core.doctor root-version check ordering (raw Read before load_section)
-- `c410e2d` refactor(lazycortex-core): route lazy-core.doctor through lazy_settings helper
-- `0ba7b00` refactor(lazycortex-core): route lazy-core.audit through lazy_settings helper
-- `15766cc` fix(lazycortex-core): correct lazy-core.agent-models prose to use ${CLAUDE_PLUGIN_ROOT}, drop stale sub-section
-- `7e0c3eb` refactor(lazycortex-core): route lazy-core.agent-models through lazy_settings helper
-- `36b7365` fix(lazycortex-core): make load_section write-only-on-migration; add hook diagnostic for malformed settings
-- `db6b087` refactor(lazycortex-core): route agent-model-router through lazy_settings helper
-- `e3dc60a` feat(lazycortex-core): scaffold migration ladder for agent_models and lazy-core.loop
-- `bde3ba0` feat(lazycortex-core): add lazy_settings helper with per-section _version migration ladder
-- `9b508b6` docs(lazycortex-core): add 4 walkthroughs + faq, expand troubleshooting, regen help-block
-- `d211a6b` docs(lazycortex-core): regen help/ trial diagrams via /lazy-diagram.draw
-- `0b41f27` fix(lazycortex-diagram): use diagramPadding:5 for sequence/timeline, not diagramMarginX/Y
-- `934c827` fix(lazycortex-diagram): populate sequence themeVariables in scheme, regenerate walkthrough diagram
-- `b6dc0ab` fix(lazycortex-diagram): add semicolon forbidden pattern, fix pub.help-writer dispatch
-- `9c7110a` refactor(lazycortex-diagram): three-layer separation — rule/template/scheme with <<init>> sentinel
+- Cleaner hook naming — the `agent-model-router` PreToolUse hook is now `model-router` — and a refreshed user-facing help layout: six functional blocks (install-and-audit, guardian, runtime, experts, agent-models, git-coordination) plus four end-to-end walkthroughs (make-repo-public, setup-runtime, setup-routine, setup-expert) replace the prior per-skill walkthrough tree.
+
+## Commits since `0.6.4` (54)
+
+- `77de0b7` chore(lazycortex-core): bump minor to 1.3.0 — lazy-core.git staging mutex
+- `8075a0b` feat(lazycortex-core): /lazy-core.git-unlock skill (confirmed manual break)
+- `550c57d` fix(lazycortex-core): /lazy-core.git-status SKILL.md — add Execution discipline preamble and Report section
+- `ea16ec1` feat(lazycortex-core): /lazy-core.git-status skill (read-only inspect)
+- `890aaa7` fix(lazycortex-core): re-apply lazy-core.git-guard hook registration
+- `acd5a89` feat(lazycortex-core): add lazy-core.git rule (always-loaded staging mutex advisory)
+- `4f51c1c` feat(lazycortex-core): register lazy-core.git-guard for git Pre/PostToolUse
+- `e5ac56f` feat(lazycortex-core): git-guard event logging to .logs/claude/lazy-core.git-guard/
+- `7d4c64a` feat(lazycortex-core): git-guard PostToolUse handler (release if index empty)
+- `11b598b` feat(lazycortex-core): git-guard PreToolUse handler (acquire/refuse/diagnostic)
+- `dc1dd38` feat(lazycortex-core): scaffold lazy-core.git-guard hook with stdin/gate/dispatch
+- `0f1142f` feat(lazycortex-core): release_if_index_empty + load_config (lazy-core.git section)
+- `61eefca` feat(lazycortex-core): acquire() with reentry, jittered wait, break, refuse
+- `0cc41f2` feat(lazycortex-core): break-the-lock heuristics (dead pid / host / stale-idle)
+- `90f58d7` feat(lazycortex-core): inspect() + git-state helpers (branch, index mtime, empty)
+- `a7e71d4` feat(lazycortex-core): atomic lock file IO with tolerant read
+- `f17bf6b` feat(lazycortex-core): staging_lock.resolve_session_id with ancestor-PID fallback
+- `c5cb5b8` feat(lazycortex-core): scaffold staging_lock helper module
+- `c8e2b0d` docs: refresh READMEs + marketplace via pub.sync-readmes
+- `89f673f` feat(lazycortex-observe): scaffold new public plugin (Task D1)
+- `c881a10` fix(lazycortex-core): add retention to runtime log directory
+- `53af734` feat(lazycortex-core): capture token usage from claude -p in expert pump
+- `8d7cd6f` docs(lazycortex-core): document runtime metrics + bump 1.2.0 (minor)
+- `afbf4a0` feat(lazycortex-core): wire metrics into runtime daemon (opt-in)
+- `b4f82b8` feat(lazycortex-core): add stdlib-only runtime metrics primitive
+- `243d227` docs(specs): add lazy-core.git staging-window mutex spec
+- `a682b36` feat(lazycortex-core): scaffold + writing rule for protocol/schema/contract references
+- `adff099` chore(lazycortex-core): bump major to 1.0.0 — routine types + working-tree protection
+- `5c0a94c` docs(lazycortex-core): document routine types + state + halt + contract
+- `79f99d6` feat(lazycortex-core): add lazy-runtime.recover skill + recover.py
+- `d34fac6` feat(lazycortex-core): type-aware lazy-routine.register wizard
+- `823a727` feat(lazycortex-core): inject expert runtime contract into every expert run
+- `5fa52ef` feat(hook-writing): codify § 5 no-foreign-staged + Fix 1 + scaffold
+- `2a348c8` feat(lazycortex-core): add expert runtime contract template
+- `06aa0d2` feat(lazycortex-core): per-job halt detection in expert_pump
+- `95c4bc8` feat(lazycortex-core): daemon-wide halt on uncommitted working tree
+- `eb21907` feat(lazycortex-core): git routine type (watch new_commits|new_files|...)
+- `1db4223` feat(lazycortex-core): schedule routine type with stdlib cron parser
+- `e196363` feat(lazycortex-core): inbox routine type
+- `37211a3` feat(lazycortex-core): persist last_run + introduce dispatcher
+- `4780b53` feat(lazycortex-core): introduce routine type taxonomy + validator
+- `4e8490a` feat(lazycortex-core): add runtime_state module (atomic state.json)
+- `b9c629c` refactor(pub.help): redesign help-doc model — blocks + walkthroughs + per-plugin lifecycle
+- `3b1ccb1` feat(lazy-core.audit): Agent B — dirty-tree write-without-commit heuristic
+- `bc6f2d6` chore(lazycortex-core): bump 0.7.0 — new hook-writing rule
+- `1f39b0c` feat(lazy-core.hook-writing): new authoring rule for Claude Code lifecycle hooks
+- `bd60ea4` feat(lazy-core.agent-writing): cross-reference skill-writing § 6 (no dirty tree)
+- `f7f6745` feat(lazy-core.skill-writing): § 6 no dirty working tree + renumber
+- `ecaa0a3` fix(pub.status): drop blank line in render_note — flap zone with iconize-sync rewriter
+- `38101c5` docs(lazycortex-review): 1.0.0 release docs — README/CHANGELOG/marketplace
+- `dd75363` feat(lazycortex-review,lazycortex-core): register lazycortex-review settings section v1 + legacy-config migrator
+- `dcac5c7` feat(lazycortex-review): plugin-shipped review_doctor + historian experts for doc-review protocol
+- `cc4561f` fix(lazycortex-core): decouple lazy-core.install runtime steps from plugin scope
+- `5b54252` docs(lazycortex-core): regenerate help docs + CHANGELOG 0.6.4 + README sync
 
 ---
 *Generated by `pub.status`. Do not hand-edit — re-run the agent to refresh.*

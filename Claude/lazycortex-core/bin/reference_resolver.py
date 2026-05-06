@@ -21,13 +21,24 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
     category must be one of {'agents', 'protocols'}.
     Raises ReferenceError if the resolved path does not exist.
     """
+    # Plugin-shipped protocols live under <plugin-root>/references/ — the
+    # repo-wide convention used by every plugin's own protocol/contract docs
+    # (iconize-protocol.md, expert-protocols-contract.md, doc-review.md).
+    # Agents stay under <plugin-root>/agents/. Consumer-local resolution
+    # (no plugin prefix) keeps the canonical Claude Code shape
+    # <repo>/.claude/<category>/<name>.md.
+    # All branches map category to the on-disk directory the same way:
+    # protocols live in `references/`, agents live in `agents/`. The mapping
+    # applies uniformly to plugin-prefixed, user-scope, and bare references.
+    plugin_dir_for_category = {"protocols": "references", "agents": "agents"}
+    dir_name = plugin_dir_for_category.get(category, category)
     if ":" in ref:
         scope, name = ref.split(":", 1)
         if scope == "user":
-            p = Path.home() / ".claude" / category / f"{name}.md"
+            p = Path.home() / ".claude" / dir_name / f"{name}.md"
         else:
             cache = Path.home() / ".claude/plugins/cache"
-            # Real layout: cache/<registry>/<plugin>/<version>/<category>/<name>.md
+            # Real layout: cache/<registry>/<plugin>/<version>/<dir>/<name>.md.
             # Glob finds all <registry>/<plugin> dirs under any registry prefix.
             plugin_dirs = list(cache.glob(f"*/{scope}"))
             if not plugin_dirs:
@@ -40,9 +51,9 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
                 raise ReferenceError(f"no versions cached for plugin: {scope}")
             # Pick the latest version by lexicographic sort (consistent with runtime_daemon).
             latest = sorted(all_versions, key=lambda v: v.name, reverse=True)[0]
-            p = latest / category / f"{name}.md"
+            p = latest / dir_name / f"{name}.md"
     else:
-        p = Path(repo) / ".claude" / category / f"{ref}.md"
+        p = Path(repo) / ".claude" / dir_name / f"{ref}.md"
     if not p.exists():
         raise ReferenceError(f"{category} not found: {ref} → {p}")
     return p

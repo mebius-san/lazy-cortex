@@ -1,27 +1,26 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-05-03
+last_regen: 2026-05-06
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: pre-commit hook silent → hook-not-firing; check-public producing wrong findings → split on waiver concern (yes → waiver-mismatch; no → author-warn); MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public gh missing → gh-not-installed; lazy-core.optimize or doctor stalls → skill-stalls; author-warn fires after setting public_author → author-mismatch; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; routine register name invalid → routine-name-format; routine already registered → routine-conflict; unregister pump without force → pump-protected; daemon stalled → daemon-stale."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: pre-commit hook silent → hook-not-firing; MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public FAIL findings → mark-public-fail-unresolved; lazy-repo.mark-public gh missing → gh-not-installed; doctor or audit stalls → skill-stalls; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; routine register name invalid → routine-name-format; routine already registered → routine-conflict; unregister pump without force → pump-protected; daemon stalled → daemon-stale; runtime recover still dirty → recover-still-dirty; audit experts json invalid → experts-json-invalid; audit reference did not resolve → ref-unresolvable; doctor routine command unresolvable → routine-command-missing; lazy-core.audit global rules empty → audit-global-empty."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
-  - lazy-core.agent-models
-  - lazy-repo.mark-public
-  - lazy-guard.allow-mcp
-  - lazy-core.setup
-  - lazy-guard.check-public
-  - lazy-core.doctor
   - lazy-core.audit
-  - lazy-core.optimize
+  - lazy-core.doctor
+  - lazy-core.setup
+  - lazy-core.agent-models
   - lazy-expert.dispatch-job
   - lazy-expert.collect-job
-  - lazy-expert.list-jobs
   - lazy-expert.cancel-job
+  - lazy-expert.list-jobs
+  - lazy-guard.allow-mcp
+  - lazy-repo.mark-public
   - lazy-routine.register
   - lazy-routine.unregister
+  - lazy-runtime.recover
 ---
 # Troubleshooting
 
@@ -32,16 +31,6 @@ source_skills:
 **Likely cause**: `.guard-waivers.json` is missing from the repo root. The pre-commit hook uses the presence of this file as the opt-in signal — without it, scanning is disabled.
 
 **Fix**: Run `/lazy-repo.mark-public`. The skill creates `.guard-waivers.json` at the repo root with the correct schema (and any `public_scopes` you select), which is the opt-in signal that activates the hook. From the next commit onward, every `git commit` triggers the scan automatically.
-
----
-
-## `/lazy-guard.check-public` reports findings I already waived
-
-**Symptom**: A finding that has a waiver entry in `.guard-waivers.json` keeps reappearing in the report.
-
-**Likely cause**: The waiver's `pattern`, `check`, or `scope` field doesn't match the finding exactly. Patterns are case-insensitive regex; the `scope` is a glob against the file path; `check` must equal the finding's check ID or `"*"`. A common mistake is leaving `scope` as a too-specific file path when the same match appears in multiple files.
-
-**Fix**: Re-run `/lazy-guard.check-public`. The skill re-scans, surfaces the still-firing finding, and offers the *Add waiver* fix strategy (S4) again — when you provide a broader `pattern`/`scope` (the skill defaults to a permissive shape and tightens on confirmation), it rewrites the existing entry. The skill also ignores any waiver whose `expires` date has already passed, so an old expired entry resurfaces here as a candidate to renew.
 
 ---
 
@@ -95,17 +84,7 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 **Likely cause**: `lazy-core.agent-models/default-tiers.json` inside the plugin cache cannot be read or parsed. This file is the single source of truth for built-in subagent model tiers; the skill refuses to fall back to hardcoded values to prevent silent drift.
 
-**Fix**: Reinstall `lazycortex-core` by removing the cached copy and running `/plugin update lazycortex-core@lazycortex`, then re-run `/lazy-core.install`.
-
----
-
-## `/lazy-core.agent-models` fails immediately with "invalid --scope value"
-
-**Symptom**: Running `/lazy-core.agent-models` (or `/lazy-core.optimize` Phase 7) produces an error about an unrecognised flag.
-
-**Likely cause**: A flag other than `--scope=auto`, `--scope=project`, `--scope=global`, or `--dry-run` was passed to the skill. Any unrecognised token causes an immediate fail.
-
-**Fix**: Re-run with a valid flag. Valid scope values are `auto` (default), `project`, and `global`. Example: `/lazy-core.agent-models --scope=project`.
+**Fix**: Reinstall `lazycortex-core` by running `/plugin update lazycortex-core@lazycortex`, then re-run `/lazy-core.install`.
 
 ---
 
@@ -119,6 +98,86 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
+## `/lazy-core.audit` exits with "experts.settings.json is not valid JSON"
+
+**Symptom**: Running `/lazy-core.audit` produces an error reporting that `experts.settings.json` is not valid JSON.
+
+**Likely cause**: The file was hand-edited and broke its JSON syntax, or a partial write left it in a truncated state.
+
+**Fix**: Run `/lazy-core.install`. The install skill's expert-add wizard re-scaffolds `experts.settings.json` by merging a fresh `{"_version": 1}` base with any previously accepted expert entries — it does not require you to re-register experts if you provide the same names during the wizard. If you want to correct the file manually, inspect it at `.experts/experts.settings.json` and fix the syntax, then re-run `/lazy-core.audit` to confirm.
+
+---
+
+## `/lazy-core.audit` reports an expert agent or protocol reference "did not resolve"
+
+**Symptom**: The expert-runtime section of the `/lazy-core.audit` report contains a FAIL like "expert `<key>`: agent reference `<value>` did not resolve" or "protocol reference `<value>` did not resolve".
+
+**Likely cause**: The `agent` or `protocol` field in `experts.settings.json` uses an unrecognised format, or the artifact it points to is no longer installed. Valid formats are `<plugin-name>:<agent-stem>`, `user:<stem>`, or bare `<stem>`.
+
+**Fix**: Run `/lazy-core.install` to re-register the affected expert — the wizard re-resolves the agent and protocol references and writes only the fields that pass validation. If the referenced plugin has been removed, install it first or update the expert entry to point to a valid replacement.
+
+---
+
+## `/lazy-core.agent-models` fails immediately with "invalid --scope value"
+
+**Symptom**: Running `/lazy-core.agent-models` (or `/lazy-core.optimize` Phase 7) produces an error about an unrecognised flag.
+
+**Likely cause**: A flag other than `--scope=auto`, `--scope=project`, `--scope=global`, or `--dry-run` was passed to the skill. Any unrecognised token causes an immediate fail.
+
+**Fix**: Re-run with a valid flag. Valid scope values are `auto` (default), `project`, and `global`. Example: `/lazy-core.agent-models --scope=project`.
+
+---
+
+## `/lazy-core.doctor` or `/lazy-core.audit` stalls mid-run
+
+**Symptom**: One of the multi-phase skills appears to stop making progress after completing a few phases.
+
+**Likely cause**: These skills use `TaskCreate` to track each phase. A still-`pending` task is treated as a bug by the skill's execution discipline — it will refuse to proceed to the report step until every prior task is either `completed` or explicitly `skipped`. A context compaction between turns can occasionally leave the task list in an inconsistent state.
+
+**Fix**: Start a fresh session and re-run the skill. Both `/lazy-core.doctor` and `/lazy-core.audit` are idempotent — re-running is safe. If the stall is consistent, run `/lazy-core.audit` first (it is the lighter read-only scan) to confirm the project context loads correctly before re-running the doctor.
+
+---
+
+## `/lazy-core.doctor` Fix L1: "launchctl kickstart" fails with "No such process"
+
+**Symptom**: Accepting the "Restart via supervisor" fix offer (Fix L1) from `/lazy-core.doctor` fails with "No such process" from `launchctl`.
+
+**Likely cause**: The launchd plist for the runtime daemon has been written to `~/Library/LaunchAgents/` but has not yet been loaded via `launchctl load`. `launchctl kickstart` can only restart a service that launchd already knows about.
+
+**Fix**: Run `launchctl load ~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` manually from your terminal, then re-run `/lazy-core.doctor` and accept the Fix L1 restart offer again. If the plist file is missing, re-run `/lazy-core.install` to reinstall the supervisor.
+
+---
+
+## `/lazy-core.doctor` Fix L3: routine command path does not exist
+
+**Symptom**: `/lazy-core.doctor` reports a FAIL on a routine under `lazy-core.runtime.routines` with message "routine `<name>` command path does not exist: `<path>`".
+
+**Likely cause**: The plugin that registered this routine has been removed or updated, leaving behind a stale `command` path in `lazy.settings.json` that no longer resolves to an installed plugin binary.
+
+**Fix**: Accept the "Unregister" offer in the doctor's Fix L3 prompt to remove the stale routine entry via `/lazy-routine.unregister`. If the plugin that owned the routine is still installed, re-run `/lazy-core.install` for that plugin to re-register it with the correct current bin path.
+
+---
+
+## `/lazy-core.setup` stops: user declined the confirmation
+
+**Symptom**: `/lazy-core.setup` exits at Step 4 without running any child skills, with a message that setup was aborted.
+
+**Likely cause**: The confirmation prompt at Step 4 (Confirm) was answered with "abort". The skill halts before executing any children when the user declines the plan.
+
+**Fix**: Re-run `/lazy-core.setup` when ready to proceed. All discovered children are idempotent — those that ran in a prior partial execution will simply complete again cleanly.
+
+---
+
+## `/lazy-core.setup` reports one or more child skills failed
+
+**Symptom**: `/lazy-core.setup` completes its run but the report shows one or more child skills under the "failed" section with a reason.
+
+**Likely cause**: A child skill (such as `/lazy-core.install`, `/lazy-guard.allow-mcp`, or `/lazy-core.agent-models`) encountered a failure that appears in its own report. `/lazy-core.setup` never aborts the chain on a child failure — it collects all results and surfaces them together.
+
+**Fix**: Read the reason listed per failed child in the setup report. Address the root cause for each (the other entries in this guide cover the most common child failure modes). Then re-run `/lazy-core.setup` — it is idempotent, so children that already succeeded will complete cleanly again and the previously-failed ones will be retried.
+
+---
+
 ## MCP tools keep prompting for permission after running `/lazy-guard.allow-mcp`
 
 **Symptom**: You ran `/lazy-guard.allow-mcp` for a server but Claude Code still asks for permission every time a tool from that server is called.
@@ -127,7 +186,7 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 **Likely cause 2**: The server's tools fall into the "medium-risk / skip" bucket — these are intentionally left out of both `allow` and `ask` lists so Claude Code prompts once per call for the user to decide in context. This is the intended behaviour for tools in that bucket.
 
-**Fix for cause 1**: Check which file has the `mcp__<server>__*` entries and consolidate them in `settings.local.json`. Re-run `/lazy-guard.allow-mcp` — it will strip cross-scope duplicates automatically.
+**Fix for cause 1**: Re-run `/lazy-guard.allow-mcp` — it will detect the cross-scope duplicates and strip the redundant entries from the tracked `settings.json` automatically after per-entry confirmation.
 
 **Fix for cause 2**: If you want the tool always allowed without a prompt, run `/lazy-guard.allow-mcp` again and explicitly override the classifier for that tool when prompted.
 
@@ -173,53 +232,13 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
-## `/lazy-core.optimize` or `/lazy-core.doctor` stalls mid-run
-
-**Symptom**: One of the multi-phase skills appears to stop making progress after completing a few phases.
-
-**Likely cause**: These skills use `TaskCreate` to track each phase. A still-`pending` task is treated as a bug by the skill's execution discipline — it will refuse to proceed to the report step until every prior task is either `completed` or explicitly `skipped`. A context compaction between turns can occasionally leave the task list in an inconsistent state.
-
-**Fix**: Start a fresh session and re-run the skill. Both `/lazy-core.optimize` and `/lazy-core.doctor` are idempotent — re-running is safe. If the stall is consistent, run `/lazy-core.audit` first (it's a lighter read-only scan) to confirm the project context loads correctly.
-
----
-
-## Author identity keeps appearing as a WARN even after setting `public_author`
-
-**Symptom**: `/lazy-guard.check-public` keeps flagging B4 (author identity in manifests) as WARN even though you've added a `public_author` block to `.guard-waivers.json`.
-
-**Likely cause**: The `public_author.name` in the waiver file doesn't exactly match the literal string found in the manifest. The auto-waive logic does a case-sensitive string equality check — not a regex match.
-
-**Fix**: Re-run `/lazy-guard.check-public`. In Phase 5 (Fix), the skill walks each unresolved B4 finding and offers to set or update the top-level `public_author` block with the literal string from your manifest — name match by default, email match if your manifest uses an email field. Once the value matches the audit's B4 capture exactly, subsequent scans auto-flip those findings to `WAIVED`.
-
----
-
-## `/lazy-core.setup` stops: user declined the confirmation
-
-**Symptom**: `/lazy-core.setup` exits at Step 4 without running any child skills, with a message that setup was aborted.
-
-**Likely cause**: The confirmation prompt at Step 4 (Confirm) was answered with "abort". The skill halts before executing any children when the user declines the plan.
-
-**Fix**: Re-run `/lazy-core.setup` when ready to proceed. All discovered children are idempotent — those that ran in a prior partial execution will simply complete again cleanly.
-
----
-
-## `/lazy-core.setup` reports one or more child skills failed
-
-**Symptom**: `/lazy-core.setup` completes its run but the report shows one or more child skills under the "failed" section with a reason.
-
-**Likely cause**: A child skill (such as `/lazy-core.install`, `/lazy-guard.allow-mcp`, or `/lazy-core.agent-models`) encountered a failure that appears in its own report. `/lazy-core.setup` never aborts the chain on a child failure — it collects all results and surfaces them together.
-
-**Fix**: Read the reason listed per failed child in the setup report. Address the root cause for each (the other entries in this guide cover the most common child failure modes). Then re-run `/lazy-core.setup` — it is idempotent, so children that already succeeded will complete cleanly again and the previously-failed ones will be retried.
-
----
-
 ## An agent dispatches to the default model despite a tier being configured
 
-**Symptom**: An agent you assigned a tier via `/lazy-core.agent-models` (e.g. `opus`) runs on the default model instead. The `agent-model-router` hook fires without applying the configured tier.
+**Symptom**: An agent you assigned a tier via `/lazy-core.agent-models` (e.g. `opus`) runs on the default model instead. The `model-router` hook fires without applying the configured tier.
 
 **Likely cause**: The tier value stored in `lazy.settings.json` is not one of the three recognised strings (`haiku`, `sonnet`, `opus`). A typo (e.g. `"sonnet-3-7"`, `"claude-opus"`) causes the hook to treat the entry as unset and fall through to the default model. The hook emits a warning to stderr but never blocks the dispatch.
 
-**Fix**: Run `/lazy-core.agent-models` to review and correct the entries. The skill overwrites only missing entries by default; to replace an incorrect value, open a fresh wizard run with `--scope=project` or `--scope=global` (matching where the bad entry lives) — the wizard will see the existing entry and skip it. Instead, edit `lazy.settings.json` by re-running `/lazy-core.agent-models` after temporarily removing the bad entry, or run `/lazy-core.doctor` which flags unrecognised tier values as a configuration error and offers to fix them.
+**Fix**: Run `/lazy-core.agent-models` to review and correct the entries. The skill fills only missing entries by default — to replace an incorrect value, remove the bad entry from `lazy.settings.json` first (the skill will then detect it as missing and prompt you to fill it in), or run `/lazy-core.doctor` which flags unrecognised tier values as a configuration error and offers to fix them.
 
 ---
 
@@ -237,9 +256,9 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 **Symptom**: An agent routes to an unexpected model tier. Inspecting `lazy.settings.json` reveals the same dispatch string (e.g. `general-purpose`) listed under two different group keys with different tier values.
 
-**Likely cause**: The `agent-model-router` hook flattens all groups at load time. When the same dispatch string appears in more than one group, the last group processed wins and a warning is emitted to stderr. The winning entry may not be the one you intended.
+**Likely cause**: The `model-router` hook flattens all groups at load time. When the same dispatch string appears in more than one group, the last group processed wins and a warning is emitted to stderr. The winning entry may not be the one you intended.
 
-**Fix**: Run `/lazy-core.agent-models` to audit the current state. After the skill reports, manually remove the duplicate entry from the group where it should not appear — the skill writes only missing entries and will not remove duplicates automatically. Then verify the intended tier is the sole remaining entry for that dispatch string. Running `/lazy-core.doctor` will also flag cross-group duplicate keys as a configuration error.
+**Fix**: Run `/lazy-core.agent-models` to audit the current state. After the skill reports, remove the duplicate entry from the group where it should not appear — the skill writes only missing entries and will not remove duplicates automatically. Then verify the intended tier is the sole remaining entry for that dispatch string. Running `/lazy-core.doctor` will also flag cross-group duplicate keys as a configuration error.
 
 ---
 
@@ -273,6 +292,16 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
+## `/lazy-expert.cancel-job` reports "Job not found"
+
+**Symptom**: Running `/lazy-expert.cancel-job` produces a message like "Job `<job_id>` not found for expert `<expert_name>`."
+
+**Likely cause**: The job directory does not exist — either the job was never dispatched under that `expert_name` and `job_id` combination, or it was already cancelled and its directory removed.
+
+**Fix**: Run `/lazy-expert.list-jobs` to confirm currently active jobs and verify the `job_id` and `expert_name`. If the job is absent, no cancellation is needed. If the job was dispatched under a different expert key, repeat the cancel with the correct `expert_name`.
+
+---
+
 ## `/lazy-expert.list-jobs` rejects the status filter
 
 **Symptom**: Running `/lazy-expert.list-jobs` with a `status` argument fails immediately with "status must be one of: pending, done, failed."
@@ -297,7 +326,7 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 **Symptom**: Running `/lazy-routine.register` produces an error like "routine `<name>` already registered. Use `--force` to overwrite."
 
-**Likely cause**: A routine with the same name is already present in the `lazy-core.runtime.routines` section of `.claude/lazy.settings.json`. The skill refuses to silently overwrite an existing entry.
+**Likely cause**: A routine with the same name is already present in the `lazy-core.runtime` section of `.claude/lazy.settings.json`. The skill refuses to silently overwrite an existing entry.
 
 **Fix**: If you want to update the existing registration (new command or interval), re-run `/lazy-routine.register` with the `--force` flag. If you want to remove the routine entirely first, run `/lazy-routine.unregister <name>` then re-register.
 
@@ -324,6 +353,16 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 **Fix for cause 1**: Run `/lazy-core.doctor`. When it reports the daemon as stalled, accept the "Restart via supervisor" fix offer (Fix L1). If `launchctl kickstart` fails with "No such process", the plist is not loaded — run `launchctl load ~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` manually, then re-run `/lazy-core.install` to re-register the supervisor if needed.
 
 **Fix for cause 2**: Wait one polling cycle (5 seconds by default), then re-run `/lazy-core.doctor` to confirm the daemon is now live.
+
+---
+
+## The runtime daemon halted and refuses to resume after cleanup
+
+**Symptom**: Running `/lazy-runtime.recover` reports "working tree still dirty; refusing to resume" even after you chose a cleanup mode (commit, stash, or discard).
+
+**Likely cause**: The cleanup operation did not produce a fully clean working tree. This can happen when a submodule has dirty state that `git checkout -- .` or `git stash` does not cover, when a routine left behind untracked files that the chosen mode did not address, or when the cleanup itself raised an error mid-run and left the tree partially cleaned.
+
+**Fix**: Run `git status` manually to see what remains dirty. Resolve any outstanding files by hand — commit them, stash them, or discard them as appropriate — then re-invoke `/lazy-runtime.recover`. The skill re-reads the halt state and re-attempts the resume once the tree is clean. If the state file at `.logs/lazy-core/runtime/state.json` is the source of confusion (e.g., a false positive halt report), you can inspect it directly; the daemon treats an unparseable file as "not halted" and will resume on its next iteration.
 
 ---
 

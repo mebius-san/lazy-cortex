@@ -1,31 +1,27 @@
 ---
 chapter_type: faq
 summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, and the expert runtime.
-last_regen: 2026-05-03
+last_regen: 2026-05-06
 no_diagram: true
 source_skills:
-  - lazy-core.audit
-  - lazy-core.optimize
   - lazy-core.install
+  - lazy-core.audit
   - lazy-core.doctor
+  - lazy-core.optimize
   - lazy-core.setup
   - lazy-core.agent-models
+  - lazy-core.git-status
+  - lazy-core.git-unlock
+  - lazy-expert.dispatch-job
+  - lazy-expert.collect-job
+  - lazy-expert.cancel-job
+  - lazy-expert.list-jobs
   - lazy-guard.allow-mcp
   - lazy-guard.check-public
   - lazy-repo.mark-public
-  - lazy-expert.dispatch-job
-  - lazy-expert.collect-job
-  - lazy-expert.list-jobs
-  - lazy-expert.cancel-job
   - lazy-routine.register
   - lazy-routine.unregister
-source_rules:
-  - lazy-core.scaffold
-  - lazy-core.skill-writing
-  - lazy-core.rule-writing
-  - lazy-core.agent-writing
-  - lazy-core.hygiene
-  - lazy-guard.security
+  - lazy-runtime.recover
 ---
 # FAQ
 
@@ -61,7 +57,7 @@ A **patch bump** (e.g. `1.0.0` → `1.0.1`) is safe to drop in with no action �
 
 ## What is `lazy.settings.json` and why does it exist alongside `settings.json`?
 
-`lazy.settings.json` is a separate config file used by the `lazy-core.agent-model-router` hook to route subagent dispatches to model tiers (`haiku`, `sonnet`, `opus`, or `default`). It lives alongside the Claude Code `settings.json` files but is not read by Claude Code itself — it is read by the hook at dispatch time.
+`lazy.settings.json` is a separate config file used by the `lazy-core.model-router` hook to route subagent dispatches to model tiers (`haiku`, `sonnet`, `opus`, or `default`). It lives alongside the Claude Code `settings.json` files but is not read by Claude Code itself — it is read by the hook at dispatch time.
 
 The file exists separately because model-routing preferences are architectural decisions (cheapest agent for Explore work, strongest for commit-message generation) that belong in a structured config, not interleaved with per-tool permission lists. Run `/lazy-core.agent-models` to fill and update it interactively. The scope rules are: entries under `_user.*` go to the global `~/.claude/lazy.settings.json`; entries under `_project.*` go to the project `.claude/lazy.settings.json`; plugin-domain groups go to the plugin's own install scope. Run `/lazy-core.optimize` to create the file if it does not exist yet.
 
@@ -171,9 +167,15 @@ Author-name findings in tracked manifests (`plugin.json`, `package.json`, etc.) 
 
 ## Do I need to enable the expert runtime, or is it on by default?
 
-The expert runtime is opt-in per repo. When you run `/lazy-core.install`, a wizard phase asks whether to enable it for the current project. If you answer yes, the skill writes `run.sh`, `experts.settings.json`, the `lazy-core.runtime` block in `.claude/lazy.settings.json`, and adds `.jobs/` to `.gitignore`. If you skip that phase or answer no, none of those files are created and the `/lazy-expert.*` skills will abort at Step 2 with "`.claude/experts/` not initialised — run `/lazy-core.install` first."
+The expert runtime is opt-in per repo. When you run `/lazy-core.install`, a wizard phase asks whether to bootstrap runtime and experts for the current repo. If you answer yes, the skill writes the `lazy-core.runtime` block into `.claude/lazy.settings.json`, creates `.experts/experts.settings.json`, copies the `lazy.runtime.sh` shim to `.claude/bin/`, and adds `.experts/.jobs/` to `.gitignore`. It also offers to install a daemon supervisor (macOS launchd or Linux systemd) and registers the `lazy-expert.pump` routine automatically once you add at least one expert. If you skip that phase or answer no, none of those files are created and the `/lazy-expert.*` skills will abort at Step 2 with "`.claude/experts/` not initialised — run `/lazy-core.install` first."
 
-To enable it later without re-running the full install flow, run `/lazy-core.install` again — it is idempotent and will offer the expert wizard phase again.
+To enable it later without re-running the full install flow, run `/lazy-core.install` again — it is idempotent and will offer the runtime wizard phase again.
+
+---
+
+## What is the expert runtime actually for?
+
+It gives you a team of named workers running in the background. You dispatch a job to a named expert, keep doing other work, and collect the result later when the daemon has finished it. The daemon is a long-lived process (started via the `.claude/bin/lazy.runtime.sh` shim or a supervisor unit) that drains the job queue and runs registered plugin routines on each cycle. Because it runs outside Claude Code's conversation thread, expert jobs do not consume turns or stack against nesting limits; those are footnotes, not the point. The point is that slow work — doc reviews, lint sweeps, analysis passes — runs in parallel while you keep your session focused on the next task.
 
 ---
 
@@ -211,9 +213,22 @@ For jobs that are already `done`, the skill also asks for confirmation before re
 
 ## How do routines differ from expert jobs?
 
-Expert jobs are one-off, user-initiated tasks: you dispatch a job, the daemon picks it up, and the result lands in `response.json`. Routines are repeating, plugin-registered tasks: a plugin's install skill calls `/lazy-routine.register` with a `name`, `command`, and `interval_sec`, and the daemon calls that command on every cycle whose interval has elapsed. Routines are intended for ongoing background work (e.g. a lint tick, a review sweep), not for ad-hoc requests.
+Expert jobs are one-off, user-initiated tasks: you dispatch a job, the daemon picks it up, and the result lands in `response.json`. Routines are repeating, plugin-registered tasks: a plugin's install skill calls `/lazy-routine.register` with a name, type, and type-specific config, and the daemon calls that command on every cycle whose interval has elapsed. Routines are intended for ongoing background work (e.g. a lint tick, a review sweep), not for ad-hoc requests.
 
 The built-in `lazy-expert.pump` routine is what drives the expert job queue — it is itself a routine registered at install time. Additional routines registered by other plugins run alongside it in the same daemon cycle.
+
+---
+
+## What routine types does `/lazy-routine.register` support?
+
+Four types, each suited to a different scheduling pattern:
+
+- **subprocess** — the default. Runs a CLI command on every daemon cycle whose `interval_sec` has elapsed.
+- **inbox** — watches a directory and dispatches one expert job per file it finds there. Good for ingestion pipelines.
+- **schedule** — fires on a cron expression boundary, not on a fixed interval. Useful for calendar-aligned tasks (daily summaries, weekly sweeps).
+- **git** — watches a remote branch for new commits, new files, changed files, deleted files, or renamed files and dispatches an expert job per matched event.
+
+All four require a dot-namespaced `name` (e.g. `acme-lint.tick`). The wizard in `/lazy-routine.register` asks for the type first, then prompts only for the fields that type needs.
 
 ---
 
@@ -222,3 +237,19 @@ The built-in `lazy-expert.pump` routine is what drives the expert job queue — 
 Yes, with `/lazy-routine.unregister <name>`. The skill is idempotent — unregistering a routine that does not exist is a no-op (it prints an INFO message rather than an error). The only routine with built-in protection is `lazy-expert.pump`: removing it stops all expert job processing, so the skill requires `--force` and warns you explicitly before proceeding.
 
 If you accidentally remove a plugin's routine, re-running that plugin's install skill re-registers it. For `lazy-expert.pump` specifically, re-running `/lazy-core.install` restores it.
+
+---
+
+## What is the staging lock, and why would it get stuck?
+
+The `lazy-core.git-guard` hook uses `.git/lazy-git.lock` to prevent two Claude Code sessions from staging files simultaneously. The lock is held by the session currently running `git add` and released after the commit. In normal operation it is held for a few seconds at most.
+
+It can get stuck when a session is interrupted mid-staging — for example, if Claude Code crashes or the network drops between the `add` and the `commit`. The hook's automatic heuristics handle most stuck-lock cases: if the holding PID is dead, the host differs, or the lock is old and idle, it breaks automatically. Run `/lazy-core.git-status` to see the current lock state without touching it. If the lock is genuinely stuck and the heuristics will not break it (the holder is still alive but you know it has abandoned staging), run `/lazy-core.git-unlock` to confirm and force-delete the lock.
+
+---
+
+## When does the runtime daemon halt, and how do I resume it?
+
+The daemon halts when a routine or expert job leaves the working tree dirty — meaning it wrote or modified tracked files without committing them. This is a safety guard: a dirty tree from one routine can corrupt the next routine's git operations. When a halt occurs, the daemon records the triggering routine, the expert and job ID (if it came from inside an expert), and the captured `git status` lines in `state.json`.
+
+Run `/lazy-runtime.recover` to get out. The skill reads the halt context, shows you exactly which paths are dirty, and asks how you want to clean up: commit the changes, stash them for later, discard them entirely, or abort (leave the daemon halted and exit). Once the tree is clean, the skill clears the `daemon_halted` block from `state.json` and the daemon resumes scheduling on its next iteration. If the tree is still dirty after cleanup (e.g. submodules left uncommitted state), the skill tells you to run `git status` manually and re-invoke it.

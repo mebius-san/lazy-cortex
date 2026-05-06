@@ -94,7 +94,25 @@ Summary:
 - Severity vocabulary: `PASS / WARN / FAIL` (doctor-family) or `INFO / WARN / FAIL` (audits that only measure + flag).
 - Coordinator owns Write/Edit, waivers, and the log write. Agents are ephemeral and do not log.
 
-## 6. Plugin audit skill contract
+## 6. No dirty working tree
+
+Skills, commands, and runnable scripts that modify a tracked file MUST commit that file in the same execution. If they cannot commit (transactional state — `MERGE_HEAD`/`CHERRY_PICK_HEAD`/rebase/bisect; ambiguous trigger; no meaningful "what just happened" anchor for the commit message) they MUST NOT write.
+
+The "write now, leave for human to commit later" pattern is forbidden. It produces flapping working trees, races with downstream normalizers (e.g., a frontmatter rewriter that re-runs and silently re-edits the file), and offloads reconciliation work onto the user.
+
+**Why this is a rule and not a guideline:** the alternative — auto-detect intent at write time — is unreliable, and the cost of a dirty tree is paid by the user, not the author. Forbidding the pattern at the rule level forces the author to decide up front: this artifact has a commit story, or it does not write.
+
+**Apply this clause to:** any skill/command path that calls `Write`, `Edit`, `f.write_text`, `f.write`, or shells out to a subprocess that mutates a tracked path.
+
+**How to comply:**
+
+- Pair every write with `git add <path>` + `git commit -m "<short, deterministic message>" -- <path>` in the same execution. Use `core.hooksPath=/dev/null` if the artifact is itself fired by a hook chain to avoid re-entry.
+- If the artifact runs in a flow that lacks a meaningful commit anchor, restructure: either gate the write so it never fires from that flow, or buffer the write into a real commit-anchored flow.
+- Loop-guard hooks that auto-commit their own writes by content (e.g., `pub.status.hook._is_real_commit` bails when HEAD's diff is folder-notes-only).
+
+**Waiver mechanism:** an artifact may opt out by declaring `dirty-tree-waiver: "<reason>"` in frontmatter (skills/agents/commands) or as a `# dirty-tree-waiver: <reason>` comment in the file header (hooks/scripts). The audit downgrades the finding from WARN to INFO when a waiver is present.
+
+## 7. Plugin audit skill contract
 
 ### The rule
 
@@ -115,13 +133,13 @@ No `<namespace>.doctor` — doctor-level orchestration (waivers, currency, fix/w
 
 `lazy-core.doctor` Phase 3 delegates by hardcoded list (availability + run-condition probe). When adding a plugin audit, register it there: availability = plugin in `~/.claude/plugins/installed_plugins.json`; run condition = opt-in gate if one exists. Discovery-based delegation (glob for `<namespace>.audit`) is a future refactor — keep the hardcoded list in sync.
 
-## 7. Plugin help command contract
+## 8. Plugin help command contract
 
 ### The rule
 
 Every plugin in `claude/<plugin>/` ships a `<namespace>.help` command. Location: `claude/<plugin>/commands/<namespace>.help.md`. Filename matches the plugin's *primary* namespace — the one the plugin is named after (`lazy-core` for `lazycortex-core`). Plugins that ship multiple namespaces still expose a single help command at the primary namespace; the help block lists every namespace's surface.
 
-Same status as § 6: a plugin missing its `<namespace>.help` command is a `tool.doctor` `[FAIL]`, not a stylistic gap.
+Same status as § 7: a plugin missing its `<namespace>.help` command is a `tool.doctor` `[FAIL]`, not a stylistic gap.
 
 ### Minimum contract
 
@@ -132,9 +150,9 @@ Same status as § 6: a plugin missing its `<namespace>.help` command is a `tool.
 
 ### Surface reference
 
-The full plugin-surface contract (required files, forbidden empty stubs, namespace-naming rationale) lives at `.claude/skills/tool.doctor/references/plugin-surface.md`. § 7 here is the authoring-side counterpart; the surface reference is the enforcement-side specification.
+The full plugin-surface contract (required files, forbidden empty stubs, namespace-naming rationale) lives at `.claude/skills/tool.doctor/references/plugin-surface.md`. § 8 here is the authoring-side counterpart; the surface reference is the enforcement-side specification.
 
-## 8. Failure modes section (optional, agent-grounding)
+## 9. Failure modes section (optional, agent-grounding)
 
 Skills MAY include a `## Failure modes` section near the bottom — between the last phase and any logging/safety sections. The section grounds the `pub.help-writer` agent's troubleshooting chapters in documented behaviour rather than agent-reconstructed guesses.
 
@@ -172,14 +190,14 @@ Opting a skill into `lazy-core.setup`: see `${CLAUDE_PLUGIN_ROOT}/references/laz
 
 ## Enforcement
 
-- `lazy-core.audit` Agent B enforces §§ 1–4 (preamble presence, no-Optional, narrative-padding heuristic). Absent preamble and "Optional" in heading are `FAIL`; narrative-padding denylist match is `WARN`.
+- `lazy-core.audit` Agent B enforces §§ 1–4 (preamble presence, no-Optional, narrative-padding heuristic) and § 6 (no dirty working tree — heuristic write-without-commit detection). Absent preamble and "Optional" in heading are `FAIL`; narrative-padding denylist match and unwaived dirty-tree finding are `WARN`.
 - `lazy-core.doctor` surfaces these findings in Phase 3 and prompts the user to fix or waive.
-- § 6 is an author-side contract — `lazy-core.doctor` flags plugin-structure violations (missing `<namespace>.audit`, shipped `<namespace>.doctor`, non-compliant install skills) in its plugin-structure pass.
-- § 7 is enforced by `tool.doctor`: missing `commands/<namespace>.help.md` is `[FAIL]`; filename / namespace mismatch is `[WARN]`. See `.claude/skills/tool.doctor/references/plugin-surface.md`.
-- § 8 is informational: `lazy-core.audit` Agent B emits `INFO` when a SKILL.md with documented aborts lacks a `## Failure modes` section.
+- § 7 is an author-side contract — `lazy-core.doctor` flags plugin-structure violations (missing `<namespace>.audit`, shipped `<namespace>.doctor`, non-compliant install skills) in its plugin-structure pass.
+- § 8 is enforced by `tool.doctor`: missing `commands/<namespace>.help.md` is `[FAIL]`; filename / namespace mismatch is `[WARN]`. See `.claude/skills/tool.doctor/references/plugin-surface.md`.
+- § 9 is informational: `lazy-core.audit` Agent B emits `INFO` when a SKILL.md with documented aborts lacks a `## Failure modes` section.
 
 ## Scope
 
 - **In-scope**: runnable artifacts under `.claude/skills/**`, `.claude/commands/**`, `claude/*/skills/**`, `claude/*/commands/**`.
 - **Out-of-scope**: `.claude/agents/**` (see `lazy-core.agent-writing`), `.claude/rules/*.md` (see `lazy-core.rule-writing`), `.claude/templates/`, `docs/`.
-- Scripts under `.claude/hooks/` and `.claude/skills/*/bin/` are a future refinement of § 1.
+- Scripts under `.claude/hooks/` are now governed by `lazy-core.hook-writing` (which itself cross-references § 1 and § 6 here). Scripts under `.claude/skills/*/bin/` continue to inherit § 1 from their parent skill.

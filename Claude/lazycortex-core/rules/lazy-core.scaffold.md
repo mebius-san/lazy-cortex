@@ -15,8 +15,20 @@ lazycortex-core:
     - ~/.claude/rules/*.md
   .claude/templates/core/skill-template.md:
     - .claude/skills/*/SKILL.md
+    - ~/.claude/skills/*/SKILL.md
   .claude/templates/core/agent-template.md:
     - .claude/agents/*.md
+    - ~/.claude/agents/*.md
   .claude/templates/core/command-template.md:
     - .claude/commands/*.md
+    - ~/.claude/commands/*.md
+  .claude/templates/core/protocol-template.md:
+    - .claude/references/*-protocol.md
+    - ~/.claude/references/*-protocol.md
+  .claude/templates/core/schema-template.md:
+    - .claude/references/*-schema.md
+    - ~/.claude/references/*-schema.md
+  .claude/templates/core/contract-template.md:
+    - .claude/references/*-contract.md
+    - ~/.claude/references/*-contract.md
 ```

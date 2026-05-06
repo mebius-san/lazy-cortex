@@ -15,7 +15,7 @@ Agents are dispatched as one-shot subagents via the `Agent` tool. Their output i
 - `name:` — dot-namespaced (`<namespace>.<name>`).
 - `description:` — must state *when* to dispatch this agent, not just what it does. The coordinator reads this to decide.
 - `tools:` — explicit allowlist. See § 5.
-- `model: inherit` — always set to `inherit`. This is Claude Code's native keyword meaning "use the parent's model". Actual model routing is handled by `lazy.settings.json` via the `lazy-core.agent-model-router` hook; the frontmatter value is the fallback when no config override exists.
+- `model: inherit` — always set to `inherit`. This is Claude Code's native keyword meaning "use the parent's model". Actual model routing is handled by `lazy.settings.json` via the `lazy-core.model-router` hook; the frontmatter value is the fallback when no config override exists.
 
 ## 2. Single-response execution model
 
@@ -41,7 +41,7 @@ Minimum tools. Dispatch cost scales with surface.
 
 ## 6. Shared rules (cross-reference, do not duplicate)
 
-Apply identically to agents; see `lazy-core.skill-writing`: § 2 (no Optional headings), § 3 (outcome vocabulary), § 4 (no narrative padding), § 5 (coordinator pattern if the agent IS a coordinator).
+Apply identically to agents; see `lazy-core.skill-writing`: § 2 (no Optional headings), § 3 (outcome vocabulary), § 4 (no narrative padding), § 5 (coordinator pattern if the agent IS a coordinator), § 6 (no dirty working tree — applies to every agent that calls `Write`/`Edit` or shells out to a subprocess that mutates a tracked path).
 
 ## 7. Logging
 
@@ -63,3 +63,5 @@ If `lazy.settings.json` does not exist at either scope (uninstalled / opted out)
 ## Enforcement
 
 `lazy-core.audit` Agent B enforces §§ 1, 2, 5, 8 (frontmatter complete, no AskUserQuestion, tool allowlist, model tier registered when config exists) on `.claude/agents/*.md` and `claude/*/agents/*.md`. Preamble presence per § 4 reuses the skill-writing check.
+
+Dirty-tree heuristic (no write-without-commit) reuses the skill-writing § 6 check; agents are scanned alongside skills in the same Agent B pass.

@@ -1,6 +1,6 @@
 # `agent_models` — schema and recommendations
 
-`lazy-core.agent-model-router` is a PreToolUse hook that intercepts every `Agent()` call and routes it to the configured model tier from `lazy.settings.json`.
+`lazy-core.model-router` is a PreToolUse hook that intercepts every `Agent()` call and routes it to the configured model tier from `lazy.settings.json`.
 
 **Why a hook instead of `Agent(model: "sonnet")`?** The `model` parameter in an `Agent()` call only affects the immediate agent. If that agent dispatches another agent internally, you have no way to control the nested agent's model. The hook intercepts every `Agent()` call at the harness level — regardless of call depth — so model routing works across the entire dispatch chain.
 

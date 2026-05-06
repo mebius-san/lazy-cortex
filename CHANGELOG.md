@@ -4,6 +4,22 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 1.3.0 — 2026-05-06 UTC
+
+- **Breaking:** The model-routing hook is now registered as `lazy-core.model-router`; the previous name `lazy-core.agent-model-router` no longer exists. Update any local `settings.local.json` entries that reference the old name.
+- New `lazy-core.git-guard` hook prevents two Claude sessions from racing on the git index: the first session to call a git tool acquires an exclusive lock; others wait with jitter, detect dead or stale holders, and break the lock automatically. An always-loaded advisory rule (`lazy-core.git`) keeps the mutex protocol in context.
+- New `lazy-core.git-status` skill inspects the guard lock and git state without touching the index; `lazy-core.git-unlock` provides a one-step confirmed manual break when the lock is stuck.
+- The runtime dispatcher now supports three routine trigger types — `inbox` (watches a drop folder), `schedule` (cron-style interval), and `git` (fires on `new_commits`, `new_files`, or other git events) — replacing the single polling loop with type-aware dispatch.
+- The runtime daemon now halts on an uncommitted working tree (both daemon-wide and per-job), preventing expert runs from dirtying the tree without checkpointing. An expert runtime contract is injected into every job so experts know the halt rules.
+- New `lazy-runtime.recover` skill restarts a crashed or stalled daemon without manual process management.
+- `lazy-routine.register` wizard is now type-aware: it prompts for routine type and configures the correct trigger fields instead of emitting a generic skeleton.
+- Opt-in runtime metrics: token usage is now captured per expert job from `claude -p` output; the metrics module uses stdlib only (no extra dependencies); the log directory has file-count retention.
+- New `lazy-core.hook-writing` authoring rule and shell hook template give contributors a structured starting point for `PreToolUse`/`PostToolUse` hooks, including the no-foreign-staged constraint.
+- `lazy-core.skill-writing` and `lazy-core.agent-writing` authoring guides now codify the no-dirty-working-tree constraint. `lazy-core.audit` gained an Agent B check that flags files written in a session without a subsequent commit.
+- New `lazy-core.reference-writing` rule and three Markdown templates (protocol, schema, contract) for documenting plugin reference artifacts.
+- Help documentation overhauled: 13 per-skill walkthroughs replaced by 6 topic blocks (install-and-audit, guardian, runtime, experts, agent-models, git-coordination) and 4 focused walkthroughs (setup-runtime, setup-routine, setup-expert, make-repo-public), each with flow or sequence diagrams.
+- `lazy-core.install` no longer runs runtime daemon setup steps when installing a non-runtime plugin scope, preventing unintended side effects during scoped installs.
+
 ### 0.6.4 — 2026-05-03 UTC
 
 - **New expert runtime system.** Four new `lazy-expert.*` skills (`lazy-expert.dispatch-job`, `lazy-expert.collect-job`, `lazy-expert.list-jobs`, `lazy-expert.cancel-job`) let you submit work to background expert agents and retrieve results. Two new `lazy-routine.*` skills (`lazy-routine.register`, `lazy-routine.unregister`) manage the routines the daemon runs on each iteration.
@@ -340,3 +356,9 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ### 0.1.0 — 2026-04-30
 
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).
+
+## lazycortex-observe
+
+### 0.1.0 — 2026-05-05
+
+- Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.

@@ -389,12 +389,17 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 - *Run condition*: same as availability — plugin installation / enablement is the opt-in.
 - *On invoke*: fold audit findings into a **Diagram** subsection.
 
-**11d. Review coverage** → `lazy-review.audit`
+**11d. Observe coverage** → `lazy-observe.audit`
+- *Availability*: `lazycortex-observe` meets the canonical signal set above.
+- *Run condition*: same as availability — plugin installation / enablement is the opt-in.
+- *On invoke*: fold audit findings into an **Observe** subsection.
+
+**11e. Review coverage** → `lazy-review.audit`
 - *Availability*: `lazycortex-review` meets the canonical signal set above.
 - *Run condition*: same as availability — plugin installation / enablement is the opt-in.
 - *On invoke*: fold audit findings into a **Review** subsection.
 
-**11e. Expert runtime** — inline, via `lazy-core.audit` Agent D findings
+**11f. Expert runtime** — inline, via `lazy-core.audit` Agent D findings
 - *Availability*: always (expert-runtime checks are part of `lazycortex-core` itself — no separate plugin probe needed).
 - *Run condition*: `experts.settings.json` exists at the repo root OR `lazy.settings.json` contains a `lazy-core.runtime` section. Skip if neither is present (no expert runtime configured — silent skip, no report entry).
 - *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D10 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).

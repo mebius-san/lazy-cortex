@@ -1,7 +1,7 @@
 ---
 name: lazy-core.install
 description: "Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, syncs authoring templates into `.claude/templates/core/`, bootstraps the scaffold registry, seeds runtime defaults, and offers expert wizard and daemon supervisor setup. Idempotent — safe to re-run. Detects install scope automatically."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *)
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *)
 ---
 # Install lazycortex-core
 
@@ -194,16 +194,51 @@ One line per seeded default: `_builtin.<key> = <value> (<state>)`. Plus `_user`,
 
 ## Step 7: Bootstrap runtime defaults
 
-**Project scope only.** Skip this step entirely (outcome `skipped-user-scope`) when install scope is `user`.
+Steps 7–11 set up the per-repo runtime layer (`.experts/`, expert wizard, daemon supervisor). They operate on the **current working repo**, independent of the plugin's install scope — runtime artifacts are always per-repo, even when the plugin is installed at user scope.
 
-Read `<repo-root>/.claude/lazy.settings.json` (already written in Step 6). If the top-level key `lazy-core.runtime` is absent, add it by running:
+For Steps 7–11, `<repo-root>` is the cwd's git toplevel (resolved or initialized in 7a below), even if Step 1 detected install scope as `user`.
+
+### 7a. Resolve the runtime repo
+
+Run `git rev-parse --show-toplevel` in cwd:
+
+- If it succeeds, set `<repo-root>` to the returned path and proceed to 7b.
+- If it fails (cwd is not inside a git repo), ask:
+
+  ```
+  AskUserQuestion:
+    question: "Current directory is not a git repository. Initialize one here to enable runtime/experts setup?"
+    description: "Runtime artifacts (`.experts/`, daemon supervisor units) need a repo root. Initializing here means git-tracking your runtime config alongside the rest of the directory; skipping bypasses runtime/experts setup for this run — Steps 3–6 are unaffected."
+    options: ["Initialize git here", "Skip — no runtime setup"]
+  ```
+
+  - On `Initialize git here`: run `Bash(git init)` in cwd, then set `<repo-root>` to cwd. Proceed to 7b.
+  - On `Skip — no runtime setup`: mark Steps 7–11 with outcome `skipped-not-in-git-repo`, skip to Step 12.
+
+### 7b. Confirm runtime setup
+
+Ask once:
+
+```
+AskUserQuestion:
+  question: "Bootstrap runtime/experts for this repo at `<repo-root>`?"
+  description: "Sets up `.experts/experts.settings.json`, `.claude/bin/lazy.runtime.sh` shim, the `lazy-core.runtime` block in `.claude/lazy.settings.json`, plus the expert-add wizard and optional daemon supervisor. Skip if you don't need this in this repo yet — the rest of the install is unaffected and you can re-run `/lazy-core.install` later."
+  options: ["Yes", "Skip — this repo doesn't need runtime/experts"]
+```
+
+- On `Skip — this repo doesn't need runtime/experts`: mark Steps 7–11 with outcome `skipped-per-user-choice`, skip to Step 12.
+- On `Yes`: continue with 7c below and run Steps 8–11.
+
+### 7c. Write `lazy-core.runtime`
+
+Read `<repo-root>/.claude/lazy.settings.json`. If the top-level key `lazy-core.runtime` is absent, add it by running:
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 from lazy_settings import save_section
 from pathlib import Path
 save_section(
-    Path('.claude/lazy.settings.json'),
+    Path('<repo-root>/.claude/lazy.settings.json'),
     'lazy-core.runtime',
     {
         '_version': 1,
@@ -219,13 +254,13 @@ save_section(
 "
 ```
 
-State **bootstrapped** if the section was absent and was written; state **already-present** if it already existed (do NOT overwrite).
+State **bootstrapped** if the section was absent and was written; **already-present** if it already existed (do NOT overwrite); **skipped-not-in-git-repo** or **skipped-per-user-choice** if 7a/7b chose to skip.
 
 ## Step 8: Bootstrap experts directory
 
-**Project scope only.** Skip this step entirely (outcome `skipped-user-scope`) when install scope is `user`.
+If Step 7 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
 
-Perform the following three idempotent operations:
+Otherwise, perform the following three idempotent operations:
 
 ### Ensure `lazy.runtime.sh` shim
 
@@ -254,9 +289,9 @@ If either line is absent, append all missing lines to `.gitignore` with `Edit` (
 
 ## Step 9: Expert-add wizard
 
-**Project scope only.** Skip this step entirely (outcome `skipped-user-scope`) when install scope is `user`.
+If Step 7 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
 
-Ask the user once:
+Otherwise, ask the user once:
 
 ```
 AskUserQuestion:
@@ -370,9 +405,9 @@ State one line per candidate: `<local_name>: registered` or `skipped`.
 
 ## Step 10: Bootstrap expert-pump routine
 
-**Project scope only.** Skip this step entirely (outcome `skipped-user-scope`) when install scope is `user`.
+If Step 7 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
 
-Check two conditions:
+Otherwise, check two conditions:
 1. `<repo-root>/.experts/experts.settings.json` contains at least one expert entry (a key that is not `_version` and whose value is a dict).
 2. `lazy.settings.json[lazy-core.runtime].routines` does NOT already contain a key `lazy-expert.pump`.
 
@@ -382,7 +417,7 @@ If both conditions are true, run:
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 from expert_runtime import bootstrap_default_routines
 from pathlib import Path
-bootstrap_default_routines(Path('.'))
+bootstrap_default_routines(Path('<repo-root>'))
 "
 ```
 
@@ -390,9 +425,9 @@ State **registered** if the routine was added; **already-present** if it was alr
 
 ## Step 11: Offer daemon supervisor install
 
-**Project scope only.** Skip this step entirely (outcome `skipped-user-scope`) when install scope is `user`.
+If Step 7 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
 
-Only proceed if Step 10 produced outcome **registered** (i.e., the expert-pump routine was freshly added — there is something to drain). If Step 10 was **already-present**, **skipped-no-experts**, or skipped for scope, state **skipped-no-pump** and move on.
+Otherwise, only proceed if Step 10 produced outcome **registered** (i.e., the expert-pump routine was freshly added — there is something to drain). If Step 10 was **already-present** or **skipped-no-experts**, state **skipped-no-pump** and move on.
 
 Ask:
 
@@ -459,4 +494,6 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Idempotent**: running this skill multiple times is safe. Files are only created/updated when there's a real change.
 - **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does **not** re-sync rule files into `.claude/rules/`. Re-run this skill after every plugin update to pick up rule changes — otherwise projects keep running the old rule content.
 - **Scope independence**: running at project scope does not affect other projects or the global config.
+- **Runtime is per-repo, not per-scope**: Steps 3–6 follow the plugin's install scope (`user` writes to `~/.claude/`, `project` writes to `<repo-root>/.claude/`). Steps 7–11 always target the current working repo (cwd's git toplevel) regardless of install scope, because runtime artifacts (`.experts/`, daemon supervisor units) are inherently per-repo. Run `/lazy-core.install` from inside each repo where you want runtime to be set up.
+- **Re-run after `git clone`**: rules/templates/`lazy.settings.json`/`experts.settings.json`/`lazy.runtime.sh` are committed into the repo, but the daemon supervisor units (launchd plist / systemd service) are per-user and not in the repo. Re-run this skill after cloning to install the supervisor for the current machine and to pick up any newer plugin shipped versions. Pick `Skip — no runtime setup` in 7a or `Skip — this repo doesn't need runtime/experts` in 7b if you don't want runtime in this repo at all.
 - **Next steps shown to user**: if any rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start).

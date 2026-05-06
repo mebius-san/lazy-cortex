@@ -1,20 +1,21 @@
 ---
 name: lazy-routine.register
-description: Register a named routine in lazy.settings.json. Wraps expert_runtime.register_routine. Used by plugin install skills.
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Write, AskUserQuestion
+description: Register a named routine in lazy.settings.json. Type-aware wizard (subprocess / inbox / schedule / git). Wraps expert_runtime.register_routine with closed-set validation. Used by plugin install skills.
+allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(git check-ignore *), Write, AskUserQuestion
+dirty-tree-waiver: "registers a routine in lazy.settings.json — operator commits explicitly to coordinate with sibling routines / install steps"
 ---
 # Routine Register
 
-Register a named routine in the `lazy-core.runtime` section of `.claude/lazy.settings.json`. Enforces `<plugin>.<verb>` naming. Refuses to overwrite an existing routine unless `--force` is set.
+Register a named routine in the `lazy-core.runtime` section of `.claude/lazy.settings.json`. Enforces `<plugin>.<verb>` naming. Refuses to overwrite an existing routine unless `--force` is set. Validates the per-type schema via `routine_types.validate_routine_entry`.
 
-Used by plugin install skills to register their scheduled routines (e.g. `lazy-review.install` registers `lazy-review.tick`).
+Used by plugin install skills (programmatic call) and by humans via `/lazy-routine.register` (wizard mode).
 
 ## Execution discipline (MANDATORY — read before any action)
 
 This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
-   - `Step 1 — Validate inputs`
+   - `Step 1 — Collect + validate inputs`
    - `Step 2 — Check for existing registration`
    - `Step 3 — Register routine`
    - `Step 4 — Report`
@@ -23,23 +24,48 @@ This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorde
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
-## Step 1 — Validate inputs
+## Step 1 — Collect + validate inputs
 
-Required inputs:
-- `name` (string) — routine name.
-- `command` (list of strings) — command to execute.
-- `interval_sec` (int) — polling interval in seconds.
+Required: `name` (string, `<plugin>.<verb>` pattern).
 
-Optional inputs:
-- `timeout_sec` (int) — per-run timeout; omit to use the daemon default.
-- `--force` (flag) — allow overwriting an existing registration.
+The remaining fields depend on the routine **type**. Allowed types: `subprocess` (default), `inbox`, `schedule`, `git`.
 
-Pre-flight checks:
-1. `name` must match `<plugin>.<verb>` pattern (contains exactly one dot, both parts non-empty). If it does not → abort: "routine names must be `<plugin>.<verb>` format (e.g. `lazy-review.tick`). Got: `<name>`."
-2. `command` must be a non-empty list.
-3. `interval_sec` must be a positive integer.
+### 1a. Resolve the type
 
-Outcome: `validated` or `aborted`.
+If the caller passed a `cfg` dict, take `cfg.get("type", "subprocess")` and skip to 1c with the dict.
+
+In wizard mode (no `cfg`), ask via `AskUserQuestion`:
+
+> Which routine type?
+> - subprocess — periodic command (default)
+> - inbox — scan a dir, dispatch a job per file
+> - schedule — cron-driven; one fire per cron boundary
+> - git — watch <remote>/<branch>; dispatch a job per item
+
+### 1b. Collect type-specific fields
+
+Per type, ask only the required + commonly-needed optional fields. Schemas live in `claude/lazycortex-core/bin/routine_types.py::SCHEMAS`. Wizard prompts:
+
+- **subprocess** — `command` (list), `interval_sec` (int), `timeout_sec?` (int).
+- **inbox** — `inbox_dir` (path relative to repo), `expert` (name), `request` (JSON-shaped block; require `role`), `interval_sec`, `timeout_sec?`.
+- **schedule** — `cron` (5-field expression), then either `command` OR `expert` + `request` (validator enforces exactly one).
+- **git** — `repo_dir?` (default `.`), `remote?` (default `origin`), `branch`, `watch` (one of `new_commits` / `new_files` / `changed_files` / `deleted_files` / `renamed_files`), `path_filter?`, `expert`, `request`, `interval_sec`.
+
+Build a single `cfg` dict carrying `type` + the collected fields.
+
+### 1c. Pre-flight validation
+
+1. `name` matches `<plugin>.<verb>` (exactly one dot, both parts non-empty). Else abort: "routine names must be `<plugin>.<verb>` format. Got: `<name>`."
+2. Call `validate_routine_entry(name, cfg)` to enforce the per-type schema. On `RoutineConfigError`, abort with the message verbatim.
+3. **Working-area gitignore check** — for `inbox` routines, run `git check-ignore -q <inbox_dir>`. Exit 0 = ignored. Exit 1 = tracked → ask via `AskUserQuestion`:
+   > `<inbox_dir>` is not gitignored. Inbox routines move tracked files between iterations, which dirties the working tree and triggers the daemon's halt protection.
+   > - Add `<inbox_dir>/` to `.gitignore` now (recommended)
+   > - Continue anyway — I will commit moves manually
+   > - Abort registration
+
+   On "Add" → append to `.gitignore`; do not auto-commit (operator commits when ready). On "Abort" → outcome `aborted`.
+
+Outcome: `validated`, `aborted`, or `gitignore-warned`.
 
 ## Step 2 — Check for existing registration
 
@@ -47,7 +73,7 @@ Load the current `lazy-core.runtime` section and check if `name` is already in `
 
 ```
 Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
-import json, sys
+import sys
 from pathlib import Path
 from lazy_settings import load_section
 section = load_section(Path('./.claude/lazy.settings.json'), 'lazy-core.runtime')
@@ -64,7 +90,7 @@ Outcome: `absent`, `overwrite-forced`, or `aborted`.
 
 ## Step 3 — Register routine
 
-Shell out to `expert_runtime.register_routine`:
+Pass the typed cfg dict to `expert_runtime.register_routine`:
 
 ```
 Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
@@ -72,13 +98,13 @@ import sys, json
 from pathlib import Path
 from expert_runtime import register_routine
 name = sys.argv[1]
-command = json.loads(sys.argv[2])
-interval_sec = int(sys.argv[3])
-timeout_sec = int(sys.argv[4]) if sys.argv[4] else None
-register_routine(Path('.'), name, command, interval_sec, timeout_sec=timeout_sec)
+cfg  = json.loads(sys.argv[2])
+register_routine(Path('.'), name, cfg)
 print('registered')
-" '<name>' '<command-json>' '<interval_sec>' '<timeout_sec|>')
+" '<name>' '<cfg-json>')
 ```
+
+`register_routine` validates again before write; if anything slipped past Step 1, it raises `RoutineConfigError` here.
 
 Outcome: `registered` or `error`.
 
@@ -86,7 +112,7 @@ Outcome: `registered` or `error`.
 
 One line per task in the canonical list, with its outcome word. A missing line is a bug.
 
-Print: "registered routine `<name>` (interval=<interval_sec>s, command=<command>)".
+Print: "registered routine `<name>` (type=<type>, <key params>)".
 
 ## Step 5 — Log the run
 
@@ -101,22 +127,25 @@ Then `Write` to `.logs/claude/lazy-routine.register/<UTC-timestamp>.md`:
 git_sha: <git rev-parse HEAD>
 git_branch: <git rev-parse --abbrev-ref HEAD>
 date: <YYYY-MM-DD HH:MM:SS UTC>
-input: "name=<name> interval_sec=<interval_sec>"
+input: "name=<name> type=<type>"
 ---
 ```
 
 `# lazy-routine.register`
 
 `## Actions`
-- Validated inputs
+- Collected + validated inputs (type=`<type>`)
 - Checked existing registration
 - Registered routine in lazy.settings.json
 
 `## Result`
-`<success|failure>` — name=`<name>`, interval=`<interval_sec>`s.
+`<success|failure>` — name=`<name>`, type=`<type>`.
 
 ## Failure modes
 
 - **"routine names must be `<plugin>.<verb>` format"** — name does not contain a dot or has an empty part → rename to follow the convention (e.g. `lazy-review.tick`).
 - **"routine `<name>` already registered"** — a routine with this name exists in settings → call `/lazy-routine.unregister` first, or retry with `--force`.
+- **"unknown type 'X'"** — `cfg.type` is not one of `subprocess`/`inbox`/`schedule`/`git` → fix the type or upgrade `lazycortex-core` to a version that supports it.
+- **"missing required field(s): […]"** — per-type schema rejected the input → fill the missing fields and retry.
+- **"`<inbox_dir>` is not gitignored"** — inbox-type routine working area is tracked → add it to `.gitignore` (the wizard offers this) or restructure the routine to operate in a gitignored path.
 - **"`.claude/lazy.settings.json` unwritable"** — file permissions or directory absent → check that `/lazy-core.install` has bootstrapped the file and it is not read-only.
