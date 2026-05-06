@@ -17,11 +17,11 @@ def _run(vault, *args):
 
 
 def _install_icon_map(vault, overrides=None):
-    mapdir = vault / ".claude" / "obsidian-iconize"; mapdir.mkdir(parents=True, exist_ok=True)
-    src = json.loads((FIX / "icon-map.json").read_text())
+    mapdir = vault / ".claude" / "iconize"; mapdir.mkdir(parents=True, exist_ok=True)
+    src = json.loads((FIX / "obsidian-icon-map.json").read_text())
     if overrides:
         src.update(overrides)
-    (mapdir / "icon-map.json").write_text(json.dumps(src, indent=2) + "\n")
+    (mapdir / "obsidian-icon-map.json").write_text(json.dumps(src, indent=2) + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ def test_install_hooks_writes_shim_only(tmp_path):
     assert r.returncode == 0, r.stderr
     shim = vault / ".githooks" / "pre-commit"
     assert shim.exists()
-    assert "HOOK_VERSION: 1.0.0" in shim.read_text()
+    assert "HOOK_VERSION: 2.0.0" in shim.read_text()
     # Worker must not touch consumer settings.json anymore.
     assert not (vault / ".claude" / "settings.json").exists()
 
@@ -72,12 +72,12 @@ def test_check_versions_passes_after_install(tmp_path):
 def test_check_versions_reports_schema_block(tmp_path):
     """check-versions includes icon_map_schema.declared when the vault has one."""
     vault = _prep(tmp_path)
-    _install_icon_map(vault, overrides={"schema_version": 1})
+    _install_icon_map(vault, overrides={"schema_version": 2})
     _run(vault, "install-hooks")
     r = _run(vault, "check-versions")
     assert r.returncode == 0, r.stderr
     report = json.loads(r.stdout)
-    assert report["icon_map_schema"]["declared"] == 1
+    assert report["icon_map_schema"]["declared"] == 2
     assert report["icon_map_schema"]["status"] == "ok"
 
 
@@ -114,15 +114,3 @@ def test_preflight_min_hook_version_too_new_exits_ok_silently(tmp_path):
     assert "99.0.0" in r.stderr
 
 
-def test_preflight_missing_schema_defaults_to_1_back_compat(tmp_path):
-    """Pre-handshake vaults (no schema_version field) keep working silently."""
-    vault = _prep(tmp_path)
-    mapdir = vault / ".claude" / "obsidian-iconize"; mapdir.mkdir(parents=True)
-    src = json.loads((FIX / "icon-map.json").read_text())
-    src.pop("schema_version", None)  # simulate old icon-map
-    (mapdir / "icon-map.json").write_text(json.dumps(src, indent=2) + "\n")
-    _prep_sync_target(vault)
-    r = _run(vault, "sync", "app/design.md")
-    assert r.returncode == 0, r.stderr
-    # No inert diagnostic.
-    assert "inert" not in r.stderr

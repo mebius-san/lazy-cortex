@@ -1,0 +1,76 @@
+# Prometheus recording + alerting rules for lazycortex-core runtime metrics.
+# Drop into your Prometheus rule_files glob, e.g. /etc/prometheus/rules.d/.
+# Alert routing (severity → channel) is operator's responsibility.
+
+groups:
+  - name: lazycortex-runtime
+    interval: 1m
+    rules:
+      # Recording rule — denominator-safe error rate.
+      - record: lazycortex:routine_error_rate:5m
+        expr: |
+          sum by (routine, repo, reason) (rate(lazycortex_runtime_routine_errors_total[5m]))
+            /
+          sum by (routine, repo) (rate(lazycortex_runtime_routine_ticks_total[5m]))
+
+      - alert: LazyCortexRoutineStaleNoTick
+        expr: time() - lazycortex_runtime_routine_last_tick_timestamp > 3600
+        for: 5m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "Routine {{ $labels.routine }} on {{ $labels.repo }} has not ticked in over 1h"
+          description: |
+            The runtime daemon has not run routine {{ $labels.routine }}
+            on repo {{ $labels.repo }} for at least one hour. Check the
+            daemon process is alive and the routine's interval / schedule
+            is configured correctly.
+
+      - alert: LazyCortexRoutineErrorRateHigh
+        expr: lazycortex:routine_error_rate:5m > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "Routine {{ $labels.routine }} on {{ $labels.repo }} error rate > 10% for 10m"
+          description: |
+            More than 10% of {{ $labels.routine }} ticks on {{ $labels.repo }}
+            have failed (reason={{ $labels.reason }}) over the last 10
+            minutes. Inspect .logs/lazy-core/runtime/<date>.jsonl on the
+            host for stderr tails.
+
+      - alert: LazyCortexDaemonHalted
+        expr: lazycortex_runtime_daemon_halted == 1
+        for: 1m
+        labels:
+          severity: critical
+          component: lazycortex-runtime
+        annotations:
+          summary: "LazyCortex daemon halted on {{ $labels.repo }} — manual recovery required"
+          description: |
+            The runtime daemon stopped scheduling routines because the
+            working tree became dirty after a routine tick.
+
+            Triggered by: {{ $labels.triggered_by }}
+            Reason: {{ $labels.reason }}
+
+            Operator must run `/lazy-runtime.recover` on the affected host
+            to clean the tree and clear the halt block in state.json.
+            See state.json on the host for `dirty_paths` and (for
+            pump-internal failures) the offending expert + job_id.
+
+      - alert: LazyCortexNoMetricsScraped
+        expr: up{job=~".*lazycortex.*"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "Prometheus is not scraping lazycortex-runtime on {{ $labels.instance }}"
+          description: |
+            The Prometheus `up` metric for lazycortex-runtime has been 0
+            for at least 5 minutes. Either the shipping agent (Alloy /
+            otelcol) is down, or the daemon's metrics endpoint is not
+            reachable. Check `/lazy-observe.doctor` on the host.

@@ -29,7 +29,7 @@ Required inputs from the caller:
 
 Pre-flight checks:
 1. `expert_name` must be a non-empty string. If absent → abort: "`expert_name` is required."
-2. `payload` must be a dict containing all three standard fields: `kind`, `role`, `request`. If any field is missing → abort with: "payload missing required field(s): <list>. See `claude/lazycortex-core/references/expert-protocols-contract.md` for the protocol contract."
+2. `payload` must be a dict containing all three standard fields: `kind`, `role`, `request`. If any field is missing → abort with: "payload missing required field(s): <list>. See `claude/lazycortex-core/references/lazy-core.expert-protocols-contract.md` for the protocol contract."
 
 Optional payload fields: `source` (array), `context` (array), `result` (array), plus protocol-specific extras.
 
@@ -106,7 +106,7 @@ input: "expert_name=<expert_name>"
 
 ## Failure modes
 
-- **"payload missing required field(s): kind"** (or `role`, `request`) — payload does not conform to the protocol contract → add the missing fields; see `claude/lazycortex-core/references/expert-protocols-contract.md`.
+- **"payload missing required field(s): kind"** (or `role`, `request`) — payload does not conform to the protocol contract → add the missing fields; see `claude/lazycortex-core/references/lazy-core.expert-protocols-contract.md`.
 - **"`.claude/experts/` not initialised"** — the experts directory has not been bootstrapped in this repo → run `/lazy-core.install` to create the required directory layout.
 - **Python `FileNotFoundError` or `ModuleNotFoundError`** — `${CLAUDE_PLUGIN_ROOT}/bin` is not on the path or `expert_runtime.py` is absent → verify the plugin is installed (`/lazy-core.install`) and `${CLAUDE_PLUGIN_ROOT}` resolves correctly.
 - **Unknown expert name** — `dispatch_job` creates the job dir under the named expert key; if the name is a typo, subsequent pump runs will silently skip it → verify the expert name against `experts.settings.json`.

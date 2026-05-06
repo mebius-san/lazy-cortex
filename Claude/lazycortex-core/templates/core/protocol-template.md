@@ -90,9 +90,9 @@ Protocols may subset to fewer categories; they may not introduce new category na
 <!--
 Authoring notes (delete before saving):
 
-- Placement: `<plugin>/references/<name>-protocol.md` for new files (suffix declares the type and triggers this template via lazy-core.scaffold). Pre-existing files without the suffix (e.g. `doc-review.md`, `iconize-protocol.md`) are grandfathered.
-- Reference key: `<plugin>:<name>` in `experts.settings.json` resolves to `<plugin>/references/<name>.md` via reference_resolver. New protocols using the suffix are referenced as `<plugin>:<name>-protocol`.
-- Versioning by filename: incompatible changes ship as a new file (e.g. `doc-review-v2-protocol.md`); the old file stays until consumers migrate. No version field, no version syntax in reference strings.
-- Contract source of truth: `claude/lazycortex-core/references/expert-protocols-contract.md`. The clauses above mirror that contract; consult it for the standard job-dir layout (request.json, READY, source/, context/, result/, response.json, DONE).
-- Worked example: `claude/lazycortex-review/references/doc-review.md`.
+- Placement: `<plugin>/references/<name>-protocol.md` for new files (suffix declares the type and triggers this template via lazy-core.scaffold). Pre-existing protocols without the suffix would be grandfathered (per `lazy-core.reference-writing § 1`); the in-tree set was migrated and none currently remain.
+- Reference key: `<plugin>:<name>` in `experts.settings.json` resolves to `<plugin>/references/<name>.md` via reference_resolver. The bare `<name>` is the file's basename without `.md`, so a renamed protocol (e.g. `lazy-review.doc-review-protocol.md`) is referenced as `lazycortex-review:lazy-review.doc-review-protocol`.
+- Versioning by filename: incompatible changes ship as a new file (e.g. `lazy-review.doc-review-v2-protocol.md`); the old file stays until consumers migrate. No version field, no version syntax in reference strings.
+- Contract source of truth: `claude/lazycortex-core/references/lazy-core.expert-protocols-contract.md`. The clauses above mirror that contract; consult it for the standard job-dir layout (request.json, READY, source/, context/, result/, response.json, DONE).
+- Worked example: `claude/lazycortex-review/references/lazy-review.doc-review-protocol.md`.
 -->

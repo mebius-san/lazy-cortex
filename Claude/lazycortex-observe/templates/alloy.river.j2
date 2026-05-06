@@ -1,0 +1,42 @@
+// Rendered by lazy-observe.install. DO NOT edit by hand.
+//
+// Grafana Alloy config — scrapes the local lazycortex-core /metrics endpoint
+// and forwards via Prometheus remote_write to the operator's observer.
+
+prometheus.scrape "lazycortex_runtime" {
+  targets = [{
+    __address__ = "{{ scrape_target }}",
+  }]
+  forward_to      = [prometheus.remote_write.observer.receiver]
+  scrape_interval = "{{ scrape_interval | default('15s') }}"
+  scrape_timeout  = "{{ scrape_timeout | default('10s') }}"
+}
+
+prometheus.remote_write "observer" {
+  endpoint {
+    url = "{{ remote_write_url }}"
+{% if auth_kind == "bearer" %}
+    bearer_token = sys.env("LAZYCORTEX_OBSERVE_TOKEN")
+{% elif auth_kind == "basic" %}
+    basic_auth {
+      username = "{{ basic_auth_username }}"
+      password = sys.env("LAZYCORTEX_OBSERVE_TOKEN")
+    }
+{% endif %}
+  }
+
+  // Write-ahead log buys recovery time when the observer is offline. Bound
+  // by max_age — old WAL data is dropped rather than retained forever.
+  wal {
+    truncate_frequency = "1h"
+    max_age            = "{{ wal_max_age | default('12h') }}"
+  }
+}
+
+// Alloy's own self-metrics endpoint — useful for /lazy-observe.doctor.
+prometheus.exporter.self "agent" {}
+
+prometheus.scrape "agent_self" {
+  targets    = prometheus.exporter.self.agent.targets
+  forward_to = [prometheus.remote_write.observer.receiver]
+}

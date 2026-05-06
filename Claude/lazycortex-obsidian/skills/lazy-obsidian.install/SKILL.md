@@ -1,6 +1,6 @@
 ---
 name: lazy-obsidian.install
-description: "Bootstrap the lazycortex-obsidian plugin for the current project (or globally). Syncs rule templates shipped by the plugin (currently none), scaffolds the tag-page template used by the `obsidian.gen-tag-pages` agent (project scope only), and cleans up orphaned rules from previous versions. At project scope, also installs the Dataview Obsidian plugin into `<repo-root>/.obsidian/` via `/lazy-obsidian.update-plugin` (Dataview renders the `Index` section of tag pages) and offers to chain into `/lazy-obsidian.iconize-install` so the full vault setup runs from one entry point. Idempotent — safe to re-run. Detects install scope automatically."
+description: "Bootstrap the lazycortex-obsidian plugin for the current project (or globally). Syncs rule templates shipped by the plugin (currently none), scaffolds the tag-page template used by the `obsidian.gen-tag-pages` agent (project scope only), and cleans up orphaned rules from previous versions. At project scope, also installs the Dataview Obsidian plugin into `<repo-root>/.obsidian/` via `/lazy-obsidian.update-plugin` (Dataview renders the `Index` section of tag pages) and offers to chain into `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install` so the full vault setup runs from one entry point. Idempotent — safe to re-run. Detects install scope automatically."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), AskUserQuestion
 ---
 # Install lazycortex-obsidian
@@ -11,7 +11,7 @@ The plugin currently ships **zero rules**. If you installed an earlier version o
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Detect install scope`
@@ -20,6 +20,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 4 — Sync the tag-page template`
    - `Step 5 — Install Dataview`
    - `Step 6 — Chain to /lazy-obsidian.iconize-install`
+   - `Step 6.5 — Chain to /lazy-obsidian.diagram-install`
    - `Step 7 — Verify / Report`
    - `Step 8 — Seed lazy.settings.json`
    - `Step 9 — Log the run`
@@ -140,12 +141,23 @@ Invoke `/lazy-obsidian.update-plugin dataview` unconditionally — it is idempot
 
 Skip this step ONLY when scope is `user` — iconize-sync is a vault concern.
 
-**Always ask** in project scope, even when `.claude/obsidian-iconize/icon-map.json` already exists. The presence of the icon map does not imply the rest of the iconize-sync system is current: `/lazy-obsidian.iconize-install` also handles the schema v1→v2 migration on `emit` keys, strips legacy PostToolUse hooks, asserts the three Iconize `data.json` keys (`frontmatterIconKey`, `frontmatterIconColorKey`, `frontmatterColorKey`), rewrites the pre-commit shim, updates `.gitignore`, and version-checks Iconize + Folder Notes + iconize-reloader via `/lazy-obsidian.update-plugin`. None of those states are observable from the icon-map file alone, so the parent skill must not short-circuit on it.
+**Always ask** in project scope, even when `.claude/iconize/obsidian-icon-map.json` already exists. The presence of the icon map does not imply the rest of the iconize-sync system is current: `/lazy-obsidian.iconize-install` also handles the schema v1→v2 migration on `emit` keys, strips legacy PostToolUse hooks, asserts the three Iconize `data.json` keys (`frontmatterIconKey`, `frontmatterIconColorKey`, `frontmatterColorKey`), rewrites the pre-commit shim, updates `.gitignore`, and version-checks Iconize + Folder Notes + iconize-reloader via `/lazy-obsidian.update-plugin`. None of those states are observable from the icon-map file alone, so the parent skill must not short-circuit on it.
 
 `AskUserQuestion`: **run-iconize-install** / **skip**. Frame the question so the user knows it's safe to re-run even if previously installed — phrase it "(Re-)run `/lazy-obsidian.iconize-install` to install or re-audit iconize-sync?" and mention in the description of the **run-iconize-install** option that the child skill is fully idempotent and will no-op unchanged artifacts.
 
 - **run-iconize-install** → invoke `/lazy-obsidian.iconize-install` as the next skill call. That skill is self-contained (installs Iconize + Folder Notes + iconize-reloader via `/lazy-obsidian.update-plugin`, scaffolds the protocol doc, icon-map, pre-commit shim, etc.) and handles its own wizard prompts. Record **chained** for the report.
 - **skip** → record **skipped**. Print: "Run `/lazy-obsidian.iconize-install` later when you want the iconize-sync system scaffolded or re-audited."
+
+## Step 6.5: Chain to `/lazy-obsidian.diagram-install` (project scope only, MANDATORY)
+
+Skip this step ONLY when scope is `user` — diagram render glue is a vault concern.
+
+**Always ask** in project scope, even when `<vault>/snippets/mermaid-fit.css` already exists. The presence of the snippet does not imply the rest of the diagram render glue is current: `/lazy-obsidian.diagram-install` also enables the snippet in `appearance.json`, version-checks `mermaid-popup` via `/lazy-obsidian.update-plugin` (re-applying the `ZoomRatioValue: "0.1"` override block), and offers to retire the legacy `mermaid-no-bg.css` snippet. None of those states are observable from the snippet file alone, so the parent skill must not short-circuit on it.
+
+`AskUserQuestion`: **run-diagram-install** / **skip**. Frame the question so the user knows it's safe to re-run even if previously installed — phrase it "(Re-)run `/lazy-obsidian.diagram-install` to install or re-audit the diagram render glue?" and mention in the description of the **run-diagram-install** option that the child skill is fully idempotent and will no-op unchanged artifacts.
+
+- **run-diagram-install** → invoke `/lazy-obsidian.diagram-install` as the next skill call. That skill is self-contained (syncs `mermaid-fit.css` snippet, enables it in `appearance.json`, installs `mermaid-popup` via `/lazy-obsidian.update-plugin` with the calibrated zoom-ratio override, prompts to retire stale palette snippets) and handles its own wizard prompts. Record **chained** for the report.
+- **skip** → record **skipped**. Print: "Run `/lazy-obsidian.diagram-install` later when you want diagram render glue scaffolded or re-audited."
 
 ## Step 7: Verify
 
@@ -158,10 +170,11 @@ Skip this step ONLY when scope is `user` — iconize-sync is a vault concern.
   - Tag-page template: state (**installed**, **updated**, **unchanged**, **kept-local**, **skipped**) and target `<path>` — omit when scope is `user`
   - Dataview install: `update-plugin` state tuple (`binary=... overrides=... community=...`) or **skipped** — omit when scope is `user`
   - iconize-install chain: **chained** / **skipped** — omit when scope is `user`. This line is mandatory in project scope; emit it unconditionally so a missing line is a visible gap in the report.
+  - diagram-install chain: **chained** / **skipped** — omit when scope is `user`. This line is mandatory in project scope; emit it unconditionally so a missing line is a visible gap in the report.
 
 ## Step 8: Seed lazy.settings.json
 
-Non-destructively seed the `lazycortex` domain group in `agent_models` with the subagent this plugin ships.
+Non-destructively seed the `lazycortex` domain group in `agent_models` with the subagents this plugin ships. **Tier values are read from `lazycortex-core`'s `default-tiers.json` at runtime** — there is no hardcoded table here. Adding/removing a `lazycortex-obsidian:*` agent and updating `default-tiers.json` is enough; this step picks the change up automatically.
 
 ### Target file
 
@@ -178,17 +191,25 @@ Read the target file. If missing or unparseable, treat its contents as `{"versio
 
 Ensure `agent_models.lazycortex` exists as an object (create empty `{}` if absent — never overwrite existing content, and never touch other groups).
 
-### Seed defaults
+### Build the seed set from `default-tiers.json`
 
-| Dispatch string | Default model |
-|---|---|
-| `lazycortex-obsidian:obsidian.gen-tag-pages` | `sonnet` |
+`lazycortex-core` is a declared dependency (`plugin.json`), so its plugin cache must be present. Locate the canonical defaults file:
 
-Per-key semantics (write back only if anything changed):
+```bash
+ls ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/skills/lazy-core.agent-models/default-tiers.json | sort -V | tail -1
+```
 
-- **absent** → add the entry with its default value. State **added**.
+The newest version wins. Read the file, parse the JSON, and select every key under `defaults` that starts with `lazycortex-obsidian:`. Those are the entries to seed (key + tier verbatim).
+
+If the file is absent → FAIL with `lazycortex-core not installed; install it before /lazy-obsidian.install`. Don't fall through to a hardcoded fallback — silent drift is exactly what the SOT is meant to prevent.
+
+### Apply per-key semantics
+
+For each `(dispatch, tier)` pulled from the JSON (write back only if anything changed):
+
+- **absent** in `agent_models.lazycortex` → add the entry with the JSON's tier. State **added**.
 - **equal** → leave untouched. State **unchanged**.
-- **different** → leave the user's value untouched. State **kept-local** (report value).
+- **different** → leave the user's value untouched. State **kept-local** (report user's value alongside the JSON's).
 
 Never touch other `lazycortex` entries (e.g. `lazycortex-log:*` seeded by `lazy-log.install`).
 
@@ -198,7 +219,7 @@ If any mutation happened, write the file with `version: 1` at the top.
 
 ### Report outcome
 
-One line per seeded default: `lazycortex.<key> = <value> (<state>)`. Append to the Step 7 report.
+One line per seeded entry: `lazycortex.<key> = <value> (<state>)`. Include the resolved `default-tiers.json` path. Append to the Step 7 report.
 
 ## Step 9: Log the run
 
@@ -206,10 +227,15 @@ Log to `./.logs/claude/lazy-obsidian.install/YYYY-MM-DD_HH-MM-SS.md` per the log
 
 Use two separate steps: `Bash(mkdir -p ...)` then `Write` tool. Never chain with `&&`.
 
+## Failure modes
+
+- **`/lazy-obsidian.install` aborts: "plugin not installed"** — `lazycortex-obsidian@lazycortex` has no entry in `~/.claude/plugins/installed_plugins.json` → add `"lazycortex-obsidian@lazycortex": true` to `enabledPlugins` in your `settings.json` and restart Claude Code, then re-run.
+- **`/lazy-obsidian.install` aborts: "plugin cache is empty"** — the plugin glob returned zero rule files → run `/plugin update lazycortex-obsidian@lazycortex` to refresh the cache, then re-run.
+
 ## Notes
 
 - **Idempotent**: running this skill multiple times is safe. Files are only created/updated when there's a real change.
 - **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does **not** re-sync rule or template files into the consumer repo. Re-run this skill after every plugin update to pick up changes.
 - **Scope independence**: running at project scope does not affect other projects or the global config.
 - **User scope is rule-only**: the tag-page template and Dataview check are project-only concerns (they require a vault).
-- **Next steps shown to user**: if any rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start). If the tag-page template was **installed** or **updated**, mention that the consumer is expected to customize it and that `/lazy-obsidian.install` will prompt on future drift. If the user **skipped** Dataview, remind them they can re-run `/lazy-obsidian.update-plugin dataview` later. If the user **skipped** the iconize-install chain, remind them they can run `/lazy-obsidian.iconize-install` later to scaffold the iconize-sync system.
+- **Next steps shown to user**: if any rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start). If the tag-page template was **installed** or **updated**, mention that the consumer is expected to customize it and that `/lazy-obsidian.install` will prompt on future drift. If the user **skipped** Dataview, remind them they can re-run `/lazy-obsidian.update-plugin dataview` later. If the user **skipped** the iconize-install chain, remind them they can run `/lazy-obsidian.iconize-install` later to scaffold the iconize-sync system. If the user **skipped** the diagram-install chain, remind them they can run `/lazy-obsidian.diagram-install` later to scaffold the diagram render glue.

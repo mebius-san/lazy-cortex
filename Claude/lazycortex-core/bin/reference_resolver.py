@@ -23,7 +23,8 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
     """
     # Plugin-shipped protocols live under <plugin-root>/references/ — the
     # repo-wide convention used by every plugin's own protocol/contract docs
-    # (iconize-protocol.md, expert-protocols-contract.md, doc-review.md).
+    # (lazy-obsidian.iconize-protocol.md, lazy-core.expert-protocols-contract.md,
+    # lazy-review.doc-review-protocol.md).
     # Agents stay under <plugin-root>/agents/. Consumer-local resolution
     # (no plugin prefix) keeps the canonical Claude Code shape
     # <repo>/.claude/<category>/<name>.md.

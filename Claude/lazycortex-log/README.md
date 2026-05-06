@@ -6,8 +6,6 @@ iconize_color: "#93c5fd"
 
 Logging, changelog, and change-history recall for Claude Code
 
-> **Versioning** — On upgrade from a previous public release: a **patch bump** is safe to drop in. A **minor bump** means re-run `/lazy-log.install` to pick up new rules, settings, or templates. A **major bump** means user-data migration is required — see the release notes in [`CHANGELOG.public.md`](../../CHANGELOG.public.md).
-
 ## Why this plugin
 
 Six weeks after a change lands, "why did we do this?" is expensive to answer. The commit message says `fix`, the PR is closed, the Slack thread is archived, and the LLM is guessing. `lazycortex-log` is designed so that future-you (or the LLM working on behalf of future-you) can actually answer that question.
@@ -26,15 +24,16 @@ Then `lazy-log.recall` searches across all three plus git history and memory, an
 - **Developers collaborating with AI assistants** who want a reliable trail from a run log back to the commit it produced.
 - **Teams doing incident postmortems** who need chronological and topical views without manually grepping through git log.
 
-## Scenarios
+## Blocks
 
-- *"Why did we change how X works?"* — Run `/lazy-log.recall "X"`. The agent searches changelog, commit log, run logs, git, and memory, and returns ranked matches with SHAs you can `git show`.
-- *"What happened in the last two weeks?"* — Run `/lazy-log.timeline "last 2 weeks"` for a chronological view merging changelog entries, commits, and AI run logs.
-- *"Summarize the whole story of the auth refactor."* — Run `/lazy-log.summary "auth refactor"` for a multi-source synthesized summary (not chronological).
-- *"I just landed a batch of commits."* — Run `/lazy-log.distill` to update `.logs/changelog.md` with user-facing prose for each new commit.
-- *"I'm cutting a release and need a CHANGELOG bullet list."* — Dispatch the `lazy-log.bullets` agent with a plugin name and commit range. It filters internal commits and rewrites the rest as outcome-led bullets ready to prepend to your public changelog.
-- *"Is the logging rule actually being followed?"* — Run `/lazy-log.audit` to verify the rule is installed and internally coherent. The rule is the single source of truth; individual skill/agent definitions do not need their own `## Logging` sections.
-- *"My `.logs/claude/` is full of folders from skills I no longer have."* — Run `/lazy-log.clean` to walk every subfolder, surface orphans (renamed skills, anonymous subagent runs), offer to distill substantive logs into memory, and delete what's safe to drop. Read-first; nothing is mutated until you approve every action.
+- **install-and-audit** — Bootstrap and verify lazycortex-log in your project. Covers what `/lazy-log.install` drops (the `lazy-log.logging` rule, `.logs/changelog.md`, `.gitignore` entry, post-commit hook), and what `/lazy-log.audit` checks (rule presence, integrity, no-conflicting per-file `## Logging` sections). Members: lazy-log.install, lazy-log.audit.
+- **change-history** — Query past changes from any angle. Members: lazy-log.recall, lazy-log.timeline, lazy-log.summary.
+- **changelog** — Maintain the human-readable changelog and draft release notes. Members: lazy-log.distill, lazy-log.bullets.
+- **housekeeping** — Keep `.logs/claude/` tidy as skills/agents come and go. Members: lazy-log.clean.
+
+## Walkthroughs
+
+- **cut-a-release** — Take a fresh batch of commits all the way to a published CHANGELOG bullet block. Path: lazy-log.distill (refresh `.logs/changelog.md` so commit groups are coherent prose) → lazy-log.bullets (filter internal commits, draft the user-facing bullet block) → prepend to `CHANGELOG.public.md`. Useful when cutting a public release where the public CHANGELOG must omit churn-only commits.
 
 ## Requirements
 
@@ -54,7 +53,7 @@ Then `lazy-log.recall` searches across all three plus git history and memory, an
 
 Requires these plugins from the same marketplace:
 
-- [`lazycortex-core`](../lazycortex-core/) — Core skills and agents for Claude Code
+- [`lazycortex-core`](../lazycortex-core/) — Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-model routing + settings management)
 
 ## Skills
 
@@ -63,6 +62,18 @@ Requires these plugins from the same marketplace:
 | `lazy-log.audit` | Verify that the project's logging rule is installed and coherent. The rule itself is the single source of truth — individual skills/agents/commands do NOT need per-file ## Logging sections. Reports gaps and offers fixes. Read-first — never modifies files without confirmation. |
 | `lazy-log.clean` | Interactive housekeeping for `./.logs/claude/`. Classifies each subdirectory against the live set of canonical skills/agents/commands; offers merge / distill-to-memory / delete / leave per orphan, batched by pattern when a cluster of anonymous folders (e.g. `task-N`) would otherwise produce dozens of prompts. Read-first — no folder is touched until the user has approved every action. |
 | `lazy-log.install` | Bootstrap the lazycortex-log plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, creates .logs/changelog.md if missing, and ensures .gitignore covers .logs/. Idempotent — safe to re-run. Detects install scope automatically. |
+
+## Documentation
+
+Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
+
+- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/install-and-audit.md) — Bootstrap lazycortex-log in a project with /lazy-log.install, then verify the logging rule stays coherent with /lazy-log.audit.
+- [change-history](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/change-history.md) — Query past changes from any angle — ranked recall, chronological timeline, or topical synthesis.
+- [changelog](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/changelog.md) — Keep a human-readable changelog current with lazy-log.distill, then cut release-ready CHANGELOG bullets with lazy-log.bullets when you ship.
+- [housekeeping](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/housekeeping.md) — Keep .logs/claude/ tidy as skills and agents come and go by running /lazy-log.clean to classify, merge, distill, and delete orphaned log folders.
+- [cut-a-release](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/walkthroughs/cut-a-release.md) — Take a fresh batch of commits all the way to a published CHANGELOG bullet block — distill themed prose, then generate outcome-led bullets filtered for public release.
+- [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/troubleshooting.md) — Common failure modes across lazycortex-log skills — symptoms, likely causes, and fixes.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/faq.md) — Answers to common questions about installing, running, and understanding lazycortex-log's skills and agents.
 
 ## Agents
 

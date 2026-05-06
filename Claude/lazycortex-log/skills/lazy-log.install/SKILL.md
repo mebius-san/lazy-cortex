@@ -194,6 +194,11 @@ Log to `./.logs/claude/lazy-log.install/YYYY-MM-DD_HH-MM-SS.md` per the logging 
 
 Use two separate steps: `Bash(mkdir -p ...)` then `Write` tool. Never chain with `&&`.
 
+## Failure modes
+
+- **`/lazy-log.install` aborts: "plugin not installed"** — `lazycortex-log@lazycortex` has no entry in `~/.claude/plugins/installed_plugins.json` → add `"lazycortex-log@lazycortex": true` to `enabledPlugins` in your `settings.json` and restart Claude Code, then re-run.
+- **`/lazy-log.install` aborts: "plugin cache is empty"** — the plugin glob returned zero rule files → run `/plugin update lazycortex-log@lazycortex` to refresh the cache, then re-run.
+
 ## Notes
 
 - **Idempotent**: running this skill multiple times is safe. Files are only created/updated when there's a real change.

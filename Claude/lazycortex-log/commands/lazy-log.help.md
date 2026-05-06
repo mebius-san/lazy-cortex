@@ -24,4 +24,18 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 No other commands.
 
+<!-- pub.sync-readmes:help-block:start -->
+**Documentation:**
+
+- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/install-and-audit.md) — Bootstrap lazycortex-log in a project with /lazy-log.install, then verify the logging rule stays coherent with /lazy-log.audit.
+- [change-history](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/change-history.md) — Query past changes from any angle — ranked recall, chronological timeline, or topical synthesis.
+- [changelog](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/changelog.md) — Keep a human-readable changelog current with lazy-log.distill, then cut release-ready CHANGELOG bullets with lazy-log.bullets when you ship.
+- [housekeeping](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/housekeeping.md) — Keep .logs/claude/ tidy as skills and agents come and go by running /lazy-log.clean to classify, merge, distill, and delete orphaned log folders.
+- [cut-a-release](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/walkthroughs/cut-a-release.md) — Take a fresh batch of commits all the way to a published CHANGELOG bullet block — distill themed prose, then generate outcome-led bullets filtered for public release.
+- [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/troubleshooting.md) — Common failure modes across lazycortex-log skills — symptoms, likely causes, and fixes.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-log/help/faq.md) — Answers to common questions about installing, running, and understanding lazycortex-log's skills and agents.
+
+Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-log/help/`.
+<!-- pub.sync-readmes:help-block:end -->
+
 See `README.md` in the plugin for the full rationale and recall workflow.

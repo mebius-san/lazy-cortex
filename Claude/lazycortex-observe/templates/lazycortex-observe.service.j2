@@ -1,0 +1,32 @@
+# Rendered by lazy-observe.install. DO NOT edit by hand.
+# systemd user unit — install at ~/.config/systemd/user/lazycortex-observe.service
+# Enable with `systemctl --user enable --now lazycortex-observe.service`.
+
+[Unit]
+Description=LazyCortex observability shipper ({{ agent_kind }})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={{ agent_binary }}{% for arg in agent_args %} {{ arg }}{% endfor %} {{ rendered_config_path }}
+WorkingDirectory={{ wal_dir }}
+Restart=on-failure
+RestartSec=10s
+
+# Token — sourced from a 0600 file via EnvironmentFile, or passed in by
+# whatever mechanism the operator picked at install time.
+EnvironmentFile=-{{ env_file }}
+
+# Hardening — read-only filesystem except for the agent's WAL dir + log dir.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={{ wal_dir }} {{ log_dir }}
+PrivateTmp=true
+NoNewPrivileges=true
+
+StandardOutput=append:{{ log_dir }}/observe.out.log
+StandardError=append:{{ log_dir }}/observe.err.log
+
+[Install]
+WantedBy=default.target

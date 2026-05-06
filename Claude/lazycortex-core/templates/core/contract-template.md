@@ -62,7 +62,7 @@ Every instance of this artifact must declare:
 <!--
 Authoring notes (delete before saving):
 
-- Placement: `<plugin>/references/<name>-contract.md` for new files (suffix triggers this template via lazy-core.scaffold). Pre-existing contracts without the suffix (e.g. `expert-protocols-contract.md`, `lazy-core.scaffold-registry.md`) are grandfathered.
+- Placement: `<plugin>/references/<name>-contract.md` for new files (suffix triggers this template via lazy-core.scaffold). Pre-existing contracts without the suffix would be grandfathered (per `lazy-core.reference-writing § 1`); the in-tree set was migrated and none currently remain.
 - A contract describes the META-spec for an artifact KIND — what every instance must contain. It is not itself an instance; instances live in their own files (`<plugin>/references/<name>-protocol.md`, `<plugin>/references/<name>-schema.md`, `<consumer>/.claude/lazy.settings.json`, etc.).
 - Cross-reference the auditor or runtime code that enforces the contract (file paths + line numbers).
 - If this contract is the seed for a scaffold template, link to the template path under `<plugin>/templates/<group>/`.

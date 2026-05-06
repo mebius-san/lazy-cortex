@@ -29,15 +29,18 @@ Always include `git_sha` — it bridges "the AI did Y" back to the actual commit
 
 ## Distill cadence (qualitative + 4h throttle)
 
-After a commit lands in this session, judge whether to invoke
-`Agent(subagent_type: "lazycortex-log:lazy-log.distill", prompt: "distill pending commits")` this turn:
+Decide whether to invoke
+`Agent(subagent_type: "lazycortex-log:lazy-log.distill", prompt: "distill pending commits")`
+on the **current turn**. Walk these gates in order; stop at the first match:
 
-- **Run when** the change is meaningful enough to narrate (notable feature, fix, or refactor — Claude judges qualitatively) **AND** `mtime(./.logs/changelog.md)` is older than 4 hours.
-- **Skip otherwise.** Pending commits accumulate in `.logs/commits.jsonl`; the next eligible turn catches up.
-- **Hard skip**: user said "don't distill" this turn.
-- **Manual catch-up**: invoke when the user asks (no throttle).
+1. **No commit landed in this turn → HARD SKIP.** "Commit landed this turn" means a `git commit` ran in *this* assistant turn — not earlier in the session, not pending in `.logs/commits.jsonl`. Questions, plans, edits without commits, and read-only turns never trigger distill, even if undistilled commits exist from earlier turns. They wait for the next turn that itself produces a commit.
+2. **User said "don't distill" this turn → HARD SKIP.**
+3. **User explicitly asked to distill / catch up → RUN** (bypasses throttle and qualitative gate).
+4. **`mtime(./.logs/changelog.md)` is younger than 4 hours → SKIP.** The 4h floor is a ceiling, not a target — even on big changes, don't run more often.
+5. **The just-landed commit isn't meaningful enough to narrate → SKIP** (Claude judges qualitatively: notable feature, fix, or refactor = yes; mechanical state-refresh, README rerender, version bump = no).
+6. **Otherwise → RUN.**
 
-The 4h floor on `mtime(.logs/changelog.md)` is a ceiling, not a target — even on big changes, don't run more often.
+Pending commits accumulate in `.logs/commits.jsonl`; the next eligible turn catches up.
 
 ## Recall, timeline, summary
 

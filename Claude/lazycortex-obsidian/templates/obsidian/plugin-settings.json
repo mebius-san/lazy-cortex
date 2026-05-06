@@ -34,6 +34,9 @@
       "iconColorInFrontmatterFieldName": "iconize_color"
     }
   },
+  "mermaid-popup": {
+    "ZoomRatioValue": "0.1"
+  },
   "folder-notes": {
     "syncFolderName": true,
     "ctrlKey": true,

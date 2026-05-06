@@ -172,6 +172,15 @@ Log to `./.logs/claude/lazy-obsidian.update-plugin/YYYY-MM-DD_HH-MM-SS.md` per t
 
 Two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain with `&&` or use `cat > file <<'EOF'`.
 
+## Failure modes
+
+- **`/lazy-obsidian.update-plugin` aborts: "Could not fetch Obsidian community registry"** — the `curl` to `obsidianmd/obsidian-releases` failed → check network connectivity and retry.
+- **`/lazy-obsidian.update-plugin` aborts: "`<id>` not in the Obsidian community registry"** — the plugin id is misspelled or is a bundled plugin passed without `--bundled` → verify the id against the Obsidian community plugins list, or add `--bundled` if it ships inside this plugin's templates.
+- **`/lazy-obsidian.update-plugin` aborts: "Could not fetch latest release manifest for `<id>`"** — the GitHub release download failed → check network connectivity and retry; the vault is left unchanged (pre-download backups are restored).
+- **`/lazy-obsidian.update-plugin` aborts: "`<id>` is not bundled in `templates/obsidian/plugins/`"** — `--bundled` was passed but the plugin's templates directory has no entry for `<id>` → remove `--bundled` to resolve from the community registry, or check that the plugin cache is current (`/plugin update lazycortex-obsidian@lazycortex`).
+- **`/lazy-obsidian.update-plugin` aborts with binary download failure** — a required file (`manifest.json` or `main.js`) could not be downloaded → the vault is restored to its pre-run state via `.bak` files; check network connectivity and retry.
+- **`/lazy-obsidian.update-plugin` aborts: "`community-plugins.json` is not a JSON array"** — the vault's `community-plugins.json` is corrupt → open Obsidian once to let it repair the file, or fix the JSON manually, then re-run.
+
 ## Idempotency & safety
 
 - **Idempotent:** re-running on a current vault produces zero mutations — `unchanged` + `overrides-current` + `community-plugins-present`.

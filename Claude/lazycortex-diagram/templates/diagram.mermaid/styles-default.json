@@ -1,0 +1,42 @@
+{
+  "name": "default",
+  "description": "Default style scheme for inverting renderers (Obsidian dark theme). Per-kind init blocks carry the whole `%%{init: ...}%%` line — drawer agents emit them verbatim. Role tokens supply fills/strokes for classDef and per-element style mechanisms; textConstants supply text/line/edge-label colours. Inversion-aware: text on coloured plates is #fff in source (becomes black after invert), text on plain canvas is #000 in source (becomes white).",
+  "blocks": {
+    "init": {
+      "architecture": "%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%",
+      "class": "%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000'},'themeCSS':'.labelBkg{background:rgba(255,255,255,0.5)!important}.edgeLabel .label span{background:transparent!important}.edgeLabel .label rect{fill:#fff!important;opacity:0.5!important}','class':{'diagramPadding':5,'useMaxWidth':true}}}%%",
+      "controls-scheme": "%%{init: {'block':{'padding':5,'useMaxWidth':true},'themeVariables':{'background':'transparent'}}}%%",
+      "decision-tree": "%%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%",
+      "erd": "%%{init: {'themeVariables':{'mainBkg':'#1e3a5f','nodeBorder':'#4a90e2','tertiaryColor':'#fff','lineColor':'#000','textColor':'#fff','edgeLabelBackground':'#ffffff80','attributeBackgroundColorOdd':'#1e3a5f','attributeBackgroundColorEven':'#2e4a6f'},'themeCSS':'text.entityLabel{fill:#fff!important}text.entityLabel:not([id*=-attr-]){font-weight:bold!important;font-size:6.8px!important}text.relationshipLabel{fill:#000!important}.relationshipLabelBox{opacity:0.5!important}','er':{'layoutDirection':'LR','diagramPadding':5,'useMaxWidth':true,'fontSize':8}}}%%",
+      "flow": "%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%",
+      "gantt": "%%{init: {'themeVariables':{'background':'transparent','sectionBkgColor':'#1e3a5f','altSectionBkgColor':'#2e2240','taskBkgColor':'#1e5f3a','taskBorderColor':'#4ae290','taskTextColor':'#fff','taskTextOutsideColor':'#000','doneTaskBkgColor':'#0d4d2a','doneTaskBorderColor':'#4ae290','critBkgColor':'#5f1e1e','critBorderColor':'#e24a4a','activeTaskBkgColor':'#5f4a1e','activeTaskBorderColor':'#e2a14a','gridColor':'#7e63a8','todayLineColor':'#e2a14a','textColor':'#000'},'gantt':{'diagramPadding':5,'useMaxWidth':true}}}%%",
+      "journey": "%%{init: {'themeVariables':{'background':'transparent','fillType0':'#1e3a5f','fillType1':'#5f4a1e','fillType2':'#1e5f3a','fillType3':'#2e2240','mainBkg':'#1e3a5f','nodeBorder':'#4a90e2','faceColor':'#e2a14a','actor0':'#4a90e2','actor1':'#e2a14a','actor2':'#e24a4a','lineColor':'#000','textColor':'#000','themeCSS':'.label{color:#fff!important}text.task{fill:#000!important}'},'journey':{'useMaxWidth':true,'diagramPadding':5,'sectionColours':['#000'],'sectionFills':['#1e3a5f','#5f4a1e','#1e5f3a','#2e2240'],'actorColours':['#4a90e2','#e2a14a','#e24a4a']}}}%%",
+      "layout": "%%{init: {'block':{'diagramPadding':5,'useMaxWidth':true}}}%%",
+      "mindmap": "%%{init: {'themeVariables':{'background':'transparent','cScale0':'#1e3a5f','cScale1':'#1e5f3a','cScale2':'#5f4a1e','cScale3':'#2e2240','cScale4':'#1e4a5f','cScale5':'#5f3a1e','cScale6':'#0d4d2a','cScale7':'#5f1e1e','cScaleLabel0':'#fff','cScaleLabel1':'#fff','cScaleLabel2':'#fff','cScaleLabel3':'#fff','cScaleLabel4':'#fff','cScaleLabel5':'#fff','cScaleLabel6':'#fff','cScaleLabel7':'#fff','lineColor':'#000','textColor':'#fff'},'mindmap':{'diagramPadding':5,'useMaxWidth':true}}}%%",
+      "nav": "%%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%",
+      "screen-scheme": "%%{init: {'block':{'diagramPadding':5,'useMaxWidth':true}}}%%",
+      "sequence": "%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%",
+      "state": "%%{init: {'themeVariables':{'background':'transparent','transitionColor':'#000','transitionLabelColor':'#000','labelBackgroundColor':'#fff','edgeLabelBackground':'#fff','stateLabelColor':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','state':{'diagramPadding':5,'useMaxWidth':true}}}%%",
+      "timeline": "%%{init: {'themeVariables':{'background':'transparent','cScale0':'#1e3a5f','cScale1':'#1e5f3a','cScale2':'#5f4a1e','cScale3':'#2e2240','cScale4':'#1e4a5f','cScale5':'#5f3a1e','cScale6':'#0d4d2a','cScale7':'#5f1e1e','cScaleLabel0':'#fff','cScaleLabel1':'#fff','cScaleLabel2':'#fff','cScaleLabel3':'#fff','cScaleLabel4':'#fff','cScaleLabel5':'#fff','cScaleLabel6':'#fff','cScaleLabel7':'#fff','lineColor':'#000','textColor':'#000'},'timeline':{'diagramPadding':5,'useMaxWidth':true}}}%%",
+      "tree": "%%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%"
+    }
+  },
+  "roles": {
+    "entry":   { "fill": "#1e3a5f", "stroke": "#4a90e2" },
+    "sub":     { "fill": "#2e2240", "stroke": "#7e63a8" },
+    "guard":   { "fill": "#5f4a1e", "stroke": "#e2a14a" },
+    "action":  { "fill": "#1e5f3a", "stroke": "#4ae290" },
+    "success": { "fill": "#0d4d2a", "stroke": "#4ae290", "strokeWidth": "2px" },
+    "error":   { "fill": "#5f1e1e", "stroke": "#e24a4a", "strokeWidth": "2px" },
+    "service": { "fill": "#1e4a5f", "stroke": "#4abce2" },
+    "store":   { "fill": "#5f3a1e", "stroke": "#e2904a" },
+    "ref":     { "stroke": "#9054e2", "dashed": true }
+  },
+  "textConstants": {
+    "textOnPlate": "#fff",
+    "textOnCanvas": "#000",
+    "lineOnCanvas": "#000",
+    "edgeLabelBg": "#fff",
+    "loopText": "#e2a14a"
+  }
+}

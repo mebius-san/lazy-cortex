@@ -186,7 +186,7 @@ Phrase symptoms in the user's voice ("`/lazy-core.install` aborts saying X"), no
 - `lazy-core.hygiene` — scope, naming (dot-namespace), settings split, MCP scope, path hygiene.
 - `lazy-guard.security` — public-repo credential/PII rules.
 
-Opting a skill into `lazy-core.setup`: see `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases.md` (`lazy_setup_phase:` frontmatter contract — read on demand, not auto-loaded).
+Opting a skill into `lazy-core.setup`: see `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md` (`lazy_setup_phase:` frontmatter contract — read on demand, not auto-loaded).
 
 ## Enforcement
 

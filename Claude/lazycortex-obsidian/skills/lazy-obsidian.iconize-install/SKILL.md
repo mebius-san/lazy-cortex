@@ -1,6 +1,6 @@
 ---
 name: lazy-obsidian.iconize-install
-description: "Scaffold the iconize-sync system into an Obsidian vault: protocol doc, local icon-map, pre-commit shim, and a `.gitignore` entry for Iconize's live `data.json` (it's rewritten on every icon click + by the iconize-sync worker, so it's runtime state, not source). Per-file wizard — asks before creating, shows diff on drift, offers deletion for orphans, strips legacy worker-written PostToolUse entries, migrates icon-map schema. Re-runnable; idempotent. Must be run from the consumer vault's git root. Installs all three iconize-sync hard-dependency plugins — `obsidian-icon-folder` (Iconize), `folder-notes`, and the bundled `iconize-reloader` — via the `/lazy-obsidian.update-plugin` primitive, which also deep-merges opinionated settings from `plugin-settings.json`. PostToolUse is plugin-shipped — no consumer settings.json mutation."
+description: "Scaffold the iconize-sync system into an Obsidian vault: protocol doc, local icon-map, pre-commit shim, and a `.gitignore` entry for Iconize's live `data.json` (it's rewritten on every icon click and by the bundled iconize-reloader plugin — runtime state, not source). Per-file wizard — asks before creating, shows diff on drift, offers deletion for orphans, strips legacy worker-written PostToolUse entries, migrates icon-map schema. Re-runnable; idempotent. Must be run from the consumer vault's git root. Installs all three iconize-sync hard-dependency plugins — `obsidian-icon-folder` (Iconize), `folder-notes`, and the bundled `iconize-reloader` — via the `/lazy-obsidian.update-plugin` primitive, which also deep-merges opinionated settings from `plugin-settings.json`. PostToolUse is plugin-shipped — no consumer settings.json mutation."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(chmod *), Bash(python3 *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), Bash(jq *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList
 argument-hint: "[--dry-run] — scaffolds into <repo-root>/.claude/ and <repo-root>/.githooks/"
 ---
@@ -25,7 +25,7 @@ This skill has 14 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 1.5a — Install/update folder-notes`
    - `Step 1.5b — Install/update obsidian-icon-folder`
    - `Step 1.5c — Install/update iconize-reloader (bundled)`
-   - `Step 2 — Scaffold protocol doc`
+   - `Step 2 — Migrate legacy protocol doc`
    - `Step 2.5 — Strip legacy PostToolUse entries`
    - `Step 2.6 — Assert Iconize frontmatter-feature settings`
    - `Step 2.7 — Icon-map scaffold (schema-aware)`
@@ -45,7 +45,7 @@ The PostToolUse hook is now **plugin-shipped**: it lives in
 `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` and is auto-loaded by Claude Code when
 the plugin is enabled. This skill no longer mutates the consumer's
 `.claude/settings.json`. The hook self-gates on presence of
-`.claude/obsidian-iconize/icon-map.json` — so enabling the plugin in a vault
+`.claude/iconize/obsidian-icon-map.json` — so enabling the plugin in a vault
 that hasn't opted in is a no-op.
 
 The pre-commit shim **still lives in the consumer's `.githooks/`** — git has
@@ -55,10 +55,11 @@ no plugin awareness. The shim resolves the plugin at exec time (no baked path).
 
 | Artifact | Target path | Source |
 |---|---|---|
-| Protocol doc | `.claude/protocol/obsidian.iconize.md` | `${CLAUDE_PLUGIN_ROOT}/templates/obsidian-iconize/protocol.md` |
-| Icon-map | `.claude/obsidian-iconize/icon-map.json` | `${CLAUDE_PLUGIN_ROOT}/templates/obsidian-iconize/icon-map.json` |
+| Icon-map | `.claude/iconize/obsidian-icon-map.json` | `${CLAUDE_PLUGIN_ROOT}/templates/iconize/obsidian-icon-map.json` |
 | Pre-commit shim | `.githooks/pre-commit` | Rendered from `pre-commit-shim.sh` via the worker's `install-hooks` |
 | Callback dir (empty) | `.claude/callbacks/` | Created empty; user drops executables here |
+
+The plugin no longer scaffolds a vault-local protocol doc. The single canonical home is `${CLAUDE_PLUGIN_ROOT}/references/lazy-obsidian.iconize-protocol.md` (cited by the worker and by icon-map matchers). Step 2 below migrates legacy installs by deleting any pre-1.0.0 vault-local copy.
 
 ## Step 1 — Locate repo root and vault
 
@@ -94,38 +95,28 @@ For each row, in order (each is its own TaskCreate task — 1.5a / 1.5b / 1.5c):
    not continue to subsequent rows or steps. No silent `skipped`, no
    continue-anyway. A failed hard dep is a failed install.
 
-## Step 2 — Scaffold protocol doc (per-file prompt)
+## Step 2 — Migrate legacy protocol doc (one-shot)
 
-**Purpose of the protocol doc** (same text used in every prompt description below):
+Pre-1.0.0 versions of this skill scaffolded `.claude/protocols/obsidian.iconize.md`
+as a vault-local copy of the protocol mechanics. v1.0.0 retires that copy —
+the canonical home is the plugin's `references/lazy-obsidian.iconize-protocol.md`,
+reachable at `${CLAUDE_PLUGIN_ROOT}/references/lazy-obsidian.iconize-protocol.md` for any
+agent or human reader. Two identical copies were redundant in source, and
+the install copy added a drift surface that paid for nothing (the body had
+no per-vault customization seams).
 
-> `protocol.md` is the vault-local human-readable reference for how file/folder
-> icons are computed and written. It documents the two cooperating writers
-> (Iconize plugin for direct Iconize frontmatter, and the `iconize-sync`
-> worker for resolved icons via `.claude/obsidian-iconize/icon-map.json`
-> matchers), the frontmatter key contract, and the resolution precedence.
-> It is **referenced by name** from icon-map matchers and from the
-> `iconize-sync` worker — vault owners typically customize it (adding
-> matcher rationales, edge cases, etc.).
+State machine:
 
-State machine (one `AskUserQuestion` per file):
-
-- **New** (target missing) → `AskUserQuestion` with:
-  - question: `Install the iconize-sync protocol doc into this vault?`
-  - description: ``<protocol-doc purpose from above>\n\n**What this does:** Copies the shipped template to `<targetPath>`. You can customize it freely afterward — future installs will show a drift diff, not silently overwrite.``
-  - options: **install** / **skip**.
-- **Unchanged** (byte-identical) → no prompt.
-- **Drift** (differ) → `AskUserQuestion` with:
-  - question: `Protocol doc has drift — overwrite with shipped version?`
-  - description: ``<protocol-doc purpose from above>\n\n**What changed:** <one-sentence summary of the diff>\n\n**Why this matters:** You likely customized this file (matcher notes, edge-case docs, project-specific conventions). Overwriting will discard those edits. Keep-local preserves your version but means you won't pick up template improvements — re-run this skill later to resolve.\n\n**Full diff:**\n```diff\n<unified diff, truncated to ~40 lines if longer>\n`````
-  - options: **overwrite** / **keep-local**.
-
-**Scope**: protocol doc only. The icon-map is handled in Step 2.7 (its drift
-decision is schema-aware, so a generic byte-diff prompt would hide the
-migration option).
-
-Reading source templates: use `Glob` against `${CLAUDE_PLUGIN_ROOT}/templates/obsidian-iconize/*`.
-Copy with `Read` + `Write` so diffs are visible to the wizard. Create missing
-parents with `Bash(mkdir -p ...)`.
+- **Target absent** (`.claude/protocols/obsidian.iconize.md` does not exist) →
+  no prompt. Outcome: **not-present**.
+- **Target present** → `AskUserQuestion`:
+  - question: `Delete legacy iconize-sync protocol doc at .claude/protocols/obsidian.iconize.md?`
+  - description: ``This file is a leftover from pre-1.0.0 installs. The protocol now lives only at `${CLAUDE_PLUGIN_ROOT}/references/lazy-obsidian.iconize-protocol.md` (referenced by the worker and by icon-map matchers). The vault-local copy was an exact duplicate; if you customized it, that text is preserved by **keep**.``
+  - options: **delete** / **keep**.
+  - On **delete**: remove the file, then `rmdir .claude/protocols` (best-effort —
+    silent failure when the directory still has other unrelated entries).
+    Outcome: **deleted**.
+  - On **keep**: leave the file untouched. Outcome: **kept**.
 
 ## Step 2.5 — Strip legacy PostToolUse entries (one-shot migration)
 
@@ -204,45 +195,109 @@ worker: `python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py check-versions`.
 
 ### Decision matrix
 
-Read `.claude/obsidian-iconize/icon-map.json` and dispatch:
+**Pre-flight (case 0): legacy-path migration.** Pre-1.0.0 versions of this
+skill placed the icon-map at `.claude/obsidian-iconize/icon-map.json`. The
+1.0.0 layout is `.claude/iconize/obsidian-icon-map.json` — `iconize/` as the
+resolver subsystem dir, file name carries the platform tag. If the legacy
+file exists, run a single `AskUserQuestion`:
+
+- question: `Migrate icon-map from .claude/obsidian-iconize/icon-map.json to .claude/iconize/obsidian-icon-map.json?`
+- description: ``v1.0.0 renamed the path. The v1.0.0 worker only reads the new path; leaving the file at the old path silently disables iconize-sync. **Migrate** does an atomic `mv` (no content change) and continues the rest of Step 2.7 against the moved file. **Keep-old** leaves the file in place; the install reports a FAIL for this step and the worker stays inert until the user fixes the path manually.``
+- options: **migrate-path** *(Recommended)* / **keep-old**.
+- On **migrate-path**: `mkdir -p .claude/iconize && mv .claude/obsidian-iconize/icon-map.json .claude/iconize/obsidian-icon-map.json && rmdir .claude/obsidian-iconize 2>/dev/null`. Outcome contributes `path-migrated` to the Step 6 report; then continue with cases 1–5 below against the new path (the file is now at the new path → cases 2-or-later apply, never case 1).
+- On **keep-old**: do nothing. State: **legacy-path-kept** (FAIL).
+
+Cases 1–5 below operate on `.claude/iconize/obsidian-icon-map.json`:
 
 1. **Target missing** → install the plugin's template at
-   `${CLAUDE_PLUGIN_ROOT}/templates/obsidian-iconize/icon-map.json`. No prompt
+   `${CLAUDE_PLUGIN_ROOT}/templates/iconize/obsidian-icon-map.json`. No prompt
    (mirrors Step 2's "New" branch for the protocol doc). State: **installed**.
 2. **Target present, `schema_version == SCHEMA_VERSION`** (handshake OK):
    - Byte-identical to template → no prompt. State: **unchanged**.
    - Byte-differs (authored customizations on the current schema) → show
-     unified diff, `AskUserQuestion`: **overwrite** / **keep-local**.
-3. **Target present, `schema_version == 1` (or absent, treated as implicit v1)
-   and `SCHEMA_VERSION == 2`** → v1-to-v2 migration is available. Preview:
-   count matchers that contain an `emit` key and list the first ~5 matcher ids
-   that would have `emit` stripped. Then issue a **single** `AskUserQuestion`
-   with three options:
-   - **migrate** — in-place upgrade. Drop every `emit` key from every matcher,
-     set `schema_version: 2`, preserve all other keys (registries,
-     stage_colors, version, matchers' other fields, key order). Implementation:
-     `jq '.schema_version = 2 | .matchers = (.matchers | map(del(.emit)))'`
-     with an atomic write (`icon-map.json.tmp` → `mv`). State: **v1-to-v2-upgraded**.
-   - **overwrite** — replace with the plugin's empty v2 template. The prompt
-     description MUST spell out that this wipes all authored registries,
-     matchers, and stage-colors. State: **overwritten**.
-   - **keep-local** — leave the v1 file untouched. Hooks remain inert (exit 0
-     with stderr diagnostic) until the user migrates. State: **v1-kept**,
-     surface as a FAIL in the Step 6 report.
+     unified diff and issue a **single** `AskUserQuestion` with three options.
+     `migrate` is first and labeled **(Recommended)** — it preserves
+     authored work and is the right answer for almost every consumer. Plain
+     overwrite/keep-local without a smart-merge option strands users with
+     hand-authored registries between two bad choices.
+     - **migrate** *(Recommended)* — three-way merge. For every top-level key
+       and nested entry (registries' inner maps, `matchers[]` keyed by `id`,
+       `stage_colors`):
+       - Keys present only in shipped template → **add** to authored file.
+       - Keys present only in authored file → **keep** verbatim.
+       - Keys present in both with byte-equal values → no-op.
+       - Keys present in both with **different** values → emit one
+         `AskUserQuestion` per conflict (key path + both values shown):
+         **keep-authored** / **take-shipped**. No bulk "resolve all"
+         shortcut — each conflict is a separate decision.
+       Atomic write (`icon-map.json.tmp` → `mv`). State: **merged**
+       (annotate count of additions, conflicts-kept-authored,
+       conflicts-took-shipped).
+     - **overwrite** — replace with shipped template. Description MUST spell
+       out that this wipes all authored registries/matchers/stage-colors.
+       State: **overwritten**.
+     - **keep-local** — leave authored file untouched; new shipped entries
+       won't reach this vault until next install. State: **kept-local**.
+3. **Target present, `schema_version` (call it `N`) `< SCHEMA_VERSION` and a
+   migration chain `N → N+1 → … → SCHEMA_VERSION` is fully covered by the
+   transforms table below.** A missing `schema_version` is treated as `N=1`
+   (pre-handshake back-compat). Render a per-step preview (one bullet per
+   chain step describing what that step changes — see transforms table) and
+   issue a **single** `AskUserQuestion` with three options. `migrate` is
+   first and labeled **(Recommended)**:
+   - **migrate** *(Recommended)* — apply each chain step in order. Each step
+     mutates `schema_version` to its target and applies its transform.
+     Final atomic write (`icon-map.json.tmp` → `mv`). Preserve all keys not
+     touched by any step (registries, stage_colors, matchers' unrelated
+     fields, key order). State: **migrated-v`N`-to-v`SCHEMA_VERSION`**
+     (e.g. `migrated-v1-to-v2`, future `migrated-v2-to-v3`,
+     `migrated-v1-to-v3` for a two-step walk).
+   - **overwrite** — replace with the plugin's empty current-schema template.
+     The prompt description MUST spell out that this wipes all authored
+     registries, matchers, and stage-colors. State: **overwritten**.
+   - **keep-local** — leave the older-schema file untouched. Hooks remain
+     inert (exit 0 with stderr diagnostic) until the user migrates. State:
+     **v`N`-kept**, surface as a FAIL in the Step 6 report.
+
+   #### Transforms table (one row per `N → N+1` step)
+
+   When a worker version is released that bumps `SCHEMA_VERSION`, the author
+   adds a row here describing the in-place transform from the previous
+   schema. The walker concatenates rows whose source ≥ the consumer's `N`
+   and whose target ≤ `SCHEMA_VERSION`. If any step in `N → … → SCHEMA_VERSION`
+   is missing from this table, fall through to case 3a below.
+
+   | Step | Transform | Implementation |
+   |---|---|---|
+   | 1 → 2 | Drop every `emit` key from every matcher; drop the legacy top-level `version` string (worker reads `schema_version` only); set `schema_version: 2`. | `jq 'del(.version) \| .schema_version = 2 \| .matchers = (.matchers \| map(del(.emit)))'` |
+
+   #### 3a. Older schema with no migration path
+
+   `schema_version < SCHEMA_VERSION` but the chain is incomplete (some
+   intermediate step has no transforms-table row). Treat as a configuration
+   error in the plugin itself, not a consumer fault. Render a single
+   `AskUserQuestion` with two options: **overwrite** (same as 3's overwrite,
+   wipes authored content) / **keep-local** (state: **migration-path-missing**,
+   surface as FAIL). Do not offer a partial migration — half-applying the
+   chain is worse than not applying it.
 4. **Target present, `schema_version` outside `SUPPORTED_SCHEMA` on the high
    side** (future version the installed worker doesn't know) → **plugin too
    old** blocker. Report and do not edit. State: **blocker-plugin-too-old**.
-5. **Target present, `schema_version == 2` but `min_hook_version` exceeds the
-   installed `HOOK_VERSION`** → same **plugin too old** blocker.
+5. **Target present, `schema_version == SCHEMA_VERSION` but `min_hook_version`
+   exceeds the installed `HOOK_VERSION`** → same **plugin too old** blocker.
 
 ### Wizard discipline
 
-Cases 2-drift and 3 each use **one** `AskUserQuestion`. Never ask a generic
-drift prompt (overwrite / keep-local) and then a second schema prompt
-(upgrade / keep) — when the drift is explained by a schema version bump,
-`migrate` must appear as a first-class option inside the same prompt as
-`overwrite` and `keep-local`, so the user doesn't have to pick `keep-local`
-just to unlock the migration path.
+Cases 2-drift, 3, and 3a each use **one** top-level `AskUserQuestion`
+(case 2-drift's `migrate` branch then issues N follow-up conflict prompts,
+one per conflicting key — that's expected, not a violation). Never ask a
+generic drift prompt (overwrite / keep-local) and then a second schema
+prompt (upgrade / keep) — when `migrate` is available, it must be the
+first option and labeled **(Recommended)**, so the user doesn't have to
+pick `keep-local` just to unlock a migration path. This applies to
+same-schema drift (merge with conflict prompts) and any older-schema
+drift the transforms table can chain to `SCHEMA_VERSION` (in-place
+schema upgrade — works for v1→v2 today, v2→v3 once that row lands, etc.).
 
 ## Step 3 — Install the pre-commit shim
 
@@ -273,9 +328,10 @@ executable scripts here to implement exotic `callback:` matchers.)
 Iconize (`obsidian-icon-folder`) stores the vault's full icon-mapping
 database (path → icon, plus `settings` / `rules` / `recentlyUsedIcons`) in
 `.obsidian/plugins/obsidian-icon-folder/data.json`. The file is rewritten
-on every icon click and by the iconize-sync worker from frontmatter + git
-hooks — so it's runtime state, not source. Tracking it produces merge
-conflicts on every branch switch and noisy diffs on every commit.
+on every icon click and by the bundled `iconize-reloader` plugin (which
+bridges folder-note frontmatter into folder-keyed entries) — so it's
+runtime state, not source. Tracking it produces merge conflicts on every
+branch switch and noisy diffs on every commit.
 
 Because this step runs only inside `iconize-install`, the opt-in is
 implicit: the user is scaffolding iconize-sync, so they clearly intend to
@@ -322,10 +378,10 @@ One bullet per step, in order — missing bullet = skipped step, back up and run
 - **Step 1.5a** `folder-notes`: state tuple (`binary=created|updated-<x>-to-<y>|unchanged overrides=... community=...`). Never `skipped` — hard deps abort the skill instead.
 - **Step 1.5b** `obsidian-icon-folder`: state tuple. Never `skipped`.
 - **Step 1.5c** `iconize-reloader`: state tuple. Never `skipped`.
-- **Step 2** protocol doc: **installed** / **unchanged** / **overwritten** / **kept-local**.
+- **Step 2** legacy protocol doc: **deleted** / **kept** / **not-present**.
 - **Step 2.5** legacy PostToolUse: **stripped** (count) / **kept** / **not-present**.
 - **Step 2.6** Iconize frontmatter settings: **asserted** / **fixed** / **kept-local** / **skipped** / **iconize-absent**.
-- **Step 2.7** icon-map: **installed** / **unchanged** / **overwritten** / **kept-local** / **v1-to-v2-upgraded** / **v1-kept** / **blocker-plugin-too-old**.
+- **Step 2.7** icon-map: **installed** / **unchanged** / **merged** (with `additions=N conflicts-kept-authored=N conflicts-took-shipped=N`) / **overwritten** / **kept-local** / **migrated-v`N`-to-v`SCHEMA_VERSION`** / **v`N`-kept** / **migration-path-missing** / **blocker-plugin-too-old**. Prepend **path-migrated** when the v1.0.0 legacy-path pre-flight ran (e.g. `path-migrated, merged`); **legacy-path-kept** when the user declined the path migration (FAIL).
 - **Step 3** pre-commit shim: HOOK_VERSION + `core.hooksPath` (**set** / **already-set** / **left-as-is**).
 - **Step 4** callbacks dir: **created** / **already-present** / **.gitkeep-added**.
 - **Step 4.5** `.gitignore` (iconize data.json): **added** / **already-ignored** / **gitignore-created** / **skipped**; WARN if `git ls-files --error-unmatch` exits 0 (user runs `git rm --cached`, never auto).
@@ -338,20 +394,27 @@ Next steps: "run `lazy-obsidian.iconize-config` to seed registries, then `lazy-o
 Log to `./.logs/claude/lazy-obsidian.iconize-install/YYYY-MM-DD_HH-MM-SS.md`
 per the logging rule. Two-step write: `Bash(mkdir -p ...)` then `Write`.
 
+## Failure modes
+
+- **`/lazy-obsidian.iconize-install` aborts: no `.obsidian/` found** — the repo root has no Obsidian vault directory → initialize Obsidian in this repo first, then re-run.
+- **`/lazy-obsidian.iconize-install` aborts: "Hard dependency `<id>` could not be installed/updated"** — `/lazy-obsidian.update-plugin` returned FAIL for `folder-notes`, `obsidian-icon-folder`, or `iconize-reloader` (network failure or registry lookup error) → check network connectivity, run `/lazy-obsidian.update-plugin <id>` manually to see the underlying error, then re-run.
+
 ## Idempotency
 
 Safe to re-run. Drift prompts only fire when content actually differs.
-Orphan detection: if `.claude/protocol/obsidian.iconize.md` exists but the
-plugin no longer ships `protocol.md`, offer deletion. Same for
-`icon-map.json`. Legacy PostToolUse detection (Step 2.5) is also idempotent —
-after the first re-run strips them, subsequent runs find nothing to strip.
+Step 2 (legacy protocol-doc migration) is idempotent — once the legacy file
+is deleted (or confirmed kept), subsequent runs report **not-present** /
+**kept** with no further prompt. Legacy PostToolUse detection (Step 2.5) is
+also idempotent — after the first re-run strips them, subsequent runs find
+nothing to strip. Icon-map orphan handling lives in Step 2.7's schema-aware
+decision matrix.
 
 ## Wizard discipline
 
 Every decision point uses `AskUserQuestion`, one question at a time. Never
-bundle "install protocol? install icon-map?" into a single multi-select
-prompt. Legacy-stripping gets its own prompt. The icon-map gets **one**
-schema-aware prompt (Step 2.7) whose options depend on the drift/schema case —
-so a v1-vs-v2 situation offers `migrate` alongside `overwrite` and
-`keep-local`, not a sequential drift-then-migration pair where `migrate` is
-hidden behind a prior choice.
+bundle "delete legacy protocol? install icon-map?" into a single multi-select
+prompt. Legacy-stripping (Steps 2 and 2.5) each get their own prompt. The
+icon-map gets **one** schema-aware prompt (Step 2.7) whose options depend on
+the drift/schema case — so a v1-vs-v2 situation offers `migrate` alongside
+`overwrite` and `keep-local`, not a sequential drift-then-migration pair
+where `migrate` is hidden behind a prior choice.

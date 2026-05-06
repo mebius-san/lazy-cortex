@@ -28,7 +28,7 @@ Every new reference file SHOULD declare its subtype via filename suffix. Existin
 | Contract | `<name>-contract.md` | `core/contract-template.md` | humans + audits |
 | Other / freeform | no suffix required | — | varies |
 
-A protocol file is the formal request/response contract for an expert (see `expert-protocols-contract.md`). A schema documents a config or data shape. A contract is the meta-spec for an artifact KIND (e.g. what every protocol file must contain). Mismatches between filename suffix and content (e.g. a `*-schema.md` file lacking a schema table) → `WARN`.
+A protocol file is the formal request/response contract for an expert (see `lazy-core.expert-protocols-contract.md`). A schema documents a config or data shape. A contract is the meta-spec for an artifact KIND (e.g. what every protocol file must contain). Mismatches between filename suffix and content (e.g. a `*-schema.md` file lacking a schema table) → `WARN`.
 
 ## 2. Mandatory frontmatter (FAIL if missing)
 
@@ -64,13 +64,13 @@ Filenames, paths, slash-commands, and code references mentioned in the body must
 
 ## 6. Versioning
 
-Protocols are versioned by filename: incompatible changes ship as a new file (e.g. `doc-review-v2-protocol.md`); the old file stays until consumers migrate. No version number is embedded in the reference key (`<plugin>:<name>`). Schema and contract docs are edited in place for clarifications; for incompatible meta-spec changes, ship a new contract file with a `-v2` suffix.
+Protocols are versioned by filename: incompatible changes ship as a new file (e.g. `lazy-review.doc-review-v2-protocol.md`); the old file stays until consumers migrate. No version number is embedded in the reference key (`<plugin>:<name>`). Schema and contract docs are edited in place for clarifications; for incompatible meta-spec changes, ship a new contract file with a `-v2` suffix.
 
-The `version:` frontmatter field on protocols is the **protocol's own** version (per `expert-protocols-contract.md § 5`), independent of the plugin's `plugin.json` version.
+The `version:` frontmatter field on protocols is the **protocol's own** version (per `lazy-core.expert-protocols-contract.md § 5`), independent of the plugin's `plugin.json` version.
 
 ## 7. Filename format
 
-`namespace.name.md` (dot-namespace) preferred but not required — references are often short bare names (e.g. `doc-review.md`, `iconize-protocol.md`). Missing dot → no severity.
+`namespace.name.md` (dot-namespace) preferred but not required — bare names without a namespace are tolerated. Missing dot → no severity.
 
 ## 8. References describe, they do not execute
 
@@ -78,4 +78,4 @@ Reference files document contracts, schemas, and protocols. They MUST NOT contai
 
 ## Enforcement
 
-`lazy-core.audit` runs the checks above on `.claude/references/*.md`, `~/.claude/references/*.md`, and `claude/*/references/*.md`. `lazy-core.doctor` Phase 3 surfaces the findings and prompts for fixes. Subtype-specific deeper validation (e.g. protocol §§ 4.1–4.9 from `expert-protocols-contract.md`) is enforced by `lazy-core.audit`'s expert-runtime phase.
+`lazy-core.audit` runs the checks above on `.claude/references/*.md`, `~/.claude/references/*.md`, and `claude/*/references/*.md`. `lazy-core.doctor` Phase 3 surfaces the findings and prompts for fixes. Subtype-specific deeper validation (e.g. protocol §§ 4.1–4.9 from `lazy-core.expert-protocols-contract.md`) is enforced by `lazy-core.audit`'s expert-runtime phase.

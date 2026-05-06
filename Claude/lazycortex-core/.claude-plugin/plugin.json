@@ -1,6 +1,6 @@
 {
   "name": "lazycortex-core",
-  "version": "1.3.0",
+  "version": "2.0.0",
   "description": "Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-model routing + settings management)",
   "author": {
     "name": "Mebius-san"

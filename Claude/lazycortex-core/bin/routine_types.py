@@ -377,7 +377,7 @@ def _is_ancestor(work_dir, ancestor: str, descendant: str) -> bool:
 def _compute_git_items(work_dir, last_seen: str, head_sha: str,
                       watch: str, path_filter: str | None) -> list[dict]:
     """Per-watch-value item enumeration. Returns list of dicts with the
-    templating variables documented in references/lazy-core.runtime.md."""
+    templating variables documented in references/lazy-core.runtime-schema.md."""
     import subprocess
     rng = f"{last_seen}..{head_sha}"
     pathspec = ["--", path_filter] if path_filter else []

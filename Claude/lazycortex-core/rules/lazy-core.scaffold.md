@@ -4,7 +4,7 @@ always_loaded: fires at create-time; path-scoped contracts don't trigger on Writ
 ---
 # Scaffold
 
-Before composing any **new** file whose path matches a glob below, `Read` the matching template first and start from it — never compose from memory. Contract & extension rules: `claude/lazycortex-core/references/lazy-core.scaffold-registry.md`.
+Before composing any **new** file whose path matches a glob below, `Read` the matching template first and start from it — never compose from memory. Contract & extension rules: `claude/lazycortex-core/references/lazy-core.scaffold-registry-contract.md`.
 
 ## Registry
 

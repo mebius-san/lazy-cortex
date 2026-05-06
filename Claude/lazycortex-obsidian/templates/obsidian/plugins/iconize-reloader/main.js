@@ -1,27 +1,108 @@
 'use strict';
 
-const RELOADER_VERSION = '2.0.8';
+const RELOADER_VERSION = '2.3.0';
 
-const { Plugin } = require('obsidian');
-const fs = require('fs');
-const path = require('path');
+const { Plugin, PluginSettingTab, Setting, Platform } = require('obsidian');
+
+// Node `fs` / `path` are desktop-only. On iOS/Android `require('fs')` is
+// either absent or a stub. Guard the import so the file loads cleanly on
+// mobile and we run in metadataCache-only mode there.
+let fs = null;
+let path = null;
+try {
+  fs = require('fs');
+  path = require('path');
+} catch (e) {
+  // mobile — handled via Platform.isMobile branches below.
+}
 
 const TARGET_PLUGIN_ID = 'obsidian-icon-folder';
 const FILE_EXPLORER_ID = 'file-explorer';
 const DEBOUNCE_MS = 250;
 
+// Vault-wide fs.watch for folder-notes (desktop only) — fires on disk write,
+// bypassing Obsidian's metadataCache polling cadence. On Dropbox-synced vaults
+// the cache can lag many seconds (sometimes until restart) before re-parsing
+// externally modified .md files; events that depend on it (folder-icon repaint
+// after an agent stage flip) feel broken. fs.watch on macOS uses FSEvents so
+// it picks up writes within ~100ms regardless of who wrote them.
+const MD_WATCH_DEBOUNCE_MS = 80;
+const MD_WATCH_EXCLUDED = new Set(['.obsidian', '.git', '.claude', '.githooks', 'node_modules']);
+
 const FOLDER_NOTES_PLUGIN_ID = 'folder-notes';
 const FOLDER_NOTE_TEMPLATE_DEFAULT = '{{folder_name}}';
 
-// Read the Folder Notes community plugin's configured folder-note name template.
-// Returns the template string (e.g. '{{folder_name}}' or 'index') or null if the
-// plugin is missing, disabled, or its data.json is unreadable.
-function readFolderNoteTemplate(basePath) {
-  const p = path.join(basePath, '.obsidian', 'plugins', FOLDER_NOTES_PLUGIN_ID, 'data.json');
+// Vault-relative paths — accepted by Obsidian's adapter on every platform.
+const DATA_VAULT_PATH = `.obsidian/plugins/${TARGET_PLUGIN_ID}/data.json`;
+const FN_DATA_VAULT_PATH = `.obsidian/plugins/${FOLDER_NOTES_PLUGIN_ID}/data.json`;
+
+const RESERVED_KEYS = new Set(['settings', 'rules', 'recentlyUsedIcons']);
+
+// Reloader's own settings — persisted to .obsidian/plugins/iconize-reloader/data.json
+// via Obsidian's Plugin.loadData / saveData. Field names default to the LazyCortex
+// `iconize_*` namespace; consumers who want to align with Iconize's stock `icon` /
+// `iconColor` keys can change them here, and `enforceIconizeSettings` will push the
+// chosen names into Iconize's own settings on load.
+const DEFAULT_SETTINGS = Object.freeze({
+  iconFieldName: 'iconize_icon',
+  colorFieldName: 'iconize_color',
+  folderNotePropagation: true,
+  enforceIconizeSettings: true,
+});
+
+// ---------------------------------------------------------------------------
+// data.json + Folder Notes plugin data — adapter-based, single platform-agnostic
+// I/O surface. Returns null on read failure (file absent, malformed JSON, etc.).
+// ---------------------------------------------------------------------------
+
+async function readIconizeData(adapter) {
   try {
-    const raw = fs.readFileSync(p, 'utf8');
+    const raw = await adapter.read(DATA_VAULT_PATH);
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+async function writeIconizeData(adapter, obj) {
+  await adapter.write(DATA_VAULT_PATH, JSON.stringify(obj, null, 2) + '\n');
+}
+
+// Upsert `{folderPath: {iconName, iconColor?}}`. Returns true when a write
+// happened, false on no-op or guarded write. Async because the adapter is.
+async function upsertFolderEntry(adapter, folderPath, iconName, iconColor) {
+  const data = await readIconizeData(adapter);
+  if (data === null) return false;
+  if (RESERVED_KEYS.has(folderPath)) return false;
+  const existing = data[folderPath];
+  const entry = { iconName };
+  if (iconColor) entry.iconColor = iconColor;
+  if (existing && existing.iconName === entry.iconName && existing.iconColor === entry.iconColor) {
+    return false;
+  }
+  data[folderPath] = entry;
+  await writeIconizeData(adapter, data);
+  return true;
+}
+
+// Remove `folderPath`. Returns true when a write happened.
+async function removeFolderEntry(adapter, folderPath) {
+  const data = await readIconizeData(adapter);
+  if (data === null) return false;
+  if (RESERVED_KEYS.has(folderPath)) return false;
+  if (!(folderPath in data)) return false;
+  delete data[folderPath];
+  await writeIconizeData(adapter, data);
+  return true;
+}
+
+// Read the Folder Notes community plugin's configured folder-note name template.
+// Returns the template string (e.g. '{{folder_name}}' or 'index') or null if
+// the plugin is missing, disabled, or its data.json is unreadable.
+async function readFolderNoteTemplate(adapter) {
+  try {
+    const raw = await adapter.read(FN_DATA_VAULT_PATH);
     const data = JSON.parse(raw);
-    // Folder Notes stores it under `folderNoteName`. Fall back to default if absent.
     return (typeof data.folderNoteName === 'string' && data.folderNoteName)
       ? data.folderNoteName
       : FOLDER_NOTE_TEMPLATE_DEFAULT;
@@ -30,10 +111,10 @@ function readFolderNoteTemplate(basePath) {
   }
 }
 
-// Given a folder-note template and a vault-relative file path, decide whether the
-// file is the folder-note for its parent folder. Supports the `{{folder_name}}`
-// token plus literal filenames. Returns the folder's vault-relative path when the
-// file IS a folder-note, or null otherwise.
+// Given a folder-note template and a vault-relative file path, decide whether
+// the file is the folder-note for its parent folder. Supports the
+// `{{folder_name}}` token plus literal filenames. Returns the folder's
+// vault-relative path when the file IS a folder-note, or null otherwise.
 function folderNoteTarget(template, vaultRelPath) {
   if (!template) return null;
   // vault root files cannot be folder-notes (no parent folder).
@@ -49,82 +130,111 @@ function folderNoteTarget(template, vaultRelPath) {
   return stem === expected ? parent : null;
 }
 
-// Read, mutate, write iconize data.json. Never touches reserved keys.
-const RESERVED_KEYS = new Set(['settings', 'rules', 'recentlyUsedIcons']);
-
-function readIconizeData(dataFile) {
+// Minimal disk-side frontmatter parser — extracts the configured icon / color
+// fields from the leading `---`-fenced block. Used by the desktop fs.watch path
+// so we don't have to wait for Obsidian's metadataCache to re-parse the file.
+// Field names are passed in (configurable via the reloader's settings tab) so
+// consumers can align with Iconize's own `icon` / `iconColor` namespace if they
+// prefer. Desktop only; never invoked on mobile (no `fs`).
+function readIconFieldsFromDisk(absPath, iconFieldName, colorFieldName) {
+  let raw;
   try {
-    return JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    raw = fs.readFileSync(absPath, 'utf8');
   } catch (e) {
-    return null;
+    return { icon: null, color: null };
   }
-}
-
-function writeIconizeData(dataFile, obj) {
-  const tmp = dataFile + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmp, dataFile);
-  return fs.statSync(dataFile).mtimeMs;
-}
-
-// Upsert `{folderPath: {iconName, iconColor?}}`. Returns updated mtime or null on no-op.
-function upsertFolderEntry(dataFile, folderPath, iconName, iconColor) {
-  const data = readIconizeData(dataFile);
-  if (data === null) return null;
-  if (RESERVED_KEYS.has(folderPath)) return null;
-  const existing = data[folderPath];
-  const entry = { iconName };
-  if (iconColor) entry.iconColor = iconColor;
-  if (existing && existing.iconName === entry.iconName && existing.iconColor === entry.iconColor) {
-    return null; // no-op
+  if (!raw.startsWith('---\n')) return { icon: null, color: null };
+  const end = raw.indexOf('\n---', 4);
+  if (end < 0) return { icon: null, color: null };
+  const block = raw.slice(4, end);
+  let icon = null, color = null;
+  for (const line of block.split('\n')) {
+    const m = /^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const k = m[1];
+    let v = m[2].trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1);
+    }
+    if (k === iconFieldName) icon = v || null;
+    else if (k === colorFieldName) color = v || null;
   }
-  data[folderPath] = entry;
-  return writeIconizeData(dataFile, data);
-}
-
-// Remove `folderPath`. Returns updated mtime or null when key absent.
-function removeFolderEntry(dataFile, folderPath) {
-  const data = readIconizeData(dataFile);
-  if (data === null) return null;
-  if (RESERVED_KEYS.has(folderPath)) return null;
-  if (!(folderPath in data)) return null;
-  delete data[folderPath];
-  return writeIconizeData(dataFile, data);
+  return { icon, color };
 }
 
 class IconizeReloaderPlugin extends Plugin {
   async onload() {
-    const basePath = this.app.vault.adapter.basePath;
-    if (!basePath) {
-      console.warn('[iconize-reloader] no vault basePath; desktop-only');
-      return;
+    await this.loadSettings();
+    const adapter = this.app.vault.adapter;
+    const isDesktop = !Platform.isMobile;
+    const basePath = isDesktop && adapter && adapter.basePath ? adapter.basePath : null;
+    if (isDesktop && !basePath) {
+      console.warn('[iconize-reloader] desktop without basePath; fs.watch path inert');
     }
-    const pluginDir = path.join(basePath, '.obsidian', 'plugins', TARGET_PLUGIN_ID);
-    const dataFile = path.join(pluginDir, 'data.json');
+
+    // Absolute paths are needed only by Node fs/fs.watch on desktop.
+    const absDataFile = isDesktop && basePath && path
+      ? path.join(basePath, '.obsidian', 'plugins', TARGET_PLUGIN_ID, 'data.json')
+      : null;
+    const absPluginDir = isDesktop && basePath && path
+      ? path.join(basePath, '.obsidian', 'plugins', TARGET_PLUGIN_ID)
+      : null;
+    const absFolderNotesDir = isDesktop && basePath && path
+      ? path.join(basePath, '.obsidian', 'plugins', FOLDER_NOTES_PLUGIN_ID)
+      : null;
 
     let lastMtime = 0;
-    try { lastMtime = fs.statSync(dataFile).mtimeMs; } catch (e) { /* not present yet */ }
+    if (absDataFile) {
+      try { lastMtime = fs.statSync(absDataFile).mtimeMs; } catch (e) { /* not present yet */ }
+    }
 
-    // Re-entrancy: when we (the reloader) write data.json for folder entries,
-    // we record the mtime here so the external-change watcher can distinguish
-    // self-writes from Iconize-writes / user-click writes.
+    // Re-entrancy: when we write data.json for folder entries, we record the
+    // mtime here so the desktop external-change watcher can distinguish
+    // self-writes from Iconize-writes / user-click writes. On mobile this
+    // value stays 0 forever — there's no fs.watch to suppress.
     let lastSelfWriteMtime = 0;
 
+    // Bump after every successful write. Desktop-only; on mobile we have
+    // nothing to suppress.
+    const bumpSelfWriteMtime = () => {
+      if (!absDataFile || !fs) return;
+      try { lastSelfWriteMtime = fs.statSync(absDataFile).mtimeMs; } catch (e) { /* file vanished */ }
+    };
+    // Expose for `_enforceIconizeSettings`, which writes Iconize's `data.json`
+    // outside the onload closure (e.g. from the settings tab).
+    this._bumpSelfWriteMtime = bumpSelfWriteMtime;
+
+    // Re-assert Iconize's frontmatter settings now that we can suppress the
+    // self-write echo. Aligns Iconize's own file-side frontmatter feature with
+    // the same field names this plugin scans for folder-side propagation, so a
+    // single `iconize_*` namespace in note frontmatter drives both layers.
+    if (this.settings.enforceIconizeSettings) {
+      try {
+        await this._enforceIconizeSettings();
+      } catch (e) {
+        console.error('[iconize-reloader] enforceIconizeSettings failed', e);
+      }
+    }
+
     // Folder-note template (read once, refreshed on Folder Notes settings change).
-    let folderNoteTemplate = readFolderNoteTemplate(basePath);
+    let folderNoteTemplate = await readFolderNoteTemplate(adapter);
     if (folderNoteTemplate === null) {
       console.warn('[iconize-reloader] folder-notes plugin not installed/disabled — folder-icon propagation inert');
     }
 
-    // Extract iconize_* from a file's cached frontmatter. Returns { icon, color }
-    // with nullable fields, or null when the file has no frontmatter at all.
+    // Extract the configured icon / color fields from a file's cached frontmatter.
+    // Field names come from `this.settings`; defaults are `iconize_icon` /
+    // `iconize_color`. Returns { icon, color } with nullable fields, or both null
+    // when the file has no frontmatter at all.
     const extractIconFields = (file) => {
       const cache = this.app.metadataCache.getFileCache(file);
       const fm = cache && cache.frontmatter;
       if (!fm) return { icon: null, color: null };
+      const iconKey = this.settings.iconFieldName;
+      const colorKey = this.settings.colorFieldName;
       return {
-        icon: typeof fm.iconize_icon === 'string' ? fm.iconize_icon : null,
-        color: typeof fm.iconize_color === 'string' ? fm.iconize_color : null,
+        icon: typeof fm[iconKey] === 'string' ? fm[iconKey] : null,
+        color: typeof fm[colorKey] === 'string' ? fm[colorKey] : null,
       };
     };
 
@@ -161,8 +271,8 @@ class IconizeReloaderPlugin extends Plugin {
     // null to assert the entry must be absent.
     const WATCHDOG_DELAY_MS = 500;
     const scheduleWatchdog = (target, desired) => {
-      setTimeout(() => {
-        const data = readIconizeData(dataFile);
+      setTimeout(async () => {
+        const data = await readIconizeData(adapter);
         if (data === null) return;
         const existing = data[target];
         const matches =
@@ -172,14 +282,14 @@ class IconizeReloaderPlugin extends Plugin {
             existing.iconColor === desired.iconColor);
         if (matches) return;
         console.log('[iconize-reloader] watchdog re-asserting', target, '→', desired);
-        let mt;
+        let wrote;
         if (desired === null) {
-          mt = removeFolderEntry(dataFile, target);
+          wrote = await removeFolderEntry(adapter, target);
         } else {
-          mt = upsertFolderEntry(dataFile, target, desired.iconName, desired.iconColor);
+          wrote = await upsertFolderEntry(adapter, target, desired.iconName, desired.iconColor);
         }
-        if (mt) {
-          lastSelfWriteMtime = mt;
+        if (wrote) {
+          bumpSelfWriteMtime();
           mirrorFolderEntryToMemory(target, desired ? desired.iconName : null, desired ? desired.iconColor : null);
           scheduleSelfRefresh();
         }
@@ -189,19 +299,20 @@ class IconizeReloaderPlugin extends Plugin {
     // Apply a folder-note's current frontmatter to data.json. No-op when the
     // file isn't a folder-note or when Folder Notes plugin is missing.
     // Returns true when a write happened (caller may want to trigger refresh).
-    const applyFolderNote = (file) => {
+    const applyFolderNote = async (file) => {
+      if (!this.settings.folderNotePropagation) return false;
       if (!folderNoteTemplate) return false;
       const target = folderNoteTarget(folderNoteTemplate, file.path);
       if (!target) return false;
       const { icon, color } = extractIconFields(file);
-      let mt;
+      let wrote = false;
       if (icon) {
-        mt = upsertFolderEntry(dataFile, target, icon, color);
+        wrote = await upsertFolderEntry(adapter, target, icon, color);
       } else {
-        mt = removeFolderEntry(dataFile, target);
+        wrote = await removeFolderEntry(adapter, target);
       }
-      if (mt) {
-        lastSelfWriteMtime = mt;
+      if (wrote) {
+        bumpSelfWriteMtime();
         mirrorFolderEntryToMemory(target, icon, color);
         const desired = icon ? (color ? { iconName: icon, iconColor: color } : { iconName: icon }) : null;
         scheduleWatchdog(target, desired);
@@ -212,13 +323,14 @@ class IconizeReloaderPlugin extends Plugin {
 
     // On folder-note deletion or rename-away, drop the folder key.
     // Returns true when a write happened.
-    const dropFolderNote = (oldPath) => {
+    const dropFolderNote = async (oldPath) => {
+      if (!this.settings.folderNotePropagation) return false;
       if (!folderNoteTemplate) return false;
       const target = folderNoteTarget(folderNoteTemplate, oldPath);
       if (!target) return false;
-      const mt = removeFolderEntry(dataFile, target);
-      if (mt) {
-        lastSelfWriteMtime = mt;
+      const wrote = await removeFolderEntry(adapter, target);
+      if (wrote) {
+        bumpSelfWriteMtime();
         mirrorFolderEntryToMemory(target, null, null);
         scheduleWatchdog(target, null);
         return true;
@@ -256,7 +368,7 @@ class IconizeReloaderPlugin extends Plugin {
     //   3. Clear iconize.registeredFileExplorers — otherwise addAll's outer
     //      loop skips already-registered explorers (it's designed for
     //      first-mount, not re-paint).
-    //   4. Call iconize.handleChangeLayout() — re-paints file-explorer, tabs
+    //   4. Trigger workspace `layout-change` — re-paints file-explorer, tabs,
     //      and title icons from the now-fresh `data`. No window reload, no
     //      plugin toggle, no race with iconize's onunload writeback.
     const refreshTree = async () => {
@@ -309,34 +421,15 @@ class IconizeReloaderPlugin extends Plugin {
       }
     };
 
-    const onChange = () => {
-      let m = 0;
-      try { m = fs.statSync(dataFile).mtimeMs; } catch (e) { return; }
-      if (m === lastMtime) return;
-      lastMtime = m;
-      // Self-write suppression: our own folder-entry writes just bumped mtime.
-      // Allow one "slack" so we only suppress the write we made and still repaint
-      // when the same mtime value is produced by an unrelated edit later.
-      if (m === lastSelfWriteMtime) {
-        lastSelfWriteMtime = 0; // single-shot
-        return;
-      }
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => { debounceTimer = null; refreshTree(); }, DEBOUNCE_MS);
-    };
-
-    // Watch the parent dir and filter — survives atomic rename (Dropbox/iCloud).
-    const watcher = fs.watch(pluginDir, { persistent: false }, (_event, filename) => {
-      if (filename === 'data.json') onChange();
-    });
-
     // Folder-note frontmatter events — metadataCache.changed fires on every
     // .md save, including the first parse after vault open. We filter inside
-    // applyFolderNote via folderNoteTarget.
+    // applyFolderNote via folderNoteTarget. This is the cross-platform path —
+    // works identically on desktop and mobile.
     const onChangedFile = (file) => {
-      if (file && file.path && file.path.endsWith('.md')) {
-        if (applyFolderNote(file)) scheduleSelfRefresh();
-      }
+      if (!(file && file.path && file.path.endsWith('.md'))) return;
+      applyFolderNote(file)
+        .then((wrote) => { if (wrote) scheduleSelfRefresh(); })
+        .catch((e) => console.error('[iconize-reloader] applyFolderNote failed', e));
     };
     this.registerEvent(this.app.metadataCache.on('changed', onChangedFile));
 
@@ -432,13 +525,7 @@ class IconizeReloaderPlugin extends Plugin {
       find();
     };
 
-    // Create: when a new folder-note appears (externally or from the worker's
-    // PostToolUse hook), Folder Notes' own vault.create listener applies CSS
-    // classes but often before the file-explorer has rendered the new file —
-    // leaving the note visible as a sibling until app reload. Schedule a
-    // refresh (which emits layout-change) and also directly nudge the CSS
-    // classes with retries so the merge lands even if Folder Notes' handler
-    // missed the DOM.
+    // Create / Rename / Delete — vault events are platform-agnostic.
     this.registerEvent(this.app.vault.on('create', (file) => {
       if (!file || !file.path || !file.path.endsWith('.md')) return;
       if (!folderNoteTemplate) return;
@@ -449,57 +536,198 @@ class IconizeReloaderPlugin extends Plugin {
       }
     }));
 
-    // Rename: decide based on old + new paths.
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
-      let wrote = false;
-      if (oldPath && oldPath.endsWith('.md')) wrote = dropFolderNote(oldPath) || wrote;
-      if (file && file.path && file.path.endsWith('.md')) wrote = applyFolderNote(file) || wrote;
-      if (wrote) scheduleSelfRefresh();
+      (async () => {
+        let wrote = false;
+        if (oldPath && oldPath.endsWith('.md')) wrote = (await dropFolderNote(oldPath)) || wrote;
+        if (file && file.path && file.path.endsWith('.md')) wrote = (await applyFolderNote(file)) || wrote;
+        if (wrote) scheduleSelfRefresh();
+      })().catch((e) => console.error('[iconize-reloader] rename handler failed', e));
     }));
 
-    // Delete: drop the folder-keyed entry if the deleted path was a folder-note.
     this.registerEvent(this.app.vault.on('delete', (file) => {
-      if (file && file.path && file.path.endsWith('.md')) {
-        if (dropFolderNote(file.path)) scheduleSelfRefresh();
-      }
+      if (!(file && file.path && file.path.endsWith('.md'))) return;
+      dropFolderNote(file.path)
+        .then((wrote) => { if (wrote) scheduleSelfRefresh(); })
+        .catch((e) => console.error('[iconize-reloader] delete handler failed', e));
     }));
 
     // Initial scan: iterate every markdown file once so pre-existing folder-note
     // frontmatter is reflected in data.json. Defer one tick so metadataCache is
     // populated. Trigger a single refreshTree after the sweep when any write
-    // happened — otherwise Iconize's in-memory `data` stays stale (our own
-    // writes are suppressed by fs.watch's self-write filter).
-    const initialScan = () => {
+    // happened — otherwise Iconize's in-memory `data` stays stale.
+    const initialScan = async () => {
       if (!folderNoteTemplate) return;
       const mdFiles = this.app.vault.getMarkdownFiles();
       let wrote = false;
-      for (const file of mdFiles) wrote = applyFolderNote(file) || wrote;
+      for (const file of mdFiles) {
+        wrote = (await applyFolderNote(file)) || wrote;
+      }
       if (wrote) scheduleSelfRefresh();
     };
-    this.app.workspace.onLayoutReady(() => setTimeout(initialScan, 100));
+    // Expose for the settings tab — invoked after a field-name change so the
+    // worker re-walks every md file under the new namespace, replacing any
+    // entries written under the previous names.
+    this._initialScan = initialScan;
+    this._scheduleSelfRefresh = scheduleSelfRefresh;
 
-    // Watch Folder Notes plugin's data.json for template changes.
-    const fnDir = path.join(basePath, '.obsidian', 'plugins', FOLDER_NOTES_PLUGIN_ID);
+    this.app.workspace.onLayoutReady(() => {
+      setTimeout(() => {
+        initialScan().catch((e) => console.error('[iconize-reloader] initialScan failed', e));
+      }, 100);
+    });
+
+    // -------------------------------------------------------------------
+    // Desktop-only fs.watch surface — three watchers + the disk-driven
+    // folder-note apply path. On mobile (`Platform.isMobile === true`) all
+    // of this is gated off; the metadataCache + vault.create/rename/delete
+    // listeners above keep the folder-icon bridge alive without polling.
+    // -------------------------------------------------------------------
+    let watcher = null;
     let fnWatcher = null;
-    try {
-      fnWatcher = fs.watch(fnDir, { persistent: false }, (_event, filename) => {
-        if (filename !== 'data.json') return;
-        const next = readFolderNoteTemplate(basePath);
-        if (next === folderNoteTemplate) return;
-        folderNoteTemplate = next;
-        console.log('[iconize-reloader] folder-notes template changed →', next);
-        // Re-scan so folder-note matches shift.
-        initialScan();
+    let mdWatcher = null;
+    const mdDebounceTimers = new Map();
+
+    if (isDesktop && fs && path && absDataFile && absPluginDir) {
+      const onChange = () => {
+        let m = 0;
+        try { m = fs.statSync(absDataFile).mtimeMs; } catch (e) { return; }
+        if (m === lastMtime) return;
+        lastMtime = m;
+        // Self-write suppression: our own folder-entry writes just bumped
+        // mtime. Allow one "slack" so we only suppress the write we made
+        // and still repaint when the same mtime value is produced by an
+        // unrelated edit later.
+        if (m === lastSelfWriteMtime) {
+          lastSelfWriteMtime = 0; // single-shot
+          return;
+        }
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => { debounceTimer = null; refreshTree(); }, DEBOUNCE_MS);
+      };
+
+      // Watch the parent dir and filter — survives atomic rename
+      // (Dropbox/iCloud).
+      watcher = fs.watch(absPluginDir, { persistent: false }, (_event, filename) => {
+        if (filename === 'data.json') onChange();
       });
-    } catch (e) {
-      // Folder Notes plugin dir absent — leave fnWatcher null; reloader stays inert
-      // on folder side but file-side painting via Iconize still works.
+
+      // Watch Folder Notes plugin's data.json for template changes.
+      if (absFolderNotesDir) {
+        try {
+          fnWatcher = fs.watch(absFolderNotesDir, { persistent: false }, (_event, filename) => {
+            if (filename !== 'data.json') return;
+            (async () => {
+              const next = await readFolderNoteTemplate(adapter);
+              if (next === folderNoteTemplate) return;
+              folderNoteTemplate = next;
+              console.log('[iconize-reloader] folder-notes template changed →', next);
+              await initialScan();
+            })().catch((e) => console.error('[iconize-reloader] fnWatcher handler failed', e));
+          });
+        } catch (e) {
+          // Folder Notes plugin dir absent — leave fnWatcher null; reloader
+          // stays inert on folder side but file-side painting via Iconize
+          // still works.
+        }
+      }
+
+      // Disk-driven folder-note apply: parse frontmatter from disk and upsert
+      // data.json without waiting for Obsidian's metadataCache to catch up.
+      // Coalesces rapid writes (atomic-replace fires multiple events) via
+      // per-path debounce. Returns true on no-op so caller can decide to
+      // refresh.
+      const applyFolderNoteFromDisk = async (vaultRel) => {
+        if (!this.settings.folderNotePropagation) return;
+        if (!folderNoteTemplate) return;
+        const target = folderNoteTarget(folderNoteTemplate, vaultRel);
+        if (!target) return;
+        const absPath = path.join(basePath, vaultRel);
+        let exists = false;
+        try { exists = fs.statSync(absPath).isFile(); } catch (e) { /* deleted */ }
+        if (exists) {
+          const { icon, color } = readIconFieldsFromDisk(
+            absPath,
+            this.settings.iconFieldName,
+            this.settings.colorFieldName,
+          );
+          if (icon) {
+            const wrote = await upsertFolderEntry(adapter, target, icon, color);
+            if (wrote) {
+              bumpSelfWriteMtime();
+              mirrorFolderEntryToMemory(target, icon, color);
+              const desired = color ? { iconName: icon, iconColor: color } : { iconName: icon };
+              scheduleWatchdog(target, desired);
+              scheduleSelfRefresh();
+              console.log('[iconize-reloader] fs.watch upsert', target, '→', desired);
+            }
+          } else {
+            const wrote = await removeFolderEntry(adapter, target);
+            if (wrote) {
+              bumpSelfWriteMtime();
+              mirrorFolderEntryToMemory(target, null, null);
+              scheduleWatchdog(target, null);
+              scheduleSelfRefresh();
+              console.log('[iconize-reloader] fs.watch remove', target, '(no icon in fm)');
+            }
+          }
+        } else {
+          const wrote = await removeFolderEntry(adapter, target);
+          if (wrote) {
+            bumpSelfWriteMtime();
+            mirrorFolderEntryToMemory(target, null, null);
+            scheduleWatchdog(target, null);
+            scheduleSelfRefresh();
+            console.log('[iconize-reloader] fs.watch remove', target, '(file deleted)');
+          }
+        }
+      };
+
+      // Vault-wide recursive fs.watch. macOS uses FSEvents under the hood,
+      // which suppresses some atomic-replace intermediates and aggregates
+      // rapid bursts. We filter on .md suffix and excluded top-level dirs at
+      // event time.
+      try {
+        mdWatcher = fs.watch(basePath, { persistent: false, recursive: true },
+          (_event, filename) => {
+            if (!filename) return;
+            // POSIX-ize for downstream string ops.
+            const vaultRel = filename.split(path.sep).join('/');
+            if (!vaultRel.endsWith('.md')) return;
+            // Skip atomic-replace intermediates from frontmatter_rewriter.
+            if (vaultRel.endsWith('.md.tmp')) return;
+            const top = vaultRel.split('/', 1)[0];
+            if (MD_WATCH_EXCLUDED.has(top)) return;
+            // Cheap pre-filter: only proceed for paths that look like
+            // folder-notes (filename stem matches parent basename, by template).
+            if (!folderNoteTemplate) return;
+            if (!folderNoteTarget(folderNoteTemplate, vaultRel)) return;
+
+            const prev = mdDebounceTimers.get(vaultRel);
+            if (prev) clearTimeout(prev);
+            mdDebounceTimers.set(vaultRel, setTimeout(() => {
+              mdDebounceTimers.delete(vaultRel);
+              applyFolderNoteFromDisk(vaultRel)
+                .catch((e) => console.error('[iconize-reloader] applyFolderNoteFromDisk failed', e));
+            }, MD_WATCH_DEBOUNCE_MS));
+          });
+        console.log('[iconize-reloader] watching vault for folder-notes →', basePath);
+      } catch (e) {
+        console.warn('[iconize-reloader] vault fs.watch failed; folder-note disk events inert', e);
+      }
+
+      console.log('[iconize-reloader] watching', absDataFile);
+    } else if (Platform.isMobile) {
+      console.log('[iconize-reloader] mobile mode — metadataCache-only (fs.watch surface inert)');
     }
 
     this.register(() => {
-      watcher.close();
+      if (watcher) watcher.close();
       if (fnWatcher) fnWatcher.close();
+      if (mdWatcher) mdWatcher.close();
       if (debounceTimer) clearTimeout(debounceTimer);
+      for (const t of mdDebounceTimers.values()) clearTimeout(t);
+      mdDebounceTimers.clear();
     });
 
     this.addCommand({
@@ -508,7 +736,129 @@ class IconizeReloaderPlugin extends Plugin {
       callback: refreshTree,
     });
 
-    console.log('[iconize-reloader] watching', dataFile);
+    this.addSettingTab(new IconizeReloaderSettingTab(this.app, this));
+  }
+
+  async loadSettings() {
+    const stored = (await this.loadData()) || {};
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored);
+  }
+
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
+
+  // Push our preferred frontmatter field names into Iconize's own settings
+  // block, plus enable Iconize's frontmatter-driven file-side painting. Returns
+  // true when a write happened. Callable from onload (early, after the
+  // self-write-mtime closure is wired) and from the settings tab's onChange
+  // handlers. No-op on mobile when Iconize's data.json is missing.
+  async _enforceIconizeSettings() {
+    const adapter = this.app.vault.adapter;
+    const data = await readIconizeData(adapter);
+    if (data === null) return false;
+    const settings = data.settings || (data.settings = {});
+    let changed = false;
+    if (settings.iconInFrontmatterEnabled !== true) {
+      settings.iconInFrontmatterEnabled = true;
+      changed = true;
+    }
+    if (settings.iconInFrontmatterFieldName !== this.settings.iconFieldName) {
+      settings.iconInFrontmatterFieldName = this.settings.iconFieldName;
+      changed = true;
+    }
+    if (settings.iconColorInFrontmatterFieldName !== this.settings.colorFieldName) {
+      settings.iconColorInFrontmatterFieldName = this.settings.colorFieldName;
+      changed = true;
+    }
+    if (changed) {
+      await writeIconizeData(adapter, data);
+      if (this._bumpSelfWriteMtime) this._bumpSelfWriteMtime();
+      console.log('[iconize-reloader] re-asserted Iconize frontmatter settings →',
+        this.settings.iconFieldName, '/', this.settings.colorFieldName);
+    }
+    return changed;
+  }
+}
+
+class IconizeReloaderSettingTab extends PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl('h2', { text: 'Iconize Reloader' });
+
+    new Setting(containerEl)
+      .setName('Folder-note → folder icon propagation')
+      .setDesc('Watch every folder-note\'s frontmatter and write the matching icon entry into Iconize\'s data.json so the parent folder paints with the configured icon. Turn off to leave folders alone (file-side painting via Iconize\'s built-in frontmatter feature still works).')
+      .addToggle((t) => t
+        .setValue(this.plugin.settings.folderNotePropagation)
+        .onChange(async (v) => {
+          this.plugin.settings.folderNotePropagation = v;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Icon field name')
+      .setDesc(`Frontmatter key the reloader reads — and Iconize is configured to read — for the icon name. Default: ${DEFAULT_SETTINGS.iconFieldName}`)
+      .addText((t) => t
+        .setPlaceholder(DEFAULT_SETTINGS.iconFieldName)
+        .setValue(this.plugin.settings.iconFieldName)
+        .onChange(async (v) => {
+          const next = (v || '').trim() || DEFAULT_SETTINGS.iconFieldName;
+          if (next === this.plugin.settings.iconFieldName) return;
+          this.plugin.settings.iconFieldName = next;
+          await this.plugin.saveSettings();
+          await this._reapplyAfterFieldChange();
+        }));
+
+    new Setting(containerEl)
+      .setName('Color field name')
+      .setDesc(`Frontmatter key the reloader reads — and Iconize is configured to read — for the icon color. Default: ${DEFAULT_SETTINGS.colorFieldName}`)
+      .addText((t) => t
+        .setPlaceholder(DEFAULT_SETTINGS.colorFieldName)
+        .setValue(this.plugin.settings.colorFieldName)
+        .onChange(async (v) => {
+          const next = (v || '').trim() || DEFAULT_SETTINGS.colorFieldName;
+          if (next === this.plugin.settings.colorFieldName) return;
+          this.plugin.settings.colorFieldName = next;
+          await this.plugin.saveSettings();
+          await this._reapplyAfterFieldChange();
+        }));
+
+    new Setting(containerEl)
+      .setName('Re-assert Iconize settings on load')
+      .setDesc('On every reloader load, push iconInFrontmatterEnabled=true plus the field names above into Iconize\'s settings. Survives manual toggling-off in Iconize\'s own settings UI.')
+      .addToggle((t) => t
+        .setValue(this.plugin.settings.enforceIconizeSettings)
+        .onChange(async (v) => {
+          this.plugin.settings.enforceIconizeSettings = v;
+          await this.plugin.saveSettings();
+          if (v) {
+            try { await this.plugin._enforceIconizeSettings(); }
+            catch (e) { console.error('[iconize-reloader] enforce on toggle failed', e); }
+          }
+        }));
+  }
+
+  // Settings-tab helper: after a field-name edit, push the new names into
+  // Iconize and re-walk every md file so existing entries land under the new
+  // namespace. Wrapped in try/catch so a malformed Iconize data.json doesn't
+  // throw out of the onChange handler.
+  async _reapplyAfterFieldChange() {
+    try {
+      if (this.plugin.settings.enforceIconizeSettings) {
+        await this.plugin._enforceIconizeSettings();
+      }
+      if (this.plugin._initialScan) await this.plugin._initialScan();
+      if (this.plugin._scheduleSelfRefresh) this.plugin._scheduleSelfRefresh();
+    } catch (e) {
+      console.error('[iconize-reloader] re-apply after field change failed', e);
+    }
   }
 }
 

@@ -1,0 +1,58 @@
+# Rendered by lazy-observe.install. DO NOT edit by hand.
+#
+# OpenTelemetry Collector config — scrapes the local lazycortex-core
+# /metrics endpoint and forwards via Prometheus remote_write to the
+# operator's observer. Vendor-neutral alternative to Grafana Alloy.
+
+receivers:
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: lazycortex_runtime
+          scrape_interval: {{ scrape_interval | default('15s') }}
+          scrape_timeout: {{ scrape_timeout | default('10s') }}
+          static_configs:
+            - targets:
+                - "{{ scrape_target }}"
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+
+exporters:
+  prometheusremotewrite:
+    endpoint: "{{ remote_write_url }}"
+{% if auth_kind == "bearer" %}
+    headers:
+      Authorization: "Bearer ${env:LAZYCORTEX_OBSERVE_TOKEN}"
+{% elif auth_kind == "basic" %}
+    auth:
+      authenticator: basicauth/observer
+{% endif %}
+    # WAL — bounded recovery if the observer is offline.
+    wal:
+      directory: "{{ wal_dir }}"
+      buffer_size: 100
+      truncate_frequency: 1h
+
+{% if auth_kind == "basic" %}
+extensions:
+  basicauth/observer:
+    client_auth:
+      username: "{{ basic_auth_username }}"
+      password: "${env:LAZYCORTEX_OBSERVE_TOKEN}"
+{% endif %}
+
+service:
+{% if auth_kind == "basic" %}
+  extensions: [basicauth/observer]
+{% endif %}
+  pipelines:
+    metrics:
+      receivers:  [prometheus]
+      processors: [batch]
+      exporters:  [prometheusremotewrite]
+  telemetry:
+    metrics:
+      address: "127.0.0.1:8888"

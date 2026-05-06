@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Rendered by lazy-observe.install. DO NOT edit by hand.
+  launchd user agent for the lazycortex observability shipper.
+  Loaded with `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.lazycortex.observe.plist`.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.lazycortex.observe</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{ agent_binary }}</string>
+{% for arg in agent_args %}
+    <string>{{ arg }}</string>
+{% endfor %}
+    <string>{{ rendered_config_path }}</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>{{ wal_dir }}</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+    <key>Crashed</key>
+    <true/>
+  </dict>
+
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>{{ log_dir }}/observe.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>{{ log_dir }}/observe.err.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>{{ home }}</string>
+{% if token_source == "env" %}
+    <!-- Token must be set in the operator's launchctl env or sourced manually before bootstrap. -->
+{% elif token_source == "file" %}
+    <key>LAZYCORTEX_OBSERVE_TOKEN_FILE</key>
+    <string>{{ token_file }}</string>
+{% endif %}
+  </dict>
+</dict>
+</plist>

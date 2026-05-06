@@ -152,4 +152,4 @@ Frontmatter: `git_sha`, `git_branch`, `date`, `input` (the args passed, or `none
 - **No fingerprint or SessionStart hook.** Manual invocation only.
 - **No `--scope` flag.** Each child self-detects scope.
 - **Adding a new install skill** to any enabled plugin is automatic — no edit to this skill needed. Adding a new configurator opts in via `lazy_setup_phase:` frontmatter.
-- **Anti-pattern**: skills already chained from inside another install flow MUST NOT carry `lazy_setup_phase:`. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases.md` for the contract.
+- **Anti-pattern**: skills already chained from inside another install flow MUST NOT carry `lazy_setup_phase:`. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md` for the contract.

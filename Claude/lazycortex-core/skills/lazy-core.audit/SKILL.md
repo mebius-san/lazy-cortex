@@ -108,7 +108,7 @@ Emit WARN only when the match survives all three gates.
 1. **Preamble present** — grep each file for `^## Execution discipline (MANDATORY`. Absent AND no `execution-discipline-waiver:` in frontmatter → `[FAIL]`. Frontmatter carries a non-empty `execution-discipline-waiver: "<reason>"` string → `[INFO]` with the waiver reason (visible, not silent). Frontmatter carries `execution-discipline-waiver: true` / `yes` / `""` → `[FAIL]` (invalid waiver).
 2. **No "Optional" in phase/step headings** — grep for `^##+ .*[Pp]hase.*[Oo]ptional`, `^##+ .*[Ss]tep.*[Oo]ptional`, and any `^### .*[Oo]ptional`. Match → `[FAIL]`.
 3. **Narrative padding (heuristic)** — grep the body (exclude frontmatter) for the denylist: `\bv\d+\.\d+\.\d+`, `user had to`, `we got burned`, `in a past session`, `in a previous run`, `user had to patch`. Match → `[WARN]` with the offending line. Final decision is the author's — heuristic, not structural.
-4. **Valid `lazy_setup_phase` value** — grep frontmatter for `^lazy_setup_phase:`. Value outside `{pre-install, per-plugin, post-install}` → `[WARN]` with the offending value. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases.md` for the contract.
+4. **Valid `lazy_setup_phase` value** — grep frontmatter for `^lazy_setup_phase:`. Value outside `{pre-install, per-plugin, post-install}` → `[WARN]` with the offending value. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md` for the contract.
 
 **Agent-writing compliance** — see `lazy-core.agent-writing` (plugin) / `.claude/rules/dev.agent-writing.md` (local pointer). File set: `.claude/agents/*.md`, `claude/*/agents/*.md`. Checks:
 
@@ -236,7 +236,7 @@ Same pattern as D2, but for `expert.protocol`. Failure → `[FAIL] expert <key>:
 
 **D4 — Protocol contract**
 
-For each expert where D3 resolved a protocol path: `Read` the resolved protocol file. Check it contains all five required sections from `expert-protocols-contract.md`:
+For each expert where D3 resolved a protocol path: `Read` the resolved protocol file. Check it contains all five required sections from `lazy-core.expert-protocols-contract.md`:
 - A `kind` enum (heading or table listing at least two kind values).
 - A `role` vocabulary (heading or table listing at least one role).
 - An `outcome` enum (heading or table listing outcome values).
@@ -527,7 +527,7 @@ Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings
 
 - **`/lazy-core.audit` exits with "experts.settings.json is not valid JSON"** — the file was hand-edited and broke JSON syntax → fix the syntax or re-scaffold via `/lazy-core.install`.
 - **Agent D reports "reference did not resolve" for an expert** — the `agent` or `protocol` field uses an unrecognised format or points to a non-existent artifact. Check the reference format (`<plugin>:<name>`, `user:<name>`, or bare `<name>`) and verify the artifact is installed → run `/lazy-core.install` to re-register.
-- **`protocol contract` WARN fires even though sections exist** — the protocol file uses non-standard headings. Section detection looks for the literal keywords (kind, role, outcome, source, result) in headings → align the protocol file headings with `expert-protocols-contract.md`.
+- **`protocol contract` WARN fires even though sections exist** — the protocol file uses non-standard headings. Section detection looks for the literal keywords (kind, role, outcome, source, result) in headings → align the protocol file headings with `lazy-core.expert-protocols-contract.md`.
 - **Routine command FAIL when the plugin is installed** — the plugin cache uses a 4-level path `<registry>/<plugin>/<version>/bin/<plugin>`; an older install used a 3-level layout. Re-install the plugin to refresh the bin path in the routine entry.
 - **D10 daemon liveness check always WARN on first use** — the runtime hasn't been started yet; this is expected after initial install → start the daemon via `launchctl load` or `systemctl --user start` as offered by `/lazy-core.install`.
 - **Agent D silently reports nothing** — `PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin` was not resolved (sandboxed environment or missing plugin path). Verify `${CLAUDE_PLUGIN_ROOT}` resolves to the plugin install path and `bin/lazy_settings.py` is present.

@@ -278,7 +278,7 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 **Likely cause**: The payload dict passed to the skill is missing one or more of the three standard fields — `kind`, `role`, and `request` — that every expert protocol requires.
 
-**Fix**: Add the missing fields to your payload. All three must be present: `kind` (the task type, e.g. `"doc-review"`), `role` (the expert role, e.g. `"designer"`), and `request` (the natural-language task description). See the protocol contract at `claude/lazycortex-core/references/expert-protocols-contract.md` for the full field reference.
+**Fix**: Add the missing fields to your payload. All three must be present: `kind` (the task type, e.g. `"doc-review"`), `role` (the expert role, e.g. `"designer"`), and `request` (the natural-language task description). See the protocol contract at `claude/lazycortex-core/references/lazy-core.expert-protocols-contract.md` for the full field reference.
 
 ---
 

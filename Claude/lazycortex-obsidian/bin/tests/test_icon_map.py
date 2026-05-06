@@ -2,11 +2,11 @@ import pathlib, sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import iconize_sync as isync
 
-FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "icon-map.json"
+FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "obsidian-icon-map.json"
 
 def test_load_icon_map_returns_dict_with_expected_keys():
     m = isync.load_icon_map(FIXTURE)
-    assert m["version"] == "1.0.0"
+    assert m["schema_version"] == 2
     assert "roles" in m["registries"]
     assert "steps" in m["registries"]
     assert len(m["matchers"]) >= 2

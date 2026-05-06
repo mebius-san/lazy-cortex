@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Generic iconize-sync worker. See claude/lazycortex-obsidian/references/iconize-protocol.md."""
+"""Generic iconize-sync worker. See claude/lazycortex-obsidian/references/lazy-obsidian.iconize-protocol.md."""
 from __future__ import annotations
-import argparse, json, os, re, subprocess, sys, time
+import argparse, json, os, re, subprocess, sys
 from pathlib import Path, PurePosixPath
 
 PROTOCOL_VERSION = "2.0.0"
@@ -17,19 +17,12 @@ SUPPORTED_SCHEMA = {2}
 
 EXIT_OK = 0
 EXIT_VALIDATION = 1
-EXIT_DATAFILE_MISSING = 2
-EXIT_CONCURRENT = 3
 EXIT_TARGET_MISSING = 4
 EXIT_VERSION_DRIFT = 5
 
 # ---------------------------------------------------------------------------
-# Vault discovery + data.json I/O
+# Vault discovery
 # ---------------------------------------------------------------------------
-
-PLUGIN_SUBPATH = Path(".obsidian/plugins/obsidian-icon-folder/data.json")
-RESERVED_KEYS = {"settings", "rules", "recentlyUsedIcons"}
-RETRIES = 3
-RETRY_SLEEP_SEC = 0.05
 
 CALLBACK_DIR_OVERRIDE = None  # Tests override this; prod: None → <vault>/.claude/callbacks
 _CALLBACK_VAULT_CACHE = None
@@ -58,69 +51,12 @@ def find_vault(override: str | None) -> Path:
     if override:
         v = Path(os.path.abspath(Path(override).expanduser()))
         if not (v / ".obsidian").is_dir():
-            raise IconizeError(
-                f"vault override has no .obsidian/: {v}", EXIT_DATAFILE_MISSING
-            )
+            raise IconizeError(f"vault override has no .obsidian/: {v}")
         return v
     v = find_vault_walk_up(Path.cwd())
     if v is None:
-        raise IconizeError(
-            "vault not found: no .obsidian/ in cwd or parents", EXIT_DATAFILE_MISSING
-        )
+        raise IconizeError("vault not found: no .obsidian/ in cwd or parents")
     return v
-
-
-def find_data_path(vault: Path) -> Path:
-    """Return the path to `data.json`; raise IconizeError(EXIT_DATAFILE_MISSING) if absent."""
-    dp = vault / PLUGIN_SUBPATH
-    if not dp.exists():
-        raise IconizeError(
-            f"Iconize data.json not found at {dp}", EXIT_DATAFILE_MISSING
-        )
-    return dp
-
-
-def load_data(path: Path) -> tuple[dict, int]:
-    """Read and parse `data.json`. Returns `(obj, mtime_ns)`."""
-    raw = path.read_text(encoding="utf-8")
-    try:
-        obj = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise IconizeError(f"data.json invalid JSON: {e}", EXIT_VALIDATION) from e
-    if not isinstance(obj, dict):
-        raise IconizeError("data.json top-level must be object", EXIT_VALIDATION)
-    return obj, path.stat().st_mtime_ns
-
-
-def dump_data(path: Path, obj: dict, expected_mtime: int) -> None:
-    """Write `obj` to `path` as JSON atomically, raising IconizeError(EXIT_CONCURRENT) if mtime drifted."""
-    if path.stat().st_mtime_ns != expected_mtime:
-        raise IconizeError(
-            "data.json changed between read and write", EXIT_CONCURRENT
-        )
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(
-        json.dumps(obj, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
-    os.replace(tmp, path)
-
-
-def with_retry(path: Path, mutate_fn, retries: int = RETRIES, sleep: float = RETRY_SLEEP_SEC):
-    """Load → mutate → dump, retrying on EXIT_CONCURRENT up to `retries` times."""
-    last = None
-    for attempt in range(retries):
-        data, mtime = load_data(path)
-        new_data = mutate_fn(data)
-        try:
-            dump_data(path, new_data, mtime)
-            return new_data
-        except IconizeError as e:
-            if e.code != EXIT_CONCURRENT:
-                raise
-            last = e
-            time.sleep(sleep * (attempt + 1))
-    assert last is not None
-    raise last
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--validate-entry", action="store_true",
                    help="read {iconName, iconColor?} JSON from stdin; exit 0 if valid")
     p.add_argument("--vault", help="vault root (default: walk up from cwd)")
-    p.add_argument("--icon-map", help="path to icon-map.json (default: <repo>/.claude/obsidian-iconize/icon-map.json)")
+    p.add_argument("--icon-map", help="path to icon-map (default: <repo>/.claude/iconize/obsidian-icon-map.json)")
     p.add_argument("--dry-run", action="store_true")
     sub = p.add_subparsers(dest="cmd", parser_class=_Parser)
     for name in ("sync", "sync-staged", "reconcile", "reconcile-dirty", "install-hooks", "check-versions"):
@@ -207,18 +143,34 @@ def build_parser() -> argparse.ArgumentParser:
 def _resolve_icon_map_path(vault: Path, override: str | None) -> Path:
     if override:
         return Path(override).expanduser().resolve()
-    # Walk up from vault to find a .claude/obsidian-iconize/icon-map.json (repo root may be above vault).
+    # Walk up from vault to find a .claude/iconize/obsidian-icon-map.json (repo root may be above vault).
     # Resolve symlinks once at entry so the walk crosses filesystem boundaries correctly.
     cur = vault.resolve()
     while True:
-        cand = cur / ".claude" / "obsidian-iconize" / "icon-map.json"
+        cand = cur / ".claude" / "iconize" / "obsidian-icon-map.json"
         if cand.exists():
             return cand
         if cur == cur.parent:
             break
         cur = cur.parent
     raise IconizeError(
-        "icon-map.json not found; run lazy-obsidian.iconize-install first", EXIT_VALIDATION)
+        "obsidian-icon-map.json not found; run lazy-obsidian.iconize-install first", EXIT_VALIDATION)
+
+
+def _load_icon_map_or_inert(vault: Path, override: str | None) -> dict | None:
+    """Hook-context icon-map loader. Returns the parsed dict on success, or
+    None when the icon-map is missing / invalid / unreadable — caller MUST
+    short-circuit with EXIT_OK so the hook stays inert. Icons are cosmetic;
+    hooks must never block a commit because of a missing or broken icon-map.
+    Diagnostic goes to stderr so a curious user can `unset` the redirect and
+    see why the hook went inert.
+    """
+    try:
+        path = _resolve_icon_map_path(vault, override)
+        return load_icon_map(path)
+    except IconizeError as e:
+        sys.stderr.write(f"iconize_sync: {e}; hook inert.\n")
+        return None
 
 
 def _read_frontmatter_for(vault: Path, vault_rel: str) -> dict:
@@ -250,10 +202,8 @@ def _vault_relative_or_none(vault: Path, raw: str) -> str | None:
 
 def cmd_sync(args) -> int:
     vault = find_vault(args.vault)
-    # data.json presence still required as an install sanity check; worker does not write it.
-    find_data_path(vault)
-    icon_map = load_icon_map(_resolve_icon_map_path(vault, args.icon_map))
-    if _preflight_incompatible(icon_map):
+    icon_map = _load_icon_map_or_inert(vault, args.icon_map)
+    if icon_map is None or _preflight_incompatible(icon_map):
         return EXIT_OK
     rel = _vault_relative_or_none(vault, args.path)
     if rel is None:
@@ -299,9 +249,8 @@ def _staged_md_files(vault: Path) -> list[str]:
 
 def cmd_sync_staged(args) -> int:
     vault = find_vault(args.vault)
-    find_data_path(vault)  # sanity
-    icon_map = load_icon_map(_resolve_icon_map_path(vault, args.icon_map))
-    if _preflight_incompatible(icon_map):
+    icon_map = _load_icon_map_or_inert(vault, args.icon_map)
+    if icon_map is None or _preflight_incompatible(icon_map):
         return EXIT_OK
 
     from frontmatter_rewriter import rewrite_file
@@ -359,9 +308,8 @@ def _walk_md_files(vault: Path, prefix: str | None) -> list[str]:
 
 def cmd_reconcile(args) -> int:
     vault = find_vault(args.vault)
-    find_data_path(vault)
-    icon_map = load_icon_map(_resolve_icon_map_path(vault, args.icon_map))
-    if _preflight_incompatible(icon_map):
+    icon_map = _load_icon_map_or_inert(vault, args.icon_map)
+    if icon_map is None or _preflight_incompatible(icon_map):
         return EXIT_OK
     prefix = normalize_path(args.prefix) if args.prefix else ""
 
@@ -449,9 +397,8 @@ def _dirty_md_files(vault: Path) -> list[str]:
 
 def cmd_reconcile_dirty(args) -> int:
     vault = find_vault(args.vault)
-    find_data_path(vault)
-    icon_map = load_icon_map(_resolve_icon_map_path(vault, args.icon_map))
-    if _preflight_incompatible(icon_map):
+    icon_map = _load_icon_map_or_inert(vault, args.icon_map)
+    if icon_map is None or _preflight_incompatible(icon_map):
         return EXIT_OK
 
     paths = _dirty_md_files(vault)
@@ -505,7 +452,7 @@ def _plugin_root() -> Path:
 
 
 def _template_path(name: str) -> Path:
-    return _plugin_root() / "templates" / "obsidian-iconize" / name
+    return _plugin_root() / "templates" / "iconize" / name
 
 
 def _parse_hook_version(text: str) -> tuple[int, int, int] | None:
@@ -742,6 +689,49 @@ def interpolate(template: str, frontmatter: dict, basename: str) -> str:
 def _basename(path: str) -> str:
     return path.rsplit("/", 1)[-1] if "/" in path else path
 
+_PATH_GLOB_RE_CACHE: dict[str, "re.Pattern[str]"] = {}
+
+def _path_glob_to_regex(pattern: str) -> "re.Pattern[str]":
+    """Translate a path glob to a fully-anchored regex.
+
+    Mirrors `PurePosixPath.full_match` (Python 3.13+):
+      - `**/` matches zero or more path segments (including empty).
+      - `**` (terminal) matches anything, including `/`.
+      - `*` matches within a single segment (does not cross `/`).
+      - `?` matches a single character (not `/`).
+
+    Implemented inline so the worker runs on Python < 3.13 too — Obsidian-Git
+    on macOS invokes `python3` via a non-login shell, which often resolves
+    to `/usr/bin/python3` (system 3.9), where `full_match` does not exist.
+    """
+    cached = _PATH_GLOB_RE_CACHE.get(pattern)
+    if cached is not None:
+        return cached
+    parts: list[str] = []
+    i, n = 0, len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == "*":
+            if i + 1 < n and pattern[i + 1] == "*":
+                if i + 2 < n and pattern[i + 2] == "/":
+                    parts.append(r"(?:[^/]+/)*")
+                    i += 3
+                else:
+                    parts.append(r".*")
+                    i += 2
+            else:
+                parts.append(r"[^/]*")
+                i += 1
+        elif c == "?":
+            parts.append(r"[^/]")
+            i += 1
+        else:
+            parts.append(re.escape(c))
+            i += 1
+    compiled = re.compile(r"\A" + "".join(parts) + r"\Z")
+    _PATH_GLOB_RE_CACHE[pattern] = compiled
+    return compiled
+
 def eval_when(when: dict, path: str, frontmatter: dict) -> bool:
     """Evaluate a matcher `when` block against a file. AND semantics across keys."""
     bn = _basename(path)
@@ -753,9 +743,10 @@ def eval_when(when: dict, path: str, frontmatter: dict) -> bool:
                 raise IconizeError(f"'basename_in' must be a list, got {type(expected).__name__}")
             if bn not in expected: return False
         elif key == "path_glob":
-            # PurePosixPath.full_match (3.13+) honors `**` cross-segment and
-            # `*` as single-segment, unlike fnmatch which ignores `/`.
-            if not PurePosixPath(path).full_match(expected): return False
+            # Mirrors PurePosixPath.full_match (3.13+): `**` crosses segments,
+            # `*` does not. Polyfilled inline so older Python (e.g. macOS
+            # /usr/bin/python3 = 3.9) used by Obsidian-Git hooks still works.
+            if not _path_glob_to_regex(expected).match(path): return False
         elif key == "role_matches_basename":
             stem = bn.rsplit(".", 1)[0]
             if frontmatter.get("role") != stem: return False

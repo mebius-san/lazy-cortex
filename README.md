@@ -29,15 +29,35 @@ Ships 18 skills, 2 commands, 9 rules, and 4 hooks.
 
 See [`claude/lazycortex-core/`](claude/lazycortex-core/) for details.
 
+### lazycortex-diagram
+
+Format-agnostic diagram engine: /lazy-diagram.draw dispatcher + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
+
+Ships 4 skills, 2 agents, 1 command, and 1 rule.
+
+Requires: lazycortex-core
+
+See [`claude/lazycortex-diagram/`](claude/lazycortex-diagram/) for details.
+
 ### lazycortex-log
 
 Logging, changelog, and change-history recall for Claude Code
 
-Ships 3 skills, 5 agents, 1 command, 1 rule, and 2 hooks.
+Ships 3 skills, 5 agents, 1 command, 1 rule, and 1 hook.
 
 Requires: lazycortex-core
 
 See [`claude/lazycortex-log/`](claude/lazycortex-log/) for details.
+
+### lazycortex-observe
+
+Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
+
+Ships 4 skills and 1 command.
+
+Requires: lazycortex-core
+
+See [`claude/lazycortex-observe/`](claude/lazycortex-observe/) for details.
 
 ### lazycortex-obsidian
 
@@ -89,7 +109,9 @@ All plugins live in a single Claude Code marketplace. Add the marketplace and en
   },
   "enabledPlugins": {
     "lazycortex-core@lazycortex": true,
+    "lazycortex-diagram@lazycortex": true,
     "lazycortex-log@lazycortex": true,
+    "lazycortex-observe@lazycortex": true,
     "lazycortex-obsidian@lazycortex": true,
     "lazycortex-specs@lazycortex": true
   }

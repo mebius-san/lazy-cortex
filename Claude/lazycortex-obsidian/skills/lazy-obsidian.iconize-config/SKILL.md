@@ -1,12 +1,12 @@
 ---
 name: lazy-obsidian.iconize-config
-description: "Interactively add, edit, or remove registry entries in the local `.claude/obsidian-iconize/icon-map.json` (roles, steps, requests, or any custom registry). Re-runnable. Writes back JSON with stable formatting. Use when the resolver misses a role/step/etc. — this skill is the canonical way to seed the missing registry entry without hand-editing."
+description: "Interactively add, edit, or remove registry entries in the local `.claude/iconize/obsidian-icon-map.json` (roles, steps, requests, or any custom registry). Re-runnable. Writes back JSON with stable formatting. Use when the resolver misses a role/step/etc. — this skill is the canonical way to seed the missing registry entry without hand-editing."
 allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(date *), AskUserQuestion
 argument-hint: "[registry-name] — e.g. roles | steps | requests.classification | requests.status_color"
 ---
 # Configure iconize-sync icon-map
 
-Reads the vault's local `.claude/obsidian-iconize/icon-map.json` and walks the
+Reads the vault's local `.claude/iconize/obsidian-icon-map.json` and walks the
 user through adding / editing / removing registry entries via wizard-style
 prompts.
 
@@ -34,7 +34,7 @@ existing local icon-map.
 ## Step 1 — Locate icon-map
 
 ```
-<repo-root>/.claude/obsidian-iconize/icon-map.json
+<repo-root>/.claude/iconize/obsidian-icon-map.json
 ```
 
 Abort with a helpful message if missing.
@@ -77,7 +77,7 @@ List existing keys as options. Pick one. Confirm via a second
 
 ## Step 5 — Write back
 
-Rewrite `icon-map.json` with `json.dumps(..., indent=2, ensure_ascii=False) + "\n"`.
+Rewrite `obsidian-icon-map.json` with `json.dumps(..., indent=2, ensure_ascii=False) + "\n"`.
 Preserve any top-level keys the skill didn't touch (`matchers`, `version`,
 `stage_colors`).
 
@@ -100,10 +100,14 @@ section.
 One `AskUserQuestion` per decision. Never bundle multiple fields into a
 single prompt. Validate inputs before persisting.
 
+## Failure modes
+
+- **`/lazy-obsidian.iconize-config` aborts: icon-map not found** — `.claude/iconize/obsidian-icon-map.json` is missing → run `/lazy-obsidian.iconize-install` first to scaffold the icon-map, then re-run.
+
 ## Notes
 
 - This skill only touches registries. To change matcher logic, edit
-  `icon-map.json` by hand — matchers are structural and benefit from seeing
+  `obsidian-icon-map.json` by hand — matchers are structural and benefit from seeing
   the whole file at once.
 - After any registry change, remind the user to run
   `lazy-obsidian.iconize-sync reconcile` so `data.json` picks up the new

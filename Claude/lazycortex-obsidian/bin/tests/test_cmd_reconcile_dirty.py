@@ -7,8 +7,8 @@ def _prep(tmp_path, init_git=True):
     clean git repo so `git status` reports a clean tree until tests dirty it."""
     vault = tmp_path / "vault"
     shutil.copytree(FIX / "vault", vault)
-    mapdir = vault / ".claude" / "obsidian-iconize"; mapdir.mkdir(parents=True)
-    shutil.copy(FIX / "icon-map.json", mapdir / "icon-map.json")
+    mapdir = vault / ".claude" / "iconize"; mapdir.mkdir(parents=True)
+    shutil.copy(FIX / "obsidian-icon-map.json", mapdir / "obsidian-icon-map.json")
     (vault / "app").mkdir()
     (vault / "app" / "design.md").write_text("---\nrole: design\nstage: draft\n---\n")
     if init_git:
@@ -25,59 +25,56 @@ def _run(vault, *args):
     return subprocess.run([sys.executable, str(WORKER), "--vault", str(vault), *args],
                           capture_output=True, text=True, cwd=str(vault))
 
-def _data(vault):
-    return json.loads((vault / ".obsidian/plugins/obsidian-icon-folder/data.json").read_text())
 
-
-def test_reconcile_dirty_modified_file_emits_entry(tmp_path):
+def test_reconcile_dirty_modified_file_rewrites_frontmatter(tmp_path):
     vault = _prep(tmp_path)
     (vault / "app" / "design.md").write_text("---\nrole: design\nstage: draft\n---\nedited\n")
     r = _run(vault, "reconcile-dirty")
     assert r.returncode == 0, r.stderr
-    assert _data(vault).get("app/design.md") == {"iconName": "LiDraftingCompass", "iconColor": "#fde68a"}
+    body = (vault / "app" / "design.md").read_text()
+    assert "iconize_icon: LiDraftingCompass" in body
+    assert 'iconize_color: "#fde68a"' in body
 
-def test_reconcile_dirty_untracked_file_emits_entry(tmp_path):
+
+def test_reconcile_dirty_untracked_file_walks_prefix(tmp_path):
     vault = _prep(tmp_path)
     (vault / "app" / "new.md").write_text("---\nrole: design\nstage: draft\n---\n")
     r = _run(vault, "reconcile-dirty")
     assert r.returncode == 0, r.stderr
-    d = _data(vault)
-    # "new.md" doesn't match 'role == design' + 'basename == design' rule; but the file's
-    # prefix "app" triggers a rewalk, which will pick up the pre-existing design.md.
-    assert d.get("app/design.md") == {"iconName": "LiDraftingCompass", "iconColor": "#fde68a"}
+    # The prefix re-walk picks up the matching design.md sibling.
+    body = (vault / "app" / "design.md").read_text()
+    assert "iconize_icon: LiDraftingCompass" in body
 
-def test_reconcile_dirty_deletion_cleans_stale_key(tmp_path):
+
+def test_reconcile_dirty_clears_stale_frontmatter_in_dirty_prefix(tmp_path):
     vault = _prep(tmp_path)
-    dp = vault / ".obsidian/plugins/obsidian-icon-folder/data.json"
-    d = json.loads(dp.read_text())
-    d["app/design.md"] = {"iconName": "LiDraftingCompass", "iconColor": "#fde68a"}
-    d["app/OBSOLETE.md"] = {"iconName": "LiGhost"}
-    dp.write_text(json.dumps(d, indent=2) + "\n")
-    # Delete design.md — git status now reports a deletion under app/.
-    (vault / "app" / "design.md").unlink()
+    # A non-matching file with stale icon keys; sits in same prefix as a dirty .md.
+    stale = vault / "app" / "stale.md"
+    stale.write_text("---\niconize_icon: LiGhost\n---\nbody\n")
+    # Dirty the prefix so reconcile-dirty walks it.
+    (vault / "app" / "design.md").write_text("---\nrole: design\nstage: draft\n---\nedited\n")
     r = _run(vault, "reconcile-dirty")
     assert r.returncode == 0, r.stderr
-    data = _data(vault)
-    # design.md is gone; OBSOLETE.md sat in the same prefix and isn't regenerated, so
-    # the reconcile prunes it too.
-    assert "app/design.md" not in data
-    assert "app/OBSOLETE.md" not in data
+    assert "iconize_icon" not in stale.read_text()
+
 
 def test_reconcile_dirty_clean_tree_is_noop(tmp_path):
     vault = _prep(tmp_path)
-    before = (vault / ".obsidian/plugins/obsidian-icon-folder/data.json").read_text()
+    before = (vault / "app" / "design.md").read_text()
     r = _run(vault, "reconcile-dirty")
     assert r.returncode == 0, r.stderr
     assert r.stdout == ""  # no output on the early-return path
-    assert (vault / ".obsidian/plugins/obsidian-icon-folder/data.json").read_text() == before
+    assert (vault / "app" / "design.md").read_text() == before
+
 
 def test_reconcile_dirty_non_git_vault_is_noop(tmp_path):
     vault = _prep(tmp_path, init_git=False)
+    before = (vault / "app" / "design.md").read_text()
     (vault / "app" / "design.md").write_text("---\nrole: design\nstage: draft\n---\nedited\n")
     r = _run(vault, "reconcile-dirty")
     assert r.returncode == 0, r.stderr
     assert r.stdout == ""
-    # No write, nothing to verify in data.json; just confirm exit 0 + no crash.
+
 
 def test_reconcile_dirty_ignores_non_markdown_changes(tmp_path):
     vault = _prep(tmp_path)
@@ -86,24 +83,24 @@ def test_reconcile_dirty_ignores_non_markdown_changes(tmp_path):
     assert r.returncode == 0, r.stderr
     assert r.stdout == ""  # no .md dirty → early return
 
+
 def test_reconcile_dirty_ignores_changes_under_obsidian(tmp_path):
     vault = _prep(tmp_path)
-    # Commit the .md first so only the .obsidian change is dirty.
     (vault / ".obsidian" / "rogue.md").write_text("---\nrole: design\n---\n")
     r = _run(vault, "reconcile-dirty")
     assert r.returncode == 0, r.stderr
     assert r.stdout == ""
 
+
 def test_reconcile_dirty_dry_run_emits_plan(tmp_path):
     vault = _prep(tmp_path)
-    (vault / "app" / "design.md").write_text("---\nrole: design\nstage: draft\n---\nedited\n")
-    dp = vault / ".obsidian/plugins/obsidian-icon-folder/data.json"
-    before = dp.read_text()
+    src = "---\nrole: design\nstage: draft\n---\nedited\n"
+    (vault / "app" / "design.md").write_text(src)
     r = _run(vault, "--dry-run", "reconcile-dirty")
     assert r.returncode == 0, r.stderr
-    assert dp.read_text() == before  # untouched
+    assert (vault / "app" / "design.md").read_text() == src
     plan = json.loads(r.stdout)
     assert plan["op"] == "reconcile-dirty"
     assert plan["dry_run"] is True
     assert plan["prefixes"] == ["app"]
-    assert "app/design.md" in plan["add_or_update"]
+    assert {"path": "app/design.md", "icon": "LiDraftingCompass", "color": "#fde68a"} in plan["planned"]

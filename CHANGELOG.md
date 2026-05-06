@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 2.0.0 — 2026-05-06 UTC
+
+- **Breaking:** All `lazycortex-core` reference files were renamed with type-alignment suffixes (`-schema`, `-contract`, `-protocol`). Consumers using `lazycortex-review` must re-run `/lazy-review.install` or manually update `experts.settings.json`, changing the doc-review resolver key from `lazycortex-review:doc-review` to `lazycortex-review:lazy-review.doc-review-protocol`.
+- The `lazy-core.git` rule now enforces a strict stage-then-commit sequence: plan all edits before any `git add`, then issue `git_add` → `/pub.pre-commit` → `git_commit` as a back-to-back triple with no writes in between.
+
 ### 1.3.0 — 2026-05-06 UTC
 
 - **Breaking:** The model-routing hook is now registered as `lazy-core.model-router`; the previous name `lazy-core.agent-model-router` no longer exists. Update any local `settings.local.json` entries that reference the old name.
@@ -166,6 +171,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-log
 
+### 0.3.12 — 2026-05-06 UTC
+
+- The `/lazy-log.help` command now surfaces a complete help tree: six topic chapters (install & audit, change history, changelog, housekeeping, troubleshooting, FAQ) plus a `cut-a-release` walkthrough.
+
 ### 0.3.5 — 2026-04-28
 
 - New `lazy-log.bullets` agent — converts one plugin's commit range into a user-facing release block (filters internal/refactor/chore commits, rewrites the rest as outcome-led bullets grouped by scope). Dispatched at sonnet tier from `pub.publish` Step 1 so the heavy rewriting doesn't consume opus tokens in the parent session.
@@ -262,6 +271,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 1.1.5 — 2026-05-06 UTC
+
+- Fixed a bug in the frontmatter rewriter that dropped the blank line after the closing `---` fence, which could produce malformed note output when rewriting Obsidian frontmatter.
+
 ### 0.3.0 — 2026-04-26
 
 - **Fix:** the bundled `iconize-reloader` companion plugin now survives Folder Notes' class-strip race condition. When a folder and its folder-note were created simultaneously, Folder Notes' CSS-class management would strip the icon classes that iconize-reloader had just applied, leaving the note rendering as a sibling until you restarted Obsidian. v2.0.8 polls for elements with a 6-second timeout and attaches MutationObservers that revert any class strips instantly. Re-run `/lazy-obsidian.iconize-install` (or `/lazy-obsidian.update-plugin iconize-reloader`) to pick up the new bundle.
@@ -347,6 +360,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.0.10 — 2026-05-06 UTC
+
+- New `lazy-diagram.help` command provides built-in documentation covering drawing workflows, installation, troubleshooting, and FAQ.
+
 ### 0.1.0 — 2026-04-27
 
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
@@ -358,6 +375,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).
 
 ## lazycortex-observe
+
+### 0.1.5 — 2026-05-06 UTC
+
+- New `/lazy-observe.help` command surfaces three help chapters (install & audit lifecycle, troubleshooting with a mermaid decision tree, operator FAQ) plus a `ship-metrics-end-to-end` walkthrough covering the full install-to-doctor path.
 
 ### 0.1.0 — 2026-05-05
 

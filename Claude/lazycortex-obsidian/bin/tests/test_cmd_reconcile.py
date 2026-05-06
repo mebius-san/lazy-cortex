@@ -2,74 +2,69 @@ import pathlib, sys, json, shutil, subprocess
 WORKER = pathlib.Path(__file__).resolve().parents[1] / "iconize_sync.py"
 FIX = pathlib.Path(__file__).parent / "fixtures"
 
-def _prep(tmp_path, with_stale=True):
+def _prep(tmp_path):
     vault = tmp_path / "vault"
     shutil.copytree(FIX / "vault", vault)
-    mapdir = vault / ".claude" / "obsidian-iconize"; mapdir.mkdir(parents=True)
-    shutil.copy(FIX / "icon-map.json", mapdir / "icon-map.json")
+    mapdir = vault / ".claude" / "iconize"; mapdir.mkdir(parents=True)
+    shutil.copy(FIX / "obsidian-icon-map.json", mapdir / "obsidian-icon-map.json")
     (vault / "app").mkdir()
     (vault / "app" / "design.md").write_text("---\nrole: design\nstage: draft\n---\n")
-    if with_stale:
-        dp = vault / ".obsidian/plugins/obsidian-icon-folder/data.json"
-        d = json.loads(dp.read_text())
-        d["app/OBSOLETE.md"] = {"iconName": "LiGhost"}
-        dp.write_text(json.dumps(d, indent=2) + "\n")
     return vault
 
 def _run(vault, *args):
     return subprocess.run([sys.executable, str(WORKER), "--vault", str(vault), *args],
                           capture_output=True, text=True, cwd=str(vault))
 
-def test_reconcile_adds_derived_entries(tmp_path):
-    vault = _prep(tmp_path, with_stale=False)
+
+def test_reconcile_writes_frontmatter_for_matched_files(tmp_path):
+    vault = _prep(tmp_path)
     r = _run(vault, "reconcile")
     assert r.returncode == 0, r.stderr
-    data = json.loads((vault / ".obsidian/plugins/obsidian-icon-folder/data.json").read_text())
-    assert "app/design.md" in data
+    body = (vault / "app" / "design.md").read_text()
+    assert "iconize_icon: LiDraftingCompass" in body
+    assert 'iconize_color: "#fde68a"' in body
 
-def test_reconcile_drops_stale_entries_in_prefix(tmp_path):
+
+def test_reconcile_clears_stale_frontmatter_keys_in_prefix(tmp_path):
+    """A note that previously matched and now doesn't (e.g. role removed) should
+    have its `iconize_*` keys cleared by a fresh reconcile."""
     vault = _prep(tmp_path)
+    # Plant a stale icon line on a file that won't match the icon-map (no role).
+    stale = vault / "app" / "stale.md"
+    stale.write_text("---\niconize_icon: LiGhost\niconize_color: \"#ff00ff\"\n---\nbody\n")
     r = _run(vault, "reconcile", "--prefix", "app")
-    assert r.returncode == 0
-    data = json.loads((vault / ".obsidian/plugins/obsidian-icon-folder/data.json").read_text())
-    assert "app/OBSOLETE.md" not in data
-    assert "app/design.md" in data
+    assert r.returncode == 0, r.stderr
+    txt = stale.read_text()
+    assert "iconize_icon" not in txt
+    assert "iconize_color" not in txt
 
-def test_reconcile_preserves_reserved_keys(tmp_path):
-    vault = _prep(tmp_path)
-    r = _run(vault, "reconcile")
-    assert r.returncode == 0
-    data = json.loads((vault / ".obsidian/plugins/obsidian-icon-folder/data.json").read_text())
-    assert "settings" in data and "rules" in data
 
 def test_reconcile_dry_run_writes_nothing_and_emits_plan(tmp_path):
     vault = _prep(tmp_path)
-    dp = vault / ".obsidian/plugins/obsidian-icon-folder/data.json"
-    before = dp.read_text()
+    before = (vault / "app" / "design.md").read_text()
     r = _run(vault, "--dry-run", "reconcile", "--prefix", "app")
     assert r.returncode == 0, r.stderr
-    assert dp.read_text() == before  # untouched
+    assert (vault / "app" / "design.md").read_text() == before
     plan = json.loads(r.stdout)
     assert plan["op"] == "reconcile"
     assert plan["dry_run"] is True
     assert plan["prefix"] == "app"
-    assert "app/design.md" in plan["add_or_update"]
-    assert "app/OBSOLETE.md" in plan["drop"]
+    assert {"path": "app/design.md", "icon": "LiDraftingCompass", "color": "#fde68a"} in plan["planned"]
 
-def test_reconcile_preserves_stale_outside_prefix(tmp_path):
+
+def test_reconcile_leaves_files_outside_prefix_untouched(tmp_path):
     vault = _prep(tmp_path)
-    dp = vault / ".obsidian/plugins/obsidian-icon-folder/data.json"
-    d = json.loads(dp.read_text())
-    d["other/X.md"] = {"iconName": "LiBox"}
-    dp.write_text(json.dumps(d, indent=2) + "\n")
+    (vault / "other").mkdir()
+    other = vault / "other" / "design.md"
+    src = "---\nrole: design\nstage: draft\n---\n"  # would match if it were in scope
+    other.write_text(src)
     r = _run(vault, "reconcile", "--prefix", "app")
     assert r.returncode == 0, r.stderr
-    data = json.loads(dp.read_text())
-    assert "other/X.md" in data  # outside prefix → untouched
-    assert "app/OBSOLETE.md" not in data  # inside prefix → dropped
+    assert other.read_text() == src  # outside prefix → not walked, no rewrite
+
 
 def test_reconcile_skips_hidden_dirs(tmp_path):
-    vault = _prep(tmp_path, with_stale=False)
+    vault = _prep(tmp_path)
     # Put a .md file inside each skip-dir. Reconcile shouldn't emit paths for them.
     for hidden in (".obsidian", ".git", ".claude", ".githooks"):
         d = vault / hidden / "sub"
@@ -79,4 +74,4 @@ def test_reconcile_skips_hidden_dirs(tmp_path):
     assert r.returncode == 0, r.stderr
     plan = json.loads(r.stdout)
     for hidden in (".obsidian", ".git", ".claude", ".githooks"):
-        assert not any(p.startswith(f"{hidden}/") for p in plan["add_or_update"])
+        assert not any(p["path"].startswith(f"{hidden}/") for p in plan["planned"])

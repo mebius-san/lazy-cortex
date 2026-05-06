@@ -7,7 +7,7 @@ import os
 import re
 from pathlib import Path
 
-_FENCE_RE = re.compile(r"(?ms)\A---\s*\n(.*?\n)^---\s*\n")
+_FENCE_RE = re.compile(r"(?ms)\A---[ \t]*\n(.*?\n)^---[ \t]*\n")
 _ICON_LINE_RE = re.compile(r"(?m)^iconize_icon:.*\n")
 _COLOR_LINE_RE = re.compile(r"(?m)^iconize_color:.*\n")
 

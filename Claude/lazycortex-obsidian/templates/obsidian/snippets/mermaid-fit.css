@@ -1,0 +1,12 @@
+/* Auto-fit mermaid diagrams to container width.
+ * Mermaid emits SVG with explicit pixel width, which overflows the editor
+ * column. SVG has a viewBox, so max-width:100% lets the browser rescale it. */
+
+.markdown-preview-view .mermaid > svg,
+.markdown-rendered .mermaid > svg,
+.markdown-source-view .mermaid > svg {
+  max-width: 100% !important;
+  height: auto !important;
+  display: block;
+  margin: 0 auto;
+}

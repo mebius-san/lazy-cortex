@@ -148,6 +148,11 @@ Refuse to delete or merge a folder whose name is empty or contains `..` / `/`. R
 
 Outcome line: `applied merges=<m> deletions=<d>` — or `none` if both lists are empty.
 
+## Failure modes
+
+- **`/lazy-log.clean` aborts immediately: ".logs/claude/ absent"** — the log directory does not exist yet (no skill has ever logged in this repo) → run any logged skill once to create it, then re-run clean.
+- **Step 1 aborts: "failed: \<reason\>"** — the canonical-name resolver script errored (e.g. Python missing, `CLAUDE_PLUGIN_ROOT` unset, or malformed JSON) → check the reason string; re-run `/lazy-log.install` to ensure the plugin is properly set up, then retry.
+
 ## Step 9: Report + log run
 
 ### Report
