@@ -3,6 +3,7 @@ name: lazy-log.timeline
 description: "Generate a chronological timeline view of all changes matching a date range or topic. Combines changelog entries, commits, and AI run logs. Use when the user wants a 'what happened when' view."
 tools: Read, Glob, Grep, Bash
 model: inherit
+logging-waiver: "single-response synthesizer — output IS the prose response, no mutations to record"
 ---
 # Change Timeline
 

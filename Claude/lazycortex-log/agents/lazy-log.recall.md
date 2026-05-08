@@ -3,6 +3,7 @@ name: lazy-log.recall
 description: "Search all change-history sources (run logs, changelog, raw commit log, git history, memory) for a query. Returns ranked matches with git SHAs so the user can jump to the actual commit. Use when the user asks 'why was X changed?' or 'when did we change Y?'"
 tools: Read, Glob, Grep, Bash
 model: inherit
+logging-waiver: "single-response synthesizer — output IS the prose response, no mutations to record"
 ---
 # Change-History Recall
 

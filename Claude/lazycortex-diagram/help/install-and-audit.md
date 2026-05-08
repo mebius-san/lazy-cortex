@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-diagram in your project — sync the authoring rule, seed agent-model tiers, and clean up orphans.
-last_regen: 2026-05-05
+last_regen: 2026-05-08
 no_diagram: true
 source_skills:
   - lazy-diagram.install
@@ -16,7 +16,7 @@ One command wires the plugin into whichever scope you enabled it at. The bootstr
 
 ## How it works
 
-Run `/lazy-diagram.install` once after enabling the plugin. The skill detects your install scope automatically, walks you through one rule-sync prompt per file it finds, and confirms each `agent_models` entry it writes. When the run completes, `/lazy-diagram.draw` and `/lazy-diagram.fix` are ready to use. If the authoring rule was newly installed or updated, restart Claude Code so the rule loads into your next session.
+Run `/lazy-diagram.install` once after enabling the plugin. The skill detects your install scope automatically, then walks you through one prompt per rule file it finds — showing you the rule's purpose and whether it is new, updated, or orphaned so you can make an informed choice. After rule sync, it confirms each `agent_models` entry it writes. When the run completes, `/lazy-diagram.draw` and `/lazy-diagram.fix` are ready to use. If any rule was newly installed or updated, restart Claude Code so the updated rule loads into your next session.
 
 To check overall plugin health after install, run `/lazy-core.doctor`. lazycortex-diagram has no user-facing audit skill; doctor is the right tool for health verification.
 

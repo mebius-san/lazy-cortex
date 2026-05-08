@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take a fresh batch of commits all the way to a published CHANGELOG bullet block — distill themed prose, then generate outcome-led bullets filtered for public release.
-last_regen: 2026-05-05
+last_regen: 2026-05-08
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Sequence diagram showing the cut-a-release journey: user runs lazy-log.distill which reads commits.jsonl and writes changelog.md; user reviews changelog.md; user dispatches lazy-log.bullets agent with plugin name, commit range, and new version; lazy-log.bullets reads git log and renders a release block; user prepends the release block to CHANGELOG.public.md and commits."
@@ -42,7 +42,7 @@ The range you will pass to `lazy-log.bullets` is `<old-sha>..HEAD`.
 
 ### Step 3 — Dispatch lazy-log.bullets to generate the release block
 
-Ask Claude to dispatch the `lazy-log.bullets` agent. Provide all four fields on separate lines in the prompt:
+Ask Claude to dispatch the `lazy-log.bullets` agent. Provide all five fields on separate lines in the prompt:
 
 ```
 plugin: <plugin-name>
@@ -52,7 +52,9 @@ new_version: <X.Y.Z>
 date: <YYYY-MM-DD>
 ```
 
-The agent reads commits in that range scoped to the plugin directory, drops every commit whose type is `chore:`, `style:`, `test:`, or a docs-only sync, and rewrites surviving commits as outcome-led bullets. Commits sharing a Conventional-commits scope are grouped into a single bullet when they describe one user-visible change. Breaking changes are prefixed with **Breaking:**.
+The `plugin_dir` tells the agent which subtree of the repo to scope the git log to — include the trailing slash.
+
+The agent reads commits in that range scoped to the plugin directory, then drops commits that are internal-only: `chore:`, `style:`, `test:`, pure `refactor:` with no user-visible change, pure `docs:` syncs, and plugin-development plumbing scoped to `tool.*` or `pub.*`. Commits sharing a Conventional-commits scope are grouped into a single bullet when they describe one user-visible change. Breaking changes are prefixed with **Breaking:**.
 
 The agent's final output is the rendered release block:
 

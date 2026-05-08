@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Install, verify health, and tear down the lazycortex-observe metrics shipper on any host.
-last_regen: 2026-05-05
+last_regen: 2026-05-08
 no_diagram: true
 source_skills:
   - lazy-observe.install

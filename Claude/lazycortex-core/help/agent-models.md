@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Assign haiku/sonnet/opus tiers to every agent in your vault and let the model-router hook route each dispatch automatically.
-last_regen: 2026-05-06
+last_regen: 2026-05-08
 no_diagram: true
 source_skills:
   - lazy-core.agent-models

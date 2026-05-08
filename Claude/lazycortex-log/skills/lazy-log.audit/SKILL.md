@@ -15,10 +15,11 @@ The rule (`.claude/rules/lazy-log.logging.md`) loads unconditionally at startup,
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Inline rule checks`
+   - `Step 1c — Logging-waiver value validation`
    - `Step 2 — Dispatch parallel cross-checks`
    - `Step 3 — Report`
    - `Step 4 — Log the run`
@@ -28,7 +29,7 @@ This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Phase 1 — Inline rule checks (main session)
 
-Neither step dispatches; both operate on a single file.
+None of these sub-steps dispatch; they all operate inline on rule and artifact files.
 
 ### 1a. Rule file installed
 
@@ -45,6 +46,15 @@ Read `.claude/rules/lazy-log.logging.md`:
 - `[WARN]` if the rule does not mention UTC timestamps (`date -u`).
 - `[WARN]` if the rule does not call out "two separate steps: `Bash(mkdir -p ...)` then `Write`".
 
+### 1c. Logging-waiver value validation
+
+Glob `.claude/skills/*/SKILL.md`, `.claude/agents/*.md`, `.claude/commands/*.md`. For each file, parse YAML frontmatter and inspect `logging-waiver:` if present:
+
+- `[FAIL]` if value is the empty string, the literal `true`, or the literal `yes`.
+- `[FAIL]` if the key is present but no value follows (key + colon with empty mapping value).
+
+Valid concrete strings → no finding (silently accepted).
+
 If Phase 1a reports `[FAIL]` (rule missing), skip Phase 2 and jump to output.
 
 ## Phase 2 — Dispatch parallel cross-checks
@@ -59,6 +69,7 @@ Dispatch three Explore agents **in a single message with three Agent tool calls*
   - `[WARN]` if the section references a log path outside `./.logs/claude/<name>/` (e.g., `~/.claude/...` or a hardcoded project path).
   - `[WARN]` if it uses a timestamp format other than `YYYY-MM-DD_HH-MM-SS`.
   - `[WARN]` if it suggests chaining with `&&` or using `cat > file <<'EOF'`.
+- Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-log.waiver-candidates.md` and classify each scoped artifact. Return any artifact classified as `should-waive` or `waiver-suspect` as an `[INFO]` finding with the suggested-reason template (or empty for `waiver-suspect`).
 
 ### Agent A — skills
 
@@ -95,11 +106,17 @@ Rule says: `./.logs/claude/<name>/...`
 
 (... one section per finding, FAIL first, then WARN ...)
 
+### Waiver candidates
+
+(One row per `should-waive` / `waiver-suspect` finding — artifact path, suggested reason, current `logging-waiver:` value if any.)
+
 ### Fixes available
 
 - [ ] Fix 1: <description> (can auto-apply)
 - [ ] Fix 2: <description> (needs manual review)
 ```
+
+For each `should-waive` candidate, offer `add logging-waiver: "<reason>" to <path>` (using the suggested-reason template from the reference). For each `waiver-suspect`, offer `fix waiver value at <path> (current: <bad value>)`. Both fixes are interactive — never auto-apply.
 
 Ask which fixes to apply. Never auto-fix without confirmation.
 

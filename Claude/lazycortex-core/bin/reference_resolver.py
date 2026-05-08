@@ -40,8 +40,15 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
         else:
             cache = Path.home() / ".claude/plugins/cache"
             # Real layout: cache/<registry>/<plugin>/<version>/<dir>/<name>.md.
-            # Glob finds all <registry>/<plugin> dirs under any registry prefix.
-            plugin_dirs = list(cache.glob(f"*/{scope}"))
+            # Walk all <registry>/<plugin> dirs under any registry prefix.
+            plugin_dirs: list[Path] = []
+            if cache.is_dir():
+                for registry in cache.iterdir():
+                    if not registry.is_dir():
+                        continue
+                    candidate = registry / scope
+                    if candidate.is_dir():
+                        plugin_dirs.append(candidate)
             if not plugin_dirs:
                 raise ReferenceError(f"plugin not in cache: {scope}")
             # Collect all version subdirectories across matching registry/plugin dirs.

@@ -30,10 +30,11 @@ HOME = Path.home()
 INSTALLED = HOME / ".claude" / "plugins" / "installed_plugins.json"
 
 NAME_RE = re.compile(r"^name:\s*[\"']?([^\"'\n]+?)[\"']?\s*$", re.MULTILINE)
+WAIVER_RE = re.compile(r"^logging-waiver:\s*[\"']?([^\"'\n]+?)[\"']?\s*$", re.MULTILINE)
 
 
-def read_frontmatter_name(path: Path) -> str | None:
-    """Return the YAML `name:` field from a file's frontmatter, or None."""
+def _extract_frontmatter_block(path: Path) -> str | None:
+    """Return the raw YAML frontmatter block (between the --- delimiters), or None."""
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -43,13 +44,35 @@ def read_frontmatter_name(path: Path) -> str | None:
     end = text.find("\n---", 3)
     if end < 0:
         return None
-    block = text[3:end]
+    return text[3:end]
+
+
+def read_frontmatter_name(path: Path) -> str | None:
+    """Return the YAML `name:` field from a file's frontmatter, or None."""
+    block = _extract_frontmatter_block(path)
+    if block is None:
+        return None
     m = NAME_RE.search(block)
     return m.group(1).strip() if m else None
 
 
-def harvest_root(root: Path, counters: dict[str, int]) -> dict[str, set[str]]:
-    """Walk one root for skills/agents/commands. Returns {kind: {names}}."""
+def read_frontmatter_waiver(path: Path) -> str | None:
+    """Return the `logging-waiver:` reason string from frontmatter, or None."""
+    block = _extract_frontmatter_block(path)
+    if block is None:
+        return None
+    m = WAIVER_RE.search(block)
+    return m.group(1).strip() if m else None
+
+
+def harvest_root(
+    root: Path, counters: dict[str, int], waivered: dict[str, str]
+) -> dict[str, set[str]]:
+    """Walk one root for skills/agents/commands. Returns {kind: {names}}.
+
+    Also populates *waivered* in-place: maps artifact name → logging-waiver reason
+    for every file that carries a ``logging-waiver:`` frontmatter key.
+    """
     found: dict[str, set[str]] = {"skill": set(), "agent": set(), "command": set()}
     if not root.is_dir():
         return found
@@ -57,26 +80,48 @@ def harvest_root(root: Path, counters: dict[str, int]) -> dict[str, set[str]]:
     # Skills: <root>/skills/<dir>/SKILL.md
     skills_dir = root / "skills"
     if skills_dir.is_dir():
-        for skill_md in skills_dir.glob("*/SKILL.md"):
-            name = read_frontmatter_name(skill_md) or skill_md.parent.name
+        for entry in os.listdir(skills_dir):
+            skill_md = skills_dir / entry / "SKILL.md"
+            if not skill_md.is_file():
+                continue
+            name = read_frontmatter_name(skill_md) or entry
             found["skill"].add(name)
             counters["files"] += 1
+            reason = read_frontmatter_waiver(skill_md)
+            if reason is not None:
+                waivered[name] = reason
 
     # Agents: <root>/agents/<file>.md
     agents_dir = root / "agents"
     if agents_dir.is_dir():
-        for agent_md in agents_dir.glob("*.md"):
+        for entry in os.listdir(agents_dir):
+            if not entry.endswith(".md"):
+                continue
+            agent_md = agents_dir / entry
+            if not agent_md.is_file():
+                continue
             name = read_frontmatter_name(agent_md) or agent_md.stem
             found["agent"].add(name)
             counters["files"] += 1
+            reason = read_frontmatter_waiver(agent_md)
+            if reason is not None:
+                waivered[name] = reason
 
     # Commands: <root>/commands/<file>.md
     commands_dir = root / "commands"
     if commands_dir.is_dir():
-        for cmd_md in commands_dir.glob("*.md"):
+        for entry in os.listdir(commands_dir):
+            if not entry.endswith(".md"):
+                continue
+            cmd_md = commands_dir / entry
+            if not cmd_md.is_file():
+                continue
             name = read_frontmatter_name(cmd_md) or cmd_md.stem
             found["command"].add(name)
             counters["files"] += 1
+            reason = read_frontmatter_waiver(cmd_md)
+            if reason is not None:
+                waivered[name] = reason
 
     return found
 
@@ -106,10 +151,16 @@ def in_repo_plugin_roots(repo: Path | None) -> list[Path]:
 
 
 def project_local_root(repo: Path | None) -> Path | None:
-    """Return <repo>/.claude/ if it exists (project-local skills/agents/commands)."""
-    if repo is None:
-        return None
-    candidate = repo / ".claude"
+    """Return <repo>/.claude/ if it exists, else fall back to cwd/.claude/.
+
+    The fallback handles the case where cwd is not inside a git repo (e.g. in
+    tests) but the caller has already arranged a .claude/ tree under cwd.
+    """
+    if repo is not None:
+        candidate = repo / ".claude"
+        return candidate if candidate.is_dir() else None
+    # No git repo found — use cwd as the project root.
+    candidate = Path.cwd() / ".claude"
     return candidate if candidate.is_dir() else None
 
 
@@ -149,25 +200,26 @@ def main() -> int:
         "files": 0,
     }
     aggregate: dict[str, set[str]] = {"skill": set(), "agent": set(), "command": set()}
+    waivered: dict[str, str] = {}
 
     repo = repo_root()
 
     for root in in_repo_plugin_roots(repo):
-        merge(aggregate, harvest_root(root, counters))
+        merge(aggregate, harvest_root(root, counters, waivered))
         counters["in_repo_plugin_roots"] += 1
 
     proj = project_local_root(repo)
     if proj is not None:
-        merge(aggregate, harvest_root(proj, counters))
+        merge(aggregate, harvest_root(proj, counters, waivered))
         counters["project_local_root"] = 1
 
     for root in installed_plugin_roots():
-        merge(aggregate, harvest_root(root, counters))
+        merge(aggregate, harvest_root(root, counters, waivered))
         counters["installed_roots"] += 1
 
     g = global_root()
     if g.is_dir():
-        merge(aggregate, harvest_root(g, counters))
+        merge(aggregate, harvest_root(g, counters, waivered))
         counters["global_root"] = 1
 
     by_kind = {k: sorted(v) for k, v in aggregate.items()}
@@ -176,6 +228,7 @@ def main() -> int:
     output = {
         "canonical": canonical,
         "by_kind": by_kind,
+        "waivered": waivered,
         "sources": {
             "in_repo_plugin_roots": counters["in_repo_plugin_roots"],
             "project_local_root": counters["project_local_root"],

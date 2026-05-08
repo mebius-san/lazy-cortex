@@ -1,6 +1,7 @@
 ---
 description: Show lazycortex-observe purpose and a one-line summary of each skill it ships
 execution-discipline-waiver: "help command — static text, no multi-step logic"
+logging-waiver: "static text — no executable steps"
 ---
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.
 
@@ -17,7 +18,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 No agents. No other commands.
 
-<!-- pub.sync-readmes:help-block:start -->
+<!-- help-block:start -->
 **Documentation:**
 
 - [ship-metrics-end-to-end](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/walkthroughs/ship-metrics-end-to-end.md) — From a clean checkout to your first dashboard panel — bring up the runtime daemon, install the shipper, produce traffic, verify the pipeline.
@@ -26,6 +27,6 @@ No agents. No other commands.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/faq.md) — Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
 
 Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-observe/help/`.
-<!-- pub.sync-readmes:help-block:end -->
+<!-- help-block:end -->
 
 See `README.md` in the plugin for full scenarios and requirements.

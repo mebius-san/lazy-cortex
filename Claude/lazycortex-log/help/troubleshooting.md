@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-log skills — symptoms, likely causes, and fixes.
-last_regen: 2026-05-05
+last_regen: 2026-05-08
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Decision tree branching first on which skill aborted (install vs. clean); for install, split on 'plugin not installed' vs. 'cache is empty'; for clean, split on '.logs/claude/ absent' vs. 'Step 1 canonical resolver failed'; each leaf names the fix."
+  request: "Decision tree branching first on which skill aborted (install vs. clean); for install, split on 'plugin not installed' vs. 'plugin cache is empty' vs. 'lazycortex-core not installed'; for clean, split on '.logs/claude/ absent' vs. 'Step 1 canonical resolver failed'; each leaf names the fix."
   kind_hint: decision-tree
 source_skills:
   - lazy-log.install
@@ -29,6 +29,16 @@ source_skills:
 **Likely cause**: The plugin is registered in `enabledPlugins` but its rule files have not been downloaded into the local cache — typically because the plugin was enabled without a subsequent plugin update, or a previous update failed partway through.
 
 **Fix**: Run `/plugin update lazycortex-log@lazycortex` to refresh the cache, then re-run `/lazy-log.install`.
+
+---
+
+## `/lazy-log.install` aborts at Step 6: "lazycortex-core not installed"
+
+**Symptom**: `/lazy-log.install` progresses through rules and changelog setup but then aborts at the agent-models seeding step with a message like "lazycortex-core not installed; install it before /lazy-log.install".
+
+**Likely cause**: Step 6 looks up tier defaults from `lazycortex-core`'s `default-tiers.json` in the plugin cache. If `lazycortex-core` is absent from the cache — because it has not been enabled or its cache is missing — the skill refuses to fall back to a hardcoded table and halts.
+
+**Fix**: Run `/lazy-core.install` (or enable `lazycortex-core@lazycortex` in `enabledPlugins` and run `/plugin update lazycortex-core@lazycortex`) so that the core plugin's cache is populated, then re-run `/lazy-log.install`.
 
 ---
 

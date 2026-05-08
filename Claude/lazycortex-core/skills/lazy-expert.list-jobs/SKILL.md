@@ -2,6 +2,7 @@
 name: lazy-expert.list-jobs
 description: List expert queue jobs, optionally filtered by expert name or status. Wraps expert_runtime.list_jobs.
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Write, AskUserQuestion
+logging-waiver: "read-only status query — single read, no mutation, no decision"
 ---
 # Expert List Jobs
 
@@ -121,5 +122,5 @@ input: "expert=<expert|none> status=<status|none>"
 ## Failure modes
 
 - **"status must be one of: pending, done, failed"** — caller passed an unsupported status value → use one of the three valid values.
-- **"No jobs found"** — the jobs base directory is absent or empty → confirm that jobs have been dispatched and `.claude/experts/.jobs/` exists.
-- **`.claude/experts/.jobs/` missing** — expert runtime not bootstrapped in this repo → run `/lazy-core.install`.
+- **"No jobs found"** — the jobs base directory is absent or empty → confirm that jobs have been dispatched and `.experts/.jobs/` exists.
+- **`.experts/.jobs/` missing** — expert runtime not bootstrapped in this repo → run `/lazy-core.install`.

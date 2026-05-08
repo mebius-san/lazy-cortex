@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Query past changes from any angle — ranked recall, chronological timeline, or topical synthesis.
-last_regen: 2026-05-05
+last_regen: 2026-05-08
 diagram_spec:
   anchor: "How the three agents share a substrate"
   request: "Flow diagram showing lazy-log.recall, lazy-log.timeline, and lazy-log.summary as three query paths fanning into a shared substrate of four sources: changelog.md, run logs, commits.jsonl, and git log/memory. Each agent has a distinct output shape: ranked table, chronological list, narrative prose."
@@ -9,7 +9,6 @@ source_skills:
   - lazy-log.recall
   - lazy-log.timeline
   - lazy-log.summary
-  - lazy-log.logging
 ---
 # Query the history of any change
 
@@ -18,13 +17,13 @@ Six weeks after a change lands, "why did we do this?" is expensive to answer fro
 ## What's in this block
 
 **`lazy-log.recall` — keyword-first ranked retrieval.**
-You give it a natural-language query ("the auth middleware rewrite", "when did we switch to dot-namespaces") and it searches every source, scores each match by how strongly it correlates with your keywords, deduplicates by git SHA, and returns a ranked table of up to ten results. Each row includes the source that produced the match and the SHA you can hand to `git show`. The ranking tiers run from multi-keyword changelog hits (strongest) down to diff-content-only matches (weakest), so the highest-confidence answer appears first. Use recall when you have a keyword or phrase and want to know where and when that thing happened.
+You give it a natural-language query ("the auth middleware rewrite", "when did we switch to dot-namespaces") and it searches every source, scores each match by how strongly it correlates with your keywords, deduplicates by git SHA, and returns a ranked table of up to ten results. Each row includes the source that produced the match and the SHA you can hand to `git show`. The ranking tiers run from multi-keyword changelog hits (strongest) down to diff-content-only matches found via `git log -S` (weakest), so the highest-confidence answer appears first. Use recall when you have a keyword or phrase and want to know where and when that thing happened.
 
 **`lazy-log.timeline` — date-range chronological view.**
 You give it a date range ("last 2 weeks", "since 2026-04-01"), a topic, or both. It collects entries from all sources within those bounds, deduplicates by SHA, sorts newest-first (or oldest-first on request), and groups by day. Every entry is a short factual reference — SHA, time, and subject — with `(internal)` prefixed on chore/refactor commits so you can skim past them. Use timeline when you want to reconstruct "what happened when" across a span of time, without needing a synthesized narrative.
 
 **`lazy-log.summary` — topical narrative synthesis.**
-You give it a topic ("how the plugin system evolved", "everything about the logging skills") and it reads the most relevant commits in full, clusters the results by sub-theme, and writes 2–4 paragraphs of prose with inline SHA citations. Unlike recall or timeline, the output is not a list — it's a narrative structured around "why and what", not "when". A supporting-references table follows the prose, and a Gaps section flags periods with no captured records. Use summary when you need to understand the arc of something, not just locate the specific change.
+You give it a topic ("how the plugin system evolved", "everything about the logging skills") and it reads the most relevant commits in full, clusters the results by sub-theme, and writes 2–4 paragraphs of prose with inline SHA citations. The sub-themes are structured around "why and what" — design decisions, implementation phases, issues that surfaced, follow-up work — not around "when". A supporting-references table follows the prose, and a Gaps section flags periods with no captured records. Use summary when you need to understand the arc of something, not just locate the specific change.
 
 ## How they work together
 

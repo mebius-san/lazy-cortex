@@ -38,8 +38,8 @@ Outcome: `validated` or `aborted`.
 Determine job state by checking the job directory:
 
 ```
-Bash(test -d .claude/experts/.jobs/<expert_name>/<job_id> && echo exists || echo missing)
-Bash(test -f .claude/experts/.jobs/<expert_name>/<job_id>/DONE && echo done || echo pending)
+Bash(test -d .experts/.jobs/<expert_name>/<job_id> && echo exists || echo missing)
+Bash(test -f .experts/.jobs/<expert_name>/<job_id>/DONE && echo done || echo pending)
 ```
 
 Classify as:

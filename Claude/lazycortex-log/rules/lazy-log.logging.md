@@ -25,29 +25,29 @@ Frontmatter (YAML, all required):
 
 Body: `# <name>` heading, then `## Actions` (bullet list of actions, files modified, decisions) and `## Result` (success/failure + summary).
 
-Always include `git_sha` — it bridges "the AI did Y" back to the actual commit.
+## Waiver
 
-## Distill cadence (qualitative + 4h throttle)
+A skill, agent, or command may opt out by declaring a non-empty string in frontmatter:
 
-Decide whether to invoke
-`Agent(subagent_type: "lazycortex-log:lazy-log.distill", prompt: "distill pending commits")`
-on the **current turn**. Walk these gates in order; stop at the first match:
+    logging-waiver: "<concrete one-line reason>"
 
-1. **No commit landed in this turn → HARD SKIP.** "Commit landed this turn" means a `git commit` ran in *this* assistant turn — not earlier in the session, not pending in `.logs/commits.jsonl`. Questions, plans, edits without commits, and read-only turns never trigger distill, even if undistilled commits exist from earlier turns. They wait for the next turn that itself produces a commit.
-2. **User said "don't distill" this turn → HARD SKIP.**
-3. **User explicitly asked to distill / catch up → RUN** (bypasses throttle and qualitative gate).
-4. **`mtime(./.logs/changelog.md)` is younger than 4 hours → SKIP.** The 4h floor is a ceiling, not a target — even on big changes, don't run more often.
-5. **The just-landed commit isn't meaningful enough to narrate → SKIP** (Claude judges qualitatively: notable feature, fix, or refactor = yes; mechanical state-refresh, README rerender, version bump = no).
+- The value must be a concrete reason. `true` / `yes` / `""` are rejected as `FAIL` by `lazy-log.audit`.
+- Waivered artifacts are silently skipped — no log file written, no audit listing.
+- Patterns / suggested reasons: see `${CLAUDE_PLUGIN_ROOT}/references/lazy-log.waiver-candidates.md`.
+
+**Class-level exemption (no per-file frontmatter required):** agents dispatched by a coordinator skill via `Agent(subagent_type: ...)` and returning a structured findings block do NOT log; the coordinator owns the log.
+
+**Log dir name MUST be the artifact's filename** (`<skill>` from `<skill>/SKILL.md`, `<name>` from `<name>.md`) — never a phase / task / dispatch description. Self-named subagent dirs (`task-N`, `expert-runtime-X`, etc.) violate this; `lazy-log.audit` flags them.
+
+## Distill cadence
+
+Decide whether to invoke `Agent(subagent_type: "lazycortex-log:lazy-log.distill", prompt: "distill pending commits")` on the **current turn**. Walk these gates in order; stop at the first match:
+
+1. **No commit this turn → SKIP** (only `git commit` in *this* turn counts; not session-earlier, not `.logs/commits.jsonl`-pending).
+2. **User said "don't distill" → SKIP.**
+3. **User asked to distill / catch up → RUN** (bypasses throttle + qualitative gate).
+4. **`mtime(./.logs/changelog.md)` < 4h → SKIP** (4h floor is a ceiling).
+5. **Just-landed commit not narration-worthy → SKIP** (Claude judges: notable feat/fix/refactor=yes; state-refresh / README-rerender / version-bump=no).
 6. **Otherwise → RUN.**
 
 Pending commits accumulate in `.logs/commits.jsonl`; the next eligible turn catches up.
-
-## Recall, timeline, summary
-
-For historical questions ("why was X changed?", "when did we change Y?"), use one of:
-
-- `Agent(subagent_type: "lazycortex-log:lazy-log.recall", prompt: "<query>")` — searches across `.logs/changelog.md`, `.logs/claude/**/*.md`, `.logs/commits.jsonl`, git log, and memory.
-- `Agent(subagent_type: "lazycortex-log:lazy-log.timeline", prompt: "<date range or topic>")` — chronological view of a date range or topic.
-- `Agent(subagent_type: "lazycortex-log:lazy-log.summary", prompt: "<topic>")` — synthesized multi-source summary.
-
-Don't skim these files manually — `lazy-log.recall` is tuned to rank relevance and return git SHAs for follow-up `git show <sha>`.

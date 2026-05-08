@@ -28,7 +28,7 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 - **Python 3** — the iconize-sync worker (`bin/iconize_sync.py`) is Python-stdlib only.
 - **`jq`** — used by `lazy-obsidian.update-plugin` for deep-merging the opinionated override block onto plugin `data.json`.
 - **`curl`** — used by `lazy-obsidian.update-plugin` to resolve the Obsidian community registry and fetch plugin binaries from GitHub releases.
-- **`lazycortex-core` (required)** — dependency declared in `plugin.json`; `lazy-obsidian.install` reuses the install pattern and `tool.doctor` validates the plugin surface.
+- **`lazycortex-core` (required)** — dependency declared in `plugin.json`; `lazy-obsidian.install` reuses the install pattern.
 
 ## Quick start
 

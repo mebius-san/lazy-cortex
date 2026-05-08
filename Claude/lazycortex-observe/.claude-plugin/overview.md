@@ -35,7 +35,7 @@ The plugin is **observer-server-blind**: every shipped file (templates, dashboar
 
 ## Scenarios
 
-<!-- Legacy marketing-summary section. Read by humans browsing the README; NOT read by pub.help-draft (Principle 5 says ## Blocks is the source of truth). -->
+<!-- Legacy marketing-summary section. Read by humans browsing the README; the canonical source of truth is the ## Blocks section above. -->
 
 - *"Ship runtime metrics from a developer laptop to a self-hosted Prometheus + Grafana"* — `/lazy-observe.install` walks through agent kind (Alloy vs otelcol), remote_write URL, bearer token storage, then renders the agent config + a launchd plist, loads the service, and smoke-tests the pipeline end-to-end.
 - *"Run on a headless Linux server (systemd) with no GUI"* — same install skill detects the platform automatically and installs a systemd user unit with `ProtectSystem=strict` + `ProtectHome=read-only` hardening. Token sourced from a 0600 file or `LAZYCORTEX_OBSERVE_TOKEN` env var — no Keychain or GUI dependency.

@@ -209,7 +209,14 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
     plugin = cmd[0]
     cache = Path.home() / ".claude/plugins/cache"
     # Real layout: cache/<registry>/<plugin>/<version>/bin/<plugin>
-    plugin_dirs = list(cache.glob(f"*/{plugin}"))
+    plugin_dirs: list[Path] = []
+    if cache.is_dir():
+        for registry in cache.iterdir():
+            if not registry.is_dir():
+                continue
+            candidate = registry / plugin
+            if candidate.is_dir():
+                plugin_dirs.append(candidate)
     if not plugin_dirs:
         raise FileNotFoundError(f"plugin not in cache: {plugin}")
     # Across all <registry>/<plugin> dirs, descend into versions and pick latest.
@@ -298,9 +305,13 @@ def _cleanup_runtime_logs(repo_root: Path, max_age: str) -> None:
     if not log_dir.exists():
         return
     threshold = time.time() - _parse_duration(max_age)
-    for f in log_dir.glob("*.jsonl"):
-        if f.name == "tokens.jsonl":
+    import os
+    for entry in os.listdir(log_dir):
+        if not entry.endswith(".jsonl"):
             continue
+        if entry == "tokens.jsonl":
+            continue
+        f = log_dir / entry
         try:
             if f.stat().st_mtime < threshold:
                 f.unlink()

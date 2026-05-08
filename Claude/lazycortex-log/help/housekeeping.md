@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Keep .logs/claude/ tidy as skills and agents come and go by running /lazy-log.clean to classify, merge, distill, and delete orphaned log folders.
-last_regen: 2026-05-05
+last_regen: 2026-05-08
 no_diagram: true
 source_skills:
   - lazy-log.clean
@@ -16,17 +16,19 @@ This block contains one skill: `lazy-log.clean`. It covers the full housekeeping
 
 ## How it works
 
-`/lazy-log.clean` begins by resolving the canonical name set: every skill, agent, and command name currently registered in the project. It then classifies each immediate subdirectory of `.logs/claude/` into one of four buckets.
+`/lazy-log.clean` begins by resolving the canonical name set: every skill, agent, and command name currently registered in the project. It then classifies each immediate subdirectory of `.logs/claude/` into one of five buckets.
 
 **Canonical folders** are those whose name matches a live canonical name exactly. They are left alone unless their newest log is more than 30 days old, in which case you are asked whether to keep, archive-then-delete, or delete without archiving.
+
+**Waivered folders** belong to a current artifact that carries a `logging-waiver` declaration — logging was intentionally turned off for that artifact. The folder itself is leftover residue from before the waiver was added. You are shown the waiver reason and up to three log previews, then asked whether to delete, distill-then-delete, or leave. A `delete-all-waivered` shortcut is available on the first prompt if you want to clear the whole waivered bucket at once without reviewing each individually.
 
 **Rename candidates** are orphan folders whose name closely resembles a canonical name (a similarity score of 0.8 or higher). The most common cause is a skill that was renamed mid-project, leaving its old log folder behind. For each candidate you choose to merge (moving its logs into the canonical folder), distill-then-delete, delete outright, or leave.
 
 **Pattern-clustered orphans** are folders matching anonymous-run patterns: `task-N`, `subagent-task-N`, `plan-execute`, `plan-execute-N`, and similar. These are the residue of ephemeral subagent threads that logged under generated names rather than a skill name. Because they tend to appear in bulk, `/lazy-log.clean` batches the entire cluster under one prompt — `delete-all`, `distill-then-delete-all`, `leave-all`, or `per-folder` if you want to review each individually.
 
-**Other orphans** are everything else: folders whose name matches neither a canonical name, a rename candidate, nor a known anonymous pattern. You see the folder name, file count, date range, and a one-line preview of the most recent result before choosing `distill-then-delete`, `delete`, or `leave`.
+**Other orphans** are everything else: folders whose name matches neither a canonical name, a waivered artifact, a rename candidate, nor a known anonymous pattern. You see the folder name, file count, date range, and a one-line preview of the most recent result before choosing `distill-then-delete`, `delete`, or `leave`.
 
-The distill-then-delete path is not simply "read before deleting". It calls `mcp__memory-project__retain` for each substantive finding extracted from the logs — decisions taken, errors hit, surprising results — so that `/lazy-log.recall` can surface them later even after the raw files are gone. Logs whose combined extracted text is under 100 characters with no error or decision keywords are treated as trivial and skipped without a memory call.
+The distill-then-delete path is not simply "read before deleting". It calls Hindsight memory for each substantive finding extracted from the logs — decisions taken, errors hit, surprising results — so that `/lazy-log.recall` can surface them later even after the raw files are gone. Logs whose combined extracted text is under 100 characters with no error or decision keywords are treated as trivial and skipped without a memory call.
 
 The read-first contract is strict: no folder is touched until you have answered every prompt. All mutations are deferred to a single application pass that runs merges first (so source folders exist when their logs are being moved), then deletions.
 

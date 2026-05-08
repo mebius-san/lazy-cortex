@@ -4,6 +4,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 2.0.1 — 2026-05-08 UTC
+
+- `lazy-core.install` now probes for Python 3.12 at the start of installation and aborts with a homebrew/pyenv upgrade prompt if the floor is not met; runtime glob calls in `reference_resolver.py` and `runtime_daemon.py` are rewritten with `os.walk` to fix a silent failure on Python 3.12.
+- `lazy-expert.list-jobs` and `lazy-core.git-status` no longer write a run log when invoked — both are read-only status queries and the log entries were noise with no diagnostic value.
+- Fixed: all `lazy-expert.*` skill probes and help docs were pointing at `.claude/experts/` for the expert queue and settings file; the runtime reads from `.experts/` at the repo root. Skills that dispatch or query expert jobs now resolve the correct path.
+- `lazy-core.checkup` drops the author-side tool menu (audit, doctor, optimize, pub.status) and runs only `lazy-core.audit` + `lazy-core.doctor` in Phase 1; `lazy-core.doctor`'s budget finding now correctly identifies always-loaded rules by byte contribution rather than mislabeling them as frontmatter violations.
+- `lazy-core.skill-writing.md` shipped rule slimmed by 40% (15.8 KB to 9.5 KB, clears WARN threshold); `lazy-core.git` rule's stage-then-commit discipline tightened — plan all edits before any `git add`, run add/pre-commit/commit back-to-back, prefer `mv` over `git mv` for multi-file refactors.
+
 ### 2.0.0 — 2026-05-06 UTC
 
 - **Breaking:** All `lazycortex-core` reference files were renamed with type-alignment suffixes (`-schema`, `-contract`, `-protocol`). Consumers using `lazycortex-review` must re-run `/lazy-review.install` or manually update `experts.settings.json`, changing the doc-review resolver key from `lazycortex-review:doc-review` to `lazycortex-review:lazy-review.doc-review-protocol`.
@@ -171,6 +179,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-log
 
+### 0.4.0 — 2026-05-08 UTC
+
+- Skills, agents, and commands can now opt out of run logging by declaring `logging-waiver: "<reason>"` in their frontmatter. Empty or boolean values (`true`, `yes`) are rejected; ephemeral subagents dispatched by a coordinator are exempt by class without per-file declarations.
+- `lazy-log.audit` now FAILs on malformed `logging-waiver` values and surfaces a "Waiver candidates" section in its report — listing artifacts that should declare a waiver (or have a suspicious one) so you can apply or fix them interactively.
+- `lazy-log.install` gains a Step 7 waiver-candidate scan that walks through every installed skill, agent, and command and prompts you to add `logging-waiver:` to any that qualify; pass `--no-scan` to skip.
+- `lazy-log.clean` now classifies log folders whose artifact has since been waivered into a dedicated `waivered` bucket and prompts per-folder with the waiver reason, offering delete / distill-then-delete / leave / delete-all-waivered options before moving on to other orphans.
+
 ### 0.3.12 — 2026-05-06 UTC
 
 - The `/lazy-log.help` command now surfaces a complete help tree: six topic chapters (install & audit, change history, changelog, housekeeping, troubleshooting, FAQ) plus a `cut-a-release` walkthrough.
@@ -271,6 +286,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 2.0.0 — 2026-05-08 UTC
+
+- **Breaking:** The tag-pages agent has been renamed from `obsidian.gen-tag-pages` to `lazy-obsidian.gen-tag-pages` to match the plugin's namespace convention. Update any dispatch strings, `lazy.settings.json` entries, or code references that use the old name `lazycortex-obsidian:obsidian.gen-tag-pages` to `lazycortex-obsidian:lazy-obsidian.gen-tag-pages`.
+
 ### 1.1.5 — 2026-05-06 UTC
 
 - Fixed a bug in the frontmatter rewriter that dropped the blank line after the closing `---` fence, which could produce malformed note output when rewriting Obsidian frontmatter.
@@ -360,6 +379,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.0.11 — 2026-05-08 UTC
+
+- _no user-visible changes_
+
 ### 1.0.10 — 2026-05-06 UTC
 
 - New `lazy-diagram.help` command provides built-in documentation covering drawing workflows, installation, troubleshooting, and FAQ.
@@ -375,6 +398,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).
 
 ## lazycortex-observe
+
+### 0.1.6 — 2026-05-08 UTC
+
+- New `/lazy-observe.help` command ships a full help layer: three reference chapters (install & audit lifecycle, troubleshooting with a diagnostic flowchart, operator FAQ) and an end-to-end walkthrough for shipping metrics from scratch.
 
 ### 0.1.5 — 2026-05-06 UTC
 

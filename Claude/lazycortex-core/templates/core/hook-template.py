@@ -35,8 +35,8 @@ import sys
 
 # ---------------------------------------------------------------------------
 # § 6 LOOP GUARD — content-based bail (replace with the predicate that
-# recognises THIS hook's own footprint; see pub.status.hook._is_real_commit
-# for a worked example).
+# recognises THIS hook's own footprint; see lazy-core.hook-writing § 6 for
+# the contract).
 # ---------------------------------------------------------------------------
 def _is_real_event(root: str) -> bool:
     """True iff the just-handled event is NOT this hook's own auto-commit.
@@ -50,7 +50,7 @@ def _is_real_event(root: str) -> bool:
 
 # ---------------------------------------------------------------------------
 # § 7 TRANSACTIONAL SKIP — never auto-commit during merge/rebase/cherry-pick.
-# Reference implementation: pub.status.hook._in_transactional_state.
+# Contract: lazy-core.hook-writing § 7.
 # ---------------------------------------------------------------------------
 _TRANSACTIONAL_MARKERS = (
     "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
@@ -168,7 +168,7 @@ if __name__ == "__main__":
 # ============================================================================
 #
 # Naming
-#   File: <dot-namespace>.hook.py (e.g., pub.status.hook.py).
+#   File: <dot-namespace>.hook.py.
 #   Register in settings.json: hooks.{Pre,Post}ToolUse[].matcher = "<MatcherName>"
 #   with hooks[].command = python3 "${CLAUDE_PLUGIN_ROOT}/hooks/<file>".
 #
@@ -190,10 +190,10 @@ if __name__ == "__main__":
 #                             per lazy-log.logging.
 #
 # Reference implementations
-#   .claude/hooks/pub.status.hook.py — full PostToolUse hook with worker
-#     dispatch, auto-commit, loop guard, transactional skip, index refresh.
-#   .claude/hooks/pub.autobump.py — full PreToolUse hook with deny / context
-#     emission and write-and-restage rideshare.
+#   See lazy-core.hook-writing §§ 1–8 for worked patterns covering full
+#   PostToolUse hooks (worker dispatch, auto-commit, loop guard, transactional
+#   skip, index refresh) and PreToolUse hooks (deny / context emission /
+#   write-and-restage rideshare).
 #
 # Out-of-scope
 #   This template targets full hook scripts. Thin shims (a one-liner that

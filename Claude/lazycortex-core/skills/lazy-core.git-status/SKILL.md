@@ -2,6 +2,7 @@
 name: lazy-core.git-status
 description: "Read-only inspect of the lazy-core.git staging lock. Prints holder, age, liveness, and whether the lock is currently breakable. No state mutation."
 allowed-tools: "Bash(python3 *), Bash(git rev-parse *), Bash(mkdir -p *), Bash(date -u *), Read, Write"
+logging-waiver: "read-only status query — single read, no mutation, no decision"
 ---
 
 # /lazy-core.git-status

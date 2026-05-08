@@ -1,10 +1,10 @@
 ---
 chapter_type: block
 summary: Register, unregister, and recover routines in the per-repo serial daemon — the async team runs in order without contending over the working tree.
-last_regen: 2026-05-06
+last_regen: 2026-05-08
 diagram_spec:
   anchor: "Runtime lifecycle"
-  request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec; a dirty working tree triggers a halt; /lazy-runtime.recover (commit/stash/discard) cleans the tree and resumes; unregister removes a routine from the loop."
+  request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec; a dirty working tree triggers a halt; /lazy-runtime.recover (commit/stash/discard/abort) cleans the tree and resumes; unregister removes a routine from the loop."
 source_skills:
   - lazy-routine.register
   - lazy-routine.unregister
@@ -14,7 +14,7 @@ source_skills:
 
 The lazycortex-core runtime daemon is a per-repo serial loop. It reads the routine registry from `.claude/lazy.settings.json`, runs each entry in order according to its `interval_sec` (or cron expression), and repeats. Because routines execute one at a time, no two ever contend over the working tree or git state — the daemon is the single serializing authority for all background work in the repo.
 
-Three skills manage that loop from the outside. `/lazy-routine.register` is a type-aware wizard that adds a named periodic job to the registry; it supports four routine types — `subprocess` (a periodic CLI command), `inbox` (scan a directory and dispatch one expert job per file), `schedule` (cron-driven, one fire per boundary), and `git` (watch a remote branch for changes and dispatch jobs). `/lazy-routine.unregister` removes a named routine cleanly and is idempotent — calling it on a name that does not exist is an INFO, not an error. `/lazy-runtime.recover` is the escape hatch for a halted daemon: when a routine or expert leaves the working tree dirty, the daemon halts to avoid a corrupted next run; this skill reads the halt context, walks you through cleanup (commit, stash, or discard), and atomically resumes the loop.
+Three skills manage that loop from the outside. `/lazy-routine.register` is a type-aware wizard that adds a named periodic job to the registry; it supports four routine types — `subprocess` (a periodic CLI command), `inbox` (scan a directory and dispatch one expert job per file), `schedule` (cron-driven, one fire per boundary), and `git` (watch a remote branch for changes and dispatch jobs). `/lazy-routine.unregister` removes a named routine cleanly and is idempotent — calling it on a name that does not exist is an INFO, not an error. `/lazy-runtime.recover` is the escape hatch for a halted daemon: when a routine or expert leaves the working tree dirty, the daemon halts to avoid a corrupted next run; this skill reads the halt context, walks you through cleanup (commit, stash, discard, or abort), and atomically resumes the loop once the tree is clean.
 
 ## When you'd use this
 
@@ -23,7 +23,7 @@ Three skills manage that loop from the outside. `/lazy-routine.register` is a ty
 - Set up a `schedule` routine that fires on a cron boundary (daily backup, weekly audit) rather than a polling interval.
 - Watch a remote branch for new commits or file changes and trigger expert jobs automatically when the upstream moves.
 - Remove a routine you no longer need, or overwrite an existing one with updated parameters.
-- Unblock the daemon after a halt — get back to a clean working tree without losing changes you want to keep.
+- Unblock the daemon after a halt — get back to a clean working tree without losing changes you want to keep, or leave the daemon halted intentionally while you investigate.
 
 ## How it fits together
 
@@ -31,7 +31,7 @@ Routine management has a natural lifecycle. You run `/lazy-routine.register` onc
 
 When a routine is no longer needed, you run `/lazy-routine.unregister <name>` and the daemon drops it from the schedule immediately. One routine is protected: `lazy-expert.pump`, the built-in job that drains the expert queue. Removing it requires `--force` and surfaces a warning that expert jobs will stop processing until the routine is re-registered or `/lazy-core.install` is re-run.
 
-The halt-and-recover path is a separate concern that does not require registration or unregistration. When the daemon halts, `/lazy-runtime.recover` reads `.logs/lazy-core/runtime/state.json` to surface the halt context — which routine triggered the halt, which expert and job were involved if applicable, and which paths are dirty — then asks how to clean up. Choose `stash` to tuck the dirty changes into a git stash you can restore later with `git stash pop`, `commit` to keep them permanently (you supply the message), or `discard` to throw them away irreversibly. Once the tree is clean the skill atomically clears the `daemon_halted` block and the daemon resumes on its next iteration.
+The halt-and-recover path is a separate concern that does not require registration or unregistration. When the daemon halts, `/lazy-runtime.recover` reads `.logs/lazy-core/runtime/state.json` to surface the halt context — which routine triggered the halt, which expert and job were involved if applicable, and which paths are dirty — then asks how to clean up. You have four options: `commit` keeps the dirty changes permanently (you supply the message); `stash` tucks them into a git stash you can restore later with `git stash pop`; `discard` throws them away irreversibly; and `abort` leaves everything as-is and exits, keeping the daemon halted so you can investigate on your own schedule. Once the cleanup produces a clean tree the skill atomically clears the `daemon_halted` block and the daemon resumes on its next iteration. If the tree is still dirty after cleanup (for example, a submodule left behind uncommitted state), the skill reports `still-dirty` without clearing the halt — run `git status` manually, resolve, and re-invoke `/lazy-runtime.recover`.
 
 For `inbox` routines there is one extra consideration: the inbox directory must be gitignored. Inbox routines move files between iterations, and an unignored path dirties the working tree on every cycle, triggering repeated halts. The register wizard detects this automatically and offers to add the path to `.gitignore` on the spot.
 
@@ -40,6 +40,7 @@ For `inbox` routines there is one extra consideration: the inbox directory must 
 - **Change a routine's configuration** — run `/lazy-routine.register <name> --force` to overwrite in one step, or run `/lazy-routine.unregister <name>` first and then re-register with the new parameters.
 - **Remove `lazy-expert.pump`** — only do this if you are intentionally disabling expert job processing. Pass `--force` to `/lazy-routine.unregister lazy-expert.pump`. Run `/lazy-core.install` to restore it.
 - **Recover without losing changes** — pick `stash` in the `/lazy-runtime.recover` wizard. Your dirty changes land in a git stash you can restore later with `git stash pop`. Pick `commit` if you want to keep them permanently.
+- **Investigate before cleaning up** — pick `abort` in the `/lazy-runtime.recover` wizard. The daemon stays halted and no changes are made; run `git status` to inspect the dirty paths, then re-invoke `/lazy-runtime.recover` when you are ready.
 - **Check daemon halt status before recovering** — inspect `.logs/lazy-core/runtime/state.json` directly to confirm halt state and read the `dirty_paths` before running the recover skill.
 
 ## Runtime lifecycle
@@ -60,6 +61,7 @@ stateDiagram-v2
   recovering --> committing : commit selected
   recovering --> stashing : stash selected
   recovering --> discarding : discard selected
+  recovering --> halted : abort selected
   committing --> idle : tree clean
   stashing --> idle : tree clean
   discarding --> idle : tree clean

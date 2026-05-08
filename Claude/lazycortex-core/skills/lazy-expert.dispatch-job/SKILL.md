@@ -5,7 +5,7 @@ allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(te
 ---
 # Expert Dispatch Job
 
-Submit a job to a named expert's queue. The skill validates the payload against the protocol contract, writes the job to `.claude/experts/.jobs/<expert_name>/`, and returns `{job_id, queue_path}` to the caller.
+Submit a job to a named expert's queue. The skill validates the payload against the protocol contract, writes the job to `.experts/.jobs/<expert_name>/`, and returns `{job_id, queue_path}` to the caller.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -37,13 +37,13 @@ Outcome: `validated` or `aborted`.
 
 ## Step 2 — Verify experts directory
 
-Check that `.claude/experts/` exists in the current repo:
+Check that `.experts/` exists in the current repo:
 
 ```
-Bash(test -d .claude/experts && echo ok || echo missing)
+Bash(test -d .experts && echo ok || echo missing)
 ```
 
-If output is `missing` → abort: "`.claude/experts/` not initialised — run `/lazy-core.install` first."
+If output is `missing` → abort: "`.experts/` not initialised — run `/lazy-core.install` first."
 
 Outcome: `asserted` or `aborted`.
 
@@ -98,7 +98,7 @@ input: "expert_name=<expert_name>"
 
 `## Actions`
 - Validated payload fields
-- Verified .claude/experts/ directory
+- Verified .experts/ directory
 - Dispatched job to expert queue
 
 `## Result`
@@ -107,6 +107,6 @@ input: "expert_name=<expert_name>"
 ## Failure modes
 
 - **"payload missing required field(s): kind"** (or `role`, `request`) — payload does not conform to the protocol contract → add the missing fields; see `claude/lazycortex-core/references/lazy-core.expert-protocols-contract.md`.
-- **"`.claude/experts/` not initialised"** — the experts directory has not been bootstrapped in this repo → run `/lazy-core.install` to create the required directory layout.
+- **"`.experts/` not initialised"** — the experts directory has not been bootstrapped in this repo → run `/lazy-core.install` to create the required directory layout.
 - **Python `FileNotFoundError` or `ModuleNotFoundError`** — `${CLAUDE_PLUGIN_ROOT}/bin` is not on the path or `expert_runtime.py` is absent → verify the plugin is installed (`/lazy-core.install`) and `${CLAUDE_PLUGIN_ROOT}` resolves correctly.
 - **Unknown expert name** — `dispatch_job` creates the job dir under the named expert key; if the name is a typo, subsequent pump runs will silently skip it → verify the expert name against `experts.settings.json`.

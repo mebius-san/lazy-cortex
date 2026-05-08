@@ -11,12 +11,12 @@
     "lazycortex-log:lazy-log.summary": "sonnet",
     "lazycortex-log:lazy-log.distill": "sonnet",
     "lazycortex-log:lazy-log.bullets": "sonnet",
-    "lazycortex-obsidian:obsidian.gen-tag-pages": "sonnet",
+    "lazycortex-obsidian:lazy-obsidian.gen-tag-pages": "sonnet",
     "lazycortex-review:lazy-review.dispatcher": "haiku",
     "lazycortex-review:lazy-review.process-file": "sonnet",
-    "lazycortex-review:lazy-review.designer": "sonnet",
-    "lazycortex-review:lazy-review.developer": "sonnet",
-    "lazycortex-review:lazy-review.review_doctor": "haiku",
+    "lazycortex-review:lazy-review.sample-designer": "sonnet",
+    "lazycortex-review:lazy-review.sample-developer": "sonnet",
+    "lazycortex-review:lazy-review.doc_doctor": "haiku",
     "lazycortex-review:lazy-review.historian": "haiku",
     "superpowers:code-reviewer": "opus",
     "superpowers:brainstorming": "opus",
@@ -24,7 +24,6 @@
     "superpowers:subagent-driven-development": "sonnet",
     "superpowers:requesting-code-review": "sonnet",
     "claude-code-guide:claude-code-guide": "sonnet",
-    "memory.optimise": "sonnet",
-    "plugin.extractor": "opus"
+    "memory.optimise": "sonnet"
   }
 }

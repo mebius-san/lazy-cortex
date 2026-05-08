@@ -11,7 +11,7 @@ Multiple Claude Code sessions on the same checkout share **one git index**. With
 
 - **Trust the hook.** If the hook returns a `permissionDecision: deny` saying "another Claude session is staging…", do not retry the same call immediately. Wait briefly and try once; if it still refuses, escalate to the user — do not bypass with raw shell git or `--no-verify`.
 - **Do not break the lock yourself.** The hook auto-breaks dead PIDs, host mismatches, and stale-and-idle holders. Manual breakage is `/lazy-core.git-unlock` only, and it asks before acting.
-- **Stage → commit promptly.** Plan all edits before any `git add` — staging is final assembly, not a workspace. Run `git_add` → `/pub.pre-commit` → `git_commit` back-to-back, nothing between. `git mv` auto-stages: for multi-file refactors prefer Bash `mv` and a single `git add -A` at the end. Idle non-empty index >10 min triggers the stale-and-idle break-rule (work in the tree stays).
+- **Stage → commit promptly.** Plan all edits before any `git add` — staging is final assembly, not a workspace. Run `git_add` → any pre-commit pipeline → `git_commit` back-to-back, nothing between. `git mv` auto-stages: for multi-file refactors prefer Bash `mv` and a single `git add -A` at the end. Idle non-empty index >10 min triggers the stale-and-idle break-rule (work in the tree stays).
 - **Same session re-stages freely.** Re-entry is a no-op; you can `git add` multiple times in a row without the hook intervening.
 
 ## Hook surface

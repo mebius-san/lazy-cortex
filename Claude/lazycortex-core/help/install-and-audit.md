@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-last_regen: 2026-05-06
+last_regen: 2026-05-08
 diagram_spec:
   anchor: "Bootstrap order"
   request: "Flow diagram showing the canonical core bootstrap order: enable plugin in settings.json → restart Claude Code → run /lazy-core.install (or /lazy-core.setup for multi-plugin) → restart if rules changed → run /lazy-core.audit to verify → optionally run /lazy-core.optimize and /lazy-core.doctor for ongoing tuning. Show /lazy-core.setup as an alternative entry point that auto-discovers and sequences all enabled plugin install skills."

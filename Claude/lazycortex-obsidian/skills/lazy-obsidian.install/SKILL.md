@@ -1,11 +1,11 @@
 ---
 name: lazy-obsidian.install
-description: "Bootstrap the lazycortex-obsidian plugin for the current project (or globally). Syncs rule templates shipped by the plugin (currently none), scaffolds the tag-page template used by the `obsidian.gen-tag-pages` agent (project scope only), and cleans up orphaned rules from previous versions. At project scope, also installs the Dataview Obsidian plugin into `<repo-root>/.obsidian/` via `/lazy-obsidian.update-plugin` (Dataview renders the `Index` section of tag pages) and offers to chain into `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install` so the full vault setup runs from one entry point. Idempotent — safe to re-run. Detects install scope automatically."
+description: "Bootstrap the lazycortex-obsidian plugin for the current project (or globally). Syncs rule templates shipped by the plugin (currently none), scaffolds the tag-page template used by the `lazy-obsidian.gen-tag-pages` agent (project scope only), and cleans up orphaned rules from previous versions. At project scope, also installs the Dataview Obsidian plugin into `<repo-root>/.obsidian/` via `/lazy-obsidian.update-plugin` (Dataview renders the `Index` section of tag pages) and offers to chain into `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install` so the full vault setup runs from one entry point. Idempotent — safe to re-run. Detects install scope automatically."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), AskUserQuestion
 ---
 # Install lazycortex-obsidian
 
-Bootstrap the plugin in the right scope: sync rule templates shipped by the plugin into the matching rules directory, scaffold the tag-page template consumed by the `obsidian.gen-tag-pages` agent (project scope only), and offer to delete orphans (rules the plugin dropped between versions). At project scope, this skill is the root entry point for the plugin family — after the rule/template work it installs Dataview (needed by tag pages) and optionally chains into `/lazy-obsidian.iconize-install` so a fresh vault reaches a usable state in one pass.
+Bootstrap the plugin in the right scope: sync rule templates shipped by the plugin into the matching rules directory, scaffold the tag-page template consumed by the `lazy-obsidian.gen-tag-pages` agent (project scope only), and offer to delete orphans (rules the plugin dropped between versions). At project scope, this skill is the root entry point for the plugin family — after the rule/template work it installs Dataview (needed by tag pages) and optionally chains into `/lazy-obsidian.iconize-install` so a fresh vault reaches a usable state in one pass.
 
 The plugin currently ships **zero rules**. If you installed an earlier version of the plugin that shipped `lazy-obsidian.vault-hygiene.md`, this skill will offer to delete it as an orphan.
 
@@ -86,7 +86,7 @@ Orphan detection only considers target files whose filename starts with one of t
 
 ## Step 4: Sync the tag-page template (project scope only)
 
-The `obsidian.gen-tag-pages` agent reads its template from the consumer repo at a fixed path. This step scaffolds (or re-prompts on drift for) that file. **Skip this step entirely when scope is `user`** — tag pages only make sense per-vault, so there is no global install mode.
+The `lazy-obsidian.gen-tag-pages` agent reads its template from the consumer repo at a fixed path. This step scaffolds (or re-prompts on drift for) that file. **Skip this step entirely when scope is `user`** — tag pages only make sense per-vault, so there is no global install mode.
 
 ### Paths
 
@@ -99,7 +99,7 @@ Ensure `<repo-root>/.claude/templates/` exists with `mkdir -p` before any write.
 
 Use `AskUserQuestion` exactly like Step 3. Do not batch:
 
-1. **New** — target missing → `AskUserQuestion`: "Install tag-page template for the `obsidian.gen-tag-pages` agent at `.claude/templates/obsidian.tag-page-template.md`?" with options **install** / **skip**. Install → `cp <source> <target>`, state **installed**. Skip → state **skipped** (note to user: the agent will refuse to run until this file exists).
+1. **New** — target missing → `AskUserQuestion`: "Install tag-page template for the `lazy-obsidian.gen-tag-pages` agent at `.claude/templates/obsidian.tag-page-template.md`?" with options **install** / **skip**. Install → `cp <source> <target>`, state **installed**. Skip → state **skipped** (note to user: the agent will refuse to run until this file exists).
 2. **Unchanged** — both present, byte-identical → no prompt. State **unchanged**.
 3. **Drift** — both present, differ → show unified diff via `Bash(diff -u <target> <source>)`. `AskUserQuestion`: **overwrite** / **keep-local**. State **updated** or **kept-local**. The consumer is expected to customize the template, so **keep-local** is the usual choice after first install.
 
@@ -107,7 +107,7 @@ No orphan detection is needed — the plugin owns exactly one template file unde
 
 ### Agent availability
 
-The agent itself (`obsidian.gen-tag-pages`) is shipped by the plugin at `<installPath>/agents/obsidian.gen-tag-pages.md` and becomes available automatically when the plugin is enabled — nothing to copy into the consumer repo. Only the template is project-local.
+The agent itself (`lazy-obsidian.gen-tag-pages`) is shipped by the plugin at `<installPath>/agents/lazy-obsidian.gen-tag-pages.md` and becomes available automatically when the plugin is enabled — nothing to copy into the consumer repo. Only the template is project-local.
 
 ## Step 5: Install Dataview (project scope only)
 
@@ -127,7 +127,7 @@ Invoke `/lazy-obsidian.update-plugin dataview` unconditionally — it is idempot
 `AskUserQuestion` with:
 
 - question: `Install the Dataview community plugin for this vault?`
-- description: ``**Purpose:** Dataview is a third-party Obsidian community plugin that indexes frontmatter across the vault and renders live query results inside notes.\n\n**Why this skill is asking:** The tag pages scaffolded by `obsidian.gen-tag-pages` contain an `Index` section built with a DataviewJS block that lists every note carrying the tag. Without Dataview installed and enabled, the `Summary` section still renders correctly but the `Index` block stays blank.\n\n**Either choice is reversible** — you can run `/lazy-obsidian.update-plugin dataview` later to install it, or disable it in Obsidian's Community Plugins settings to remove it.``
+- description: ``**Purpose:** Dataview is a third-party Obsidian community plugin that indexes frontmatter across the vault and renders live query results inside notes.\n\n**Why this skill is asking:** The tag pages scaffolded by `lazy-obsidian.gen-tag-pages` contain an `Index` section built with a DataviewJS block that lists every note carrying the tag. Without Dataview installed and enabled, the `Summary` section still renders correctly but the `Index` block stays blank.\n\n**Either choice is reversible** — you can run `/lazy-obsidian.update-plugin dataview` later to install it, or disable it in Obsidian's Community Plugins settings to remove it.``
 - options: **install** / **skip**.
 
 - **install** → invoke `/lazy-obsidian.update-plugin dataview`. Record its state tuple.

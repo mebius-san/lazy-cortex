@@ -92,7 +92,7 @@ Forbidden: blind `git_add(file)` after writing, "hopes the commit picks it up".
 
 ### Reference incident
 
-The 2026-05-04 git-state-hygiene incident: a `pub.autobump` rideshare collided with `pub.status._autocommit` running with pathspec, leaving a `plugin.json` staged at the *previous* version while HEAD and working tree advanced. A naive `git commit -am` would have silently downgraded the manifest. See `docs/specs/2026-05-04-git-state-hygiene.md`.
+The 2026-05-04 git-state-hygiene incident: an autobump rideshare collided with a publish-status auto-commit running with pathspec, leaving a `plugin.json` staged at the *previous* version while HEAD and working tree advanced. A naive `git commit -am` would have silently downgraded the manifest. See `docs/specs/2026-05-04-git-state-hygiene.md`.
 
 ### Severity
 
@@ -108,17 +108,17 @@ A hook that auto-commits its own writes MUST have a content-based bail. Pattern:
 
 Time-based throttles (cooldown files, mtime checks) and counter-based guards are not acceptable substitutes — they leak state across sessions and fail when the user reorders or amends commits.
 
-Reference implementation: `.claude/hooks/pub.status.hook.py::_is_real_commit`.
+Reference implementation: a publish-status hook that bails when HEAD's diff is entirely folder-notes-only (recognising its own footprint).
 
 ## 7. Transactional skip
 
 A hook that auto-commits MUST refuse to do so when the repo has any of: `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `REBASE_HEAD`, `rebase-merge/`, `rebase-apply/`, `BISECT_LOG`. Auto-commit during these flows interferes with the user's interactive operation and can corrupt the in-progress merge/rebase state.
 
-Reference implementation: `.claude/hooks/pub.status.hook.py::_in_transactional_state`.
+Reference implementation: a transactional-state guard that aborts the auto-commit when any merge/rebase/cherry-pick markers are present.
 
 ## 8. Logging
 
-Cross-reference `lazy-log.logging`. Hooks log to `./.logs/claude/<hook-name>/<timestamp>.md` like every other artifact. Naming: `<dot-namespace>.hook` (e.g., `pub.status.hook`).
+Cross-reference `lazy-log.logging`. Hooks log to `./.logs/claude/<hook-name>/<timestamp>.md` like every other artifact. Naming: `<dot-namespace>.hook`.
 
 ## Enforcement
 

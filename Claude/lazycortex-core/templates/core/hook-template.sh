@@ -80,8 +80,7 @@ for marker in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD REBASE_HEAD \
 done
 
 # § 6 — LOOP GUARD — content-based bail (replace with predicate that
-# recognises THIS hook's own footprint; see pub.status.hook._is_real_commit
-# for a Python worked example).
+# recognises THIS hook's own footprint; contract: lazy-core.hook-writing § 6).
 # Time-based throttles and counter guards are forbidden — content predicate only.
 # Example: bail if every changed path matches our own auto-commit pattern.
 # CHANGED="$(git -C "$ROOT" diff-tree --no-commit-id --name-only -r --root HEAD)"
@@ -134,9 +133,8 @@ exit 0
 #
 # Contract (lazy-core.hook-writing §§ 1–8) — same as Python variant.
 #
-# Reference implementations (Python — read these for the worked patterns):
-#   .claude/hooks/pub.status.hook.py
-#   .claude/hooks/pub.autobump.py
+# Reference implementations: see lazy-core.hook-writing §§ 1–8 for worked
+# patterns (PostToolUse loop-guarded auto-commit, PreToolUse deny / rideshare).
 #
 # Out-of-scope
 #   Inline `command:` strings in settings.json (one-liners) don't need a

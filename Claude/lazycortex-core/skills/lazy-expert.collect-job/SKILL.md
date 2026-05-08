@@ -105,5 +105,5 @@ input: "expert_name=<expert_name> job_id=<job_id>"
 
 - **"job_id is required"** — caller omitted the job_id argument → supply the job_id returned by `/lazy-expert.dispatch-job`.
 - **status == "missing"** — the job directory was never created or was already cancelled → verify the job_id and expert_name are correct; re-dispatch if needed.
-- **Malformed response.json** — `collect_job` reads `response.json` and may raise `json.JSONDecodeError` if the expert wrote invalid JSON → inspect the file at `.claude/experts/.jobs/<expert>/<job_id>/response.json` directly.
+- **Malformed response.json** — `collect_job` reads `response.json` and may raise `json.JSONDecodeError` if the expert wrote invalid JSON → inspect the file at `.experts/.jobs/<expert>/<job_id>/response.json` directly.
 - **Python `ModuleNotFoundError`** — plugin not installed or `${CLAUDE_PLUGIN_ROOT}` not set → run `/lazy-core.install`.

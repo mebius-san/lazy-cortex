@@ -25,10 +25,10 @@ It is referenced in `experts.settings.json` as `<plugin>:<name>` (e.g. `lazycort
 
 ## 2. Standard job-dir layout
 
-Every job under `.claude/experts/.jobs/<expert-name>/<job-id>/` follows this structure:
+Every job under `.experts/.jobs/<expert-name>/<job-id>/` follows this structure:
 
 ```
-.claude/experts/.jobs/<expert-name>/<job-id>/
+.experts/.jobs/<expert-name>/<job-id>/
 ├── request.json     # consumer-written
 ├── READY            # consumer-written marker; daemon picks up only after this exists
 ├── source/...       # consumer-written input files; layout is protocol's choice; may be absent
@@ -66,21 +66,21 @@ Any of the `source` / `context` / `result` subdirs may be absent when no files o
 
   "source": [
     {
-      "path": ".claude/experts/.jobs/<expert>/<job-id>/source/<...>",
+      "path": ".experts/.jobs/<expert>/<job-id>/source/<...>",
       "description": "Short prose telling expert what this file is"
     }
   ],
 
   "context": [
     {
-      "path": ".claude/experts/.jobs/<expert>/<job-id>/context/<...>",
+      "path": ".experts/.jobs/<expert>/<job-id>/context/<...>",
       "description": "Short prose"
     }
   ],
 
   "result": [
     {
-      "path": ".claude/experts/.jobs/<expert>/<job-id>/result/<...>",
+      "path": ".experts/.jobs/<expert>/<job-id>/result/<...>",
       "description": "Where expert should write this output file"
     }
   ]
@@ -104,7 +104,7 @@ Standard field semantics:
   "outcome": "<protocol-defined-enum>",
   "result": [
     {
-      "path": ".claude/experts/.jobs/<expert>/<job-id>/result/<...>",
+      "path": ".experts/.jobs/<expert>/<job-id>/result/<...>",
       "description": "Short prose telling consumer what's in the file"
     }
   ]
@@ -201,7 +201,7 @@ If none: state "No extra fields."
 
 State explicitly:
 - what the expert **may** write outside `result/` (e.g. editing `source/` files in-place for `kind=review`)
-- what the expert **must not** write (e.g. must not modify files outside `.claude/experts/.jobs/<job-id>/`)
+- what the expert **must not** write (e.g. must not modify files outside `.experts/.jobs/<job-id>/`)
 
 ### 4.9 Error categories used
 

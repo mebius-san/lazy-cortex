@@ -96,7 +96,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Command | Description |
 |---|---|
-| `lazy-core.checkup` | One entry point that runs every read-only audit/doctor in this repo (consumer + author trios), merges findings into a per-plugin table, then prompts once for which mutating fix-flow to run. Read-only by default. |
+| `lazy-core.checkup` | One entry point that runs every read-only audit/doctor this plugin orchestrates against consumer config, merges findings into a per-plugin table, then prompts once for which mutating fix-flow to run. Read-only by default. |
 | `lazy-core.help` | Show lazycortex-core purpose and a one-line summary of each skill it ships |
 
 ## Rules
@@ -108,9 +108,9 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 | `lazy-core.hook-writing` | Authoring contract for Claude Code lifecycle hooks — PreToolUse, PostToolUse, Stop, SessionStart, etc. Covers script discipline, trigger gating, branch determinism, loop guards, transactional skip, the no-dirty-tree clause, and logging. |
 | `lazy-core.hygiene` | Project hygiene constraints checked by lazy-core.audit, lazy-core.doctor, and lazy-core.optimize — scope, naming, settings split, MCP scope, and path hygiene. |
 | `lazy-core.reference-writing` | Authoring contract for reference docs (protocols, schemas, contracts) under references/ at any scope. |
-| `lazy-core.rule-writing` | Authoring contract for rule files. Mandatory frontmatter (description + paths scope OR always_loaded waiver), size budget, dot-namespace filename, no large code blocks, artifact-reference integrity, no narrative padding, plugin-vs-local scoping. |
+| `lazy-core.rule-writing` | Authoring contract for rule files. Mandatory frontmatter (description + paths scope OR always_loaded waiver), size budget, dot-namespace filename, no large code blocks, artifact-reference integrity, no narrative padding. |
 | `lazy-core.scaffold` | Registry of authoring templates for any new artifact a plugin registers. |
-| `lazy-core.skill-writing` | Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, the plugin audit-skill contract, and the plugin help-command contract. |
+| `lazy-core.skill-writing` | Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, no-dirty-tree clause, and the optional Failure-modes section. |
 | `lazy-guard.security` | Security constraints that the lazy-guard.* scanners and pre-commit hook enforce — credential safety and public-repo readiness. |
 
 ## Hooks

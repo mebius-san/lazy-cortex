@@ -1,6 +1,7 @@
 ---
 description: Show lazycortex-core purpose and a one-line summary of each skill it ships
 execution-discipline-waiver: "help command — static text, no multi-step logic"
+logging-waiver: "static text — no executable steps"
 ---
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.
 
@@ -31,7 +32,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-core.checkup` — single entry point: runs every read-only audit/doctor (consumer + author trios), merges findings into one per-plugin table, then prompts for the mutating fix-flow to run.
 - `lazy-core.help` — this listing.
 
-<!-- pub.sync-readmes:help-block:start -->
+<!-- help-block:start -->
 **Documentation:**
 
 - [agent-models](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/agent-models.md) — Assign haiku/sonnet/opus tiers to every agent in your vault and let the model-router hook route each dispatch automatically.
@@ -48,7 +49,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, and the expert runtime.
 
 Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-core/help/`.
-<!-- pub.sync-readmes:help-block:end -->
+<!-- help-block:end -->
 
 No agents.
 

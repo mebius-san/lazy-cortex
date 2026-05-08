@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
-last_regen: 2026-05-06
+last_regen: 2026-05-08
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing how lazy-guard.check-public feeds findings into lazy-repo.mark-public (which creates .guard-waivers.json and activates the pre-commit hook), and how lazy-guard.allow-mcp independently classifies MCP server tools into allow/ask/skip buckets and writes them to settings.local.json"
@@ -33,7 +33,7 @@ All three skills write to files they own (`.guard-waivers.json`, `settings.local
 
 **`/lazy-repo.mark-public`** is the guided end-to-end workflow for taking a repo (or subtree) public. It calls `/lazy-guard.check-public` internally, then walks you through resolving every finding before it will proceed. Once all secrets are cleared it writes `.guard-waivers.json` — which both records your waiver decisions and activates the pre-commit hook for all future commits — and in whole-repo mode optionally flips GitHub visibility via `gh`. If you only want a subtree to be public (e.g. `claude/**` ships to the marketplace while the rest stays private), pass the scope glob: the hook then scans only those paths on every commit, and the GitHub visibility step is skipped entirely.
 
-**`/lazy-guard.allow-mcp`** works independently of the other two. It enumerates every tool the target MCP server exposes in your current session and classifies each one: safe or reversible reads and low-risk writes go into `permissions.allow` (no prompt), truly destructive operations go into `permissions.ask` (always prompt), and medium-risk tools are left out of both so Claude Code's default per-call prompt applies when you actually invoke them. Results land in `settings.local.json` — gitignored by default — so your personal permission choices never leak into commits your teammates inherit. For globally defined servers the skill asks whether to register at global scope (all projects on this machine) or project scope (this repo only). It also optionally installs a SessionStart preload hook that resolves MCP tool schemas once at session start, which is what stops Claude Code from drifting to Bash equivalents when schemas feel expensive to fetch mid-session.
+**`/lazy-guard.allow-mcp`** works independently of the other two. It enumerates every tool the target MCP server exposes in your current session and classifies each one: safe or reversible reads and low-risk writes go into `permissions.allow` (no prompt), truly destructive operations go into `permissions.ask` (always prompt), and medium-risk tools are left out of both so Claude Code's default per-call prompt applies when you actually invoke them. Results land in `settings.local.json` — gitignored by default — so your personal permission choices never leak into commits your teammates inherit. For globally defined servers the skill checks existing state and infers the target scope before asking; it only prompts when scope is genuinely undetermined. It also optionally installs a SessionStart preload hook that resolves MCP tool schemas once at session start, which is what stops Claude Code from drifting to Bash equivalents when schemas feel expensive to fetch mid-session.
 
 ## How they work together
 

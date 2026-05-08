@@ -131,12 +131,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--icon-map", help="path to icon-map (default: <repo>/.claude/iconize/obsidian-icon-map.json)")
     p.add_argument("--dry-run", action="store_true")
     sub = p.add_subparsers(dest="cmd", parser_class=_Parser)
-    for name in ("sync", "sync-staged", "reconcile", "reconcile-dirty", "install-hooks", "check-versions"):
+    for name in ("sync", "sync-staged", "reconcile", "reconcile-plugin", "reconcile-dirty", "install-hooks", "check-versions"):
         sp = sub.add_parser(name)
         if name == "sync":
             sp.add_argument("path", help="file path relative to vault root")
         if name == "reconcile":
             sp.add_argument("--prefix", help="only reconcile entries whose path starts with this prefix")
+        if name == "reconcile-plugin":
+            sp.add_argument("plugin", help="plugin name; reconcile only claude/<plugin>/")
     return p
 
 
@@ -296,13 +298,16 @@ def cmd_sync_staged(args) -> int:
 def _walk_md_files(vault: Path, prefix: str | None) -> list[str]:
     root = vault / prefix if prefix else vault
     if not root.exists(): return []
+    skip_dirs = {".obsidian", ".git", ".claude", ".githooks"}
     out: list[str] = []
-    for p in root.rglob("*.md"):
-        # Skip .obsidian/, .git/, .claude/, .githooks/ at any depth
-        rel_parts = p.relative_to(vault).parts
-        if any(part in (".obsidian", ".git", ".claude", ".githooks") for part in rel_parts):
-            continue
-        out.append("/".join(rel_parts))
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        # Prune skipped dirs in-place so we never descend into them.
+        dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+        for fn in filenames:
+            if not fn.endswith(".md"):
+                continue
+            rel = Path(dirpath, fn).relative_to(vault)
+            out.append("/".join(rel.parts))
     return out
 
 
@@ -339,6 +344,64 @@ def cmd_reconcile(args) -> int:
 
     print(json.dumps({"op": "reconcile", "prefix": prefix,
                       "touched_count": len(touched)}, ensure_ascii=False))
+    return EXIT_OK
+
+
+def cmd_reconcile_plugin(args) -> int:
+    """Plugin-scoped reconcile + auto-stage. Walks claude/<plugin>/**/*.md only,
+    re-resolves icons, rewrites frontmatter where the resolution differs, and
+    re-stages touched files so they ride the caller's pending commit.
+
+    Used by the pre-commit pipeline after a plugin.json bump: the version
+    delta flips callbacks like `plugin-is-patch-bumped`, so every file under
+    the plugin's subtree whose color depends on that callback (folder note,
+    README) must repaint in the same commit. The full `reconcile` walk would
+    do the same but at vault scope; this one is bounded to the touched plugin.
+    """
+    vault = find_vault(args.vault)
+    icon_map = _load_icon_map_or_inert(vault, args.icon_map)
+    if icon_map is None or _preflight_incompatible(icon_map):
+        return EXIT_OK
+    plugin = args.plugin
+    prefix = f"claude/{plugin}"
+
+    from frontmatter_rewriter import rewrite_file
+    touched: list[str] = []
+    planned: list[dict] = []
+
+    for rel in _walk_md_files(vault, prefix):
+        fm = _read_frontmatter_for(vault, rel)
+        entries = resolve_matchers(icon_map, rel, fm)
+        icon, color = (None, None)
+        if entries:
+            _, entry = entries[0]
+            icon = entry.get("iconName")
+            color = entry.get("iconColor")
+        note_path = vault / rel
+        if not note_path.is_file():
+            continue
+        if args.dry_run:
+            planned.append({"path": rel, "icon": icon, "color": color})
+            continue
+        if rewrite_file(note_path, icon=icon, color=color):
+            touched.append(rel)
+
+    if args.dry_run:
+        print(json.dumps({"op": "reconcile-plugin", "plugin": plugin, "dry_run": True,
+                          "planned": planned}, ensure_ascii=False))
+        return EXIT_OK
+
+    if touched:
+        rs = subprocess.run(
+            ["git", "-C", str(vault), "add", "--"] + touched,
+            capture_output=True, text=True,
+        )
+        if rs.returncode != 0:
+            sys.stderr.write(
+                f"warning: re-stage of modified notes failed: {rs.stderr.strip()}\n")
+
+    print(json.dumps({"op": "reconcile-plugin", "plugin": plugin, "touched": touched},
+                     ensure_ascii=False))
     return EXIT_OK
 
 
@@ -590,6 +653,7 @@ DISPATCH = {
     "sync": cmd_sync,
     "sync-staged": cmd_sync_staged,
     "reconcile": cmd_reconcile,
+    "reconcile-plugin": cmd_reconcile_plugin,
     "reconcile-dirty": cmd_reconcile_dirty,
     "install-hooks": cmd_install_hooks,
     "check-versions": cmd_check_versions,
@@ -612,7 +676,7 @@ def main(argv=None) -> int:
             print(f"error: {e}", file=sys.stderr); return EXIT_VALIDATION
         return EXIT_OK
     if not args.cmd:
-        print("usage: iconize_sync <sync|sync-staged|reconcile|reconcile-dirty|install-hooks|check-versions> ...", file=sys.stderr)
+        print("usage: iconize_sync <sync|sync-staged|reconcile|reconcile-plugin|reconcile-dirty|install-hooks|check-versions> ...", file=sys.stderr)
         return EXIT_VALIDATION
     handler = DISPATCH.get(args.cmd)
     if handler is None:

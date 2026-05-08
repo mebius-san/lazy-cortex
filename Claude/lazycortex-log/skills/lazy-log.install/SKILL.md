@@ -9,7 +9,7 @@ Bootstrap the plugin in the right scope: copy every rule template shipped by the
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Detect install scope`
@@ -18,8 +18,9 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 4 — Create .logs/changelog.md`
    - `Step 5 — Update .gitignore`
    - `Step 6 — Seed lazy.settings.json`
-   - `Step 7 — Verify`
-   - `Step 8 — Log the run`
+   - `Step 7 — Waiver-candidate scan`
+   - `Step 8 — Verify`
+   - `Step 9 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -176,7 +177,43 @@ If any mutation happened, write the file with `version: 1` at the top.
 
 One line per seeded entry: `lazycortex.<key> = <value> (<state>)`. Include the resolved `default-tiers.json` path so the user can see where the defaults came from.
 
-## Step 7: Verify
+## Step 7: Waiver-candidate scan
+
+Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-log.waiver-candidates.md`. For each artifact under `.claude/skills/*/SKILL.md`, `.claude/agents/*.md`, `.claude/commands/*.md`:
+
+1. Parse YAML frontmatter.
+2. Classify per the reference table — `should-waive`, `already-waived-ok`, `waiver-suspect`, or `should-log`.
+3. Collect the `should-waive` and `waiver-suspect` candidates as the recommendation list.
+
+If the recommendation list is empty, outcome `none` and skip ahead.
+
+If non-empty, ask once at entry:
+
+- `AskUserQuestion`: ``Found <N> waiver candidate(s). Walk through them now?``
+  - options: `walk-through` / `skip`
+
+If `skip`: outcome `deferred (<N> candidates)`.
+
+If `walk-through`:
+
+1. `TaskCreate` one task per candidate (`Review candidate <path>`) so dropped candidates surface as `pending`.
+2. For each candidate, mark its task `in_progress`, then `AskUserQuestion`:
+   - question: ``Add `logging-waiver:` to `<path>`? Signal: <signal-letter>. Suggested reason: `<template>`.``
+   - options: `add-with-suggested-reason` / `add-with-custom-reason` / `leave-as-is` / `skip-remaining-for-this-artifact-type`
+3. On `add-with-suggested-reason` → `Edit` the file's frontmatter to add `logging-waiver: "<template>"`. Outcome `waived-suggested`.
+4. On `add-with-custom-reason` → `AskUserQuestion` (text input via "Other") for the reason. Validate non-empty / not `true` / `yes`. Outcome `waived-custom`.
+5. On `leave-as-is` → outcome `left`.
+6. On `skip-remaining-for-this-artifact-type` → mark remaining candidates of that artifact type as `skipped` and continue with the next type.
+
+For each `waiver-suspect` candidate, the question is rephrased: ``Existing waiver on `<path>` is suspect (value: <current-value>). Replace, remove, or leave?`` with options `replace-with-template` / `remove-key` / `leave-as-is`.
+
+Outcome line: `scanned <N> candidates: waived=<w>, left=<l>, skipped=<s>, suspect-fixed=<sf>`.
+
+### Opt-out
+
+If the install was invoked with `--no-scan` (parsed from the input string), skip Step 7 entirely with outcome `opted-out`.
+
+## Step 8: Verify
 
 - Read back each installed rule file and confirm its `---` frontmatter parses
 - If `.logs/changelog.md` was created, read back its first line
@@ -188,7 +225,7 @@ One line per seeded entry: `lazycortex.<key> = <value> (<state>)`. Include the r
   - .gitignore updated (or "already covers .logs/")
   - Per-key `agent_models` seed outcome from Step 6
 
-## Step 8: Log the run
+## Step 9: Log the run
 
 Log to `./.logs/claude/lazy-log.install/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter).
 

@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-05-06
+last_regen: 2026-05-08
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: pre-commit hook silent → hook-not-firing; MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public FAIL findings → mark-public-fail-unresolved; lazy-repo.mark-public gh missing → gh-not-installed; doctor or audit stalls → skill-stalls; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; routine register name invalid → routine-name-format; routine already registered → routine-conflict; unregister pump without force → pump-protected; daemon stalled → daemon-stale; runtime recover still dirty → recover-still-dirty; audit experts json invalid → experts-json-invalid; audit reference did not resolve → ref-unresolvable; doctor routine command unresolvable → routine-command-missing; lazy-core.audit global rules empty → audit-global-empty."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: pre-commit hook silent → hook-not-firing; MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing / settings-unwritable); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public FAIL findings → mark-public-fail-unresolved; lazy-repo.mark-public gh missing → gh-not-installed; doctor or audit stalls → skill-stalls; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; routine register name invalid → routine-name-format; routine already registered → routine-conflict; unregister pump without force → pump-protected; daemon stalled → daemon-stale; runtime recover still dirty → recover-still-dirty; audit experts json invalid → experts-json-invalid; audit reference did not resolve → ref-unresolvable; audit protocol contract false-positive → protocol-heading-mismatch; doctor routine command unresolvable → routine-command-missing; lazy-core.audit global rules empty → audit-global-empty."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
@@ -88,6 +88,16 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
+## `/lazy-core.install` Step 7 fails: "settings file unwritable"
+
+**Symptom**: `/lazy-core.install` fails at Step 7 (Bootstrap runtime defaults) with a message indicating that `lazy_settings.save_section` encountered a permission or I/O error when writing `lazy-core.runtime` into `.claude/lazy.settings.json`.
+
+**Likely cause**: The `.claude/lazy.settings.json` file or its parent directory has permissions that prevent the skill from writing, or the file was locked by another process.
+
+**Fix**: Check the file permissions on `.claude/lazy.settings.json` and the `.claude/` directory. Ensure both are writable by your current user. Then re-run `/lazy-core.install`.
+
+---
+
 ## `/lazy-core.audit` shows empty results for global rules
 
 **Symptom**: The audit reports zero files found under `~/.claude/rules/` even though files exist there.
@@ -115,6 +125,16 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 **Likely cause**: The `agent` or `protocol` field in `experts.settings.json` uses an unrecognised format, or the artifact it points to is no longer installed. Valid formats are `<plugin-name>:<agent-stem>`, `user:<stem>`, or bare `<stem>`.
 
 **Fix**: Run `/lazy-core.install` to re-register the affected expert — the wizard re-resolves the agent and protocol references and writes only the fields that pass validation. If the referenced plugin has been removed, install it first or update the expert entry to point to a valid replacement.
+
+---
+
+## `/lazy-core.audit` protocol-contract WARN fires even though the sections exist
+
+**Symptom**: The expert-runtime section of `/lazy-core.audit` emits a `WARN` like "protocol for expert `<key>` missing required section(s): kind, role" even though your protocol file visibly contains all five required sections.
+
+**Likely cause**: The section-detection heuristic looks for the literal keywords (`kind`, `role`, `outcome`, `source`, `result`) in heading lines. If your protocol uses alternative heading text — for example `## Request kinds` instead of `## kind` — the heuristic does not match and the WARN fires as a false positive.
+
+**Fix**: Align the protocol file headings with the keywords expected by `lazy-core.expert-protocols-contract.md` (the contract documents the exact heading patterns). Renaming the headings to match the keywords clears the WARN on the next `/lazy-core.audit` run.
 
 ---
 
@@ -262,13 +282,13 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
-## `/lazy-expert.dispatch-job` fails: "`.claude/experts/` not initialised"
+## `/lazy-expert.dispatch-job` fails: "`.experts/` not initialised"
 
-**Symptom**: Running `/lazy-expert.dispatch-job` produces an error like "`.claude/experts/` not initialised — run `/lazy-core.install` first."
+**Symptom**: Running `/lazy-expert.dispatch-job` produces an error like "`.experts/` not initialised — run `/lazy-core.install` first."
 
-**Likely cause**: The expert runtime has not been bootstrapped for this repo. `/lazy-expert.dispatch-job` requires the `.claude/experts/` directory layout to exist before it can write job files.
+**Likely cause**: The expert runtime has not been bootstrapped for this repo. `/lazy-expert.dispatch-job` requires the `.experts/` directory layout to exist before it can write job files.
 
-**Fix**: Run `/lazy-core.install`. When the wizard asks whether to enable the expert runtime, answer yes. The install skill creates `.claude/experts/`, writes `experts.settings.json`, and bootstraps the required directory layout. Then re-run `/lazy-expert.dispatch-job`.
+**Fix**: Run `/lazy-core.install`. When the wizard asks whether to enable the expert runtime, answer yes. The install skill creates `.experts/`, writes `experts.settings.json`, and bootstraps the required directory layout. Then re-run `/lazy-expert.dispatch-job`.
 
 ---
 

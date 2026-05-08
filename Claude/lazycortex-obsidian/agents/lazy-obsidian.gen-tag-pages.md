@@ -1,5 +1,5 @@
 ---
-name: obsidian.gen-tag-pages
+name: lazy-obsidian.gen-tag-pages
 description: |
   Use this agent to generate or update Obsidian tag pages from tags used across the vault's notes.
   Scans all `.md` files for `tags:` frontmatter, then creates/updates/removes tag pages
@@ -9,7 +9,7 @@ description: |
   <example>
   Context: New notes were added with new tags, or tags were added/removed from existing notes
   user: "Regenerate tag pages"
-  assistant: "I'll use the obsidian.gen-tag-pages agent to regenerate the Obsidian tag pages"
+  assistant: "I'll use the lazy-obsidian.gen-tag-pages agent to regenerate the Obsidian tag pages"
   </example>
 model: inherit
 color: purple
@@ -139,7 +139,7 @@ Print a summary:
 
 ## Phase 7 — Log the run
 
-After completing all work, write a run log to `.logs/claude/obsidian.gen-tag-pages/YYYY-MM-DD_HH-MM-SS.md`.
+After completing all work, write a run log to `.logs/claude/lazy-obsidian.gen-tag-pages/YYYY-MM-DD_HH-MM-SS.md`.
 Use UTC time: `date -u +%Y-%m-%d_%H-%M-%S` for the filename. Create directories with `mkdir -p` (never chain with `&&`; use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool).
 
 Log frontmatter (YAML, all required):
@@ -149,4 +149,4 @@ Log frontmatter (YAML, all required):
 - `date` — `YYYY-MM-DD HH:MM:SS UTC`
 - `input` — arguments passed, or `none`
 
-Body: `# obsidian.gen-tag-pages` heading, then `## Actions` (bullet list of actions, files modified, decisions) and `## Result` (success/failure + summary).
+Body: `# lazy-obsidian.gen-tag-pages` heading, then `## Actions` (bullet list of actions, files modified, decisions) and `## Result` (success/failure + summary).

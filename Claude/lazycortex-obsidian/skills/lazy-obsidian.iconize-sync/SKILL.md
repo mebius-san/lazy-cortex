@@ -1,8 +1,8 @@
 ---
 name: lazy-obsidian.iconize-sync
-description: "Resolve Obsidian file/folder icons from a declarative icon-map and write the result into each note's `iconize_icon` / `iconize_color` frontmatter keys. The worker never touches `.obsidian/plugins/obsidian-icon-folder/data.json` — Iconize itself paints non-folder-note icons live from frontmatter, and the bundled `iconize-reloader` plugin bridges folder-note frontmatter into folder-keyed `data.json` entries. Driven by `.claude/iconize/obsidian-icon-map.json`. Subcommands: `sync`, `sync-staged`, `reconcile`, `reconcile-dirty`, `install-hooks`, `check-versions`. Callable from `.githooks/pre-commit`, Claude Code's PostToolUse hook, and Claude Code's Stop hook."
+description: "Resolve Obsidian file/folder icons from a declarative icon-map and write the result into each note's `iconize_icon` / `iconize_color` frontmatter keys. The worker never touches `.obsidian/plugins/obsidian-icon-folder/data.json` — Iconize itself paints non-folder-note icons live from frontmatter, and the bundled `iconize-reloader` plugin bridges folder-note frontmatter into folder-keyed `data.json` entries. Driven by `.claude/iconize/obsidian-icon-map.json`. Subcommands: `sync`, `sync-staged`, `reconcile`, `reconcile-plugin`, `reconcile-dirty`, `install-hooks`, `check-versions`. Callable from `.githooks/pre-commit`, Claude Code's PostToolUse hook, and Claude Code's Stop hook."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Write
-argument-hint: "<subcommand> [args] | sync <path> | sync-staged | reconcile [--prefix PATH] | reconcile-dirty | install-hooks | check-versions"
+argument-hint: "<subcommand> [args] | sync <path> | sync-staged | reconcile [--prefix PATH] | reconcile-plugin <plugin> | reconcile-dirty | install-hooks | check-versions"
 execution-discipline-waiver: "thin dispatcher to iconize_sync.py — discipline belongs in the Python worker, not the SKILL.md"
 ---
 # Iconize Sync (Obsidian)
@@ -55,6 +55,18 @@ Walk every `.md` file (under `--prefix` if given, else whole vault), compute
 the desired `iconize_*` frontmatter, and rewrite each file. Files that no
 longer match a rule have their `iconize_icon` / `iconize_color` keys cleared.
 Use after bulk frontmatter changes or icon-map edits.
+
+### `reconcile-plugin <plugin>`
+
+Plugin-scoped reconcile + auto-stage. Walks `claude/<plugin>/**/*.md` only,
+re-resolves icons, rewrites frontmatter where the resolution differs, and
+re-stages touched files so they ride the caller's pending commit.
+
+Use case: invoked by the pre-commit pipeline after bumping `claude/<plugin>/.claude-plugin/plugin.json`.
+The version delta flips callbacks like `plugin-is-patch-bumped`, so every file
+under the plugin's subtree whose color depends on those callbacks (folder
+note, README) repaints in the same commit. The full `reconcile` walk would
+do the same at vault scope; this one is bounded.
 
 ### `reconcile-dirty`
 

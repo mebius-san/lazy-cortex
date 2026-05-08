@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and understanding lazycortex-log's skills and agents.
-last_regen: 2026-05-05
+last_regen: 2026-05-08
 no_diagram: true
 source_skills:
   - lazy-log.recall
@@ -10,7 +10,6 @@ source_skills:
   - lazy-log.distill
   - lazy-log.bullets
   - lazy-log.clean
-  - lazy-log.logging
 ---
 # Frequently asked questions
 
@@ -44,7 +43,7 @@ The distilled changelog (`.logs/changelog.md`) is written by `lazy-log.distill`,
 
 After a commit lands in a session, Claude judges qualitatively whether the change is meaningful enough to narrate (notable feature, fix, or refactor). If yes, and if `.logs/changelog.md` was last updated more than four hours ago, distillation fires automatically. Small housekeeping commits (a `chore:` tweak, a typo fix) are skipped.
 
-If you want distillation to run regardless — for example after a batch of commits landed in a previous session — invoke `/lazy-log.distill` directly. Passing `force` in the prompt bypasses the four-hour throttle.
+If you want distillation to run regardless — for example after a batch of commits landed in a previous session — invoke `/lazy-log.distill` directly. Including the word `force` in the prompt bypasses the four-hour throttle.
 
 ---
 
@@ -57,6 +56,12 @@ All three search the same sources (changelog, run logs, raw commit log, git hist
 - **`lazy-log.summary`** is a synthesized narrative. You give it a topic and it clusters related changes across all time into a prose story grouped by sub-theme. Best for "explain the whole arc of how the plugin system evolved."
 
 When in doubt, start with `lazy-log.recall` — if the answer is a single commit, recall will surface it fastest.
+
+---
+
+## Do recall, timeline, and summary produce run logs?
+
+No. All three carry a `logging-waiver` — their output is the response itself, so a separate run log would only duplicate the prose already returned to you. You will not find `.logs/claude/lazy-log.recall/` (or timeline / summary) entries accumulating over time, and `/lazy-log.clean` will not flag those names as orphan folders.
 
 ---
 

@@ -77,7 +77,7 @@ Emit one `[INFO]` per enabled server. Emit `[WARN]`:
 - Mode B only: non-empty project `.mcp.json` but no `enabledMcpjsonServers` anywhere.
 - Always: name in `enabledMcpjsonServers` with no definition in `.mcp.json` or `$HOME/.mcp.json`.
 
-**Python runtime** — every `lazycortex-*` plugin ships hooks that shebang `python3` and the project `.claude/hooks/pub.*.py` are invoked as `python3 ...` from `settings.json`. If `python3` is missing or too old, hooks silently fail and the user loses distill-after-commit, settings/public guards, agent-model routing, and pub.autobump. Run two short Bash probes:
+**Python runtime** — every `lazycortex-*` plugin ships hooks that shebang `python3`, and project hooks invoked as `python3 ...` from `settings.json` rely on the same interpreter. If `python3` is missing or too old, hooks silently fail and the user loses distill-after-commit, settings/public guards, agent-model routing, and autobump. Run two short Bash probes:
 
 - `command -v python3` — empty output → `[FAIL] python3 not in PATH — every hook in .claude/settings.json and claude/lazycortex-*/hooks/*.py will fail to execute.`
 - `python3 --version 2>&1` — parse `Python X.Y.Z`. Floor is **3.8** (hooks use `from __future__ import annotations`, f-strings, `pathlib`, all stdlib — no third-party deps, but 3.7 is EOL since 2023-06). Emit:
@@ -103,14 +103,14 @@ Emit WARN only when the match survives all three gates.
 
 **Naming hygiene** — for `.claude/skills/*/`, `.claude/agents/*.md`, `.claude/commands/*.md`, `.claude/hooks/*`, `.claude/rules/*.md`: filename (or directory name for skills) must use dot-namespace (`namespace.name`). `[WARN]` for anything missing a dot (e.g., `logging.md` → `<namespace>.logging.md`).
 
-**Skill-writing compliance** — see `lazy-core.skill-writing` (plugin) / `.claude/rules/dev.skill-writing.md` (local pointer). File set: `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md` (commands exempt from the preamble check). Four checks:
+**Skill-writing compliance** — see `lazy-core.skill-writing`. File set: `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md` (commands exempt from the preamble check). Four checks:
 
 1. **Preamble present** — grep each file for `^## Execution discipline (MANDATORY`. Absent AND no `execution-discipline-waiver:` in frontmatter → `[FAIL]`. Frontmatter carries a non-empty `execution-discipline-waiver: "<reason>"` string → `[INFO]` with the waiver reason (visible, not silent). Frontmatter carries `execution-discipline-waiver: true` / `yes` / `""` → `[FAIL]` (invalid waiver).
 2. **No "Optional" in phase/step headings** — grep for `^##+ .*[Pp]hase.*[Oo]ptional`, `^##+ .*[Ss]tep.*[Oo]ptional`, and any `^### .*[Oo]ptional`. Match → `[FAIL]`.
 3. **Narrative padding (heuristic)** — grep the body (exclude frontmatter) for the denylist: `\bv\d+\.\d+\.\d+`, `user had to`, `we got burned`, `in a past session`, `in a previous run`, `user had to patch`. Match → `[WARN]` with the offending line. Final decision is the author's — heuristic, not structural.
 4. **Valid `lazy_setup_phase` value** — grep frontmatter for `^lazy_setup_phase:`. Value outside `{pre-install, per-plugin, post-install}` → `[WARN]` with the offending value. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md` for the contract.
 
-**Agent-writing compliance** — see `lazy-core.agent-writing` (plugin) / `.claude/rules/dev.agent-writing.md` (local pointer). File set: `.claude/agents/*.md`, `claude/*/agents/*.md`. Checks:
+**Agent-writing compliance** — see `lazy-core.agent-writing`. File set: `.claude/agents/*.md`, `claude/*/agents/*.md`. Checks:
 
 1. **Frontmatter complete** — `name`, `description`, `tools` all present. Missing any → `[FAIL]`.
 2. **Preamble present** (for multi-phase agents) — same check as skill-writing §1. Agents with `## Phase N` or `## Process` sections must carry the preamble OR a valid `execution-discipline-waiver:` string. Same FAIL/INFO vocabulary.
@@ -148,7 +148,7 @@ Missing files are a silent no-op — `load_section` returns a stub with `_versio
 3. **User-authored, project** — `./.claude/agents/*.md`. Group: `_project`. Dispatch string: bare filename stem. (Project entries shadow global entries of the same stem — both still listed separately with provenance.)
 4. **Plugin-shipped** — `$HOME/.claude/plugins/cache/**/agents/*.md`. Extract plugin name from path (`$HOME/.claude/plugins/cache/<marketplace>/<plugin-name>/<version>/agents/<agent>.md` → plugin = `<plugin-name>`). Group: **domain** derived from plugin name via the domain-extraction rule (first `-`-delimited segment, or full name if no `-`). Dispatch string: `<plugin-name>:<stem>`.
 
-**Rule-writing compliance** — see `lazy-core.rule-writing` (plugin) / `.claude/rules/dev.rule-writing.md` (local pointer). File set: `.claude/rules/*.md`, `$HOME/.claude/rules/*.md`, `claude/*/rules/*.md`. **Exclude** `**/templates/**/*-template.md` from every check below — templates are skeletons, not rules; their placeholder frontmatter and example clauses would otherwise misfire. Checks:
+**Rule-writing compliance** — see `lazy-core.rule-writing`. File set: `.claude/rules/*.md`, `$HOME/.claude/rules/*.md`, `claude/*/rules/*.md`. **Exclude** `**/templates/**/*-template.md` from every check below — templates are skeletons, not rules; their placeholder frontmatter and example clauses would otherwise misfire. Checks:
 
 1. **Frontmatter present** — YAML frontmatter with at minimum `description:`. Absent → `[FAIL]`.
 2. **Scope or waiver** — frontmatter must carry EITHER `paths:` (YAML block-list of globs, per Claude Code docs) OR `always_loaded: "<reason>"`. Neither present → `[FAIL]`. `always_loaded: true` / `always_loaded: ""` → `[FAIL]` (invalid waiver).
@@ -171,7 +171,7 @@ Missing files are a silent no-op — `load_section` returns a stub with `_versio
 
 ### Agent C — help-doc coverage and staleness
 
-Per-plugin scan of `claude/<plugin>/` for help-doc completeness against `## Scenarios` and chapter staleness against source-skill mtime. Both checks emit `[WARN]` only — there is no manual fix path, and `pub.publish` Step 0b regenerates chapters at the next bump.
+Per-plugin scan of `claude/<plugin>/` for help-doc completeness against `## Scenarios` and chapter staleness against source-skill mtime. Both checks emit `[WARN]` only — there is no manual fix path; chapters are regenerated by the publish pipeline at the next version bump.
 
 Discover plugins: `claude/*/.claude-plugin/plugin.json`. For each plugin:
 
@@ -180,7 +180,7 @@ Discover plugins: `claude/*/.claude-plugin/plugin.json`. For each plugin:
 For every plugin under `claude/<plugin>/`:
 
 - Read each bullet under `## Scenarios` in `claude/<plugin>/README.md`. Skip the plugin if the README has no `## Scenarios` section.
-- For each bullet, look for a corresponding `claude/<plugin>/help/walkthroughs/<slug>.md`. Slug-match algorithm matches `pub.help-draft` Step 2: lowercase the first 4–6 keywords of the bullet, hyphenate, strip non-alphanumeric. A walkthrough chapter also matches when its frontmatter `summary` substring-matches the bullet text.
+- For each bullet, look for a corresponding `claude/<plugin>/help/walkthroughs/<slug>.md`. Slug-match: lowercase the first 4–6 keywords of the bullet, hyphenate, strip non-alphanumeric. A walkthrough chapter also matches when its frontmatter `summary` substring-matches the bullet text.
 - Missing match → `[WARN]` with detail `scenario "<bullet>" has no walkthrough chapter in claude/<plugin>/help/walkthroughs/`.
 
 #### Check H2 — Help-doc staleness
@@ -191,7 +191,7 @@ For every chapter under `claude/<plugin>/help/**/*.md`:
 - For each skill in `source_skills`, find the most recent commit mtime via `git log -1 --format=%cI -- claude/<plugin>/skills/<skill>/SKILL.md`. Also include `claude/<plugin>/README.md`'s mtime.
 - If any source's mtime is newer than `last_regen` → `[WARN]` with detail `chapter <path> is stale; clears at next publish bump for <plugin>`.
 
-These warnings are advisory — there is no manual fix path. The next `pub.publish` regenerates the chapters per the patch-bump short-circuit logic in `pub.help-draft`.
+These warnings are advisory — there is no manual fix path. The publish pipeline regenerates chapters at the next version bump (subject to its patch-bump short-circuit).
 
 Severity vocabulary: `INFO` (advisory note about a passing chapter or scenario, optional) / `WARN` (H1 missing chapter, H2 stale chapter). Never emit `FAIL` from this agent.
 
@@ -333,12 +333,12 @@ If none of the three probes run (e.g. not on macOS, no runtime configured) → s
 ### help_doc_coverage
 - [WARN] scenario "<bullet>" has no walkthrough chapter | claude/<plugin>/README.md
   detail: <bullet text>
-  fix: regenerated automatically by pub.publish on next bump
+  fix: regenerated automatically by the publish pipeline on next bump
 
 ### help_doc_staleness
 - [WARN] chapter <path> is stale | claude/<plugin>/help/walkthroughs/<slug>.md
   detail: source_skills mtime > last_regen
-  fix: regenerated automatically by pub.publish on next bump
+  fix: regenerated automatically by the publish pipeline on next bump
 
 ### summary
 plugins_scanned: <n>  warn: <m>
@@ -442,7 +442,7 @@ One line per Agent B naming `[WARN]`.
 - **Missing walkthrough chapter** (WARN) — one line per Agent C H1 finding (scenario without a chapter).
 - **Stale chapter** (WARN) — one line per Agent C H2 finding (source_skills mtime newer than chapter `last_regen`).
 
-Both clear automatically at the next `pub.publish` bump for the affected plugin — no manual fix path.
+Both clear automatically at the next publish bump for the affected plugin — no manual fix path.
 
 ### Model routing
 

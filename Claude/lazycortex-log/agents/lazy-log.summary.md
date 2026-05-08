@@ -3,6 +3,7 @@ name: lazy-log.summary
 description: "Synthesize a multi-paragraph summary of all changes related to a topic across time (not chronological). Use when the user wants to understand 'the whole story' of a feature, refactor, or area of the codebase."
 tools: Read, Glob, Grep, Bash
 model: inherit
+logging-waiver: "single-response synthesizer — output IS the prose response, no mutations to record"
 ---
 # Topic Summary
 

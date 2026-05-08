@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, and the expert runtime.
-last_regen: 2026-05-06
+last_regen: 2026-05-08
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -167,7 +167,7 @@ Author-name findings in tracked manifests (`plugin.json`, `package.json`, etc.) 
 
 ## Do I need to enable the expert runtime, or is it on by default?
 
-The expert runtime is opt-in per repo. When you run `/lazy-core.install`, a wizard phase asks whether to bootstrap runtime and experts for the current repo. If you answer yes, the skill writes the `lazy-core.runtime` block into `.claude/lazy.settings.json`, creates `.experts/experts.settings.json`, copies the `lazy.runtime.sh` shim to `.claude/bin/`, and adds `.experts/.jobs/` to `.gitignore`. It also offers to install a daemon supervisor (macOS launchd or Linux systemd) and registers the `lazy-expert.pump` routine automatically once you add at least one expert. If you skip that phase or answer no, none of those files are created and the `/lazy-expert.*` skills will abort at Step 2 with "`.claude/experts/` not initialised — run `/lazy-core.install` first."
+The expert runtime is opt-in per repo. When you run `/lazy-core.install`, a wizard phase asks whether to bootstrap runtime and experts for the current repo. If you answer yes, the skill writes the `lazy-core.runtime` block into `.claude/lazy.settings.json`, creates `.experts/experts.settings.json`, copies the `lazy.runtime.sh` shim to `.claude/bin/`, and adds `.experts/.jobs/` to `.gitignore`. It also offers to install a daemon supervisor (macOS launchd or Linux systemd) and registers the `lazy-expert.pump` routine automatically once you add at least one expert. If you skip that phase or answer no, none of those files are created and the `/lazy-expert.*` skills will abort at Step 2 with "`.experts/` not initialised — run `/lazy-core.install` first."
 
 To enable it later without re-running the full install flow, run `/lazy-core.install` again — it is idempotent and will offer the runtime wizard phase again.
 

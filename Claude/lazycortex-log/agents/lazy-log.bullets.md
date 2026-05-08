@@ -1,8 +1,9 @@
 ---
 name: lazy-log.bullets
-description: "Convert one plugin's commit range into a user-facing CHANGELOG release block. Reads commits via git, drops internal-only commits by Conventional-commits type, rewrites the rest as outcome-led bullets grouped by scope, and returns the rendered `### <version> — <date> UTC` block ready to prepend to CHANGELOG.public.md. Dispatch from publish workflows (e.g. `pub.publish`) or any release-drafting flow that needs commit-subjects → user-bullets translation."
+description: "Convert one plugin's commit range into a user-facing CHANGELOG release block. Reads commits via git, drops internal-only commits by Conventional-commits type, rewrites the rest as outcome-led bullets grouped by scope, and returns the rendered `### <version> — <date> UTC` block ready to prepend to CHANGELOG.public.md. Dispatch from any release-drafting flow that needs commit-subjects → user-bullets translation."
 tools: Bash, Write, TaskCreate, TaskUpdate, TaskList
 model: inherit
+logging-waiver: "single-response synthesizer — output IS the prose response, no mutations to record"
 ---
 # Draft user-facing changelog bullets for one plugin release
 

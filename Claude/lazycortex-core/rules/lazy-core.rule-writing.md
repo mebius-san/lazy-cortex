@@ -1,5 +1,5 @@
 ---
-description: Authoring contract for rule files. Mandatory frontmatter (description + paths scope OR always_loaded waiver), size budget, dot-namespace filename, no large code blocks, artifact-reference integrity, no narrative padding, plugin-vs-local scoping.
+description: Authoring contract for rule files. Mandatory frontmatter (description + paths scope OR always_loaded waiver), size budget, dot-namespace filename, no large code blocks, artifact-reference integrity, no narrative padding.
 paths:
   - ".claude/rules/**"
   - ".claude/templates/core/rule-template.md"
@@ -66,15 +66,7 @@ Slash-commands (`/name`), agent subagent-types, rule filenames, `references/…`
 
 Same denylist as `lazy-core.skill-writing § 4`: `\bv\d+\.\d+\.\d+`, `user had to`, `we got burned`, `in a past session`, `in a previous run`. Match → `WARN`. Author owns final call.
 
-## 7. Plugin-vs-local scoping
-
-- **Governs plugin-shipped artifacts** → `<plugin>/rules/`, `paths:` scoped to consumer location (`.claude/**` etc.).
-- **Project-only** (not consumers) → `.claude/rules/`, `paths:` scoped narrowly (`claude/**`, `claude/*/skills/**`).
-- **Every action, any file** → `<plugin>/rules/` with `always_loaded:`. Use sparingly; each is a tax on every consumer.
-
-**Local pointer pattern**: when a plugin rule also needs to cover plugin-authoring sources (`claude/**` in this vault), keep the plugin rule narrowly scoped and add a thin pointer in `.claude/rules/` with a wider `paths:` glob cross-referencing the plugin rule. Each file carries its own scope; no content duplication.
-
-## 8. Rules are read, not executed
+## 7. Rules are read, not executed
 
 Rules describe invariants. They do not carry `Execution discipline` preambles or Report steps — those belong in skills/agents that *apply* the rule.
 

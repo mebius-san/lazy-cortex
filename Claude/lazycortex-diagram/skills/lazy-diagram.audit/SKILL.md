@@ -135,7 +135,7 @@ For each selected finding, the coordinator (this session, not the agents) applie
 - A2 missing section → cannot auto-fix; surface the file path and ask the user to author the missing section.
 - A3 clause violation → offer to invoke `lazy-diagram.fix` against the offending file.
 - A5 missing-role-in-scheme → surface the scheme file path and missing role; ask the user to add the hex entry under `roles{}` or `textConstants{}`.
-- A5 missing-init-block → surface the scheme file path and missing kind; ask the user to author the `blocks.init.<kind>` entry (the project-local `dev.diagram-style` skill is the dedicated authoring path).
+- A5 missing-init-block → surface the scheme file path and missing kind; ask the user to author the `blocks.init.<kind>` entry under `templates/diagram.mermaid/styles-*.json`.
 - A5 init-block sanity violation → surface the scheme file, kind, and which sanity check failed (`useMaxWidth` missing, `theme:base` present, `darkMode:true` present, malformed wrapper); ask the user to fix the scheme entry.
 - A5 declared-but-unused role → surface the template path and unused role; offer to delete the unused `## Roles` line or extend `## Color binding` to reference it.
 

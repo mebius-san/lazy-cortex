@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo serial daemon so the async expert team has an executor — install wizard, start the daemon, then unblock it with /lazy-runtime.recover if the working tree halts.
-last_regen: 2026-05-06
+last_regen: 2026-05-08
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, wizard asks about runtime, user opts in, wizard writes .claude/bin/lazy.runtime.sh + experts.settings.json + lazy-core.runtime block; (2) User runs .claude/bin/lazy.runtime.sh (daemon starts, polls .experts/.jobs/ on interval); (3) Working tree goes dirty, daemon writes daemon_halted to .logs/lazy-core/runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
@@ -18,7 +18,7 @@ The expert runtime gives you a serial, per-repo daemon that drains a job queue a
 
 - `lazycortex-core` enabled in `~/.claude/settings.json` and the plugin cache populated (run `/plugin update lazycortex-core@lazycortex` if you have not already).
 - A git repository — the runtime is project-scoped and writes state under `.logs/lazy-core/runtime/`.
-- Python 3 on your `$PATH` — the daemon and all runtime scripts are Python.
+- Python 3.12 or later on your `$PATH` — the daemon and all runtime scripts are Python.
 - At least one agent file with an `expert_protocol:` frontmatter field somewhere the wizard can discover it (plugin cache, `~/.claude/agents/`, or `.claude/agents/`). If none exist the wizard skips expert registration; you can re-run `/lazy-core.install` after adding agents.
 
 ## The journey
@@ -60,7 +60,7 @@ To verify the daemon is alive, check `.logs/lazy-core/runtime/state.json` — a 
 
 ### Step 4 — Verify the daemon is polling (verification gate)
 
-After one polling interval, open `.logs/lazy-core/runtime/state.json` and confirm the `last_run` timestamp is recent. If the timestamp is absent or stale, check that the shim is executable (`ls -l .claude/bin/lazy.runtime.sh`) and that Python 3 is on your `$PATH`.
+After one polling interval, open `.logs/lazy-core/runtime/state.json` and confirm the `last_run` timestamp is recent. If the timestamp is absent or stale, check that the shim is executable (`ls -l .claude/bin/lazy.runtime.sh`) and that Python 3.12+ is on your `$PATH`.
 
 ### Step 5 — Recover if the working tree halts
 
@@ -156,4 +156,3 @@ sequenceDiagram
   recoverSkill-->>user: recovery complete
   daemon->>fs: resume polling .experts/.jobs/ on next iteration
 ```
-

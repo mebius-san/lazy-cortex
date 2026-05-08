@@ -22,7 +22,7 @@ Drawer agents emit only what the closure provides — no fabricated hex, no fabr
 
 Per-kind drawing constraints (init directive shape, edge labelling, ID conventions, density bounds, sanity checks) are inlined in each drawer agent's `## Process (single pass)` § Sanity checks and § Density check (`agents/lazy-diagram.draw-*.md`). They are drawing concerns enforced at fence-emit time — not authoring concerns enforced at template-write time. Authors of templates and style files do not need to know the drawing constraints; the agent owns them.
 
-Style-file authoring concerns (palette construction, contrast, inversion-aware text colour for hosts that flip brightness at render time) live in the `dev.diagram-style` skill.
+Style-file authoring concerns (palette construction, contrast, inversion-aware text colour for hosts that flip brightness at render time) are documented inside each shipped style file under `templates/diagram.mermaid/styles-*.json`.
 
 ## Enforcement
 

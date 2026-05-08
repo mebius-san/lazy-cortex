@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Inspect and manually break the per-repo staging lock that prevents hooks and skills from stomping each other's git index changes.
-last_regen: 2026-05-06
+last_regen: 2026-05-08
 diagram_spec:
   anchor: "Lock lifecycle"
   request: "State diagram of the lazy-core.git staging lock lifecycle: NO_LOCK → HELD (a hook or skill acquires the lock before touching the git index) → auto-released when the staging window closes OR auto-broken by heuristics (dead PID / stale-and-idle / different host) → NO_LOCK. Show the manual break path via /lazy-core.git-unlock as an alternative exit from HELD, guarded by /lazy-core.git-status inspection first."
@@ -73,4 +73,3 @@ stateDiagram-v2
   style lockActive fill:#1e5f3a,stroke:#4ae290,color:#fff
   style inspecting fill:#5f4a1e,stroke:#e2a14a,color:#fff
 ```
-

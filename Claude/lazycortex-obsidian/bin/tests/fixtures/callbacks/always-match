@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-# Reads JSON on stdin, ignores it, emits match=true.
-cat >/dev/null
-echo '{"match": true}'

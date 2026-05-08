@@ -79,53 +79,6 @@ def _emit_context(msg: str, event: str = "PostToolUse") -> None:
     }, sys.stdout)
 
 
-def _log_event(repo: Path, kind: str, **fields) -> None:
-    """Write a markdown log entry per .claude/rules/lazy-log.logging.md."""
-    from datetime import datetime, timezone
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
-    log_dir = repo / ".logs" / "claude" / "lazy-core.git-guard"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"{ts}.md"
-
-    try:
-        sha = subprocess.check_output(
-            ["git", "-C", str(repo), "rev-parse", "HEAD"],
-            stderr=subprocess.DEVNULL, text=True,
-        ).strip()
-    except subprocess.CalledProcessError:
-        sha = "no-git"
-    try:
-        branch = subprocess.check_output(
-            ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"],
-            stderr=subprocess.DEVNULL, text=True,
-        ).strip()
-    except subprocess.CalledProcessError:
-        branch = "no-git"
-
-    peer = fields.pop("peer", None)
-    body_lines = [f"# lazy-core.git-guard\n", "## Actions\n"]
-    body_lines.append(f"- kind: {kind}\n")
-    for k, v in fields.items():
-        body_lines.append(f"- {k}: {v}\n")
-    if peer is not None:
-        body_lines.append(
-            f"- peer: session={peer.session_id} pid={peer.pid} "
-            f"host={peer.host} branch={peer.branch} started_at={peer.started_at}\n"
-        )
-    body_lines.append("\n## Result\n")
-    body_lines.append(f"- {kind}\n")
-
-    log_path.write_text(
-        "---\n"
-        f"git_sha: {sha}\n"
-        f"git_branch: {branch}\n"
-        f"date: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
-        f"input: kind={kind}\n"
-        "---\n\n"
-        + "".join(body_lines)
-    )
-
-
 def main() -> int:
     # § 1 — defensive JSON parse; never crash.
     try:
@@ -168,19 +121,10 @@ def _handle_pre(repo: Path, session_id: str, verb: str, cfg) -> int:
                 f"(PID {peer.pid}, {age}s old) — proceeding with this commit anyway.",
                 event="PreToolUse",
             )
-            _log_event(repo, "diagnostic_peer_lock", peer=peer, verb=verb)
         return 0
 
     # Acquiring verbs: try the lock.
     res = staging_lock.acquire(repo, session_id, cfg)
-    _log_event(
-        repo,
-        kind=res.status,
-        peer=res.peer,
-        verb=verb,
-        break_reason=res.break_reason,
-        waited_seconds=res.waited_seconds,
-    )
     if res.status == "refused":
         _emit_deny(res.message)
     return 0
@@ -189,8 +133,7 @@ def _handle_pre(repo: Path, session_id: str, verb: str, cfg) -> int:
 def _handle_post(repo: Path, session_id: str, verb: str) -> int:
     if verb not in _RELEASE_VERBS:
         return 0
-    res = staging_lock.release_if_index_empty(repo, session_id)
-    _log_event(repo, kind="release", verb=verb, release_reason=res.reason)
+    staging_lock.release_if_index_empty(repo, session_id)
     return 0
 
 

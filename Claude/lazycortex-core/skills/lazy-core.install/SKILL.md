@@ -9,9 +9,10 @@ Bootstrap the plugin in the right scope: copy every rule template shipped by the
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 13 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 14 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+   - `Step 0 — Verify Python ≥ 3.12 (floor)`
    - `Step 1 — Detect install scope`
    - `Step 2 — Determine paths`
    - `Step 3 — Sync rule templates`
@@ -28,6 +29,30 @@ This skill has 13 ordered steps. The executing agent MUST NOT skip, merge, reord
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
+
+## Step 0: Verify Python ≥ 3.12 (floor)
+
+Every plugin in this marketplace requires Python ≥ 3.12. This step runs first; on a machine that already meets the floor it is silent (one `python3 -V` invocation) and the install proceeds straight to Step 1. Per-plugin `<ns>.install` skills inherit this gate — they do NOT re-probe.
+
+Run `Bash(python3 -V)` and parse the version. If `python3` is missing or the version is below `3.12.0`, walk the user through install via `AskUserQuestion`:
+
+```
+AskUserQuestion:
+  question: "Python 3.12+ is required (found `<detected version or 'not found'>`). How would you like to install it?"
+  description: "All LazyCortex plugins target Python 3.12 as a single floor. Pick the route that matches this machine; once Python is upgraded, re-run `/lazy-core.install`."
+  options:
+    - "macOS — `brew install python@3.12 && brew link python@3.12 --force`"
+    - "Linux / cross-platform — `pyenv install 3.12 && pyenv global 3.12`"
+    - "Skip — abort install"
+```
+
+On macOS / Linux options: print the corresponding command for the user to run in their own shell — do NOT execute it (this skill never installs system packages on the user's behalf). Then state outcome `awaiting-user-install` and abort the run; the user re-runs `/lazy-core.install` once the upgrade lands.
+
+On `Skip — abort install`: state outcome `aborted-python-floor-not-met` and exit with the message `Python 3.12+ required — re-run /lazy-core.install once installed.`. Skip Steps 1–13.
+
+If `python3 -V` reports ≥ 3.12.0: state outcome `python-floor-ok (<version>)` and proceed to Step 1.
+
+When raising the floor in the future, bump this step's numeric threshold in the same edit as any other floor-bearing reference.
 
 ## Step 1: Detect install scope
 
@@ -458,6 +483,7 @@ On `Linux systemd`:
 ## Step 12: Report
 
 Report to the user:
+- Python version probe outcome (Step 0)
 - Scope detected (user vs project)
 - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)
 - For each rule: state (**created**, **updated**, **unchanged**, or **kept-local**) and target `<path>`

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Dispatch jobs to named expert workers, keep the main session free, and collect results when the daemon finishes them.
-last_regen: 2026-05-06
+last_regen: 2026-05-08
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing a user dispatching a job via dispatch-job, the runtime daemon draining the queue, and the user collecting results via collect-job. Include list-jobs and cancel-job as optional side paths. Use boxes for the four skills and a distinct shape for the daemon process."
@@ -26,7 +26,7 @@ Each expert is a named role defined in `experts.settings.json` at install time. 
 
 ## How it fits together
 
-`/lazy-expert.dispatch-job` is the entry point. You supply three required fields — `kind` (what type of work this is), `role` (which expert should handle it), and `request` (the task description) — plus optional `source`, `context`, and `result` arrays for file references. The skill validates the payload against the protocol contract, writes the job directory under `.claude/experts/.jobs/<expert_name>/`, and returns a `job_id` and `queue_path`. From that point the main session is free.
+`/lazy-expert.dispatch-job` is the entry point. You supply three required fields — `kind` (what type of work this is), `role` (which expert should handle it), and `request` (the task description) — plus optional `source`, `context`, and `result` arrays for file references. The skill validates the payload against the protocol contract, writes the job directory under `.experts/.jobs/<expert_name>/`, and returns a `job_id` and `queue_path`. From that point the main session is free.
 
 The runtime daemon, which you start separately with `./run.sh`, polls the queue. For each `READY` job it spawns the configured expert agent, waits for completion, and writes `response.json` plus a `DONE` marker. You never interact with the daemon directly.
 

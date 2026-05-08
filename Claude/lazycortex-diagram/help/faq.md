@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, and split behaviour.
-last_regen: 2026-05-05
+last_regen: 2026-05-08
 no_diagram: true
 source_skills:
   - lazy-diagram.draw
@@ -37,6 +37,8 @@ A scheme is a named JSON file that ships with the plugin and governs the colour 
 
 The drawer agent returns `split-into-N` when the request would produce a diagram that exceeds the kind's upper-bound density (for example, more than 12 distinct nodes in a flow diagram, or more than 6 participants in a sequence). When this happens, the dispatcher surfaces the suggested seam list and stops — it does not emit multiple fences in a single call. You then run `/lazy-diagram.draw` once per seam, each targeting its own sub-section heading. The seam list in the output tells you where the natural split points are.
 
+If you encounter `split-into-N` from `/lazy-diagram.fix`, the cause is different: the host-section prose has grown to span multiple logical diagrams since the fence was first created. Fix does not split fences automatically — you must manually divide the section into sub-sections (each with its own heading), then re-run `/lazy-diagram.fix` per sub-section.
+
 ---
 
 ## What does "skipped-below-threshold" mean?
@@ -57,6 +59,12 @@ Several mermaid syntax markers are ambiguous. A `flowchart` body could represent
 
 ---
 
+## What happens when `/lazy-diagram.fix` warns "no host-section prose"?
+
+Fix uses the prose surrounding the existing fence — paragraphs between the anchor heading and the fence, plus any prose immediately after it — as the re-render request. If the section contains only the fence and no surrounding prose, fix falls back to using the fence's own node labels and edge labels as the request and continues with a `[WARN]` notice. The diagram will be re-conformed to the current scheme, but the output quality depends entirely on the label vocabulary in the existing fence. Adding prose that describes what the diagram depicts gives the drawer agent richer context and typically produces a better result on the next fix run.
+
+---
+
 ## Can I embed a diagram inside another skill I am writing?
 
-Yes. Follow the Caller contract in the `lazy-diagram.draw` SKILL.md: declare one TaskCreate task per invocation with a title of the form `draw-diagram <file>:<anchor>:<kind|auto>`, place the invocation as its own numbered substep (not a trailing sentence), and add a Verify section that diffs your declared seams against the run logs written by the dispatcher. A section with a declared draw seam must not carry any other visual placeholder — the seam invocation is the artifact.
+Yes. Follow the Caller contract in the `lazy-diagram.draw` SKILL.md. The contract has four clauses: (1) each invocation must be its own numbered substep in the calling skill's Process — never a trailing one-liner; (2) the calling skill's preamble must declare one `TaskCreate` task per invocation with a title of the form `draw-diagram <file>:<anchor>:<kind|auto>`; (3) the calling skill must include a `## Verify` section that diffs its declared seam set against the run logs written by the dispatcher under `./.logs/claude/lazy-diagram.draw/` — any non-empty difference is a verify failure; (4) a section that has a declared draw seam must carry no other visual-authoring placeholder (no ASCII sketch, no boxed-text diagram) — the seam invocation is the artifact.

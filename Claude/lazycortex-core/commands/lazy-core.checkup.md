@@ -1,13 +1,11 @@
 ---
-description: One entry point that runs every read-only audit/doctor in this repo (consumer + author trios), merges findings into a per-plugin table, then prompts once for which mutating fix-flow to run. Read-only by default.
+description: One entry point that runs every read-only audit/doctor this plugin orchestrates against consumer config, merges findings into a per-plugin table, then prompts once for which mutating fix-flow to run. Read-only by default.
 ---
 # `/lazy-core.checkup`
 
-Single entry point that runs every read-only health check this repo ships, merges all findings into one per-plugin table, then prompts the user once for which mutating fix-flow(s) to run.
+Single entry point that runs every read-only health check this plugin orchestrates against consumer config, merges all findings into one per-plugin table, then prompts the user once for which mutating fix-flow(s) to run.
 
-This is pure orchestration — it does **not** re-implement scan logic. It calls existing skills via the `Skill` tool (and the `pub.status` agent via the `Agent` tool), captures their merged-findings blocks, reformats, and asks. Mutating flows (`lazy-core.optimize`, `tool.optimize`, doctors' interactive fix loops, `pub.status`) only run after explicit user choice in Phase 4.
-
-Author-side artifacts (`tool.*` skills under `.claude/skills/`, `pub.status` agent under `.claude/agents/`) live in the LazyCortex authoring repo and are not always present. Probe each with `Glob` before invoking; if absent, skip and emit an `INFO` row noting unavailability.
+This is pure orchestration — it does **not** re-implement scan logic. It calls existing skills via the `Skill` tool, captures their merged-findings blocks, reformats, and asks. Mutating flows (`lazy-core.optimize`, the doctor's interactive fix loop) only run after explicit user choice in Phase 4.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -28,18 +26,16 @@ This command has 6 ordered steps. The executing agent MUST NOT skip, merge, reor
 
 Invoke each of the following via the `Skill` tool, in order. Capture the merged-findings block from each invocation's output.
 
-For both doctor invocations, pass this hint in the Skill invocation: *"Operate in report-only mode: complete all phases up to but not including the interactive Fix phase. Emit only the merged-findings block. The /lazy-core.checkup coordinator owns the unified table and fix prompt — do not enter your own per-finding fix/waive loop."*
+For the doctor invocation, pass this hint in the Skill invocation: *"Operate in report-only mode: complete all phases up to but not including the interactive Fix phase. Emit only the merged-findings block. The /lazy-core.checkup coordinator owns the unified table and fix prompt — do not enter your own per-finding fix/waive loop."*
 
-1. `Skill(skill: "lazy-core.audit")` — always available (sibling skill in the same plugin).
-2. `Skill(skill: "lazy-core.doctor", args: "report-only")` — always available; in this repo it auto-detects local-tool mode and expands content checks to `claude/**`.
-3. `tool.audit` — **probe first** with `Glob(".claude/skills/tool.audit/SKILL.md")`. If a match is returned, `Skill(skill: "tool.audit")`. If no match, emit one finding row in the table with `INFO | tool.audit | (n/a) | author-side skill not installed | install LazyCortex authoring kit if you author plugins`.
-4. `tool.doctor` — same probe pattern; pass the report-only hint.
+1. `Skill(skill: "lazy-core.audit")` — sibling skill in this plugin.
+2. `Skill(skill: "lazy-core.doctor", args: "report-only")` — sibling skill in this plugin; delegates to other installed plugins' audits per its own Phase 3.
 
 Outcome word: `audited`.
 
 ## Phase 2 — Build unified table
 
-Group every captured finding by `plugin_owner` (already tagged by upstream skills; `tool.*` outputs are implicitly per-plugin and group by their plugin argument).
+Group every captured finding by `plugin_owner` (already tagged by upstream skills).
 
 Discover plugin sections dynamically: `Glob("claude/*/.claude-plugin/plugin.json")`. The repo-level section comes first; per-plugin sections follow in alphabetical order.
 
@@ -65,16 +61,13 @@ Outcome word: `presented`.
 
 ## Phase 4 — Prompt next action
 
-Call `AskUserQuestion` with `multiSelect: true`, header `Fix-flows`, and these options (suppress any whose underlying skill failed the Phase 1 probe):
+Call `AskUserQuestion` with `multiSelect: true`, header `Fix-flows`, and these options:
 
 1. `Run lazy-core.optimize` — consumer-config rewrites
-2. `Run tool.optimize` — plugin-source rewrites
-3. `Run lazy-core.doctor fix loop` — interactive per-finding fix/waive over consumer config
-4. `Run tool.doctor fix loop` — interactive per-finding fix/waive over plugin sources
-5. `Run pub.status` — refresh per-plugin pending-changes folder notes + iconize colors
-6. `Nothing — done`
+2. `Run lazy-core.doctor fix loop` — interactive per-finding fix/waive over consumer config
+3. `Nothing — done`
 
-If the user picks `Nothing — done` (or selects nothing else), proceed directly to the log step. Otherwise, invoke each chosen item in the order listed above — skills via `Skill(skill: "<name>")`, and `pub.status` via `Agent(subagent_type: "pub.status", prompt: "refresh per-plugin folder notes + iconize colors")`. Items run sequentially in the main agent — let each finish before invoking the next.
+If the user picks `Nothing — done` (or selects nothing else), proceed directly to the log step. Otherwise, invoke each chosen item in the order listed above via `Skill(skill: "<name>")`. Items run sequentially in the main agent — let each finish before invoking the next.
 
 Outcome word: `dispatched` (or `skipped-per-user-choice` if user picked Nothing).
 
@@ -85,10 +78,10 @@ Emit exactly one line per task in the canonical list, each tagged with the outco
 Example shape:
 
 ```
-- Phase 1 — Read-only audit pass: audited (4 skills, 1 skipped-as-absent)
+- Phase 1 — Read-only audit pass: audited (2 skills)
 - Phase 2 — Build unified table: built (5 sections, 23 findings)
 - Phase 3 — Present table: presented
-- Phase 4 — Prompt next action: dispatched (lazy-core.optimize, pub.status)
+- Phase 4 — Prompt next action: dispatched (lazy-core.optimize)
 - Report: reported
 - Log the run: logged (./.logs/claude/lazy-core.checkup/2026-04-26_HH-MM-SS.md)
 ```

@@ -1,6 +1,7 @@
 ---
 description: Show lazycortex-diagram purpose and a one-line summary of each skill, agent, and rule it ships
 execution-discipline-waiver: "static help text — no executable steps"
+logging-waiver: "static text — no executable steps"
 ---
 Output the block below verbatim to the user. Do not summarize, rephrase, or add commentary. Do not invoke any tools. Do not log this run.
 
@@ -28,7 +29,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 - `lazy-diagram.help` — this listing.
 
-<!-- pub.sync-readmes:help-block:start -->
+<!-- help-block:start -->
 **Documentation:**
 
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/install-and-audit.md) — Bootstrap lazycortex-diagram in your project — sync the authoring rule, seed agent-model tiers, and clean up orphans.
@@ -37,6 +38,6 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/faq.md) — Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, and split behaviour.
 
 Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-diagram/help/`.
-<!-- pub.sync-readmes:help-block:end -->
+<!-- help-block:end -->
 
 See `README.md` in the plugin for full scenarios and the kind/format matrix.
