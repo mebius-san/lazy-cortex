@@ -73,15 +73,15 @@ You pick one and the skill applies it. The next step will not proceed until ever
 
 **For each WARN finding** you choose: fix it, waive it, or skip it for now. Waiving adds an entry to `.guard-waivers.json` with your justification. Skipping leaves the finding unresolved but does not block the next step.
 
-**Author identity findings (check B4)**: if the same name appears in multiple manifests, setting a `public_author` record once is better than writing one waiver per file. When you confirm your intended public name, the skill records it in `.guard-waivers.json` as `public_author`. That single record auto-waives every B4 finding whose captured match equals your public name — including in files added later — without scattering individual waiver entries across the file.
+**Author identity findings (check B4)**: if the same name appears in multiple manifests, setting a `public_author` record once is better than writing one waiver per file. When you confirm your intended public name, the skill records it as a top-level `public_author` block in `.guard-waivers.json`. That single record auto-waives every B4 finding whose captured match equals your public name — including in files added later — without scattering individual waiver entries across the file.
 
 ### 5 — Create `.guard-waivers.json`
 
 The skill writes the waiver file to the repo root with all accepted waivers from the previous step and commits it. The file may contain:
 
-- `public_author` — your chosen public name (and optionally email), if you confirmed one
+- `public_author` — your chosen public name (and optionally email), recorded as a top-level block; governs every author-field finding under the declared scopes automatically
 - `public_scopes` — the glob list in subtree-public mode
-- `waivers` — individual accepted exceptions
+- `waivers` — individual accepted exceptions with check ID, scope, pattern, reason, and date
 - `global_skip_paths` — vendored or third-party directories the audit identified as safe to skip
 
 Creating this file also activates the pre-commit hook: from this point forward, every `git commit` in this repo automatically scans staged changes and blocks on new secrets. To disable pre-commit scanning entirely later, remove `.guard-waivers.json`. To add new accepted exceptions, re-run `/lazy-guard.check-public` and choose the waiver option for any finding you want to accept — the skill appends the entry.
@@ -124,45 +124,43 @@ sequenceDiagram
   participant github as GitHub
 
   user->>markPublic: invoke /lazy-repo.mark-public
-  markPublic->>markPublic: preflight — check git status and .guard-waivers.json
-  markPublic->>github: query current repo visibility
+  markPublic->>markPublic: preflight - check git status
+  markPublic->>github: query repo visibility
   github-->>markPublic: visibility response (public or private)
-  markPublic->>markPublic: determine scope (whole-repo vs. subtree via public_scopes)
-  Note over markPublic: scope locked — whole-repo or subtree
+  markPublic->>markPublic: determine scope - whole-repo vs. subtree
+  Note over markPublic: scope resolved - dispatching scans
 
-  markPublic->>scanAgents: dispatch secrets scan
-  markPublic->>scanAgents: dispatch PII scan
-  markPublic->>scanAgents: dispatch infra scan
-  markPublic->>scanAgents: dispatch local-paths scan
-  scanAgents-->>markPublic: secrets findings
-  scanAgents-->>markPublic: PII findings
-  scanAgents-->>markPublic: infra findings
-  scanAgents-->>markPublic: local-paths findings
-
-  markPublic->>checkPublic: consolidate findings into unified table
-  checkPublic-->>markPublic: unified findings table (FAILs and WARNs)
-  markPublic-->>user: present unified findings table
+  markPublic->>checkPublic: dispatch scan request
+  checkPublic->>scanAgents: run secrets scan
+  checkPublic->>scanAgents: run PII scan
+  checkPublic->>scanAgents: run infra scan
+  checkPublic->>scanAgents: run local-paths scan
+  scanAgents-->>checkPublic: secrets findings
+  scanAgents-->>checkPublic: PII findings
+  scanAgents-->>checkPublic: infra findings
+  scanAgents-->>checkPublic: local-paths findings
+  checkPublic-->>markPublic: unified findings table (FAILs + WARNs)
 
   loop per FAIL finding
-    markPublic-->>user: prompt — encrypt, template-ize, or redact
-    user->>markPublic: resolution choice (encrypt / template / redact)
-    markPublic->>checkPublic: re-scan resolved finding
-    checkPublic-->>markPublic: finding cleared
+    markPublic->>user: present FAIL - encrypt / template / redact required
+    user-->>markPublic: resolution action chosen
+    markPublic->>checkPublic: re-scan resolved FAIL
+    checkPublic-->>markPublic: FAIL cleared
   end
 
   loop per WARN finding
-    markPublic-->>user: prompt — fix, waive, or skip
-    user->>markPublic: resolution choice (fix / waive / skip)
+    markPublic->>user: present WARN - fix / waive / skip
+    user-->>markPublic: resolution action chosen
   end
 
   markPublic->>markPublic: write .guard-waivers.json with public_author and accepted waivers
-  Note over markPublic: pre-commit hook activated by .guard-waivers.json presence
+  Note over markPublic: pre-commit hook activated via .guard-waivers.json
 
   alt whole-repo mode
-    markPublic->>github: gh repo edit --visibility public
-    github-->>markPublic: visibility updated
-    markPublic-->>user: repo is now public
+    markPublic->>github: gh repo edit - set visibility public
+    github-->>markPublic: visibility flipped to public
+    markPublic-->>user: repo is public - pre-commit hook active
   else subtree mode
-    markPublic-->>user: subtree marked public — repo visibility unchanged
+    markPublic-->>user: subtree scoped - pre-commit hook active
   end
 ```

@@ -5,7 +5,6 @@ last_regen: 2026-05-08
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing how lazy-guard.check-public feeds findings into lazy-repo.mark-public (which creates .guard-waivers.json and activates the pre-commit hook), and how lazy-guard.allow-mcp independently classifies MCP server tools into allow/ask/skip buckets and writes them to settings.local.json"
-  kind_hint: flow
 source_skills:
   - lazy-repo.mark-public
   - lazy-guard.check-public
@@ -67,71 +66,54 @@ Day-to-day auditing uses `/lazy-guard.check-public` directly. Run it after addin
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  userRunsCheckPublic[Run lazy-guard.check-public]
-  scanFindings{Findings?}
-  failSecrets{Secrets found?}
-  warnPii[PII / infra / path warnings]
-  resolveSecrets[Resolve secrets - encrypt or redact]
-  userRunsMarkPublic[Run lazy-repo.mark-public]
+  invokeCheckPublic[lazy-guard.check-public invoked]
+  scanFindings{Findings found?}
+  noFindings[No findings - repo clean]
+  feedFindings[Findings fed to lazy-repo.mark-public]
   createWaivers[Create .guard-waivers.json]
-  activateHook[Pre-commit hook activated]
-  commitBlocked{Commit passes scan?}
-  publishDone[Repo published - Done]
-  commitFailed[Commit blocked - Fix findings]
-
-  userRunsAllowMcp[Run lazy-guard.allow-mcp]
-  discoverTools[Discover MCP server tools]
-  classifyTools{Classify each tool}
+  activateHook[Activate pre-commit hook]
+  repoMarkedPublic[Repo marked public]
+  invokeAllowMcp[lazy-guard.allow-mcp invoked independently]
+  classifyTools[Classify MCP server tools]
+  bucketGuard{Bucket assignment}
   allowBucket[allow bucket]
   askBucket[ask bucket]
   skipBucket[skip bucket]
-  writeSettings[Write to settings.local.json - Done]
+  writeSettings[Write to settings.local.json]
 
-  userRunsCheckPublic -->|scan repo| scanFindings
-  scanFindings -->|clean| userRunsMarkPublic
-  scanFindings -->|findings| failSecrets
-  failSecrets -->|secrets FAIL| resolveSecrets
-  failSecrets -->|warnings only| warnPii
-  resolveSecrets -->|resolved| userRunsMarkPublic
-  warnPii -->|waive or fix| userRunsMarkPublic
-  userRunsMarkPublic -->|write| createWaivers
-  createWaivers -->|enables hook| activateHook
-  activateHook -->|on each commit| commitBlocked
-  commitBlocked -->|passes| publishDone
-  commitBlocked -->|fails| commitFailed
-
-  userRunsAllowMcp -->|enumerate| discoverTools
-  discoverTools -->|classify| classifyTools
-  classifyTools -->|permit| allowBucket
-  classifyTools -->|prompt| askBucket
-  classifyTools -->|exclude| skipBucket
-  allowBucket -->|merge| writeSettings
-  askBucket -->|merge| writeSettings
-  skipBucket -->|merge| writeSettings
+  invokeCheckPublic -->|scan repo| scanFindings
+  scanFindings -->|clean| noFindings
+  scanFindings -->|findings present| feedFindings
+  feedFindings -->|pass findings| createWaivers
+  createWaivers -->|waivers written| activateHook
+  activateHook -->|hook enabled| repoMarkedPublic
+  invokeAllowMcp -->|enumerate tools| classifyTools
+  classifyTools -->|assign bucket| bucketGuard
+  bucketGuard -->|safe - auto-permit| allowBucket
+  bucketGuard -->|ambiguous - prompt| askBucket
+  bucketGuard -->|risky - suppress| skipBucket
+  allowBucket -->|merge result| writeSettings
+  askBucket -->|merge result| writeSettings
+  skipBucket -->|merge result| writeSettings
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
-  classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
 
-  class userRunsCheckPublic entry
-  class userRunsAllowMcp entry
+  class invokeCheckPublic entry
+  class invokeAllowMcp entry
   class scanFindings guard
-  class failSecrets guard
-  class classifyTools guard
-  class commitBlocked guard
-  class resolveSecrets action
-  class warnPii action
-  class userRunsMarkPublic action
-  class discoverTools action
-  class createWaivers store
+  class bucketGuard guard
+  class feedFindings action
+  class createWaivers action
   class activateHook action
+  class classifyTools action
   class allowBucket action
   class askBucket action
   class skipBucket action
-  class writeSettings store
-  class publishDone success
-  class commitFailed error
+  class noFindings success
+  class repoMarkedPublic success
+  class writeSettings success
 ```

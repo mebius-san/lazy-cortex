@@ -1,10 +1,40 @@
 """Resolve agent / protocol references to filesystem paths."""
 from __future__ import annotations
+import json, os
 from pathlib import Path
 
 
 class ReferenceError(Exception):
     pass
+
+
+def _dev_plugin_dirs() -> list[Path]:
+    """Read `LAZYCORTEX_PLUGIN_DIRS` (set by the runtime daemon's runner from
+    its `--plugin-dir` flags). Each entry is a plugin source directory whose
+    `.claude-plugin/plugin.json` "name" is matched against the reference's
+    plugin scope before the resolver falls back to the plugin cache. Subprocess
+    routines inherit this env, so daemon-spawned `lazy-review tick` /
+    `expert-pump-once` see the same dev plugins the daemon does."""
+    raw = os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "")
+    if not raw:
+        return []
+    return [Path(p) for p in raw.split(os.pathsep) if p]
+
+
+def _resolve_in_dev_dir(plugin_dir: Path, plugin_name: str, dir_name: str, name: str) -> Path | None:
+    """If `plugin_dir`'s manifest `name` matches `plugin_name`, return the
+    resolved on-disk path under `<plugin_dir>/<dir_name>/<name>.md`. The
+    file's existence is enforced by the caller — match-but-missing is a
+    plugin authoring bug and must surface as a hard error rather than be
+    silently shadowed by a cache fall-through."""
+    manifest = plugin_dir / ".claude-plugin" / "plugin.json"
+    try:
+        data = json.loads(manifest.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    if data.get("name") != plugin_name:
+        return None
+    return plugin_dir / dir_name / f"{name}.md"
 
 
 def resolve(ref: str, *, category: str, repo: Path) -> Path:
@@ -38,6 +68,13 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
         if scope == "user":
             p = Path.home() / ".claude" / dir_name / f"{name}.md"
         else:
+            # Dev-plugin paths take precedence over the plugin cache.
+            for plugin_dir in _dev_plugin_dirs():
+                hit = _resolve_in_dev_dir(plugin_dir, scope, dir_name, name)
+                if hit is not None:
+                    if not hit.exists():
+                        raise ReferenceError(f"{category} not found in dev plugin: {ref} → {hit}")
+                    return hit
             cache = Path.home() / ".claude/plugins/cache"
             # Real layout: cache/<registry>/<plugin>/<version>/<dir>/<name>.md.
             # Walk all <registry>/<plugin> dirs under any registry prefix.

@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 2.1.0 — 2026-05-08 UTC
+
+- The runtime daemon no longer clobbers in-progress operator edits: iterations now skip entirely when the working tree is dirty at the start of the cycle, and the halt-on-unexpected-dirt check fires only on paths that became dirty _during_ a routine — not on pre-existing changes from concurrent terminal work.
+- Dev-vault daemon startup accepts repeatable `--plugin-dir <path>` flags, and `reference_resolver` now inherits those paths via the `LAZYCORTEX_PLUGIN_DIRS` environment variable — fixing agent and protocol references (e.g. `lazycortex-review:lazy-review.historian`) that previously failed with "plugin not in cache" when the daemon was launched against a local plugin checkout.
+
 ### 2.0.1 — 2026-05-08 UTC
 
 - `lazy-core.install` now probes for Python 3.12 at the start of installation and aborts with a homebrew/pyenv upgrade prompt if the floor is not met; runtime glob calls in `reference_resolver.py` and `runtime_daemon.py` are rewritten with `os.walk` to fix a silent failure on Python 3.12.

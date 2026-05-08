@@ -4,25 +4,39 @@ summary: Common failure modes across lazycortex-core skills — symptoms, likely
 last_regen: 2026-05-08
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: pre-commit hook silent → hook-not-firing; MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing / settings-unwritable); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public FAIL findings → mark-public-fail-unresolved; lazy-repo.mark-public gh missing → gh-not-installed; doctor or audit stalls → skill-stalls; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; routine register name invalid → routine-name-format; routine already registered → routine-conflict; unregister pump without force → pump-protected; daemon stalled → daemon-stale; runtime recover still dirty → recover-still-dirty; audit experts json invalid → experts-json-invalid; audit reference did not resolve → ref-unresolvable; audit protocol contract false-positive → protocol-heading-mismatch; doctor routine command unresolvable → routine-command-missing; lazy-core.audit global rules empty → audit-global-empty."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: Python version too low → python-floor-not-met; pre-commit hook silent → hook-not-firing; MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-load-error / systemctl-error); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public FAIL findings → mark-public-fail-unresolved; lazy-repo.mark-public gh missing → gh-not-installed; doctor or audit stalls → skill-stalls; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; routine register name invalid → routine-name-format; routine already registered → routine-conflict; unregister pump without force → pump-protected; daemon stalled → daemon-stale; runtime recover still dirty → recover-still-dirty; recover state.json unparseable → state-unparseable; audit experts json invalid → experts-json-invalid; audit reference did not resolve → ref-unresolvable; audit protocol contract false-positive → protocol-heading-mismatch; audit routine command path layout → routine-path-layout; doctor routine command unresolvable → routine-command-missing; lazy-core.audit global rules empty → audit-global-empty."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
   - lazy-core.audit
   - lazy-core.doctor
+  - lazy-core.optimize
   - lazy-core.setup
   - lazy-core.agent-models
+  - lazy-core.git-status
+  - lazy-core.git-unlock
   - lazy-expert.dispatch-job
   - lazy-expert.collect-job
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-guard.allow-mcp
+  - lazy-guard.check-public
   - lazy-repo.mark-public
   - lazy-routine.register
   - lazy-routine.unregister
   - lazy-runtime.recover
 ---
 # Troubleshooting
+
+## Python 3.12 or higher is required but not found
+
+**Symptom**: Running `/lazy-core.install` immediately asks how to install Python, or reports "Python 3.12+ required — re-run /lazy-core.install once installed."
+
+**Likely cause**: The `python3` binary on the current machine is either absent or reports a version below 3.12. Every LazyCortex plugin requires Python 3.12 as a single floor — hook scripts, runtime helpers, and install tooling all depend on it.
+
+**Fix**: Install or upgrade Python 3.12 using the route that matches your machine — `brew install python@3.12 && brew link python@3.12 --force` on macOS, or `pyenv install 3.12 && pyenv global 3.12` on Linux. Run the install command in your own terminal (the skill prints the correct command but never runs system package managers on your behalf). Once the upgrade is in place, re-run `/lazy-core.install`.
+
+---
 
 ## The pre-commit hook doesn't fire on commits
 
@@ -98,6 +112,30 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
+## `/lazy-core.install` Step 11 fails: supervisor template not found
+
+**Symptom**: `/lazy-core.install` fails at Step 11 (Offer daemon supervisor install) with a message about a missing plist or service template file.
+
+**Likely cause**: The plugin cache does not contain `templates/runtime/com.lazycortex.runtime.plist` (macOS) or `templates/runtime/lazy-core-runtime.service` (Linux). This happens when the plugin was only partially downloaded or the cache was truncated.
+
+**Fix**: Run `/plugin update lazycortex-core@lazycortex` to restore the full plugin cache, then re-run `/lazy-core.install` and accept the daemon supervisor install offer again.
+
+---
+
+## `/lazy-core.install` Step 11 fails: `launchctl load` or `systemctl enable` error
+
+**Symptom**: `/lazy-core.install` writes the supervisor unit file but immediately reports a non-zero exit from `launchctl load` (macOS) or `systemctl --user enable --now` (Linux).
+
+**Likely cause (macOS)**: The plist was written to `~/Library/LaunchAgents/` but `launchctl load` encountered a substitution error (e.g., a path placeholder that was not replaced) or a permissions issue on the file.
+
+**Likely cause (Linux)**: The systemd user instance is not running, or `systemctl --user daemon-reload` has not been called after writing the unit file.
+
+**Fix (macOS)**: Inspect the plist at `~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` for literal `{REPO_ROOT}` or `{REPO_NAME}` placeholders. If found, re-run `/lazy-core.install` to regenerate. Otherwise run `launchctl load <path>` manually from your terminal.
+
+**Fix (Linux)**: Run `systemctl --user daemon-reload` then `systemctl --user enable --now lazy-core-runtime-<repo-name>.service`, or re-run `/lazy-core.install` to reinstall the unit.
+
+---
+
 ## `/lazy-core.audit` shows empty results for global rules
 
 **Symptom**: The audit reports zero files found under `~/.claude/rules/` even though files exist there.
@@ -135,6 +173,16 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 **Likely cause**: The section-detection heuristic looks for the literal keywords (`kind`, `role`, `outcome`, `source`, `result`) in heading lines. If your protocol uses alternative heading text — for example `## Request kinds` instead of `## kind` — the heuristic does not match and the WARN fires as a false positive.
 
 **Fix**: Align the protocol file headings with the keywords expected by `lazy-core.expert-protocols-contract.md` (the contract documents the exact heading patterns). Renaming the headings to match the keywords clears the WARN on the next `/lazy-core.audit` run.
+
+---
+
+## `/lazy-core.audit` reports a routine command path does not exist but the plugin is installed
+
+**Symptom**: The expert-runtime section of `/lazy-core.audit` emits a FAIL like "routine `<name>` command path does not exist: `<path>`" even though the owning plugin appears to be installed and working.
+
+**Likely cause**: The plugin cache uses a four-level layout (`<registry>/<plugin>/<version>/bin/<plugin>`). An older install recorded a three-level path in `lazy.settings.json`, which no longer resolves after the cache was reorganised or the plugin was updated.
+
+**Fix**: Re-run `/lazy-core.install` for the owning plugin to refresh the `command` path in `lazy-core.runtime.routines` to the current four-level layout. Alternatively, accept the "Unregister" offer in `/lazy-core.doctor`'s Fix L3 prompt, then re-run the plugin's install to re-register the routine with the correct path.
 
 ---
 
@@ -386,4 +434,113 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
+## `/lazy-runtime.recover` complains about an unparseable state file
+
+**Symptom**: Running `/lazy-runtime.recover` fails with a message about `.logs/lazy-core/runtime/state.json` being unparseable or corrupt, even though the daemon appears to have halted.
+
+**Likely cause**: The state file was partially written during a crash or interrupted cleanup, leaving it in a truncated JSON state. The `recover` helper raises a parse error before it can read the `daemon_halted` block.
+
+**Fix**: The daemon itself treats an unparseable state file as "not halted" and resumes automatically on its next polling iteration — so if the daemon is still running, it will clear the bad state on its own. If you want to force the issue, delete `.logs/lazy-core/runtime/state.json` from your terminal (the daemon recreates it on the next iteration with a clean structure), then confirm the daemon is live via `/lazy-core.doctor`.
+
+---
+
 ## Diagnostic flowchart
+
+```mermaid
+%%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart TD
+  symptom{Observed symptom?}
+
+  symptom -->|Python version too low| pythonFloor[python-floor-not-met]
+  symptom -->|Pre-commit hook silent| hookNotFiring[hook-not-firing]
+  symptom -->|MCP tools still prompting| mcpCause{Cause?}
+  symptom -->|lazy-core.install failure| installSubError{Sub-error?}
+  symptom -->|lazy-core.agent-models invalid flag| invalidScope[invalid-scope]
+  symptom -->|lazy-core.setup child fails| setupChildFailed[setup-child-failed]
+  symptom -->|mark-public FAIL findings| markPublicFail[mark-public-fail-unresolved]
+  symptom -->|mark-public gh missing| ghNotInstalled[gh-not-installed]
+  symptom -->|doctor or audit stalls| skillStalls[skill-stalls]
+  symptom -->|agent dispatches wrong model| wrongModelCause{Cause?}
+  symptom -->|experts directory missing| expertsNotInit[experts-not-init]
+  symptom -->|dispatch payload rejected| payloadMissingFields[payload-missing-fields]
+  symptom -->|collect-job status missing| jobNotFound[job-not-found]
+  symptom -->|list-jobs invalid status filter| invalidStatusFilter[invalid-status-filter]
+  symptom -->|cancel-job job not found| jobAbsent[job-absent]
+  symptom -->|routine register name invalid| routineNameFormat[routine-name-format]
+  symptom -->|routine already registered| routineConflict[routine-conflict]
+  symptom -->|unregister pump without force| pumpProtected[pump-protected]
+  symptom -->|daemon stalled| daemonStale[daemon-stale]
+  symptom -->|runtime recover still dirty| recoverStillDirty[recover-still-dirty]
+  symptom -->|recover state.json unparseable| stateUnparseable[state-unparseable]
+  symptom -->|audit experts json invalid| expertsJsonInvalid[experts-json-invalid]
+  symptom -->|audit reference did not resolve| refUnresolvable[ref-unresolvable]
+  symptom -->|audit protocol contract false-positive| protocolHeadingMismatch[protocol-heading-mismatch]
+  symptom -->|audit routine command path layout| routinePathLayout[routine-path-layout]
+  symptom -->|doctor routine command unresolvable| routineCommandMissing[routine-command-missing]
+  symptom -->|audit global rules empty| auditGlobalEmpty[audit-global-empty]
+
+  mcpCause -->|server not found| serverNotFound[server-not-found]
+  mcpCause -->|server not loaded| serverNotLoaded[server-not-loaded]
+  mcpCause -->|permission loop| permissionLoop[permission-loop]
+
+  installSubError -->|plugin not installed| pluginNotInstalled[plugin-not-installed]
+  installSubError -->|cache empty| cacheEmpty[cache-empty]
+  installSubError -->|cache broken| cacheBroken[cache-broken]
+  installSubError -->|tiers missing| tiersMissing[tiers-missing]
+  installSubError -->|settings unwritable| settingsUnwritable[settings-unwritable]
+  installSubError -->|supervisor template missing| supervisorTemplateMissing[supervisor-template-missing]
+  installSubError -->|launchctl load error| launchctlLoadError[launchctl-load-error]
+  installSubError -->|systemctl error| systemctlError[systemctl-error]
+
+  wrongModelCause -->|wrong model assigned| wrongModel[wrong-model]
+  wrongModelCause -->|floor ignored| floorIgnored[floor-ignored]
+  wrongModelCause -->|duplicate key| duplicateKey[duplicate-key]
+
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+
+  class symptom guard
+  class mcpCause guard
+  class installSubError guard
+  class wrongModelCause guard
+
+  class pythonFloor error
+  class hookNotFiring error
+  class invalidScope error
+  class setupChildFailed error
+  class markPublicFail error
+  class ghNotInstalled error
+  class skillStalls error
+  class expertsNotInit error
+  class payloadMissingFields error
+  class jobNotFound error
+  class invalidStatusFilter error
+  class jobAbsent error
+  class routineNameFormat error
+  class routineConflict error
+  class pumpProtected error
+  class daemonStale error
+  class recoverStillDirty error
+  class stateUnparseable error
+  class expertsJsonInvalid error
+  class refUnresolvable error
+  class protocolHeadingMismatch error
+  class routinePathLayout error
+  class routineCommandMissing error
+  class auditGlobalEmpty error
+  class serverNotFound error
+  class serverNotLoaded error
+  class permissionLoop error
+  class pluginNotInstalled error
+  class cacheEmpty error
+  class cacheBroken error
+  class tiersMissing error
+  class settingsUnwritable error
+  class supervisorTemplateMissing error
+  class launchctlLoadError error
+  class systemctlError error
+  class wrongModel error
+  class floorIgnored error
+  class duplicateKey error
+```

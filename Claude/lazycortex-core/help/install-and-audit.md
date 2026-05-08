@@ -57,13 +57,13 @@ It dispatches three parallel scan agents. Agent A checks artifact integrity: rul
 
 After collecting findings, the doctor checks plugin version currency (live fetch with a 5-second timeout, falling back to the cached manifest) and applies release-mode suppression: content-level findings on a plugin's own rule files are silenced when that plugin is outdated, keeping you focused on the root cause (run `/plugin update`) rather than chasing issues that will be overwritten on upgrade. The doctor then delegates to sibling audit skills — `lazy-guard.check-public` when `.guard-waivers.json` exists, `lazy-log.audit` when `lazycortex-log` is installed, and similarly for `lazycortex-diagram`, `lazycortex-observe`, and `lazycortex-review`. It also re-runs the expert runtime checks from `lazy-core.audit` Agent D inline.
 
-It then offers targeted fixes — applying them only after your explicit confirmation — and a per-WARN waive loop. Waivers are stored as files under the project memory directory so they persist across sessions; `FAIL`-severity findings are never waiveable. Three loop-runtime fixes are available when relevant: restarting a stalled daemon, deleting orphan job directories, and unregistering routines whose plugin bin path has gone missing.
+It then offers targeted fixes — applying them only after your explicit confirmation — and a per-WARN waive loop. For each remaining WARN you can skip it for the current run or waive it permanently; permanent waivers are stored as files under `doctor.waivers/` in your project memory directory and persist across sessions. `FAIL`-severity findings are never waiveable. Three loop-runtime fixes are available when relevant: restarting a stalled daemon, deleting orphan job directories, and unregistering routines whose plugin bin path has gone missing.
 
 ### lazy-core.optimize
 
 `/lazy-core.optimize` addresses the two most common sources of bloat: oversized rule files and project-specific entries that leaked into global settings.
 
-For each rule file over 3 KB it classifies every section as a constraint (a prohibition or one-liner fact that needs to load every turn) or reference material (layouts, tables, procedures, API details). It shows you the classification and, on confirmation, rewrites the rule file to constraints only and moves reference material into the corresponding agent definition. It also runs a readability audit across all rules, skills, agents, and commands — flagging decision-logic tables, abstract-header tables, narrative preambles, restated cross-references, decorative markers, and long explanatory paragraphs — and offers rewrites with a diff preview per finding.
+For each rule file over 3 KB it classifies every section as a constraint (a prohibition or one-liner fact that needs to load every turn) or reference material (layouts, tables, procedures, API details). It shows you the classification and, on confirmation, rewrites the rule file to constraints only and moves reference material into the corresponding agent definition. It also runs an LLM-readability audit across all rules, skills, agents, and commands — flagging decision-logic tables, abstract-header tables, narrative preambles, restated cross-references, decorative markers, and long explanatory paragraphs — and offers rewrites with a diff preview per finding. Findings you don't want to revisit can be permanently waived.
 
 On the settings side it audits your global `~/.claude/settings.json` for entries that are actually project-specific (service permissions, `additionalDirectories`, domain-specific MCP servers, path-specific Read/Write/Edit rules) and migrates them to the correct project `settings.local.json`. It closes by running `/lazy-core.agent-models` to fill any missing model-routing entries.
 
@@ -101,53 +101,59 @@ The audit and doctor can run at any time without side effects and do not require
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart TD
   enablePlugin[Enable plugin in settings.json]
-  restartFirst{Restart Claude Code}
-  chooseEntry{Single plugin or multi?}
+  restartFirst[Restart Claude Code]
+  chooseEntryPoint{Single or multi-plugin?}
   runInstall[Run /lazy-core.install]
   runSetup[Run /lazy-core.setup]
-  autoDiscover[Auto-discover and sequence all enabled plugin install skills]
+  setupDiscovers[Auto-discover and sequence all enabled plugin install skills]
   rulesChanged{Rules changed?}
   restartSecond[Restart Claude Code]
   runAudit[Run /lazy-core.audit to verify]
-  tuneGuard{Further tuning needed?}
+  auditPassed{Audit passed?}
+  tuningNeeded{Ongoing tuning needed?}
   runOptimize[Run /lazy-core.optimize]
   runDoctor[Run /lazy-core.doctor]
-  done[Bootstrap complete]
+  bootstrapDone[Bootstrap complete]
+  fixIssues[Fix reported issues]
 
-  enablePlugin -->|save settings| restartFirst
-  restartFirst -->|single plugin| chooseEntry
-  restartFirst -->|multi-plugin| chooseEntry
-  chooseEntry -->|single plugin| runInstall
-  chooseEntry -->|multi-plugin| runSetup
-  runSetup -->|discovers plugins| autoDiscover
-  autoDiscover -->|sequences installs| rulesChanged
-  runInstall -->|install done| rulesChanged
-  rulesChanged -->|yes| restartSecond
-  rulesChanged -->|no| runAudit
-  restartSecond -->|reloaded| runAudit
-  runAudit -->|verified| tuneGuard
-  tuneGuard -->|yes| runOptimize
-  tuneGuard -->|no| done
-  runOptimize -->|optimized| runDoctor
-  runDoctor -->|checked| done
+  enablePlugin -->|save config| restartFirst
+  restartFirst -->|session ready| chooseEntryPoint
+  chooseEntryPoint -->|single plugin| runInstall
+  chooseEntryPoint -->|multi-plugin| runSetup
+  runSetup -->|discovers plugins| setupDiscovers
+  setupDiscovers -->|sequences installs| rulesChanged
+  runInstall -->|install complete| rulesChanged
+  rulesChanged -->|yes - rules changed| restartSecond
+  rulesChanged -->|no rules changed| runAudit
+  restartSecond -->|session reloaded| runAudit
+  runAudit -->|results collected| auditPassed
+  auditPassed -->|yes - all checks pass| tuningNeeded
+  auditPassed -->|no - issues found| fixIssues
+  fixIssues -->|issues resolved| runAudit
+  tuningNeeded -->|yes - run optimization| runOptimize
+  tuningNeeded -->|no - skip tuning| bootstrapDone
+  runOptimize -->|optimization done| runDoctor
+  runDoctor -->|health checked| bootstrapDone
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-  classDef sub fill:#2e2240,stroke:#7e63a8,color:#fff
+  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
   class enablePlugin entry
-  class restartFirst guard
-  class chooseEntry guard
-  class rulesChanged guard
-  class tuneGuard guard
+  class restartFirst action
+  class chooseEntryPoint guard
   class runInstall action
   class runSetup action
-  class autoDiscover sub
+  class setupDiscovers action
+  class rulesChanged guard
   class restartSecond action
   class runAudit action
+  class auditPassed guard
+  class tuningNeeded guard
   class runOptimize action
   class runDoctor action
-  class done success
+  class bootstrapDone success
+  class fixIssues error
 ```

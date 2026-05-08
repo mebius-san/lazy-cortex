@@ -12,6 +12,57 @@ from routine_types import dispatch_routine
 
 DEFAULT_TIMEOUT_SEC = 300
 
+# Set by `set_plugin_dirs`. When non-empty, `resolve_routine_command` consults
+# these paths first (each is a plugin source dir containing `.claude-plugin/`
+# and `bin/`) and falls back to the plugin cache if no match. This mirrors
+# Claude Code's `--plugin-dir` for the daemon's separate-process world: a
+# dev-vault operator points the daemon at the source plugins they're working
+# on, instead of routing through a cached install.
+_PLUGIN_DIRS: list[Path] = []
+
+
+def set_plugin_dirs(dirs: list[Path]) -> None:
+    global _PLUGIN_DIRS
+    _PLUGIN_DIRS = [Path(d).resolve() for d in dirs]
+    # Also export to the environment so subprocess routines
+    # (`lazycortex-core expert-pump-once`, `lazycortex-review tick`, …)
+    # inherit the dev-plugin paths and their own resolvers — most notably
+    # `reference_resolver.resolve` for `<plugin>:<name>` agent / protocol
+    # refs — can match them. Daemon-internal `resolve_routine_command`
+    # uses `_PLUGIN_DIRS` directly; this env handle is for everyone else.
+    os.environ["LAZYCORTEX_PLUGIN_DIRS"] = os.pathsep.join(str(p) for p in _PLUGIN_DIRS)
+
+
+def _resolve_in_plugin_dir(plugin_dir: Path, plugin_name: str) -> Path | None:
+    """Match a plugin source dir against `plugin_name` (looked up from the
+    dir's `plugin.json` "name" field) and return its bin entrypoint, or None
+    on no match. Bin entrypoint resolution: prefer `bin/<plugin-name>`; fall
+    back to the single executable script under `bin/`. Multiple executables
+    → ambiguous, returns None so the caller can keep searching."""
+    manifest = plugin_dir / ".claude-plugin" / "plugin.json"
+    try:
+        data = json.loads(manifest.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    if data.get("name") != plugin_name:
+        return None
+    bin_dir = plugin_dir / "bin"
+    if not bin_dir.is_dir():
+        return None
+    primary = bin_dir / plugin_name
+    if primary.is_file() and os.access(primary, os.X_OK):
+        return primary
+    execs = [
+        p for p in bin_dir.iterdir()
+        if p.is_file()
+        and not p.name.endswith(".py")
+        and not p.name.startswith(".")
+        and os.access(p, os.X_OK)
+    ]
+    if len(execs) == 1:
+        return execs[0]
+    return None
+
 
 def _read_plugin_version() -> str:
     """Read this plugin's version from the shipped plugin.json. Returns
@@ -145,6 +196,17 @@ def _run_iteration(repo_root: Path) -> None:
             "error": f"git_pre failed: {e}",
         })
 
+    # Pre-iteration tree check — daemon does NOT run routines while the
+    # working tree has uncommitted changes. The operator may be mid-edit,
+    # or another process (a hand-run `lazy-review tick`, a manual git op)
+    # may be in flight. Either way, routines like `lazy-review.tick` would
+    # read the dirty file, generate output from the WIP state, and commit
+    # over the operator's work. Skip silently — no halt, no log spam — so
+    # the daemon resumes cleanly the next iteration after the tree settles.
+    pre_dirty = _check_working_tree(repo_root)
+    if pre_dirty is not None:
+        return
+
     now = time.time()
     halted_this_iter = False
     for name, routine_cfg in due_routines(now, registry, last_run):
@@ -153,8 +215,11 @@ def _run_iteration(repo_root: Path) -> None:
         last_run[name] = time.time()
         runtime_state.save(repo_root, state)
 
-        dirty = _check_working_tree(repo_root)
-        if dirty is not None:
+        # Tree was clean at iteration start; any dirt now is the routine's
+        # own output that didn't make it into a commit — that's a contract
+        # violation and the daemon halts so the operator can investigate.
+        post_dirty = _check_working_tree(repo_root)
+        if post_dirty is not None:
             # Don't overwrite an existing halt block — pump may have already
             # written a more specific one (with expert + job_id attribution).
             if "daemon_halted" not in state:
@@ -162,7 +227,7 @@ def _run_iteration(repo_root: Path) -> None:
                     "halted_since": time.time(),
                     "triggered_by": name,
                     "reason": "uncommitted_changes",
-                    "dirty_paths": dirty,
+                    "dirty_paths": post_dirty,
                     "expert": None,
                     "job_id": None,
                 }
@@ -207,6 +272,11 @@ def run(repo_root: Path) -> None:
 
 def resolve_routine_command(cmd: list[str]) -> list[str]:
     plugin = cmd[0]
+    # Dev-plugin paths take precedence over the plugin cache.
+    for pd in _PLUGIN_DIRS:
+        bin_path = _resolve_in_plugin_dir(pd, plugin)
+        if bin_path is not None:
+            return [str(bin_path), *cmd[1:]]
     cache = Path.home() / ".claude/plugins/cache"
     # Real layout: cache/<registry>/<plugin>/<version>/bin/<plugin>
     plugin_dirs: list[Path] = []
@@ -218,7 +288,9 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
             if candidate.is_dir():
                 plugin_dirs.append(candidate)
     if not plugin_dirs:
-        raise FileNotFoundError(f"plugin not in cache: {plugin}")
+        raise FileNotFoundError(
+            f"plugin not in cache and no matching --plugin-dir for: {plugin}"
+        )
     # Across all <registry>/<plugin> dirs, descend into versions and pick latest.
     all_versions = []
     for pd in plugin_dirs:

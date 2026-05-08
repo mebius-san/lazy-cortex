@@ -13,7 +13,7 @@ source_skills:
 ---
 # Expert workers — dispatch, keep working, collect later
 
-The experts block lets you hand a long-running task to a named specialist worker and come back for the result when it's ready. You run `/lazy-expert.dispatch-job`, receive a `job_id` in seconds, and carry on with whatever else you are doing. The runtime daemon — a persistent process you start once with `./run.sh` — drains the queue on its own: it picks up each `READY` job, spawns the configured expert agent, waits for it to finish, and writes the result. When you want the output, you run `/lazy-expert.collect-job` with the `job_id`. The main session is never blocked waiting for expert work.
+The experts block lets you hand a long-running task to a named specialist worker and come back for the result when it's ready. You run `/lazy-expert.dispatch-job`, receive a `job_id` and `queue_path` in seconds, and carry on with whatever else you are doing. The runtime daemon — a persistent process you start once with `./run.sh` — drains the queue on its own: it picks up each `READY` job, spawns the configured expert agent, waits for it to finish, and writes the result. When you want the output, you run `/lazy-expert.collect-job` with the `job_id`. The main session is never blocked waiting for expert work.
 
 Each expert is a named role defined in `experts.settings.json` at install time. The role carries its own system prompt and tool allowlist, so a `designer` expert and a `reviewer` expert behave differently even though the same daemon runs both. The daemon runs one job at a time per repo, which means no two experts ever contend over the working tree or git state.
 
@@ -39,6 +39,7 @@ The runtime daemon, which you start separately with `./run.sh`, polls the queue.
 ## Common adjustments
 
 - **Add optional file references.** The `source`, `context`, and `result` fields in the dispatch payload are arrays of repo-relative file paths. Pass `source` for files the expert should read, `context` for background material, and `result` for paths where the expert should write its output. These are passed through to the expert agent via the protocol contract.
+- **Verify the expert name before dispatching.** If you mistype the expert key, `dispatch-job` will silently create a job directory under the misspelled name — the daemon will never pick it up because no matching expert is configured. Confirm the name against `experts.settings.json` first.
 - **Filter the job list by expert.** `/lazy-expert.list-jobs expert=<name>` is the fastest way to check the queue for one worker when you have several experts configured.
 - **Re-dispatch a failed job.** If `/lazy-expert.collect-job` returns `status: failed`, read the error, fix the underlying issue (e.g. a missing source file), cancel the failed job with `/lazy-expert.cancel-job`, and dispatch a new one.
 - **Add or reconfigure expert roles.** Each expert's prompt and tools are set in `experts.settings.json`. Run `/lazy-core.install` to re-run the expert wizard and update that file.
@@ -53,36 +54,43 @@ The runtime daemon, which you start separately with `./run.sh`, polls the queue.
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  userDispatchJob[dispatch-job]
-  runtimeDaemon((Runtime Daemon))
+  userDispatchesJob[User dispatches job]
+  dispatchJobSkill[dispatch-job]
   jobQueue[(Job Queue)]
-  userCollectJob[collect-job]
-  userListJobs[list-jobs]
-  userCancelJob[cancel-job]
-  jobDone[Job Done]
-  jobCancelled[Job Cancelled]
+  runtimeDaemon{{Runtime Daemon}}
+  collectJobSkill[collect-job]
+  userCollectsResults[User collects results]
+  listJobsSkill[list-jobs]
+  cancelJobSkill[cancel-job]
+  jobCancelled[Job cancelled]
+  jobsListed[Jobs listed]
 
-  userDispatchJob -->|enqueue| jobQueue
+  userDispatchesJob -->|invoke| dispatchJobSkill
+  dispatchJobSkill -->|enqueue| jobQueue
   jobQueue -->|drain| runtimeDaemon
-  runtimeDaemon -->|complete| userCollectJob
-  userCollectJob -->|return results| jobDone
-  userDispatchJob -->|check status| userListJobs
-  userListJobs -->|select to cancel| userCancelJob
-  userCancelJob -->|removed| jobCancelled
+  runtimeDaemon -->|process complete| collectJobSkill
+  collectJobSkill -->|return| userCollectsResults
+
+  userDispatchesJob -->|invoke| listJobsSkill
+  listJobsSkill -->|display| jobsListed
+
+  userDispatchesJob -->|invoke| cancelJobSkill
+  cancelJobSkill -->|confirm| jobCancelled
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
   classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class userDispatchJob entry
+  class userDispatchesJob entry
+  class dispatchJobSkill action
+  class collectJobSkill action
+  class listJobsSkill action
+  class cancelJobSkill action
   class runtimeDaemon service
   class jobQueue store
-  class userCollectJob action
-  class userListJobs action
-  class userCancelJob action
-  class jobDone success
-  class jobCancelled error
+  class userCollectsResults success
+  class jobsListed success
+  class jobCancelled success
 ```

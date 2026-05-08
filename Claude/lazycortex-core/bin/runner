@@ -1,6 +1,37 @@
 #!/usr/bin/env python3
+"""Daemon entrypoint.
+
+Usage: runner <repo-root> [--plugin-dir <path>]...
+
+`--plugin-dir <path>` (repeatable) points the daemon at a plugin source
+directory (one containing `.claude-plugin/plugin.json` and `bin/`). The
+daemon's routine resolver consults these paths first, falling back to the
+plugin cache. Mirrors Claude Code's `--plugin-dir` for the daemon's
+separate-process world.
+"""
 import os, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
-from runtime_daemon import run
-run(Path(sys.argv[1] if len(sys.argv) > 1 else os.getcwd()))
+from runtime_daemon import run, set_plugin_dirs
+
+repo = None
+plugin_dirs: list[Path] = []
+i = 1
+while i < len(sys.argv):
+    a = sys.argv[i]
+    if a == "--plugin-dir":
+        if i + 1 >= len(sys.argv):
+            sys.stderr.write("--plugin-dir requires a path argument\n")
+            sys.exit(2)
+        plugin_dirs.append(Path(sys.argv[i + 1]))
+        i += 2
+        continue
+    if repo is None:
+        repo = Path(a)
+        i += 1
+        continue
+    sys.stderr.write(f"unexpected argument: {a}\n")
+    sys.exit(2)
+
+set_plugin_dirs(plugin_dirs)
+run(repo if repo is not None else Path(os.getcwd()))

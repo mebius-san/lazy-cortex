@@ -27,8 +27,8 @@ After this walkthrough you have:
 ## What you need
 
 - `lazycortex-core` installed and restarted in Claude Code.
-- A git repo to run async jobs in.
-- Python 3 available in the shell where you start the daemon.
+- A git repo to run async jobs in (the runtime is always per-repo).
+- Python 3.12 or later available in the shell where you start the daemon.
 - `CLAUDE_PLUGIN_ROOT` set correctly — `/lazy-core.install` writes this into `.claude/bin/lazy.runtime.sh` automatically.
 
 ## The journey
@@ -40,9 +40,9 @@ Run `/lazy-core.install` inside the repo. The install wizard walks through sever
 - Creates `.experts/` and seeds `.experts/experts.settings.json`.
 - Writes the `.claude/bin/lazy.runtime.sh` shim, which resolves the latest plugin runner at exec time — supervisor units don't need re-rendering after `/plugin update`.
 - Adds the `lazy-core.runtime` block to `.claude/lazy.settings.json` with the daemon's polling interval and cleanup schedule.
-- Adds `.experts/.jobs/` to `.gitignore`.
+- Adds `.experts/.jobs/` and `.logs/lazy-core/runtime/` to `.gitignore`.
 
-When the wizard reaches the expert-add phase (Step 9), answer **Yes** to scan installed plugins for expert candidates. For each candidate you accept, the wizard asks for a local name (e.g. `designer`, `developer`, `reviewer`), a git author name, and a git author email for commits the expert makes. These are written into `experts.settings.json` via the wizard — do not edit the file by hand.
+When the wizard reaches the expert-add phase (Step 9), answer **Yes** to scan installed plugins for expert candidates. For each candidate you accept, the wizard asks for a local name (e.g. `designer`, `developer`, `reviewer`), a git author name, and a git author email for commits the expert makes. These are written into `experts.settings.json` by the wizard — do not edit the file by hand.
 
 Once at least one expert is registered, the skill bootstraps the `lazy-expert.pump` routine (Step 10) in `lazy.settings.json` and offers to install a daemon supervisor (Step 11) via macOS launchd or Linux systemd. Choose the option that matches your machine, or skip and start the daemon manually in the next step.
 
@@ -108,7 +108,7 @@ To narrow to a specific expert or status:
 /lazy-expert.list-jobs status=failed
 ```
 
-The output is a table with `expert`, `job_id`, `status`, and `age_sec` columns. A status of `pending` means the daemon has not yet written the `DONE` marker; `done` means the result is ready; `failed` means the expert wrote a `DONE` marker with `outcome == "error"`.
+The output is a table with `expert`, `job_id`, `status`, and `age_sec` columns. A status of `pending` means the daemon has not yet written the `DONE` marker; `done` means the result is ready; `failed` means the expert wrote a `DONE` marker with `outcome == "error"`. The `age_sec` column counts seconds since the relevant marker's modification time — useful for spotting jobs that have been sitting a long time.
 
 You can dispatch additional jobs, continue working on the codebase, or run other skills — the daemon drains the queue in the background regardless.
 
@@ -146,32 +146,23 @@ Open the listed result files to read the expert's output. If status comes back a
 sequenceDiagram
   participant user as User
   participant claudeSession as Claude Session
-  participant jobsQueue as .experts/.jobs/ queue
+  participant jobQueue as .experts/.jobs/ queue
   participant daemon as Daemon (runner)
   participant expertAgent as Expert Agent
 
-  user->>claudeSession: /lazy-expert.dispatch-job with task prompt
-  claudeSession->>jobsQueue: write job file (request.json + PENDING marker)
-  claudeSession-->>user: job ID confirmed
-
-  loop poll for new jobs
-    daemon->>jobsQueue: scan for PENDING marker
-  end
-
-  daemon->>jobsQueue: claim job (set IN_PROGRESS marker)
-  daemon->>expertAgent: spawn agent with job context
-  expertAgent->>expertAgent: process task
-  expertAgent->>jobsQueue: write response.json
-  expertAgent->>jobsQueue: write DONE marker
-  expertAgent-->>daemon: agent exit
-
-  user->>claudeSession: /lazy-expert.collect-job with job ID
-  claudeSession->>jobsQueue: read response.json where DONE marker present
-  alt result ready
-    jobsQueue-->>claudeSession: response.json contents
-    claudeSession-->>user: job result returned
-  else not yet done
-    jobsQueue-->>claudeSession: DONE marker absent
-    claudeSession-->>user: job still in progress
-  end
+  user->>claudeSession: /lazy-expert.dispatch-job
+  claudeSession->>jobQueue: write job descriptor file
+  Note over jobQueue: job pending — awaiting pickup
+  daemon->>jobQueue: poll for new job files
+  jobQueue-->>daemon: job descriptor
+  daemon->>expertAgent: spawn expert agent with job context
+  expertAgent->>expertAgent: process job request
+  expertAgent->>jobQueue: write response.json
+  expertAgent->>jobQueue: write DONE marker
+  Note over jobQueue: job complete — response ready
+  daemon-->>claudeSession: DONE signal observed
+  user->>claudeSession: /lazy-expert.collect-job
+  claudeSession->>jobQueue: read response.json
+  jobQueue-->>claudeSession: response payload
+  claudeSession-->>user: collected job result
 ```

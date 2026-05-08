@@ -14,7 +14,7 @@ source_skills:
 
 The lazycortex-core runtime daemon is a per-repo serial loop. It reads the routine registry from `.claude/lazy.settings.json`, runs each entry in order according to its `interval_sec` (or cron expression), and repeats. Because routines execute one at a time, no two ever contend over the working tree or git state — the daemon is the single serializing authority for all background work in the repo.
 
-Three skills manage that loop from the outside. `/lazy-routine.register` is a type-aware wizard that adds a named periodic job to the registry; it supports four routine types — `subprocess` (a periodic CLI command), `inbox` (scan a directory and dispatch one expert job per file), `schedule` (cron-driven, one fire per boundary), and `git` (watch a remote branch for changes and dispatch jobs). `/lazy-routine.unregister` removes a named routine cleanly and is idempotent — calling it on a name that does not exist is an INFO, not an error. `/lazy-runtime.recover` is the escape hatch for a halted daemon: when a routine or expert leaves the working tree dirty, the daemon halts to avoid a corrupted next run; this skill reads the halt context, walks you through cleanup (commit, stash, discard, or abort), and atomically resumes the loop once the tree is clean.
+Three skills manage that loop from the outside. `/lazy-routine.register` is a type-aware wizard that adds a named periodic job to the registry. It supports four routine types: `subprocess` (a periodic CLI command), `inbox` (scan a directory and dispatch one expert job per file), `schedule` (cron-driven, one fire per boundary), and `git` (watch a remote branch for changes and dispatch jobs on new commits or file changes). `/lazy-routine.unregister` removes a named routine cleanly and is idempotent — calling it on a name that does not exist is an INFO, not an error. `/lazy-runtime.recover` is the escape hatch for a halted daemon: when a routine or expert leaves the working tree dirty, the daemon halts to protect the next run; this skill reads the halt context, walks you through cleanup (commit, stash, discard, or abort), and clears the halt once the tree is clean so the daemon resumes on its next iteration.
 
 ## When you'd use this
 
@@ -27,11 +27,11 @@ Three skills manage that loop from the outside. `/lazy-routine.register` is a ty
 
 ## How it fits together
 
-Routine management has a natural lifecycle. You run `/lazy-routine.register` once — typically as part of your plugin's install step — and the daemon picks up the new entry on its very next cycle; no restart required. The wizard collects only the fields the chosen type needs, validates against the per-type schema, and enforces `<plugin>.<verb>` dot-namespace naming (e.g. `lazy-review.tick`). If you attempt to register a name that already exists, the skill refuses unless you pass `--force` to overwrite in one step.
+Routine management has a natural lifecycle. You run `/lazy-routine.register` once — typically as part of your plugin's install step — and the daemon picks up the new entry on its very next cycle without a restart. The wizard collects only the fields the chosen type needs, validates against the per-type schema, and enforces `<plugin>.<verb>` dot-namespace naming (e.g. `lazy-review.tick`). If you attempt to register a name that already exists, the skill refuses unless you pass `--force` to overwrite in one step.
 
 When a routine is no longer needed, you run `/lazy-routine.unregister <name>` and the daemon drops it from the schedule immediately. One routine is protected: `lazy-expert.pump`, the built-in job that drains the expert queue. Removing it requires `--force` and surfaces a warning that expert jobs will stop processing until the routine is re-registered or `/lazy-core.install` is re-run.
 
-The halt-and-recover path is a separate concern that does not require registration or unregistration. When the daemon halts, `/lazy-runtime.recover` reads `.logs/lazy-core/runtime/state.json` to surface the halt context — which routine triggered the halt, which expert and job were involved if applicable, and which paths are dirty — then asks how to clean up. You have four options: `commit` keeps the dirty changes permanently (you supply the message); `stash` tucks them into a git stash you can restore later with `git stash pop`; `discard` throws them away irreversibly; and `abort` leaves everything as-is and exits, keeping the daemon halted so you can investigate on your own schedule. Once the cleanup produces a clean tree the skill atomically clears the `daemon_halted` block and the daemon resumes on its next iteration. If the tree is still dirty after cleanup (for example, a submodule left behind uncommitted state), the skill reports `still-dirty` without clearing the halt — run `git status` manually, resolve, and re-invoke `/lazy-runtime.recover`.
+The halt-and-recover path is a separate concern that does not require registration or unregistration. When the daemon halts, `/lazy-runtime.recover` reads `.logs/lazy-core/runtime/state.json` to surface the halt context — which routine triggered the halt, which expert and job were involved if applicable, and which paths are dirty — then asks how to clean up. You have four options: `commit` keeps the dirty changes permanently (you supply the message); `stash` tucks them into a git stash you can restore later with `git stash pop`; `discard` throws them away irreversibly; and `abort` leaves everything as-is and exits, keeping the daemon halted so you can investigate on your own schedule. Once the cleanup produces a clean tree the skill clears the `daemon_halted` block and the daemon resumes on its next iteration. If the tree is still dirty after cleanup (for example, a submodule left behind uncommitted state), the skill reports `still-dirty` without clearing the halt — run `git status` manually, resolve, and re-invoke `/lazy-runtime.recover`.
 
 For `inbox` routines there is one extra consideration: the inbox directory must be gitignored. Inbox routines move files between iterations, and an unignored path dirties the working tree on every cycle, triggering repeated halts. The register wizard detects this automatically and offers to add the path to `.gitignore` on the spot.
 
@@ -50,34 +50,39 @@ For `inbox` routines there is one extra consideration: the inbox directory must 
 stateDiagram-v2
   [*] --> idle
 
-  idle --> registering : routine registered in lazy.settings.json
-  registering --> idle : registration complete
+  idle --> running : routine registered
 
-  idle --> running : interval_sec elapsed
-  running --> running : next routine in order
-
+  running --> running : interval elapsed - execute next routine
   running --> halted : dirty working tree detected
-  halted --> recovering : /lazy-runtime.recover invoked
-  recovering --> committing : commit selected
-  recovering --> stashing : stash selected
-  recovering --> discarding : discard selected
-  recovering --> halted : abort selected
-  committing --> idle : tree clean
-  stashing --> idle : tree clean
-  discarding --> idle : tree clean
 
-  idle --> unregistered : routine unregistered
-  unregistered --> [*]
+  halted --> running : lazy-runtime.recover - tree cleaned
+  halted --> halted : recover aborted
+
+  running --> idle : last routine unregistered
+
+  idle --> [*]
 
   style idle fill:#1e3a5f,stroke:#4a90e2,color:#fff
-  style registering fill:#1e5f3a,stroke:#4ae290,color:#fff
   style running fill:#1e5f3a,stroke:#4ae290,color:#fff
-  style halted fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
-  style recovering fill:#5f4a1e,stroke:#e2a14a,color:#fff
-  style committing fill:#1e5f3a,stroke:#4ae290,color:#fff
-  style stashing fill:#1e5f3a,stroke:#4ae290,color:#fff
-  style discarding fill:#1e5f3a,stroke:#4ae290,color:#fff
-  style unregistered fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  style halted fill:#5f4a1e,stroke:#e2a14a,color:#fff
+
+  state halted {
+    [*] --> awaitingRecovery
+    awaitingRecovery --> commit : operator chooses commit
+    awaitingRecovery --> stash : operator chooses stash
+    awaitingRecovery --> discard : operator chooses discard
+    awaitingRecovery --> abortRecover : operator chooses abort
+    commit --> [*]
+    stash --> [*]
+    discard --> [*]
+    abortRecover --> [*]
+
+    style awaitingRecovery fill:#5f4a1e,stroke:#e2a14a,color:#fff
+    style commit fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+    style stash fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+    style discard fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+    style abortRecover fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  }
 ```
 
 ## See also

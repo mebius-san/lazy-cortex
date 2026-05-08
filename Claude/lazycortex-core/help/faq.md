@@ -253,3 +253,29 @@ It can get stuck when a session is interrupted mid-staging — for example, if C
 The daemon halts when a routine or expert job leaves the working tree dirty — meaning it wrote or modified tracked files without committing them. This is a safety guard: a dirty tree from one routine can corrupt the next routine's git operations. When a halt occurs, the daemon records the triggering routine, the expert and job ID (if it came from inside an expert), and the captured `git status` lines in `state.json`.
 
 Run `/lazy-runtime.recover` to get out. The skill reads the halt context, shows you exactly which paths are dirty, and asks how you want to clean up: commit the changes, stash them for later, discard them entirely, or abort (leave the daemon halted and exit). Once the tree is clean, the skill clears the `daemon_halted` block from `state.json` and the daemon resumes scheduling on its next iteration. If the tree is still dirty after cleanup (e.g. submodules left uncommitted state), the skill tells you to run `git status` manually and re-invoke it.
+
+---
+
+## Why does `/lazy-core.install` check Python version before anything else?
+
+Every plugin in the lazycortex marketplace requires Python 3.12 or newer. The install skill runs the Python check as Step 0 — before it touches any files — because all plugin hooks (`lazy-guard.check-public.py`, `lazy-guard.settings.py`, `lazy-core.model-router.py`, `lazy-core.git-guard.py`) will fail silently at runtime if the Python floor is not met. Failing at Step 0 with a clear "install Python 3.12 via brew or pyenv" message is better than installing all the rule files and discovering hook failures later.
+
+Note that `/lazy-core.audit` uses a lower floor of Python 3.8 for its own runtime probe — that check covers whether the Python version is sufficient for hooks' `__future__` annotations and f-strings. The 3.12 install-floor is stricter and is set as the single marketplace-wide requirement so all plugins can rely on it without per-plugin version guards.
+
+---
+
+## Which skills support `--dry-run` and what does it do?
+
+Three skills in this plugin accept `--dry-run`:
+
+- `/lazy-core.setup` — builds and previews the install plan (which skills would run, in what order) without executing any of them.
+- `/lazy-core.agent-models` — walks the wizard and reports what tier assignments would be written, without touching either `lazy.settings.json` file.
+- `/lazy-guard.allow-mcp` — computes and previews the diff (which tools would land in `allow`, `ask`, or skip) without writing to any settings file.
+
+In all three cases, `--dry-run` is purely read-only: no files are created or modified, and the skill exits after the preview. It is safe to run at any time and does not require undoing anything afterward.
+
+---
+
+## What happens if I register a routine whose `inbox_dir` is not gitignored?
+
+`/lazy-routine.register` checks this for `inbox`-type routines using `git check-ignore`. If the directory is tracked rather than gitignored, the skill warns you: an inbox routine moves files between iterations, which dirties the working tree and triggers the daemon's halt protection on every cycle. You get three options — add the directory to `.gitignore` now (recommended), continue anyway and commit moves manually, or abort the registration. If you choose to add it, the skill appends the entry to `.gitignore` but does not auto-commit; you commit when you are ready to coordinate with other in-flight changes.
