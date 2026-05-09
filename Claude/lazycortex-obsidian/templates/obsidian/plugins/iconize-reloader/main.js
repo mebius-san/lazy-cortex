@@ -1,6 +1,6 @@
 'use strict';
 
-const RELOADER_VERSION = '2.3.0';
+const RELOADER_VERSION = '2.4.0';
 
 const { Plugin, PluginSettingTab, Setting, Platform } = require('obsidian');
 
@@ -32,9 +32,18 @@ const MD_WATCH_EXCLUDED = new Set(['.obsidian', '.git', '.claude', '.githooks', 
 const FOLDER_NOTES_PLUGIN_ID = 'folder-notes';
 const FOLDER_NOTE_TEMPLATE_DEFAULT = '{{folder_name}}';
 
+// Notebook Navigator owns its own folder-note frontmatter pipeline (its
+// `folderNoteMetadataAdapter` reads `frontmatterIconField` / `frontmatterColorField`
+// per file and paints folder icons natively). The reloader only needs to push the
+// three settings keys that align NB's reader with Iconize's namespace —
+// `useFrontmatterMetadata`, `frontmatterIconField`, `frontmatterColorField` —
+// nothing folder-side, no data-mirroring.
+const NB_PLUGIN_ID = 'notebook-navigator';
+
 // Vault-relative paths — accepted by Obsidian's adapter on every platform.
 const DATA_VAULT_PATH = `.obsidian/plugins/${TARGET_PLUGIN_ID}/data.json`;
 const FN_DATA_VAULT_PATH = `.obsidian/plugins/${FOLDER_NOTES_PLUGIN_ID}/data.json`;
+const NB_DATA_VAULT_PATH = `.obsidian/plugins/${NB_PLUGIN_ID}/data.json`;
 
 const RESERVED_KEYS = new Set(['settings', 'rules', 'recentlyUsedIcons']);
 
@@ -66,6 +75,21 @@ async function readIconizeData(adapter) {
 
 async function writeIconizeData(adapter, obj) {
   await adapter.write(DATA_VAULT_PATH, JSON.stringify(obj, null, 2) + '\n');
+}
+
+// Notebook Navigator data.json — surgical settings-only access. Returns null when
+// NB is not installed or its data.json is unreadable.
+async function readNbData(adapter) {
+  try {
+    const raw = await adapter.read(NB_DATA_VAULT_PATH);
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+async function writeNbData(adapter, obj) {
+  await adapter.write(NB_DATA_VAULT_PATH, JSON.stringify(obj, null, 2) + '\n');
 }
 
 // Upsert `{folderPath: {iconName, iconColor?}}`. Returns true when a write
@@ -208,11 +232,19 @@ class IconizeReloaderPlugin extends Plugin {
     // self-write echo. Aligns Iconize's own file-side frontmatter feature with
     // the same field names this plugin scans for folder-side propagation, so a
     // single `iconize_*` namespace in note frontmatter drives both layers.
+    // Notebook Navigator (when present) gets the same field names pushed into
+    // its own settings — it owns its folder-note frontmatter pipeline natively,
+    // so this is settings-only, no data mirroring.
     if (this.settings.enforceIconizeSettings) {
       try {
         await this._enforceIconizeSettings();
       } catch (e) {
         console.error('[iconize-reloader] enforceIconizeSettings failed', e);
+      }
+      try {
+        await this._enforceNotebookNavigatorSettings();
+      } catch (e) {
+        console.error('[iconize-reloader] enforceNotebookNavigatorSettings failed', e);
       }
     }
 
@@ -779,6 +811,36 @@ class IconizeReloaderPlugin extends Plugin {
     }
     return changed;
   }
+
+  // Push our preferred frontmatter field names into Notebook Navigator's settings
+  // and flip its master `useFrontmatterMetadata` toggle on. NB owns the folder-note
+  // frontmatter read pipeline itself — this method is settings-only; no data
+  // mirroring, no folder-icon dictionary writes. No-op when NB is not installed
+  // (data.json absent → readNbData returns null).
+  async _enforceNotebookNavigatorSettings() {
+    const adapter = this.app.vault.adapter;
+    const data = await readNbData(adapter);
+    if (data === null) return false;
+    let changed = false;
+    if (data.useFrontmatterMetadata !== true) {
+      data.useFrontmatterMetadata = true;
+      changed = true;
+    }
+    if (data.frontmatterIconField !== this.settings.iconFieldName) {
+      data.frontmatterIconField = this.settings.iconFieldName;
+      changed = true;
+    }
+    if (data.frontmatterColorField !== this.settings.colorFieldName) {
+      data.frontmatterColorField = this.settings.colorFieldName;
+      changed = true;
+    }
+    if (changed) {
+      await writeNbData(adapter, data);
+      console.log('[iconize-reloader] re-asserted Notebook Navigator frontmatter settings →',
+        this.settings.iconFieldName, '/', this.settings.colorFieldName);
+    }
+    return changed;
+  }
 }
 
 class IconizeReloaderSettingTab extends PluginSettingTab {
@@ -831,8 +893,8 @@ class IconizeReloaderSettingTab extends PluginSettingTab {
         }));
 
     new Setting(containerEl)
-      .setName('Re-assert Iconize settings on load')
-      .setDesc('On every reloader load, push iconInFrontmatterEnabled=true plus the field names above into Iconize\'s settings. Survives manual toggling-off in Iconize\'s own settings UI.')
+      .setName('Re-assert plugin settings on load')
+      .setDesc('On every reloader load, push iconInFrontmatterEnabled=true plus the field names above into Iconize\'s settings, and useFrontmatterMetadata=true with the same field names into Notebook Navigator\'s settings (when present). Survives manual toggling-off in either plugin\'s own settings UI.')
       .addToggle((t) => t
         .setValue(this.plugin.settings.enforceIconizeSettings)
         .onChange(async (v) => {
@@ -840,19 +902,23 @@ class IconizeReloaderSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
           if (v) {
             try { await this.plugin._enforceIconizeSettings(); }
-            catch (e) { console.error('[iconize-reloader] enforce on toggle failed', e); }
+            catch (e) { console.error('[iconize-reloader] enforce iconize on toggle failed', e); }
+            try { await this.plugin._enforceNotebookNavigatorSettings(); }
+            catch (e) { console.error('[iconize-reloader] enforce notebook-navigator on toggle failed', e); }
           }
         }));
   }
 
   // Settings-tab helper: after a field-name edit, push the new names into
-  // Iconize and re-walk every md file so existing entries land under the new
-  // namespace. Wrapped in try/catch so a malformed Iconize data.json doesn't
-  // throw out of the onChange handler.
+  // Iconize and Notebook Navigator, then re-walk every md file so existing
+  // folder-icon entries (Iconize-side) land under the new namespace. Wrapped in
+  // try/catch so a malformed plugin data.json doesn't throw out of the onChange
+  // handler.
   async _reapplyAfterFieldChange() {
     try {
       if (this.plugin.settings.enforceIconizeSettings) {
         await this.plugin._enforceIconizeSettings();
+        await this.plugin._enforceNotebookNavigatorSettings();
       }
       if (this.plugin._initialScan) await this.plugin._initialScan();
       if (this.plugin._scheduleSelfRefresh) this.plugin._scheduleSelfRefresh();

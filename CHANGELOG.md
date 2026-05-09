@@ -295,6 +295,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 2.1.0 — 2026-05-09 UTC
+
+- `iconize-reloader` 2.4.0: when Notebook Navigator is installed alongside Iconize, the reloader now automatically aligns Notebook Navigator's frontmatter settings (`useFrontmatterMetadata`, `frontmatterIconField`, `frontmatterColorField`) to match the Iconize configuration on load — no more manual alignment of the two plugins. Re-run `/lazy-obsidian.iconize-install` to deploy the updated reloader.
+
 ### 2.0.0 — 2026-05-08 UTC
 
 - **Breaking:** The tag-pages agent has been renamed from `obsidian.gen-tag-pages` to `lazy-obsidian.gen-tag-pages` to match the plugin's namespace convention. Update any dispatch strings, `lazy.settings.json` entries, or code references that use the old name `lazycortex-obsidian:obsidian.gen-tag-pages` to `lazycortex-obsidian:lazy-obsidian.gen-tag-pages`.
