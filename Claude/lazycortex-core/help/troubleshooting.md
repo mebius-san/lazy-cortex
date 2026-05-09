@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-05-08
+last_regen: 2026-05-09
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: Python version too low → python-floor-not-met; pre-commit hook silent → hook-not-firing; MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-load-error / systemctl-error); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public FAIL findings → mark-public-fail-unresolved; lazy-repo.mark-public gh missing → gh-not-installed; doctor or audit stalls → skill-stalls; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; routine register name invalid → routine-name-format; routine already registered → routine-conflict; unregister pump without force → pump-protected; daemon stalled → daemon-stale; runtime recover still dirty → recover-still-dirty; recover state.json unparseable → state-unparseable; audit experts json invalid → experts-json-invalid; audit reference did not resolve → ref-unresolvable; audit protocol contract false-positive → protocol-heading-mismatch; audit routine command path layout → routine-path-layout; doctor routine command unresolvable → routine-command-missing; lazy-core.audit global rules empty → audit-global-empty."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: Python version too low → python-floor-not-met; pre-commit hook silent → hook-not-firing; MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-load-error / systemctl-error); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public FAIL findings → mark-public-fail-unresolved; lazy-repo.mark-public gh missing → gh-not-installed; doctor or audit stalls → skill-stalls; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; routine register name invalid → routine-name-format; routine already registered → routine-conflict; routine register unknown type → routine-unknown-type; routine register missing required field → routine-missing-field; routine register settings unwritable → routine-settings-unwritable; unregister pump without force → pump-protected; daemon stalled → daemon-stale; runtime recover still dirty → recover-still-dirty; recover state.json unparseable → state-unparseable; recover commit needs message → recover-commit-needs-message; dispatch to wrong expert key → expert-key-mismatch; audit experts json invalid → experts-json-invalid; audit reference did not resolve → ref-unresolvable; audit protocol contract false-positive → protocol-heading-mismatch; audit routine command path layout → routine-path-layout; doctor routine command unresolvable → routine-command-missing; lazy-core.audit global rules empty → audit-global-empty."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
@@ -350,6 +350,16 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
+## `/lazy-expert.dispatch-job` routes to the wrong expert silently
+
+**Symptom**: A job you dispatched appears to complete without error, but the result is missing or seems to have been processed by the wrong worker. Running `/lazy-expert.list-jobs` shows the job under an unexpected expert key.
+
+**Likely cause**: The `expert_name` argument contains a typo that does not match any key in `experts.settings.json`. The skill creates the job directory under the named key regardless — if the expert key is unrecognised, the daemon's pump routine skips it silently on every drain cycle.
+
+**Fix**: Run `/lazy-expert.list-jobs` to see all active job directories and confirm which expert key the job landed under. Verify the intended key against `experts.settings.json`. Cancel the misrouted job with `/lazy-expert.cancel-job`, then re-dispatch with the correct `expert_name`.
+
+---
+
 ## `/lazy-expert.collect-job` returns `status: missing`
 
 **Symptom**: `/lazy-expert.collect-job` reports `status: missing` along with "Job `<job_id>` not found for expert `<expert_name>`."
@@ -400,6 +410,36 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
+## `/lazy-routine.register` fails: unknown routine type
+
+**Symptom**: Running `/lazy-routine.register` fails with a message like "unknown type 'X'" during input validation.
+
+**Likely cause**: The `type` field in the routine configuration is not one of the four supported values: `subprocess`, `inbox`, `schedule`, or `git`. The skill's type-aware wizard only accepts these four values.
+
+**Fix**: Correct the `type` to one of `subprocess` (default, for periodic commands), `inbox` (scans a directory and dispatches a job per file), `schedule` (cron-driven), or `git` (watches a remote branch). If you need a type that isn't listed, you may need to upgrade `lazycortex-core` to a newer version that supports it.
+
+---
+
+## `/lazy-routine.register` fails: missing required field(s)
+
+**Symptom**: Running `/lazy-routine.register` fails with "missing required field(s): `<list>`" during validation.
+
+**Likely cause**: The configuration dict passed to the skill is missing one or more fields required by the routine type's schema. For example, a `subprocess` routine requires `command` and `interval_sec`; an `inbox` routine additionally requires `inbox_dir`, `expert`, and `request`.
+
+**Fix**: Add the missing fields and retry. Each routine type has a distinct required-field set enforced by `routine_types.validate_routine_entry`. Run `/lazy-routine.register` in wizard mode (without a pre-built `cfg` dict) to be prompted for each required field in order.
+
+---
+
+## `/lazy-routine.register` fails: "`.claude/lazy.settings.json` unwritable"
+
+**Symptom**: `/lazy-routine.register` aborts with a message about `.claude/lazy.settings.json` being unwritable or the directory being absent.
+
+**Likely cause**: Either `.claude/lazy.settings.json` does not exist (the expert runtime was never bootstrapped for this repo) or the file has permissions that prevent writing.
+
+**Fix**: Run `/lazy-core.install` to bootstrap the file and the `lazy-core.runtime` section. If the file exists but is read-only, check its permissions and ensure the current user can write to it, then re-run `/lazy-routine.register`.
+
+---
+
 ## `/lazy-routine.unregister` refuses to remove `lazy-expert.pump`
 
 **Symptom**: Running `/lazy-routine.unregister lazy-expert.pump` fails with "`lazy-expert.pump` is the built-in expert pump; removing it breaks the experts pipeline."
@@ -434,6 +474,16 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
+## `/lazy-runtime.recover` requires a commit message but none was provided
+
+**Symptom**: Running `/lazy-runtime.recover` and choosing "commit" as the cleanup mode fails with "commit mode requires a non-empty message."
+
+**Likely cause**: The commit mode prompt was answered with an empty string or the message field was omitted. The skill refuses to create a commit without a message.
+
+**Fix**: Re-invoke `/lazy-runtime.recover`, choose "commit" again, and supply a non-empty commit message when prompted. The default suggestion is `<triggered_by>: recover from halt` — you can accept it or type your own.
+
+---
+
 ## `/lazy-runtime.recover` complains about an unparseable state file
 
 **Symptom**: Running `/lazy-runtime.recover` fails with a message about `.logs/lazy-core/runtime/state.json` being unparseable or corrupt, even though the daemon appears to have halted.
@@ -463,14 +513,19 @@ flowchart TD
   symptom -->|agent dispatches wrong model| wrongModelCause{Cause?}
   symptom -->|experts directory missing| expertsNotInit[experts-not-init]
   symptom -->|dispatch payload rejected| payloadMissingFields[payload-missing-fields]
+  symptom -->|dispatch wrong expert key| expertKeyMismatch[expert-key-mismatch]
   symptom -->|collect-job status missing| jobNotFound[job-not-found]
   symptom -->|list-jobs invalid status filter| invalidStatusFilter[invalid-status-filter]
   symptom -->|cancel-job job not found| jobAbsent[job-absent]
   symptom -->|routine register name invalid| routineNameFormat[routine-name-format]
   symptom -->|routine already registered| routineConflict[routine-conflict]
+  symptom -->|routine register unknown type| routineUnknownType[routine-unknown-type]
+  symptom -->|routine register missing field| routineMissingField[routine-missing-field]
+  symptom -->|routine register settings unwritable| routineSettingsUnwritable[routine-settings-unwritable]
   symptom -->|unregister pump without force| pumpProtected[pump-protected]
   symptom -->|daemon stalled| daemonStale[daemon-stale]
   symptom -->|runtime recover still dirty| recoverStillDirty[recover-still-dirty]
+  symptom -->|recover commit needs message| recoverCommitNeedsMessage[recover-commit-needs-message]
   symptom -->|recover state.json unparseable| stateUnparseable[state-unparseable]
   symptom -->|audit experts json invalid| expertsJsonInvalid[experts-json-invalid]
   symptom -->|audit reference did not resolve| refUnresolvable[ref-unresolvable]
@@ -514,14 +569,19 @@ flowchart TD
   class skillStalls error
   class expertsNotInit error
   class payloadMissingFields error
+  class expertKeyMismatch error
   class jobNotFound error
   class invalidStatusFilter error
   class jobAbsent error
   class routineNameFormat error
   class routineConflict error
+  class routineUnknownType error
+  class routineMissingField error
+  class routineSettingsUnwritable error
   class pumpProtected error
   class daemonStale error
   class recoverStillDirty error
+  class recoverCommitNeedsMessage error
   class stateUnparseable error
   class expertsJsonInvalid error
   class refUnresolvable error

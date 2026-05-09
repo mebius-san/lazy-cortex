@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-last_regen: 2026-05-08
+last_regen: 2026-05-09
 diagram_spec:
   anchor: "Bootstrap order"
   request: "Flow diagram showing the canonical core bootstrap order: enable plugin in settings.json → restart Claude Code → run /lazy-core.install (or /lazy-core.setup for multi-plugin) → restart if rules changed → run /lazy-core.audit to verify → optionally run /lazy-core.optimize and /lazy-core.doctor for ongoing tuning. Show /lazy-core.setup as an alternative entry point that auto-discovers and sequences all enabled plugin install skills."
@@ -17,6 +17,8 @@ source_skills:
 Every lazycortex plugin ships lifecycle skills — install, audit, and sometimes doctor, optimize, and setup. For most plugins those skills are scoped to their own rules and config. For `lazycortex-core` the stakes are higher. Core ships the shared scaffolding every other plugin assumes is already in place: the rule authoring templates, the `lazy.settings.json` runtime structure, the agent-model routing layer, and the expert runtime daemon. Bootstrapping core is bootstrapping the whole lazycortex baseline.
 
 This block covers all five of core's lifecycle skills. The order they run in and the way they build on each other is what matters — this is the only place they are documented together.
+
+**Prerequisite:** all lazycortex plugins require Python 3.12 or later. `/lazy-core.install` checks this at Step 0 and aborts with install instructions if the floor is not met — nothing else in this block will run until Python 3.12+ is available.
 
 ## When you'd use this
 
@@ -99,61 +101,51 @@ The audit and doctor can run at any time without side effects and do not require
 
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
-flowchart TD
+flowchart LR
   enablePlugin[Enable plugin in settings.json]
-  restartFirst[Restart Claude Code]
-  chooseEntryPoint{Single or multi-plugin?}
+  restartInitial[Restart Claude Code]
+  multiPlugin{Multi-plugin setup?}
   runInstall[Run /lazy-core.install]
   runSetup[Run /lazy-core.setup]
-  setupDiscovers[Auto-discover and sequence all enabled plugin install skills]
   rulesChanged{Rules changed?}
-  restartSecond[Restart Claude Code]
-  runAudit[Run /lazy-core.audit to verify]
-  auditPassed{Audit passed?}
-  tuningNeeded{Ongoing tuning needed?}
+  restartAfterRules[Restart Claude Code]
+  runAudit[Run /lazy-core.audit]
+  tuningNeeded{Tuning needed?}
   runOptimize[Run /lazy-core.optimize]
   runDoctor[Run /lazy-core.doctor]
-  bootstrapDone[Bootstrap complete]
-  fixIssues[Fix reported issues]
+  verifiedDone[Bootstrap verified — Done]
 
-  enablePlugin -->|save config| restartFirst
-  restartFirst -->|session ready| chooseEntryPoint
-  chooseEntryPoint -->|single plugin| runInstall
-  chooseEntryPoint -->|multi-plugin| runSetup
-  runSetup -->|discovers plugins| setupDiscovers
-  setupDiscovers -->|sequences installs| rulesChanged
-  runInstall -->|install complete| rulesChanged
-  rulesChanged -->|yes - rules changed| restartSecond
-  rulesChanged -->|no rules changed| runAudit
-  restartSecond -->|session reloaded| runAudit
-  runAudit -->|results collected| auditPassed
-  auditPassed -->|yes - all checks pass| tuningNeeded
-  auditPassed -->|no - issues found| fixIssues
-  fixIssues -->|issues resolved| runAudit
-  tuningNeeded -->|yes - run optimization| runOptimize
-  tuningNeeded -->|no - skip tuning| bootstrapDone
-  runOptimize -->|optimization done| runDoctor
-  runDoctor -->|health checked| bootstrapDone
+  enablePlugin -->|enable| restartInitial
+  restartInitial -->|ready| multiPlugin
+  multiPlugin -->|single plugin| runInstall
+  multiPlugin -->|multi-plugin| runSetup
+  runSetup -->|auto-discovers and sequences all enabled plugin install skills| rulesChanged
+  runInstall -->|installed| rulesChanged
+  rulesChanged -->|yes — rules changed| restartAfterRules
+  rulesChanged -->|no change| runAudit
+  restartAfterRules -->|reloaded| runAudit
+  runAudit -->|audit pass| tuningNeeded
+  tuningNeeded -->|optimize| runOptimize
+  tuningNeeded -->|diagnose| runDoctor
+  tuningNeeded -->|skip| verifiedDone
+  runOptimize -->|done| verifiedDone
+  runDoctor -->|done| verifiedDone
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
   class enablePlugin entry
-  class restartFirst action
-  class chooseEntryPoint guard
+  class restartInitial action
+  class multiPlugin guard
   class runInstall action
   class runSetup action
-  class setupDiscovers action
   class rulesChanged guard
-  class restartSecond action
+  class restartAfterRules action
   class runAudit action
-  class auditPassed guard
   class tuningNeeded guard
   class runOptimize action
   class runDoctor action
-  class bootstrapDone success
-  class fixIssues error
+  class verifiedDone success
 ```

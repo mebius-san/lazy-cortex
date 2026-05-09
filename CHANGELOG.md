@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 2.1.1 — 2026-05-09 UTC
+
+- Expert subprocess runs now save their full output to `transcript.jsonl` inside the job directory, giving you a post-hoc audit trail whenever an expert behaves unexpectedly. Transcripts are retained for 7 days (the default `cleanup_completed_after` window).
+
 ### 2.1.0 — 2026-05-08 UTC
 
 - The runtime daemon no longer clobbers in-progress operator edits: iterations now skip entirely when the working tree is dirty at the start of the cycle, and the halt-on-unexpected-dirt check fires only on paths that became dirty _during_ a routine — not on pre-existing changes from concurrent terminal work.

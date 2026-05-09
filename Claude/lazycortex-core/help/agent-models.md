@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Assign haiku/sonnet/opus tiers to every agent in your vault and let the model-router hook route each dispatch automatically.
-last_regen: 2026-05-08
+last_regen: 2026-05-09
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
@@ -36,7 +36,7 @@ After the write, `lazy-core.model-router` picks up the new entries immediately o
 
 **After adding new agents.** The wizard is idempotent — running it again on a fully-configured vault reports "nothing to do". Run it freely after installing a new plugin or authoring a new agent.
 
-**Changing an existing tier.** `/lazy-core.agent-models` never overwrites existing entries; it only adds missing ones. To change a tier already set, run `/lazy-core.agent-models --scope=project` for a project-level override, or edit the entry directly via `/lazy-core.optimize` Phase 7, which re-prompts for any newly-missing entries.
+**Changing an existing tier.** `/lazy-core.agent-models` never overwrites existing entries; it only adds missing ones. To raise or lower a tier that's already set, run `/lazy-core.agent-models --scope=project` — the project-level entry shadows the global one without destroying it. To remove a project-level override and fall back to the global tier, delete that entry from `./.claude/lazy.settings.json` via `/lazy-core.optimize` Phase 7, which re-prompts for any entries that go missing after cleanup.
 
 ## Where this fits
 

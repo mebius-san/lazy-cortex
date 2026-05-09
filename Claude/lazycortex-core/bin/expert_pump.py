@@ -129,6 +129,14 @@ def _process_one(repo: Path, expert_name: str, identity: dict, jdir: Path) -> No
                  "--agent", str(agent_path), prompt],
                 env=env, cwd=repo, capture_output=True, text=True, timeout=900,
             )
+            # Persist the transcript on every attempt — the last write wins,
+            # matching the final outcome. Job dirs are retained per
+            # `cleanup_completed_after` (default 7d) which is the intended
+            # debug window. Best-effort; never block DONE on a write failure.
+            try:
+                (jdir / "transcript.jsonl").write_text(proc.stdout or "")
+            except Exception as e:  # pragma: no cover — defensive
+                sys.stderr.write(f"transcript write failed: {e}\n")
             if proc.returncode == 0 and (jdir / "response.json").exists():
                 # Token capture is best-effort — never block DONE.
                 try:
