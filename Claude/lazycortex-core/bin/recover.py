@@ -35,7 +35,7 @@ def is_clean(repo: Path) -> bool:
     convention)."""
     try:
         rc = subprocess.run(
-            ["git", "-c", "color.status=never", "status", "--porcelain"],
+            ["git", "--no-optional-locks", "-c", "color.status=never", "status", "--porcelain"],
             cwd=str(repo), capture_output=True, text=True,
         )
     except FileNotFoundError:
@@ -91,7 +91,7 @@ def resume(repo: Path) -> None:
     """
     if not is_clean(repo):
         rc = subprocess.run(
-            ["git", "-c", "color.status=never", "status", "--porcelain"],
+            ["git", "--no-optional-locks", "-c", "color.status=never", "status", "--porcelain"],
             cwd=str(repo), capture_output=True, text=True,
         )
         raise RecoverError(

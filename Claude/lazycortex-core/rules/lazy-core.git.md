@@ -33,4 +33,4 @@ Multiple Claude Code sessions on the same checkout share **one git index**. With
 
 ## Disabling
 
-In `<repo>/.claude/lazy.settings.json` add `{"lazy-core.git": {"enabled": false}}` to short-circuit the hook entirely. Useful in single-session repos where the lock is noise.
+In `<repo>/.claude/lazy.settings.json` add `{"git": {"enabled": false}}` to short-circuit the hook entirely. Useful in single-session repos where the lock is noise.

@@ -9,7 +9,7 @@ Bootstrap the plugin in the right scope: copy every rule template shipped by the
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 14 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 16 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 0 — Verify Python ≥ 3.12 (floor)`
@@ -19,13 +19,16 @@ This skill has 14 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 4 — Sync authoring templates`
    - `Step 5 — Verify`
    - `Step 6 — Seed lazy.settings.json`
-   - `Step 7 — Bootstrap runtime defaults`
-   - `Step 8 — Bootstrap experts directory`
-   - `Step 9 — Expert-add wizard`
-   - `Step 10 — Bootstrap expert-pump routine`
-   - `Step 11 — Offer daemon supervisor install`
-   - `Step 12 — Report`
-   - `Step 13 — Log the run`
+   - `Step 7 — Bootstrap .logs/ directory`
+   - `Step 8 — Migrate stale lazycortex-log hook registrations`
+   - `Step 9 — Bootstrap runtime defaults`
+   - `Step 10 — Bootstrap experts directory`
+   - `Step 10.5 — Bootstrap .memory/ directory`
+   - `Step 11 — Expert-add wizard`
+   - `Step 12 — Bootstrap expert-pump routine`
+   - `Step 13 — Offer daemon supervisor install`
+   - `Step 14 — Report`
+   - `Step 15 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -48,7 +51,7 @@ AskUserQuestion:
 
 On macOS / Linux options: print the corresponding command for the user to run in their own shell — do NOT execute it (this skill never installs system packages on the user's behalf). Then state outcome `awaiting-user-install` and abort the run; the user re-runs `/lazy-core.install` once the upgrade lands.
 
-On `Skip — abort install`: state outcome `aborted-python-floor-not-met` and exit with the message `Python 3.12+ required — re-run /lazy-core.install once installed.`. Skip Steps 1–13.
+On `Skip — abort install`: state outcome `aborted-python-floor-not-met` and exit with the message `Python 3.12+ required — re-run /lazy-core.install once installed.`. Skip Steps 1–15.
 
 If `python3 -V` reports ≥ 3.12.0: state outcome `python-floor-ok (<version>)` and proceed to Step 1.
 
@@ -217,44 +220,80 @@ If any mutation happened, write the file with `version: 1` at the top. Preserve 
 
 One line per seeded default: `_builtin.<key> = <value> (<state>)`. Plus `_user`, `_project`: `created (empty)` if new, `unchanged` otherwise.
 
-## Step 7: Bootstrap runtime defaults
+## Step 7: Bootstrap .logs/ directory
 
-Steps 7–11 set up the per-repo runtime layer (`.experts/`, expert wizard, daemon supervisor). They operate on the **current working repo**, independent of the plugin's install scope — runtime artifacts are always per-repo, even when the plugin is installed at user scope.
+Create `.logs/` at the repo root and ensure `.gitignore` covers it. `.logs/` is gitignored runtime state: daemon output, recall logs, and the commit-recorder feed. This step runs unconditionally (it is not gated on runtime-setup confirmation) and is absorbed from the retired `lazy-log.install` skill.
 
-For Steps 7–11, `<repo-root>` is the cwd's git toplevel (resolved or initialized in 7a below), even if Step 1 detected install scope as `user`.
+Run via:
 
-### 7a. Resolve the runtime repo
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from pathlib import Path
+from lazy_install_phases import bootstrap_logs_dir
+print(bootstrap_logs_dir(Path('.')))
+")
+```
+
+Outcome: `bootstrapped` (dir created and/or `.gitignore` updated) or `already-present` (both existed).
+
+## Step 8: Migrate stale lazycortex-log hook registrations
+
+The `lazycortex-log` plugin was retired and folded into `lazycortex-core`. Its `hooks/lazy-log.commit-recorder.py` was registered under `${CLAUDE_PLUGIN_ROOT}/lazycortex-log/hooks/` in consumer `settings.json` files. This step strips those stale registrations from the four standard settings paths so the retired plugin path no longer appears in the consumer's hook pipeline.
+
+Run via:
+
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from pathlib import Path
+from lazy_install_phases import migrate_log_hooks
+for p in [Path('.claude/settings.json'),
+          Path('.claude/settings.local.json'),
+          Path.home() / '.claude/settings.json',
+          Path.home() / '.claude/settings.local.json']:
+    print(f'{p}: {migrate_log_hooks(p)}')
+")
+```
+
+Idempotent: a second run on already-clean files is a no-op. Report one line per path with its outcome word (`migrated` or `no-stale-entries`).
+
+## Step 9: Bootstrap runtime defaults
+
+Steps 9–13 set up the per-repo runtime layer (`.experts/`, expert wizard, daemon supervisor). They operate on the **current working repo**, independent of the plugin's install scope — runtime artifacts are always per-repo, even when the plugin is installed at user scope.
+
+For Steps 9–13, `<repo-root>` is the cwd's git toplevel (resolved or initialized in 9a below), even if Step 1 detected install scope as `user`.
+
+### 9a. Resolve the runtime repo
 
 Run `git rev-parse --show-toplevel` in cwd:
 
-- If it succeeds, set `<repo-root>` to the returned path and proceed to 7b.
+- If it succeeds, set `<repo-root>` to the returned path and proceed to 9b.
 - If it fails (cwd is not inside a git repo), ask:
 
   ```
   AskUserQuestion:
     question: "Current directory is not a git repository. Initialize one here to enable runtime/experts setup?"
-    description: "Runtime artifacts (`.experts/`, daemon supervisor units) need a repo root. Initializing here means git-tracking your runtime config alongside the rest of the directory; skipping bypasses runtime/experts setup for this run — Steps 3–6 are unaffected."
+    description: "Runtime artifacts (`.experts/`, daemon supervisor units) need a repo root. Initializing here means git-tracking your runtime config alongside the rest of the directory; skipping bypasses runtime/experts setup for this run — Steps 3–8 are unaffected."
     options: ["Initialize git here", "Skip — no runtime setup"]
   ```
 
-  - On `Initialize git here`: run `Bash(git init)` in cwd, then set `<repo-root>` to cwd. Proceed to 7b.
-  - On `Skip — no runtime setup`: mark Steps 7–11 with outcome `skipped-not-in-git-repo`, skip to Step 12.
+  - On `Initialize git here`: run `Bash(git init)` in cwd, then set `<repo-root>` to cwd. Proceed to 9b.
+  - On `Skip — no runtime setup`: mark Steps 9–13 with outcome `skipped-not-in-git-repo`, skip to Step 14.
 
-### 7b. Confirm runtime setup
+### 9b. Confirm runtime setup
 
 Ask once:
 
 ```
 AskUserQuestion:
   question: "Bootstrap runtime/experts for this repo at `<repo-root>`?"
-  description: "Sets up `.experts/experts.settings.json`, `.claude/bin/lazy.runtime.sh` shim, the `lazy-core.runtime` block in `.claude/lazy.settings.json`, plus the expert-add wizard and optional daemon supervisor. Skip if you don't need this in this repo yet — the rest of the install is unaffected and you can re-run `/lazy-core.install` later."
+  description: "Sets up `lazy.settings.json[experts]`, `.claude/bin/lazy.runtime.sh` shim, the `lazy-core.runtime` block in `.claude/lazy.settings.json`, plus the expert-add wizard and optional daemon supervisor. Skip if you don't need this in this repo yet — the rest of the install is unaffected and you can re-run `/lazy-core.install` later."
   options: ["Yes", "Skip — this repo doesn't need runtime/experts"]
 ```
 
-- On `Skip — this repo doesn't need runtime/experts`: mark Steps 7–11 with outcome `skipped-per-user-choice`, skip to Step 12.
-- On `Yes`: continue with 7c below and run Steps 8–11.
+- On `Skip — this repo doesn't need runtime/experts`: mark Steps 9–13 with outcome `skipped-per-user-choice`, skip to Step 14.
+- On `Yes`: continue with 9c below and run Steps 10–13.
 
-### 7c. Write `lazy-core.runtime`
+### 9c. Write `lazy-core.runtime`
 
 Read `<repo-root>/.claude/lazy.settings.json`. If the top-level key `lazy-core.runtime` is absent, add it by running:
 
@@ -271,7 +310,8 @@ save_section(
             'git': None,
             'polling_interval_sec': 5,
             'cleanup_completed_after': '7d',
-            'cleanup_failed_after': '30d'
+            'cleanup_failed_after': '30d',
+            'cleanup_dead_after': '7d'
         },
         'routines': {}
     }
@@ -279,11 +319,11 @@ save_section(
 "
 ```
 
-State **bootstrapped** if the section was absent and was written; **already-present** if it already existed (do NOT overwrite); **skipped-not-in-git-repo** or **skipped-per-user-choice** if 7a/7b chose to skip.
+State **bootstrapped** if the section was absent and was written; **already-present** if it already existed (do NOT overwrite); **skipped-not-in-git-repo** or **skipped-per-user-choice** if 9a/9b chose to skip.
 
-## Step 8: Bootstrap experts directory
+## Step 10: Bootstrap experts directory
 
-If Step 7 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
 
 Otherwise, perform the following three idempotent operations:
 
@@ -298,9 +338,9 @@ The shim resolves the latest `lazycortex-core/bin/runner` from the plugin cache 
 
 State **created** if copied; **already-present** if it existed.
 
-### Ensure `experts.settings.json`
+### Ensure `lazy.settings.json[experts]`
 
-Check whether `<repo-root>/.experts/experts.settings.json` exists. If missing, `Write` the file with content `{"_version": 1}`.
+Check whether the `experts` section exists in `<repo-root>/.claude/lazy.settings.json`. If missing, write it with content `{"_version": 1}` via `lazy_settings.save_section`.
 
 State **created** if written; **already-present** if it existed.
 
@@ -312,9 +352,25 @@ Read `<repo-root>/.gitignore` (or treat as empty if missing). Ensure it contains
 
 If either line is absent, append all missing lines to `.gitignore` with `Edit` (or `Write` if the file was missing). State **updated** if any line was appended; **already-present** if both were already there.
 
-## Step 9: Expert-add wizard
+## Step 10.5: Bootstrap .memory/ directory
 
-If Step 7 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
+
+Otherwise, ensure `.memory/` exists and is **un-ignored** in `.gitignore` so memory notes are tracked in git (per `Spec §8.1`):
+
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from pathlib import Path
+from lazy_install_phases import bootstrap_memory_dir
+print(bootstrap_memory_dir(Path('.')))
+")
+```
+
+Outcome: `bootstrapped` (dir created and/or `.gitignore` updated) or `already-present` (both existed).
+
+## Step 11: Expert-add wizard
+
+If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
 
 Otherwise, ask the user once:
 
@@ -324,7 +380,7 @@ AskUserQuestion:
   options: ["Yes", "Skip — I'll do this later"]
 ```
 
-On `Skip — I'll do this later`, state **skipped-per-user-choice** and move to Step 10.
+On `Skip — I'll do this later`, state **skipped-per-user-choice** and move to Step 12.
 
 On `Yes`, run the wizard:
 
@@ -356,13 +412,13 @@ print(resolved)
 
 If `resolve_reference` raises an exception or returns `None`, skip that candidate and record it in the report as `protocol-unresolvable`.
 
-If no candidates are found after scanning all three scopes, state **no-candidates** and proceed to Step 10.
+If no candidates are found after scanning all three scopes, state **no-candidates** and proceed to Step 12.
 
 ### 2. Filter already-registered candidates
 
-Load `<repo-root>/.experts/experts.settings.json`. Skip any candidate whose `agent_name` already appears as a key in the JSON (besides `_version`).
+Load the `experts` section of `<repo-root>/.claude/lazy.settings.json` (via `lazy_settings.load_section`). Skip any candidate whose `agent_name` already appears as a key in the section (besides `_version`).
 
-If all candidates are filtered out, state **all-already-registered** and proceed to Step 10.
+If all candidates are filtered out, state **all-already-registered** and proceed to Step 12.
 
 ### 3. Present each candidate one at a time
 
@@ -375,7 +431,7 @@ AskUserQuestion:
 ```
 
 On `Skip`: move to the next candidate.
-On `Stop wizard`: stop iterating; proceed to Step 10 with whatever was accepted so far.
+On `Stop wizard`: stop iterating; proceed to Step 12 with whatever was accepted so far.
 On `Yes`: ask for the three fields below (one `AskUserQuestion` each, strictly in sequence):
 
 **a.** Local name for this expert in the project:
@@ -405,35 +461,32 @@ AskUserQuestion:
 ```
 Use default if chosen; otherwise prompt once more.
 
-### 4. Write accepted candidates to `experts.settings.json`
+### 4. Write accepted candidates to `lazy.settings.json[experts]`
 
 For each accepted candidate, merge the new entry via:
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
-import json, os, tempfile
 from pathlib import Path
-p = Path('<repo-root>/.experts/experts.settings.json')
-data = json.loads(p.read_text())
-data['<local_name>'] = {
+from lazy_settings import load_section, save_section
+p = Path('<repo-root>/.claude/lazy.settings.json')
+section = load_section(p, 'experts')
+section['<local_name>'] = {
     'agent': '<plugin>:<agent_name>',
-    'protocol': '<expert_protocol_ref>',
     'git_author': {'name': '<author_name>', 'email': '<author_email>'}
 }
-tmp = p.with_suffix('.tmp')
-tmp.write_text(json.dumps(data, indent=2))
-os.replace(tmp, p)
+save_section(p, 'experts', section)
 "
 ```
 
 State one line per candidate: `<local_name>: registered` or `skipped`.
 
-## Step 10: Bootstrap expert-pump routine
+## Step 12: Bootstrap expert-pump routine
 
-If Step 7 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
 
 Otherwise, check two conditions:
-1. `<repo-root>/.experts/experts.settings.json` contains at least one expert entry (a key that is not `_version` and whose value is a dict).
+1. The `experts` section of `<repo-root>/.claude/lazy.settings.json` contains at least one expert entry (a key that is not `_version` and whose value is a dict).
 2. `lazy.settings.json[lazy-core.runtime].routines` does NOT already contain a key `lazy-expert.pump`.
 
 If both conditions are true, run:
@@ -448,11 +501,11 @@ bootstrap_default_routines(Path('<repo-root>'))
 
 State **registered** if the routine was added; **already-present** if it was already there; **skipped-no-experts** if condition 1 was false.
 
-## Step 11: Offer daemon supervisor install
+## Step 13: Offer daemon supervisor install
 
-If Step 7 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
 
-Otherwise, only proceed if Step 10 produced outcome **registered** (i.e., the expert-pump routine was freshly added — there is something to drain). If Step 10 was **already-present** or **skipped-no-experts**, state **skipped-no-pump** and move on.
+Otherwise, only proceed if Step 12 produced outcome **registered** (i.e., the expert-pump routine was freshly added — there is something to drain). If Step 12 was **already-present** or **skipped-no-experts**, state **skipped-no-pump** and move on.
 
 Ask:
 
@@ -480,7 +533,7 @@ On `Linux systemd`:
 5. `Bash(systemctl --user enable --now lazy-core-runtime-<REPO_NAME>.service)`
 6. State **systemd-installed**.
 
-## Step 12: Report
+## Step 14: Report
 
 Report to the user:
 - Python version probe outcome (Step 0)
@@ -489,13 +542,16 @@ Report to the user:
 - For each rule: state (**created**, **updated**, **unchanged**, or **kept-local**) and target `<path>`
 - For each authoring template: state and target `<path>` (Step 4)
 - Per-key `agent_models` seed outcome from Step 6
-- Runtime bootstrap outcome (Step 7)
-- Experts directory bootstrap outcome (Step 8)
-- Expert-add wizard outcome (Step 9)
-- Expert-pump routine registration outcome (Step 10)
-- Daemon supervisor install outcome (Step 11)
+- `.logs/` directory bootstrap outcome (Step 7)
+- Hook migration outcome (Step 8): one line per settings path (`migrated` or `no-stale-entries`)
+- Runtime bootstrap outcome (Step 9)
+- Experts directory bootstrap outcome (Step 10)
+- `.memory/` directory bootstrap outcome (Step 10.5)
+- Expert-add wizard outcome (Step 11)
+- Expert-pump routine registration outcome (Step 12)
+- Daemon supervisor install outcome (Step 13)
 
-## Step 13: Log the run
+## Step 15: Log the run
 
 Log to `./.logs/claude/lazy-core.install/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter).
 
@@ -507,19 +563,22 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **`/lazy-core.install` aborts: "plugin cache is empty — run `/plugin update` first"** — the rule glob under the plugin's `installPath` returned zero files → run `/plugin update lazycortex-core@lazycortex` to refresh the cache, then re-run.
 - **Step 4 aborts: "plugin cache is broken" (templates directory empty)** — the `templates/core/` directory inside the plugin cache is missing or empty → run `/plugin update lazycortex-core@lazycortex`, then re-run.
 - **Step 6 fails: "default-tiers.json missing or invalid"** — `lazy-core.agent-models/default-tiers.json` cannot be read or parsed → reinstall `lazycortex-core` to restore the file, then re-run.
-- **Step 7 fails: settings file unwritable** — `lazy_settings.save_section` raises a permission or I/O error when writing `lazy-core.runtime` into `.claude/lazy.settings.json` → check file permissions on `.claude/lazy.settings.json` and the `.claude/` directory, then re-run.
-- **Step 9 wizard: "no candidates found"** — no agent files with `expert_protocol:` frontmatter were found under any of the three discovery scopes → no experts are available to register; the wizard skips automatically.
-- **Step 9 wizard: frontmatter parse failure** — a candidate agent file's frontmatter is malformed YAML → the candidate is skipped and flagged in the report as `parse-error`; fix the frontmatter manually and re-run `/lazy-core.install` to pick it up.
-- **Step 9 wizard: protocol reference unresolvable** — `reference_resolver.resolve_reference` returns `None` or raises for a candidate's `expert_protocol:` value → the candidate is skipped and flagged as `protocol-unresolvable`; verify the protocol file exists at the referenced path or reinstall the owning plugin.
-- **Step 11 fails: supervisor template not found** — `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist` or `lazy-core-runtime.service` is missing from the plugin cache → run `/plugin update lazycortex-core@lazycortex` to restore templates, then re-run.
-- **Step 11 fails: `launchctl load` error** — the plist was written but `launchctl load` returned a non-zero exit code → inspect the plist at `~/Library/LaunchAgents/` for substitution errors, then run `launchctl load <path>` manually.
-- **Step 11 fails: `systemctl --user enable --now` error** — the service unit was written but `systemctl` returned a non-zero exit code → run `systemctl --user status lazy-core-runtime-<REPO_NAME>.service` to inspect the error, then correct and re-enable manually.
+- **Step 7 fails: `.logs/` not a directory** — a file named `.logs` already exists at the repo root → remove or rename it, then re-run.
+- **Step 7 fails: `.gitignore` unwritable** — `bootstrap_logs_dir` raised a permission or I/O error → check permissions on the repo root, then re-run.
+- **Step 8 fails: settings.json malformed JSON** — one of the four standard settings paths contains invalid JSON → fix the file manually, then re-run.
+- **Step 9 fails: settings file unwritable** — `lazy_settings.save_section` raises a permission or I/O error when writing `lazy-core.runtime` into `.claude/lazy.settings.json` → check file permissions on `.claude/lazy.settings.json` and the `.claude/` directory, then re-run.
+- **Step 11 wizard: "no candidates found"** — no agent files with `expert_protocol:` frontmatter were found under any of the three discovery scopes → no experts are available to register; the wizard skips automatically.
+- **Step 11 wizard: frontmatter parse failure** — a candidate agent file's frontmatter is malformed YAML → the candidate is skipped and flagged in the report as `parse-error`; fix the frontmatter manually and re-run `/lazy-core.install` to pick it up.
+- **Step 11 wizard: protocol reference unresolvable** — `reference_resolver.resolve_reference` returns `None` or raises for a candidate's `expert_protocol:` value → the candidate is skipped and flagged as `protocol-unresolvable`; verify the protocol file exists at the referenced path or reinstall the owning plugin.
+- **Step 13 fails: supervisor template not found** — `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist` or `lazy-core-runtime.service` is missing from the plugin cache → run `/plugin update lazycortex-core@lazycortex` to restore templates, then re-run.
+- **Step 13 fails: `launchctl load` error** — the plist was written but `launchctl load` returned a non-zero exit code → inspect the plist at `~/Library/LaunchAgents/` for substitution errors, then run `launchctl load <path>` manually.
+- **Step 13 fails: `systemctl --user enable --now` error** — the service unit was written but `systemctl` returned a non-zero exit code → run `systemctl --user status lazy-core-runtime-<REPO_NAME>.service` to inspect the error, then correct and re-enable manually.
 
 ## Notes
 
 - **Idempotent**: running this skill multiple times is safe. Files are only created/updated when there's a real change.
 - **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does **not** re-sync rule files into `.claude/rules/`. Re-run this skill after every plugin update to pick up rule changes — otherwise projects keep running the old rule content.
 - **Scope independence**: running at project scope does not affect other projects or the global config.
-- **Runtime is per-repo, not per-scope**: Steps 3–6 follow the plugin's install scope (`user` writes to `~/.claude/`, `project` writes to `<repo-root>/.claude/`). Steps 7–11 always target the current working repo (cwd's git toplevel) regardless of install scope, because runtime artifacts (`.experts/`, daemon supervisor units) are inherently per-repo. Run `/lazy-core.install` from inside each repo where you want runtime to be set up.
-- **Re-run after `git clone`**: rules/templates/`lazy.settings.json`/`experts.settings.json`/`lazy.runtime.sh` are committed into the repo, but the daemon supervisor units (launchd plist / systemd service) are per-user and not in the repo. Re-run this skill after cloning to install the supervisor for the current machine and to pick up any newer plugin shipped versions. Pick `Skip — no runtime setup` in 7a or `Skip — this repo doesn't need runtime/experts` in 7b if you don't want runtime in this repo at all.
+- **Runtime is per-repo, not per-scope**: Steps 3–8 follow the plugin's install scope (`user` writes to `~/.claude/`, `project` writes to `<repo-root>/.claude/`). Steps 9–13 always target the current working repo (cwd's git toplevel) regardless of install scope, because runtime artifacts (`.experts/`, daemon supervisor units) are inherently per-repo. Run `/lazy-core.install` from inside each repo where you want runtime to be set up.
+- **Re-run after `git clone`**: rules/templates/`lazy.settings.json`/`lazy.runtime.sh` are committed into the repo, but the daemon supervisor units (launchd plist / systemd service) are per-user and not in the repo. Re-run this skill after cloning to install the supervisor for the current machine and to pick up any newer plugin shipped versions. Pick `Skip — no runtime setup` in 9a or `Skip — this repo doesn't need runtime/experts` in 9b if you don't want runtime in this repo at all.
 - **Next steps shown to user**: if any rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start).

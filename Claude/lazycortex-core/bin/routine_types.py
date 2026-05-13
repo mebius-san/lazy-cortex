@@ -9,8 +9,9 @@ RoutineConfigError. Per-type custom constraints (e.g. schedule's exactly-one
 between `command` vs `expert+request`) are enforced too.
 """
 from __future__ import annotations
+import re
 
-VALID_TYPES = {"subprocess", "inbox", "schedule", "git"}
+VALID_TYPES = {"subprocess", "inbox", "schedule", "git", "md-scan"}
 
 VALID_GIT_WATCH = {
     "new_commits", "new_files", "changed_files", "deleted_files", "renamed_files",
@@ -33,9 +34,75 @@ SCHEMAS = {
         "required": {"branch", "watch", "expert", "request", "interval_sec"},
         "optional": {"repo_dir", "remote", "path_filter", "timeout_sec"},
     },
+    "md-scan": {
+        "required": {"paths", "frontmatter_filter", "agent", "interval_sec"},
+        "optional": {"timeout_sec"},
+    },
 }
 
-COMMON_ALLOWED = {"type"}
+COMMON_ALLOWED = {"type", "protocol", "protocols"}
+
+
+def _resolve_expert(repo, expert_name: str) -> dict:
+    """Look up an expert entry in lazy.settings.json[experts]. Returns the
+    entry dict (with agent / git_author / ...). Returns an empty dict when
+    the expert isn't registered — the resulting config.json will have
+    missing fields, and the pump rejects the job at spawn time. This
+    keeps routine dispatch (and its tests) decoupled from the experts
+    section being seeded."""
+    from pathlib import Path
+    from lazy_settings import load_section
+    experts = load_section(Path(repo) / ".claude/lazy.settings.json", "experts")
+    entry = experts.get(expert_name)
+    if not isinstance(entry, dict):
+        return {}
+    return entry
+
+
+def _routine_protocols(cfg: dict) -> list[str]:
+    """Pick the routine's declared protocols list. Routine config accepts
+    either `protocol: <id>` (single) or `protocols: [<id>, ...]` (list).
+    Returns a list — single becomes a one-item list. Empty list when the
+    routine didn't declare a protocol; caller handles whether that's an
+    error or fine for this routine type."""
+    p = cfg.get("protocols")
+    if isinstance(p, list):
+        return list(p)
+    single = cfg.get("protocol")
+    if isinstance(single, str):
+        return [single]
+    return []
+
+
+_ARG_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def _write_job_config(jdir, expert_name: str, expert_entry: dict,
+                      protocols: list[str], aspects: list[str], arguments: dict) -> None:
+    """Compose <jdir>/config.json so the expert pump has everything it
+    needs in one place — agent path-ref, declared protocols, expert-side
+    aspects + arguments, git author. No env vars, no lookups elsewhere
+    at spawn time.
+
+    arguments keys must match ^[a-z][a-z0-9_]*$ — keeps the rendered
+    `- argument: <name> = <value>` prompt line grep-friendly and
+    deterministic. Invalid key → RoutineConfigError before the job
+    dir is written, so the queued job never reaches the pump broken.
+    """
+    import json
+    from pathlib import Path
+    for k in (arguments or {}):
+        if not _ARG_KEY_RE.match(k):
+            raise RoutineConfigError(f"arguments-key-invalid: {k}")
+    cfg = {
+        "agent": expert_entry.get("agent"),
+        "protocols": list(protocols or []),
+        "aspects": list(aspects or []),
+        "arguments": dict(arguments or {}),
+        "git_author": expert_entry.get("git_author", {}),
+    }
+    Path(jdir).mkdir(parents=True, exist_ok=True)
+    (Path(jdir) / "config.json").write_text(json.dumps(cfg, indent=2))
 
 
 class RoutineConfigError(ValueError):
@@ -97,6 +164,16 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
                 f"Valid: {sorted(VALID_GIT_WATCH)}."
             )
 
+    if rtype == "md-scan":
+        if not isinstance(cfg.get("paths"), list):
+            raise RoutineConfigError(
+                f"routine '{name}' (type=md-scan): 'paths' must be a list of globs"
+            )
+        if not isinstance(cfg.get("frontmatter_filter"), dict):
+            raise RoutineConfigError(
+                f"routine '{name}' (type=md-scan): 'frontmatter_filter' must be a dict"
+            )
+
 
 def dispatch_routine(repo, name: str, cfg: dict) -> dict:
     """Dispatch one routine tick. Returns the standard tick result dict.
@@ -115,6 +192,8 @@ def dispatch_routine(repo, name: str, cfg: dict) -> dict:
         return dispatch_schedule(repo, name, cfg)
     if rtype == "git":
         return dispatch_git(repo, name, cfg)
+    if rtype == "md-scan":
+        return dispatch_md_scan(repo, name, cfg)
     # Validator should have caught this; this is a defensive guard.
     raise RoutineConfigError(f"routine '{name}': unknown type '{rtype}' at dispatch time")
 
@@ -122,6 +201,25 @@ def dispatch_routine(repo, name: str, cfg: dict) -> dict:
 # Per-type handlers — implementations land in their own phases (C/D/E).
 # Until then, calling these returns a clean error result so the daemon's
 # tick loop doesn't crash; just logs and moves on.
+
+def _match_frontmatter_filter(flt: dict, frontmatter: dict) -> bool:
+    """Apply an AND-combined frontmatter filter for md-scan.
+
+    Filter shape: {key: <value-or-list-of-values>}. The file matches when
+    EVERY key in the filter has its frontmatter value present in the
+    accepted-values list. None in the accepted list matches a missing key
+    OR an explicit None value.
+
+    Scalar values in the filter are treated as single-element lists.
+    """
+    for key, accepted in flt.items():
+        if not isinstance(accepted, list):
+            accepted = [accepted]
+        actual = frontmatter.get(key, None)
+        if actual not in accepted and not (None in accepted and actual is None):
+            return False
+    return True
+
 
 def _not_implemented(name: str, rtype: str) -> dict:
     import time
@@ -187,6 +285,11 @@ def dispatch_inbox(repo, name: str, cfg: dict) -> dict:
     # Lazy import to avoid hard coupling on expert_runtime layout details.
     from expert_runtime import JOBS_BASE
 
+    expert_entry = _resolve_expert(repo, expert)
+    protocols = _routine_protocols(cfg)
+    aspects = expert_entry.get("aspects") or []
+    arguments = expert_entry.get("arguments") or {}
+
     dispatched = 0
     for f in candidates:
         job_id = uuid.uuid4().hex[:12]
@@ -196,6 +299,7 @@ def dispatch_inbox(repo, name: str, cfg: dict) -> dict:
             f.rename(job_dir / "source" / f.name)  # atomic on same filesystem
             request = _render_template(request_template, {"file": f.name})
             (job_dir / "request.json").write_text(json.dumps(request, indent=2))
+            _write_job_config(job_dir, expert, expert_entry, protocols, aspects, arguments)
             (job_dir / "READY").touch()
             dispatched += 1
         except Exception as e:
@@ -240,8 +344,13 @@ def dispatch_schedule(repo, name: str, cfg: dict) -> dict:
         "cron_fire_ts": now.isoformat(),
         "cron_fire_unix": str(int(now.timestamp())),
     })
+    expert_entry = _resolve_expert(repo, expert)
+    protocols = _routine_protocols(cfg)
+    aspects = expert_entry.get("aspects") or []
+    arguments = expert_entry.get("arguments") or {}
     from expert_runtime import dispatch_job
-    dispatch_job(Path(repo), expert, request)
+    result = dispatch_job(Path(repo), expert, request)
+    _write_job_config(result["queue_path"], expert, expert_entry, protocols, aspects, arguments)
     return {
         "name": name, "exit": 0,
         "duration_sec": time.time() - started,
@@ -326,10 +435,15 @@ def dispatch_git(repo, name: str, cfg: dict) -> dict:
 
     items = _compute_git_items(work_dir, last_seen, head_sha, watch, path_filter)
 
+    expert_entry = _resolve_expert(repo, expert)
+    protocols = _routine_protocols(cfg)
+    aspects = expert_entry.get("aspects") or []
+    arguments = expert_entry.get("arguments") or {}
     from expert_runtime import dispatch_job
     for item in items:
         rendered = _render_template(request_template, item)
-        dispatch_job(repo, expert, rendered)
+        result = dispatch_job(repo, expert, rendered)
+        _write_job_config(result["queue_path"], expert, expert_entry, protocols, aspects, arguments)
 
     git_state["last_seen_sha"] = head_sha
     runtime_state.save(repo, state)
@@ -466,3 +580,83 @@ def _last_change_sha(work_dir, path: str, rng: str, status: str) -> str:
         return out or "unknown"
     except subprocess.CalledProcessError:
         return "unknown"
+
+
+def dispatch_md_scan(repo, name: str, cfg: dict) -> dict:
+    """Glob `cfg['paths']` under `repo`, parse each match's frontmatter,
+    filter by `cfg['frontmatter_filter']`, dispatch the agent on every
+    surviving file via the expert-runtime job queue.
+
+    In-place semantics: never moves the source file; the agent receives
+    the absolute path and edits the file where it lies.
+    """
+    import time
+    from glob import glob
+    from pathlib import Path
+    started = time.time()
+    repo = Path(repo)
+
+    paths_globs = cfg["paths"]
+    flt = cfg["frontmatter_filter"]
+    expert = cfg["agent"]
+
+    # Glob & dedupe by resolved absolute path
+    seen_abs = set()
+    candidates = []
+    for g in paths_globs:
+        for hit in sorted(glob(str(repo / g))):
+            ap = Path(hit).resolve()
+            if ap in seen_abs:
+                continue
+            seen_abs.add(ap)
+            if ap.is_file():
+                candidates.append(ap)
+
+    dispatched = 0
+    skipped = 0
+    try:
+        from frontmatter_parser import parse_frontmatter
+    except ImportError:
+        return {
+            "name": name, "exit": -1,
+            "duration_sec": time.time() - started,
+            "error": "frontmatter_parser module unavailable",
+        }
+
+    expert_entry = _resolve_expert(repo, expert)
+    protocols = _routine_protocols(cfg)
+    aspects = expert_entry.get("aspects") or []
+    arguments = expert_entry.get("arguments") or {}
+
+    for f in candidates:
+        try:
+            text = f.read_text(errors="replace")
+        except OSError:
+            continue
+        fm = parse_frontmatter(text)
+        if not _match_frontmatter_filter(flt, fm):
+            continue
+        request = {"file": str(f)}
+        try:
+            from expert_runtime import dispatch_job
+            result = dispatch_job(repo, expert, request, dedup_key=str(f))
+            if result.get("status") == "already-queued":
+                skipped += 1
+            else:
+                _write_job_config(result["queue_path"], expert, expert_entry, protocols, aspects, arguments)
+                dispatched += 1
+        except Exception as e:
+            return {
+                "name": name, "exit": -1,
+                "duration_sec": time.time() - started,
+                "dispatched_count": dispatched,
+                "skipped_count": skipped,
+                "error": f"md-scan dispatch failed at {f}: {e}",
+            }
+
+    return {
+        "name": name, "exit": 0,
+        "duration_sec": time.time() - started,
+        "dispatched_count": dispatched,
+        "skipped_count": skipped,
+    }

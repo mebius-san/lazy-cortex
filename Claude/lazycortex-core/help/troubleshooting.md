@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-05-09
+last_regen: 2026-05-13
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: Python version too low → python-floor-not-met; pre-commit hook silent → hook-not-firing; MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-load-error / systemctl-error); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public FAIL findings → mark-public-fail-unresolved; lazy-repo.mark-public gh missing → gh-not-installed; doctor or audit stalls → skill-stalls; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; routine register name invalid → routine-name-format; routine already registered → routine-conflict; routine register unknown type → routine-unknown-type; routine register missing required field → routine-missing-field; routine register settings unwritable → routine-settings-unwritable; unregister pump without force → pump-protected; daemon stalled → daemon-stale; runtime recover still dirty → recover-still-dirty; recover state.json unparseable → state-unparseable; recover commit needs message → recover-commit-needs-message; dispatch to wrong expert key → expert-key-mismatch; audit experts json invalid → experts-json-invalid; audit reference did not resolve → ref-unresolvable; audit protocol contract false-positive → protocol-heading-mismatch; audit routine command path layout → routine-path-layout; doctor routine command unresolvable → routine-command-missing; lazy-core.audit global rules empty → audit-global-empty."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: Python version too low → python-floor-not-met; pre-commit hook silent → hook-not-firing; MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-load-error / systemctl-error); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public FAIL findings → mark-public-fail-unresolved; lazy-repo.mark-public gh missing → gh-not-installed; doctor or audit stalls → skill-stalls; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; dispatch to wrong expert key → expert-key-mismatch; routine register name invalid → routine-name-format; routine already registered → routine-conflict; routine register unknown type → routine-unknown-type; routine register missing required field → routine-missing-field; routine register settings unwritable → routine-settings-unwritable; unregister pump without force → pump-protected; daemon stalled → daemon-stale; runtime recover still dirty → recover-still-dirty; recover state.json unparseable → state-unparseable; recover commit needs message → recover-commit-needs-message; audit experts json invalid → experts-json-invalid; audit reference did not resolve → ref-unresolvable; audit routine command path layout → routine-path-layout; doctor routine command unresolvable → routine-command-missing; lazy-core.audit global rules empty → audit-global-empty; migrated-from-lazycortex-log → commit-hook-error; memory write expert not persona → memory-not-persona; memory write frontmatter invalid → memory-frontmatter-invalid; memory write consolidate out of scope → memory-consolidate-scope; memory index memory dir absent → memory-dir-absent; memory reflect expert not persona → reflect-not-persona; memory reflect no sources → reflect-no-sources; mark-persona expert not registered → persona-expert-unknown; git lock stuck → git-lock-stuck; git unlock no lock → git-no-lock; log-clean absent → log-dir-absent; log-clean canonical resolver failed → log-resolver-failed; log-distill throttled → log-distill-throttled; log-recall no matches → log-recall-no-match."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
@@ -21,6 +21,16 @@ source_skills:
   - lazy-expert.list-jobs
   - lazy-guard.allow-mcp
   - lazy-guard.check-public
+  - lazy-log.clean
+  - lazy-log.distill
+  - lazy-log.recall
+  - lazy-log.timeline
+  - lazy-log.summary
+  - lazy-log.bullets
+  - lazy-memory.write
+  - lazy-memory.index
+  - lazy-memory.reflect
+  - lazy-memory.mark-persona
   - lazy-repo.mark-public
   - lazy-routine.register
   - lazy-routine.unregister
@@ -146,33 +156,23 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
-## `/lazy-core.audit` exits with "experts.settings.json is not valid JSON"
+## `/lazy-core.audit` exits with "lazy.settings.json[experts] is not valid JSON"
 
-**Symptom**: Running `/lazy-core.audit` produces an error reporting that `experts.settings.json` is not valid JSON.
+**Symptom**: Running `/lazy-core.audit` produces an error reporting that `lazy.settings.json[experts]` is not valid JSON.
 
 **Likely cause**: The file was hand-edited and broke its JSON syntax, or a partial write left it in a truncated state.
 
-**Fix**: Run `/lazy-core.install`. The install skill's expert-add wizard re-scaffolds `experts.settings.json` by merging a fresh `{"_version": 1}` base with any previously accepted expert entries — it does not require you to re-register experts if you provide the same names during the wizard. If you want to correct the file manually, inspect it at `.experts/experts.settings.json` and fix the syntax, then re-run `/lazy-core.audit` to confirm.
+**Fix**: Run `/lazy-core.install`. The install skill's expert-add wizard re-scaffolds `lazy.settings.json[experts]` by merging a fresh `{"_version": 1}` base with any previously accepted expert entries — it does not require you to re-register experts if you provide the same names during the wizard. If you want to correct the file manually, inspect it at `lazy.settings.json[experts]` and fix the syntax, then re-run `/lazy-core.audit` to confirm.
 
 ---
 
-## `/lazy-core.audit` reports an expert agent or protocol reference "did not resolve"
+## `/lazy-core.audit` reports an expert agent reference "did not resolve"
 
-**Symptom**: The expert-runtime section of the `/lazy-core.audit` report contains a FAIL like "expert `<key>`: agent reference `<value>` did not resolve" or "protocol reference `<value>` did not resolve".
+**Symptom**: The expert-runtime section of the `/lazy-core.audit` report contains a FAIL like "expert `<key>`: agent reference `<value>` did not resolve".
 
-**Likely cause**: The `agent` or `protocol` field in `experts.settings.json` uses an unrecognised format, or the artifact it points to is no longer installed. Valid formats are `<plugin-name>:<agent-stem>`, `user:<stem>`, or bare `<stem>`.
+**Likely cause**: The `agent` field in `lazy.settings.json[experts]` uses an unrecognised format, or the artifact it points to is no longer installed. Valid formats are `<plugin-name>:<agent-stem>`, `user:<stem>`, or bare `<stem>`.
 
-**Fix**: Run `/lazy-core.install` to re-register the affected expert — the wizard re-resolves the agent and protocol references and writes only the fields that pass validation. If the referenced plugin has been removed, install it first or update the expert entry to point to a valid replacement.
-
----
-
-## `/lazy-core.audit` protocol-contract WARN fires even though the sections exist
-
-**Symptom**: The expert-runtime section of `/lazy-core.audit` emits a `WARN` like "protocol for expert `<key>` missing required section(s): kind, role" even though your protocol file visibly contains all five required sections.
-
-**Likely cause**: The section-detection heuristic looks for the literal keywords (`kind`, `role`, `outcome`, `source`, `result`) in heading lines. If your protocol uses alternative heading text — for example `## Request kinds` instead of `## kind` — the heuristic does not match and the WARN fires as a false positive.
-
-**Fix**: Align the protocol file headings with the keywords expected by `lazy-core.expert-protocols-contract.md` (the contract documents the exact heading patterns). Renaming the headings to match the keywords clears the WARN on the next `/lazy-core.audit` run.
+**Fix**: Run `/lazy-core.install` to re-register the affected expert — the wizard re-resolves the agent reference and writes only the fields that pass validation. If the referenced plugin has been removed, install it first or update the expert entry to point to a valid replacement.
 
 ---
 
@@ -182,7 +182,7 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 **Likely cause**: The plugin cache uses a four-level layout (`<registry>/<plugin>/<version>/bin/<plugin>`). An older install recorded a three-level path in `lazy.settings.json`, which no longer resolves after the cache was reorganised or the plugin was updated.
 
-**Fix**: Re-run `/lazy-core.install` for the owning plugin to refresh the `command` path in `lazy-core.runtime.routines` to the current four-level layout. Alternatively, accept the "Unregister" offer in `/lazy-core.doctor`'s Fix L3 prompt, then re-run the plugin's install to re-register the routine with the correct path.
+**Fix**: Re-run `/lazy-core.install` for the owning plugin to refresh the `command` path in `routines` to the current four-level layout. Alternatively, accept the "Unregister" offer in `/lazy-core.doctor`'s Fix L3 prompt, then re-run the plugin's install to re-register the routine with the correct path.
 
 ---
 
@@ -218,7 +218,7 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ## `/lazy-core.doctor` Fix L3: routine command path does not exist
 
-**Symptom**: `/lazy-core.doctor` reports a FAIL on a routine under `lazy-core.runtime.routines` with message "routine `<name>` command path does not exist: `<path>`".
+**Symptom**: `/lazy-core.doctor` reports a FAIL on a routine under `routines` with message "routine `<name>` command path does not exist: `<path>`".
 
 **Likely cause**: The plugin that registered this routine has been removed or updated, leaving behind a stale `command` path in `lazy.settings.json` that no longer resolves to an installed plugin binary.
 
@@ -336,7 +336,7 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 **Likely cause**: The expert runtime has not been bootstrapped for this repo. `/lazy-expert.dispatch-job` requires the `.experts/` directory layout to exist before it can write job files.
 
-**Fix**: Run `/lazy-core.install`. When the wizard asks whether to enable the expert runtime, answer yes. The install skill creates `.experts/`, writes `experts.settings.json`, and bootstraps the required directory layout. Then re-run `/lazy-expert.dispatch-job`.
+**Fix**: Run `/lazy-core.install`. When the wizard asks whether to enable the expert runtime, answer yes. The install skill creates `.experts/`, writes `lazy.settings.json[experts]`, and bootstraps the required directory layout. Then re-run `/lazy-expert.dispatch-job`.
 
 ---
 
@@ -354,9 +354,9 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 **Symptom**: A job you dispatched appears to complete without error, but the result is missing or seems to have been processed by the wrong worker. Running `/lazy-expert.list-jobs` shows the job under an unexpected expert key.
 
-**Likely cause**: The `expert_name` argument contains a typo that does not match any key in `experts.settings.json`. The skill creates the job directory under the named key regardless — if the expert key is unrecognised, the daemon's pump routine skips it silently on every drain cycle.
+**Likely cause**: The `expert_name` argument contains a typo that does not match any key in `lazy.settings.json[experts]`. The skill creates the job directory under the named key regardless — if the expert key is unrecognised, the daemon's pump routine skips it silently on every drain cycle.
 
-**Fix**: Run `/lazy-expert.list-jobs` to see all active job directories and confirm which expert key the job landed under. Verify the intended key against `experts.settings.json`. Cancel the misrouted job with `/lazy-expert.cancel-job`, then re-dispatch with the correct `expert_name`.
+**Fix**: Run `/lazy-expert.list-jobs` to see all active job directories and confirm which expert key the job landed under. Verify the intended key against `lazy.settings.json[experts]`. Cancel the misrouted job with `/lazy-expert.cancel-job`, then re-dispatch with the correct `expert_name`.
 
 ---
 
@@ -494,113 +494,341 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
+## `/lazy-core.git-status` shows no lock but commits are serialising unexpectedly
+
+**Symptom**: `/lazy-core.git-status` reports "Lock: NONE (no staging in progress)" but commits from Claude Code sessions are still queuing or failing with lock-related errors.
+
+**Likely cause**: The lock file at `.git/lazy-git.lock` was deleted or was never created, but the session that holds the staging window has not yet released its in-memory staging state. This can happen if the session restarted mid-staging: the `git-guard` hook's auto-break heuristics check the lock file, but the file may have been cleaned up externally while the hook state is inconsistent.
+
+**Fix**: Re-run `/lazy-core.git-status` to confirm the current state. If the lock is truly absent and commits still fail, restart the Claude Code session — the hook's staging state resets on session start. If a different session is genuinely holding the lock but the file was lost, the next commit attempt from that session will recreate it and the normal heuristics (dead PID / stale-and-idle) will apply.
+
+---
+
+## `/lazy-core.git-unlock` finds no lock to break
+
+**Symptom**: Running `/lazy-core.git-unlock` reports "no lock to break" even though you can see a `.git/lazy-git.lock` file in the repo.
+
+**Likely cause**: The lock file exists on disk but the staging-lock inspect helper could not read it — this usually means the file is empty (a partial write left it zero bytes) or its JSON is malformed. The helper treats unreadable lock files as absent.
+
+**Fix**: Delete the file manually from your terminal (`rm .git/lazy-git.lock`). A zero-byte or malformed lock file is safe to delete — the next staging operation will recreate it from scratch.
+
+---
+
+## `/lazy-memory.write` rejects the note: expert not marked persona
+
+**Symptom**: Running `/lazy-memory.write` aborts with "`<expert>` is not marked persona; run `/lazy-memory.mark-persona <expert>` first."
+
+**Likely cause**: The expert's entry in `lazy.settings.json[experts]` does not carry `lazycortex-core:lazy-memory.persona-aspect` in its `aspects[]`. The skill refuses to write to `.memory/<expert>/` unless the expert has opted into the memory subsystem.
+
+**Fix**: Run `/lazy-memory.mark-persona <expert>`. The skill appends the persona aspect to the expert's entry and is idempotent — re-running on an already-marked expert returns `already-marked` with no change. Then retry `/lazy-memory.write`.
+
+---
+
+## `/lazy-memory.write` rejects the note: frontmatter invalid
+
+**Symptom**: Running `/lazy-memory.write` fails with a message like "frontmatter-invalid: missing required field: summary" or "frontmatter-invalid: tag must be prefixed `memory/`".
+
+**Likely cause**: The note body passed to the skill is missing one or more required frontmatter fields (`title`, `tags`, `type`, `summary`), or at least one `tags` entry does not carry the `memory/` prefix.
+
+**Fix**: Add the missing field or correct the tag prefix. Every tag must read `memory/<topic>` (e.g. `memory/auth`). The `type` field must be one of `persona | rule | example | warning | fact`. Once the frontmatter is valid, re-run `/lazy-memory.write` with the corrected note body.
+
+---
+
+## `/lazy-memory.write` rejects a consolidate path as out of scope
+
+**Symptom**: Running `/lazy-memory.write` with `--consolidate` fails with "consolidate-out-of-scope: `<path>`".
+
+**Likely cause**: The path passed via `--consolidate` does not live under `.logs/` or `.memory/`. The skill only allows consolidation of paths in those two directories to prevent accidental deletion of tracked source files.
+
+**Fix**: Remove the out-of-scope path from the `--consolidate` list and retry. If you intended to delete a file outside those directories, do so manually from your terminal — the skill cannot help with that.
+
+---
+
+## `/lazy-memory.index` fails: "`.memory/` not present"
+
+**Symptom**: Running `/lazy-memory.index` aborts immediately with "`.memory/` not present".
+
+**Likely cause**: The memory subsystem has not been bootstrapped for this repo. The `.memory/` directory is created by `/lazy-core.install` when you accept the expert runtime wizard — if install was skipped or never run, the directory does not exist.
+
+**Fix**: Run `/lazy-core.install`. When the wizard asks whether to enable the expert runtime, answer yes — the install skill creates `.memory/` and bootstraps the directory layout. Then re-run `/lazy-memory.index`.
+
+---
+
+## `/lazy-memory.reflect` aborts: expert not marked persona
+
+**Symptom**: Running `/lazy-memory.reflect <expert>` fails with "`<expert>` is not marked persona; run `/lazy-memory.mark-persona <expert>`."
+
+**Likely cause**: The expert has not been opted into the memory subsystem. `/lazy-memory.reflect` dispatches a `kind=reflect` job to the expert's queue; the expert's prompt only knows how to handle reflect jobs if it carries the persona aspect. The skill refuses rather than dispatch a job the expert cannot process.
+
+**Fix**: Run `/lazy-memory.mark-persona <expert>` first (idempotent — re-running on an already-marked expert is safe), then re-run `/lazy-memory.reflect`.
+
+---
+
+## `/lazy-memory.reflect` reports no source files found
+
+**Symptom**: `/lazy-memory.reflect` completes but reports `source_count: 0` and the expert returns `outcome=empty`.
+
+**Likely cause**: The expert has no recent run logs under `.logs/claude/<expert>/` and no existing memory notes under `.memory/<expert>/`. The reflect job has nothing to consolidate.
+
+**Fix**: Dispatch a few normal jobs to the expert first (via `/lazy-expert.dispatch-job`) so it accumulates run logs. Once at least one run log exists, `/lazy-memory.reflect` will find something to consolidate. The default window is the last 30 days — if logs exist but are older, pass `--days <N>` with a larger value.
+
+---
+
+## `/lazy-memory.mark-persona` rejects the expert name
+
+**Symptom**: Running `/lazy-memory.mark-persona <expert>` fails with "`<expert>` is not registered in `lazy.settings.json[experts]`."
+
+**Likely cause**: The name passed to the skill is either a typo or the expert was never registered. The skill checks for the name as a key in `lazy.settings.json[experts]` (excluding `_version`) before attempting any write.
+
+**Fix**: Verify the expert name against `lazy.settings.json[experts]`. If the expert does not yet exist, register it via `/lazy-core.install` — the wizard prompts for a name, agent reference, and optional protocols/aspects. Then re-run `/lazy-memory.mark-persona`.
+
+---
+
+## `/lazy-log.clean` aborts: ".logs/claude/ absent"
+
+**Symptom**: Running `/lazy-log.clean` aborts immediately with ".logs/claude/ absent".
+
+**Likely cause**: The run-log directory does not exist yet — no skill has produced a run log in this repo, so the directory was never created.
+
+**Fix**: Run any logged skill once (for example `/lazy-core.audit`) to create `.logs/claude/` and at least one log file. Then re-run `/lazy-log.clean`.
+
+---
+
+## `/lazy-log.clean` Step 1 aborts: "failed: `<reason>`"
+
+**Symptom**: `/lazy-log.clean` exits at Step 1 with "failed: `<reason>`" and skips all subsequent steps.
+
+**Likely cause**: The canonical-name resolver script (`resolve-canonical.py`) errored — typically because `CLAUDE_PLUGIN_ROOT` is unset, Python is missing, or the script produced malformed JSON. Without a canonical name set, every log folder would be classified as an orphan, so the skill refuses to continue.
+
+**Fix**: Check the reason string in the error. Ensure `lazycortex-core` is properly installed by re-running `/lazy-core.install`. If the error mentions Python, verify that `python3` resolves to 3.12 or higher in the current shell environment.
+
+---
+
+## `/lazy-log.distill` skips processing: "skipped-throttle"
+
+**Symptom**: Running `/lazy-log.distill` reports "skipped-throttle — last write <Δt> ago" and makes no changes to `.logs/changelog.md`.
+
+**Likely cause**: The changelog was updated less than 4 hours ago. `/lazy-log.distill` enforces a 4-hour floor to prevent redundant rewrites within the same working session.
+
+**Fix**: If you need to force a distill pass before the throttle window expires — for example, after a burst of meaningful commits — pass `force` or `manual catch-up` in the invocation prompt. Otherwise wait until the window elapses and the next qualifying commit triggers an automatic run per the distill cadence rule.
+
+---
+
+## `/lazy-log.recall` returns no matches for a query
+
+**Symptom**: Running `/lazy-log.recall` with a topic query produces an empty result table with the message "No matches found".
+
+**Likely cause**: The query keywords do not appear in any of the five sources: `.logs/changelog.md`, run-log `## Actions` / `## Result` sections, `.logs/commits.jsonl`, git log messages, or memory files. This typically happens when the work in question predates the run-log or changelog system, or when the terminology in the query differs from the terminology used in commit messages and logs.
+
+**Fix**: Try alternate phrasings or synonyms — the agent searches by keyword and the commit vocabulary may differ from your query vocabulary. You can also search git history directly with `git log --all --grep "<keyword>"` and `git log --all -S "<keyword>"` (for code-level changes) to confirm whether the history exists. If the history predates the logging system entirely, the missing period will appear in the "Gaps" section of a `/lazy-log.summary` run.
+
+---
+
+## Migrated from `lazycortex-log` (since core 3.0.0)
+
+`lazycortex-log` was retired and its artifacts absorbed into `lazycortex-core`. If you see commit-hook errors like:
+
+```
+Hook error: python3 "${CLAUDE_PLUGIN_ROOT}/lazycortex-log/hooks/lazy-log.commit-recorder.py": No such file
+```
+
+…recover with:
+
+1. `/lazy-core.setup` — strips orphan registrations and adds core's new ones.
+2. **Restart any open sessions** — Claude Code holds hook registrations in memory; existing sessions keep failing until restarted.
+
+New sessions pick up the consolidated hook from `lazycortex-core` cleanly.
+
+---
+
 ## Diagnostic flowchart
 
 ```mermaid
 %%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart TD
-  symptom{Observed symptom?}
+  symptomGroup{Which symptom group?}
 
-  symptom -->|Python version too low| pythonFloor[python-floor-not-met]
-  symptom -->|Pre-commit hook silent| hookNotFiring[hook-not-firing]
-  symptom -->|MCP tools still prompting| mcpCause{Cause?}
-  symptom -->|lazy-core.install failure| installSubError{Sub-error?}
-  symptom -->|lazy-core.agent-models invalid flag| invalidScope[invalid-scope]
-  symptom -->|lazy-core.setup child fails| setupChildFailed[setup-child-failed]
-  symptom -->|mark-public FAIL findings| markPublicFail[mark-public-fail-unresolved]
-  symptom -->|mark-public gh missing| ghNotInstalled[gh-not-installed]
-  symptom -->|doctor or audit stalls| skillStalls[skill-stalls]
-  symptom -->|agent dispatches wrong model| wrongModelCause{Cause?}
-  symptom -->|experts directory missing| expertsNotInit[experts-not-init]
-  symptom -->|dispatch payload rejected| payloadMissingFields[payload-missing-fields]
-  symptom -->|dispatch wrong expert key| expertKeyMismatch[expert-key-mismatch]
-  symptom -->|collect-job status missing| jobNotFound[job-not-found]
-  symptom -->|list-jobs invalid status filter| invalidStatusFilter[invalid-status-filter]
-  symptom -->|cancel-job job not found| jobAbsent[job-absent]
-  symptom -->|routine register name invalid| routineNameFormat[routine-name-format]
-  symptom -->|routine already registered| routineConflict[routine-conflict]
-  symptom -->|routine register unknown type| routineUnknownType[routine-unknown-type]
-  symptom -->|routine register missing field| routineMissingField[routine-missing-field]
-  symptom -->|routine register settings unwritable| routineSettingsUnwritable[routine-settings-unwritable]
-  symptom -->|unregister pump without force| pumpProtected[pump-protected]
-  symptom -->|daemon stalled| daemonStale[daemon-stale]
-  symptom -->|runtime recover still dirty| recoverStillDirty[recover-still-dirty]
-  symptom -->|recover commit needs message| recoverCommitNeedsMessage[recover-commit-needs-message]
-  symptom -->|recover state.json unparseable| stateUnparseable[state-unparseable]
-  symptom -->|audit experts json invalid| expertsJsonInvalid[experts-json-invalid]
-  symptom -->|audit reference did not resolve| refUnresolvable[ref-unresolvable]
-  symptom -->|audit protocol contract false-positive| protocolHeadingMismatch[protocol-heading-mismatch]
-  symptom -->|audit routine command path layout| routinePathLayout[routine-path-layout]
-  symptom -->|doctor routine command unresolvable| routineCommandMissing[routine-command-missing]
-  symptom -->|audit global rules empty| auditGlobalEmpty[audit-global-empty]
+  installGroup{Install or setup?}
+  mcpGroup{MCP or security?}
+  daemonGroup{Daemon or runtime?}
+  expertGroup{Expert dispatch or collect?}
+  routinesGroup{Routines?}
+  memoryGroup{Memory subsystem?}
+  gitGroup{Git coordination?}
+  loggingGroup{Logging?}
+  auditGroup{Audit?}
 
-  mcpCause -->|server not found| serverNotFound[server-not-found]
-  mcpCause -->|server not loaded| serverNotLoaded[server-not-loaded]
-  mcpCause -->|permission loop| permissionLoop[permission-loop]
+  symptomGroup -->|install-setup| installGroup
+  symptomGroup -->|mcp-security| mcpGroup
+  symptomGroup -->|daemon-runtime| daemonGroup
+  symptomGroup -->|expert-dispatch| expertGroup
+  symptomGroup -->|routines| routinesGroup
+  symptomGroup -->|memory| memoryGroup
+  symptomGroup -->|git| gitGroup
+  symptomGroup -->|logging| loggingGroup
+  symptomGroup -->|audit| auditGroup
 
-  installSubError -->|plugin not installed| pluginNotInstalled[plugin-not-installed]
-  installSubError -->|cache empty| cacheEmpty[cache-empty]
-  installSubError -->|cache broken| cacheBroken[cache-broken]
-  installSubError -->|tiers missing| tiersMissing[tiers-missing]
-  installSubError -->|settings unwritable| settingsUnwritable[settings-unwritable]
-  installSubError -->|supervisor template missing| supervisorTemplateMissing[supervisor-template-missing]
-  installSubError -->|launchctl load error| launchctlLoadError[launchctl-load-error]
-  installSubError -->|systemctl error| systemctlError[systemctl-error]
+  pythonFloor{Python version too low?}
+  hookFiring{Hook not firing?}
+  pluginMissing{Plugin not installed?}
 
-  wrongModelCause -->|wrong model assigned| wrongModel[wrong-model]
-  wrongModelCause -->|floor ignored| floorIgnored[floor-ignored]
-  wrongModelCause -->|duplicate key| duplicateKey[duplicate-key]
+  installGroup -->|python-error| pythonFloor
+  installGroup -->|hook-silent| hookFiring
+  installGroup -->|plugin-absent| pluginMissing
+
+  pythonFloorEntry[slug: python-floor-not-met]
+  hookNotFiringEntry[slug: hook-not-firing]
+  pluginNotInstalledEntry[slug: plugin-not-installed]
+
+  pythonFloor -->|confirmed| pythonFloorEntry
+  hookFiring -->|confirmed| hookNotFiringEntry
+  pluginMissing -->|confirmed| pluginNotInstalledEntry
+
+  serverNotFound{MCP server not found?}
+  securityBlock{Security check blocking?}
+
+  mcpGroup -->|server-missing| serverNotFound
+  mcpGroup -->|guard-refusal| securityBlock
+
+  serverNotFoundEntry[slug: server-not-found]
+  securityBlockEntry[slug: security-check-fail]
+
+  serverNotFound -->|confirmed| serverNotFoundEntry
+  securityBlock -->|confirmed| securityBlockEntry
+
+  daemonCrash{Daemon crashes or hangs?}
+  runtimeError{Runtime error on invoke?}
+
+  daemonGroup -->|crash-hang| daemonCrash
+  daemonGroup -->|invoke-error| runtimeError
+
+  daemonCrashEntry[slug: daemon-crash]
+  runtimeErrorEntry[slug: runtime-error]
+
+  daemonCrash -->|confirmed| daemonCrashEntry
+  runtimeError -->|confirmed| runtimeErrorEntry
+
+  dispatchFail{Expert not dispatched?}
+  collectFail{Expert result not collected?}
+
+  expertGroup -->|no-dispatch| dispatchFail
+  expertGroup -->|no-collect| collectFail
+
+  dispatchFailEntry[slug: expert-dispatch-fail]
+  collectFailEntry[slug: expert-collect-fail]
+
+  dispatchFail -->|confirmed| dispatchFailEntry
+  collectFail -->|confirmed| collectFailEntry
+
+  routineNotRun{Routine did not run?}
+  routineWrongOutput{Routine produced wrong output?}
+
+  routinesGroup -->|silent| routineNotRun
+  routinesGroup -->|bad-output| routineWrongOutput
+
+  routineNotRunEntry[slug: routine-not-run]
+  routineWrongOutputEntry[slug: routine-wrong-output]
+
+  routineNotRun -->|confirmed| routineNotRunEntry
+  routineWrongOutput -->|confirmed| routineWrongOutputEntry
+
+  memoryRetainFail{Retain not persisting?}
+  memoryRecallFail{Recall returns empty?}
+
+  memoryGroup -->|retain-silent| memoryRetainFail
+  memoryGroup -->|recall-empty| memoryRecallFail
+
+  memoryRetainFailEntry[slug: memory-retain-fail]
+  memoryRecallFailEntry[slug: memory-recall-fail]
+
+  memoryRetainFail -->|confirmed| memoryRetainFailEntry
+  memoryRecallFail -->|confirmed| memoryRecallFailEntry
+
+  gitGuardBlock{Git guard blocking commit?}
+  gitDrift{Plugin drift detected?}
+
+  gitGroup -->|guard-block| gitGuardBlock
+  gitGroup -->|drift-flagged| gitDrift
+
+  gitGuardBlockEntry[slug: git-guard-block]
+  gitDriftEntry[slug: git-drift-detected]
+
+  gitGuardBlock -->|confirmed| gitGuardBlockEntry
+  gitDrift -->|confirmed| gitDriftEntry
+
+  logNotWritten{Log file not written?}
+  logWaiverFail{Waiver not accepted?}
+
+  loggingGroup -->|no-log-file| logNotWritten
+  loggingGroup -->|waiver-reject| logWaiverFail
+
+  logNotWrittenEntry[slug: log-not-written]
+  logWaiverFailEntry[slug: log-waiver-fail]
+
+  logNotWritten -->|confirmed| logNotWrittenEntry
+  logWaiverFail -->|confirmed| logWaiverFailEntry
+
+  auditDrift{Audit reports drift?}
+  auditVersionFail{Version check fails?}
+
+  auditGroup -->|drift-warn| auditDrift
+  auditGroup -->|version-fail| auditVersionFail
+
+  auditDriftEntry[slug: audit-drift]
+  auditVersionFailEntry[slug: audit-version-fail]
+
+  auditDrift -->|confirmed| auditDriftEntry
+  auditVersionFail -->|confirmed| auditVersionFailEntry
 
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class symptom guard
-  class mcpCause guard
-  class installSubError guard
-  class wrongModelCause guard
-
-  class pythonFloor error
-  class hookNotFiring error
-  class invalidScope error
-  class setupChildFailed error
-  class markPublicFail error
-  class ghNotInstalled error
-  class skillStalls error
-  class expertsNotInit error
-  class payloadMissingFields error
-  class expertKeyMismatch error
-  class jobNotFound error
-  class invalidStatusFilter error
-  class jobAbsent error
-  class routineNameFormat error
-  class routineConflict error
-  class routineUnknownType error
-  class routineMissingField error
-  class routineSettingsUnwritable error
-  class pumpProtected error
-  class daemonStale error
-  class recoverStillDirty error
-  class recoverCommitNeedsMessage error
-  class stateUnparseable error
-  class expertsJsonInvalid error
-  class refUnresolvable error
-  class protocolHeadingMismatch error
-  class routinePathLayout error
-  class routineCommandMissing error
-  class auditGlobalEmpty error
-  class serverNotFound error
-  class serverNotLoaded error
-  class permissionLoop error
-  class pluginNotInstalled error
-  class cacheEmpty error
-  class cacheBroken error
-  class tiersMissing error
-  class settingsUnwritable error
-  class supervisorTemplateMissing error
-  class launchctlLoadError error
-  class systemctlError error
-  class wrongModel error
-  class floorIgnored error
-  class duplicateKey error
+  class symptomGroup guard
+  class installGroup guard
+  class mcpGroup guard
+  class daemonGroup guard
+  class expertGroup guard
+  class routinesGroup guard
+  class memoryGroup guard
+  class gitGroup guard
+  class loggingGroup guard
+  class auditGroup guard
+  class pythonFloor guard
+  class hookFiring guard
+  class pluginMissing guard
+  class serverNotFound guard
+  class securityBlock guard
+  class daemonCrash guard
+  class runtimeError guard
+  class dispatchFail guard
+  class collectFail guard
+  class routineNotRun guard
+  class routineWrongOutput guard
+  class memoryRetainFail guard
+  class memoryRecallFail guard
+  class gitGuardBlock guard
+  class gitDrift guard
+  class logNotWritten guard
+  class logWaiverFail guard
+  class auditDrift guard
+  class auditVersionFail guard
+  class pythonFloorEntry success
+  class hookNotFiringEntry success
+  class pluginNotInstalledEntry success
+  class serverNotFoundEntry success
+  class securityBlockEntry success
+  class daemonCrashEntry success
+  class runtimeErrorEntry success
+  class dispatchFailEntry success
+  class collectFailEntry success
+  class routineNotRunEntry success
+  class routineWrongOutputEntry success
+  class memoryRetainFailEntry success
+  class memoryRecallFailEntry success
+  class gitGuardBlockEntry success
+  class gitDriftEntry success
+  class logNotWrittenEntry success
+  class logWaiverFailEntry success
+  class auditDriftEntry success
+  class auditVersionFailEntry success
 ```

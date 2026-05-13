@@ -4,7 +4,80 @@ import os, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
-USAGE = "usage: lazycortex-core <subcommand> [args...]\nSubcommands: expert-pump-once, runtime"
+USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
+         "Subcommands: expert-pump-once, runtime, memory-reflect-all")
+
+
+def _cmd_memory_reflect_all(argv: list[str]) -> int:
+    """Dispatch a kind=reflect job for every persona-marked expert.
+    Flags: --dry-run (list targets but don't dispatch), --days N (log window)."""
+    import argparse, json, time
+    parser = argparse.ArgumentParser(prog="lazycortex-core memory-reflect-all")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--days", type=int, default=30)
+    args = parser.parse_args(argv)
+
+    from lazy_settings import load_section
+    from expert_runtime import dispatch_job
+    from routine_types import _write_job_config
+
+    repo = Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
+    experts = load_section(repo / ".claude/lazy.settings.json", "experts")
+    PERSONA = "lazycortex-core:lazy-memory.persona-aspect"
+
+    summary = {"dispatched": 0, "skipped_not_persona": 0,
+               "would_dispatch": 0, "errors": []}
+
+    for name, entry in experts.items():
+        if name == "_version" or not isinstance(entry, dict):
+            continue
+        aspects = entry.get("aspects") or []
+        if PERSONA not in aspects:
+            summary["skipped_not_persona"] += 1
+            continue
+        if args.dry_run:
+            summary["would_dispatch"] += 1
+            continue
+
+        # Gather sources: recent logs + memory notes
+        sources = []
+        log_root = repo / ".logs/claude" / name
+        cutoff = time.time() - args.days * 86400
+        if log_root.is_dir():
+            for p in sorted(log_root.iterdir()):
+                if p.is_file() and p.suffix == ".md" and p.stat().st_mtime >= cutoff:
+                    sources.append({"path": str(p), "description": "recent run log"})
+        mem_root = repo / ".memory" / name
+        if mem_root.is_dir():
+            for p in sorted(mem_root.iterdir()):
+                if p.is_file() and p.suffix == ".md":
+                    sources.append({"path": str(p), "description": "current memory note"})
+
+        payload = {
+            "kind": "reflect",
+            "role": "reflect",
+            "request": (
+                "Consolidate recent runs into memory per lazy-memory.persona-aspect "
+                "§Obligations. Use /lazy-memory.write for any new or updated notes. "
+                "Return outcome=empty if nothing is worth consolidating."
+            ),
+            "source": sources,
+        }
+        try:
+            result = dispatch_job(repo, name, payload)
+            _write_job_config(
+                result["queue_path"], name, entry,
+                protocols=[],
+                aspects=aspects,
+                arguments=entry.get("arguments") or {},
+            )
+            summary["dispatched"] += 1
+        except Exception as e:
+            summary["errors"].append({"expert": name, "error": str(e)})
+
+    print(json.dumps(summary))
+    return 0
+
 
 def main() -> int:
     if len(sys.argv) < 2:
@@ -19,8 +92,11 @@ def main() -> int:
     elif sub == "runtime":
         from runtime_daemon import run
         run(repo); return 0
+    elif sub == "memory-reflect-all":
+        return _cmd_memory_reflect_all(sys.argv[2:])
     else:
         print(f"unknown subcommand: {sub}\n{USAGE}", file=sys.stderr); return 2
+
 
 if __name__ == "__main__":
     sys.exit(main())

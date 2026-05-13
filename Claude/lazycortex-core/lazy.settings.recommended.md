@@ -17,7 +17,7 @@ The **canonical tier recommendations** live in [`skills/lazy-core.agent-models/d
     "_builtin":   { "Explore": "haiku", "Plan": "opus" },
     "_user":      { },
     "_project":   { },
-    "lazycortex": { "lazycortex-log:lazy-log.distill": "sonnet" }
+    "lazycortex": { "lazycortex-core:lazy-log.distill": "sonnet" }
   }
 }
 ```

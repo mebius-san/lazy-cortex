@@ -76,7 +76,6 @@ pre-install:
   (none)
 per-plugin:
   • lazycortex-core:lazy-core.install
-  • lazycortex-log:lazy-log.install
   • lazycortex-obsidian:lazy-obsidian.install
 post-install:
   • lazycortex-core:lazy-guard.allow-mcp

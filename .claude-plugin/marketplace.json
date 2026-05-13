@@ -16,11 +16,6 @@
       "source": "./claude/lazycortex-diagram"
     },
     {
-      "name": "lazycortex-log",
-      "description": "Logging, changelog, and change-history recall for Claude Code",
-      "source": "./claude/lazycortex-log"
-    },
-    {
       "name": "lazycortex-observe",
       "description": "Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.",
       "source": "./claude/lazycortex-observe"

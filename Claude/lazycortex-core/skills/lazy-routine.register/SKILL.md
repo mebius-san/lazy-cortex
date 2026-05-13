@@ -1,6 +1,6 @@
 ---
 name: lazy-routine.register
-description: Register a named routine in lazy.settings.json. Type-aware wizard (subprocess / inbox / schedule / git). Wraps expert_runtime.register_routine with closed-set validation. Used by plugin install skills.
+description: Register a named routine in lazy.settings.json. Type-aware wizard (subprocess / inbox / schedule / git / md-scan). Wraps expert_runtime.register_routine with closed-set validation. Used by plugin install skills.
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(git check-ignore *), Write, AskUserQuestion
 dirty-tree-waiver: "registers a routine in lazy.settings.json — operator commits explicitly to coordinate with sibling routines / install steps"
 ---
@@ -28,7 +28,7 @@ This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 Required: `name` (string, `<plugin>.<verb>` pattern).
 
-The remaining fields depend on the routine **type**. Allowed types: `subprocess` (default), `inbox`, `schedule`, `git`.
+The remaining fields depend on the routine **type**. Allowed types: `subprocess` (default), `inbox`, `schedule`, `git`, `md-scan`.
 
 ### 1a. Resolve the type
 
@@ -38,9 +38,10 @@ In wizard mode (no `cfg`), ask via `AskUserQuestion`:
 
 > Which routine type?
 > - subprocess — periodic command (default)
-> - inbox — scan a dir, dispatch a job per file
+> - inbox — scan a dir, dispatch a job per file (moves files into job staging)
 > - schedule — cron-driven; one fire per cron boundary
 > - git — watch <remote>/<branch>; dispatch a job per item
+> - md-scan — scan markdown files matching globs, filter by frontmatter; dispatch in-place (no file move)
 
 ### 1b. Collect type-specific fields
 
@@ -50,6 +51,7 @@ Per type, ask only the required + commonly-needed optional fields. Schemas live 
 - **inbox** — `inbox_dir` (path relative to repo), `expert` (name), `request` (JSON-shaped block; require `role`), `interval_sec`, `timeout_sec?`.
 - **schedule** — `cron` (5-field expression), then either `command` OR `expert` + `request` (validator enforces exactly one).
 - **git** — `repo_dir?` (default `.`), `remote?` (default `origin`), `branch`, `watch` (one of `new_commits` / `new_files` / `changed_files` / `deleted_files` / `renamed_files`), `path_filter?`, `expert`, `request`, `interval_sec`.
+- **md-scan** — `paths` (list of vault-relative globs, e.g. `["requests/*.md"]`), `frontmatter_filter` (dict of `key → value-or-list-of-values`; `null` matches missing keys, e.g. `{"request_status": [null, "draft"]}`), `agent` (plugin-namespaced agent name to dispatch), `interval_sec`, `timeout_sec?`. No file move — agent gets the absolute path of each match and edits in place.
 
 Build a single `cfg` dict carrying `type` + the collected fields.
 
@@ -145,7 +147,7 @@ input: "name=<name> type=<type>"
 
 - **"routine names must be `<plugin>.<verb>` format"** — name does not contain a dot or has an empty part → rename to follow the convention (e.g. `lazy-review.tick`).
 - **"routine `<name>` already registered"** — a routine with this name exists in settings → call `/lazy-routine.unregister` first, or retry with `--force`.
-- **"unknown type 'X'"** — `cfg.type` is not one of `subprocess`/`inbox`/`schedule`/`git` → fix the type or upgrade `lazycortex-core` to a version that supports it.
+- **"unknown type 'X'"** — `cfg.type` is not one of `subprocess`/`inbox`/`schedule`/`git`/`md-scan` → fix the type or upgrade `lazycortex-core` to a version that supports it.
 - **"missing required field(s): […]"** — per-type schema rejected the input → fill the missing fields and retry.
 - **"`<inbox_dir>` is not gitignored"** — inbox-type routine working area is tracked → add it to `.gitignore` (the wizard offers this) or restructure the routine to operate in a gitignored path.
 - **"`.claude/lazy.settings.json` unwritable"** — file permissions or directory absent → check that `/lazy-core.install` has bootstrapped the file and it is not read-only.

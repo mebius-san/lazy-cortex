@@ -1,11 +1,11 @@
 ---
 name: lazy-core.audit
-description: "Quick read-only audit of what gets loaded into conversation context at startup plus skill-writing, agent-writing, and rule-writing compliance. Shows sizes, loading behavior, optimization opportunities, Execution-Discipline preamble presence, no-Optional headings, narrative-padding heuristics, and rule-file frontmatter/size/code-block/scope enforcement. No changes made."
-allowed-tools: Read, Glob, Grep, Bash(wc *), Bash(command -v python3), Bash(python3 --version), Bash(python3 *)
+description: "Quick read-only audit of what gets loaded into conversation context at startup plus skill-writing, agent-writing, rule-writing, and logging compliance. Shows sizes, loading behavior, optimization opportunities, Execution-Discipline preamble presence, no-Optional headings, narrative-padding heuristics, rule-file frontmatter/size/code-block/scope enforcement, and logging-rule installation state. No changes made."
+allowed-tools: Read, Glob, Grep, Bash(wc *), Bash(command -v python3), Bash(python3 --version), Bash(python3 *), Bash(test *)
 ---
 # Context Audit
 
-Coordinator skill. Dispatches two **Explore** subagents in parallel to measure context weight and hygiene, then renders the tables. Read-only — no changes made.
+Coordinator skill. Runs inline logging compliance checks, then dispatches four **Explore** subagents in parallel to measure context weight and hygiene. Read-only — no changes made.
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispatching for the coordinator pattern.
 
@@ -17,17 +17,50 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispat
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
-   - `Phase 1 — Dispatch parallel scans`
-   - `Phase 2 — Render (Report)`
+   - `Phase 1 — Inline logging compliance checks`
+   - `Phase 2 — Dispatch parallel scans`
+   - `Phase 3 — Render (Report)`
    - `Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
-## Phase 1 — Dispatch parallel scans
+## Phase 1 — Inline logging compliance checks
+
+Absorbed from the retired `lazy-log.audit` skill. These four checks run inline (no subagent dispatch) before Phase 2's parallel scan. Record findings in a local list for inclusion in the Phase 3 render.
+
+Severity vocabulary (same as Phase 2): `INFO` / `WARN` / `FAIL`.
+
+### L1 — Logging rule presence
+
+Check two paths: `claude/lazycortex-core/rules/lazy-log.logging.md` (plugin source) and at least one consumer scope.
+
+- Read `claude/lazycortex-core/rules/lazy-log.logging.md`. If absent → `[FAIL] logging rule missing from plugin source at claude/lazycortex-core/rules/lazy-log.logging.md`.
+- Glob `.claude/rules/lazy-log.logging.md`. If absent, also Glob `$HOME/.claude/rules/lazy-log.logging.md` (expand `$HOME` first via `Bash(echo $HOME)`). If neither consumer path exists → `[WARN] lazy-log.logging.md not installed in any consumer scope (.claude/rules/ or ~/.claude/rules/) — run /lazy-core.setup`.
+- If the rule file at the plugin source path exists but has no YAML frontmatter `description:` key → `[WARN] lazy-log.logging.md plugin source has no frontmatter description | claude/lazycortex-core/rules/lazy-log.logging.md`.
+
+### L2 — `.logs/` directory state
+
+- `Bash(test -d .logs && echo present || echo absent)`. If absent → `[WARN] .logs/ directory missing at repo root — run /lazy-core.setup to bootstrap`.
+
+### L3 — `.gitignore` covers `.logs/`
+
+- Read `.gitignore`. If absent → `[WARN] .gitignore not found — cannot verify .logs/ coverage | .gitignore`.
+- If present but neither `.logs/` nor `.logs` appears in the file → `[WARN] .gitignore does not exclude .logs/ — commits will include runtime state | .gitignore`.
+
+### L4 — `logging-waiver:` value validation
+
+Glob `.claude/skills/*/SKILL.md`, `.claude/agents/*.md`, `.claude/commands/*.md`. For each file, parse YAML frontmatter and inspect `logging-waiver:` if present:
+
+- `[FAIL]` if value is the empty string, the literal `true`, or the literal `yes`.
+- `[FAIL]` if the key is present but no value follows (key + colon with empty mapping value).
+
+Valid concrete strings → no finding.
+
+## Phase 2 — Dispatch parallel scans
 
 Dispatch these four Explore agents **in a single message with four Agent tool calls** (`subagent_type: "Explore"`, `mode: "dontAsk"`). Each returns the structured report from `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md`. Budget: "Report under 350 words".
 
@@ -80,9 +113,9 @@ Emit one `[INFO]` per enabled server. Emit `[WARN]`:
 **Python runtime** — every `lazycortex-*` plugin ships hooks that shebang `python3`, and project hooks invoked as `python3 ...` from `settings.json` rely on the same interpreter. If `python3` is missing or too old, hooks silently fail and the user loses distill-after-commit, settings/public guards, agent-model routing, and autobump. Run two short Bash probes:
 
 - `command -v python3` — empty output → `[FAIL] python3 not in PATH — every hook in .claude/settings.json and claude/lazycortex-*/hooks/*.py will fail to execute.`
-- `python3 --version 2>&1` — parse `Python X.Y.Z`. Floor is **3.8** (hooks use `from __future__ import annotations`, f-strings, `pathlib`, all stdlib — no third-party deps, but 3.7 is EOL since 2023-06). Emit:
-  - `[INFO] python3 path=<path> version=<X.Y.Z>` when found and ≥ 3.8.
-  - `[WARN] python3 version <X.Y.Z> below floor 3.8 — hooks may break on newer syntax additions.` when found and < 3.8.
+- `python3 --version 2>&1` — parse `Python X.Y.Z`. Floor is **3.12** (shipped Python uses `pathlib` semantics that shifted in 3.12; per-plugin `<ns>.install` skills inherit the floor and must NOT re-probe). Emit:
+  - `[INFO] python3 path=<path> version=<X.Y.Z>` when found and ≥ 3.12.
+  - `[FAIL] python3 version <X.Y.Z> below floor 3.12 — every shipped hook fails on startup. Run /lazy-core.install to walk the install path.` when found and < 3.12.
 
 Skip both probes silently if neither runs (sandbox restriction); the renderer treats the section as absent.
 
@@ -191,29 +224,29 @@ For every chapter under `claude/<plugin>/help/**/*.md`:
 - For each skill in `source_skills`, find the most recent commit mtime via `git log -1 --format=%cI -- claude/<plugin>/skills/<skill>/SKILL.md`. Also include `claude/<plugin>/README.md`'s mtime.
 - If any source's mtime is newer than `last_regen` → `[WARN]` with detail `chapter <path> is stale; clears at next publish bump for <plugin>`.
 
-These warnings are advisory — there is no manual fix path. The publish pipeline regenerates chapters at the next version bump (subject to its patch-bump short-circuit).
+These warnings are advisory — there is no manual fix path. The publish pipeline regenerates chapters at the next version bump (subject to its patch-bump short-circuit). The mtime probe uses `git log -1` and therefore detects only *committed* edits; uncommitted local changes do not register as stale here.
 
 Severity vocabulary: `INFO` (advisory note about a passing chapter or scenario, optional) / `WARN` (H1 missing chapter, H2 stale chapter). Never emit `FAIL` from this agent.
 
 ### Agent D — expert runtime
 
-Scope: `experts.settings.json`, `lazy.settings.json[lazy-core.runtime]`, `.jobs/` directories, runtime daemon liveness. Severity vocabulary: `INFO` (informational, non-actionable) / `WARN` (advisory or degraded state) / `FAIL` (structural violation or unresolvable reference).
+Scope: `lazy.settings.json[experts]`, `lazy.settings.json[lazy-core.runtime]`, `.jobs/` directories, runtime daemon liveness. Severity vocabulary: `INFO` (informational, non-actionable) / `WARN` (advisory or degraded state) / `FAIL` (structural violation or unresolvable reference).
 
 **CRITICAL PATH RULE** applies: no Bash under `$HOME/.claude/`. Expand `$HOME` once via `Bash(echo $HOME)` then substitute.
 
 **Path layout constant**: plugin cache lives under `$HOME/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>`.
 
-Perform these 9 sub-checks in order:
+Perform these 7 sub-checks in order:
 
-**D1 — `experts.settings.json` schema**
+**D1 — `lazy.settings.json[experts]` schema**
 
-Read `experts.settings.json` at the repo root. If absent: emit `[INFO] experts.settings.json absent — no experts configured` and skip D2–D4, D7–D8. If present but not valid JSON: `[FAIL] experts.settings.json is not valid JSON | experts.settings.json`.
+Read `.claude/lazy.settings.json`. If the file is absent or the `experts` section is missing/empty (after stripping `_version`): emit `[INFO] lazy.settings.json[experts] absent — no experts configured` and skip D2, D5 (D4 runs regardless — routines can exist without experts). If the file is present but not valid JSON: `[FAIL] lazy.settings.json is not valid JSON | .claude/lazy.settings.json`.
 
 For every top-level key that is not `_version` (filter by shape — skip keys whose value is not an object, so `_version: int` is excluded without name-checking):
 
-- Verify the expert entry has all four required fields: `agent`, `protocol`, `git_author.name`, `git_author.email`. Missing any field → `[FAIL] expert <key> missing required field(s): <list> | experts.settings.json`.
+- Verify the expert entry has all three required fields: `agent`, `git_author.name`, `git_author.email`. Missing any field → `[FAIL] expert <key> missing required field(s): <list> | lazy.settings.json[experts]`. Note: `protocol` is NOT an expert field — protocols are declared by routines, not by experts. Optional fields: `aspects` (list of `<plugin>:<name>-aspect` refs) and `arguments` (dict of `<lowercase_snake>: <json-value>`). Unknown extra fields → `[WARN] expert <key> has unknown field(s): <list>`.
 
-Emit `[INFO] experts.settings.json: <N> experts defined` when at least one expert passes.
+Emit `[INFO] lazy.settings.json[experts]: <N> experts defined` when at least one expert passes.
 
 **D2 — Reference resolution (agent)**
 
@@ -228,32 +261,67 @@ print(json.dumps({'ok': result is not None, 'resolved': str(result) if result el
 " '<expert.agent value>')
 ```
 
-Failure (non-zero exit or `ok: false`) → `[FAIL] expert <key>: agent reference '<value>' did not resolve | experts.settings.json` (category: logical).
+Failure (non-zero exit or `ok: false`) → `[FAIL] expert <key>: agent reference '<value>' did not resolve | lazy.settings.json[experts]` (category: logical).
 
-**D3 — Reference resolution (protocol)**
+**D8 — Reference resolution (aspects)**
 
-Same pattern as D2, but for `expert.protocol`. Failure → `[FAIL] expert <key>: protocol reference '<value>' did not resolve | experts.settings.json` (category: logical).
+For each expert entry with a non-empty `aspects[]`:
 
-**D4 — Protocol contract**
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from reference_resolver import resolve, ReferenceError
+from pathlib import Path
+import sys
+ok = True
+for ref in sys.argv[1:]:
+    try:
+        resolve(ref, category='aspects', repo=Path('.'))
+    except ReferenceError as e:
+        print(f'FAIL: {ref}: {e}')
+        ok = False
+print('OK' if ok else 'FAIL')
+" '<aspect-ref-1>' '<aspect-ref-2>' ...)
+```
 
-For each expert where D3 resolved a protocol path: `Read` the resolved protocol file. Check it contains all five required sections from `lazy-core.expert-protocols-contract.md`:
-- A `kind` enum (heading or table listing at least two kind values).
-- A `role` vocabulary (heading or table listing at least one role).
-- An `outcome` enum (heading or table listing outcome values).
-- A `source` conventions section.
-- A `result` conventions section.
+Any unresolved aspect ref → `[FAIL] expert <key>: aspect reference '<value>' did not resolve | lazy.settings.json[experts]`.
 
-Missing any required section → `[WARN] protocol for expert <key> missing required section(s): <list> | <protocol path>`.
+**D9 — Arguments validation**
 
-**D5 — Standard request fields enforcement**
+For each expert entry carrying `arguments`:
 
-For each resolved protocol file: grep the file for a JSON Schema block (fenced ` ```json ` block containing `"required":`). If a schema block is present, verify it lists all three standard fields: `kind`, `role`, `request` under `"required"`. Any standard field absent from the schema → `[WARN] protocol for expert <key> JSON Schema missing standard required fields: <list> | <protocol path>`.
+- Every key must match `^[a-z][a-z0-9_]*$`. Mismatch → `[FAIL] expert <key>: arguments-key-invalid: <bad-key> | lazy.settings.json[experts]`. Fix: rename the key.
+- Every value must round-trip through `json.dumps`/`json.loads` cleanly (guaranteed since settings is JSON, but re-verified as a sanity check).
+- Total stringified `arguments` size: ≥ 4 KiB → `[WARN] expert <key>: arguments payload <N> bytes — consider a source/ file or protocol reference instead of inlining`.
 
-If no JSON Schema block is present in the protocol file, skip this check silently.
+**D10 — Memory hygiene**
 
-**D6 — `lazy.settings.json[lazy-core.runtime]` schema**
+For every directory under `.memory/<expert>/` (skip `.tags/` and the global `.memory/.tags/`):
 
-Read `.claude/lazy.settings.json`. If absent: `[INFO] lazy.settings.json absent — runtime section not configured` and skip D6 sub-checks. If present, extract the `lazy-core.runtime` section (treat missing section as an empty object):
+- If the directory's `<expert>` is not a key in `lazy.settings.json[experts]` → `[WARN] .memory/<expert>/ orphan — expert not in lazy.settings.json[experts] | .memory/<expert>/`.
+- If the expert IS registered but `aspects[]` lacks `lazycortex-core:lazy-memory.persona-aspect` → `[FAIL] .memory/<expert>/ exists but expert is not marked persona | lazy.settings.json[experts][<expert>].aspects`. Fix options: (a) run `/lazy-memory.mark-persona <expert>`; (b) delete the orphan directory.
+
+For every memory note (`.memory/<expert>/*.md` excluding `.tags/`):
+
+- Required frontmatter present (`title`, `tags`, `type`, `summary`). Missing → `[FAIL] memory note missing required frontmatter: <field> | <path>`.
+- Every tag prefixed `memory/`. Unprefixed → `[FAIL] memory note tag missing `memory/` prefix: <tag> | <path>`.
+- Note slug matches `^[a-z0-9-]+$`. Mismatch → `[WARN] memory note slug non-canonical (expected lowercase + dashes): <path>`.
+
+For every persona-marked expert with no `.memory/<expert>/` directory:
+
+- `[INFO] expert <key> is persona but has not written memory yet | .memory/`.
+
+For every local tag file (`.memory/<expert>/.tags/<topic>.md`):
+
+- Every note referenced by `../<slug>.md` must exist → `[WARN] tag file references missing note: <slug> | <tag-file>`.
+- Cross-check: every note's frontmatter `tags:` that includes `memory/<topic>` must appear in the local tag file → `[WARN] note <slug> carries `memory/<topic>` but is not listed in <tag-file>`. Fix: run `/lazy-memory.index`.
+
+For every global tag file (`.memory/.tags/<topic>.md`):
+
+- Every expert pointer (`../<expert>/.tags/<topic>.md`) must exist → `[WARN] global tag file references missing local file: <expert> | <global-tag-file>`. Fix: run `/lazy-memory.index`.
+
+**D3 — `lazy.settings.json[lazy-core.runtime]` schema**
+
+Read `.claude/lazy.settings.json`. If absent: `[INFO] lazy.settings.json absent — runtime section not configured` and skip D3 sub-checks. If present, extract the `lazy-core.runtime` section (treat missing section as an empty object):
 
 ```
 Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
@@ -268,28 +336,29 @@ print(json.dumps(s))
 Validate the returned section:
 
 - `_version` must equal `1`. Wrong value or absent → `[FAIL] lazy-core.runtime section _version mismatch (expected 1) | .claude/lazy.settings.json`.
-- `daemon` block must be a dict and contain: `git` (string or bool), `polling_interval_sec` (positive int), `cleanup_completed_after` (string or int), `cleanup_failed_after` (string or int). Any missing key → `[FAIL] lazy-core.runtime daemon block missing key(s): <list> | .claude/lazy.settings.json`.
+- `daemon` block must be a dict and contain: `git` (string or bool), `polling_interval_sec` (positive int), `cleanup_completed_after` (string or int), `cleanup_failed_after` (string or int), `cleanup_dead_after` (string or int). Any missing key → `[FAIL] lazy-core.runtime daemon block missing key(s): <list> | .claude/lazy.settings.json`.
+- Each `cleanup_*_after` value must parse as `<N>d` (days), `<N>h` (hours), or a raw non-negative integer (seconds). Anything else → `[FAIL] lazy-core.runtime daemon.<key> has malformed value '<value>' (expected <N>d / <N>h / int) | .claude/lazy.settings.json` — D6 below would otherwise silently fail to parse and apply a default.
 - `routines` must be a dict (may be empty). Non-dict value → `[FAIL] lazy-core.runtime routines is not a dict | .claude/lazy.settings.json`.
-- When D1 found at least one expert AND `routines` does not contain a `lazy-expert.pump` entry → `[WARN] experts configured but lazy-expert.pump routine absent from lazy-core.runtime.routines | .claude/lazy.settings.json`.
+- When D1 found at least one expert AND `routines` does not contain a `lazy-expert.pump` entry → `[WARN] experts configured but lazy-expert.pump routine absent from routines | .claude/lazy.settings.json`.
 
-**D7 — Routine command resolvability**
+**D4 — Routine command resolvability**
 
-For each key/value in `lazy-core.runtime.routines` (skip if D6 found the section absent):
+For each key/value in `routines` (skip if D3 found the section absent):
 
 - Read the routine object's `command` field. If absent → `[FAIL] routine <name> has no command field | .claude/lazy.settings.json`.
 - The `command` value must be a plugin bin path under the 4-level plugin cache layout: `$HOME/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>`. Resolve `$HOME` via `Bash(echo $HOME)`. Check path existence via `Bash(test -f '<path>' && echo ok || echo missing)`. Missing → `[FAIL] routine <name> command path does not exist: <path> | .claude/lazy.settings.json`.
 
-**D8 — Orphan jobs**
+**D5 — Orphan jobs**
 
 Glob `.jobs/*/` (one level deep). For each subdirectory name `<expert>`:
 
-- If `<expert>` is not a key in `experts.settings.json` (from D1) → `[WARN] orphan job directory .jobs/<expert>/ — expert not in experts.settings.json | .jobs/<expert>/`.
+- If `<expert>` is not a key in `lazy.settings.json[experts]` (from D1) → `[WARN] orphan job directory .jobs/<expert>/ — expert not in lazy.settings.json[experts] | .jobs/<expert>/`.
 
-**D9 — Stale DONE jobs**
+**D6 — Stale DONE jobs**
 
-From D6, obtain `cleanup_completed_after` and `cleanup_failed_after` (default to `"7d"` if absent or D6 was skipped). Convert to seconds (parse `<N>d` → `N*86400`, `<N>h` → `N*3600`, int → use directly).
+From D3, obtain `cleanup_completed_after` and `cleanup_failed_after` (default to `"7d"` if absent or D3 was skipped). Convert to seconds (parse `<N>d` → `N*86400`, `<N>h` → `N*3600`, int → use directly).
 
-For each job dir under `.jobs/*/` (recurse one more level: `.jobs/<expert>/<job-id>/`): read the `status` field from the job's `job.json` if present. For jobs with status `DONE` or `FAILED`:
+For each job dir under `.jobs/*/` (recurse one more level: `.jobs/<expert>/<job-id>/`): determine status by the presence of marker files written by the pump — `DONE` indicates the expert finished (success or `outcome=error` — read `response.json` to distinguish), `DEAD` indicates the pump killed the process as stuck. For jobs carrying either marker:
 
 ```
 Bash(python3 -c "
@@ -304,7 +373,7 @@ print('stale' if age_sec > threshold_sec else 'ok')
 
 Stale → `[WARN] stale completed/failed job not yet cleaned: .jobs/<expert>/<job-id>/ (age > threshold) — pump may not be running | .jobs/<expert>/<job-id>/`.
 
-**D10 — Daemon liveness**
+**D7 — Daemon liveness**
 
 Best-effort check. Three signals (any one passing = alive):
 
@@ -350,29 +419,24 @@ plugins_scanned: <n>  warn: <m>
 ## scan: lazy-core.audit/expert-runtime
 
 ### experts_settings
-- [INFO] experts.settings.json: <N> experts defined
-- [FAIL] experts.settings.json is not valid JSON | experts.settings.json
-- [FAIL] expert <key> missing required field(s): <list> | experts.settings.json
+- [INFO] lazy.settings.json[experts]: <N> experts defined
+- [FAIL] lazy.settings.json is not valid JSON | .claude/lazy.settings.json
+- [FAIL] expert <key> missing required field(s): <list> | lazy.settings.json[experts]
 
 ### reference_resolution
-- [FAIL] expert <key>: agent reference '<value>' did not resolve | experts.settings.json
-- [FAIL] expert <key>: protocol reference '<value>' did not resolve | experts.settings.json
-
-### protocol_contract
-- [WARN] protocol for expert <key> missing required section(s): <list> | <protocol path>
-- [WARN] protocol for expert <key> JSON Schema missing standard required fields: <list> | <protocol path>
+- [FAIL] expert <key>: agent reference '<value>' did not resolve | lazy.settings.json[experts]
 
 ### runtime_settings
 - [INFO] lazy.settings.json absent — runtime section not configured
 - [FAIL] lazy-core.runtime section _version mismatch (expected 1) | .claude/lazy.settings.json
 - [FAIL] lazy-core.runtime daemon block missing key(s): <list> | .claude/lazy.settings.json
 - [FAIL] lazy-core.runtime routines is not a dict | .claude/lazy.settings.json
-- [WARN] experts configured but lazy-expert.pump routine absent from lazy-core.runtime.routines | .claude/lazy.settings.json
+- [WARN] experts configured but lazy-expert.pump routine absent from routines | .claude/lazy.settings.json
 - [FAIL] routine <name> has no command field | .claude/lazy.settings.json
 - [FAIL] routine <name> command path does not exist: <path> | .claude/lazy.settings.json
 
 ### orphan_jobs
-- [WARN] orphan job directory .jobs/<expert>/ — expert not in experts.settings.json | .jobs/<expert>/
+- [WARN] orphan job directory .jobs/<expert>/ — expert not in lazy.settings.json[experts] | .jobs/<expert>/
 
 ### stale_jobs
 - [WARN] stale completed/failed job not yet cleaned: .jobs/<expert>/<job-id>/ (age > threshold) — pump may not be running | .jobs/<expert>/<job-id>/
@@ -380,13 +444,29 @@ plugins_scanned: <n>  warn: <m>
 ### daemon_liveness
 - [WARN] runtime daemon appears stale — no pgrep match, no launchctl PID, and no JSONL log line in the last <threshold>s | .logs/lazy-core/runtime/
 
+### aspect_resolution
+- [FAIL] expert <key>: aspect reference '<value>' did not resolve | lazy.settings.json[experts]
+
+### arguments_validation
+- [FAIL] expert <key>: arguments-key-invalid: <bad-key> | lazy.settings.json[experts]
+- [WARN] expert <key>: arguments payload <N> bytes
+
+### memory_hygiene
+- [WARN] .memory/<expert>/ orphan
+- [FAIL] .memory/<expert>/ exists but expert is not marked persona
+- [FAIL] memory note missing required frontmatter
+- [FAIL] memory note tag missing memory/ prefix
+- [WARN] tag file references missing note
+- [WARN] note carries tag but is not listed in tag file
+- [INFO] expert is persona but has not written memory yet
+
 ### summary
 pass: <n>  warn: <n>  fail: <n>
 ```
 
-## Phase 2 — Render
+## Phase 3 — Render
 
-Parse all four returned blocks. Produce:
+Parse all four returned blocks plus the Phase 1 inline findings. Produce:
 
 ### Always loaded (startup cost)
 
@@ -492,17 +572,32 @@ One line per entry. Below the table:
 
 Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings are all `[INFO]` and print only the summary line instead.
 
-**Expert configuration** — one line per `[FAIL]` from D1 (schema) and D2/D3 (reference resolution). Show the `[INFO]` experts count line when all schema checks pass.
+**Expert configuration** — one line per `[FAIL]` from D1 (schema) and D2 (agent reference resolution). Show the `[INFO]` experts count line when all schema checks pass.
 
-**Protocol checks** — one line per `[WARN]` from D4 (protocol contract) and D5 (standard request fields). Omit the section if no warnings.
+**Loop settings** — one line per `[FAIL]` or `[WARN]` from D3 (runtime schema) and D4 (routine command resolvability). Omit the section if all pass.
 
-**Loop settings** — one line per `[FAIL]` or `[WARN]` from D6 (schema) and D7 (routine command resolvability). Omit the section if all pass.
+**Job hygiene** — one line per `[WARN]` from D5 (orphan jobs) and D6 (stale DONE/DEAD jobs). Omit the section if no warnings.
 
-**Job hygiene** — one line per `[WARN]` from D8 (orphan jobs) and D9 (stale DONE jobs). Omit the section if no warnings.
+**Daemon liveness** — one line per `[WARN]` from D7. Omit the section if no warnings.
 
-**Daemon liveness** — one line per `[WARN]` from D10. Omit the section if no warnings.
+**Aspect resolution** — one line per `[FAIL]` from D8. Omit the section if all pass.
 
-**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D10 findings).
+**Arguments validation** — one line per `[FAIL]` or `[WARN]` from D9. Omit if all pass.
+
+**Memory hygiene** — one line per `[FAIL]` or `[WARN]` from D10. INFO findings (persona-but-empty) appear only when the full report would otherwise be empty.
+
+**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D7 findings).
+
+### Logging compliance
+
+Render Phase 1 inline findings.
+
+- **Logging rule presence** (FAIL / WARN) — one line per L1 finding. Omit the sub-section if all pass.
+- **`.logs/` directory** (WARN) — one line for L2 if absent. Omit if present.
+- **`.gitignore` coverage** (WARN) — one line per L3 finding. Omit if covered.
+- **`logging-waiver:` value** (FAIL) — one line per L4 finding. Omit if all valid.
+
+If all L1–L4 checks pass: emit a single `PASS: logging rule installed, .logs/ present, .gitignore covers .logs/, all waiver values valid` summary line.
 
 ### Recommendations
 
@@ -516,18 +611,21 @@ Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings
 - Rule over size budget → move long guidance to `<plugin>/skills/<skill>/references/*.md` per `lazy-core.rule-writing § 2`.
 - "Optional" in phase/step heading → rename the heading; the user's accept/decline choice belongs inside an `AskUserQuestion`, not at the heading level.
 - Narrative-padding match → review and drop the passage if its removal leaves executable behavior unchanged.
-- `experts.settings.json` FAIL → add missing fields per the expert schema; run `/lazy-core.install` wizard step to re-scaffold.
-- Reference resolution FAIL → verify the agent/protocol reference uses a valid format (`<plugin>:<name>`, `user:<name>`, or bare `<name>`) and that the referenced artifact exists.
+- `lazy.settings.json[experts]` FAIL → add missing fields per the expert schema; run `/lazy-core.install` wizard step to re-scaffold.
+- Reference resolution FAIL → verify the agent reference uses a valid format (`<plugin>:<name>`, `user:<name>`, or bare `<name>`) and that the referenced artifact exists.
 - Loop settings FAIL → re-run `/lazy-core.install` to scaffold or repair the `lazy-core.runtime` section in `lazy.settings.json`.
 - Routine command FAIL → install the missing plugin or remove the unresolvable routine entry.
 - Daemon stalled → run `/lazy-core.doctor` for the restart fix-offer.
+- Logging rule not installed in consumer scope → run `/lazy-core.setup` to copy `lazy-log.logging.md` to `.claude/rules/`.
+- `.logs/` missing → run `/lazy-core.setup` to bootstrap the directory.
+- `.gitignore` missing `.logs/` entry → add `.logs/` to `.gitignore` manually or via `/lazy-core.setup`.
+- `logging-waiver:` FAIL → replace empty/boolean waiver value with a concrete string reason per `lazy-core.skill-writing § 1`.
 - Note: system prompt, skill registry, MCP instructions, deferred tool list are injected by Claude Code and cannot be reduced by the user.
 
 ## Failure modes
 
-- **`/lazy-core.audit` exits with "experts.settings.json is not valid JSON"** — the file was hand-edited and broke JSON syntax → fix the syntax or re-scaffold via `/lazy-core.install`.
-- **Agent D reports "reference did not resolve" for an expert** — the `agent` or `protocol` field uses an unrecognised format or points to a non-existent artifact. Check the reference format (`<plugin>:<name>`, `user:<name>`, or bare `<name>`) and verify the artifact is installed → run `/lazy-core.install` to re-register.
-- **`protocol contract` WARN fires even though sections exist** — the protocol file uses non-standard headings. Section detection looks for the literal keywords (kind, role, outcome, source, result) in headings → align the protocol file headings with `lazy-core.expert-protocols-contract.md`.
+- **`/lazy-core.audit` exits with "lazy.settings.json is not valid JSON"** — the file was hand-edited and broke JSON syntax → fix the syntax or re-scaffold via `/lazy-core.install`.
+- **Agent D reports "reference did not resolve" for an expert** — the `agent` field uses an unrecognised format or points to a non-existent artifact. Check the reference format (`<plugin>:<name>`, `user:<name>`, or bare `<name>`) and verify the artifact is installed → run `/lazy-core.install` to re-register.
 - **Routine command FAIL when the plugin is installed** — the plugin cache uses a 4-level path `<registry>/<plugin>/<version>/bin/<plugin>`; an older install used a 3-level layout. Re-install the plugin to refresh the bin path in the routine entry.
-- **D10 daemon liveness check always WARN on first use** — the runtime hasn't been started yet; this is expected after initial install → start the daemon via `launchctl load` or `systemctl --user start` as offered by `/lazy-core.install`.
+- **D7 daemon liveness check always WARN on first use** — the runtime hasn't been started yet; this is expected after initial install → start the daemon via `launchctl load` or `systemctl --user start` as offered by `/lazy-core.install`.
 - **Agent D silently reports nothing** — `PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin` was not resolved (sandboxed environment or missing plugin path). Verify `${CLAUDE_PLUGIN_ROOT}` resolves to the plugin install path and `bin/lazy_settings.py` is present.

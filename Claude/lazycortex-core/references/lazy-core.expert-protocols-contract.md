@@ -15,7 +15,7 @@ A protocol file is a plain markdown file at:
 <plugin>/references/<name>.md
 ```
 
-It is referenced in `experts.settings.json` as `<plugin>:<name>` (e.g. `lazycortex-review:lazy-review.doc-review-protocol`). The runtime resolver (`reference_resolver.resolve(ref, category="protocols", ...)`) maps the `protocols` category to the plugin's `references/` dir, matching the repo-wide convention used by every plugin's protocol/contract docs.
+It is referenced from a **routine entry** in `lazy.settings.json` (the routine declares which protocol(s) its dispatched jobs follow) as `<plugin>:<name>` — single via `protocol: <ref>` or list via `protocols: [<ref>, ...]`. The runtime resolver (`reference_resolver.resolve(ref, category="protocols", ...)`) maps the `protocols` category to the plugin's `references/` dir, matching the repo-wide convention used by every plugin's protocol/contract docs. Expert entries in `lazy.settings.json[experts]` do NOT carry a `protocol` field — protocols are routine-side, not expert-side; the dispatcher reads them from routine cfg and writes them to each job's `config.json`. Aspects are a sibling category (see `lazy-core.expert-aspects-contract.md`): a protocol defines the request/response contract for jobs (routine-side); an aspect shapes how the expert acts (expert-side). The two layers compose — the pump lists protocols and aspects in parallel in the user-message prompt.
 
 **Scope**: a protocol file defines only the protocol-specific contract — the `kind` enum, `role` vocabulary, field shapes, and side-effect rules for one protocol. Standard job-dir and JSON shapes (§§ 2–3) apply universally and are not repeated per protocol.
 
@@ -29,28 +29,38 @@ Every job under `.experts/.jobs/<expert-name>/<job-id>/` follows this structure:
 
 ```
 .experts/.jobs/<expert-name>/<job-id>/
-├── request.json     # consumer-written
-├── READY            # consumer-written marker; daemon picks up only after this exists
+├── request.json     # consumer-written (dispatcher) — job parameters + file-list arrays
+├── config.json      # consumer-written (dispatcher) — agent ref + resolved protocols + git_author
+├── READY            # consumer-written marker — pump picks up only after this exists
 ├── source/...       # consumer-written input files; layout is protocol's choice; may be absent
 ├── context/...      # consumer-written reference files; layout is protocol's choice; may be absent
 ├── result/...       # expert-written output files; layout is protocol's choice; may be absent
+├── PID              # pump-written while expert subprocess is running
 ├── response.json    # expert-written
-└── DONE             # expert/daemon-written marker; consumer collects only after this exists
+├── DONE             # pump-written marker after expert exits — consumer collects only after this exists
+├── DEAD             # pump-written marker if pump killed the process as stuck (alternative terminal state)
+└── dead.json        # pump-written audit log of the kill — paired with DEAD
 ```
 
 File-role summary:
 
 | File | Written by | Purpose |
 |------|-----------|---------|
-| `request.json` | consumer | job parameters + file-list arrays |
-| `READY` | consumer | signals job is ready for pickup |
-| `source/` | consumer | input files the expert processes |
-| `context/` | consumer | reference files the expert may read |
+| `request.json` | dispatcher | job parameters + file-list arrays |
+| `config.json` | dispatcher | agent path-ref, resolved protocols list, git_author (consumed by pump at spawn time — REQUIRED, pump aborts with `logical` error if absent) |
+| `READY` | dispatcher | signals job is ready for pickup |
+| `source/` | dispatcher | input files the expert processes |
+| `context/` | dispatcher | reference files the expert may read |
 | `result/` | expert | output files the expert writes |
+| `PID` | pump | process-id while expert is running; cleared on exit |
 | `response.json` | expert | outcome + optional result file-list |
-| `DONE` | expert/daemon | signals job is complete |
+| `DONE` | pump | terminal marker — expert exited cleanly (success or `outcome=error`) |
+| `DEAD` | pump | terminal marker — pump killed the expert as stuck |
+| `dead.json` | pump | audit log of the kill (timestamps, signals) — paired with DEAD |
 
-Any of the `source` / `context` / `result` subdirs may be absent when no files of that kind exist for the job. The corresponding arrays in JSON may be omitted or empty.
+Any of the `source` / `context` / `result` subdirs may be absent when no files of that kind exist for the job. The corresponding arrays in JSON may be omitted or empty. When a subdir IS present but the matching `request.json` array is empty/absent, the expert receives the directory path in its prompt but no per-file descriptions — protocols should populate the array whenever the dir contains files.
+
+**Two terminal states**: a collected job exposes EITHER `DONE` (whether `outcome=error` or any protocol-defined success outcome) OR `DEAD` (pump killed it). `lazy-expert.list-jobs` and `lazy-expert.collect-job` distinguish them.
 
 ---
 
@@ -94,7 +104,7 @@ Standard field semantics:
 - **`kind`** — selects the operation type; must match a value from the protocol's `kind` enum.
 - **`role`** — free-form, but the protocol enumerates the values its expert prompt handles and how each shifts behaviour. Consumer sets it per-job.
 - **`request`** — free-form prose: the actual instruction or question. Not metadata. Protocol may suggest a template.
-- **`source` / `context` / `result`** — optional file-list arrays. Each entry: `{path, description}`. `path` is full from the source repo root (where the daemon spawned the expert with `cwd=<source-repo>`). Expert reads / writes via these paths directly with `Read` / `Write`.
+- **`source` / `context` / `result`** — optional file-list arrays. Each entry: `{path, description}`. `path` is full from the source repo root (where the daemon spawned the expert with `cwd=<source-repo>`). Expert reads / writes via these paths directly with `Read` / `Write`. When the corresponding directory exists on disk but its array is absent in `request.json`, the expert sees only the directory path in its prompt (no per-file descriptions) — protocols should populate the array whenever the dir contains files.
 
 ### response.json
 
@@ -128,6 +138,8 @@ Standard field semantics:
 ```
 
 `outcome=error` is a reserved value across all protocols. Protocols may not define a `kind` or `outcome` value named `error`.
+
+**Validation:** the pump does not validate `response.json` against a schema. A syntactically malformed `response.json` is treated as `{}` and the job is still marked `DONE` — `lazy-expert.collect-job` will then return `status=done` with an empty response and no error signal. Protocol-defined `result` array enforcement (e.g. "outcome=edited requires result[]") is the consumer's responsibility, not the pump's.
 
 ---
 
@@ -222,7 +234,7 @@ Protocols may subset to fewer categories. They may not introduce new category na
 Protocols are versioned **by filename**. There is no version field, no version syntax in reference strings.
 
 - **Backward-compatible changes** (add optional field, add new `kind`, clarify prose): edit the existing file.
-- **Incompatible changes** (rename a `kind`, remove a field, change `outcome` semantics): create a new file with a new name (e.g. `lazy-review.doc-review-v2-protocol.md`). The old file stays. Consumers migrate by updating `experts.settings.json` to reference the new name.
+- **Incompatible changes** (rename a `kind`, remove a field, change `outcome` semantics): create a new file with a new name (e.g. `lazy-review.doc-review-v2-protocol.md`). The old file stays. Consumers migrate by updating routine cfg entries in `lazy.settings.json` to reference the new name.
 
 No version number is embedded in the reference string (`lazycortex-review:lazy-review.doc-review-protocol`). Consumers that need the old contract keep referencing the old filename.
 
@@ -235,8 +247,8 @@ No version number is embedded in the reference string (`lazycortex-review:lazy-r
 - Protocol file is valid markdown and parses without error.
 - All required sections (§§ 4.1–4.9) are present.
 - Every `kind` value listed in § 4.1 has a corresponding entry in § 4.4.
-- Every expert agent in `experts.settings.json` that references this protocol has a resolvable agent file.
-- Protocol filename matches the reference key in `experts.settings.json`.
+- Every routine in `lazy.settings.json` that references this protocol resolves it to an existing file via `reference_resolver`.
+- Protocol filename matches the reference key used by routines.
 
 Failures surface as `FAIL` findings; missing-but-optional content (e.g. § 4.5 "No extra fields" omitted) surfaces as `WARN`.
 

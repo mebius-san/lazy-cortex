@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#93c5fd"
+iconize_color: "#fca5a5"
 ---
 # lazycortex-core
 
@@ -27,8 +27,10 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 - **guardian** — Public-repo guardrails and MCP permission management. Catches secrets, PII, and internal paths before they ship; classifies new MCP servers' tools so consumers stop drowning in allow prompts. Members: lazy-repo.mark-public, lazy-guard.check-public, lazy-guard.allow-mcp.
 - **runtime** — Per-repo serial daemon that drives the async team. Routines and expert jobs run in order without contending over the working tree; the recovery skill restores the daemon after a halt. Members: lazy-routine.register, lazy-routine.unregister, lazy-runtime.recover.
 - **experts** — An async team of named experts. Dispatch jobs to specialized workers, keep the main session free, and collect results later. Each expert is a role configured at install time with its own prompt and tools; the runtime daemon drains the queue without holding up the caller. Members: lazy-expert.dispatch-job, lazy-expert.collect-job, lazy-expert.cancel-job, lazy-expert.list-jobs.
+- **memory** — Per-expert long-term memory under `.memory/<expert>/`, tracked in git. Persona-marked experts grow over runs: they consult notes before primary work, write new notes via `lazy-memory.write` as a side-effect of jobs, and consolidate via `kind=reflect` passes. Members: lazy-memory.write, lazy-memory.index, lazy-memory.reflect, lazy-memory.mark-persona.
 - **agent-models** — Per-agent Claude model tier routing. The wizard fills in haiku/sonnet/opus tiers for every dispatchable agent in your vault; the `lazy-core.model-router` PreToolUse hook injects the configured tier on every `Agent` call so cheap-by-default works without per-agent flags. Members: lazy-core.agent-models.
 - **git-coordination** — Coordinated git staging across hooks and skills via a per-repo staging lock. Inspect who currently holds the lock and break it manually when the auto-break heuristics don't apply. Members: lazy-core.git-status, lazy-core.git-unlock.
+- **change-history** — Run-log housekeeping and change-history access. Classifies and prunes `.logs/claude/` run-log directories against the live skill/agent/command name set; rolls per-commit log entries into themed changelog blocks; answers "why was X changed?" / "when did we touch Y?" across `.logs/`, git log, and memory; drafts user-facing changelog bullets. Members: lazy-log.clean, lazy-log.distill, lazy-log.recall, lazy-log.timeline, lazy-log.summary, lazy-log.bullets.
 
 ## Walkthroughs
 
@@ -36,6 +38,7 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 - **setup-runtime** — Bootstrap the per-repo serial daemon so the async team has an executor. Path: lazy-core.install (runtime-daemon wizard) → start the daemon (`./run.sh`) → first `/lazy-runtime.recover` if the tree halts.
 - **setup-routine** — Register a custom periodic routine with the runtime daemon and remove it cleanly when no longer needed. Path: lazy-routine.register → daemon picks it up on the next cycle → lazy-routine.unregister.
 - **setup-expert** — Add a named expert to your async team and dispatch your first job. Path: lazy-core.install (expert wizard) → lazy-expert.dispatch-job → lazy-expert.list-jobs → lazy-expert.collect-job.
+- **add-memory-to-expert** — Opt an existing expert into the memory subsystem and run the first reflect pass. Path: lazy-memory.mark-persona → first few dispatches accumulate `.logs/claude/<expert>/` runs → lazy-memory.reflect → expert writes its first `.memory/<expert>/*.md` notes via lazy-memory.write.
 
 ## Requirements
 
@@ -57,7 +60,7 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 | Skill | Description |
 |---|---|
 | `lazy-core.agent-models` | Interactively assign model tiers (haiku/sonnet/opus/default) to every dispatchable subagent missing from `lazy.settings.json`. Auto-routes each entry to its structurally-correct scope: `_user.*` → global file, `_project.*` → project file, `_builtin.*` → global (override with `--scope=project\|global`). Cheap, standalone, idempotent — safe to re-run. Invoked directly or by `lazy-core.optimize` Phase 7. |
-| `lazy-core.audit` | Quick read-only audit of what gets loaded into conversation context at startup plus skill-writing, agent-writing, and rule-writing compliance. Shows sizes, loading behavior, optimization opportunities, Execution-Discipline preamble presence, no-Optional headings, narrative-padding heuristics, and rule-file frontmatter/size/code-block/scope enforcement. No changes made. |
+| `lazy-core.audit` | Quick read-only audit of what gets loaded into conversation context at startup plus skill-writing, agent-writing, rule-writing, and logging compliance. Shows sizes, loading behavior, optimization opportunities, Execution-Discipline preamble presence, no-Optional headings, narrative-padding heuristics, rule-file frontmatter/size/code-block/scope enforcement, and logging-rule installation state. No changes made. |
 | `lazy-core.doctor` | Health check for Claude Code project configuration. Verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, checks that installed plugins are at the latest marketplace version, and delegates to sibling audit skills (lazy-guard.check-public, lazy-log.audit) when they apply. Reports issues and offers targeted fixes. Run periodically or when something feels off. |
 | `lazy-core.git-status` | Read-only inspect of the lazy-core.git staging lock. Prints holder, age, liveness, and whether the lock is currently breakable. No state mutation. |
 | `lazy-core.git-unlock` | Manually break the lazy-core.git staging lock. Asks before acting (AskUserQuestion). Use only when /lazy-core.git-status shows a lock that the hook's break-the-lock heuristics will not auto-break. |
@@ -70,8 +73,13 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 | `lazy-expert.list-jobs` | List expert queue jobs, optionally filtered by expert name or status. Wraps expert_runtime.list_jobs. |
 | `lazy-guard.allow-mcp` | Register tools of one or more MCP servers in Claude Code settings using a 3-bucket classifier — safe/reversible tools into permissions.allow (no prompt), truly destructive tools into permissions.ask (always prompt), and medium-risk tools skipped entirely so Claude Code prompts once per call and the user decides. Writes to settings.local.json (gitignored) by default to keep personal permissions out of tracked settings shared with teammates. For globally defined servers, asks whether to register at the global scope (~/.claude/settings.local.json) or per-project (./.claude/settings.local.json). Also strips redundant mcp__ entries from paired tracked settings.json after promotion. Optionally installs a SessionStart preload hook (in gitignored settings.local.json — a personal optimization, not universal enablement) that tells the agent to resolve the server's tool schemas via ToolSearch at session start — eliminates the deferred-loading round-trip that otherwise causes drift to Bash equivalents. Use when the user says 'allow context7 mcp', 'allow all mcp tools', 'trust the brave-search MCP server', or similar. |
 | `lazy-guard.check-public` | Use when auditing a public repo (or a public subtree inside an otherwise private repo) for leaked secrets, PII, infrastructure details, or hardcoded local paths. Run before making a repo/subtree public, after adding new configs, or as a periodic hygiene check. Reads .guard-waivers.json for accepted exceptions and optional `public_scopes` globs. |
+| `lazy-log.clean` | Interactive housekeeping for `./.logs/claude/`. Classifies each subdirectory against the live set of canonical skills/agents/commands; offers merge / distill-to-memory / delete / leave per orphan, batched by pattern when a cluster of anonymous folders (e.g. `task-N`) would otherwise produce dozens of prompts. Read-first — no folder is touched until the user has approved every action. |
+| `lazy-memory.index` | Operator / audit-side rebuild of `.memory/.tags/` and every `.memory/<expert>/.tags/` from current notes' frontmatter. Recovery tool — `lazy-memory.write` keeps tag files in sync atomically; this skill exists for hand-edited memory trees and drift recovery. |
+| `lazy-memory.mark-persona` | Opt one expert into the memory subsystem by appending `lazycortex-core:lazy-memory.persona-aspect` to its `aspects[]` in `lazy.settings.json[experts][<expert>]`. Idempotent — re-running on an already-marked expert is a no-op. |
+| `lazy-memory.reflect` | Dispatch a single `kind=reflect` job for one persona-marked expert. The expert reviews recent `.logs/claude/<self>/*.md` runs + current `.memory/<self>/*.md` and consolidates via `lazy-memory.write`. Refuses non-persona-marked experts. |
+| `lazy-memory.write` | Atomic memory-note writer for persona-marked experts. Writes one note under `.memory/<expert>/`, regenerates touched `.tags/` files (local + global), optionally drops consolidated log files. The only blessed writer of .memory/. |
 | `lazy-repo.mark-public` | Use when preparing a local/private repo — or a subtree inside one — to become public. Runs the full lazy-guard.check-public audit, walks through fixes and waivers, creates .guard-waivers.json to enable the pre-commit hook, and optionally flips the repo to public on GitHub. Accepts an optional scope argument to mark a subtree public (e.g., `claude/**`) without touching GitHub visibility. |
-| `lazy-routine.register` | Register a named routine in lazy.settings.json. Type-aware wizard (subprocess / inbox / schedule / git). Wraps expert_runtime.register_routine with closed-set validation. Used by plugin install skills. |
+| `lazy-routine.register` | Register a named routine in lazy.settings.json. Type-aware wizard (subprocess / inbox / schedule / git / md-scan). Wraps expert_runtime.register_routine with closed-set validation. Used by plugin install skills. |
 | `lazy-routine.unregister` | Remove a named routine from lazy.settings.json. Wraps expert_runtime.unregister_routine. Protects the built-in lazy-expert.pump routine. |
 | `lazy-runtime.recover` | Recover the lazycortex-core runtime daemon from a working-tree halt. Walks the operator through cleanup (commit / stash / discard / abort) and clears the daemon_halted block from state.json once the tree is clean. |
 
@@ -80,17 +88,30 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
 
 - [agent-models](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/agent-models.md) — Assign haiku/sonnet/opus tiers to every agent in your vault and let the model-router hook route each dispatch automatically.
+- [add-memory-to-expert](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/add-memory-to-expert.md) — Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
+- [change-history](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/change-history.md) — Run-log housekeeping and change-history access — clean up orphaned log directories, distill commits into themed prose, and ask "why was X changed?" across every source at once.
 - [experts](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/experts.md) — Dispatch jobs to named expert workers, keep the main session free, and collect results when the daemon finishes them.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, and change-history access.
 - [git-coordination](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/git-coordination.md) — Inspect and manually break the per-repo staging lock that prevents hooks and skills from stomping each other's git index changes.
 - [guardian](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/guardian.md) — Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/install-and-audit.md) — Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-- [runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/runtime.md) — Register, unregister, and recover routines in the per-repo serial daemon — the async team runs in order without contending over the working tree.
 - [make-repo-public](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/make-repo-public.md) — Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
+- [memory](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/memory.md) — Per-expert long-term memory tracked in git — experts consult notes before primary work, write new notes as a side-effect of jobs, and consolidate via reflect passes.
+- [runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/runtime.md) — Register, unregister, and recover routines in the per-repo serial daemon — five routine types keep the async team running in order without contending over the working tree.
 - [setup-expert](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-expert.md) — Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
 - [setup-routine](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-routine.md) — Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
 - [setup-runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-runtime.md) — Bootstrap the per-repo serial daemon so the async expert team has an executor — install wizard, start the daemon, then unblock it with /lazy-runtime.recover if the working tree halts.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/troubleshooting.md) — Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, and the expert runtime.
+
+## Agents
+
+| Agent | Description |
+|---|---|
+| `lazy-log.bullets` | Convert one plugin's commit range into a user-facing CHANGELOG release block. Reads commits via git, drops internal-only commits by Conventional-commits type, rewrites the rest as outcome-led bullets grouped by scope, and returns the rendered `### <version> — <date> UTC` block ready to prepend to CHANGELOG.public.md. Dispatch from any release-drafting flow that needs commit-subjects → user-bullets translation. |
+| `lazy-log.distill` | Convert raw commit entries from .logs/commits.jsonl into themed functional prose in ./.logs/changelog.md. Output is theme-first (## <theme>) with one paragraph per day (### YYYY-MM-DD); same-day re-runs rewrite today's paragraph in place; touched theme blocks bump to the top. Throttled to once per 4h via mtime(.logs/changelog.md). Invoke after meaningful commits (see lazy-log.logging rule) or on demand. |
+| `lazy-log.recall` | Search all change-history sources (run logs, changelog, raw commit log, git history, memory) for a query. Returns ranked matches with git SHAs so the user can jump to the actual commit. Use when the user asks 'why was X changed?' or 'when did we change Y?' |
+| `lazy-log.summary` | Synthesize a multi-paragraph summary of all changes related to a topic across time (not chronological). Use when the user wants to understand 'the whole story' of a feature, refactor, or area of the codebase. |
+| `lazy-log.timeline` | Generate a chronological timeline view of all changes matching a date range or topic. Combines changelog entries, commits, and AI run logs. Use when the user wants a 'what happened when' view. |
 
 ## Commands
 
@@ -112,15 +133,17 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 | `lazy-core.scaffold` | Registry of authoring templates for any new artifact a plugin registers. |
 | `lazy-core.skill-writing` | Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, no-dirty-tree clause, and the optional Failure-modes section. |
 | `lazy-guard.security` | Security constraints that the lazy-guard.* scanners and pre-commit hook enforce — credential safety and public-repo readiness. |
+| `lazy-log.logging` | Logging conventions for skills, agents, and commands. |
 
 ## Hooks
 
 | Hook | Trigger | Description |
 |---|---|---|
-| `lazy-core.git-guard` | `Bash`, `mcp__git__git_commit`, `mcp__git__git_add`, `mcp__git__git_reset` | Serialize git staging across Claude Code sessions. |
-| `lazy-core.model-router` | `Agent` | Route Agent dispatches to a configured model. |
-| `lazy-guard.check-public` | `Bash`, `mcp__git__git_commit` | Scan staged git changes for secrets, PII, and infrastructure leaks before committing to a public repo. |
-| `lazy-guard.settings` | `Edit\|Write` | Guard Claude Code settings files against dangerous changes. |
+| `lazy-core.git-guard` | `Bash`, `mcp__git__git_commit`, `mcp__git__git_add`, `mcp__git__git_reset` | Pre/PostToolUse hook: serialize git staging across Claude Code sessions. |
+| `lazy-core.model-router` | `Agent` | PreToolUse hook — route Agent dispatches to a configured model. |
+| `lazy-guard.check-public` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: scan staged git changes for secrets, PII, and infrastructure leaks before committing to a public repo. |
+| `lazy-guard.settings` | `Edit\|Write` | PreToolUse hook: guard Claude Code settings files against dangerous changes. |
+| `lazy-log.commit-recorder` | `Bash`, `mcp__git__git_commit` | PostToolUse hook: record every successful git commit to .logs/commits.jsonl. |
 
 ## Installation
 
@@ -164,6 +187,11 @@ Invoke skills with slash commands:
 /lazy-expert.list-jobs
 /lazy-guard.allow-mcp
 /lazy-guard.check-public
+/lazy-log.clean
+/lazy-memory.index
+/lazy-memory.mark-persona
+/lazy-memory.reflect
+/lazy-memory.write
 /lazy-repo.mark-public
 /lazy-routine.register
 /lazy-routine.unregister

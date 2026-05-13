@@ -15,7 +15,7 @@ Reference files live under `references/` at any of three scopes:
 | Consumer override | `<repo>/.claude/references/<name>.md` | bare `<name>` via `bin/reference_resolver.py` |
 | User scope | `~/.claude/references/<name>.md` | `user:<name>` via `bin/reference_resolver.py` |
 
-`references/` is the canonical name at every scope — there is no `protocols/` or `schemas/` folder. The resolver maps the `category` argument (`protocols`, `agents`) to the on-disk directory (`references`, `agents`); see `bin/reference_resolver.py:plugin_dir_for_category`.
+`references/` is the canonical name at every scope — there is no `protocols/` or `schemas/` folder. The resolver maps the `category` argument (`protocols`, `agents`, `aspects`) to the on-disk directory (`references`, `agents`, `references`); see `bin/reference_resolver.py:plugin_dir_for_category`.
 
 ## 1. Subtypes and filename suffix conventions
 
@@ -24,11 +24,14 @@ Every new reference file SHOULD declare its subtype via filename suffix. Existin
 | Subtype | Suffix | Scaffold template | Loaded by |
 |---|---|---|---|
 | Protocol | `<name>-protocol.md` | `core/protocol-template.md` | `reference_resolver` (runtime) |
+| Aspect | `<name>-aspect.md` | `core/aspect-template.md` | `reference_resolver` (runtime, `category="aspects"`) |
 | Schema | `<name>-schema.md` | `core/schema-template.md` | humans + audits |
 | Contract | `<name>-contract.md` | `core/contract-template.md` | humans + audits |
 | Other / freeform | no suffix required | — | varies |
 
 A protocol file is the formal request/response contract for an expert (see `lazy-core.expert-protocols-contract.md`). A schema documents a config or data shape. A contract is the meta-spec for an artifact KIND (e.g. what every protocol file must contain). Mismatches between filename suffix and content (e.g. a `*-schema.md` file lacking a schema table) → `WARN`.
+
+An aspect file is the meta-contract for a behavior layer composed into one or more experts (see `lazy-core.expert-aspects-contract.md`).
 
 ## 2. Mandatory frontmatter (FAIL if missing)
 
@@ -38,6 +41,7 @@ A protocol file is the formal request/response contract for an expert (see `lazy
 | Subtype | Required additional frontmatter |
 |---|---|
 | Protocol | `name:` (the bare reference key), `version:` (integer protocol version) |
+| Aspect | `name:` (the bare reference key) |
 | Schema | none beyond `description:` |
 | Contract | none beyond `description:` |
 

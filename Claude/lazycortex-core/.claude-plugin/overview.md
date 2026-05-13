@@ -19,8 +19,10 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 - **guardian** — Public-repo guardrails and MCP permission management. Catches secrets, PII, and internal paths before they ship; classifies new MCP servers' tools so consumers stop drowning in allow prompts. Members: lazy-repo.mark-public, lazy-guard.check-public, lazy-guard.allow-mcp.
 - **runtime** — Per-repo serial daemon that drives the async team. Routines and expert jobs run in order without contending over the working tree; the recovery skill restores the daemon after a halt. Members: lazy-routine.register, lazy-routine.unregister, lazy-runtime.recover.
 - **experts** — An async team of named experts. Dispatch jobs to specialized workers, keep the main session free, and collect results later. Each expert is a role configured at install time with its own prompt and tools; the runtime daemon drains the queue without holding up the caller. Members: lazy-expert.dispatch-job, lazy-expert.collect-job, lazy-expert.cancel-job, lazy-expert.list-jobs.
+- **memory** — Per-expert long-term memory under `.memory/<expert>/`, tracked in git. Persona-marked experts grow over runs: they consult notes before primary work, write new notes via `lazy-memory.write` as a side-effect of jobs, and consolidate via `kind=reflect` passes. Members: lazy-memory.write, lazy-memory.index, lazy-memory.reflect, lazy-memory.mark-persona.
 - **agent-models** — Per-agent Claude model tier routing. The wizard fills in haiku/sonnet/opus tiers for every dispatchable agent in your vault; the `lazy-core.model-router` PreToolUse hook injects the configured tier on every `Agent` call so cheap-by-default works without per-agent flags. Members: lazy-core.agent-models.
 - **git-coordination** — Coordinated git staging across hooks and skills via a per-repo staging lock. Inspect who currently holds the lock and break it manually when the auto-break heuristics don't apply. Members: lazy-core.git-status, lazy-core.git-unlock.
+- **change-history** — Run-log housekeeping and change-history access. Classifies and prunes `.logs/claude/` run-log directories against the live skill/agent/command name set; rolls per-commit log entries into themed changelog blocks; answers "why was X changed?" / "when did we touch Y?" across `.logs/`, git log, and memory; drafts user-facing changelog bullets. Members: lazy-log.clean, lazy-log.distill, lazy-log.recall, lazy-log.timeline, lazy-log.summary, lazy-log.bullets.
 
 ## Walkthroughs
 
@@ -28,6 +30,7 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 - **setup-runtime** — Bootstrap the per-repo serial daemon so the async team has an executor. Path: lazy-core.install (runtime-daemon wizard) → start the daemon (`./run.sh`) → first `/lazy-runtime.recover` if the tree halts.
 - **setup-routine** — Register a custom periodic routine with the runtime daemon and remove it cleanly when no longer needed. Path: lazy-routine.register → daemon picks it up on the next cycle → lazy-routine.unregister.
 - **setup-expert** — Add a named expert to your async team and dispatch your first job. Path: lazy-core.install (expert wizard) → lazy-expert.dispatch-job → lazy-expert.list-jobs → lazy-expert.collect-job.
+- **add-memory-to-expert** — Opt an existing expert into the memory subsystem and run the first reflect pass. Path: lazy-memory.mark-persona → first few dispatches accumulate `.logs/claude/<expert>/` runs → lazy-memory.reflect → expert writes its first `.memory/<expert>/*.md` notes via lazy-memory.write.
 
 ## Requirements
 

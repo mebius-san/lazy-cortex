@@ -15,7 +15,7 @@ A `<artifact-kind>` is a <markdown / JSON / YAML> file at:
 <plugin>/<location>/<name>.<ext>
 ```
 
-<Describe how it's referenced from other artifacts (e.g. `experts.settings.json` keys, frontmatter, settings sections, registry blocks), and what naming or filename conventions apply.>
+<Describe how it's referenced from other artifacts (e.g. `lazy.settings.json[experts]` keys, frontmatter, settings sections, registry blocks), and what naming or filename conventions apply.>
 
 ---
 

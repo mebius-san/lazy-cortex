@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, and the expert runtime.
-last_regen: 2026-05-08
+summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, and change-history access.
+last_regen: 2026-05-13
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -22,6 +22,16 @@ source_skills:
   - lazy-routine.register
   - lazy-routine.unregister
   - lazy-runtime.recover
+  - lazy-memory.write
+  - lazy-memory.index
+  - lazy-memory.reflect
+  - lazy-memory.mark-persona
+  - lazy-log.clean
+  - lazy-log.distill
+  - lazy-log.recall
+  - lazy-log.timeline
+  - lazy-log.summary
+  - lazy-log.bullets
 ---
 # FAQ
 
@@ -167,7 +177,7 @@ Author-name findings in tracked manifests (`plugin.json`, `package.json`, etc.) 
 
 ## Do I need to enable the expert runtime, or is it on by default?
 
-The expert runtime is opt-in per repo. When you run `/lazy-core.install`, a wizard phase asks whether to bootstrap runtime and experts for the current repo. If you answer yes, the skill writes the `lazy-core.runtime` block into `.claude/lazy.settings.json`, creates `.experts/experts.settings.json`, copies the `lazy.runtime.sh` shim to `.claude/bin/`, and adds `.experts/.jobs/` to `.gitignore`. It also offers to install a daemon supervisor (macOS launchd or Linux systemd) and registers the `lazy-expert.pump` routine automatically once you add at least one expert. If you skip that phase or answer no, none of those files are created and the `/lazy-expert.*` skills will abort at Step 2 with "`.experts/` not initialised — run `/lazy-core.install` first."
+The expert runtime is opt-in per repo. When you run `/lazy-core.install`, a wizard phase asks whether to bootstrap runtime and experts for the current repo. If you answer yes, the skill writes the `lazy-core.runtime` block into `.claude/lazy.settings.json`, creates `lazy.settings.json[experts]`, copies the `lazy.runtime.sh` shim to `.claude/bin/`, and adds `.experts/.jobs/` to `.gitignore`. It also offers to install a daemon supervisor (macOS launchd or Linux systemd) and registers the `lazy-expert.pump` routine automatically once you add at least one expert. If you skip that phase or answer no, none of those files are created and the `/lazy-expert.*` skills will abort at Step 2 with "`.experts/` not initialised — run `/lazy-core.install` first."
 
 To enable it later without re-running the full install flow, run `/lazy-core.install` again — it is idempotent and will offer the runtime wizard phase again.
 
@@ -279,3 +289,95 @@ In all three cases, `--dry-run` is purely read-only: no files are created or mod
 ## What happens if I register a routine whose `inbox_dir` is not gitignored?
 
 `/lazy-routine.register` checks this for `inbox`-type routines using `git check-ignore`. If the directory is tracked rather than gitignored, the skill warns you: an inbox routine moves files between iterations, which dirties the working tree and triggers the daemon's halt protection on every cycle. You get three options — add the directory to `.gitignore` now (recommended), continue anyway and commit moves manually, or abort the registration. If you choose to add it, the skill appends the entry to `.gitignore` but does not auto-commit; you commit when you are ready to coordinate with other in-flight changes.
+
+---
+
+## What is the difference between a protocol and an aspect?
+
+A **protocol** is routine-side config that defines the request/response contract for the jobs a routine dispatches — the `kind` enum, `role` vocabulary, field shapes, and outcome enum. Different routines can dispatch jobs against the same protocol.
+
+An **aspect** is expert-side config that shapes how the expert acts on top of its protocol. The same protocol can be paired with different aspects across experts. For example, two experts could share the doc-review protocol but only one carries `lazy-memory.persona-aspect` to keep notes between runs. Protocols and aspects are listed in parallel in the expert's user-message prompt — the expert reads both before acting.
+
+---
+
+## How do I give an expert long-term memory?
+
+Run `/lazy-memory.mark-persona <expert>` to opt the expert into the memory subsystem. The skill appends `lazycortex-core:lazy-memory.persona-aspect` to the expert's `aspects[]` in `lazy.settings.json[experts]`. From that point:
+
+- The expert may write notes under `.memory/<expert>/` via `/lazy-memory.write` (the only blessed writer of `.memory/`).
+- The expert must consult `.memory/<expert>/.tags/*.md` before its primary work.
+- Periodic consolidation runs via `/lazy-memory.reflect <expert>` (or the daemon's `memory-reflect-all` routine if enabled).
+
+Memory notes are markdown files with frontmatter (`title`, `tags`, `type`, `summary`) and live in `.memory/<expert>/`. They are tracked in git — the directory is un-ignored explicitly so consolidated learnings travel with the repo.
+
+---
+
+## What note types does the memory subsystem support?
+
+Every memory note written via `/lazy-memory.write` must declare a `type` in its frontmatter. The accepted values are:
+
+- **persona** — information about the expert's own role, preferences, or accumulated understanding.
+- **rule** — a behavioral constraint or policy the expert has learned to apply.
+- **example** — a concrete past case or worked example worth recalling.
+- **warning** — a known pitfall or anti-pattern the expert has encountered.
+- **fact** — a discrete factual datum the expert needs to remember.
+
+Notes also require `title`, `summary`, and `tags` (all tag entries must be prefixed `memory/`, e.g. `memory/auth`). If any of these fields are missing, `/lazy-memory.write` aborts with a `frontmatter-invalid` error before touching the filesystem.
+
+---
+
+## When should I run `/lazy-memory.reflect` versus waiting for the daemon?
+
+`/lazy-memory.reflect` dispatches a `kind=reflect` job immediately for one persona-marked expert, without waiting for the daemon's next scheduled cycle. Use it when you want to consolidate right now — for example, after a focused burst of sessions with a particular expert where you know patterns have accumulated.
+
+If you have registered the `memory-reflect-all` routine (enabled during `/lazy-core.install`), the daemon dispatches reflect passes on its own cadence for all persona-marked experts. In that case, `/lazy-memory.reflect` is most useful for catching up a single expert outside the regular cadence, or to verify that the reflect job runs cleanly before trusting the daemon to run it automatically.
+
+`/lazy-memory.reflect` refuses to dispatch for an expert that is not persona-marked. Run `/lazy-memory.mark-persona <expert>` first to opt the expert in.
+
+---
+
+## When should I run `/lazy-memory.index`?
+
+`/lazy-memory.index` is a recovery tool, not a routine step. Under normal operation, `/lazy-memory.write` keeps the tag index in sync atomically every time it writes a note: it regenerates the local `.memory/<expert>/.tags/` and the global `.memory/.tags/` in the same operation. You only need `/lazy-memory.index` when the tag files have drifted from the actual notes — for example, after hand-editing note frontmatter directly in a text editor, after merging memory notes from another branch, or after recovering from a partial write failure.
+
+Running it on an already-consistent tree is safe — the worker is idempotent and simply confirms that the note count, tag count, and expert count are as expected.
+
+---
+
+## How does `/lazy-log.clean` decide what counts as an orphan?
+
+Every subdirectory under `.logs/claude/` is compared against a live canonical name set that the skill resolves from all skills, agents, and commands found in the enabled plugin set. A folder is canonical if its name exactly matches an artifact name; it is an orphan if it does not. Orphans then split into three further buckets:
+
+- **Rename candidates** — the name is ≥ 80% similar (by sequence match) to a canonical name, suggesting a past rename or typo.
+- **Pattern orphans** — the name matches known anonymous-subagent patterns like `task-N`, `subagent-task-N`, or `plan-execute`.
+- **Other orphans** — everything that remains.
+
+The skill asks for your decision on each bucket (or cluster, for pattern orphans) one question at a time. For any folder you want to clean up, you can optionally distill its log content into Hindsight memory before deletion. No folder is touched until you have approved every action.
+
+---
+
+## What is the difference between `/lazy-log.recall`, `/lazy-log.timeline`, and `/lazy-log.summary`?
+
+All three search the same set of sources — `.logs/changelog.md`, run logs, `.logs/commits.jsonl`, git log, and project memory files — but they answer different questions.
+
+`/lazy-log.recall` answers "where and when did X happen?" It decomposes your query into keywords, searches all sources, ranks matches by tier (changelog and run-log results rank highest), deduplicates by git SHA, and returns a table of the top matches with SHAs you can pass to `git show`.
+
+`/lazy-log.timeline` answers "what happened between these dates?" It collects and sorts all matching entries chronologically and groups them by day, marking internal commits (chore/refactor) separately so you can skim past them. Good for a "what happened last week" overview.
+
+`/lazy-log.summary` answers "tell me the whole story of X." It synthesizes a multi-paragraph narrative grouped by sub-theme rather than date — design decisions, implementation phases, issues that came up, follow-up work. Use it when you want to understand the arc of a feature or refactor, not just find a commit SHA.
+
+---
+
+## What does `/lazy-log.distill` produce, and when does it run?
+
+`/lazy-log.distill` converts raw commit entries from `.logs/commits.jsonl` into human-readable themed prose in `.logs/changelog.md`. The output is structured theme-first: a top-level `## <theme>` for each Conventional-commits scope or keyword cluster, then `### YYYY-MM-DD` paragraphs under each theme. Same-day re-runs rewrite today's paragraph in place rather than appending a fragment.
+
+The agent is throttled to once per four hours by default — it checks the mtime of `.logs/changelog.md` and skips if the last write was less than four hours ago. You can bypass the throttle by passing `force` or `manual catch-up` in the invocation prompt. The `lazy-log.logging` rule also decides, on each turn that produces a commit, whether to invoke distill automatically — it walks a gate sequence (was there a commit this turn? did the user say skip? is this a narration-worthy commit?) before dispatching.
+
+---
+
+## What does `/lazy-log.bullets` produce, and how is it different from `/lazy-log.distill`?
+
+`/lazy-log.bullets` converts a commit range for one plugin into a user-facing release block ready to prepend to `CHANGELOG.public.md`. It drops internal-only commits (chore, style, test, pure refactor with no behavioral change visible to a user installing the plugin) and rewrites the rest as outcome-led bullets grouped by Conventional-commits scope. The output is the rendered `### <version> — <date> UTC` block, not a file write — the coordinator (typically `pub.publish`) owns prepending it.
+
+`/lazy-log.distill` targets the private `.logs/changelog.md` used for day-to-day recall within the repo; `/lazy-log.bullets` targets the public `CHANGELOG.public.md` shipped with each plugin release. The audiences, filtering criteria, and output destinations are different.

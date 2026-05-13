@@ -1,46 +1,44 @@
 ---
 chapter_type: block
 summary: Assign haiku/sonnet/opus tiers to every agent in your vault and let the model-router hook route each dispatch automatically.
-last_regen: 2026-05-09
+last_regen: 2026-05-13
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
 ---
 # Per-agent model routing
 
-Every `Agent` call in Claude Code spins up a subagent. By default they all run on the same model tier. That's fine for a handful of agents, but a vault with dozens — distill workers, diagram drawers, log taggers, expert-job processors — burns opus-level budget on work a haiku model handles just as well.
+Every `Agent` call in Claude Code spins up a subagent. By default they all run on the same model tier. That is fine for a handful of agents, but a vault with dozens — distill workers, diagram drawers, log taggers, expert-job processors — burns opus-level budget on work a haiku model handles just as well.
 
-This block lets you declare, once, which tier each agent deserves. Run `/lazy-core.agent-models` and a batched wizard walks you through every agent that doesn't yet have a routing entry. Curated defaults are suggested automatically; you accept, adjust, or skip in bulk. Once the entries are written, the `lazy-core.model-router` PreToolUse hook intercepts every `Agent` dispatch and silently injects the right model — no per-call flags, no per-session reminders.
+This block gives you two things: an interactive wizard that assigns each agent a tier once, and a hook that enforces those assignments automatically on every subsequent dispatch. Run `/lazy-core.agent-models`, walk through the batched prompts, and from that point on every `Agent` call gets the right model without per-call flags or per-session reminders.
 
-## What's in this block
+## When you'd use this
 
-**`lazy-core.agent-models`** owns the interactive setup half of the routing system. It discovers every dispatchable agent across your vault — Claude Code built-ins, globally-authored agents, project-local agents, and plugin-shipped agents — compares that list against existing `agent_models` entries in `lazy.settings.json`, and presents only the gaps. A three-batch structure keeps the session short: curated LazyCortex agents with pre-baked tier suggestions first, then any third-party plugin agents, then your project's own agents. You answer once per batch; the skill writes each entry to whichever settings file owns that scope.
+- After a fresh install, when `lazy-core.audit` reports that `agent_models` entries are missing for discovered agents.
+- After installing a new plugin that ships additional agents.
+- After authoring a new project-local agent in `.claude/agents/`.
+- When you want a project-specific model tier that overrides your global default for a particular agent.
+- When previewing what routing entries would be written before committing to them.
 
-The `lazy-core.model-router` PreToolUse hook is the runtime half. It fires before every `Agent` call, reads the `agent_models` section, matches the dispatch string, and injects the configured tier into the call. It runs silently — you dispatch agents exactly as before. Agents with no entry, or entries set to `default`, fall through to Claude Code's own model default.
+## How it fits together
 
-## How they work together
+Run `/lazy-core.agent-models`. The skill loads the `agent_models` sections from both your global `~/.claude/lazy.settings.json` and the project `./.claude/lazy.settings.json`, merges them into a single lookup, and discovers every dispatchable agent across your vault — Claude Code built-ins (`Explore`, `Plan`, `general-purpose`, `statusline-setup`), globally-authored agents under `~/.claude/agents/`, project-local agents under `./.claude/agents/`, and plugin-shipped agents from the plugin cache. Any agent whose dispatch string already appears in the merged lookup — including those explicitly set to `default` — is considered decided and stays out of the wizard.
 
-You run `/lazy-core.agent-models` after a fresh install or after adding new agents. The skill loads the current `agent_models` sections from both your global `~/.claude/lazy.settings.json` and the project `./.claude/lazy.settings.json`, then merges them into a single lookup. Any agent whose dispatch string already appears in that lookup — including entries explicitly set to `default` — is considered decided and stays out of the wizard.
+The remaining agents surface in three ordered batches. The first covers built-ins and LazyCortex plugin agents, which carry pre-baked tier suggestions from an internal tier table (for example, `Explore` → haiku, `Plan` → opus, log-distill agents → haiku). The second covers any other third-party plugin agents. The third covers your project's own agents. Each batch is a single prompt: accept all suggestions, review each agent individually, mass-set the whole batch to `default`, or skip it for now. Accepting a batch records every entry as planned; reviewing routes just those agents into a per-agent prompt where you can accept the suggestion, pick a neighbor tier, fall back to `default`, or skip.
 
-The remaining agents surface in three ordered batches. For built-ins and LazyCortex plugin agents, suggested tiers come from a built-in tier table: `Explore` → haiku, `Plan` → opus, log distillers → haiku, and so on. For your own agents, the wizard falls back to a description heuristic and lets you confirm or override. Each batch is a single `AskUserQuestion`: accept all suggestions, review each agent individually, mass-set the batch to `default`, or skip it for now.
+After the prompts, the skill writes each entry to its structurally correct file. `_user.*` agents land in the global settings file (those agents live in `~/.claude/agents/`, so their tiers belong globally). `_project.*` agents land in the project settings file. Built-ins land in the global file because they are identical across every repo. Plugin agents follow the plugin's install scope. Pass `--scope=project` to force every entry into the project file — useful for repo-specific overrides.
 
-When you accept, the skill routes each entry to its structurally correct file. `_user.*` agents (authored globally in `~/.claude/agents/`) land in the global settings file; `_project.*` agents (in `./.claude/agents/`) land in the project file; built-ins land in the global file because they're identical across every repo. Plugin agents follow the plugin's own install scope. You can override all of this with `--scope=project` to force every entry into the project file — useful when you want project-specific tier overrides that take precedence over your global defaults.
-
-After the write, `lazy-core.model-router` picks up the new entries immediately on the next `Agent` dispatch. No restart needed.
+The `lazy-core.model-router` PreToolUse hook is the runtime counterpart. It fires before every `Agent` dispatch, reads the `agent_models` section, matches the dispatch string, and injects the configured tier silently. Agents with no entry, or entries set to `default`, fall through to Claude Code's built-in model default. No restart is needed after the wizard writes new entries — the hook picks them up on the next dispatch.
 
 ## Common adjustments
 
 **Preview before writing.** Run `/lazy-core.agent-models --dry-run` to see exactly which entries would be written and to which file, without making any changes.
 
-**Project-specific overrides.** If your global config sets `general-purpose` to `sonnet` but this repo's general-purpose work is lightweight, run `/lazy-core.agent-models --scope=project`. The project entry takes precedence over the global one.
+**Project-specific overrides.** If your global config sets `general-purpose` to `sonnet` but this repo's general-purpose work is lightweight, run `/lazy-core.agent-models --scope=project`. The project entry takes precedence over the global one without touching the global setting.
 
 **After adding new agents.** The wizard is idempotent — running it again on a fully-configured vault reports "nothing to do". Run it freely after installing a new plugin or authoring a new agent.
 
-**Changing an existing tier.** `/lazy-core.agent-models` never overwrites existing entries; it only adds missing ones. To raise or lower a tier that's already set, run `/lazy-core.agent-models --scope=project` — the project-level entry shadows the global one without destroying it. To remove a project-level override and fall back to the global tier, delete that entry from `./.claude/lazy.settings.json` via `/lazy-core.optimize` Phase 7, which re-prompts for any entries that go missing after cleanup.
-
-## Where this fits
-
-The routing system assumes `lazy-core.install` has already run — install seeds `_builtin` defaults non-interactively, while this skill fills in every other discovered agent via the interactive wizard. If `/lazy-core.audit` reports missing `agent_models` entries, this is the direct fix. `/lazy-core.optimize` Phase 7 delegates here automatically when it reaches the model-routing step, so running the full optimizer end-to-end covers both optimization passes and model-tier setup in one session.
+**Changing an existing tier.** `/lazy-core.agent-models` never overwrites existing entries; it only adds missing ones. To override a tier that is already set globally, run `/lazy-core.agent-models --scope=project` — the project entry shadows the global one. To remove that project-level override and fall back to the global tier, delete the entry from `./.claude/lazy.settings.json` via `/lazy-core.optimize` Phase 7, which re-prompts for any entries that go missing after cleanup.
 
 ## See also
 

@@ -31,4 +31,7 @@ lazycortex-core:
   .claude/templates/core/contract-template.md:
     - .claude/references/*-contract.md
     - ~/.claude/references/*-contract.md
+  .claude/templates/core/aspect-template.md:
+    - .claude/references/*-aspect.md
+    - ~/.claude/references/*-aspect.md
 ```

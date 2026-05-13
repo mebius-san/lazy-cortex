@@ -15,6 +15,7 @@
 
 .claude/settings.local.json
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 .logs/
 
 
@@ -24,6 +25,12 @@
 __pycache__/
 *.py[cod]
 *$py.class
+
+
+# ---------------------------------------------------------------------------------------
+# Test output
+
+tests/review/interactive/snapshots/
 
 
 # ---------------------------------------------------------------------------------------
@@ -54,3 +61,9 @@ __pycache__/
 .obsidian/plugins/omnisearch/data.json
 
 
+
+# GitHub Copilot — auth tokens + chat history + auto-downloaded language server
+.obsidian/plugins/github-copilot/data.json
+.obsidian/plugins/github-copilot/secure-credentials.dat
+.obsidian/plugins/github-copilot/conversations.json
+.obsidian/plugins/github-copilot/copilot-*/

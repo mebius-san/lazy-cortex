@@ -48,7 +48,7 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
       user:<name>      — global ~/.claude/<category>/<name>.md
       <name>           — repo-local .claude/<category>/<name>.md
 
-    category must be one of {'agents', 'protocols'}.
+    category must be one of {'agents', 'protocols', 'aspects'}.
     Raises ReferenceError if the resolved path does not exist.
     """
     # Plugin-shipped protocols live under <plugin-root>/references/ — the
@@ -61,7 +61,7 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
     # All branches map category to the on-disk directory the same way:
     # protocols live in `references/`, agents live in `agents/`. The mapping
     # applies uniformly to plugin-prefixed, user-scope, and bare references.
-    plugin_dir_for_category = {"protocols": "references", "agents": "agents"}
+    plugin_dir_for_category = {"protocols": "references", "agents": "agents", "aspects": "references"}
     dir_name = plugin_dir_for_category.get(category, category)
     if ":" in ref:
         scope, name = ref.split(":", 1)

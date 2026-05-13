@@ -47,7 +47,7 @@ Authoring notes (delete before saving):
   § 8 Register the agent's model tier in `lazy.settings.json` if that file exists.
 - Filename: `<namespace.name>.md` under `.claude/agents/` or `<plugin>/agents/`.
 - Logging: only if your project has a logging contract installed (e.g. `lazy-log.logging` from
-  `lazycortex-log`). If so, add a `## Logging` section: ephemeral subagents do not log;
+  `lazycortex-core`). If so, add a `## Logging` section: ephemeral subagents do not log;
   multi-phase non-ephemeral agents log to `./.logs/claude/<namespace.name>/<UTC-timestamp>.md`
   with the contract's required frontmatter. If no logging plugin is installed, omit the section
   entirely — agents do not need to log.

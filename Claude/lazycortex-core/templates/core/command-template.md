@@ -58,7 +58,7 @@ Authoring notes (delete before saving):
 - Filename: `<namespace>.<name>.md` under `.claude/commands/` or `<plugin>/commands/`.
 
 - Logging: only if your project has a logging contract installed (e.g. `lazy-log.logging` from
-  `lazycortex-log`). If so, add a `## Log the run` step pointing at
+  `lazycortex-core`). If so, add a `## Log the run` step pointing at
   `./.logs/claude/<namespace.name>/<UTC-timestamp>.md` with the contract's required frontmatter.
   If no logging plugin is installed, omit the step.
 -->

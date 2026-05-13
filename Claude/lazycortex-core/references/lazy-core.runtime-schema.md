@@ -33,6 +33,7 @@ The `daemon` key is optional. When absent, no git ops are performed and `polling
 | `polling_interval_sec` | int | `5` | Maximum sleep between runtime iterations. |
 | `cleanup_completed_after` | duration string | `"7d"` | Age after which a completed job dir is deleted. |
 | `cleanup_failed_after` | duration string | `"30d"` | Age after which a failed job dir is deleted. |
+| `cleanup_dead_after` | duration string | `"7d"` | Age after which a DEAD-marked stuck job dir is deleted. DEAD jobs are marked by `expert_pump._detect_dead_jobs` when their PID file references a dead process; the forensic window before cleanup matches `cleanup_completed_after` by default. |
 | `cleanup_runtime_log_after` | duration string | `"30d"` | Age after which a per-day `.logs/lazy-core/runtime/<date>.jsonl` file is deleted. `tokens.jsonl` is append-only and not subject to this retention — operators rotate it manually. |
 
 Duration strings: a number followed by a unit suffix — `s`, `m`, `h`, or `d` (e.g. `"30d"`, `"12h"`, `"300s"`).
@@ -63,7 +64,8 @@ The daemon's branch is daemon-exclusive. Do not push to it from other processes 
       },
       "polling_interval_sec": 30,
       "cleanup_completed_after": "7d",
-      "cleanup_failed_after": "30d"
+      "cleanup_failed_after": "30d",
+      "cleanup_dead_after": "7d"
     },
     "routines": {
       "lazy-expert.pump": {
@@ -200,8 +202,11 @@ Each entry under `routines` may carry an optional `type` field. Default is `subp
 | `inbox` | `inbox_dir`, `expert`, `request`, `interval_sec` | `timeout_sec` |
 | `schedule` | `cron`, plus EITHER `command` OR `expert`+`request` | `timeout_sec` |
 | `git` | `branch`, `watch`, `expert`, `request`, `interval_sec` | `repo_dir`, `remote`, `path_filter`, `timeout_sec` |
+| `md-scan` | `paths`, `expert`, `interval_sec` | `frontmatter_filter`, `request`, `cadence`, `timeout_sec` |
 
 Closed-set strict validation: unknown type, unknown field, missing required, or per-type custom constraint violation → `RoutineConfigError` at registration time.
+
+**Common optional fields (any type):** `protocol: <ref>` or `protocols: [<ref>, ...]` — declares which protocol(s) the routine's dispatched jobs follow. The dispatcher resolves each ref via `reference_resolver.resolve(..., category="protocols", ...)` and threads the resolved paths through to each job's `config.json`. Protocols are routine-side, not expert-side — expert entries in `lazy.settings.json[experts]` do NOT carry a `protocol` field. See `lazy-core.expert-protocols-contract.md`.
 
 ### `inbox`
 
@@ -292,7 +297,7 @@ The check is read-only on the daemon side — the daemon never cleans the tree i
 
 ## 11. Expert runtime contract
 
-Every expert run receives `claude/lazycortex-core/templates/expert-runtime-contract.md` via `claude -p --append-system-prompt-file ...`. The contract is loaded as a system-prompt-level rule on top of the expert's per-protocol contract.
+Every expert run receives `claude/lazycortex-core/references/lazy-core.expert-runtime-contract.md` via `claude -p --append-system-prompt-file ...`. The contract is loaded as a system-prompt-level rule on top of the expert's per-protocol contract.
 
 Contract sections:
 - **Working tree** — every change must be committed before exit. No push, no branch switching.

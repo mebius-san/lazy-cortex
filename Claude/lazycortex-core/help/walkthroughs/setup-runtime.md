@@ -1,10 +1,10 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo serial daemon so the async expert team has an executor — install wizard, start the daemon, then unblock it with /lazy-runtime.recover if the working tree halts.
-last_regen: 2026-05-08
+last_regen: 2026-05-13
 diagram_spec:
   anchor: "How setup and recovery connect"
-  request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, wizard asks about runtime, user opts in, wizard writes .claude/bin/lazy.runtime.sh + experts.settings.json + lazy-core.runtime block; (2) User runs .claude/bin/lazy.runtime.sh (daemon starts, polls .experts/.jobs/ on interval); (3) Working tree goes dirty, daemon writes daemon_halted to .logs/lazy-core/runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
+  request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, wizard asks about runtime, user opts in, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + lazy-core.runtime block; (2) User runs .claude/bin/lazy.runtime.sh (daemon starts, polls .experts/.jobs/ on interval); (3) Working tree goes dirty, daemon writes daemon_halted to .logs/lazy-core/runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
   kind_hint: sequence
 source_skills:
   - lazy-core.install
@@ -33,18 +33,19 @@ Open a Claude Code session rooted in the target repository and run:
 
 The skill detects install scope automatically. Because the runtime is project-scoped, run it inside the repo rather than from a global session.
 
+The install first verifies Python 3.12 or later is available. If Python is absent or too old, the skill surfaces the install options (Homebrew on macOS, pyenv cross-platform) and aborts; re-run once the floor is met.
+
 ### Step 2 — Answer yes to the runtime-daemon wizard
 
 During install, the wizard asks whether to bootstrap runtime and experts for the repo. Answer **Yes**. The skill writes:
 
-- `.experts/experts.settings.json` — registered expert entries.
-- `.claude/bin/lazy.runtime.sh` — the runtime shim, made executable.
-- `lazy-core.runtime` block inside `.claude/lazy.settings.json` — daemon configuration and the built-in polling interval (default: 5 seconds).
+- `lazy.settings.json[experts]` — the experts section, initially containing only `_version`.
+- `.claude/bin/lazy.runtime.sh` — the runtime shim, made executable. The shim resolves the latest `lazycortex-core/bin/runner` from the plugin cache at exec time, so it stays current after `/plugin update` without needing a re-run.
+- `lazy-core.runtime` block inside `.claude/lazy.settings.json` — daemon configuration including polling interval (default: 5 seconds) and job-cleanup retention windows.
+- `.memory/` directory at the repo root, unignored in `.gitignore` — tracked in git so memory notes survive clones.
 - Entries in `.gitignore` covering `.experts/.jobs/` and `.logs/lazy-core/runtime/`.
 
-The shim resolves the latest `lazycortex-core/bin/runner` from the plugin cache at exec time, so it stays current after `/plugin update` without needing a re-run.
-
-Next, the wizard asks whether to scan for expert candidates and register them. Answer **Yes** and work through the per-candidate prompts (local name, git author name, git author email). When at least one expert is registered, the `lazy-expert.pump` routine is added to `lazy-core.runtime.routines` automatically. Because the pump routine was freshly added, the wizard then offers a daemon supervisor — choose **macOS launchd** or **Linux systemd** to start the daemon automatically on login, or **Skip** to start it by hand. On re-runs where the pump routine is already present, the supervisor offer does not appear; use your OS's service manager directly if you need to re-install the supervisor.
+Next, the wizard asks whether to scan for expert candidates and register them. Answer **Yes** and work through the per-candidate prompts (local name, git author name, git author email). When at least one expert is registered, the `lazy-expert.pump` routine is added to `routines` automatically. Because the pump routine was freshly added, the wizard then offers a daemon supervisor — choose **macOS launchd** or **Linux systemd** to start the daemon automatically on login, or **Skip** to start it by hand. On re-runs where the pump routine is already present, the supervisor offer does not appear; use your OS's service manager directly if you need to re-install the supervisor.
 
 ### Step 3 — Start the daemon
 
@@ -55,8 +56,6 @@ If you chose a supervisor in Step 2, the daemon is already running. If you skipp
 ```
 
 The daemon reads `lazy.settings.json[lazy-core.runtime]`, runs the `lazy-expert.pump` routine on each polling iteration, drains any `READY` jobs it finds, and loops. One daemon per repo means no two routines ever contend over the working tree or git state.
-
-To verify the daemon is alive, check `.logs/lazy-core/runtime/state.json` — a running daemon writes `last_run` on each iteration.
 
 ### Step 4 — Verify the daemon is polling (verification gate)
 
@@ -95,9 +94,21 @@ If you add new expert agents later, re-run `/lazy-core.install` — the wizard's
 
 If a plugin needs its own periodic routine, run `/lazy-routine.register` to add it to the daemon's rotation.
 
-After cloning the repo to a new machine, re-run `/lazy-core.install` — the shim and settings files are committed, but the daemon supervisor unit (launchd plist or systemd service) is per-user and is not in the repo. The wizard regenerates and loads it for the current machine.
+After cloning the repo to a new machine, re-run `/lazy-core.install` — the shim, settings files, and `.memory/` directory are committed to the repo, but the daemon supervisor unit (launchd plist or systemd service) is per-user and is not in the repo. The wizard regenerates and loads it for the current machine.
 
 The `daemon_halted` recovery path is an expected operational event, not an error in the daemon itself. When it fires often from a particular routine, that routine's output logic is leaving dirt behind — investigate there, not in the daemon.
+
+## Adding periodic memory reflection
+
+If you have persona-marked experts (see the `memory` block), you can register a periodic reflect routine so the daemon consolidates each expert's memory weekly:
+
+Run `/lazy-routine.register` with:
+- name: `lazy-memory.reflect-all`
+- type: `subprocess`
+- command: `["lazycortex-core", "memory-reflect-all"]`
+- interval_sec: `604800` (7 days)
+
+The routine dispatches one `kind=reflect` job per persona-marked expert on each fire. Experts that have not written memory yet get a no-op reflect (returns `outcome=empty`).
 
 ## How setup and recovery connect
 
@@ -105,58 +116,52 @@ The `daemon_halted` recovery path is an expected operational event, not an error
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant installSkill as /lazy-core.install wizard
-  participant fs as File System
+  participant installSkill as /lazy-core.install
+  participant fsWrite as File System
   participant daemon as lazy.runtime.sh daemon
   participant jobsDir as .experts/.jobs/
-  participant stateFile as .logs/lazy-core/runtime/state.json
+  participant stateFile as state.json
   participant recoverSkill as /lazy-runtime.recover
 
-  Note over user,fs: Phase 1 — Install
+  Note over user,installSkill: Phase 1 — Install
 
   user->>installSkill: run /lazy-core.install
-  installSkill->>user: prompt - enable runtime daemon?
+  installSkill->>user: prompt — enable runtime daemon?
   user-->>installSkill: opt in
-  installSkill->>fs: write .claude/bin/lazy.runtime.sh
-  installSkill->>fs: write experts.settings.json
-  installSkill->>fs: write lazy-core.runtime block in config
-  fs-->>installSkill: files written
-  installSkill-->>user: install complete - runtime enabled
+  installSkill->>fsWrite: write .claude/bin/lazy.runtime.sh
+  installSkill->>fsWrite: write lazy.settings.json experts block
+  installSkill->>fsWrite: write lazy-core.runtime config block
+  installSkill-->>user: install complete
 
-  Note over user,jobsDir: Phase 2 — Daemon Start
+  Note over user,jobsDir: Phase 2 — Daemon start
 
   user->>daemon: execute .claude/bin/lazy.runtime.sh
-  daemon->>stateFile: write state=running
+  Note over daemon: daemon starts, enters poll loop
   loop poll interval
     daemon->>jobsDir: scan .experts/.jobs/ for pending jobs
-    jobsDir-->>daemon: job list (empty or queued)
+    jobsDir-->>daemon: job list (may be empty)
   end
 
-  Note over daemon,recoverSkill: Phase 3 — Dirty Tree and Recovery
+  Note over user,recoverSkill: Phase 3 — Dirty-tree halt and recover
 
-  daemon->>fs: detect working tree dirty
-  daemon->>stateFile: write daemon_halted + halt context
-  Note over stateFile: state=daemon_halted
-  daemon-->>user: daemon paused - tree is dirty
+  fsWrite->>stateFile: working tree goes dirty
+  daemon->>stateFile: detect dirty tree, write daemon_halted
+  Note over daemon,stateFile: daemon paused — will not process jobs
 
   user->>recoverSkill: run /lazy-runtime.recover
-  recoverSkill->>stateFile: read daemon_halted context
-  stateFile-->>recoverSkill: halt context payload
-  recoverSkill-->>user: show halt context - pick cleanup mode
+  recoverSkill->>stateFile: read daemon_halted halt context
+  stateFile-->>recoverSkill: halt reason + dirty-file list
+  recoverSkill-->>user: show halt context
+  user->>recoverSkill: pick cleanup mode (commit/stash/discard)
   alt commit
-    user-->>recoverSkill: choose commit
-    recoverSkill->>fs: stage and commit dirty changes
+    recoverSkill->>fsWrite: stage and commit dirty changes
   else stash
-    user-->>recoverSkill: choose stash
-    recoverSkill->>fs: git stash dirty changes
+    recoverSkill->>fsWrite: git stash dirty changes
   else discard
-    user-->>recoverSkill: choose discard
-    recoverSkill->>fs: git checkout -- discard changes
+    recoverSkill->>fsWrite: git checkout -- dirty files
   end
-  recoverSkill->>stateFile: clear daemon_halted - write state=running
-  stateFile-->>recoverSkill: state cleared
-  recoverSkill-->>user: recovery complete - daemon will resume
-  daemon->>stateFile: read state on next iteration
-  stateFile-->>daemon: state=running
-  daemon->>jobsDir: resume polling .experts/.jobs/
+  recoverSkill->>stateFile: clear daemon_halted flag
+  stateFile-->>recoverSkill: state updated
+  recoverSkill-->>user: daemon cleared
+  daemon->>jobsDir: resume polling on next iteration
 ```

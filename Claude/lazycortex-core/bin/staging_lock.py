@@ -188,7 +188,11 @@ def _delete_lock(repo_root: Path) -> None:
 def _index_is_empty(repo_root: Path) -> bool:
     """True iff `git diff --cached --quiet` returns 0."""
     rc = subprocess.run(
-        ["git", "-C", str(repo_root), "diff", "--cached", "--quiet"],
+        # `--no-optional-locks` skips the stat-cache refresh that would
+        # otherwise write to `.git/index.lock`. Read-only inspection of
+        # the index doesn't need the lock.
+        ["git", "--no-optional-locks", "-C", str(repo_root),
+         "diff", "--cached", "--quiet"],
         capture_output=True,
     ).returncode
     return rc == 0
@@ -367,7 +371,7 @@ def release_if_index_empty(repo_root: Path, session_id: str) -> ReleaseResult:
 # --- Config -------------------------------------------------------------------
 
 _SETTINGS_REL = ".claude/lazy.settings.json"
-_SECTION = "lazy-core.git"
+_SECTION = "git"
 
 
 def load_config(repo_root: Path) -> StagingConfig:

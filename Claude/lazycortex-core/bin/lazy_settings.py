@@ -6,9 +6,11 @@ from typing import Any
 
 CURRENT_VERSIONS = {
     "agent_models": 1,
-    "lazy-core.runtime": 1,
-    "lazy-core.git": 1,
-    "lazycortex-review": 1,
+    "daemon": 1,
+    "routines": 1,
+    "experts": 1,
+    "git": 1,
+    "review": 1,
 }
 
 def _migrations(section_key: str) -> dict[int, callable]:
@@ -28,13 +30,6 @@ def migrate_root_version_to_section_version(raw: dict) -> dict:
                 v["_version"] = legacy
     return raw
 
-def migrate_loop_section_to_runtime(raw: dict) -> dict:
-    """One-shot rename of legacy `lazy-core.loop` section key to `lazy-core.runtime`.
-    Idempotent — second call is a no-op."""
-    if "lazy-core.loop" in raw and "lazy-core.runtime" not in raw:
-        raw["lazy-core.runtime"] = raw.pop("lazy-core.loop")
-    return raw
-
 def load_section(path: Path | str, section_key: str) -> dict:
     path = Path(path)
     if not path.exists():
@@ -42,9 +37,7 @@ def load_section(path: Path | str, section_key: str) -> dict:
     raw = json.loads(path.read_text() or "{}")
     had_root_version = "version" in raw
     raw = migrate_root_version_to_section_version(raw)
-    had_loop_key = "lazy-core.loop" in raw
-    raw = migrate_loop_section_to_runtime(raw)
-    dirty = had_root_version or had_loop_key
+    dirty = had_root_version
     section = raw.get(section_key, {})
     if not section:
         section = {"_version": CURRENT_VERSIONS.get(section_key, 1)}
@@ -65,7 +58,6 @@ def save_section(path: Path | str, section_key: str, section: dict) -> None:
     path = Path(path)
     raw = json.loads(path.read_text() or "{}") if path.exists() else {}
     raw = migrate_root_version_to_section_version(raw)
-    raw = migrate_loop_section_to_runtime(raw)
     section.setdefault("_version", CURRENT_VERSIONS.get(section_key, 1))
     raw[section_key] = section
     _atomic_write(path, raw)

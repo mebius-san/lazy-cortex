@@ -438,15 +438,35 @@ def set_queue_depth_from_filesystem(repo_root: Path) -> None:
 
 
 def _classify_job_state(job_dir: Path) -> str:
+    """Classify a job_dir into the closed-set enum mirrored from
+    expert_runtime._job_status: queued | active | dead | done | failed.
+
+    Filesystem signature:
+      - DEAD exists                                  → dead
+      - DONE + response.json (outcome == error)      → failed
+      - DONE present                                  → done
+      - READY + PID (no DEAD, no response.json)       → active
+      - READY only (no PID)                           → queued
+      - none of the above                             → queued (fallback)
+    """
+    import json
+    if (job_dir / "DEAD").exists():
+        return "dead"
     if (job_dir / "DONE").exists():
+        resp_path = job_dir / "response.json"
+        if resp_path.exists():
+            try:
+                outcome = json.loads(resp_path.read_text()).get("outcome")
+                if outcome == "error":
+                    return "failed"
+            except json.JSONDecodeError:
+                pass
         return "done"
-    # Heuristic for "running" — DONE absent and dir mtime < 30s ago suggests
-    # active work. Plan accepts the simple version for v1.
-    if time.time() - job_dir.stat().st_mtime < 30:
-        return "running"
     if (job_dir / "READY").exists():
-        return "ready"
-    return "ready"  # default — anything in the queue without DONE is pending
+        if (job_dir / "PID").exists():
+            return "active"
+        return "queued"
+    return "queued"  # fallback for partial/in-flight dirs
 
 
 # --- Token aggregation (Task B2) ---------------------------------------------

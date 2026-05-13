@@ -382,8 +382,8 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 - *On invoke*: fold guard's summary (category × severity counts, waivered count) and FAIL/WARN findings into a **Guard** subsection.
 
 **11b. Logging coverage** → `lazy-log.audit`
-- *Availability*: `lazycortex-log` meets the canonical signal set above.
-- *Run condition*: same as availability — plugin installation / enablement is the opt-in.
+- *Availability*: `lazycortex-core` meets the canonical signal set above.
+- *Run condition*: always — `lazy-log.audit` is shipped by `lazycortex-core` and runs unconditionally when the plugin is enabled.
 - *On invoke*: fold audit findings into a **Logging** subsection.
 
 **11c. Diagram coverage** → `lazy-diagram.audit`
@@ -403,7 +403,7 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 
 **11f. Expert runtime** — inline, via `lazy-core.audit` Agent D findings
 - *Availability*: always (expert-runtime checks are part of `lazycortex-core` itself — no separate plugin probe needed).
-- *Run condition*: `experts.settings.json` exists at the repo root OR `lazy.settings.json` contains a `lazy-core.runtime` section. Skip if neither is present (no expert runtime configured — silent skip, no report entry).
+- *Run condition*: `.claude/lazy.settings.json` contains a non-empty `experts` section OR a `lazy-core.runtime` section. Skip if neither is present (no expert runtime configured — silent skip, no report entry).
 - *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D10 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).
 
 ## Phase 4 — Present + fix + waive
@@ -479,7 +479,7 @@ On Restart:
 
 **Fix L2 — Stale orphan jobs** (trigger: D8 WARN "orphan job directory")
 
-`AskUserQuestion`: "Found <N> orphan job director(y/ies) under `.jobs/` for experts no longer in `experts.settings.json`. Delete them?"
+`AskUserQuestion`: "Found <N> orphan job director(y/ies) under `.jobs/` for experts no longer in `lazy.settings.json[experts]`. Delete them?"
 
 Options: `Delete all`, `Keep`.
 
@@ -495,7 +495,7 @@ Report one line per deleted directory: `deleted: .jobs/<expert>/`.
 
 **Fix L3 — Routine command unresolvable** (trigger: D7 FAIL "routine <name> command path does not exist")
 
-`AskUserQuestion`: "Routine `<name>` references plugin bin path `<path>` which does not exist. The plugin may not be installed. Unregister the routine from `lazy-core.runtime.routines`?"
+`AskUserQuestion`: "Routine `<name>` references plugin bin path `<path>` which does not exist. The plugin may not be installed. Unregister the routine from `routines`?"
 
 Options: `Unregister`, `Keep — I'll fix the plugin install`.
 
@@ -555,7 +555,7 @@ On confirmation, resolve the backend via the Phase 2.7a priority ladder using th
 - **Fix L2 fails with "Permission denied" on rmtree** — the job directory has restricted permissions (e.g. created by a different user or process). Doctor surfaces the error; the user must remove the directory manually.
 - **Fix L3 "unregister_routine" raises "settings file not writable"** — `.claude/lazy.settings.json` is read-only or the process lacks write permission → fix file permissions, then re-run `/lazy-core.doctor`.
 - **Fix L3 offered but routine reappears on next doctor run** — the settings write completed but the installed plugin's default-routines bootstrap re-added the entry. Re-run `/lazy-core.install` with the `skip expert-pump routine` option, or add the routine to a local exclusion list in `lazy.settings.json`.
-- **Phase 3 § 11e skipped unexpectedly** — neither `experts.settings.json` nor a `lazy-core.runtime` section in `lazy.settings.json` was found. If expert runtime is configured but the files are in a non-standard location, run `/lazy-core.audit` directly to surface Agent D findings without the skip guard.
+- **Phase 3 § 11e skipped unexpectedly** — neither an `experts` section nor a `lazy-core.runtime` section was found in `lazy.settings.json`. If expert runtime is configured but the file is in a non-standard location, run `/lazy-core.audit` directly to surface Agent D findings without the skip guard.
 
 ## Logging
 

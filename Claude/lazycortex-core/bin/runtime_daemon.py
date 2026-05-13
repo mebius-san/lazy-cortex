@@ -27,8 +27,10 @@ def set_plugin_dirs(dirs: list[Path]) -> None:
     # Also export to the environment so subprocess routines
     # (`lazycortex-core expert-pump-once`, `lazycortex-review tick`, …)
     # inherit the dev-plugin paths and their own resolvers — most notably
-    # `reference_resolver.resolve` for `<plugin>:<name>` agent / protocol
-    # refs — can match them. Daemon-internal `resolve_routine_command`
+    # `reference_resolver.resolve` for `<plugin>:<name>` agent / protocol /
+    # aspect refs — can match them. Arguments are not ref-resolved (pass-through
+    # JSON values), but flow through to <jdir>/config.json the same way.
+    # Daemon-internal `resolve_routine_command`
     # uses `_PLUGIN_DIRS` directly; this env handle is for everyone else.
     os.environ["LAZYCORTEX_PLUGIN_DIRS"] = os.pathsep.join(str(p) for p in _PLUGIN_DIRS)
 
@@ -82,8 +84,8 @@ def _init_metrics_if_enabled(repo_root: Path) -> None:
     hot-reload, but metrics init is one-shot — operators must restart the
     daemon to flip enablement on or off."""
     settings_path = repo_root / ".claude/lazy.settings.json"
-    cfg = load_section(settings_path, "lazy-core.runtime")
-    metrics_cfg = cfg.get("metrics", {})
+    daemon = load_section(settings_path, "daemon")
+    metrics_cfg = daemon.get("metrics", {})
     if not metrics_cfg.get("enabled"):
         return
     import metrics
@@ -138,8 +140,14 @@ def _check_working_tree(repo_root: Path) -> list[str] | None:
     repo. Operators running the daemon outside one get no protection.
     """
     try:
+        # `--no-optional-locks` tells git to skip the stat-cache refresh
+        # that `git status` would otherwise write to `.git/index.lock`.
+        # The dirty-tree-skip check runs every daemon iteration; without
+        # this flag, the daemon grabs the index lock dozens of times per
+        # minute and races with any concurrent manual git command.
         rc = subprocess.run(
-            ["git", "-c", "color.status=never", "status", "--porcelain"],
+            ["git", "--no-optional-locks", "-c", "color.status=never",
+             "status", "--porcelain"],
             cwd=str(repo_root), capture_output=True, text=True,
         )
     except FileNotFoundError:
@@ -175,9 +183,9 @@ def _run_iteration(repo_root: Path) -> None:
         return  # halted — wait for /lazy-runtime.recover
 
     settings_path = repo_root / ".claude/lazy.settings.json"
-    cfg = load_section(settings_path, "lazy-core.runtime")
-    daemon = cfg.get("daemon", {})
-    registry = cfg.get("routines", {})
+    daemon = load_section(settings_path, "daemon")
+    registry = load_section(settings_path, "routines")
+    registry.pop("_version", None)
     last_run = state.setdefault("last_run", {})
 
     # Hourly cleanup — throttled via state so the floor on filesystem churn
@@ -259,9 +267,9 @@ def run(repo_root: Path) -> None:
     while not stop["flag"]:
         _run_iteration(repo_root)
         # Compute sleep based on latest cfg + last_run state.
-        cfg = load_section(settings_path, "lazy-core.runtime")
-        daemon = cfg.get("daemon", {})
-        registry = cfg.get("routines", {})
+        daemon = load_section(settings_path, "daemon")
+        registry = load_section(settings_path, "routines")
+        registry.pop("_version", None)
         last_run = runtime_state.load(repo_root).get("last_run", {})
         sleep_s = compute_sleep(
             time_until_next_due(time.time(), registry, last_run),

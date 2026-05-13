@@ -51,7 +51,7 @@ Authoring notes (delete before saving):
   § 4 No narrative padding (`v1.2.3`, "we got burned", incident post-mortems → WARN).
 - Filename: `<namespace.name>/SKILL.md`.
 - Logging: only if your project has a logging contract installed (e.g. `lazy-log.logging` from
-  `lazycortex-log`). If so, add a `## Logging` section pointing at
+  `lazycortex-core`). If so, add a `## Logging` section pointing at
   `./.logs/claude/<namespace.name>/<UTC-timestamp>.md` with the contract's required frontmatter
   (typically `git_sha`, `git_branch`, `date`, `input`). Use `Bash(mkdir -p ...)` then the `Write`
   tool — never chain. If no logging plugin is installed, omit the section.

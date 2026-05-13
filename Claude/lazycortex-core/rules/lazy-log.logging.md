@@ -41,7 +41,7 @@ A skill, agent, or command may opt out by declaring a non-empty string in frontm
 
 ## Distill cadence
 
-Decide whether to invoke `Agent(subagent_type: "lazycortex-log:lazy-log.distill", prompt: "distill pending commits")` on the **current turn**. Walk these gates in order; stop at the first match:
+Decide whether to invoke `Agent(subagent_type: "lazycortex-core:lazy-log.distill", prompt: "distill pending commits")` on the **current turn**. Walk these gates in order; stop at the first match:
 
 1. **No commit this turn → SKIP** (only `git commit` in *this* turn counts; not session-earlier, not `.logs/commits.jsonl`-pending).
 2. **User said "don't distill" → SKIP.**

@@ -24,8 +24,9 @@ This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorde
 ## Step 1 — Validate inputs
 
 Required inputs from the caller:
-- `expert_name` (string) — the key in `experts.settings.json`.
+- `expert_name` (string) — the key in `lazy.settings.json[experts]`.
 - `payload` (dict) — the request body.
+- `protocols` (list of strings, optional, default `[]`) — protocol refs for this job. May be empty if the caller knows the expert ships without protocols.
 
 Pre-flight checks:
 1. `expert_name` must be a non-empty string. If absent → abort: "`expert_name` is required."
@@ -56,15 +57,34 @@ Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 import json, sys
 from pathlib import Path
 from expert_runtime import dispatch_job
+from routine_types import _write_job_config
+from lazy_settings import load_section
 payload = json.loads(sys.argv[1])
-result = dispatch_job(Path('.'), sys.argv[2], payload)
+expert = sys.argv[2]
+# Pass '[]' for empty protocols; bare empty string raises JSONDecodeError.
+protocols = json.loads(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3] else []
+repo = Path('.')
+experts = load_section(repo / '.claude/lazy.settings.json', 'experts')
+entry = experts.get(expert, {})
+if not entry:
+    print(json.dumps({
+        'outcome': 'aborted-no-experts-entry',
+        'message': f'{expert!r} is not registered in lazy.settings.json[experts]',
+    }))
+    sys.exit(0)
+aspects = entry.get('aspects') or []
+arguments = entry.get('arguments') or {}
+result = dispatch_job(repo, expert, payload)
+_write_job_config(result['queue_path'], expert, entry, protocols, aspects, arguments)
 print(json.dumps(result))
-" '<payload-json>' '<expert_name>')
+" '<payload-json>' '<expert_name>' '<protocols-json>')
 ```
 
 Capture and parse the JSON output: `{job_id, queue_path}`.
 
-Outcome: `dispatched` or `error`.
+The skill also writes `<jdir>/config.json` so the pump has agent ref + protocols + aspects + arguments + git_author in one place. Protocols default to the caller's argument list; aspects + arguments are read from `lazy.settings.json[experts][<expert_name>]` (empty defaults if absent).
+
+Outcome: `dispatched`, `aborted-no-experts-entry` (when the expert is not in `lazy.settings.json[experts]`), or `error`. Before dispatching, the skill must verify the expert entry exists; if `entry` is empty, abort with `aborted-no-experts-entry` and the message "`<expert_name>` is not registered in `lazy.settings.json[experts]`."
 
 ## Step 4 — Report
 
@@ -109,4 +129,5 @@ input: "expert_name=<expert_name>"
 - **"payload missing required field(s): kind"** (or `role`, `request`) — payload does not conform to the protocol contract → add the missing fields; see `claude/lazycortex-core/references/lazy-core.expert-protocols-contract.md`.
 - **"`.experts/` not initialised"** — the experts directory has not been bootstrapped in this repo → run `/lazy-core.install` to create the required directory layout.
 - **Python `FileNotFoundError` or `ModuleNotFoundError`** — `${CLAUDE_PLUGIN_ROOT}/bin` is not on the path or `expert_runtime.py` is absent → verify the plugin is installed (`/lazy-core.install`) and `${CLAUDE_PLUGIN_ROOT}` resolves correctly.
-- **Unknown expert name** — `dispatch_job` creates the job dir under the named expert key; if the name is a typo, subsequent pump runs will silently skip it → verify the expert name against `experts.settings.json`.
+- **"`<expert_name>` is not registered in `lazy.settings.json[experts]`"** — the expert was never added or the name is a typo → register via `/lazy-core.install` expert wizard, or correct the name and re-run.
+- **`JSONDecodeError` from `sys.argv[3]`** — caller passed `<protocols-json>` as something other than a JSON array literal → pass `'[]'` for an empty list, or a JSON array like `'["plug:proto"]'`. The skill's argparse-style invocation expects a JSON-serializable string.

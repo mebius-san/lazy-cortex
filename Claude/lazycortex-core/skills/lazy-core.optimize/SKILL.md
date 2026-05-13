@@ -11,7 +11,7 @@ Reduce startup context weight and fix settings layer violations for the current 
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 11 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Audit context weight`
@@ -20,6 +20,7 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Phase 3 — Audit global settings for project leakage`
    - `Phase 4 — Fix settings leakage`
    - `Phase 5 — Memory index health`
+   - `Phase 5.5 — Expert memory hygiene`
    - `Phase 6 — Heavy-scan delegation audit`
    - `Phase 7 — Fill agent_models wizard`
    - `Report (Output / Optimization Results)`
@@ -235,6 +236,59 @@ Check the memory index at `$HOME/.claude/projects/<project-key>/memory/MEMORY.md
 
 Report findings. Fix orphaned/broken links automatically, flag stale for user review.
 
+## Phase 5.5: Expert memory hygiene
+
+Operates on the `.memory/<expert>/` subtree (Spec §8 — distinct from Phase 5's `MEMORY.md` index). Two checks; both interactive (per-finding `AskUserQuestion`):
+
+### 5.5a. Orphan notes
+
+For every note under `.memory/<expert>/*.md` (skip `.tags/`):
+
+- Read its frontmatter `tags:`. For each tag, check whether the matching local tag file `.memory/<expert>/.tags/<topic>.md` lists this note.
+- A note is **orphan** when none of its tags are listed in any local tag file. This is symmetric drift — either the note's tags are stale or the tag files are.
+
+For each orphan note, `AskUserQuestion`:
+
+```
+AskUserQuestion:
+  question: "Orphan memory note `<path>` — its tags are listed in no local .tags file."
+  description: "Either the note's tags are stale or the .tags files are. Pick a remedy."
+  options:
+    - "Run /lazy-memory.index — regenerate .tags/ from notes"
+    - "Delete the note (it's no longer reachable)"
+    - "Leave alone (I'll fix it manually)"
+```
+
+- Run `/lazy-memory.index` → invoke the sibling skill; state **reindexed**.
+- Delete → run `Bash(rm <path>)`; state **deleted**.
+- Leave alone → state **kept-orphan**.
+
+### 5.5b. Near-duplicate notes
+
+For every pair of notes within the same `.memory/<expert>/` that share at least one tag and whose titles match by Levenshtein distance ≤ 3:
+
+`AskUserQuestion`:
+
+```
+AskUserQuestion:
+  question: "Near-duplicate memory notes: `<note-a>` and `<note-b>` share tags `<topics>` and similar titles."
+  description: "Consolidating may reduce noise; keeping both is fine if they cover different angles."
+  options:
+    - "Show me both (Read each and decide)"
+    - "Leave alone"
+```
+
+- Show me both → `Read` each, present a one-line comparison, then ask whether to keep both or merge manually. This phase never auto-merges; merges go through a separate `/lazy-memory.write` invocation by the operator.
+- Leave alone → state **kept**.
+
+### 5.5c. Summary row
+
+Append one row to the Optimization Results table (Output section):
+
+```
+| Memory hygiene | - | N | reindexed: R, deleted: D, kept: K |
+```
+
 ## Phase 6: Heavy-scan delegation audit
 
 Find skills that should be refactored to the coordinator-plus-parallel-Explore-agents pattern described in `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md`. This phase only reports — it never rewrites skills, because coordinator logic is skill-specific.
@@ -320,6 +374,7 @@ End with a summary:
 | Settings entries moved | - | N | global -> project |
 | Memory issues fixed | - | N | orphaned/broken |
 | Delegation candidates | - | N | heavy skills to refactor |
+| Memory hygiene | - | N | reindexed / deleted / kept-orphan |
 | LLM-readability rewrites | - | N | applied / skipped / waived |
 | agent_models entries | - | N | added / skipped (wrote to: <path>) |
 ```

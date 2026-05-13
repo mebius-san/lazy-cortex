@@ -1,10 +1,10 @@
 ---
 chapter_type: block
-summary: Register, unregister, and recover routines in the per-repo serial daemon — the async team runs in order without contending over the working tree.
-last_regen: 2026-05-08
+summary: Register, unregister, and recover routines in the per-repo serial daemon — five routine types keep the async team running in order without contending over the working tree.
+last_regen: 2026-05-13
 diagram_spec:
   anchor: "Runtime lifecycle"
-  request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec; a dirty working tree triggers a halt; /lazy-runtime.recover (commit/stash/discard/abort) cleans the tree and resumes; unregister removes a routine from the loop."
+  request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers a halt; /lazy-runtime.recover (commit/stash/discard/abort) cleans the tree and resumes; unregister removes a routine from the loop."
 source_skills:
   - lazy-routine.register
   - lazy-routine.unregister
@@ -12,9 +12,9 @@ source_skills:
 ---
 # Runtime daemon — routine management and recovery
 
-The lazycortex-core runtime daemon is a per-repo serial loop. It reads the routine registry from `.claude/lazy.settings.json`, runs each entry in order according to its `interval_sec` (or cron expression), and repeats. Because routines execute one at a time, no two ever contend over the working tree or git state — the daemon is the single serializing authority for all background work in the repo.
+The lazycortex-core runtime daemon is a per-repo serial loop. It reads the routine registry from `.claude/lazy.settings.json`, runs each entry in order according to its `interval_sec` or cron schedule, and repeats. Because routines execute one at a time, no two ever contend over the working tree or git state — the daemon is the single serializing authority for all background work in the repo.
 
-Three skills manage that loop from the outside. `/lazy-routine.register` is a type-aware wizard that adds a named periodic job to the registry. It supports four routine types: `subprocess` (a periodic CLI command), `inbox` (scan a directory and dispatch one expert job per file), `schedule` (cron-driven, one fire per boundary), and `git` (watch a remote branch for changes and dispatch jobs on new commits or file changes). `/lazy-routine.unregister` removes a named routine cleanly and is idempotent — calling it on a name that does not exist is an INFO, not an error. `/lazy-runtime.recover` is the escape hatch for a halted daemon: when a routine or expert leaves the working tree dirty, the daemon halts to protect the next run; this skill reads the halt context, walks you through cleanup (commit, stash, discard, or abort), and clears the halt once the tree is clean so the daemon resumes on its next iteration.
+Three skills manage that loop from the outside. `/lazy-routine.register` is a type-aware wizard that adds a named periodic job to the registry. It supports five routine types: `subprocess` (a periodic CLI command), `inbox` (scan a directory and dispatch one expert job per file), `schedule` (cron-driven, one fire per boundary), `git` (watch a remote branch for changes and dispatch jobs on new commits or file changes), and `md-scan` (scan markdown files matching glob patterns, filter by frontmatter values, and dispatch an agent job per match in place). `/lazy-routine.unregister` removes a named routine cleanly and is idempotent — calling it on a name that does not exist is an INFO, not an error. `/lazy-runtime.recover` is the escape hatch for a halted daemon: when a routine or expert leaves the working tree dirty, the daemon halts to protect the next run; this skill reads the halt context, walks you through cleanup (commit, stash, discard, or abort), and clears the halt once the tree is clean so the daemon resumes on its next iteration.
 
 ## When you'd use this
 
@@ -22,12 +22,15 @@ Three skills manage that loop from the outside. `/lazy-routine.register` is a ty
 - Wire an `inbox` directory so the daemon automatically dispatches one expert job per file that lands there, consuming the queue as files arrive.
 - Set up a `schedule` routine that fires on a cron boundary (daily backup, weekly audit) rather than a polling interval.
 - Watch a remote branch for new commits or file changes and trigger expert jobs automatically when the upstream moves.
+- Scan markdown files by frontmatter fields (e.g. `request_status: draft`) and dispatch an agent to process each match without moving the files.
 - Remove a routine you no longer need, or overwrite an existing one with updated parameters.
 - Unblock the daemon after a halt — get back to a clean working tree without losing changes you want to keep, or leave the daemon halted intentionally while you investigate.
 
 ## How it fits together
 
 Routine management has a natural lifecycle. You run `/lazy-routine.register` once — typically as part of your plugin's install step — and the daemon picks up the new entry on its very next cycle without a restart. The wizard collects only the fields the chosen type needs, validates against the per-type schema, and enforces `<plugin>.<verb>` dot-namespace naming (e.g. `lazy-review.tick`). If you attempt to register a name that already exists, the skill refuses unless you pass `--force` to overwrite in one step.
+
+The five types cover the common shapes of background work. `subprocess` runs any shell command on a fixed interval — use it for scripts, CLI tools, or any periodic task that does not need expert routing. `inbox` watches a directory and dispatches one expert job per file, moving each file into job staging so it is not processed twice — use it for queues where new files arrive from outside the daemon. `schedule` takes a standard five-field cron expression and fires once per boundary, dispatching either a command or an expert job — use it for calendar-driven tasks like nightly backups or weekly audits. `git` polls a remote branch for new commits, new files, changed files, deleted files, or renamed files, then dispatches an expert job per match — use it for CI-like reactions to upstream changes. `md-scan` scans vault-relative glob patterns, filters the matching markdown files by frontmatter key-value pairs, and dispatches a plugin-namespaced agent job for each match without moving the files — use it for processing in-place request queues tracked in git, such as design-request or review-request notes.
 
 When a routine is no longer needed, you run `/lazy-routine.unregister <name>` and the daemon drops it from the schedule immediately. One routine is protected: `lazy-expert.pump`, the built-in job that drains the expert queue. Removing it requires `--force` and surfaces a warning that expert jobs will stop processing until the routine is re-registered or `/lazy-core.install` is re-run.
 
@@ -42,6 +45,7 @@ For `inbox` routines there is one extra consideration: the inbox directory must 
 - **Recover without losing changes** — pick `stash` in the `/lazy-runtime.recover` wizard. Your dirty changes land in a git stash you can restore later with `git stash pop`. Pick `commit` if you want to keep them permanently.
 - **Investigate before cleaning up** — pick `abort` in the `/lazy-runtime.recover` wizard. The daemon stays halted and no changes are made; run `git status` to inspect the dirty paths, then re-invoke `/lazy-runtime.recover` when you are ready.
 - **Check daemon halt status before recovering** — inspect `.logs/lazy-core/runtime/state.json` directly to confirm halt state and read the `dirty_paths` before running the recover skill.
+- **Narrow an `md-scan` to specific frontmatter states** — the `frontmatter_filter` field accepts a dict of key-to-value mappings; `null` matches files where the key is absent entirely, so `{"request_status": [null, "draft"]}` catches both new files and in-progress ones.
 
 ## Runtime lifecycle
 
@@ -50,39 +54,35 @@ For `inbox` routines there is one extra consideration: the inbox directory must 
 stateDiagram-v2
   [*] --> idle
 
-  idle --> running : routine registered
+  state "Daemon Loop" as daemonLoop {
+    [*] --> idle
+    idle --> runningRoutine : interval_sec or cron fires
+    runningRoutine --> idle : routine complete
+    runningRoutine --> halted : dirty working tree detected
+  }
 
-  running --> running : interval elapsed - execute next routine
-  running --> halted : dirty working tree detected
+  halted --> recovering : /lazy-runtime.recover invoked
+  recovering --> commitClean : commit selected
+  recovering --> stashClean : stash selected
+  recovering --> discardClean : discard selected
+  recovering --> abortRecovery : abort selected
+  commitClean --> idle : tree clean
+  stashClean --> idle : tree clean
+  discardClean --> idle : tree clean
+  abortRecovery --> halted : recovery aborted
 
-  halted --> running : lazy-runtime.recover - tree cleaned
-  halted --> halted : recover aborted
-
-  running --> idle : last routine unregistered
-
-  idle --> [*]
+  idle --> unregistered : unregister routine
+  unregistered --> [*]
 
   style idle fill:#1e3a5f,stroke:#4a90e2,color:#fff
-  style running fill:#1e5f3a,stroke:#4ae290,color:#fff
-  style halted fill:#5f4a1e,stroke:#e2a14a,color:#fff
-
-  state halted {
-    [*] --> awaitingRecovery
-    awaitingRecovery --> commit : operator chooses commit
-    awaitingRecovery --> stash : operator chooses stash
-    awaitingRecovery --> discard : operator chooses discard
-    awaitingRecovery --> abortRecover : operator chooses abort
-    commit --> [*]
-    stash --> [*]
-    discard --> [*]
-    abortRecover --> [*]
-
-    style awaitingRecovery fill:#5f4a1e,stroke:#e2a14a,color:#fff
-    style commit fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-    style stash fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-    style discard fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
-    style abortRecover fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
-  }
+  style runningRoutine fill:#1e5f3a,stroke:#4ae290,color:#fff
+  style halted fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  style recovering fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  style commitClean fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  style stashClean fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  style discardClean fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  style abortRecovery fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  style unregistered fill:#2e2240,stroke:#7e63a8,color:#fff
 ```
 
 ## See also

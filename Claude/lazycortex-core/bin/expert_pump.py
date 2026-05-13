@@ -6,8 +6,128 @@ from lazy_settings import load_section
 from reference_resolver import resolve, ReferenceError
 
 JOBS_BASE = ".experts/.jobs"
-EXPERTS_FILE = ".experts/experts.settings.json"
 RETRY_DELAYS = [1, 2, 4, 8, 16]
+
+
+def _pid_alive(pid: int) -> bool:
+    """Probe with os.kill(pid, 0). True if process exists (or we lack
+    permission to signal it). False on ProcessLookupError or invalid pid.
+    Mirrors staging_lock._pid_alive."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+_DEAD_JSON_INTERNAL_FILES = {"READY", "PID", "request.json", "DEAD", "dead.json"}
+
+
+def _build_dead_json(jdir: Path, expert: str, job_id: str, marked_at: float) -> dict:
+    """Compose the dead.json payload for a stuck job. Pure function — does not
+    write to disk; the caller persists the returned dict.
+    """
+    import json
+    from datetime import datetime, timezone
+
+    queued_at = (jdir / "READY").stat().st_mtime
+    claimed_at = (jdir / "PID").stat().st_mtime
+
+    try:
+        original_pid = int((jdir / "PID").read_text().strip())
+    except (OSError, ValueError):
+        original_pid = -1
+
+    dedup_key = None
+    try:
+        request = json.loads((jdir / "request.json").read_text())
+        dedup_key = request.get("_dedup_key")
+    except (OSError, json.JSONDecodeError, KeyError):
+        pass
+
+    partial_output = sorted(
+        p.name for p in jdir.iterdir()
+        if p.name not in _DEAD_JSON_INTERNAL_FILES
+    )
+
+    duration_alive_sec = max(0.0, marked_at - claimed_at)
+
+    if duration_alive_sec < 5 and not partial_output:
+        likely_cause = "crashed_at_startup"
+    elif duration_alive_sec > 3600 and not partial_output:
+        likely_cause = "long_running_killed_or_hung"
+    elif partial_output:
+        likely_cause = "crashed_mid_processing"
+    else:
+        likely_cause = "unknown"
+
+    return {
+        "marked_at": marked_at,
+        "marked_at_iso": datetime.fromtimestamp(marked_at, tz=timezone.utc).isoformat().replace("+00:00", "Z"),
+        "expert": expert,
+        "job_id": job_id,
+        "dedup_key": dedup_key,
+        "original_pid": original_pid,
+        "queued_at": queued_at,
+        "claimed_at": claimed_at,
+        "duration_queued_sec": max(0.0, claimed_at - queued_at),
+        "duration_alive_sec": duration_alive_sec,
+        "partial_output": partial_output,
+        "likely_cause": likely_cause,
+    }
+
+
+def _detect_dead_jobs(repo: Path) -> int:
+    """Walk all job_dirs under <repo>/.experts/.jobs/, mark stuck jobs
+    (READY + PID file + no response.json + no DEAD, with dead PID) by
+    touching DEAD and writing dead.json. Returns the count of newly-
+    marked dead jobs.
+    """
+    import json
+    base = Path(repo) / JOBS_BASE
+    if not base.exists():
+        return 0
+
+    marked = 0
+    for edir in base.iterdir():
+        if not edir.is_dir():
+            continue
+        for jdir in edir.iterdir():
+            if not jdir.is_dir():
+                continue
+            if not (jdir / "READY").exists():
+                continue
+            if (jdir / "response.json").exists():
+                continue
+            if (jdir / "DONE").exists():
+                continue
+            if (jdir / "DEAD").exists():
+                continue
+            if not (jdir / "PID").exists():
+                continue
+
+            try:
+                pid_text = (jdir / "PID").read_text().strip()
+                pid = int(pid_text)
+                alive = _pid_alive(pid)
+            except (OSError, ValueError):
+                alive = False
+
+            if alive:
+                continue
+
+            blob = _build_dead_json(jdir, edir.name, jdir.name, time.time())
+            (jdir / "dead.json").write_text(json.dumps(blob, indent=2))
+            (jdir / "DEAD").touch()
+            marked += 1
+
+    return marked
 
 
 class _ExpertLeftDirtyTree(Exception):
@@ -58,69 +178,115 @@ def _check_post_claude(repo: Path, expert_name: str, jdir: Path) -> bool:
 
 def pump(repo: Path) -> dict:
     repo = Path(repo)
-    experts_path = repo / EXPERTS_FILE
-    if not experts_path.exists():
-        return {"experts": 0, "processed": 0, "cleaned": 0}
-    experts = json.loads(experts_path.read_text())
-    experts.pop("_version", None)
-
-    loop_cfg = load_section(repo / ".claude/lazy.settings.json", "lazy-core.runtime")
-    daemon = loop_cfg.get("daemon", {})
+    settings_path = repo / ".claude/lazy.settings.json"
+    daemon = load_section(settings_path, "daemon")
     cleanup_done_after  = _parse_duration(daemon.get("cleanup_completed_after", "7d"))
     cleanup_fail_after  = _parse_duration(daemon.get("cleanup_failed_after",   "30d"))
+    cleanup_dead_after  = _parse_duration(daemon.get("cleanup_dead_after",     "7d"))
+    detected_dead = _detect_dead_jobs(repo)
 
-    processed = cleaned = 0
-    for name, identity in experts.items():
-        edir = repo / JOBS_BASE / name
-        if not edir.exists(): continue
+    jobs_root = repo / JOBS_BASE
+    if not jobs_root.exists():
+        return {"experts": 0, "processed": 0, "cleaned": 0, "detected_dead": detected_dead}
+
+    processed = cleaned = expert_count = 0
+    for edir in sorted(jobs_root.iterdir()):
+        if not edir.is_dir():
+            continue
+        expert_count += 1
+        name = edir.name
         for jdir in sorted(edir.iterdir()):
             if not jdir.is_dir(): continue
-            cleaned += _maybe_cleanup(jdir, cleanup_done_after, cleanup_fail_after)
+            cleaned += _maybe_cleanup(jdir, cleanup_done_after, cleanup_fail_after, cleanup_dead_after)
             if (jdir / "READY").exists() and not (jdir / "DONE").exists():
                 try:
-                    _process_one(repo, name, identity, jdir)
+                    _process_one(repo, name, jdir)
                     processed += 1
                 except _ExpertLeftDirtyTree as e:
                     processed += 1
                     # Stop processing further jobs this tick; the daemon-wide
                     # halt is already written by _check_post_claude.
                     return {
-                        "experts": len(experts), "processed": processed,
-                        "cleaned": cleaned, "halted": True,
+                        "experts": expert_count, "processed": processed,
+                        "cleaned": cleaned, "detected_dead": detected_dead, "halted": True,
                         "halt_expert": e.expert, "halt_job_id": e.job_id,
                     }
-    return {"experts": len(experts), "processed": processed, "cleaned": cleaned}
+    return {"experts": expert_count, "processed": processed, "cleaned": cleaned, "detected_dead": detected_dead}
 
-def _process_one(repo: Path, expert_name: str, identity: dict, jdir: Path) -> None:
+def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
+    # Per-job config.json carries everything the pump needs: agent ref,
+    # protocols list (declared by the routine that created this job),
+    # git_author for any commits the expert makes. Routine wrote it at
+    # dispatch time; pump never consults lazy.settings.json[experts].
+    config_path = jdir / "config.json"
+    if not config_path.exists():
+        _write_error(jdir, "logical", f"config.json missing in {jdir}")
+        return
     try:
-        agent_path    = resolve(identity["agent"],    category="agents",    repo=repo)
-        protocol_path = resolve(identity["protocol"], category="protocols", repo=repo)
+        cfg = json.loads(config_path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        _write_error(jdir, "logical", f"unreadable config.json: {e}")
+        return
+
+    agent_ref = cfg.get("agent")
+    protocols_refs = cfg.get("protocols") or []
+    aspects_refs   = cfg.get("aspects") or []
+    arguments      = cfg.get("arguments") or {}
+    if not agent_ref:
+        _write_error(jdir, "logical", "config.json: missing agent")
+        return
+    if not protocols_refs and not aspects_refs:
+        _write_error(jdir, "logical", "config.json: both protocols and aspects are empty — nothing to instruct the expert with")
+        return
+
+    try:
+        agent_path = resolve(agent_ref, category="agents", repo=repo)
+        protocol_paths = [
+            resolve(p, category="protocols", repo=repo) for p in protocols_refs
+        ]
+        aspect_paths = [
+            resolve(a, category="aspects", repo=repo) for a in aspects_refs
+        ]
     except ReferenceError as e:
         _write_error(jdir, "logical", str(e))
         return
 
+    git_author = cfg.get("git_author") or {}
     env = os.environ.copy()
-    env["PROTOCOL_PATH"]    = str(protocol_path)
-    env["GIT_AUTHOR_NAME"]  = identity.get("git_author", {}).get("name",  "")
-    env["GIT_AUTHOR_EMAIL"] = identity.get("git_author", {}).get("email", "")
-    env["JOB_DIR"]          = str(jdir)
+    env["GIT_AUTHOR_NAME"]  = git_author.get("name",  "")
+    env["GIT_AUTHOR_EMAIL"] = git_author.get("email", "")
 
-    prompt = (
-        f"Process this expert job. Concrete paths (already resolved — do not look up env vars):\n"
-        f"- protocol contract: {protocol_path}\n"
-        f"- request.json:      {jdir}/request.json\n"
-        f"- source/ dir:       {jdir}/source/\n"
-        f"- context/ dir:      {jdir}/context/  (may be absent)\n"
-        f"- result/ dir:       {jdir}/result/   (write outputs here)\n"
-        f"- response.json:     {jdir}/response.json  (write your final outcome here)\n"
-        f"\nSteps: Read the protocol + request.json, perform the work per the protocol, "
-        f"write result files into result/, write response.json with outcome + result array "
-        f"per the protocol's response.json schema, then exit. Do not touch DONE — daemon does that."
-    )
-    contract_path = (Path(__file__).parent.parent / "templates" / "expert-runtime-contract.md").resolve()
+    # Three parallel single-noun labels — protocols, aspects, arguments.
+    # `- protocol:` replaces the legacy `- protocol contract:` for parallelism.
+    # Arguments are key-sorted for byte-stable prompts (cache hits, snapshot tests).
+    prompt_lines = ["Process this expert job. Concrete paths (already resolved — do not look up env vars):"]
+    for p in protocol_paths:
+        prompt_lines.append(f"- protocol:           {p}")
+    for a in aspect_paths:
+        prompt_lines.append(f"- aspect:             {a}")
+    for k in sorted(arguments):
+        v = json.dumps(arguments[k], ensure_ascii=False, sort_keys=True)
+        prompt_lines.append(f"- argument:           {k} = {v}")
+    prompt_lines.extend([
+        f"- request.json:      {jdir}/request.json",
+        f"- source/ dir:       {jdir}/source/",
+        f"- context/ dir:      {jdir}/context/  (may be absent)",
+        f"- result/ dir:       {jdir}/result/   (write outputs here)",
+        f"- response.json:     {jdir}/response.json  (write your final outcome here)",
+        "",
+        "Steps: Read the protocol(s) + aspect(s) + request.json, perform the work per the protocol, "
+        "write result files into result/, write response.json with outcome + result array "
+        "per the protocol's response.json schema, then exit. Do not touch DONE — daemon does that.",
+    ])
+    prompt = "\n".join(prompt_lines)
+    contract_path = (Path(__file__).parent.parent / "references" / "lazy-core.expert-runtime-contract.md").resolve()
     last_err = None
     for delay in [0, *RETRY_DELAYS]:
         if delay: time.sleep(delay)
+        # Mark this job as ours: write PID before invoking the expert.
+        # The dead-job detector reads this to distinguish queued (no PID)
+        # from active (PID file present, alive) from stuck (PID dead).
+        (jdir / "PID").write_text(f"{os.getpid()}\n")
         try:
             proc = subprocess.run(
                 ["claude", "-p", "--permission-mode", "bypassPermissions",
@@ -239,18 +405,36 @@ def _write_error(jdir: Path, category: str, message: str) -> None:
     }, indent=2))
     (jdir / "DONE").touch()
 
-def _maybe_cleanup(jdir: Path, done_after: float, fail_after: float) -> int:
-    if not (jdir / "DONE").exists(): return 0
-    age = time.time() - (jdir / "DONE").stat().st_mtime
-    resp_path = jdir / "response.json"
-    is_error = False
-    if resp_path.exists():
-        try: is_error = json.loads(resp_path.read_text()).get("outcome") == "error"
-        except json.JSONDecodeError: pass
-    threshold = fail_after if is_error else done_after
-    if age >= threshold:
-        shutil.rmtree(jdir)
-        return 1
+def _maybe_cleanup(jdir: Path, done_after: float, fail_after: float, dead_after: float) -> int:
+    """Per-tick GC. Returns 1 if jdir was removed, 0 otherwise.
+
+    Branches:
+      - DONE present → TTL = done_after (normal) or fail_after (error outcome).
+      - DEAD present → TTL = dead_after. Stuck-job forensic window.
+      - Neither → leave alone (job is queued or active).
+    """
+    if (jdir / "DONE").exists():
+        age = time.time() - (jdir / "DONE").stat().st_mtime
+        resp_path = jdir / "response.json"
+        is_error = False
+        if resp_path.exists():
+            try:
+                is_error = json.loads(resp_path.read_text()).get("outcome") == "error"
+            except json.JSONDecodeError:
+                pass
+        threshold = fail_after if is_error else done_after
+        if age >= threshold:
+            shutil.rmtree(jdir)
+            return 1
+        return 0
+
+    if (jdir / "DEAD").exists():
+        age = time.time() - (jdir / "DEAD").stat().st_mtime
+        if age >= dead_after:
+            shutil.rmtree(jdir)
+            return 1
+        return 0
+
     return 0
 
 def _parse_duration(s: str) -> float:

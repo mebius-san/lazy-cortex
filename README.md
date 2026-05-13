@@ -25,7 +25,7 @@ Each plugin addresses one of these pains without forcing you to adopt the others
 
 Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-model routing + settings management)
 
-Ships 18 skills, 2 commands, 9 rules, and 4 hooks.
+Ships 23 skills, 5 agents, 2 commands, 10 rules, and 5 hooks.
 
 See [`claude/lazycortex-core/`](claude/lazycortex-core/) for details.
 
@@ -38,16 +38,6 @@ Ships 4 skills, 2 agents, 1 command, and 1 rule.
 Requires: lazycortex-core
 
 See [`claude/lazycortex-diagram/`](claude/lazycortex-diagram/) for details.
-
-### lazycortex-log
-
-Logging, changelog, and change-history recall for Claude Code
-
-Ships 3 skills, 5 agents, 1 command, 1 rule, and 1 hook.
-
-Requires: lazycortex-core
-
-See [`claude/lazycortex-log/`](claude/lazycortex-log/) for details.
 
 ### lazycortex-observe
 
@@ -73,7 +63,7 @@ See [`claude/lazycortex-obsidian/`](claude/lazycortex-obsidian/) for details.
 
 Specification and design skills for Claude Code
 
-Ships 17 skills and 1 command.
+Ships 20 skills, 1 agent, and 1 command.
 
 Requires: lazycortex-core, lazycortex-diagram
 
@@ -83,13 +73,13 @@ See [`claude/lazycortex-specs/`](claude/lazycortex-specs/) for details.
 
 - **Claude Code** — the plugins use skills, agents, hooks, and the plugin marketplace system.
 - **git** — hooks and logging depend on git repos. Installing in a non-git directory degrades gracefully but loses most value.
-- **Python 3** — for hook scripts bundled with plugins that install hooks (e.g. `lazycortex-core`, `lazycortex-log`).
+- **Python 3** — for hook scripts bundled with plugins that install hooks (e.g. `lazycortex-core`, `lazycortex-obsidian`).
 
 ## Quick start
 
 1. Add the marketplace and enable the plugins you want (see Installation below).
 2. Restart Claude Code.
-3. For each enabled plugin, run its install skill once per project: `/lazy-core.install`, `/lazy-log.install`, etc. This drops the plugin's rule templates into `.claude/rules/` and sets up any log/changelog scaffolding.
+3. For each enabled plugin, run its install skill once per project: `/lazy-core.install`, `/lazy-observe.install`, etc. This drops the plugin's rule templates into `.claude/rules/` and sets up any log/changelog scaffolding.
 4. Invoke skills via slash commands. Hooks activate automatically.
 
 ## Installation
@@ -110,7 +100,6 @@ All plugins live in a single Claude Code marketplace. Add the marketplace and en
   "enabledPlugins": {
     "lazycortex-core@lazycortex": true,
     "lazycortex-diagram@lazycortex": true,
-    "lazycortex-log@lazycortex": true,
     "lazycortex-observe@lazycortex": true,
     "lazycortex-obsidian@lazycortex": true,
     "lazycortex-specs@lazycortex": true
