@@ -2,9 +2,7 @@
 chapter_type: block
 summary: Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
 last_regen: 2026-05-13
-diagram_spec:
-  anchor: "Bootstrap order"
-  request: "Flow diagram showing the canonical core bootstrap order: enable plugin in settings.json → restart Claude Code → run /lazy-core.install (or /lazy-core.setup for multi-plugin) → restart if rules changed → run /lazy-core.audit to verify → optionally run /lazy-core.optimize and /lazy-core.doctor for ongoing tuning. Show /lazy-core.setup as an alternative entry point that auto-discovers and sequences all enabled plugin install skills."
+no_diagram: true
 source_skills:
   - lazy-core.install
   - lazy-core.audit
@@ -77,7 +75,9 @@ On the settings side it audits your global `~/.claude/settings.json` for entries
 
 `/lazy-core.setup` is the shortcut for a fresh project bootstrap when you have multiple lazycortex plugins enabled.
 
-It scans `~/.claude/plugins/installed_plugins.json` for every enabled plugin, discovers their `<namespace>.install` skills and any skill opting in via `lazy_setup_phase:` frontmatter, builds a dependency-ordered execution plan (with `lazy-core.install` always first), shows you a preview, asks for a single confirmation, and then runs each child in sequence. Children that fail are logged but do not abort the loop — you get one coherent summary at the end. Pass `--dry-run` to see the plan without executing it.
+Before any installer runs, it migrates `.claude/lazy.settings.json` through the current per-section version ladder — a step that ensures every section's schema is current before child installers read or write it. The migration runs `lazy_settings.py migrate` and reports which sections (if any) were upgraded. If migration exits non-zero the run aborts immediately; no installers execute until the settings file is current.
+
+Once the settings file is confirmed up-to-date, the skill scans `~/.claude/plugins/installed_plugins.json` for every enabled plugin, discovers their `<namespace>.install` skills and any skill opting in via `lazy_setup_phase:` frontmatter, builds a dependency-ordered execution plan (with `lazy-core.install` always first), shows you a preview, asks for a single confirmation, and then runs each child in sequence. Children that fail are logged but do not abort the loop — you get one coherent summary at the end. Pass `--dry-run` to see the plan without executing it.
 
 The plan is deterministic and the children are all idempotent: re-running `/lazy-core.setup` after a plugin update, after a fresh clone, or after enabling a new plugin is always safe.
 
@@ -102,6 +102,8 @@ Run `/lazy-core.audit` afterwards to verify the memory subsystem is healthy — 
 **Previewing the setup chain** — run `/lazy-core.setup --dry-run` to see the ordered list of install skills that would run, grouped by phase, with no changes applied.
 
 **Filling missing model-routing entries** — run `/lazy-core.agent-models` directly (or let `/lazy-core.optimize` Phase 7 do it) to assign haiku/sonnet/opus tiers to any newly discovered agents without running the full optimize pipeline.
+
+**Settings migration failed during setup** — if `/lazy-core.setup` aborts at Step 0 with a migration error, read the captured stderr in the Step 6 report. A non-zero exit typically means a malformed migration callable in the `lazy_settings_migrations/` ladder. Fix the root cause, then re-run `/lazy-core.setup` — Steps 1–5 do not execute until the settings file is current.
 
 ## Where this fits
 

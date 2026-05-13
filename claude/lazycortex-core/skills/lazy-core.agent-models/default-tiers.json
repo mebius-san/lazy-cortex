@@ -14,8 +14,6 @@
     "lazycortex-obsidian:lazy-obsidian.gen-tag-pages": "sonnet",
     "lazycortex-review:lazy-review.dispatcher": "haiku",
     "lazycortex-review:lazy-review.process-file": "sonnet",
-    "lazycortex-review:lazy-review.sample-designer": "sonnet",
-    "lazycortex-review:lazy-review.sample-developer": "sonnet",
     "lazycortex-review:lazy-review.doc_doctor": "haiku",
     "lazycortex-review:lazy-review.historian": "haiku",
     "superpowers:code-reviewer": "opus",

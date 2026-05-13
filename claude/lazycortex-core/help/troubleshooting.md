@@ -4,7 +4,7 @@ summary: Common failure modes across lazycortex-core skills — symptoms, likely
 last_regen: 2026-05-13
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: Python version too low → python-floor-not-met; pre-commit hook silent → hook-not-firing; MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-load-error / systemctl-error); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public FAIL findings → mark-public-fail-unresolved; lazy-repo.mark-public gh missing → gh-not-installed; doctor or audit stalls → skill-stalls; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; dispatch to wrong expert key → expert-key-mismatch; routine register name invalid → routine-name-format; routine already registered → routine-conflict; routine register unknown type → routine-unknown-type; routine register missing required field → routine-missing-field; routine register settings unwritable → routine-settings-unwritable; unregister pump without force → pump-protected; daemon stalled → daemon-stale; runtime recover still dirty → recover-still-dirty; recover state.json unparseable → state-unparseable; recover commit needs message → recover-commit-needs-message; audit experts json invalid → experts-json-invalid; audit reference did not resolve → ref-unresolvable; audit routine command path layout → routine-path-layout; doctor routine command unresolvable → routine-command-missing; lazy-core.audit global rules empty → audit-global-empty; migrated-from-lazycortex-log → commit-hook-error; memory write expert not persona → memory-not-persona; memory write frontmatter invalid → memory-frontmatter-invalid; memory write consolidate out of scope → memory-consolidate-scope; memory index memory dir absent → memory-dir-absent; memory reflect expert not persona → reflect-not-persona; memory reflect no sources → reflect-no-sources; mark-persona expert not registered → persona-expert-unknown; git lock stuck → git-lock-stuck; git unlock no lock → git-no-lock; log-clean absent → log-dir-absent; log-clean canonical resolver failed → log-resolver-failed; log-distill throttled → log-distill-throttled; log-recall no matches → log-recall-no-match."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: Python version too low → python-floor-not-met; pre-commit hook silent → hook-not-firing; MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-load-error / systemctl-error); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup migration errored → setup-migration-failed; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public FAIL findings → mark-public-fail-unresolved; lazy-repo.mark-public gh missing → gh-not-installed; doctor or audit stalls → skill-stalls; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; dispatch to wrong expert key → expert-key-mismatch; routine register name invalid → routine-name-format; routine already registered → routine-conflict; routine register unknown type → routine-unknown-type; routine register missing required field → routine-missing-field; routine register settings unwritable → routine-settings-unwritable; unregister pump without force → pump-protected; daemon stalled → daemon-stale; runtime recover still dirty → recover-still-dirty; recover state.json unparseable → state-unparseable; recover commit needs message → recover-commit-needs-message; audit experts json invalid → experts-json-invalid; audit reference did not resolve → ref-unresolvable; audit routine command path layout → routine-path-layout; doctor routine command unresolvable → routine-command-missing; lazy-core.audit global rules empty → audit-global-empty; migrated-from-lazycortex-log → commit-hook-error; memory write expert not persona → memory-not-persona; memory write frontmatter invalid → memory-frontmatter-invalid; memory write consolidate out of scope → memory-consolidate-scope; memory index memory dir absent → memory-dir-absent; memory reflect expert not persona → reflect-not-persona; memory reflect no sources → reflect-no-sources; mark-persona expert not registered → persona-expert-unknown; git lock stuck → git-lock-stuck; git unlock no lock → git-no-lock; log-clean absent → log-dir-absent; log-clean canonical resolver failed → log-resolver-failed; log-distill throttled → log-distill-throttled; log-recall no matches → log-recall-no-match."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
@@ -223,6 +223,16 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 **Likely cause**: The plugin that registered this routine has been removed or updated, leaving behind a stale `command` path in `lazy.settings.json` that no longer resolves to an installed plugin binary.
 
 **Fix**: Accept the "Unregister" offer in the doctor's Fix L3 prompt to remove the stale routine entry via `/lazy-routine.unregister`. If the plugin that owned the routine is still installed, re-run `/lazy-core.install` for that plugin to re-register it with the correct current bin path.
+
+---
+
+## `/lazy-core.setup` stops at Step 0: settings migration errored
+
+**Symptom**: Running `/lazy-core.setup` halts immediately with a message like "failed: `<stderr>`" in its Step 0 line, and the Step 6 report shows Steps 1–5 with outcome `aborted-by-migration-failure`. No child skills run.
+
+**Likely cause**: `lazy_settings.py migrate` exited non-zero before any installer had a chance to read or write `.claude/lazy.settings.json`. This typically means a migration ladder file under `lazy_settings_migrations/` has a malformed `MIGRATIONS` callable, or the settings file itself is so corrupted that the ladder cannot parse it at all.
+
+**Fix**: Read the captured stderr in the Step 6 report to identify which migration module or settings section is at fault. If the settings file is corrupt, inspect `.claude/lazy.settings.json` and fix the JSON syntax. If the error names a specific migration module, reinstall `lazycortex-core` via `/plugin update lazycortex-core@lazycortex` to restore the migration ladder, then re-run `/lazy-core.setup`.
 
 ---
 
@@ -671,18 +681,22 @@ flowchart TD
   pythonFloor{Python version too low?}
   hookFiring{Hook not firing?}
   pluginMissing{Plugin not installed?}
+  setupMigration{Setup migration errored?}
 
   installGroup -->|python-error| pythonFloor
   installGroup -->|hook-silent| hookFiring
   installGroup -->|plugin-absent| pluginMissing
+  installGroup -->|migration-fail| setupMigration
 
   pythonFloorEntry[slug: python-floor-not-met]
   hookNotFiringEntry[slug: hook-not-firing]
   pluginNotInstalledEntry[slug: plugin-not-installed]
+  setupMigrationEntry[slug: setup-migration-failed]
 
   pythonFloor -->|confirmed| pythonFloorEntry
   hookFiring -->|confirmed| hookNotFiringEntry
   pluginMissing -->|confirmed| pluginNotInstalledEntry
+  setupMigration -->|confirmed| setupMigrationEntry
 
   serverNotFound{MCP server not found?}
   securityBlock{Security check blocking?}
@@ -796,6 +810,7 @@ flowchart TD
   class pythonFloor guard
   class hookFiring guard
   class pluginMissing guard
+  class setupMigration guard
   class serverNotFound guard
   class securityBlock guard
   class daemonCrash guard
@@ -815,6 +830,7 @@ flowchart TD
   class pythonFloorEntry success
   class hookNotFiringEntry success
   class pluginNotInstalledEntry success
+  class setupMigrationEntry success
   class serverNotFoundEntry success
   class securityBlockEntry success
   class daemonCrashEntry success

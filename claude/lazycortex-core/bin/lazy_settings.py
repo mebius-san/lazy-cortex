@@ -54,6 +54,30 @@ def load_section(path: Path | str, section_key: str) -> dict:
         _atomic_write(path, raw)
     return section
 
+def migrate_all(path: Path | str) -> dict[str, tuple[int, int]]:
+    """Run the migration ladder for every section in CURRENT_VERSIONS.
+
+    Returns {section_key: (before, after)} for sections that were upgraded.
+    Sections already at the target version are omitted from the result.
+    """
+    path = Path(path)
+    pre: dict[str, int] = {}
+    if path.exists():
+        raw = json.loads(path.read_text() or "{}")
+        raw = migrate_root_version_to_section_version(raw)
+        for k, target in CURRENT_VERSIONS.items():
+            sect = raw.get(k) or {}
+            pre[k] = sect.get("_version", target)
+    else:
+        pre = dict(CURRENT_VERSIONS)
+    result: dict[str, tuple[int, int]] = {}
+    for k, target in CURRENT_VERSIONS.items():
+        after = load_section(path, k).get("_version", target)
+        if pre[k] != after:
+            result[k] = (pre[k], after)
+    return result
+
+
 def save_section(path: Path | str, section_key: str, section: dict) -> None:
     path = Path(path)
     raw = json.loads(path.read_text() or "{}") if path.exists() else {}
@@ -74,3 +98,20 @@ def _atomic_write(path: Path, data: dict) -> None:
         try: os.unlink(tmp)
         except OSError: pass
         raise
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) < 2 or sys.argv[1] != "migrate":
+        print("usage: lazy_settings.py migrate [path]", file=sys.stderr)
+        sys.exit(2)
+    target = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(".claude/lazy.settings.json")
+    upgraded = migrate_all(target)
+    total = len(CURRENT_VERSIONS)
+    up_to_date = total - len(upgraded)
+    if not upgraded:
+        print(f"migrated: 0 sections ({up_to_date} up-to-date)")
+    else:
+        print(f"migrated: {len(upgraded)} sections ({up_to_date} up-to-date)")
+        for k, (a, b) in upgraded.items():
+            print(f"  {k}: v{a} -> v{b}")

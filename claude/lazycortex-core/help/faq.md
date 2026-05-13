@@ -49,7 +49,15 @@ Use `/lazy-core.audit` when you want a quick, safe read of the current state. Us
 
 `/lazy-core.install` installs one plugin — `lazycortex-core` — by syncing its rule templates and authoring templates into the target `.claude/` directory, and seeding `lazy.settings.json` with the built-in agent-model defaults. `/lazy-core.setup` is the meta-installer: it discovers every enabled plugin that ships a `<namespace>.install` skill (or opts in via `lazy_setup_phase:` frontmatter) and runs them all in the correct order, with `lazy-core.install` going first.
 
-Use `/lazy-core.install` directly when you want to re-sync just the core plugin after a `lazycortex-core` update. Use `/lazy-core.setup` after any plugin update, after enabling a new plugin, or on a fresh project clone — it is the single command that brings all plugins current in one pass.
+Before any plugin installer runs, `/lazy-core.setup` automatically migrates `.claude/lazy.settings.json` to the current per-section schema (Step 0). This happens transparently — you do not need to run a migration command by hand, and you do not need to know which schema version you are on. If the migration step fails, setup surfaces the reason and stops before touching any plugin files.
+
+Use `/lazy-core.install` directly when you want to re-sync just the core plugin after a `lazycortex-core` update. Use `/lazy-core.setup` after any plugin update, after enabling a new plugin, or on a fresh project clone — it is the single command that brings all plugins current in one pass, settings migration included.
+
+---
+
+## Do I need to migrate `lazy.settings.json` by hand after a plugin update?
+
+No. `/lazy-core.setup` runs a settings migration as its first step (Step 0) before any plugin installer touches the file. The migration ladder upgrades each section of `.claude/lazy.settings.json` to the current schema automatically. The step is transparent: if nothing needs to change, it prints `migrated: 0 sections (N up-to-date)` and continues; if sections are upgraded, it lists each one in the Step 6 report. Only if the migration itself errors (a malformed ladder entry) does setup stop and ask you to investigate.
 
 ---
 
@@ -139,7 +147,7 @@ The only time hand-editing `lazy.settings.json` is appropriate is when you are d
 
 ## When does `/lazy-core.setup` help versus running each plugin's install skill manually?
 
-`/lazy-core.setup` is the right default after any multi-plugin change: it discovers all enabled plugins automatically (no list to maintain), resolves dependency order (core before others, post-install configurators last), and continues even if one child fails so you get a single coherent summary rather than hunting for which installer you missed. It is also idempotent — every child skill is idempotent, so re-running setup after a partial failure is safe.
+`/lazy-core.setup` is the right default after any multi-plugin change: it discovers all enabled plugins automatically (no list to maintain), migrates `lazy.settings.json` to the current schema before any installer runs, resolves dependency order (core before others, post-install configurators last), and continues even if one child fails so you get a single coherent summary rather than hunting for which installer you missed. It is also idempotent — every child skill is idempotent, so re-running setup after a partial failure is safe.
 
 Run a plugin's install skill directly only when you want to re-sync exactly one plugin and you are certain it has no cross-plugin dependencies. The most common case is a `lazycortex-core`-only update where running `/lazy-core.install` is faster and clearer. For everything else — fresh clone, adding a new plugin, upgrading multiple plugins at once — `/lazy-core.setup` is the single command that brings the whole project current.
 
@@ -278,7 +286,7 @@ Note that `/lazy-core.audit` uses a lower floor of Python 3.8 for its own runtim
 
 Three skills in this plugin accept `--dry-run`:
 
-- `/lazy-core.setup` — builds and previews the install plan (which skills would run, in what order) without executing any of them.
+- `/lazy-core.setup` — builds and previews the install plan (which skills would run, in what order) without executing any of them. The settings migration step (Step 0) still runs in dry-run mode so the preview reflects the post-migration state.
 - `/lazy-core.agent-models` — walks the wizard and reports what tier assignments would be written, without touching either `lazy.settings.json` file.
 - `/lazy-guard.allow-mcp` — computes and previews the diff (which tools would land in `allow`, `ask`, or skip) without writing to any settings file.
 

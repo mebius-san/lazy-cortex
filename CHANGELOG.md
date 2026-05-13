@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 3.1.1 — 2026-05-13 UTC
+
+- `lazy-core.setup` now runs a settings-migration pass (via `lazy_settings.py migrate`) as its first step before installing any plugin; if migration fails, the setup run halts with `aborted-by-migration-failure` rather than proceeding on a stale settings layout.
+
 ### 3.1.0 — 2026-05-13 UTC
 
 - **Breaking — `lazycortex-log` absorbed.** The separate `lazycortex-log` plugin is retired and its surface area now ships inside `lazycortex-core`. Consumers must remove `lazycortex-log` from `enabledPlugins`, then re-run `/lazy-core.install` — the install skill migrates the old `lazycortex-log:` settings.json hook entries, drops the absorbed `lazy-log.commit-recorder` hook + `lazy-log.logging` rule into the right places, and bootstraps `.logs/` and `.memory/` directories. The `lazy-log.{clean,distill,recall,timeline,summary,bullets}` skills/agents and the `lazy-log.logging` rule are now plain `lazycortex-core` members — no namespace change in invocation.

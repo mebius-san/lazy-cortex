@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#fca5a5"
+iconize_color: "#93c5fd"
 ---
 # lazycortex-core
 
@@ -87,8 +87,8 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 
 Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
 
-- [agent-models](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/agent-models.md) — Assign haiku/sonnet/opus tiers to every agent in your vault and let the model-router hook route each dispatch automatically.
 - [add-memory-to-expert](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/add-memory-to-expert.md) — Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
+- [agent-models](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/agent-models.md) — Assign haiku/sonnet/opus tiers to every agent in your vault and let the model-router hook route each dispatch automatically.
 - [change-history](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/change-history.md) — Run-log housekeeping and change-history access — clean up orphaned log directories, distill commits into themed prose, and ask "why was X changed?" across every source at once.
 - [experts](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/experts.md) — Dispatch jobs to named expert workers, keep the main session free, and collect results when the daemon finishes them.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, and change-history access.
@@ -139,9 +139,9 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Hook | Trigger | Description |
 |---|---|---|
-| `lazy-core.git-guard` | `Bash`, `mcp__git__git_commit`, `mcp__git__git_add`, `mcp__git__git_reset` | Pre/PostToolUse hook: serialize git staging across Claude Code sessions. |
+| `lazy-core.git-guard` | `Bash`, `mcp__git__git_add`, `mcp__git__git_commit`, `mcp__git__git_reset` | Pre/PostToolUse hook: serialize git staging across Claude Code sessions. |
 | `lazy-core.model-router` | `Agent` | PreToolUse hook — route Agent dispatches to a configured model. |
-| `lazy-guard.check-public` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: scan staged git changes for secrets, PII, and infrastructure leaks before committing to a public repo. |
+| `lazy-guard.check-public` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: scan staged git changes for secrets, PII, and infrastructure |
 | `lazy-guard.settings` | `Edit\|Write` | PreToolUse hook: guard Claude Code settings files against dangerous changes. |
 | `lazy-log.commit-recorder` | `Bash`, `mcp__git__git_commit` | PostToolUse hook: record every successful git commit to .logs/commits.jsonl. |
 
