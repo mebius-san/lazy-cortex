@@ -12,9 +12,9 @@ source_skills:
 ---
 # Domain aspects for specialist composition
 
-The aspects block is a set of pure prompt layers — each one adds a body of domain knowledge to whichever generic expert (`interpreter`, `designer`, or `planner`) you pair it with. You wire the pairing in `lazy.settings.json[experts]` and the expert runtime merges the aspect bodies into the agent's system prompt at dispatch time. The result is a named specialist — for example a `claude-plugin-planner` or a `game-designer` — without authoring a fresh agent for each domain.
+The aspects block is a set of pure prompt layers — each one adds a body of domain knowledge to whichever generic expert (`interpreter`, `designer`, or `planner`) you pair it with. You declare the pairing in `lazy.settings.json[experts]` and the expert runtime merges the aspect bodies into the agent's system prompt at dispatch time. The result is a named specialist — for example a `claude-plugin-planner` or a `game-designer` — without authoring a fresh agent for each domain.
 
-`lazycortex-experts` ships three starter aspects: `claude-plugin-aspect` (LazyCortex plugin authoring), `game-dev-aspect` (game design and implementation planning), and `dotfiles-aspect` (personal-computer and network configuration management). All three are public-marketplace-safe, domain-neutral on tooling choices, and composable with each other or with aspects your own plugins ship.
+`lazycortex-experts` ships three starter aspects: `claude-plugin-aspect` (LazyCortex plugin authoring), `game-dev-aspect` (game design and implementation planning), and `dotfiles-aspect` (personal-computer and network configuration management). All three are public-marketplace-safe, domain-neutral on tooling choices, and composable with each other or with aspects your own plugins ship. Running `/lazy-experts.install` seeds all nine built-in (agent × aspect) specialist entries into `lazy.settings.json[experts]` automatically — you only need to hand-author entries for specialists you invent yourself.
 
 ## What's in this block
 
@@ -43,6 +43,8 @@ The `lazy.settings.json[experts]` entry is the composition point. A typical entr
   }
 }
 ```
+
+Running `/lazy-experts.install` writes all nine built-in combinations — one entry per (agent × aspect) pair: `claude-plugin-interpreter`, `claude-plugin-designer`, `claude-plugin-planner`, `game-interpreter`, `game-designer`, `game-planner`, `dotfiles-interpreter`, `dotfiles-designer`, `dotfiles-planner`. Every seeded entry also carries `lazycortex-core:lazy-memory.persona-aspect` so the specialist accumulates private memory under `.memory/<self>/` across runs. Install is idempotent — existing entries are never overwritten, so any specialist you hand-customized survives a re-run.
 
 The aspect bodies themselves carry no side-effects and add no new write permissions. They expand what the agent knows and what it considers a complete or incomplete brief — they do not change where or how it writes its output, which remains governed by the protocol the dispatching routine supplies.
 
@@ -99,4 +101,3 @@ flowchart LR
   class claudePluginDesigner success
   class dotfilesInterpreter success
 ```
-

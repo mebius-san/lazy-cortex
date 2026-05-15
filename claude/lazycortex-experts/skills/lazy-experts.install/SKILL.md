@@ -1,22 +1,23 @@
 ---
 name: lazy-experts.install
-description: "Bootstrap the lazycortex-experts plugin for the current project (or globally). Seeds agent-model tiers for the three generic agents (interpreter, designer, planner) from `lazycortex-core`'s `default-tiers.json` into `lazy.settings.json[agent_models].lazycortex`. Ships no expert-entry seeding — composition lives in the consumer's `lazy.settings.json[experts]`. Idempotent — safe to re-run. Detects install scope automatically."
+description: "Bootstrap the lazycortex-experts plugin for the current project (or globally). Seeds two things into `lazy.settings.json`: (1) agent-model tiers for the three generic agents (interpreter, designer, planner) from `lazycortex-core`'s `default-tiers.json` into `agent_models.lazycortex`; (2) one composed expert entry per (agent × domain-aspect) pair into `experts` — every seeded expert also carries `lazycortex-core:lazy-memory.persona-aspect` so each accumulates private memory across runs. Idempotent — safe to re-run; existing entries are never overwritten."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *), AskUserQuestion
 ---
 # Install lazycortex-experts
 
-Seed agent-model tiers for the three generic agents in the consumer's `lazy.settings.json` so dispatch routing picks up the right Claude tier for each. No rules to sync (this plugin ships none); no expert entries to seed (composition is consumer-side per `docs/specs/2026-05-13-experts-plugin-design.md § 7`).
+Seed two things into the consumer's `lazy.settings.json` so dispatch routing works out of the box: agent-model tiers (so each generic agent gets the right Claude tier) and composed expert entries (one per agent × domain-aspect pair, every entry carrying the persona aspect so the expert accumulates private memory under `.memory/<self>/`). No rules to sync — this plugin ships none.
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Detect install scope`
    - `Step 2 — Determine target paths`
-   - `Step 3 — Seed lazy.settings.json`
-   - `Step 4 — Verify / Report`
-   - `Step 5 — Log the run`
+   - `Step 3 — Seed agent_models`
+   - `Step 4 — Seed expert entries`
+   - `Step 5 — Verify / Report`
+   - `Step 6 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `unchanged`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -54,11 +55,11 @@ Newest version wins. If the file is absent → FAIL with `lazycortex-core not in
 
 Outcome: `target-resolved: <path>`, `defaults-resolved: <path>`.
 
-## Step 3: Seed lazy.settings.json
+## Step 3: Seed agent_models
 
-Read the target `lazy.settings.json`. If missing or unparseable, initialize as `{"_version": 1, "agent_models": {}}`. Ensure `agent_models.lazycortex` exists as an object (create empty `{}` if absent — never overwrite other groups).
+Read the target `lazy.settings.json`. If missing or unparseable, initialize as `{"_version": 1, "agent_models": {}, "experts": {"_version": 1}}`. Ensure `agent_models.lazycortex` exists as an object (create empty `{}` if absent — never overwrite other groups).
 
-Read the resolved defaults JSON. Select every key under `defaults` that starts with `lazycortex-experts:` — these are the entries to seed.
+Read the resolved defaults JSON. Select every key under `defaults` that starts with `lazycortex-experts:` — these are the agent-tier entries to seed.
 
 For each `(dispatch, tier)` pair from the defaults file, write back only if anything changed:
 
@@ -68,22 +69,75 @@ For each `(dispatch, tier)` pair from the defaults file, write back only if anyt
 
 Never touch other `lazycortex` entries (seeded by sibling install skills).
 
-If any mutation happened, write the file with `_version: 1` preserved at the top.
-
 Outcome (one line per seeded entry): `lazycortex.<key> = <tier> (<state>)`.
 
-## Step 4: Verify / Report
+## Step 4: Seed expert entries
 
-- Read back the written `lazy.settings.json` and confirm it parses + contains the three `lazycortex-experts:*` keys under `agent_models.lazycortex`.
+Enumerate the agents and aspects this plugin ships, then seed one composed expert entry per (agent × domain-aspect) pair under `lazy.settings.json[experts]`. Every seeded entry also carries `lazycortex-core:lazy-memory.persona-aspect` so the expert is opted into the memory subsystem.
+
+### Enumerate
+
+- `<installPath>` is the `installPath` field from `~/.claude/plugins/installed_plugins.json` for `lazycortex-experts@lazycortex`.
+- **Agents**: `Glob <installPath>/agents/lazy-experts.*.md`. For each match, the role is the basename minus the `lazy-experts.` prefix and `.md` suffix — currently `interpreter`, `designer`, `planner`.
+- **Domain aspects**: `Glob <installPath>/references/lazy-experts.*-aspect.md`. For each match, the domain key is the basename minus the `lazy-experts.` prefix and `-aspect.md` suffix — currently `claude-plugin`, `game-dev`, `dotfiles`.
+
+If either glob is empty, abort with `plugin-cache-incomplete: <missing-dir>`. The cache must hold both agents and aspects before seeding can run.
+
+### Compose
+
+For each `(domain, role)` pair (cartesian product — N agents × M aspects = N×M entries), build the expert key by prefix-mapping the domain to its short form:
+
+| Domain (aspect basename suffix) | Expert-key prefix |
+|---|---|
+| `claude-plugin` | `claude-plugin-` |
+| `game-dev` | `game-` |
+| `dotfiles` | `dotfiles-` |
+| *(other / future)* | `<domain>-` (verbatim) |
+
+The expert key is `<prefix><role>`. Examples: `claude-plugin-designer`, `game-interpreter`, `dotfiles-planner`. The prefix map is closed-set for the three v1 domains; future domain aspects fall through to the verbatim form.
+
+The composed entry's shape:
+
+```jsonc
+"<expert-key>": {
+  "agent": "lazycortex-experts:lazy-experts.<role>",
+  "aspects": [
+    "lazycortex-experts:lazy-experts.<domain>-aspect",
+    "lazycortex-core:lazy-memory.persona-aspect"
+  ],
+  "git_author": {
+    "name": "<title-case-with-spaces>",
+    "email": "<expert-key>@lazycortex.local"
+  }
+}
+```
+
+The `git_author.name` is the expert key with hyphens replaced by spaces, title-cased (e.g. `Claude Plugin Designer`, `Game Interpreter`). The email pins the canonical local domain so commits attributed to the expert are visibly distinct from operator commits.
+
+### Apply
+
+Ensure `experts` exists as an object with `_version: 1` (create if absent — never overwrite). For each composed entry, per-key semantics matching Step 3:
+
+- **absent** → add the entry verbatim. State `added`.
+- **present** (any shape) → leave untouched. State `kept-local`. Do NOT overwrite even if the existing entry has different aspects or a stale `agent` ref — operators may have customized.
+
+If any mutation happened, write the file with `_version: 1` preserved at the top of both `agent_models` and `experts`.
+
+Outcome (one line per seeded entry): `experts.<expert-key> (<state>)`.
+
+## Step 5: Verify / Report
+
+- Read back the written `lazy.settings.json` and confirm it parses + contains the three `lazycortex-experts:*` keys under `agent_models.lazycortex` AND the expected N×M expert keys under `experts`.
+- For each seeded expert, confirm both aspect refs resolve (the file glob from Step 4 already proved this for domain aspects; the persona aspect must exist in `~/.claude/plugins/cache/lazycortex/lazycortex-core/*/references/lazy-memory.persona-aspect.md`).
 - Report to the user:
   - Scope detected.
   - Plugin version + commit synced from (from `installed_plugins.json`).
   - Defaults file path used.
-  - Per-key outcome.
+  - Per-key outcome for both `agent_models` and `experts`.
 
 Outcome: `verified` or `verify-failed: <reason>`.
 
-## Step 5: Log the run
+## Step 6: Log the run
 
 Log to `./.logs/claude/lazy-experts.install/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`. Required frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input`.
 
@@ -102,6 +156,7 @@ One line per task in the canonical list above, with its outcome word.
 
 ## Notes
 
-- **Idempotent**: re-running this skill is safe. Entries are only added when absent; existing entries are never overwritten.
-- **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does not re-sync settings. Re-run if `default-tiers.json` shipped new `lazycortex-experts:*` rows in a later release.
+- **Idempotent**: re-running this skill is safe. Entries are only added when absent; existing entries are never overwritten — including hand-customized composed experts.
+- **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does not re-sync settings. Re-run if `default-tiers.json` shipped new `lazycortex-experts:*` rows OR a new domain aspect shipped in a later release — the cartesian-product step picks the new entries up.
 - **Scope independence**: project-scope installs do not affect global config.
+- **Memory side-effect**: every seeded expert carries `lazycortex-core:lazy-memory.persona-aspect`, which lets the expert write to `.memory/<self>/` via `lazy-memory.write`. `lazy-core.install` ensures the `.memory/` directory exists and is un-ignored. Removing the persona aspect from a seeded expert is supported (the expert just stops growing memory) — the install skill never re-adds it on re-run.

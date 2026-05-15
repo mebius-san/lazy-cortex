@@ -14,21 +14,31 @@ source_skills:
 ---
 # Frequently asked questions
 
-## Do I need to author expert entries in lazy.settings.json myself?
+## Does /lazy-experts.install create my expert entries automatically?
 
-Yes. `/lazy-experts.install` seeds the agent-model tier entries that tell the expert runtime which Claude tier to use for each generic agent. It does not seed the `experts` block that maps a specialist name to an agent and its aspects — that composition is yours to define. You write the `experts` entries in `<repo-root>/.claude/lazy.settings.json` (project scope) or `~/.claude/lazy.settings.json` (global scope), naming the agent and any aspects you want composed into it.
+Yes. `/lazy-experts.install` seeds one composed expert entry per (agent × domain-aspect) pair into `lazy.settings.json[experts]`. For the three agents (interpreter, designer, planner) and three domain aspects (claude-plugin, game-dev, dotfiles), that gives you nine entries out of the box — for example, `claude-plugin-designer`, `game-interpreter`, `dotfiles-planner`. Every seeded entry also carries `lazycortex-core:lazy-memory.persona-aspect` so the expert accumulates private memory across runs.
+
+If you need a specialist that doesn't match the cartesian product — say, a custom aspect you authored, or an agent from another plugin — you write that entry yourself in `<repo-root>/.claude/lazy.settings.json` (project scope) or `~/.claude/lazy.settings.json` (global scope). The install skill leaves any hand-authored entries untouched.
 
 ---
 
 ## Do I need to re-run /lazy-experts.install after a plugin update?
 
-Yes, if the update ships new or revised tier entries. `/plugin update` refreshes the plugin cache but does not re-sync your `lazy.settings.json`. Run `/lazy-experts.install` after updating to pick up any new `lazycortex-experts:*` entries from `lazycortex-core`'s `default-tiers.json`. The skill is idempotent — re-running it is always safe; it only adds absent entries and leaves your customised tiers in place.
+Yes, if the update ships new agent-model tier entries or new domain aspects. `/plugin update` refreshes the plugin cache but does not re-sync your `lazy.settings.json`. Re-run `/lazy-experts.install` to pick up any new `lazycortex-experts:*` entries from `lazycortex-core`'s `default-tiers.json`, and to pick up any new (agent × domain-aspect) pairs that ship in a later release. The skill is idempotent — re-running it is always safe; it only adds absent entries and leaves your customised values in place.
 
 ---
 
 ## I customised a tier for one of the agents. Will /lazy-experts.install overwrite it?
 
 No. When an entry is already in your `lazy.settings.json` and differs from the upstream default, the skill leaves your value untouched and reports `kept-local` alongside both values so the divergence is visible. If you want to change a tier, run `/lazy-core.agent-models` — that skill owns the `agent_models` section of `lazy.settings.json` and writes the value correctly. Do not hand-edit the file directly.
+
+---
+
+## What is the memory aspect that gets attached to every seeded expert?
+
+Every expert entry seeded by `/lazy-experts.install` includes `lazycortex-core:lazy-memory.persona-aspect` in its `aspects` array. This aspect opts the expert into `lazycortex-core`'s memory subsystem: the expert can accumulate notes about your project, preferences, and prior work under `.memory/<expert-key>/` in the working repo. That memory persists across runs and is loaded back into the expert's context on subsequent dispatches.
+
+If you remove the persona aspect from a seeded entry, the expert stops growing memory — the install skill never re-adds it on re-run, so the removal holds until you add it back manually. Removing it does not delete existing memory files; it just stops the expert from reading or writing them.
 
 ---
 

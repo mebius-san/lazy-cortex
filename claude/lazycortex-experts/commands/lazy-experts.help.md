@@ -52,9 +52,9 @@ The expert never runs until a routine elsewhere dispatches a job to it — by de
 
 - [agents](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/agents.md) — Three persona-only agents (interpreter, designer, planner) that transform a raw request into a structured brief, a design spec, and an implementation plan.
 - [aspects](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/aspects.md) — Three domain aspect files (claude-plugin, game-dev, dotfiles) that layer domain knowledge onto any generic expert via lazy.settings.json composition.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, composing specialists, understanding the three-agent pipeline, and working with domain aspects.
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/install-and-audit.md) — Bootstrap lazycortex-experts in your project by seeding agent-model tiers for the three generic experts from lazycortex-core's defaults.
+- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/install-and-audit.md) — Bootstrap lazycortex-experts by seeding agent-model tiers and pre-composed expert entries for all agent × domain-aspect pairs into lazy.settings.json.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/troubleshooting.md) — Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, composing specialists, understanding the three-agent pipeline, and working with domain aspects.
 
 Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-experts/help/`.
 <!-- help-block:end -->

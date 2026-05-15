@@ -53,7 +53,7 @@ Requires these plugins from the same marketplace:
 
 | Skill | Description |
 |---|---|
-| `lazy-experts.install` | Bootstrap the lazycortex-experts plugin for the current project (or globally). Seeds agent-model tiers for the three generic agents (interpreter, designer, planner) from `lazycortex-core`'s `default-tiers.json` into `lazy.settings.json[agent_models].lazycortex`. Ships no expert-entry seeding — composition lives in the consumer's `lazy.settings.json[experts]`. Idempotent — safe to re-run. Detects install scope automatically. |
+| `lazy-experts.install` | Bootstrap the lazycortex-experts plugin for the current project (or globally). Seeds two things into `lazy.settings.json`: (1) agent-model tiers for the three generic agents (interpreter, designer, planner) from `lazycortex-core`'s `default-tiers.json` into `agent_models.lazycortex`; (2) one composed expert entry per (agent × domain-aspect) pair into `experts` — every seeded expert also carries `lazycortex-core:lazy-memory.persona-aspect` so each accumulates private memory across runs. Idempotent — safe to re-run; existing entries are never overwritten. |
 
 ## Documentation
 
@@ -61,9 +61,9 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 - [agents](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/agents.md) — Three persona-only agents (interpreter, designer, planner) that transform a raw request into a structured brief, a design spec, and an implementation plan.
 - [aspects](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/aspects.md) — Three domain aspect files (claude-plugin, game-dev, dotfiles) that layer domain knowledge onto any generic expert via lazy.settings.json composition.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, composing specialists, understanding the three-agent pipeline, and working with domain aspects.
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/install-and-audit.md) — Bootstrap lazycortex-experts in your project by seeding agent-model tiers for the three generic experts from lazycortex-core's defaults.
+- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/install-and-audit.md) — Bootstrap lazycortex-experts by seeding agent-model tiers and pre-composed expert entries for all agent × domain-aspect pairs into lazy.settings.json.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/troubleshooting.md) — Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, composing specialists, understanding the three-agent pipeline, and working with domain aspects.
 
 ## Agents
 

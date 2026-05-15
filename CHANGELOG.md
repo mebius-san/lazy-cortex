@@ -441,6 +441,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 0.2.0 — 2026-05-16 UTC
+
+- `lazy-experts.install` now seeds nine ready-to-use composed expert configurations (each pairing an agent role with an aspect and persona) into the target project automatically at install time, so no manual expert-entry setup is required after installation.
+
 ### 0.1.0 — 2026-05-15 UTC
 
 - Three built-in expert agents ship with the plugin: `lazy-experts.designer` (heavy-reasoning UI/UX and visual work), `lazy-experts.interpreter` (code explanation and analysis), and `lazy-experts.planner` (multi-step planning and decomposition) — ready to invoke without any configuration.
