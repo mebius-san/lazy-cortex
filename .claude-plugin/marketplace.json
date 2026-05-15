@@ -16,6 +16,11 @@
       "source": "./claude/lazycortex-diagram"
     },
     {
+      "name": "lazycortex-experts",
+      "description": "Generic doc-producing experts (interpreter, designer, planner) plus a starter set of domain aspects (claude-plugin, game-dev, dotfiles). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.",
+      "source": "./claude/lazycortex-experts"
+    },
+    {
       "name": "lazycortex-observe",
       "description": "Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.",
       "source": "./claude/lazycortex-observe"

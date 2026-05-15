@@ -39,6 +39,16 @@ Requires: lazycortex-core
 
 See [`claude/lazycortex-diagram/`](claude/lazycortex-diagram/) for details.
 
+### lazycortex-experts
+
+Generic doc-producing experts (interpreter, designer, planner) plus a starter set of domain aspects (claude-plugin, game-dev, dotfiles). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
+
+Ships 1 skill, 3 agents, and 1 command.
+
+Requires: lazycortex-core
+
+See [`claude/lazycortex-experts/`](claude/lazycortex-experts/) for details.
+
 ### lazycortex-observe
 
 Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
@@ -100,6 +110,7 @@ All plugins live in a single Claude Code marketplace. Add the marketplace and en
   "enabledPlugins": {
     "lazycortex-core@lazycortex": true,
     "lazycortex-diagram@lazycortex": true,
+    "lazycortex-experts@lazycortex": true,
     "lazycortex-observe@lazycortex": true,
     "lazycortex-obsidian@lazycortex": true,
     "lazycortex-specs@lazycortex": true

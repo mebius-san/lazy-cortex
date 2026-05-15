@@ -438,3 +438,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ### 0.1.0 — 2026-05-05
 
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
+
+## lazycortex-experts
+
+### 0.1.0 — 2026-05-15 UTC
+
+- Three built-in expert agents ship with the plugin: `lazy-experts.designer` (heavy-reasoning UI/UX and visual work), `lazy-experts.interpreter` (code explanation and analysis), and `lazy-experts.planner` (multi-step planning and decomposition) — ready to invoke without any configuration.
+- Three domain aspect files provide pre-built expert context for Claude-plugin development (`lazy-experts.claude-plugin-aspect`), game development (`lazy-experts.game-dev-aspect`), and dotfiles management (`lazy-experts.dotfiles-aspect`), giving the expert agents scoped background knowledge for each domain.
+- `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
