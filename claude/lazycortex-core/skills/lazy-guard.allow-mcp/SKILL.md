@@ -165,10 +165,7 @@ For each target settings file (always a `settings.local.json` unless user overro
 
    **Skip-bucket tools are deliberately not reconciled.** A skip-classified tool that the user has pinned to `allow` or `ask` stays exactly where it is — no comparison, no removal, no prompt. This avoids re-asking the same "remove `git_commit`?" question on every run. Skip-bucket tools that are *not* pinned simply aren't written; Claude Code's per-call prompt handles them.
 3. Compute **cross-scope duplicates** to strip (Phase 6.5): for each server whose target is `settings.local.json`, inspect the paired tracked `settings.json` and list any `mcp__<server>__*` entry still there. Tracked settings shouldn't own per-tool permissions, so anything found is a leak to clean up.
-4. Print a diff-style preview per file:
-   ```
-   <target file, absolute path>  (settings.local.json — gitignored)
-     allow:
+4. Print a diff-style preview per file: ``` <target file, absolute path>  (settings.local.json — gitignored) allow:
        + mcp__<server>__<safe-tool>            # new
        - mcp__<server>__<destructive-tool>     # promoting to ask
      ask:
@@ -186,8 +183,7 @@ For each target settings file (always a `settings.local.json` unless user overro
        - mcp__<server>__<any>                  # permissions belong in settings.local.json
      ask:
        - mcp__<server>__<any>
-   ```
-   Omit any sub-block with no entries.
+   ``` Omit any sub-block with no entries.
 5. **Per-tool confirmation for every reversal of a prior trust choice.** Any entry in `to_move_to_ask` (user previously allowed → classifier now says destructive) is a reversal of a choice the user made in a past run or by hand. These MUST NOT be bundled into the general write confirmation — each needs its own `AskUserQuestion`, one at a time:
 
    - For each `t ∈ to_move_to_ask`: `AskUserQuestion` **"Promote `<t>` from `allow` to `ask`? Classifier marks it destructive; promotion means Claude Code prompts every call."** options: `promote` (default) / `keep-in-allow`. On `keep-in-allow`, drop `t` from `to_move_to_ask` for this run (and surface as a note: "left in allow per user override — classifier considered it destructive").

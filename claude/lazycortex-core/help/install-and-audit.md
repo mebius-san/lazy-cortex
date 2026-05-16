@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-last_regen: 2026-05-13
+last_regen: 2026-05-16
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -35,7 +35,9 @@ This block covers all five of core's lifecycle skills. The order they run in and
 
 It works in two phases. The first phase syncs every rule template the plugin ships into the correct rules directory — `.claude/rules/` for project scope, `~/.claude/rules/` for user scope. For each rule it detects whether the file is new, unchanged, drifted, or orphaned and asks you what to do one question at a time, with the rule's purpose surfaced so you can decide without digging. It also syncs authoring templates into `.claude/templates/core/` and bootstraps the scaffold registry.
 
-The second phase seeds `lazy.settings.json` with the three built-in agent-model routing defaults, then offers the expert runtime wizard. The wizard writes the `.experts/` directory layout, the `lazy.runtime.sh` shim, and the `lazy-core.runtime` block in `lazy.settings.json`. If you register at least one expert, it also bootstraps the expert-pump routine and — optionally — installs a launchd or systemd supervisor so the daemon starts automatically.
+After syncing rule templates, the install bootstraps the `.logs/` directory at the repo root and ensures `.gitignore` covers it. It then migrates any stale hook registrations left over from the retired `lazycortex-log` plugin — stripping the old `hooks/lazy-log.commit-recorder.py` path from all four standard settings files so the retired plugin path no longer appears in your hook pipeline. These steps run unconditionally and are silent no-ops on clean installs.
+
+The next phase seeds `lazy.settings.json` with the three built-in agent-model routing defaults, then offers the expert runtime wizard. The wizard writes the `.experts/` directory layout, the `lazy.runtime.sh` shim, and the `lazy-core.runtime` block in `lazy.settings.json`. If you register at least one expert, it also bootstraps the expert-pump routine and — optionally — installs a launchd or systemd supervisor so the daemon starts automatically.
 
 Step 10.5 of the install bootstraps the `.memory/` directory and ensures it is un-ignored in `.gitignore`, so memory notes are tracked in git. This step runs only when runtime/experts setup was confirmed; it is silently skipped otherwise. If you add persona-marked experts later, re-run `/lazy-core.install` and confirm the runtime steps to get the `.memory/` bootstrap.
 
@@ -104,6 +106,8 @@ Run `/lazy-core.audit` afterwards to verify the memory subsystem is healthy — 
 **Filling missing model-routing entries** — run `/lazy-core.agent-models` directly (or let `/lazy-core.optimize` Phase 7 do it) to assign haiku/sonnet/opus tiers to any newly discovered agents without running the full optimize pipeline.
 
 **Settings migration failed during setup** — if `/lazy-core.setup` aborts at Step 0 with a migration error, read the captured stderr in the Step 6 report. A non-zero exit typically means a malformed migration callable in the `lazy_settings_migrations/` ladder. Fix the root cause, then re-run `/lazy-core.setup` — Steps 1–5 do not execute until the settings file is current.
+
+**Stale hook registrations from retired plugins** — if you see references to a `lazycortex-log` plugin path in your hook pipeline, re-run `/lazy-core.install`. Step 8 automatically strips those stale entries from all four standard settings paths so your hook pipeline only references current plugin paths.
 
 ## Where this fits
 

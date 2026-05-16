@@ -224,8 +224,7 @@ After all fixes: re-run the scan (re-dispatch the four agents) to show updated s
 
 ## Logging
 
-Log to `./.logs/claude/lazy-guard.check-public/YYYY-MM-DD_HH-MM-SS.md`.
-Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
+Log to `./.logs/claude/lazy-guard.check-public/YYYY-MM-DD_HH-MM-SS.md`. Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
 
 Log format:
 ```markdown

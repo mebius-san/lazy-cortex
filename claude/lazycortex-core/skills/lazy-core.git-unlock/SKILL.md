@@ -60,8 +60,7 @@ print("broken" if existed else "no-lock")
 PY
 ```
 
-If output is `broken` → the lock was present and has been deleted. Emit outcome `broken`.
-If output is `no-lock` → the lock had already been deleted (race with another tool). Emit outcome `race`.
+If output is `broken` → the lock was present and has been deleted. Emit outcome `broken`. If output is `no-lock` → the lock had already been deleted (race with another tool). Emit outcome `race`.
 
 **Outcome: `broken` or `race`.**
 

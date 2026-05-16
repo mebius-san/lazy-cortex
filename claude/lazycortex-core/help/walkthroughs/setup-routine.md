@@ -1,10 +1,11 @@
 ---
 chapter_type: walkthrough
 summary: Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-last_regen: 2026-05-13
+last_regen: 2026-05-16
 diagram_spec:
   anchor: "How registration and pickup flow"
   request: "Sequence diagram showing the user running /lazy-routine.register, the skill writing lazy.settings.json, the daemon picking up the new routine on its next cycle without restart, and the user later running /lazy-routine.unregister to remove it. Include the built-in protection check for lazy-expert.pump."
+  kind_hint: sequence
 source_skills:
   - lazy-routine.register
   - lazy-routine.unregister
@@ -15,7 +16,7 @@ The runtime daemon runs registered plugin routines in serial order on a schedule
 
 ## Outcome
 
-After this walkthrough your routine is running on its configured cadence inside the daemon. The routine's name appears in `routines` in `.claude/lazy.settings.json`, the daemon picks it up on its next cycle without a restart, and you know exactly how to remove it cleanly when it is no longer needed.
+After completing this walkthrough you know how to register any of the five routine types, confirm the daemon picks the routine up on its next cycle without a restart, and remove it cleanly. At the end of the register path the routine's name appears in `routines` in `.claude/lazy.settings.json` and the daemon is scheduling it automatically. At the end of the unregister path the entry is gone and the daemon skips it from the next cycle forward.
 
 ## What you need
 
@@ -63,7 +64,7 @@ After the wizard completes it prints:
 registered routine `<name>` (type=<type>, <key params>)
 ```
 
-To double-check, read the `routines` key via `/lazy-core.doctor`, or re-run `/lazy-routine.register` with the same name — it will refuse with "already registered", which confirms the entry exists.
+To double-check, run `/lazy-core.doctor` to verify the current routine registry, or re-run `/lazy-routine.register` with the same name — it will refuse with "already registered", which confirms the entry exists.
 
 ### Step 4 — Let the daemon pick it up
 
@@ -93,7 +94,7 @@ The daemon picks up the removal on its next cycle — no restart needed.
 
 ## After you're done
 
-Your routine is no longer in `routines` and the daemon will skip it from the next cycle forward. The plugin that owned the routine should re-register it during its next install (via `/lazy-core.install` or `/lazy-core.setup`) if you want it back. Run `/lazy-core.doctor` at any time to verify the current routine registry and daemon state are consistent.
+The routine is no longer in `routines` and the daemon skips it from the next cycle forward. To bring it back, call `/lazy-routine.register` again with the same name and configuration. Plugin install skills (e.g. those triggered by `/lazy-core.install` or `/lazy-core.setup`) can re-register their routines automatically on the next install pass. Run `/lazy-core.doctor` at any time to verify the current routine registry and daemon state are consistent.
 
 ## How registration and pickup flow
 
@@ -102,7 +103,7 @@ Your routine is no longer in `routines` and the daemon will skip it from the nex
 sequenceDiagram
   participant user as User
   participant registerSkill as /lazy-routine.register
-  participant settingsFile as lazy.settings.json
+  participant settings as lazy.settings.json
   participant daemon as Routine Daemon
   participant unregisterSkill as /lazy-routine.unregister
 
@@ -110,24 +111,23 @@ sequenceDiagram
   alt routine is lazy-expert.pump
     registerSkill-->>user: blocked - lazy-expert.pump is a built-in protected routine
   else routine is not protected
-    registerSkill->>settingsFile: write new routine entry
-    settingsFile-->>registerSkill: write confirmed
-    registerSkill-->>user: registered successfully
-  end
-
-  Note over daemon: next scheduled cycle begins
-  loop daemon poll cycle
-    daemon->>settingsFile: read lazy.settings.json
-    settingsFile-->>daemon: current routine list
-    daemon->>daemon: apply updated routine set without restart
-  end
-
-  user->>unregisterSkill: invoke /lazy-routine.unregister <routine-name>
-  alt routine is lazy-expert.pump
-    unregisterSkill-->>user: blocked - lazy-expert.pump cannot be unregistered
-  else routine is removable
-    unregisterSkill->>settingsFile: remove routine entry
-    settingsFile-->>unregisterSkill: write confirmed
-    unregisterSkill-->>user: unregistered successfully
+    registerSkill->>settings: write new routine entry
+    settings-->>registerSkill: write confirmed
+    registerSkill-->>user: routine registered successfully
+    Note over daemon: next poll cycle begins
+    loop daemon poll cycle
+      daemon->>settings: read lazy.settings.json
+      settings-->>daemon: current routines list
+      daemon-->>daemon: detect new routine without restart
+    end
+    Note over daemon: new routine now active
+    user->>unregisterSkill: invoke /lazy-routine.unregister <routine-name>
+    alt routine is lazy-expert.pump
+      unregisterSkill-->>user: blocked - lazy-expert.pump cannot be unregistered
+    else routine is not protected
+      unregisterSkill->>settings: remove routine entry
+      settings-->>unregisterSkill: write confirmed
+      unregisterSkill-->>user: routine unregistered successfully
+    end
   end
 ```

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Inspect and manually break the per-repo staging lock that prevents hooks and skills from stomping each other's git index changes.
-last_regen: 2026-05-13
+last_regen: 2026-05-16
 diagram_spec:
   anchor: "Lock lifecycle"
   request: "State diagram of the lazy-core.git staging lock lifecycle: NO_LOCK → HELD (a hook or skill acquires the lock before touching the git index) → auto-released when the staging window closes OR auto-broken by heuristics (dead PID / stale-and-idle / different host) → NO_LOCK. Show the manual break path via /lazy-core.git-unlock as an alternative exit from HELD, guarded by /lazy-core.git-status inspection first."
@@ -25,9 +25,9 @@ The staging lock prevents that. Before any hook or skill modifies the index it a
 
 ## What's in this block
 
-**`/lazy-core.git-status`** is the read-only inspector. It reads `.git/lazy-git.lock` and prints everything relevant about the current holder: session ID and PID, how long the lock has been held, when the index was last touched, whether the holder process is still alive on the same host, and whether the automatic break-the-lock heuristics would fire if another operation arrived right now. It never writes, never deletes, and never modifies anything. Running it is always safe and leaves no trace.
+**`/lazy-core.git-status`** is the read-only inspector. It reads `.git/lazy-git.lock` and prints everything relevant about the current holder: session ID and PID, how long the lock has been held, when the index was last touched, whether the holder process is still alive on the same host, and whether the automatic break-the-lock heuristics would fire if another operation arrived right now. It also tells you whether the current session owns the lock or whether it belongs to a peer. It never writes, never deletes, and never modifies anything — running it is always safe and leaves no trace.
 
-**`/lazy-core.git-unlock`** is the manual break. It runs the same inspection internally, presents the holder details in a confirmation prompt, waits for you to confirm, then force-deletes the lock file. If you cancel, nothing changes. If you confirm, the lock is gone and any queued operation resumes on its next attempt.
+**`/lazy-core.git-unlock`** is the manual break. It runs the same inspection internally, presents the holder details — session ID, PID, age, host, branch, liveness — in a confirmation prompt, waits for you to confirm, then force-deletes the lock file. If you cancel, nothing changes. If you confirm, the lock is gone and any queued operation resumes on its next attempt.
 
 ## How they work together
 
@@ -61,17 +61,14 @@ The staging lock is an infrastructure layer that the rest of the lazycortex-core
 stateDiagram-v2
   [*] --> noLock
 
-  noLock --> held : acquire (hook or skill locks index)
-
-  held --> noLock : staging window closes (auto-release)
-  held --> noLock : dead PID detected (auto-break)
-  held --> noLock : stale-and-idle timeout (auto-break)
-  held --> noLock : different host detected (auto-break)
-
+  noLock --> held : hook or skill acquires lock before git index touch
+  held --> noLock : staging window closes - index empties after commit or reset
   held --> inspecting : /lazy-core.git-status invoked
-
-  inspecting --> held : status only - no action taken
-  inspecting --> noLock : /lazy-core.git-unlock confirmed
+  inspecting --> noLock : /lazy-core.git-unlock confirmed - manual break
+  inspecting --> held : inspection only - no break
+  held --> noLock : auto-break - dead PID detected
+  held --> noLock : auto-break - stale and idle over 10 min
+  held --> noLock : auto-break - different host mismatch
 
   style noLock fill:#1e3a5f,stroke:#4a90e2,color:#fff
   style held fill:#1e5f3a,stroke:#4ae290,color:#fff

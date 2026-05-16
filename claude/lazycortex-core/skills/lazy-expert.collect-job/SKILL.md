@@ -98,8 +98,7 @@ input: "expert_name=<expert_name> job_id=<job_id>"
 - Validated inputs
 - Called collect_job
 
-`## Result`
-`<success|failure>` — status=`<status>`.
+`## Result` `<success|failure>` — status=`<status>`.
 
 ## Failure modes
 

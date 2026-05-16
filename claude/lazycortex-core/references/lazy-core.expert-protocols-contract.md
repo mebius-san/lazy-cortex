@@ -164,8 +164,11 @@ Enumerate the `role` strings the expert prompt knows to handle. For each value, 
 
 Example shape:
 ```
-- `active_writer` — expert may edit source files directly
-- `final_check` — expert writes only to result/, no source edits
+- `main` — main-writer in a doc-review chain; may edit any non-owned section
+- `<section>` — section-writer (e.g. `routing`); may edit only its owned `# <Section>` heading
+- `final` — final-writer; never edits content, only raises `#review/concern` callouts
+- `auto` — historian-style mechanical role; reads source only, writes one summary sentence
+- `repair` — doc_doctor-style structural-repair role; rewrites broken doc, no content review
 ```
 
 ### 4.3 `request` conventions

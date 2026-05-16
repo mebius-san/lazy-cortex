@@ -1,6 +1,6 @@
 """Public helpers for dispatching/collecting jobs in the expert runtime."""
 from __future__ import annotations
-import json, shutil, uuid
+import json, shutil, time, uuid
 from pathlib import Path
 from typing import Iterable
 
@@ -55,6 +55,17 @@ def dispatch_job(
 
     job_id = job_id or uuid.uuid4().hex[:12]
     d = _job_dir(repo, expert, job_id)
+    # If a previous job at this exact path was marked DEAD by the pump,
+    # park it under a timestamped sibling name before reusing the slot.
+    # Without this `mkdir(exist_ok=True)` would reuse the dead directory
+    # in place, and the new job would coexist with the stale DEAD marker:
+    # pump skips any job dir with DEAD present, so the new dispatch
+    # becomes an invisible zombie. Renaming preserves dead.json + the
+    # original request for operator post-mortem and frees the slot
+    # cleanly.
+    if d.exists() and (d / "DEAD").exists():
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        d.rename(d.with_name(f"{job_id}.dead-{stamp}"))
     d.mkdir(parents=True, exist_ok=True)
     out_payload = dict(payload)
     if dedup_key is not None:

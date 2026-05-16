@@ -1,10 +1,11 @@
 ---
 chapter_type: walkthrough
 summary: Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
-last_regen: 2026-05-13
+last_regen: 2026-05-16
 diagram_spec:
   anchor: "How memory grows over time"
   request: "Sequence diagram showing user invoking mark-persona, then dispatching jobs (accumulating run logs), then invoking reflect which reads run logs + existing memory notes and calls lazy-memory.write to produce .memory/<expert>/<slug>.md, and finally a git commit sealing the notes."
+  kind_hint: sequence
 source_skills:
   - lazy-memory.mark-persona
   - lazy-memory.reflect
@@ -88,7 +89,7 @@ queue_path:   .experts/.jobs/<expert>/<job-id>/
 source_count: <N>
 ```
 
-If `source_count` is 0, the expert has no recent run logs and no existing memory; dispatch more jobs first.
+If `source_count` is 0, the expert has no recent run logs and no existing memory; dispatch more jobs first (Step 2).
 
 If the skill reports `<expert> is not marked persona`, run `/lazy-memory.mark-persona <expert>` (Step 1) and re-try.
 
@@ -126,13 +127,15 @@ Expected state:
 - One `<topic>.md` per tag the expert used, under `.memory/<expert>/.tags/`, listing the notes tagged with that topic.
 - Matching entries in the global `.memory/.tags/` aggregator, pointing at the per-expert tag file.
 
-To check the frontmatter of a specific note:
+All tags in the note frontmatter carry the `memory/` prefix (e.g. `memory/auth`, `memory/patterns`). If a tag is missing the prefix, `/lazy-memory.write` would have rejected the note with `frontmatter-invalid: tag must be prefixed memory/` — so any note that landed successfully has valid tags.
+
+To check for broader memory-hygiene issues (missing required fields, malformed frontmatter) across the whole tree:
 
 ```
 /lazy-core.audit
 ```
 
-`lazy-core.audit` reports any memory-hygiene findings (missing required fields, malformed tags) under its "Memory hygiene" section.
+`lazy-core.audit` reports memory-hygiene findings under its "Memory hygiene" section.
 
 ### Step 6 (optional) — Commit the new notes
 
@@ -165,35 +168,34 @@ To extend memory to another expert, start again at Step 1 with the new expert's 
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant coordinator as Coordinator
-  participant runLogs as Run Logs
-  participant memoryNotes as Memory Notes
+  participant claude as Claude (Coordinator)
+  participant jobRunner as Job Runner
+  participant runLogs as Run Logs (.logs/)
+  participant memoryNotes as Memory Notes (.memory/)
   participant lazyMemory as lazy-memory.write
-  participant memoryFiles as .memory/<expert>/<slug>.md
   participant git as Git
 
-  user->>coordinator: mark-persona <expert>
-  Note over coordinator: persona activated — expert context set
+  user->>claude: mark-persona <expert>
+  claude-->>user: persona activated
 
-  loop dispatch jobs
-    user->>coordinator: dispatch job
-    coordinator->>runLogs: append run log entry
-    runLogs-->>coordinator: log written
+  loop for each dispatched job
+    user->>claude: dispatch job
+    claude->>jobRunner: run job task
+    jobRunner-->>runLogs: append run log entry
+    jobRunner-->>claude: job result
+    claude-->>user: job complete
   end
 
-  user->>coordinator: reflect
-  coordinator->>runLogs: read accumulated run logs
-  runLogs-->>coordinator: run log entries
-  coordinator->>memoryNotes: read existing memory notes
-  memoryNotes-->>coordinator: existing notes
-  coordinator->>lazyMemory: write synthesised memory
-  lazyMemory->>memoryFiles: write .memory/<expert>/<slug>.md
-  memoryFiles-->>lazyMemory: file written
-  lazyMemory-->>coordinator: memory notes produced
-  coordinator->>git: stage .memory/<expert>/<slug>.md
-  git-->>coordinator: staged
-  coordinator->>git: commit — seal memory notes
-  git-->>coordinator: commit sealed
-  coordinator-->>user: reflect complete
+  user->>claude: reflect
+  Note over claude,runLogs: reflect phase begins
+  claude->>runLogs: read accumulated run logs
+  runLogs-->>claude: run log entries
+  claude->>memoryNotes: read existing notes for <expert>
+  memoryNotes-->>claude: existing .memory/<expert>/*.md
+  claude->>lazyMemory: write distilled notes
+  lazyMemory-->>memoryNotes: write .memory/<expert>/<slug>.md
+  lazyMemory-->>claude: notes written
+  claude->>git: git commit -m "reflect: seal <expert> memory notes"
+  git-->>claude: commit sealed
+  claude-->>user: reflect complete
 ```
-

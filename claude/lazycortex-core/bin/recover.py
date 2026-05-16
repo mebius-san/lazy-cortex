@@ -21,7 +21,17 @@ class RecoverError(Exception):
     """Raised when recovery cannot proceed (still dirty, bad mode, etc.)."""
 
 
-VALID_MODES = {"commit", "stash", "discard", "abort"}
+VALID_MODES = {"commit", "stash", "discard", "abort", "manual-fix"}
+
+# Halt reasons where the working tree is presumed already clean and the
+# operator's repair happened outside the skill (manual git ops). The skill
+# offers `manual-fix` instead of the dirt-cleanup wizard. Source of truth:
+# claude/lazycortex-core/bin/runtime_daemon.py:_halt_daemon callers.
+MANUAL_FIX_REASONS = {
+    "git_pull_diverged",
+    "git_push_failed",
+    "git_remote_unavailable",
+}
 
 
 def read_halt(repo: Path) -> dict | None:
@@ -48,16 +58,18 @@ def is_clean(repo: Path) -> bool:
 def cleanup(repo: Path, mode: str, message: str | None = None) -> None:
     """Apply the operator-chosen cleanup mode to the working tree.
 
-    mode ∈ {commit, stash, discard, abort}.
+    mode ∈ {commit, stash, discard, abort, manual-fix}.
       - commit: stage everything (`git add -A`) and commit with `message`.
       - stash:  `git stash push -u -m <marker>`.
       - discard: reset tracked changes + clean untracked.
-      - abort:  no-op (operator backed out).
+      - abort:  no-op (operator backed out — halt stays).
+      - manual-fix: no-op (operator has resolved the halt cause externally;
+                    resume() proceeds to clear the halt block).
     """
     if mode not in VALID_MODES:
         raise RecoverError(f"unknown cleanup mode: {mode!r}")
 
-    if mode == "abort":
+    if mode in {"abort", "manual-fix"}:
         return
 
     if mode == "commit":

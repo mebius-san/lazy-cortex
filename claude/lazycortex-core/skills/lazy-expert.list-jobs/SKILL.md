@@ -115,8 +115,7 @@ input: "expert=<expert|none> status=<status|none>"
 - Validated filters
 - Called list_jobs (N jobs returned)
 
-`## Result`
-`success` — listed N job(s).
+`## Result` `success` — listed N job(s).
 
 ## Failure modes
 

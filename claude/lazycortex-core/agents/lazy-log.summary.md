@@ -96,5 +96,4 @@ discussion is not captured.">
 
 ## Logging
 
-Log to `./.logs/claude/lazy-log.summary/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter).
-Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
+Log to `./.logs/claude/lazy-log.summary/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter). Use `Bash(mkdir -p ...)` then `Write` tool (never chain).

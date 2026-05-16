@@ -381,8 +381,7 @@ End with a summary:
 
 ## Logging
 
-Log to `./.logs/claude/lazy-core.optimize/YYYY-MM-DD_HH-MM-SS.md`.
-Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
+Log to `./.logs/claude/lazy-core.optimize/YYYY-MM-DD_HH-MM-SS.md`. Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
 
 The log's `## Actions` section must include an `## llm-readability audit` subsection when Phase 2.5 ran:
 

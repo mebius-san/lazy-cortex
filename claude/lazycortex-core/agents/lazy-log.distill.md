@@ -161,5 +161,4 @@ Also tell the user the path to the updated file (`.logs/changelog.md`).
 
 ## Logging
 
-Log to `./.logs/claude/lazy-log.distill/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` in frontmatter).
-Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
+Log to `./.logs/claude/lazy-log.distill/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` in frontmatter). Use `Bash(mkdir -p ...)` then `Write` tool (never chain).

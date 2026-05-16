@@ -155,13 +155,7 @@ Process batches strictly in order (1 → 2 → 3). Wait for the answer to each b
 For each entry tagged `review-bound` in Step 6 (and only those), fire a single `AskUserQuestion`:
 
 - **question**: `` `<dispatch-string>` — assign model tier? ``
-- **description**:
-  ```
-  **Group:** <group>
-  **Source:** <path or "(built-in)">
-  **Description:** <agent's frontmatter `description:` field, or "(no description)">
-  **Will write to:** <resolved destination path> (<scopeMode>)
-  **Suggested tier:** <suggested-tier>
+- **description**: ``` **Group:** <group> **Source:** <path or "(built-in)"> **Description:** <agent's frontmatter `description:` field, or "(no description)"> **Will write to:** <resolved destination path> (<scopeMode>) **Suggested tier:** <suggested-tier>
 
   Suggested tier resolution order:
   1. `templateTier` from `default-tiers.json` if this dispatch string is in the template (always wins).

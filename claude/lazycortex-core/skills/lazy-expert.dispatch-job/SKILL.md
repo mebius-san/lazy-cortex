@@ -121,8 +121,7 @@ input: "expert_name=<expert_name>"
 - Verified .experts/ directory
 - Dispatched job to expert queue
 
-`## Result`
-`<success|failure>` — job_id=`<job_id>`, queue_path=`<queue_path>`.
+`## Result` `<success|failure>` — job_id=`<job_id>`, queue_path=`<queue_path>`.
 
 ## Failure modes
 

@@ -11,6 +11,23 @@ import runtime_state
 from routine_types import dispatch_routine
 
 DEFAULT_TIMEOUT_SEC = 300
+POST_TICK_MAX_PUSH_ATTEMPTS = 3
+
+
+class GitPullDiverged(RuntimeError):
+    """Pre-tick: local HEAD and origin/<branch> have a common ancestor that
+    is neither — i.e. both sides have commits the other does not. The daemon's
+    branch is supposed to be exclusive to the daemon, so this should not happen
+    in normal operation. Recovering automatically (rebase / merge / reset) is
+    unsafe — could drop the operator's commits — so we halt and let the human
+    resolve."""
+
+
+class GitPushFailed(RuntimeError):
+    """Post-tick: push to origin/<branch> failed after every retry. Either the
+    operator is pushing continuously into the same branch (rare, points at a
+    deeper coordination bug), or push is refused for non-race reasons (auth,
+    force-protection, permission). Either way, requires human intervention."""
 
 # Set by `set_plugin_dirs`. When non-empty, `resolve_routine_command` consults
 # these paths first (each is a plugin source dir containing `.claude-plugin/`
@@ -163,6 +180,36 @@ def _check_working_tree(repo_root: Path) -> list[str] | None:
     return lines
 
 
+def _halt_daemon(
+    repo_root: Path,
+    state: dict,
+    reason: str,
+    triggered_by: str,
+    detail: str,
+) -> None:
+    """Write the `daemon_halted` block to state.json (if not already present)
+    and emit a halt metric. Used by both git-failure and dirty-tree halt paths.
+
+    Logs the trigger detail to the runtime log too, so the operator running
+    `/lazy-runtime.recover` can correlate the halt with a routine result entry."""
+    _log_routine_result(repo_root, {
+        "name": triggered_by, "exit": -1, "duration_sec": 0.0,
+        "error": f"{reason}: {detail}",
+    })
+    if "daemon_halted" in state:
+        return  # Don't clobber an earlier, more-specific halt (e.g. expert attribution).
+    state["daemon_halted"] = {
+        "halted_since": time.time(),
+        "triggered_by": triggered_by,
+        "reason": reason,
+        "dirty_paths": [],
+        "expert": None,
+        "job_id": None,
+    }
+    runtime_state.save(repo_root, state)
+    _emit_halt_metric_if_available(reason=reason, triggered_by=triggered_by)
+
+
 def _emit_halt_metric_if_available(reason: str, triggered_by: str) -> None:
     """Best-effort metrics emission. The metrics module may not be installed yet
     (it lands with the observability plan); guarded import keeps both plans
@@ -198,11 +245,16 @@ def _run_iteration(repo_root: Path) -> None:
 
     try:
         _git_pre(repo_root, daemon.get("git"))
+    except GitPullDiverged as e:
+        _halt_daemon(repo_root, state, "git_pull_diverged", "_git_pre", str(e))
+        return
     except Exception as e:
         _log_routine_result(repo_root, {
             "name": "_git_pre", "exit": -1, "duration_sec": 0.0,
             "error": f"git_pre failed: {e}",
         })
+        _halt_daemon(repo_root, state, "git_remote_unavailable", "_git_pre", str(e))
+        return
 
     # Pre-iteration tree check — daemon does NOT run routines while the
     # working tree has uncommitted changes. The operator may be mid-edit,
@@ -249,11 +301,14 @@ def _run_iteration(repo_root: Path) -> None:
     if not halted_this_iter:
         try:
             _git_post(repo_root, daemon.get("git"))
+        except GitPushFailed as e:
+            _halt_daemon(repo_root, state, "git_push_failed", "_git_post", str(e))
         except Exception as e:
             _log_routine_result(repo_root, {
                 "name": "_git_post", "exit": -1, "duration_sec": 0.0,
                 "error": f"git_post failed: {e}",
             })
+            _halt_daemon(repo_root, state, "git_remote_unavailable", "_git_post", str(e))
 
 
 def run(repo_root: Path) -> None:
@@ -323,6 +378,15 @@ def _run_git(repo_root: Path, args: list[str]) -> None:
         raise
 
 
+def _run_git_capture(repo_root: Path, args: list[str]) -> str:
+    """Like `_run_git`, but returns stripped stdout. Used for rev-parse and
+    merge-base where we need the sha output."""
+    proc = subprocess.run(
+        ["git", *args], cwd=repo_root, check=True, capture_output=True, text=True,
+    )
+    return proc.stdout.strip()
+
+
 def _git_pre(repo_root: Path, git_cfg: dict | None) -> None:
     if not git_cfg:
         return
@@ -330,20 +394,95 @@ def _git_pre(repo_root: Path, git_cfg: dict | None) -> None:
     # `-B` is intentional: the daemon's branch is reset to current HEAD each
     # iteration. The branch is daemon-exclusive (per daemon.git.branch contract).
     _run_git(repo_root, ["checkout", "-B", branch])
-    if git_cfg.get("remote_sync") in ("pull", "pull_push"):
-        # Explicit `origin <branch>` — `git checkout -B <branch>` does not set
-        # upstream tracking, so a bare `git pull --ff-only` would fail with
-        # "There is no tracking information for the current branch."
+    if git_cfg.get("remote_sync") not in ("pull", "pull_push"):
+        return
+    # Explicit `origin <branch>` everywhere — `git checkout -B` does not set
+    # upstream tracking, so bare commands would fail on "no tracking information".
+    _run_git(repo_root, ["fetch", "origin", branch])
+    local = _run_git_capture(repo_root, ["rev-parse", "HEAD"])
+    remote = _run_git_capture(repo_root, ["rev-parse", f"origin/{branch}"])
+    if local == remote:
+        return  # In sync, nothing to pull.
+    base = _run_git_capture(repo_root, ["merge-base", "HEAD", f"origin/{branch}"])
+    if base == local:
+        # Local is an ancestor of remote → fast-forward pull is safe.
         _run_git(repo_root, ["pull", "--ff-only", "origin", branch])
+        return
+    if base == remote:
+        # Remote is an ancestor of local — we carry unpushed local commits
+        # (e.g. previous tick's `_git_post` push got blocked). No pull needed;
+        # the next `_git_post` will rebase + push these forward.
+        return
+    # Otherwise: histories diverged — both sides have commits the other doesn't.
+    raise GitPullDiverged(
+        f"local HEAD {local[:8]} and origin/{branch} {remote[:8]} have diverged"
+    )
 
 
 def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
     if not git_cfg:
         return
-    if git_cfg.get("remote_sync") == "pull_push":
-        # Explicit `origin <branch>` so we don't rely on upstream tracking
-        # that `git checkout -B` does not set.
-        _run_git(repo_root, ["push", "origin", git_cfg["branch"]])
+    if git_cfg.get("remote_sync") != "pull_push":
+        return
+    branch = git_cfg["branch"]
+
+    for _attempt in range(POST_TICK_MAX_PUSH_ATTEMPTS):
+        _run_git(repo_root, ["fetch", "origin", branch])
+        local = _run_git_capture(repo_root, ["rev-parse", "HEAD"])
+        remote = _run_git_capture(repo_root, ["rev-parse", f"origin/{branch}"])
+
+        if local == remote:
+            return  # Nothing to push.
+
+        base = _run_git_capture(repo_root, ["merge-base", "HEAD", f"origin/{branch}"])
+
+        if base == remote:
+            # Local is strictly ahead of origin (no operator commits in the
+            # gap) → fast-forward push.
+            try:
+                _run_git(repo_root, ["push", "origin", branch])
+                return
+            except subprocess.CalledProcessError:
+                # Race: operator pushed between our fetch and our push. Retry.
+                continue
+
+        if base == local:
+            # Origin moved forward but contains nothing of ours? That means
+            # our local HEAD became an ancestor of origin between our fetch
+            # and now — extremely unlikely but possible if another process
+            # already rebased + pushed for us. Just fall through to "no work".
+            return
+
+        # Histories diverged within the tick (operator pushed a commit while
+        # the routine was running). Try to rebase our local commits onto the
+        # new origin tip.
+        try:
+            _run_git(repo_root, ["rebase", f"origin/{branch}"])
+        except subprocess.CalledProcessError:
+            # Conflict on rebase — operator's commits and ours touch the same
+            # content. Bail out: abort the rebase, hard-reset to origin
+            # (discarding this tick's work), and log the discard. Next tick
+            # re-runs the routine on the fresh operator state.
+            _run_git(repo_root, ["rebase", "--abort"])
+            _run_git(repo_root, ["reset", "--hard", f"origin/{branch}"])
+            _log_routine_result(repo_root, {
+                "name": "_git_post", "exit": 0, "duration_sec": 0.0,
+                "error": "tick discarded: operator-conflict",
+            })
+            return
+
+        # Rebase clean — push the rebased commits.
+        try:
+            _run_git(repo_root, ["push", "origin", branch])
+            return
+        except subprocess.CalledProcessError:
+            # Race again: another operator push slid in between our rebase and
+            # our push. Retry the whole loop.
+            continue
+
+    raise GitPushFailed(
+        f"push to origin/{branch} failed after {POST_TICK_MAX_PUSH_ATTEMPTS} attempts"
+    )
 
 
 def dispatch_subprocess(repo_root: Path, name: str, cfg: dict) -> dict:

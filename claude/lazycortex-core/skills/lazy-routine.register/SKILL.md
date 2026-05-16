@@ -59,11 +59,7 @@ Build a single `cfg` dict carrying `type` + the collected fields.
 
 1. `name` matches `<plugin>.<verb>` (exactly one dot, both parts non-empty). Else abort: "routine names must be `<plugin>.<verb>` format. Got: `<name>`."
 2. Call `validate_routine_entry(name, cfg)` to enforce the per-type schema. On `RoutineConfigError`, abort with the message verbatim.
-3. **Working-area gitignore check** — for `inbox` routines, run `git check-ignore -q <inbox_dir>`. Exit 0 = ignored. Exit 1 = tracked → ask via `AskUserQuestion`:
-   > `<inbox_dir>` is not gitignored. Inbox routines move tracked files between iterations, which dirties the working tree and triggers the daemon's halt protection.
-   > - Add `<inbox_dir>/` to `.gitignore` now (recommended)
-   > - Continue anyway — I will commit moves manually
-   > - Abort registration
+3. **Working-area gitignore check** — for `inbox` routines, run `git check-ignore -q <inbox_dir>`. Exit 0 = ignored. Exit 1 = tracked → ask via `AskUserQuestion`: > `<inbox_dir>` is not gitignored. Inbox routines move tracked files between iterations, which dirties the working tree and triggers the daemon's halt protection. > - Add `<inbox_dir>/` to `.gitignore` now (recommended) > - Continue anyway — I will commit moves manually > - Abort registration
 
    On "Add" → append to `.gitignore`; do not auto-commit (operator commits when ready). On "Abort" → outcome `aborted`.
 
@@ -140,8 +136,7 @@ input: "name=<name> type=<type>"
 - Checked existing registration
 - Registered routine in lazy.settings.json
 
-`## Result`
-`<success|failure>` — name=`<name>`, type=`<type>`.
+`## Result` `<success|failure>` — name=`<name>`, type=`<type>`.
 
 ## Failure modes
 

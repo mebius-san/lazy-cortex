@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-05-13
+last_regen: 2026-05-16
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: Python version too low → python-floor-not-met; pre-commit hook silent → hook-not-firing; MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-load-error / systemctl-error); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup migration errored → setup-migration-failed; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public FAIL findings → mark-public-fail-unresolved; lazy-repo.mark-public gh missing → gh-not-installed; doctor or audit stalls → skill-stalls; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; dispatch to wrong expert key → expert-key-mismatch; routine register name invalid → routine-name-format; routine already registered → routine-conflict; routine register unknown type → routine-unknown-type; routine register missing required field → routine-missing-field; routine register settings unwritable → routine-settings-unwritable; unregister pump without force → pump-protected; daemon stalled → daemon-stale; runtime recover still dirty → recover-still-dirty; recover state.json unparseable → state-unparseable; recover commit needs message → recover-commit-needs-message; audit experts json invalid → experts-json-invalid; audit reference did not resolve → ref-unresolvable; audit routine command path layout → routine-path-layout; doctor routine command unresolvable → routine-command-missing; lazy-core.audit global rules empty → audit-global-empty; migrated-from-lazycortex-log → commit-hook-error; memory write expert not persona → memory-not-persona; memory write frontmatter invalid → memory-frontmatter-invalid; memory write consolidate out of scope → memory-consolidate-scope; memory index memory dir absent → memory-dir-absent; memory reflect expert not persona → reflect-not-persona; memory reflect no sources → reflect-no-sources; mark-persona expert not registered → persona-expert-unknown; git lock stuck → git-lock-stuck; git unlock no lock → git-no-lock; log-clean absent → log-dir-absent; log-clean canonical resolver failed → log-resolver-failed; log-distill throttled → log-distill-throttled; log-recall no matches → log-recall-no-match."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom: Python version too low → python-floor-not-met; pre-commit hook silent → hook-not-firing; MCP tools still prompting after allow-mcp → split on cause (server-not-found / server-not-loaded / permission-loop); lazy-core.install failures → split on sub-error (plugin-not-installed / cache-empty / cache-broken / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-load-error / systemctl-error); lazy-core.agent-models invalid flag → invalid-scope; lazy-core.setup migration errored → setup-migration-failed; lazy-core.setup child fails → setup-child-failed; lazy-repo.mark-public FAIL findings → mark-public-fail-unresolved; lazy-repo.mark-public gh missing → gh-not-installed; doctor or audit stalls → skill-stalls; agent dispatches to wrong model → split (wrong-model / floor-ignored / duplicate-key); experts directory missing → experts-not-init; dispatch payload rejected → payload-missing-fields; dispatch expert not registered → expert-not-registered; collect-job status missing → job-not-found; list-jobs invalid status filter → invalid-status-filter; cancel-job job not found → job-absent; dispatch to wrong expert key → expert-key-mismatch; routine register name invalid → routine-name-format; routine already registered → routine-conflict; routine register unknown type → routine-unknown-type; routine register missing required field → routine-missing-field; routine register settings unwritable → routine-settings-unwritable; unregister pump without force → pump-protected; daemon stalled → daemon-stale; runtime recover still dirty → recover-still-dirty; recover state.json unparseable → state-unparseable; recover commit needs message → recover-commit-needs-message; audit experts json invalid → experts-json-invalid; audit reference did not resolve → ref-unresolvable; audit routine command path layout → routine-path-layout; doctor routine command unresolvable → routine-command-missing; lazy-core.audit global rules empty → audit-global-empty; migrated-from-lazycortex-log → commit-hook-error; memory write expert not persona → memory-not-persona; memory write frontmatter invalid → memory-frontmatter-invalid; memory write consolidate out of scope → memory-consolidate-scope; memory index memory dir absent → memory-dir-absent; memory reflect expert not persona → reflect-not-persona; memory reflect no sources → reflect-no-sources; mark-persona expert not registered → persona-expert-unknown; git lock stuck → git-lock-stuck; git unlock no lock → git-no-lock; log-clean absent → log-dir-absent; log-clean canonical resolver failed → log-resolver-failed; log-distill throttled → log-distill-throttled; log-recall no matches → log-recall-no-match."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
@@ -112,9 +112,9 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
-## `/lazy-core.install` Step 7 fails: "settings file unwritable"
+## `/lazy-core.install` Step 9 fails: "settings file unwritable"
 
-**Symptom**: `/lazy-core.install` fails at Step 7 (Bootstrap runtime defaults) with a message indicating that `lazy_settings.save_section` encountered a permission or I/O error when writing `lazy-core.runtime` into `.claude/lazy.settings.json`.
+**Symptom**: `/lazy-core.install` fails at Step 9 (Bootstrap runtime defaults) with a message indicating that `lazy_settings.save_section` encountered a permission or I/O error when writing `lazy-core.runtime` into `.claude/lazy.settings.json`.
 
 **Likely cause**: The `.claude/lazy.settings.json` file or its parent directory has permissions that prevent the skill from writing, or the file was locked by another process.
 
@@ -122,9 +122,9 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
-## `/lazy-core.install` Step 11 fails: supervisor template not found
+## `/lazy-core.install` Step 13 fails: supervisor template not found
 
-**Symptom**: `/lazy-core.install` fails at Step 11 (Offer daemon supervisor install) with a message about a missing plist or service template file.
+**Symptom**: `/lazy-core.install` fails at Step 13 (Offer daemon supervisor install) with a message about a missing plist or service template file.
 
 **Likely cause**: The plugin cache does not contain `templates/runtime/com.lazycortex.runtime.plist` (macOS) or `templates/runtime/lazy-core-runtime.service` (Linux). This happens when the plugin was only partially downloaded or the cache was truncated.
 
@@ -132,7 +132,7 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
-## `/lazy-core.install` Step 11 fails: `launchctl load` or `systemctl enable` error
+## `/lazy-core.install` Step 13 fails: `launchctl load` or `systemctl enable` error
 
 **Symptom**: `/lazy-core.install` writes the supervisor unit file but immediately reports a non-zero exit from `launchctl load` (macOS) or `systemctl --user enable --now` (Linux).
 
@@ -360,6 +360,16 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ---
 
+## `/lazy-expert.dispatch-job` aborts: expert not registered
+
+**Symptom**: Running `/lazy-expert.dispatch-job` produces an error like "`<expert_name>` is not registered in `lazy.settings.json[experts]`."
+
+**Likely cause**: The `expert_name` argument does not match any key in `lazy.settings.json[experts]`. Either the expert was never added during install, the name contains a typo, or the settings file was manually edited and the entry was lost.
+
+**Fix**: Verify the expert name against `lazy.settings.json[experts]`. If the expert is missing, register it via the `/lazy-core.install` expert wizard — the wizard prompts for name, agent reference, and optional protocols. Then re-dispatch with the correct `expert_name`.
+
+---
+
 ## `/lazy-expert.dispatch-job` routes to the wrong expert silently
 
 **Symptom**: A job you dispatched appears to complete without error, but the result is missing or seems to have been processed by the wrong worker. Running `/lazy-expert.list-jobs` shows the job under an unexpected expert key.
@@ -392,11 +402,11 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 ## `/lazy-expert.list-jobs` rejects the status filter
 
-**Symptom**: Running `/lazy-expert.list-jobs` with a `status` argument fails immediately with "status must be one of: pending, done, failed."
+**Symptom**: Running `/lazy-expert.list-jobs` with a `status` argument fails immediately with "status must be one of: queued, active, dead, done, failed."
 
-**Likely cause**: The value passed to the `status` filter is not one of the three recognised strings. Common mistakes include passing `READY`, `IN_PROGRESS`, or `DONE` (the internal daemon status names, which differ from the skill's output vocabulary).
+**Likely cause**: The value passed to the `status` filter is not one of the five recognised strings. Common mistakes include passing `pending` (the old vocabulary), `IN_PROGRESS`, `DONE` (uppercase), or `ready` — none of which match the skill's closed enum.
 
-**Fix**: Use one of the three valid filter values: `pending`, `done`, or `failed`. To see all jobs regardless of status, omit the `status` argument entirely.
+**Fix**: Use one of the five valid filter values: `queued`, `active`, `dead`, `done`, or `failed`. To see all jobs regardless of status, omit the `status` argument entirely.
 
 ---
 
@@ -424,9 +434,9 @@ Restart Claude Code, then re-run `/lazy-core.install`.
 
 **Symptom**: Running `/lazy-routine.register` fails with a message like "unknown type 'X'" during input validation.
 
-**Likely cause**: The `type` field in the routine configuration is not one of the four supported values: `subprocess`, `inbox`, `schedule`, or `git`. The skill's type-aware wizard only accepts these four values.
+**Likely cause**: The `type` field in the routine configuration is not one of the five supported values: `subprocess`, `inbox`, `schedule`, `git`, or `md-scan`. The skill's type-aware wizard only accepts these five values.
 
-**Fix**: Correct the `type` to one of `subprocess` (default, for periodic commands), `inbox` (scans a directory and dispatches a job per file), `schedule` (cron-driven), or `git` (watches a remote branch). If you need a type that isn't listed, you may need to upgrade `lazycortex-core` to a newer version that supports it.
+**Fix**: Correct the `type` to one of `subprocess` (default, for periodic commands), `inbox` (scans a directory and dispatches a job per file), `schedule` (cron-driven), `git` (watches a remote branch), or `md-scan` (scans markdown files matching globs and dispatches in-place). If you need a type that isn't listed, you may need to upgrade `lazycortex-core` to a newer version that supports it.
 
 ---
 

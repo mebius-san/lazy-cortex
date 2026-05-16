@@ -100,17 +100,7 @@ Checks the agent performs:
 
   2. **Root `version` check (raw JSON)** — using the raw JSON parsed in step 1, check whether the top-level object contains a `"version"` key. If present, emit: `[WARN] <path> has root 'version' key — auto-migration to per-section _version not yet run. Trigger migration by running any lazy-core skill (e.g., /lazy-core.audit) so that load_section rewrites the file.` Why this must use the raw JSON: `load_section` runs `migrate_root_version_to_section_version` on every call, rewriting the file in place and removing the root `version` key before this check could see it.
 
-  3. **Migrating helper read (project scope only)** — for the project file, call `load_section` to obtain the migrated section dict and trigger on-disk migration if the file is still in the old format:
-     ```
-     Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
-     from lazy_settings import load_section
-     from pathlib import Path
-     import json
-     proj = load_section(Path('.claude/lazy.settings.json'), 'agent_models')
-     print(json.dumps(proj))
-     ")
-     ```
-     Do NOT add a manual file-existence guard — `load_section` returns a stub with `_version` intact when the file is absent.
+  3. **Migrating helper read (project scope only)** — for the project file, call `load_section` to obtain the migrated section dict and trigger on-disk migration if the file is still in the old format: ``` Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c " from lazy_settings import load_section from pathlib import Path import json proj = load_section(Path('.claude/lazy.settings.json'), 'agent_models') print(json.dumps(proj)) ") ``` Do NOT add a manual file-existence guard — `load_section` returns a stub with `_version` intact when the file is absent.
 
      For the **global scope**, do NOT call `load_section` via Bash (CRITICAL PATH RULE forbids Bash under `$HOME/.claude/`). Instead, pluck the `agent_models` value directly from the raw JSON parsed in step 1: `raw.get("agent_models", {})`. If `agent_models` is missing from the raw JSON treat it as an empty dict (no gap findings for the global scope).
 
@@ -135,11 +125,7 @@ Scope: settings files, memory index, CLAUDE.md files, hook registration, MCP ser
 
 Checks the agent performs:
 
-- **Settings consistency** — read all four:
-  ```
-  ~/.claude/settings.json          ~/.claude/settings.local.json
-  .claude/settings.json            .claude/settings.local.json
-  ```
+- **Settings consistency** — read all four: ``` ~/.claude/settings.json          ~/.claude/settings.local.json .claude/settings.json            .claude/settings.local.json ```
   - `[FAIL]` any file is not valid JSON
   - `[FAIL]` project-specific permissions (service CLIs, `additionalDirectories`, service MCP servers, domain-specific WebFetch) in global `settings.json` instead of project `settings.local.json`
   - `[WARN]` duplicate permission entries across global + project files
@@ -259,12 +245,8 @@ Findings are emitted only for plugins where both sides carry a comparable versio
 
 Finding schema:
 
-- Outdated plugin:
-  `[WARN] plugin <name>@<mp> is outdated (<installed> → <latest>) | installed_plugins.json`
-  `detail: scope=<user|project> | path=<installPath>`
-  `fix: run `/plugin update <name>` or `/plugin install <name>@<mp>` to upgrade`
-- Marketplace cache fallback (one per unreachable marketplace):
-  `[INFO] marketplace <mp> unreachable — using cached manifest (last updated <lastUpdated>)`
+- Outdated plugin: `[WARN] plugin <name>@<mp> is outdated (<installed> → <latest>) | installed_plugins.json` `detail: scope=<user|project> | path=<installPath>` `fix: run `/plugin update <name>` or `/plugin install <name>@<mp>` to upgrade`
+- Marketplace cache fallback (one per unreachable marketplace): `[INFO] marketplace <mp> unreachable — using cached manifest (last updated <lastUpdated>)`
 
 Worst-case latency: 5 s × number of referenced marketplaces (sequential today; parallelize if it bites).
 
@@ -559,8 +541,7 @@ On confirmation, resolve the backend via the Phase 2.7a priority ladder using th
 
 ## Logging
 
-Log to `./.logs/claude/lazy-core.doctor/YYYY-MM-DD_HH-MM-SS.md`.
-Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
+Log to `./.logs/claude/lazy-core.doctor/YYYY-MM-DD_HH-MM-SS.md`. Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
 
 The `## Actions` section must include, in addition to the usual run details:
 

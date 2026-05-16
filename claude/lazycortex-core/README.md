@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#93c5fd"
+iconize_color: "#86efac"
 ---
 # lazycortex-core
 
@@ -81,27 +81,27 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 | `lazy-repo.mark-public` | Use when preparing a local/private repo — or a subtree inside one — to become public. Runs the full lazy-guard.check-public audit, walks through fixes and waivers, creates .guard-waivers.json to enable the pre-commit hook, and optionally flips the repo to public on GitHub. Accepts an optional scope argument to mark a subtree public (e.g., `claude/**`) without touching GitHub visibility. |
 | `lazy-routine.register` | Register a named routine in lazy.settings.json. Type-aware wizard (subprocess / inbox / schedule / git / md-scan). Wraps expert_runtime.register_routine with closed-set validation. Used by plugin install skills. |
 | `lazy-routine.unregister` | Remove a named routine from lazy.settings.json. Wraps expert_runtime.unregister_routine. Protects the built-in lazy-expert.pump routine. |
-| `lazy-runtime.recover` | Recover the lazycortex-core runtime daemon from a working-tree halt. Walks the operator through cleanup (commit / stash / discard / abort) and clears the daemon_halted block from state.json once the tree is clean. |
+| `lazy-runtime.recover` | Recover the lazycortex-core runtime daemon from a halt — either a working-tree halt (uncommitted_changes) or a remote-sync halt (git_pull_diverged, git_push_failed, git_remote_unavailable). Branches on the halt reason: walks the operator through dirt cleanup for tree halts, or through manual repair guidance for remote-sync halts. Atomically clears the daemon_halted block from state.json once the precondition holds. |
 
 ## Documentation
 
 Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
 
-- [add-memory-to-expert](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/add-memory-to-expert.md) — Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
 - [agent-models](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/agent-models.md) — Assign haiku/sonnet/opus tiers to every agent in your vault and let the model-router hook route each dispatch automatically.
 - [change-history](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/change-history.md) — Run-log housekeeping and change-history access — clean up orphaned log directories, distill commits into themed prose, and ask "why was X changed?" across every source at once.
 - [experts](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/experts.md) — Dispatch jobs to named expert workers, keep the main session free, and collect results when the daemon finishes them.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, and change-history access.
 - [git-coordination](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/git-coordination.md) — Inspect and manually break the per-repo staging lock that prevents hooks and skills from stomping each other's git index changes.
 - [guardian](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/guardian.md) — Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/install-and-audit.md) — Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-- [make-repo-public](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/make-repo-public.md) — Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
 - [memory](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/memory.md) — Per-expert long-term memory tracked in git — experts consult notes before primary work, write new notes as a side-effect of jobs, and consolidate via reflect passes.
-- [runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/runtime.md) — Register, unregister, and recover routines in the per-repo serial daemon — five routine types keep the async team running in order without contending over the working tree.
+- [runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/runtime.md) — Register, unregister, and recover routines in the per-repo serial daemon — five routine types keep the async team running in order; the recovery skill handles both dirty-tree and remote-sync halts.
+- [add-memory-to-expert](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/add-memory-to-expert.md) — Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
+- [make-repo-public](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/make-repo-public.md) — Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
 - [setup-expert](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-expert.md) — Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
 - [setup-routine](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-routine.md) — Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
 - [setup-runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-runtime.md) — Bootstrap the per-repo serial daemon so the async expert team has an executor — install wizard, start the daemon, then unblock it with /lazy-runtime.recover if the working tree halts.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/troubleshooting.md) — Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, daemon halt recovery, and change-history access.
 
 ## Agents
 
@@ -124,16 +124,16 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Rule | Description |
 |---|---|
-| `lazy-core.agent-writing` | Authoring contract for agents (subagents dispatched via the Agent tool). Covers frontmatter requirements, single-response execution model, reporting contract, tool-allowlist hygiene, and cross-references to the shared Execution-Discipline preamble in lazy-core.skill-writing. |
-| `lazy-core.git` | Serialize git staging across concurrent Claude Code sessions sharing one checkout — honor the lazy-core.git-guard hook and the lock file under .git/lazy-git.lock. |
-| `lazy-core.hook-writing` | Authoring contract for Claude Code lifecycle hooks — PreToolUse, PostToolUse, Stop, SessionStart, etc. Covers script discipline, trigger gating, branch determinism, loop guards, transactional skip, the no-dirty-tree clause, and logging. |
-| `lazy-core.hygiene` | Project hygiene constraints checked by lazy-core.audit, lazy-core.doctor, and lazy-core.optimize — scope, naming, settings split, MCP scope, and path hygiene. |
-| `lazy-core.reference-writing` | Authoring contract for reference docs (protocols, schemas, contracts) under references/ at any scope. |
-| `lazy-core.rule-writing` | Authoring contract for rule files. Mandatory frontmatter (description + paths scope OR always_loaded waiver), size budget, dot-namespace filename, no large code blocks, artifact-reference integrity, no narrative padding. |
-| `lazy-core.scaffold` | Registry of authoring templates for any new artifact a plugin registers. |
-| `lazy-core.skill-writing` | Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, no-dirty-tree clause, and the optional Failure-modes section. |
-| `lazy-guard.security` | Security constraints that the lazy-guard.* scanners and pre-commit hook enforce — credential safety and public-repo readiness. |
-| `lazy-log.logging` | Logging conventions for skills, agents, and commands. |
+| `lazy-core.agent-writing.md` | Authoring contract for agents (subagents dispatched via the Agent tool). Covers frontmatter requirements, single-response execution model, reporting contract, tool-allowlist hygiene, and cross-references to the shared Execution-Discipline preamble in lazy-core.skill-writing. |
+| `lazy-core.git.md` | Serialize git staging across concurrent Claude Code sessions sharing one checkout — honor the lazy-core.git-guard hook and the lock file under .git/lazy-git.lock. |
+| `lazy-core.hook-writing.md` | Authoring contract for Claude Code lifecycle hooks — PreToolUse, PostToolUse, Stop, SessionStart, etc. Covers script discipline, trigger gating, branch determinism, loop guards, transactional skip, the no-dirty-tree clause, and logging. |
+| `lazy-core.hygiene.md` | Project hygiene constraints checked by lazy-core.audit, lazy-core.doctor, and lazy-core.optimize — scope, naming, settings split, MCP scope, and path hygiene. |
+| `lazy-core.reference-writing.md` | Authoring contract for reference docs (protocols, schemas, contracts) under references/ at any scope. |
+| `lazy-core.rule-writing.md` | Authoring contract for rule files. Mandatory frontmatter (description + paths scope OR always_loaded waiver), size budget, dot-namespace filename, no large code blocks, artifact-reference integrity, no narrative padding. |
+| `lazy-core.scaffold.md` | Registry of authoring templates for any new artifact a plugin registers. |
+| `lazy-core.skill-writing.md` | Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, no-dirty-tree clause, and the optional Failure-modes section. |
+| `lazy-guard.security.md` | Security constraints that the lazy-guard.* scanners and pre-commit hook enforce — credential safety and public-repo readiness. |
+| `lazy-log.logging.md` | Logging conventions for skills, agents, and commands. |
 
 ## Hooks
 

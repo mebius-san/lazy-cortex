@@ -48,10 +48,7 @@ Invoke the `/lazy-guard.check-public` skill. Follow its full Phase 1-4 (Prepare,
 **Passing the scope**: if Step 1b selected subtree-public mode, the easiest way to scope the audit is:
 
 1. If `.guard-waivers.json` already exists, read it, add/overwrite `public_scopes` with the Step 1b globs, re-write the file.
-2. If it doesn't exist, create a minimal scaffold:
-   ```json
-   { "version": 1, "public_scopes": [ ... ], "waivers": [] }
-   ```
+2. If it doesn't exist, create a minimal scaffold: ```json { "version": 1, "public_scopes": [ ... ], "waivers": [] } ```
 
 This way the check-public skill and the hook immediately see the scope. The file will be completed with accepted waivers in Step 4.
 
@@ -123,5 +120,4 @@ If no: tell the user the repo is audit-clean and ready — they can run `gh repo
 
 ## Logging
 
-Log to `./.logs/claude/lazy-repo.mark-public/YYYY-MM-DD_HH-MM-SS.md`.
-Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
+Log to `./.logs/claude/lazy-repo.mark-public/YYYY-MM-DD_HH-MM-SS.md`. Use `Bash(mkdir -p ...)` then `Write` tool (never chain).

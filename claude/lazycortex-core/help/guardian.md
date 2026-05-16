@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
-last_regen: 2026-05-13
+last_regen: 2026-05-16
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing how lazy-guard.check-public feeds findings into lazy-repo.mark-public (which creates .guard-waivers.json and activates the pre-commit hook), and how lazy-guard.allow-mcp independently classifies MCP server tools into allow/ask/skip buckets and writes them to settings.local.json"
@@ -66,44 +66,37 @@ Day-to-day auditing uses `/lazy-guard.check-public` directly. Run it after addin
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  invokeCheckPublic[lazy-guard.check-public invoked]
-  scanRepo{Findings found?}
-  findingsBlock[Findings block returned]
-  invokeMarkPublic[lazy-repo.mark-public receives findings]
-  resolveFindings{All findings resolved?}
+  checkPublicRun[lazy-guard.check-public runs scan]
+  findingsReady{Findings ready?}
+  markPublicInvoked[lazy-repo.mark-public invoked]
   createWaivers[Create .guard-waivers.json]
-  activateHook[Pre-commit hook activated]
-  markPublicDone[Repo marked public]
-  refusePublish[Publish refused — unresolved findings]
+  activateHook[Activate pre-commit hook]
+  publishDone[Repo marked public - Done]
+  noFindings[No actionable findings - Skip]
 
-  invokeAllowMcp[lazy-guard.allow-mcp invoked]
-  discoverTools[Discover MCP server tools]
-  classifyTools{Classify each tool}
+  allowMcpRun[lazy-guard.allow-mcp runs classification]
+  classifyTools{Tool classification}
   allowBucket[allow bucket]
   askBucket[ask bucket]
   skipBucket[skip bucket]
   writeSettings[Write to settings.local.json]
-  allowMcpDone[MCP permissions applied]
+  settingsDone[MCP permissions applied - Done]
 
-  invokeCheckPublic -->|run scan| scanRepo
-  scanRepo -->|yes| findingsBlock
-  scanRepo -->|no findings| invokeMarkPublic
-  findingsBlock -->|feed findings| invokeMarkPublic
-  invokeMarkPublic -->|evaluate| resolveFindings
-  resolveFindings -->|resolved| createWaivers
-  resolveFindings -->|unresolved| refusePublish
-  createWaivers -->|enable hook| activateHook
-  activateHook -->|complete| markPublicDone
+  checkPublicRun -->|produce findings| findingsReady
+  findingsReady -->|findings present| markPublicInvoked
+  findingsReady -->|no findings| noFindings
+  markPublicInvoked -->|create file| createWaivers
+  createWaivers -->|file present enables| activateHook
+  activateHook -->|pipeline active| publishDone
 
-  invokeAllowMcp -->|enumerate| discoverTools
-  discoverTools -->|classify| classifyTools
-  classifyTools -->|safe auto-use| allowBucket
-  classifyTools -->|needs confirmation| askBucket
-  classifyTools -->|excluded| skipBucket
-  allowBucket -->|merge| writeSettings
-  askBucket -->|merge| writeSettings
-  skipBucket -->|merge| writeSettings
-  writeSettings -->|done| allowMcpDone
+  allowMcpRun -->|inspect each tool| classifyTools
+  classifyTools -->|auto-permit| allowBucket
+  classifyTools -->|prompt on use| askBucket
+  classifyTools -->|exclude| skipBucket
+  allowBucket -->|merge into| writeSettings
+  askBucket -->|merge into| writeSettings
+  skipBucket -->|merge into| writeSettings
+  writeSettings -->|persisted| settingsDone
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
@@ -111,21 +104,18 @@ flowchart LR
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class invokeCheckPublic entry
-  class invokeAllowMcp entry
-  class scanRepo guard
-  class resolveFindings guard
+  class checkPublicRun entry
+  class allowMcpRun entry
+  class findingsReady guard
   class classifyTools guard
-  class findingsBlock action
-  class invokeMarkPublic action
+  class markPublicInvoked action
   class createWaivers action
   class activateHook action
-  class discoverTools action
   class allowBucket action
   class askBucket action
   class skipBucket action
   class writeSettings action
-  class markPublicDone success
-  class allowMcpDone success
-  class refusePublish error
+  class publishDone success
+  class settingsDone success
+  class noFindings error
 ```

@@ -59,16 +59,21 @@ When raising the floor in the future, bump this step's numeric threshold in the 
 
 ## Step 1: Detect install scope
 
-Read `~/.claude/plugins/installed_plugins.json` and find the entry for `lazycortex-core@lazycortex`. The `scope` field is either:
+Read `~/.claude/plugins/installed_plugins.json`. The `lazycortex-core@lazycortex` key holds an **array of entries** — one per project where `/plugin install` was last run. The plugin **cache is shared globally across all projects**, so any non-empty array proves the plugin is installed and usable in the current cwd.
+
+**Do NOT compare an entry's `projectPath` against the current working directory.** `projectPath` records where the install command was last run, not where the plugin "belongs" — Step 2 of this skill targets `<repo-root>` (i.e. `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
+
+Look at the `scope` field of the entries in the array:
 - `"user"` — plugin enabled globally in `~/.claude/settings.json`
-- `"project"` — plugin enabled in a project's `.claude/settings.json`
+- `"project"` — plugin enabled per-project in `.claude/settings.json`
 
-If the plugin has entries at both scopes, ask the user which to target. Default: `project`.
+If both scopes appear in the array, ask the user which to target. Default: `project`.
 
-If no entry is found, the plugin isn't actually installed — abort and tell the user to enable it first in their `settings.json`:
+Abort **only** if the `lazycortex-core@lazycortex` key is absent or its array is empty — i.e. the plugin has never been installed on this machine. In that case tell the user to install it first:
 ```json
 "enabledPlugins": { "lazycortex-core@lazycortex": true }
 ```
+then run `/plugin install lazycortex/lazycortex-core`.
 
 ## Step 2: Determine paths
 
@@ -269,8 +274,7 @@ Run `git rev-parse --show-toplevel` in cwd:
 - If it succeeds, set `<repo-root>` to the returned path and proceed to 9b.
 - If it fails (cwd is not inside a git repo), ask:
 
-  ```
-  AskUserQuestion:
+  ``` AskUserQuestion:
     question: "Current directory is not a git repository. Initialize one here to enable runtime/experts setup?"
     description: "Runtime artifacts (`.experts/`, daemon supervisor units) need a repo root. Initializing here means git-tracking your runtime config alongside the rest of the directory; skipping bypasses runtime/experts setup for this run — Steps 3–8 are unaffected."
     options: ["Initialize git here", "Skip — no runtime setup"]
@@ -329,14 +333,20 @@ Otherwise, perform the following three idempotent operations:
 
 ### Ensure `lazy.runtime.sh` shim
 
-Check whether `<repo-root>/.claude/bin/lazy.runtime.sh` exists (`Bash(test -f ...)`). If missing:
+The shim is content-tracked so consumers pick up new shim features (e.g. the `--dev-mode` flag added in lazy-core 0.18) on re-install without manual cleanup.
+
 1. `Bash(mkdir -p <repo-root>/.claude/bin/)`
-2. `Bash(cp ${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy.runtime.sh <repo-root>/.claude/bin/lazy.runtime.sh)`
-3. `Bash(chmod +x <repo-root>/.claude/bin/lazy.runtime.sh)`
+2. If `<repo-root>/.claude/bin/lazy.runtime.sh` is absent → copy + chmod, state **created**.
+3. If present and `Bash(diff -q ${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy.runtime.sh <repo-root>/.claude/bin/lazy.runtime.sh)` reports differences → copy + chmod, state **refreshed**.
+4. Otherwise → state **already-present** (no action).
 
-The shim resolves the latest `lazycortex-core/bin/runner` from the plugin cache at exec time, so supervisor units don't need re-rendering after `/plugin update`.
+Copy command in cases 2 and 3:
+```
+Bash(cp ${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy.runtime.sh <repo-root>/.claude/bin/lazy.runtime.sh)
+Bash(chmod +x <repo-root>/.claude/bin/lazy.runtime.sh)
+```
 
-State **created** if copied; **already-present** if it existed.
+The shim resolves the latest `lazycortex-core/bin/runner` from the plugin cache at exec time, so supervisor units don't need re-rendering after `/plugin update`. Re-copying on content drift is safe — the shim's interface is stable (positional repo-root + repeatable `--plugin-dir`; the new `--dev-mode` flag is additive).
 
 ### Ensure `lazy.settings.json[experts]`
 
@@ -430,9 +440,7 @@ AskUserQuestion:
   options: ["Yes", "Skip", "Stop wizard"]
 ```
 
-On `Skip`: move to the next candidate.
-On `Stop wizard`: stop iterating; proceed to Step 12 with whatever was accepted so far.
-On `Yes`: ask for the three fields below (one `AskUserQuestion` each, strictly in sequence):
+On `Skip`: move to the next candidate. On `Stop wizard`: stop iterating; proceed to Step 12 with whatever was accepted so far. On `Yes`: ask for the three fields below (one `AskUserQuestion` each, strictly in sequence):
 
 **a.** Local name for this expert in the project:
 ```
@@ -517,21 +525,67 @@ AskUserQuestion:
 
 On `Skip — I'll start the daemon manually`: state **skipped-per-user-choice**.
 
+### 13a. Resolve dev-mode preference
+
+Before rendering the supervisor unit, decide whether to pass `--dev-mode` to `lazy.runtime.sh`. In dev-mode the shim scans `<repo-root>/claude/*/.claude-plugin/plugin.json` and prefers those plugin sources over the cache — useful when this repo IS the plugin's authoring vault.
+
+Read the persisted choice via:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_section
+from pathlib import Path
+sec = load_section(Path('<repo-root>/.claude/lazy.settings.json'), 'lazy-core.runtime')
+print((sec.get('supervisor') or {}).get('dev_mode', 'unset'))
+"
+```
+
+- If output is `True` or `False` → use that value, skip the question.
+- If output is `unset` → ask:
+
+```
+AskUserQuestion:
+  question: "Run the supervisor in dev-mode?"
+  description: "Dev-mode prefers plugin sources under `<repo-root>/claude/*/` over the plugin cache. Pick `No` unless this repo is a LazyCortex plugin-authoring vault."
+  options: ["No (Recommended)", "Yes — prefer in-repo plugin sources"]
+```
+
+Persist the chosen `dev_mode` (boolean) at `lazy-core.runtime.supervisor.dev_mode`:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_section, save_section
+from pathlib import Path
+p = Path('<repo-root>/.claude/lazy.settings.json')
+sec = load_section(p, 'lazy-core.runtime')
+sec.setdefault('supervisor', {})['dev_mode'] = <True|False>
+save_section(p, 'lazy-core.runtime', sec)
+"
+```
+
+Hold the chosen boolean as `<dev_mode>` for 13b/13c.
+
+### 13b. macOS launchd
+
 On `macOS launchd`:
 1. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist`.
 2. Substitute `{REPO_ROOT}` → absolute path of `<repo-root>`, `{REPO_NAME}` → basename of `<repo-root>` (the shim path is built into the templates as `{REPO_ROOT}/.claude/bin/lazy.runtime.sh` — no separate runner-path substitution needed).
-3. `Bash(mkdir -p ~/Library/LaunchAgents/)`
-4. Write the rendered plist to `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist`.
-5. `Bash(launchctl load ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)`
-6. State **launchd-installed**.
+3. **If `<dev_mode>` is True**: insert a `<string>--dev-mode</string>` line into `ProgramArguments` between the `lazy.runtime.sh` line and the `{REPO_ROOT}` line. Indent matches the surrounding `<string>` lines (8 spaces).
+4. `Bash(mkdir -p ~/Library/LaunchAgents/)`
+5. Write the rendered plist to `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist`.
+6. `Bash(launchctl load ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)`
+7. State **launchd-installed** (or **launchd-installed-dev-mode** when `<dev_mode>` is True).
+
+### 13c. Linux systemd
 
 On `Linux systemd`:
 1. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy-core-runtime.service`.
 2. Substitute `{REPO_ROOT}` and `{REPO_NAME}` as above.
-3. `Bash(mkdir -p ~/.config/systemd/user/)`
-4. Write the rendered unit to `~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service`.
-5. `Bash(systemctl --user enable --now lazy-core-runtime-<REPO_NAME>.service)`
-6. State **systemd-installed**.
+3. **If `<dev_mode>` is True**: replace `lazy.runtime.sh {REPO_ROOT}` (after step 2's substitution) with `lazy.runtime.sh --dev-mode {REPO_ROOT}` in the `ExecStart=` line.
+4. `Bash(mkdir -p ~/.config/systemd/user/)`
+5. Write the rendered unit to `~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service`.
+6. `Bash(systemctl --user enable --now lazy-core-runtime-<REPO_NAME>.service)`
+7. State **systemd-installed** (or **systemd-installed-dev-mode** when `<dev_mode>` is True).
 
 ## Step 14: Report
 
@@ -573,6 +627,7 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Step 13 fails: supervisor template not found** — `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist` or `lazy-core-runtime.service` is missing from the plugin cache → run `/plugin update lazycortex-core@lazycortex` to restore templates, then re-run.
 - **Step 13 fails: `launchctl load` error** — the plist was written but `launchctl load` returned a non-zero exit code → inspect the plist at `~/Library/LaunchAgents/` for substitution errors, then run `launchctl load <path>` manually.
 - **Step 13 fails: `systemctl --user enable --now` error** — the service unit was written but `systemctl` returned a non-zero exit code → run `systemctl --user status lazy-core-runtime-<REPO_NAME>.service` to inspect the error, then correct and re-enable manually.
+- **Step 13: dev-mode enabled but supervisor logs show "no plugin sources found"** — `<dev_mode>` was persisted as `True` but `<repo-root>/claude/` contains no `*/.claude-plugin/plugin.json` files. The shim silently no-ops the scan and the daemon falls back to the cache — no error, but dev-mode is doing nothing. Either disable dev-mode by re-running `/lazy-core.install` and answering "No", or populate `<repo-root>/claude/<plugin>/.claude-plugin/plugin.json` if this is meant to be a plugin-authoring vault.
 
 ## Notes
 

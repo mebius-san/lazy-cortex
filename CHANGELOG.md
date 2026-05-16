@@ -4,6 +4,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 3.2.0 — 2026-05-16 UTC
+
+- The daemon now halts with a specific reason when remote-sync fails during a tick — diverged history raises `git_pull_diverged`, repeated push refusal raises `git_push_failed` — instead of silently continuing in a broken state. `lazy-runtime.recover` gains a `manual-fix` mode that prints reason-specific repair steps and clears the halt block once resolved.
+- Duplicate expert jobs dispatched from symlinked repo paths (e.g. macOS Dropbox surface vs. real path) are eliminated: job IDs are now derived from the resolved canonical path. Stale DEAD-marked job slots are renamed out of the way before a fresh dispatch, preventing new jobs from becoming invisible to the pump.
+- The daemon supervisor shim accepts a new `--dev-mode` flag; when set, it discovers plugin sources directly from `claude/*/.claude-plugin/plugin.json` in the host repo and injects them before the plugin cache. `lazy-core.install` Step 13 now prompts once whether to enable dev-mode and persists the choice.
+- A `projectPath` mismatch encountered during `lazy-core.install` Step 1 is no longer treated as an abort condition — the installer clarifies that this state is recoverable and continues.
+- Default model-tier assignments for `lazycortex-experts` agents are now seeded on install; the `lazy-experts.designer` agent is tiered to the Opus model class to match its heavy-reasoning workload.
+
 ### 3.1.1 — 2026-05-13 UTC
 
 - `lazy-core.setup` now runs a settings-migration pass (via `lazy_settings.py migrate`) as its first step before installing any plugin; if migration fails, the setup run halts with `aborted-by-migration-failure` rather than proceeding on a stale settings layout.

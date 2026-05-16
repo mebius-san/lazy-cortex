@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Dispatch jobs to named expert workers, keep the main session free, and collect results when the daemon finishes them.
-last_regen: 2026-05-13
+last_regen: 2026-05-16
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing a user dispatching a job via dispatch-job, the runtime daemon draining the queue, and the user collecting results via collect-job. Include list-jobs and cancel-job as optional side paths. Use boxes for the four skills and a distinct shape for the daemon process."
@@ -22,7 +22,8 @@ Each expert is a named role defined in `lazy.settings.json[experts]` at install 
 - You want to run a lengthy review, doc-generation, or analysis task without holding the main session open the whole time.
 - You have multiple jobs in flight and need to check their status at a glance before deciding which result to retrieve first.
 - You dispatched a job but your requirements changed — you want to cancel it before the daemon starts it.
-- You need to filter the queue by expert name or state to locate a specific job.
+- You need to filter the queue by expert name or status to locate a specific job.
+- The daemon marked a job `dead` (an unrecoverable error during launch) and you need to identify which job failed before re-dispatching.
 
 ## How it fits together
 
@@ -30,7 +31,7 @@ Each expert is a named role defined in `lazy.settings.json[experts]` at install 
 
 The runtime daemon, which you start separately with `./run.sh`, polls the queue. For each queued job it spawns the configured expert agent, waits for completion, and writes `response.json` plus a `DONE` marker. You never interact with the daemon directly.
 
-`/lazy-expert.list-jobs` gives you a live view of the queue at any point. It lists every job sorted oldest-first with columns for expert, job_id, status, and age. Each job carries one of five statuses: `queued` (waiting for the daemon to pick it up), `active` (daemon is running it now), `dead` (daemon marked it dead after an unrecoverable error), `done` (completed successfully), or `failed` (completed with an error outcome). Pass `expert=<name>` to narrow to one worker, or `status=<value>` to filter by state. Use this before collecting to confirm a job has finished, or to locate a `job_id` you have lost track of.
+`/lazy-expert.list-jobs` gives you a live view of the queue at any point. It lists every job sorted oldest-first with columns for expert, job_id, status, and age. Each job carries one of five statuses: `queued` (waiting for the daemon to pick it up), `active` (daemon is running it right now — a `PID` marker is present alongside the `READY` marker), `dead` (daemon marked it dead after an unrecoverable error during launch), `done` (completed successfully), or `failed` (completed with an error outcome). Pass `expert=<name>` to narrow to one worker, or `status=<value>` to filter by state. Use this before collecting to confirm a job has finished, or to locate a `job_id` you have lost track of.
 
 `/lazy-expert.collect-job` retrieves the result for a specific job. You supply the `expert_name` and `job_id`; the skill returns `{status, response}`. When status is `done` it prints the result file paths from `response.json` so you can read them directly. When status is `pending` the daemon has not finished yet — run the skill again later. When status is `failed` it prints the error from `response.json`. When status is `missing` the job directory does not exist — verify the `job_id` and `expert_name` or re-dispatch.
 
@@ -41,7 +42,7 @@ The runtime daemon, which you start separately with `./run.sh`, polls the queue.
 - **Add optional file references.** The `source`, `context`, and `result` fields in the dispatch payload are arrays of repo-relative file paths. Pass `source` for files the expert should read, `context` for background material, and `result` for paths where the expert should write its output. These are passed through to the expert agent via the protocol contract.
 - **Verify the expert name before dispatching.** If you mistype the expert key, `dispatch-job` will abort with "`<expert_name>` is not registered in `lazy.settings.json[experts]`" — confirm the name before running.
 - **Filter the job list by expert.** `/lazy-expert.list-jobs expert=<name>` is the fastest way to check the queue for one worker when you have several experts configured.
-- **Filter by status.** Pass `status=queued` to see jobs waiting to be picked up, `status=active` to confirm the daemon is currently working, `status=dead` to surface jobs that the daemon could not run, or `status=failed` to find jobs with error outcomes.
+- **Filter by status.** Pass `status=queued` to see jobs waiting to be picked up, `status=active` to confirm the daemon is currently working on a job, `status=dead` to surface jobs the daemon could not launch, or `status=failed` to find jobs with error outcomes. Note that `collect-job` reports `pending` for any job the daemon has not yet finished (whether queued or active); use `list-jobs status=active` to distinguish the two.
 - **Re-dispatch a failed job.** If `/lazy-expert.collect-job` returns `status: failed`, read the error from `response.json` and check `transcript.jsonl` in the same job directory for the full expert subprocess output. Fix the underlying issue (e.g. a missing source file), cancel the failed job with `/lazy-expert.cancel-job`, and dispatch a new one.
 - **Add or reconfigure expert roles.** Each expert's prompt and tools are set in `lazy.settings.json[experts]`. Run `/lazy-core.install` to re-run the expert wizard and update that file.
 
@@ -79,40 +80,34 @@ Run `/lazy-core.install` and re-walk the expert wizard if you want help editing 
 flowchart LR
   userDispatchJob[dispatch-job]
   jobQueue[(Job Queue)]
-  runtimeDaemon{{Runtime Daemon}}
-  listJobs[list-jobs]
-  cancelJob[cancel-job]
-  jobDone{Job complete?}
-  collectJob[collect-job]
-  resultReady[Results collected]
+  runtimeDaemon{{runtime daemon}}
+  userCollectJob[collect-job]
+  jobDone[Job results collected]
+  userListJobs[list-jobs]
+  userCancelJob[cancel-job]
   jobCancelled[Job cancelled]
 
-  userDispatchJob -->|enqueue| jobQueue
-  jobQueue -->|drain| runtimeDaemon
-  runtimeDaemon -->|process| jobDone
-  jobDone -->|yes| collectJob
-  jobDone -->|no - still running| jobQueue
-  userDispatchJob -->|optionally| listJobs
-  listJobs -->|inspect| jobDone
-  userDispatchJob -->|optionally| cancelJob
-  cancelJob -->|abort| jobCancelled
-  collectJob -->|return| resultReady
+  userDispatchJob -->|enqueue job| jobQueue
+  jobQueue -->|drain next| runtimeDaemon
+  runtimeDaemon -->|write result| userCollectJob
+  userCollectJob -->|return output| jobDone
+  userDispatchJob -->|check queue| userListJobs
+  userListJobs -->|select job| userCancelJob
+  userCancelJob -->|remove from queue| jobCancelled
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
-  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
   classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
   class userDispatchJob entry
+  class userCollectJob entry
+  class userListJobs action
+  class userCancelJob action
   class runtimeDaemon service
   class jobQueue store
-  class listJobs action
-  class cancelJob action
-  class jobDone guard
-  class collectJob action
-  class resultReady success
+  class jobDone success
   class jobCancelled error
 ```

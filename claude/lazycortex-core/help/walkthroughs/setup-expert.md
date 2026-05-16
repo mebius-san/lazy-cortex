@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-05-13
+last_regen: 2026-05-16
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -45,7 +45,7 @@ Run `/lazy-core.install` inside the repo. The install wizard walks through 16 or
 
 When Step 11 offers to scan installed plugins for expert candidates, answer **Yes**. For each candidate you accept, the wizard asks for a local name (e.g. `designer`, `developer`, `reviewer`), a git author name, and a git author email for commits the expert makes. These are written into `lazy.settings.json[experts]` by the wizard — do not edit the file by hand.
 
-Once at least one expert is registered, Step 12 bootstraps the `lazy-expert.pump` routine in `lazy.settings.json`. Step 13 then offers to install a daemon supervisor via macOS launchd or Linux systemd. Choose the option that matches your machine, or skip and start the daemon manually in the next step.
+Once at least one expert is registered, Step 12 bootstraps the `lazy-expert.pump` routine in `lazy.settings.json`. Step 13 then offers to install a daemon supervisor via macOS launchd or Linux systemd — but only when the pump routine was freshly registered in Step 12. If Step 12 found the routine already present (a re-run), Step 13 is skipped. Choose the supervisor option that matches your machine, or skip and start the daemon manually in the next step.
 
 If you already ran `/lazy-core.install` and skipped the runtime phase, re-run the skill — it is idempotent and detects what is already present.
 
@@ -56,7 +56,7 @@ If you already ran `/lazy-core.install` and skipped the runtime phase, re-run th
 The wizard registers each expert with `agent` and `git_author` only. Two additional fields are available in `lazy.settings.json[experts][<expert>]`:
 
 - `aspects[]` — adds behavior layers. The most commonly used aspect is `lazycortex-core:lazy-memory.persona-aspect` (long-term memory). Run `/lazy-memory.mark-persona <expert>` after the wizard to opt in; the skill writes the aspects array for you — do not edit it by hand.
-- `arguments{}` — pinned named values rendered into every job's prompt. These are static values that should follow the expert across all dispatches (e.g. a preferred code style, a target language, a review rubric). Edit the expert's `arguments` entry by re-running `/lazy-core.install` and accepting the candidate again, or add the key directly via `/lazy-core.agent-models` if it surfaces the field. For one-off overrides, pass extra fields in the job `payload` instead.
+- `arguments{}` — pinned named values rendered into every job's prompt. These are static values that should follow the expert across all dispatches (e.g. a preferred code style, a target language, a review rubric). To add or update arguments, re-run `/lazy-core.install` and accept the candidate again in the expert-add wizard. For one-off overrides, pass extra fields in the job `payload` instead.
 
 Both fields flow through to `config.json` when a job is dispatched, so the daemon always has the full expert configuration alongside the request.
 
@@ -172,26 +172,22 @@ sequenceDiagram
   participant daemon as Daemon (runner)
   participant expertAgent as Expert Agent
 
-  user->>claudeSession: /lazy-expert.dispatch-job
-  claudeSession->>jobsQueue: write job envelope (job-id, prompt, config)
-  Note over jobsQueue: job file lands in queue dir
-  claudeSession-->>user: job-id confirmed, job queued
-
-  daemon->>jobsQueue: poll — detect new job file
-  jobsQueue-->>daemon: job envelope contents
-  daemon->>expertAgent: spawn expert agent with job spec
-
-  expertAgent->>expertAgent: execute expert reasoning
+  user->>claudeSession: /lazy-expert.dispatch-job with task payload
+  claudeSession->>jobsQueue: write job file to queue
+  claudeSession-->>user: job ID confirmed
+  Note over jobsQueue,daemon: daemon polls queue directory
+  daemon->>jobsQueue: detect new job file
+  jobsQueue-->>daemon: job file contents
+  daemon->>expertAgent: spawn expert agent with job context
+  expertAgent->>expertAgent: execute assigned task
   expertAgent->>jobsQueue: write response.json
   expertAgent->>jobsQueue: write DONE marker
-  Note over jobsQueue: response.json + DONE marker present
-
-  daemon->>jobsQueue: detect DONE marker
-  jobsQueue-->>daemon: confirm marker seen
-  Note over daemon: job marked complete
-
-  user->>claudeSession: /lazy-expert.collect-job (job-id)
-  claudeSession->>jobsQueue: read response.json for job-id
+  Note over jobsQueue: job marked complete
+  daemon->>jobsQueue: observe DONE marker
+  jobsQueue-->>daemon: DONE marker confirmed
+  daemon-->>claudeSession: notify job finished
+  user->>claudeSession: /lazy-expert.collect-job with job ID
+  claudeSession->>jobsQueue: read response.json
   jobsQueue-->>claudeSession: response.json contents
-  claudeSession-->>user: collected result delivered
+  claudeSession-->>user: collected result returned
 ```

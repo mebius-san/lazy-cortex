@@ -103,8 +103,7 @@ input: "name=<name> force=<true|false>"
 - Verified registration status
 - Unregistration result
 
-`## Result`
-`<success|aborted>` — name=`<name>`, outcome=`<unregistered|already-absent|aborted>`.
+`## Result` `<success|aborted>` — name=`<name>`, outcome=`<unregistered|already-absent|aborted>`.
 
 ## Failure modes
 

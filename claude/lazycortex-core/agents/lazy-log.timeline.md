@@ -89,5 +89,4 @@ If no input is given, default to "everything in the last 7 days".
 
 ## Logging
 
-Log to `./.logs/claude/lazy-log.timeline/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter).
-Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
+Log to `./.logs/claude/lazy-log.timeline/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha` frontmatter). Use `Bash(mkdir -p ...)` then `Write` tool (never chain).

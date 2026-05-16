@@ -379,16 +379,7 @@ Best-effort check. Three signals (any one passing = alive):
 
 1. `Bash(pgrep -f bin/runner 2>/dev/null && echo running || echo stopped)` → `running`.
 2. `Bash(launchctl list com.lazycortex.runtime.$(basename $(pwd)) 2>/dev/null | grep -q '"PID"' && echo running || echo stopped)` → `running`.
-3. Compute `5 × max(polling_interval_sec)` across all routines (default 300 s if not available). Find newest `.logs/lazy-core/runtime/*.jsonl` via `Bash(ls -t .logs/lazy-core/runtime/*.jsonl 2>/dev/null | head -1)`. If a file is found, check its mtime:
-   ```
-   Bash(python3 -c "
-   import os, time, sys
-   path = sys.argv[1]; threshold = int(sys.argv[2])
-   age = time.time() - os.path.getmtime(path)
-   print('ok' if age < threshold else 'stale')
-   " '<newest jsonl>' '<threshold>')
-   ```
-   `ok` → alive.
+3. Compute `5 × max(polling_interval_sec)` across all routines (default 300 s if not available). Find newest `.logs/lazy-core/runtime/*.jsonl` via `Bash(ls -t .logs/lazy-core/runtime/*.jsonl 2>/dev/null | head -1)`. If a file is found, check its mtime: ``` Bash(python3 -c " import os, time, sys path = sys.argv[1]; threshold = int(sys.argv[2]) age = time.time() - os.path.getmtime(path) print('ok' if age < threshold else 'stale') " '<newest jsonl>' '<threshold>') ``` `ok` → alive.
 
 If all three signals indicate stopped/stale/absent → `[WARN] runtime daemon appears stale — no pgrep match, no launchctl PID, and no JSONL log line in the last <threshold>s | .logs/lazy-core/runtime/`.
 

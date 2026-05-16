@@ -101,8 +101,7 @@ input: "expert_name=<expert_name> job_id=<job_id>"
 - Confirmation: <confirmed|user-aborted|absent>
 - Cancellation: <cancelled|skipped>
 
-`## Result`
-`<success|aborted>` — job_id=`<job_id>`, outcome=`<outcome>`.
+`## Result` `<success|aborted>` — job_id=`<job_id>`, outcome=`<outcome>`.
 
 ## Failure modes
 

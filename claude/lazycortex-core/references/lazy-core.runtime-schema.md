@@ -43,13 +43,33 @@ Duration strings: a number followed by a unit suffix — `s`, `m`, `h`, or `d` (
 | Field | Type | Description |
 |---|---|---|
 | `branch` | string | **Required.** Branch the daemon checks out exclusively each iteration. |
-| `remote_sync` | `"pull"` / `"pull_push"` | Optional. `"pull"` does `git pull --ff-only` after checkout. `"pull_push"` additionally does `git push` after routines run. Absent = no remote sync. |
+| `remote_sync` | `"pull"` / `"pull_push"` | Optional. `"pull"` does pre-iteration fetch+ff-pull. `"pull_push"` additionally does fetch+rebase+push after routines run. Absent = no remote sync. |
 
-**Pre-iteration ops** (when `daemon.git` is set): `git checkout -B <branch>` (reset to current HEAD), then `git pull --ff-only` if `remote_sync` is `"pull"` or `"pull_push"`.
+**Pre-iteration ops** (when `daemon.git.remote_sync` is `"pull"` or `"pull_push"`):
 
-**Post-iteration ops**: `git push` if `remote_sync` is `"pull_push"`.
+1. `git checkout -B <branch>` (reset to current HEAD).
+2. `git fetch origin <branch>`.
+3. Compare `HEAD` against `origin/<branch>` via `merge-base`:
+   - **In sync** (HEAD == origin/branch) → no-op.
+   - **Local-ahead** (origin is an ancestor of HEAD) → no-op; unpushed local commits will be pushed by the next post-iteration ops.
+   - **Remote-ahead** (HEAD is an ancestor of origin) → `git pull --ff-only origin <branch>`.
+   - **Diverged** (both sides have commits the other doesn't) → halt with `reason: git_pull_diverged`. Automatic resolution is unsafe (could drop the operator's commits); requires `/lazy-runtime.recover`.
 
-The daemon's branch is daemon-exclusive. Do not push to it from other processes while the daemon is running.
+**Post-iteration ops** (when `daemon.git.remote_sync` is `"pull_push"`):
+
+A retry loop (max 3 attempts):
+
+1. `git fetch origin <branch>`.
+2. Compare HEAD vs `origin/<branch>`:
+   - **Equal** → nothing to push; exit.
+   - **Local-ahead** (origin is ancestor of HEAD) → fast-forward `git push origin <branch>`. On race (push refused because origin moved between our fetch and our push), retry.
+   - **Diverged** → `git rebase origin/<branch>`. On conflict, `git rebase --abort && git reset --hard origin/<branch>` (this tick's work is discarded; the next tick re-runs the routine on top of the operator's commits) and exit cleanly (NO halt). On clean rebase, push; on race, retry.
+
+After the third failed push attempt, halt with `reason: git_push_failed`.
+
+Any other git failure during pre-iteration or post-iteration ops (network unreachable, missing remote tracking, permission denied, force-protection rejection) halts with `reason: git_remote_unavailable`.
+
+The daemon's branch is daemon-exclusive but coexists safely with operator pushes from a second machine: the operator's pushes are absorbed via the pre-tick pull or the post-tick rebase. Direct pushes from other processes on the **same** machine into the same branch are still unsupported (could race with the daemon's checkout reset).
 
 ### Example `lazy-core.runtime` block
 
@@ -57,6 +77,9 @@ The daemon's branch is daemon-exclusive. Do not push to it from other processes 
 {
   "lazy-core.runtime": {
     "_version": 1,
+    "supervisor": {
+      "dev_mode": false
+    },
     "daemon": {
       "git": {
         "branch": "daemon/main",
@@ -81,6 +104,16 @@ The daemon's branch is daemon-exclusive. Do not push to it from other processes 
   }
 }
 ```
+
+### `supervisor` block fields
+
+The `supervisor` key is optional and records install-time choices about how the supervisor unit (launchd plist / systemd service) was rendered. The daemon process itself does not read this block — it is consumed by `/lazy-core.install` Step 13 when (re-)rendering the unit.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `dev_mode` | bool | `false` | When `true`, the rendered supervisor invokes `lazy.runtime.sh` with `--dev-mode`. The shim then scans `<repo-root>/claude/*/.claude-plugin/plugin.json` and injects one `--plugin-dir <plugin-root>` per match before the runner's positional repo-root. The runner consults those paths first and falls back to the plugin cache. Useful when this repo IS the authoring vault for the plugins the daemon needs — local source edits take effect without a `/plugin update` cycle. |
+
+`dev_mode` is install-skill state, not runtime config — flipping it in `lazy.settings.json` does NOT affect the running daemon. To change effective mode, re-run `/lazy-core.install` so the supervisor unit is re-rendered, then reload the unit (`launchctl unload && launchctl load` on macOS, `systemctl --user daemon-reload && systemctl --user restart` on Linux).
 
 ---
 
@@ -263,8 +296,8 @@ Schema:
   },
   "daemon_halted": {
     "halted_since": <unix_ts>,
-    "triggered_by": "<routine_name>",
-    "reason": "uncommitted_changes",
+    "triggered_by": "<routine_name|_git_pre|_git_post|lazy-expert.pump>",
+    "reason": "uncommitted_changes|git_pull_diverged|git_push_failed|git_remote_unavailable",
     "dirty_paths": ["<git status --porcelain line>", ...],
     "expert": "<expert_name|null>",
     "job_id": "<job_id|null>"
@@ -272,7 +305,14 @@ Schema:
 }
 ```
 
-`daemon_halted` is absent when healthy. `git_watch` is absent when no `git`-type routines are registered.
+`daemon_halted` is absent when healthy. `git_watch` is absent when no `git`-type routines are registered. `dirty_paths` is empty for git-related halt reasons (the tree is presumed clean at halt time; the halt cause is in the branch/remote state, not the working tree).
+
+**Halt reasons (closed set):**
+
+- `uncommitted_changes` — routine left the working tree dirty (see § 10). Recovery: dirt-cleanup wizard via `/lazy-runtime.recover`.
+- `git_pull_diverged` — pre-tick fetch found that local and origin both have commits the other doesn't. Recovery: operator repairs branch state manually, then `/lazy-runtime.recover` clears the halt.
+- `git_push_failed` — post-tick push retried `POST_TICK_MAX_PUSH_ATTEMPTS` (3) times and kept failing. Recovery: operator investigates push refusal (auth, branch protection, persistent race), then `/lazy-runtime.recover`.
+- `git_remote_unavailable` — any other unexpected git failure during pre- or post-tick remote sync (network, permission, missing remote). Recovery: operator restores network/auth, then `/lazy-runtime.recover`.
 
 Persistence consequences:
 - `last_run` survives daemon restart and laptop sleep — slow routines (e.g. every 6h) are honored across restarts.
@@ -281,15 +321,20 @@ Persistence consequences:
 
 ---
 
-## 10. Working-tree protection
+## 10. Working-tree protection and halt invariants
 
-After every routine tick, the daemon runs `git status --porcelain` in the repo. Non-empty output writes a top-level `daemon_halted` block to state.json with `triggered_by`, `reason`, and `dirty_paths`, then stops scheduling routines until the operator runs `/lazy-runtime.recover`.
+The daemon halts (writes a top-level `daemon_halted` block to state.json and stops scheduling routines) on any of these conditions:
 
-Why daemon-wide rather than per-routine: the daemon's pre-iteration `git checkout -B <branch>` (when `daemon.git` is set) silently nukes any dirty work. If a single routine left dirt, even routines that operate purely in gitignored paths would read inconsistent tree state in the next iteration. Halting everything is the safe default.
+- **Dirty working tree after a routine** — `git status --porcelain` non-empty → `reason: uncommitted_changes`. Why daemon-wide rather than per-routine: the daemon's pre-iteration `git checkout -B <branch>` (when `daemon.git` is set) silently nukes any dirty work. If a single routine left dirt, even routines that operate purely in gitignored paths would read inconsistent tree state in the next iteration. Halting everything is the safe default.
+- **Pre-tick divergence** — local and origin branches both have commits the other doesn't → `reason: git_pull_diverged`. Automatic resolution would risk dropping the operator's commits, so the daemon halts and waits.
+- **Post-tick push exhausted retries** — the rebase+push retry loop failed `POST_TICK_MAX_PUSH_ATTEMPTS` times → `reason: git_push_failed`. Indicates either persistent operator-side races (rare) or branch-protection / auth refusal.
+- **Other pre- or post-tick git failure** — network, missing remote, permission, etc. → `reason: git_remote_unavailable`.
 
-Per-job attribution: when an expert (inside `expert-pump`) is the cause, the halt block also records `expert` + `job_id`. The job's `response.json` is overridden with `outcome: "error", error.category: "uncommitted_changes"` and `DONE` is touched.
+Per-job attribution: when an expert (inside `expert-pump`) is the cause of a dirty-tree halt, the halt block also records `expert` + `job_id`. The job's `response.json` is overridden with `outcome: "error", error.category: "uncommitted_changes"` and `DONE` is touched. Git-related halts carry no expert attribution (the daemon, not a routine, owns remote sync).
 
-Recovery: `/lazy-runtime.recover` walks the operator through commit / stash / discard / abort, then atomically clears the halt block once the tree is clean. See `claude/lazycortex-core/skills/lazy-runtime.recover/SKILL.md`.
+A pre-tick rebase conflict during post-tick remote sync is **not** a halt — the daemon discards the current tick's work (`rebase --abort && reset --hard origin/<branch>`) and logs `tick discarded: operator-conflict`. The next tick re-runs the routine on top of the operator's commits. Halting on a routine-conflict would block forever for any operator who edits the same files the routine touches.
+
+Recovery for every halt path: `/lazy-runtime.recover`. For `uncommitted_changes` the skill walks the operator through commit / stash / discard / abort. For git-related reasons the skill prints reason-specific repair guidance and asks the operator to fix the state externally before confirming resume (mode `manual-fix`). Once the tree is clean, the halt block is atomically cleared. See `claude/lazycortex-core/skills/lazy-runtime.recover/SKILL.md`.
 
 The check is read-only on the daemon side — the daemon never cleans the tree itself. The operator authors every commit in the recovery path.
 
@@ -359,7 +404,12 @@ lazycortex_runtime_up
 lazycortex_runtime_build_info{version,daemon_name,repo}
 ```
 
-`status` ∈ `{ok, error, timeout, crash}`; `reason` ∈ `{timeout, resolve, subprocess_error, unexpected, git_pre_failed, git_post_failed, uncommitted_changes}`; `state` ∈ `{ready, running, done}`; `kind` ∈ `{input, output, cache_read, cache_write}`.
+`status` ∈ `{ok, error, timeout, crash}`. `state` ∈ `{ready, running, done}`. `kind` ∈ `{input, output, cache_read, cache_write}`.
+
+The `reason` label is metric-specific:
+
+- On `routine_errors_total` (routine tick failures): `{timeout, resolve, subprocess_error, unexpected, git_pre_failed, git_post_failed}`.
+- On `daemon_halts_total` / `daemon_halted` (gauge): `{uncommitted_changes, git_pull_diverged, git_push_failed, git_remote_unavailable}` — matches the closed set in § 9.
 
 ### Shipping to a Prometheus + Grafana stack
 

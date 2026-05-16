@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, and change-history access.
-last_regen: 2026-05-13
+summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, daemon halt recovery, and change-history access.
+last_regen: 2026-05-16
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -268,9 +268,13 @@ It can get stuck when a session is interrupted mid-staging — for example, if C
 
 ## When does the runtime daemon halt, and how do I resume it?
 
-The daemon halts when a routine or expert job leaves the working tree dirty — meaning it wrote or modified tracked files without committing them. This is a safety guard: a dirty tree from one routine can corrupt the next routine's git operations. When a halt occurs, the daemon records the triggering routine, the expert and job ID (if it came from inside an expert), and the captured `git status` lines in `state.json`.
+The daemon halts in two distinct families of situations.
 
-Run `/lazy-runtime.recover` to get out. The skill reads the halt context, shows you exactly which paths are dirty, and asks how you want to clean up: commit the changes, stash them for later, discard them entirely, or abort (leave the daemon halted and exit). Once the tree is clean, the skill clears the `daemon_halted` block from `state.json` and the daemon resumes scheduling on its next iteration. If the tree is still dirty after cleanup (e.g. submodules left uncommitted state), the skill tells you to run `git status` manually and re-invoke it.
+**Working-tree halts** (`uncommitted_changes`) happen when a routine or expert job leaves modified or untracked tracked files behind without committing them. A dirty tree from one routine can corrupt the next routine's git operations, so the daemon stops and records the triggering routine, the expert and job ID (if the dirt came from inside an expert), and the captured `git status` lines in `state.json`.
+
+**Remote-sync halts** (`git_pull_diverged`, `git_push_failed`, `git_remote_unavailable`) happen when the daemon's pre- or post-tick remote sync fails in a way that automatic retry cannot resolve — for example, a diverged branch, persistent push rejection, or an unreachable origin.
+
+Run `/lazy-runtime.recover` to get out of either family. For working-tree halts, the skill shows you the dirty paths and asks how to clean up: commit the changes, stash them for later, discard them entirely, or abort and leave the daemon halted. For remote-sync halts, the skill prints reason-specific guidance (diverged-branch commands, auth checks, network diagnostics) and asks you to repair the situation by hand before confirming resume — the skill itself does not run git commands to fix these cases, because automatic resolution could silently drop your commits. Once the precondition holds, the skill atomically clears the `daemon_halted` block from `state.json` and the daemon resumes on its next iteration.
 
 ---
 

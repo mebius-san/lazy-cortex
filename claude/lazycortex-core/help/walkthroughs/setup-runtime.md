@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo serial daemon so the async expert team has an executor — install wizard, start the daemon, then unblock it with /lazy-runtime.recover if the working tree halts.
-last_regen: 2026-05-13
+last_regen: 2026-05-16
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, wizard asks about runtime, user opts in, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + lazy-core.runtime block; (2) User runs .claude/bin/lazy.runtime.sh (daemon starts, polls .experts/.jobs/ on interval); (3) Working tree goes dirty, daemon writes daemon_halted to .logs/lazy-core/runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
@@ -12,7 +12,7 @@ source_skills:
 ---
 # How do I bootstrap the runtime daemon and recover it if the working tree halts?
 
-The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines — without hitting Claude Code's subagent nesting limit. Setting it up takes three actions: run the runtime-daemon wizard inside `/lazy-core.install`, start the daemon with `.claude/bin/lazy.runtime.sh`, and know how to unblock it with `/lazy-runtime.recover` if a job or routine leaves the working tree dirty.
+The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines — without hitting Claude Code's subagent nesting limit. Setting it up takes three actions: run the runtime-daemon wizard inside `/lazy-core.install`, start the daemon with `.claude/bin/lazy.runtime.sh`, and know how to unblock it with `/lazy-runtime.recover` if a job or routine leaves the working tree dirty or a remote-sync operation fails.
 
 ## What you need
 
@@ -61,28 +61,26 @@ The daemon reads `lazy.settings.json[lazy-core.runtime]`, runs the `lazy-expert.
 
 After one polling interval, open `.logs/lazy-core/runtime/state.json` and confirm the `last_run` timestamp is recent. If the timestamp is absent or stale, check that the shim is executable (`ls -l .claude/bin/lazy.runtime.sh`) and that Python 3.12+ is on your `$PATH`.
 
-### Step 5 — Recover if the working tree halts
+### Step 5 — Recover if the daemon halts
 
-The daemon halts automatically when a routine or expert leaves the working tree dirty — it writes a `daemon_halted` block to `.logs/lazy-core/runtime/state.json` and stops scheduling. If you notice jobs stop processing, run:
+The daemon halts in two situations and writes a `daemon_halted` block to `.logs/lazy-core/runtime/state.json` in both cases. If you notice jobs stop processing, run:
 
 ```
 /lazy-runtime.recover
 ```
 
-The skill reads the halt context and surfaces:
+The skill reads the halt context and shows you `triggered_by` (which routine or `lazy-expert.pump` caused the halt), `expert` + `job_id` (when the halt came from inside an expert job), and `reason` (the halt family).
 
-- `triggered_by` — which routine or `lazy-expert.pump` caused the halt.
-- `expert` + `job_id` — populated when the dirt came from inside an expert job.
-- `dirty_paths` — the captured `git status --porcelain` lines.
-
-It then asks how to clean up before resuming:
+**Working-tree halt (`uncommitted_changes`)** — a routine or expert left uncommitted changes behind. The skill also shows `dirty_paths` (the captured `git status --porcelain` output) and asks how to clean up before resuming:
 
 - **commit** — stages everything and commits with a message you provide. Use when the dirty changes are intentional work you want to keep.
 - **stash** — runs `git stash push -u`. Tucks the dirt away so you can restore it manually later.
 - **discard** — runs `git checkout -- . && git clean -fd`. Throws away every dirty change. This is irreversible.
 - **abort** — leaves everything as-is and exits. The daemon stays halted until you clean up manually and re-run the skill.
 
-Once cleanup succeeds and the tree is clean, the skill atomically clears the `daemon_halted` block from `state.json`. The daemon resumes scheduling on its next iteration with no restart required.
+**Remote-sync halts (`git_pull_diverged` / `git_push_failed` / `git_remote_unavailable`)** — the daemon's pre- or post-tick remote sync hit an unrecoverable state. The skill does not attempt to fix these automatically (automatic resolution could silently drop your commits). Instead it surfaces reason-specific guidance — for example, inspecting `git log --oneline HEAD origin/<branch>` for a diverged branch, or checking network and `git remote -v` for a remote-unavailable halt. After you resolve the situation by hand, confirm **resume** to clear the halt block. The daemon's next tick re-evaluates; if the condition persists it will halt again with the same reason.
+
+Once cleanup or manual repair succeeds and the tree is clean, the skill atomically clears the `daemon_halted` block from `state.json`. The daemon resumes scheduling on its next iteration with no restart required.
 
 If the tree is still dirty after cleanup (e.g., a submodule left additional changes), the skill reports `still-dirty` and leaves the halt block in place. Run `git status` to inspect, resolve the remaining changes, and re-run `/lazy-runtime.recover`.
 
@@ -116,52 +114,48 @@ The routine dispatches one `kind=reflect` job per persona-marked expert on each 
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant installSkill as /lazy-core.install
-  participant fsWrite as File System
+  participant installSkill as /lazy-core.install wizard
+  participant fsConfig as .claude/ config files
   participant daemon as lazy.runtime.sh daemon
   participant jobsDir as .experts/.jobs/
   participant stateFile as state.json
   participant recoverSkill as /lazy-runtime.recover
 
-  Note over user,installSkill: Phase 1 — Install
-
+  Note over user,fsConfig: Phase 1 — Install and runtime opt-in
   user->>installSkill: run /lazy-core.install
-  installSkill->>user: prompt — enable runtime daemon?
+  installSkill->>user: prompt — enable expert runtime?
   user-->>installSkill: opt in
-  installSkill->>fsWrite: write .claude/bin/lazy.runtime.sh
-  installSkill->>fsWrite: write lazy.settings.json experts block
-  installSkill->>fsWrite: write lazy-core.runtime config block
+  installSkill->>fsConfig: write .claude/bin/lazy.runtime.sh
+  installSkill->>fsConfig: write lazy.settings.json [experts] block
+  installSkill->>fsConfig: write lazy-core.runtime config block
+  fsConfig-->>installSkill: files written
   installSkill-->>user: install complete
 
-  Note over user,jobsDir: Phase 2 — Daemon start
-
+  Note over user,jobsDir: Phase 2 — Daemon start and poll loop
   user->>daemon: execute .claude/bin/lazy.runtime.sh
-  Note over daemon: daemon starts, enters poll loop
+  daemon->>stateFile: write state running
   loop poll interval
     daemon->>jobsDir: scan .experts/.jobs/ for pending jobs
-    jobsDir-->>daemon: job list (may be empty)
+    jobsDir-->>daemon: job queue snapshot
   end
 
-  Note over user,recoverSkill: Phase 3 — Dirty-tree halt and recover
-
-  fsWrite->>stateFile: working tree goes dirty
-  daemon->>stateFile: detect dirty tree, write daemon_halted
-  Note over daemon,stateFile: daemon paused — will not process jobs
-
+  Note over user,recoverSkill: Phase 3 — Dirty tree halt and recovery
+  daemon->>stateFile: detect dirty working tree
+  daemon->>stateFile: write daemon_halted to state.json
   user->>recoverSkill: run /lazy-runtime.recover
-  recoverSkill->>stateFile: read daemon_halted halt context
-  stateFile-->>recoverSkill: halt reason + dirty-file list
-  recoverSkill-->>user: show halt context
-  user->>recoverSkill: pick cleanup mode (commit/stash/discard)
+  recoverSkill->>stateFile: read halt context from state.json
+  recoverSkill-->>user: show halt context and cleanup options
   alt commit
-    recoverSkill->>fsWrite: stage and commit dirty changes
+    user-->>recoverSkill: pick commit
+    recoverSkill->>fsConfig: stage and commit dirty changes
   else stash
-    recoverSkill->>fsWrite: git stash dirty changes
+    user-->>recoverSkill: pick stash
+    recoverSkill->>fsConfig: git stash dirty changes
   else discard
-    recoverSkill->>fsWrite: git checkout -- dirty files
+    user-->>recoverSkill: pick discard
+    recoverSkill->>fsConfig: git checkout to discard changes
   end
   recoverSkill->>stateFile: clear daemon_halted flag
-  stateFile-->>recoverSkill: state updated
-  recoverSkill-->>user: daemon cleared
-  daemon->>jobsDir: resume polling on next iteration
+  stateFile-->>daemon: flag cleared on next iteration
+  daemon->>jobsDir: resume polling .experts/.jobs/
 ```

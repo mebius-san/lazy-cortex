@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Run-log housekeeping and change-history access — clean up orphaned log directories, distill commits into themed prose, and ask "why was X changed?" across every source at once.
-last_regen: 2026-05-13
+last_regen: 2026-05-16
 diagram_spec:
   anchor: "How the members fit together"
   request: "Architecture diagram showing the two groups of members in the change-history block: (1) lazy-log.clean prunes the .logs/claude/ tree; (2) lazy-log.distill converts .logs/commits.jsonl into .logs/changelog.md; (3) lazy-log.recall, lazy-log.timeline, and lazy-log.summary read from changelog + run logs + git log + memory to answer history queries; (4) lazy-log.bullets reads git commits to produce a user-facing release block. Show the shared inputs (commits.jsonl, changelog.md, run logs) feeding the query agents."
@@ -52,12 +52,14 @@ immediate subdirectory of `.logs/claude/`, resolves the live canonical name set
 from your vault, and classifies each directory into one of five buckets:
 canonical (still active), rename-candidate (close match to a current name),
 pattern-clustered orphan (anonymous task-N or subagent-task-N folders),
-waivered (a skill that still exists but now carries a logging waiver), or other
-orphan. For each non-canonical directory it prompts you — one question at a
-time — whether to merge, distill to memory before deleting, delete outright, or
-leave alone. Substantive logs can be pushed into Hindsight project memory
-before the folder disappears, so the record survives the cleanup. Nothing on
-disk changes until you have answered every prompt.
+waivered (a skill that still exists but now carries a logging waiver and left
+residual logs behind), or other orphan. For canonical folders whose newest log
+is more than 30 days old, it also flags them as stale and asks what to do with
+them. For each non-canonical or stale directory it prompts you — one question
+at a time — whether to merge, distill to memory before deleting, delete
+outright, or leave alone. Substantive logs can be pushed into Hindsight project
+memory before the folder disappears, so the record survives the cleanup.
+Nothing on disk changes until you have answered every prompt.
 
 `lazy-log.distill` is the engine behind the internal changelog. It runs
 automatically after meaningful commits per the `lazy-log.logging` rule, or you
@@ -128,41 +130,42 @@ flowchart LR
     lazyLogSummary[lazy-log.summary]
   end
 
-  subgraph release [Release]
+  subgraph releaseBlock [Release Block]
     lazyLogBullets[lazy-log.bullets]
   end
 
-  runLogs -->|prunes tree| lazyLogClean
-  commitsJsonl -->|converts to changelog| lazyLogDistill
+  runLogs -->|prunes| lazyLogClean
+  commitsJsonl -->|converts| lazyLogDistill
   lazyLogDistill -->|writes| changelogMd
-  changelogMd -->|reads history| lazyLogRecall
-  changelogMd -->|reads history| lazyLogTimeline
-  changelogMd -->|reads history| lazyLogSummary
-  runLogs -->|reads run detail| lazyLogRecall
-  runLogs -->|reads run detail| lazyLogTimeline
-  runLogs -->|reads run detail| lazyLogSummary
-  gitLog -->|reads commits| lazyLogRecall
-  gitLog -->|reads commits| lazyLogTimeline
-  gitLog -->|reads commits| lazyLogSummary
-  memory -->|reads retained facts| lazyLogRecall
-  memory -->|reads retained facts| lazyLogSummary
+  changelogMd -->|feeds history| lazyLogRecall
+  changelogMd -->|feeds history| lazyLogTimeline
+  changelogMd -->|feeds history| lazyLogSummary
+  runLogs -->|feeds run context| lazyLogRecall
+  runLogs -->|feeds run context| lazyLogTimeline
+  runLogs -->|feeds run context| lazyLogSummary
+  gitLog -->|feeds commit history| lazyLogRecall
+  gitLog -->|feeds commit history| lazyLogTimeline
+  gitLog -->|feeds commit history| lazyLogSummary
+  memory -->|feeds retained facts| lazyLogRecall
+  memory -->|feeds retained facts| lazyLogSummary
   gitLog -->|reads commits| lazyLogBullets
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
   classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
 
-  class lazyLogClean action
-  class lazyLogDistill action
-  class lazyLogRecall action
-  class lazyLogTimeline action
-  class lazyLogSummary action
-  class lazyLogBullets action
   class commitsJsonl store
   class changelogMd store
   class runLogs store
   class gitLog store
   class memory store
+  class lazyLogClean action
+  class lazyLogDistill action
+  class lazyLogRecall service
+  class lazyLogTimeline service
+  class lazyLogSummary service
+  class lazyLogBullets entry
 ```
 
 ## See also
