@@ -38,20 +38,22 @@ In wizard mode (no `cfg`), ask via `AskUserQuestion`:
 
 > Which routine type?
 > - subprocess — periodic command (default)
-> - inbox — scan a dir, dispatch a job per file (moves files into job staging)
+> - inbox — scan a dir, fire once per file (job-queue moves the file; command leaves it in place)
 > - schedule — cron-driven; one fire per cron boundary
-> - git — watch <remote>/<branch>; dispatch a job per item
-> - md-scan — scan markdown files matching globs, filter by frontmatter; dispatch in-place (no file move)
+> - git — watch <remote>/<branch>; fire once per item
+> - md-scan — scan markdown files matching globs, filter by frontmatter; fire in-place (no file move)
 
 ### 1b. Collect type-specific fields
 
 Per type, ask only the required + commonly-needed optional fields. Schemas live in `claude/lazycortex-core/bin/routine_types.py::SCHEMAS`. Wizard prompts:
 
-- **subprocess** — `command` (list), `interval_sec` (int), `timeout_sec?` (int).
-- **inbox** — `inbox_dir` (path relative to repo), `expert` (name), `request` (JSON-shaped block; require `role`), `interval_sec`, `timeout_sec?`.
-- **schedule** — `cron` (5-field expression), then either `command` OR `expert` + `request` (validator enforces exactly one).
-- **git** — `repo_dir?` (default `.`), `remote?` (default `origin`), `branch`, `watch` (one of `new_commits` / `new_files` / `changed_files` / `deleted_files` / `renamed_files`), `path_filter?`, `expert`, `request`, `interval_sec`.
-- **md-scan** — `paths` (list of vault-relative globs, e.g. `["requests/*.md"]`), `frontmatter_filter` (dict of `key → value-or-list-of-values`; `null` matches missing keys, e.g. `{"request_status": [null, "draft"]}`), `agent` (plugin-namespaced agent name to dispatch), `interval_sec`, `timeout_sec?`. No file move — agent gets the absolute path of each match and edits in place.
+Every type ends with the same EITHER/OR question — `command` (list) OR `expert` (name) + `request` (JSON-shaped block). The validator enforces exactly-one; the wizard asks the question once at the end of the type-specific fields.
+
+- **subprocess** — `interval_sec` (int), `timeout_sec?` (int). Then EITHER `command` OR `expert` + `request`.
+- **inbox** — `inbox_dir` (path relative to repo), `interval_sec`, `timeout_sec?`. Then EITHER `command` OR `expert` + `request`. With `expert + request`: files are moved into job staging; with `command`: files stay in the inbox until the consumer removes them.
+- **schedule** — `cron` (5-field expression). Then EITHER `command` OR `expert` + `request`.
+- **git** — `repo_dir?` (default `.`), `remote?` (default `origin`), `branch`, `watch` (one of `new_commits` / `new_files` / `changed_files` / `deleted_files` / `renamed_files`), `path_filter?`, `interval_sec`. Then EITHER `command` OR `expert` + `request`.
+- **md-scan** — `paths` (list of vault-relative globs, e.g. `["requests/*.md"]`), `frontmatter_filter` (dict of `key → value-or-list-of-values`; `null` matches missing keys, e.g. `{"request_status": [null, "draft"]}`), `interval_sec`, `timeout_sec?`. Then EITHER `command` OR `expert` + `request`. No file move — the consumer gets the absolute path of each match and edits in place.
 
 Build a single `cfg` dict carrying `type` + the collected fields.
 

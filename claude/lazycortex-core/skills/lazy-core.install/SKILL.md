@@ -19,7 +19,7 @@ This skill has 16 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 4 — Sync authoring templates`
    - `Step 5 — Verify`
    - `Step 6 — Seed lazy.settings.json`
-   - `Step 7 — Bootstrap .logs/ directory`
+   - `Step 7 — Bootstrap .logs/, .runtime/, and lazy.settings.local.json gitignore`
    - `Step 8 — Migrate stale lazycortex-log hook registrations`
    - `Step 9 — Bootstrap runtime defaults`
    - `Step 10 — Bootstrap experts directory`
@@ -27,6 +27,7 @@ This skill has 16 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 11 — Expert-add wizard`
    - `Step 12 — Bootstrap expert-pump routine`
    - `Step 13 — Offer daemon supervisor install`
+   - `Step 13.5 — Document expert-spawn sandbox in settings.local.json`
    - `Step 14 — Report`
    - `Step 15 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
@@ -225,21 +226,28 @@ If any mutation happened, write the file with `version: 1` at the top. Preserve 
 
 One line per seeded default: `_builtin.<key> = <value> (<state>)`. Plus `_user`, `_project`: `created (empty)` if new, `unchanged` otherwise.
 
-## Step 7: Bootstrap .logs/ directory
+## Step 7: Bootstrap .logs/, .runtime/, and lazy.settings.local.json gitignore
 
-Create `.logs/` at the repo root and ensure `.gitignore` covers it. `.logs/` is gitignored runtime state: daemon output, recall logs, and the commit-recorder feed. This step runs unconditionally (it is not gated on runtime-setup confirmation) and is absorbed from the retired `lazy-log.install` skill.
+Create `.logs/` and `.runtime/` at the repo root, ensure `.gitignore` covers both, and ensure `.gitignore` also lists `.claude/lazy.settings.local.json` (the gitignored personal overlay companion to the tracked `lazy.settings.json`).
+
+- `.logs/` — gitignored runtime journal (daemon output, recall logs, commit-recorder feed).
+- `.runtime/` — gitignored non-log daemon state (currently `state.json` carrying `last_run` / `git_watch` / `daemon_halted`).
+- `.claude/lazy.settings.local.json` — gitignored personal-overlay file that `lazy_settings.load_section` deep-merges onto the tracked `lazy.settings.json`. No directory is created — the file is opt-in and materializes only when the consumer adds a local override. The `.gitignore` slot is reserved so accidental commits are impossible.
+
+All three concerns are handled by two helpers. This step runs unconditionally (not gated on runtime-setup confirmation); the `.logs/` half is absorbed from the retired `lazy-log.install` skill.
 
 Run via:
 
 ```
 Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 from pathlib import Path
-from lazy_install_phases import bootstrap_logs_dir
-print(bootstrap_logs_dir(Path('.')))
+from lazy_install_phases import bootstrap_logs_dir, bootstrap_lazy_settings_local_gitignore
+print('.logs/+.runtime/:', bootstrap_logs_dir(Path('.')))
+print('lazy.settings.local.json:', bootstrap_lazy_settings_local_gitignore(Path('.')))
 ")
 ```
 
-Outcome: `bootstrapped` (dir created and/or `.gitignore` updated) or `already-present` (both existed).
+Outcome per helper: `bootstrapped` (something was created/appended) or `already-present`.
 
 ## Step 8: Migrate stale lazycortex-log hook registrations
 
@@ -356,17 +364,16 @@ State **created** if written; **already-present** if it existed.
 
 ### Ensure `.gitignore` entries
 
-Read `<repo-root>/.gitignore` (or treat as empty if missing). Ensure it contains both of the following lines:
+Read `<repo-root>/.gitignore` (or treat as empty if missing). Ensure it contains the following line:
 - `.experts/.jobs/`
-- `.logs/lazy-core/runtime/`
 
-If either line is absent, append all missing lines to `.gitignore` with `Edit` (or `Write` if the file was missing). State **updated** if any line was appended; **already-present** if both were already there.
+`.logs/` and `.runtime/` are owned by Step 7's `bootstrap_logs_dir` helper and need no entry here. If the `.experts/.jobs/` line is absent, append it to `.gitignore` with `Edit` (or `Write` if the file was missing). State **updated** if appended; **already-present** otherwise.
 
 ## Step 10.5: Bootstrap .memory/ directory
 
 If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
 
-Otherwise, ensure `.memory/` exists and is **un-ignored** in `.gitignore` so memory notes are tracked in git (per `Spec §8.1`):
+Otherwise, ensure `.memory/` exists at the repo root and strip any legacy `!.memory/` line from `.gitignore` (older versions of this skill wrote a defensive un-ignore line; the line was selective paranoia and is now retired — memory notes track in git the normal way):
 
 ```
 Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
@@ -376,7 +383,7 @@ print(bootstrap_memory_dir(Path('.')))
 ")
 ```
 
-Outcome: `bootstrapped` (dir created and/or `.gitignore` updated) or `already-present` (both existed).
+Outcome: `bootstrapped` (dir created and/or legacy line stripped) or `already-present` (dir existed and no legacy line present).
 
 ## Step 11: Expert-add wizard
 
@@ -587,6 +594,66 @@ On `Linux systemd`:
 6. `Bash(systemctl --user enable --now lazy-core-runtime-<REPO_NAME>.service)`
 7. State **systemd-installed** (or **systemd-installed-dev-mode** when `<dev_mode>` is True).
 
+## Step 13.5: Document expert-spawn sandbox in settings.local.json
+
+If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
+
+Otherwise, the runtime daemon (Step 12+) spawns `claude -p --permission-mode dontAsk` subprocesses for every expert job. Without an explicit `<repo-root>/.claude/settings.local.json` sandbox + permission block, those spawns either run unrestricted (any earlier `bypassPermissions` left over) or are completely deny-by-default (`dontAsk` with no `permissions.allow`) and cannot Read/Write/Edit anything. Neither is correct.
+
+This step does NOT write the file — `settings.local.json` is per-machine state the operator owns. Instead it (a) shows the recommended block and (b) Edits the file in place ONLY at the operator's explicit go-ahead, MERGING into existing keys rather than overwriting.
+
+### 13.5a. Confirm
+
+```
+AskUserQuestion:
+  question: "Configure expert-spawn sandbox + permissions in `<repo-root>/.claude/settings.local.json`?"
+  description: "The runtime daemon will spawn `claude -p --permission-mode dontAsk` for every expert job. Without sandbox+permissions in settings.local.json those spawns can't Read/Write/Edit (or can read your entire home dir). settings.local.json is per-machine (gitignored). The skill will MERGE — never overwrite — your existing keys."
+  options: ["Yes — merge the recommended block", "Skip — I'll configure manually"]
+```
+
+On `Skip — I'll configure manually`: state outcome `skipped-per-user-choice`. Print the recommended block (below) for reference, then move to Step 14.
+
+### 13.5b. Recommended block
+
+Show the operator the full block they should have under `<repo-root>/.claude/settings.local.json`. Substitute `<repo-root>` with the absolute path of the current repo. Substitute `<plugin-source-N>` lines with one entry per plugin source directory the daemon will pass via `--plugin-dir` (Step 13a's `dev_mode` decision dictates whether these are in-repo `<repo-root>/claude/<plugin>/` paths or `~/.claude/plugins/cache/...` paths — list what the supervisor unit will actually use).
+
+```json
+{
+  "sandbox": {
+    "enabled": true,
+    "filesystem": {
+      "allowRead":  ["<repo-root>", "<plugin-source-1>", "<plugin-source-2>", "..."],
+      "allowWrite": ["<repo-root>"]
+    }
+  },
+  "additionalDirectories": ["<plugin-source-1>", "<plugin-source-2>", "..."],
+  "permissions": {
+    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet"],
+    "deny":  ["Bash(find /*)", "Bash(find /Users/*)", "Bash(grep -r /*)", "Bash(grep -R /*)", "Bash(rg /*)", "Bash(rg --files /*)", "Bash(ls /Users/*)"]
+  }
+}
+```
+
+Tilde-form (`~/...`) is acceptable for paths the operator wants portable across machines — Claude Code expands `~` at load time. Absolute paths are equally valid.
+
+### 13.5c. Merge into settings.local.json
+
+`Read <repo-root>/.claude/settings.local.json`. Three cases:
+
+1. **Missing or unparseable** → `Write` the recommended block verbatim as a new file. State **created**.
+2. **Present, no `sandbox` / `permissions` / `additionalDirectories` keys** → `Edit` the file to add all three blocks (preserve every existing top-level key). State **appended**.
+3. **Present, one or more of those keys already there** → for each clashing key, `AskUserQuestion`:
+   - `sandbox` / `additionalDirectories` collision → ask once: "Union the recommended paths into the existing list, or keep the existing list verbatim?" Options: "Union" / "Keep local". On Union, `Edit` to add only the paths that aren't already present. On Keep local, leave that key alone.
+   - `permissions.allow` collision → same wizard: "Union the recommended tool names with the existing allow list?" Options: "Union" / "Keep local".
+   - `permissions.deny` collision → same wizard.
+   State **merged-N** where N is the number of keys that got unions; **kept-local-N** for those left untouched.
+
+Never replace an entire key with the recommended value. The operator's existing settings.local.json is authoritative for shape; this skill only adds missing scope.
+
+### Outcome
+
+One line per write action: `created` / `appended` / `merged-N keep-local-K` / `skipped-per-user-choice` / `skipped-not-daemon-repo`.
+
 ## Step 14: Report
 
 Report to the user:
@@ -604,6 +671,7 @@ Report to the user:
 - Expert-add wizard outcome (Step 11)
 - Expert-pump routine registration outcome (Step 12)
 - Daemon supervisor install outcome (Step 13)
+- Sandbox/permissions merge outcome (Step 13.5)
 
 ## Step 15: Log the run
 
@@ -617,7 +685,7 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **`/lazy-core.install` aborts: "plugin cache is empty — run `/plugin update` first"** — the rule glob under the plugin's `installPath` returned zero files → run `/plugin update lazycortex-core@lazycortex` to refresh the cache, then re-run.
 - **Step 4 aborts: "plugin cache is broken" (templates directory empty)** — the `templates/core/` directory inside the plugin cache is missing or empty → run `/plugin update lazycortex-core@lazycortex`, then re-run.
 - **Step 6 fails: "default-tiers.json missing or invalid"** — `lazy-core.agent-models/default-tiers.json` cannot be read or parsed → reinstall `lazycortex-core` to restore the file, then re-run.
-- **Step 7 fails: `.logs/` not a directory** — a file named `.logs` already exists at the repo root → remove or rename it, then re-run.
+- **Step 7 fails: `.logs/` or `.runtime/` not a directory** — a file by either of those names already exists at the repo root → remove or rename it, then re-run.
 - **Step 7 fails: `.gitignore` unwritable** — `bootstrap_logs_dir` raised a permission or I/O error → check permissions on the repo root, then re-run.
 - **Step 8 fails: settings.json malformed JSON** — one of the four standard settings paths contains invalid JSON → fix the file manually, then re-run.
 - **Step 9 fails: settings file unwritable** — `lazy_settings.save_section` raises a permission or I/O error when writing `lazy-core.runtime` into `.claude/lazy.settings.json` → check file permissions on `.claude/lazy.settings.json` and the `.claude/` directory, then re-run.

@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
-last_regen: 2026-05-16
+last_regen: 2026-05-23
 diagram_spec:
   anchor: "How memory grows over time"
   request: "Sequence diagram showing user invoking mark-persona, then dispatching jobs (accumulating run logs), then invoking reflect which reads run logs + existing memory notes and calls lazy-memory.write to produce .memory/<expert>/<slug>.md, and finally a git commit sealing the notes."
@@ -29,9 +29,9 @@ After this walkthrough your expert:
 - `lazy-core.install` has run in this repo (`.experts/` and `.memory/` exist).
 - At least one expert is registered in `.claude/lazy.settings.json[experts]` and has run at least a few jobs so run logs exist under `.logs/claude/<expert>/`.
 - The runtime daemon is running (`./run.sh`). If it halted, run `/lazy-runtime.recover` first.
-- You know the expert's registered name (the key in `lazy.settings.json[experts]`).
+- You know the expert's registered name — the key under `experts` in `.claude/lazy.settings.json`.
 
-## The journey
+## The flow
 
 ### Step 1 — Opt the expert into the memory subsystem
 
@@ -46,7 +46,7 @@ expert:        <your-expert>
 aspects_after: lazycortex-core:lazy-memory.persona-aspect
 ```
 
-If the skill reports `<expert> is not registered in lazy.settings.json[experts]`, verify the name matches a key under `experts` in `.claude/lazy.settings.json`, then re-run.
+If the skill reports `<expert> is not registered in lazy.settings.json[experts]`, verify the name matches a key under `experts` in `.claude/lazy.settings.json`, then re-run. If the expert has never been registered at all, run `/lazy-core.install` and step through the expert wizard first.
 
 ### Step 2 — Dispatch real jobs to accumulate run logs
 
@@ -127,7 +127,7 @@ Expected state:
 - One `<topic>.md` per tag the expert used, under `.memory/<expert>/.tags/`, listing the notes tagged with that topic.
 - Matching entries in the global `.memory/.tags/` aggregator, pointing at the per-expert tag file.
 
-All tags in the note frontmatter carry the `memory/` prefix (e.g. `memory/auth`, `memory/patterns`). If a tag is missing the prefix, `/lazy-memory.write` would have rejected the note with `frontmatter-invalid: tag must be prefixed memory/` — so any note that landed successfully has valid tags.
+All tags in note frontmatter carry the `memory/` prefix (e.g. `memory/auth`, `memory/patterns`). If a tag is missing the prefix, `/lazy-memory.write` would have rejected the note with `frontmatter-invalid: tag must be prefixed memory/` — so any note that landed successfully has valid tags.
 
 To check for broader memory-hygiene issues (missing required fields, malformed frontmatter) across the whole tree:
 
@@ -163,39 +163,3 @@ The expert now reads its memory notes at the start of every job. As it handles m
 To extend memory to another expert, start again at Step 1 with the new expert's name.
 
 ## How memory grows over time
-
-```mermaid
-%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
-sequenceDiagram
-  participant user as User
-  participant claude as Claude (Coordinator)
-  participant jobRunner as Job Runner
-  participant runLogs as Run Logs (.logs/)
-  participant memoryNotes as Memory Notes (.memory/)
-  participant lazyMemory as lazy-memory.write
-  participant git as Git
-
-  user->>claude: mark-persona <expert>
-  claude-->>user: persona activated
-
-  loop for each dispatched job
-    user->>claude: dispatch job
-    claude->>jobRunner: run job task
-    jobRunner-->>runLogs: append run log entry
-    jobRunner-->>claude: job result
-    claude-->>user: job complete
-  end
-
-  user->>claude: reflect
-  Note over claude,runLogs: reflect phase begins
-  claude->>runLogs: read accumulated run logs
-  runLogs-->>claude: run log entries
-  claude->>memoryNotes: read existing notes for <expert>
-  memoryNotes-->>claude: existing .memory/<expert>/*.md
-  claude->>lazyMemory: write distilled notes
-  lazyMemory-->>memoryNotes: write .memory/<expert>/<slug>.md
-  lazyMemory-->>claude: notes written
-  claude->>git: git commit -m "reflect: seal <expert> memory notes"
-  git-->>claude: commit sealed
-  claude-->>user: reflect complete
-```

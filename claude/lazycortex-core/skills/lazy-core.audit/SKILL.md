@@ -42,14 +42,16 @@ Check two paths: `claude/lazycortex-core/rules/lazy-log.logging.md` (plugin sour
 - Glob `.claude/rules/lazy-log.logging.md`. If absent, also Glob `$HOME/.claude/rules/lazy-log.logging.md` (expand `$HOME` first via `Bash(echo $HOME)`). If neither consumer path exists → `[WARN] lazy-log.logging.md not installed in any consumer scope (.claude/rules/ or ~/.claude/rules/) — run /lazy-core.setup`.
 - If the rule file at the plugin source path exists but has no YAML frontmatter `description:` key → `[WARN] lazy-log.logging.md plugin source has no frontmatter description | claude/lazycortex-core/rules/lazy-log.logging.md`.
 
-### L2 — `.logs/` directory state
+### L2 — `.logs/` and `.runtime/` directory state
 
 - `Bash(test -d .logs && echo present || echo absent)`. If absent → `[WARN] .logs/ directory missing at repo root — run /lazy-core.setup to bootstrap`.
+- `Bash(test -d .runtime && echo present || echo absent)`. If absent → `[WARN] .runtime/ directory missing at repo root — run /lazy-core.setup to bootstrap`.
 
-### L3 — `.gitignore` covers `.logs/`
+### L3 — `.gitignore` covers `.logs/` and `.runtime/`
 
-- Read `.gitignore`. If absent → `[WARN] .gitignore not found — cannot verify .logs/ coverage | .gitignore`.
-- If present but neither `.logs/` nor `.logs` appears in the file → `[WARN] .gitignore does not exclude .logs/ — commits will include runtime state | .gitignore`.
+- Read `.gitignore`. If absent → `[WARN] .gitignore not found — cannot verify .logs/ or .runtime/ coverage | .gitignore`.
+- If present but neither `.logs/` nor `.logs` appears in the file → `[WARN] .gitignore does not exclude .logs/ — commits will include runtime journal | .gitignore`.
+- If present but neither `.runtime/` nor `.runtime` appears in the file → `[WARN] .gitignore does not exclude .runtime/ — commits will include daemon state.json | .gitignore`.
 
 ### L4 — `logging-waiver:` value validation
 
@@ -584,11 +586,11 @@ Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings
 Render Phase 1 inline findings.
 
 - **Logging rule presence** (FAIL / WARN) — one line per L1 finding. Omit the sub-section if all pass.
-- **`.logs/` directory** (WARN) — one line for L2 if absent. Omit if present.
-- **`.gitignore` coverage** (WARN) — one line per L3 finding. Omit if covered.
+- **`.logs/` and `.runtime/` directories** (WARN) — one line per L2 finding (each directory is checked independently). Omit if both present.
+- **`.gitignore` coverage** (WARN) — one line per L3 finding (`.logs/` and `.runtime/` are checked independently). Omit if both covered.
 - **`logging-waiver:` value** (FAIL) — one line per L4 finding. Omit if all valid.
 
-If all L1–L4 checks pass: emit a single `PASS: logging rule installed, .logs/ present, .gitignore covers .logs/, all waiver values valid` summary line.
+If all L1–L4 checks pass: emit a single `PASS: logging rule installed, .logs/ + .runtime/ present, .gitignore covers both, all waiver values valid` summary line.
 
 ### Recommendations
 
@@ -608,8 +610,8 @@ If all L1–L4 checks pass: emit a single `PASS: logging rule installed, .logs/ 
 - Routine command FAIL → install the missing plugin or remove the unresolvable routine entry.
 - Daemon stalled → run `/lazy-core.doctor` for the restart fix-offer.
 - Logging rule not installed in consumer scope → run `/lazy-core.setup` to copy `lazy-log.logging.md` to `.claude/rules/`.
-- `.logs/` missing → run `/lazy-core.setup` to bootstrap the directory.
-- `.gitignore` missing `.logs/` entry → add `.logs/` to `.gitignore` manually or via `/lazy-core.setup`.
+- `.logs/` or `.runtime/` missing → run `/lazy-core.setup` to bootstrap the directory.
+- `.gitignore` missing `.logs/` or `.runtime/` entry → add the missing line to `.gitignore` manually or via `/lazy-core.setup`.
 - `logging-waiver:` FAIL → replace empty/boolean waiver value with a concrete string reason per `lazy-core.skill-writing § 1`.
 - Note: system prompt, skill registry, MCP instructions, deferred tool list are injected by Claude Code and cannot be reduced by the user.
 

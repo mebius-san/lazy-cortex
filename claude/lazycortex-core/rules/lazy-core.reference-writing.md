@@ -80,6 +80,18 @@ The `version:` frontmatter field on protocols is the **protocol's own** version 
 
 Reference files document contracts, schemas, and protocols. They MUST NOT contain executable steps, "Execution discipline" preambles, or Report sections — those belong in skills/agents that *apply* the contract.
 
+## 9. Protocol scope fence — no consumer-config leakage
+
+A `*-protocol.md` file documents the WIRE contract: what the dispatcher writes into `request.json`, what the expert writes into `response.json`, the per-kind contents of `source/` / `context/` / `result/`, and the side-effect rules the expert respects while handling one request. See `lazy-core.expert-protocols-contract.md § 1 Out of scope` for the full negative list.
+
+A `*-protocol.md` file MUST NOT include:
+
+- `lazy.settings.json` shape — no `routines:`, no `experts:`, no `review.classes:` JSON snippets. Consumer config goes in the consumer plugin's functional spec (`docs/specs/…`) and its configure-wizard skill (`<plugin>.configure` or equivalent).
+- Tutorial JSON snippets showing "how to register this expert" or "where to put this in settings".
+- Lifecycle prose tied to the consumer's state machine that goes beyond what the expert observes per request (`role`, `source/`, `context/`, `result/`, declared fields). Cross-job state transitions belong in the consumer's spec.
+
+`lazy-core.audit` flags any `*-protocol.md` containing the strings `lazy.settings.json`, `review.classes`, `routines:`, or top-level `experts:` JSON keys as `WARN` ("protocol leaks consumer-config schema; see § 9 of `lazy-core.reference-writing`"). The check has a waiver path for the meta-contract itself (`lazy-core.expert-protocols-contract.md`), which describes what protocols are and necessarily references the settings tree.
+
 ## Enforcement
 
 `lazy-core.audit` runs the checks above on `.claude/references/*.md`, `~/.claude/references/*.md`, and `claude/*/references/*.md`. `lazy-core.doctor` Phase 3 surfaces the findings and prompts for fixes. Subtype-specific deeper validation (e.g. protocol §§ 4.1–4.9 from `lazy-core.expert-protocols-contract.md`) is enforced by `lazy-core.audit`'s expert-runtime phase.

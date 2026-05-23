@@ -11,7 +11,7 @@ The runtime daemon halts in two distinct families of situations:
 - **`uncommitted_changes`** — a routine or expert left the working tree dirty. The skill walks the operator through commit / stash / discard / abort.
 - **`git_pull_diverged` / `git_push_failed` / `git_remote_unavailable`** — pre- or post-tick remote sync hit an unrecoverable state. The skill describes the situation and asks the operator to repair it externally (manual git ops, network fix, etc.) before confirming resume.
 
-In both families the skill ends with an atomic clear of the `daemon_halted` block from `<repo>/.logs/lazy-core/runtime/state.json`. The daemon resumes scheduling on its next iteration.
+In both families the skill ends with an atomic clear of the `daemon_halted` block from `<repo>/.runtime/state.json`. The daemon resumes scheduling on its next iteration.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -29,7 +29,7 @@ This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Step 1 — Read halt context
 
-Load `daemon_halted` from `<repo>/.logs/lazy-core/runtime/state.json`:
+Load `daemon_halted` from `<repo>/.runtime/state.json`:
 
 ```
 Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
@@ -166,8 +166,8 @@ input: "mode=<mode>"
 
 ## Failure modes
 
-- **"Daemon is not halted. Nothing to recover."** — the daemon was not in halt state when this skill ran → no action needed; verify with `cat .logs/lazy-core/runtime/state.json`.
+- **"Daemon is not halted. Nothing to recover."** — the daemon was not in halt state when this skill ran → no action needed; verify with `cat .runtime/state.json`.
 - **"working tree still dirty; refusing to resume"** — the cleanup did not produce a clean tree (e.g., submodules left dirt, or the operator chose `abort`) → run `git status` manually, resolve, and re-invoke `/lazy-runtime.recover`.
 - **"commit mode requires a non-empty message"** — operator picked commit but provided no message → re-invoke and supply a message.
-- **"`.logs/lazy-core/runtime/state.json` unparseable"** — state file is corrupt → inspect manually; the daemon treats unparseable state as "not halted" and resumes on next iteration, but you may have lost `last_run` history.
+- **"`.runtime/state.json` unparseable"** — state file is corrupt → inspect manually; the daemon treats unparseable state as "not halted" and resumes on next iteration, but you may have lost `last_run` history.
 - **Manual-fix path: halt re-fires immediately after resume** — the operator confirmed they fixed a `git_pull_diverged` / `git_push_failed` halt, but the underlying state was not actually resolved (branch still diverged, push still rejected). The next tick's `_git_pre` / `_git_post` re-detects the same condition and halts again with the same reason → reinspect with `git fetch origin <branch>; git log --oneline HEAD origin/<branch>` and address the actual cause before re-running `/lazy-runtime.recover`.

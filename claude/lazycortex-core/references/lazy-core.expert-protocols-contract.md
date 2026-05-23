@@ -19,6 +19,14 @@ It is referenced from a **routine entry** in `lazy.settings.json` (the routine d
 
 **Scope**: a protocol file defines only the protocol-specific contract — the `kind` enum, `role` vocabulary, field shapes, and side-effect rules for one protocol. Standard job-dir and JSON shapes (§§ 2–3) apply universally and are not repeated per protocol.
 
+**Out of scope — protocol files MUST NOT include**:
+
+- The consumer's `lazy.settings.json` shape — `routines:`, `experts:`, `review.classes:`, or any other settings-tree fragment. How a consumer wires routines, registers experts, or groups class-level expert lists is consumer configuration; it belongs in the functional spec for the consumer plugin and in the configure-wizard skill, not in the wire protocol.
+- Tutorial JSON snippets that show "how to declare this expert" or "where to put this in settings". A protocol describes what the dispatcher sends to the expert and what the expert sends back — nothing about how a project is configured to dispatch in the first place.
+- Lifecycle prose tied to a specific consumer's state machine that goes beyond what the expert observes per request (`role` value, `source/`, `context/`, `result/`, fields documented in this contract). Cross-job state transitions are the consumer's concern.
+
+The protocol contract is the wire between dispatcher and expert. Anything that lives on either end of that wire (consumer config, state machine internals, agent persona) is out of scope. When in doubt: if an expert running this protocol does not need the information to handle one request, it does not belong in the protocol file.
+
 **Versioning by filename** (§ 6). Incompatible changes ship as a new file with a new name; the old file stays until all consumers migrate.
 
 ---
@@ -232,18 +240,34 @@ Protocols may subset to fewer categories. They may not introduce new category na
 
 ---
 
-## 5. Versioning
+## 5. Commit responsibility
+
+Whoever changes a file is responsible for committing that file. No actor — agent, daemon, dispatcher, pump, hook, anything — ever commits the whole tree or stages with wildcards (`git add .` / `git add -A` / `git commit -a` are forbidden). Each commit covers exactly the paths its author intentionally changed and nothing else.
+
+Concrete consequences:
+
+- **Agents** commit what they changed inside the **source project tree** (the document they were dispatched to revise, files they explicitly wrote per the protocol's side-effect rules). Agents NEVER commit anything under their own job dir (`.experts/.jobs/<expert>/<job-id>/` — request.json, response.json, result/, source/, context/, …). Job-dir is private scratch; it must be gitignored AND must never be `git add`-ed.
+- **Dispatcher / daemon** commits only what dispatcher/daemon itself wrote (mechanical banner-tick edits, scaffolding inserts, finalize strips, history-entry appends). Never any path that an upstream actor edited.
+- **Operator** commits operator's own work, on the operator's schedule.
+
+If after all actors finish the working tree is still dirty, somebody violated this contract. The dirty paths plus `git blame` / `git log --diff-filter=M --follow` identify who. The contract makes that identification deterministic — there is exactly one author per change, with the author named.
+
+The system MUST be correct regardless of whether an individual actor honoured this rule on any given run. The contract defines responsibility; behaviour-under-violation defines diagnostics, not correctness. A dispatcher that loses an agent's response because the agent also committed it is a dispatcher bug — the contract is not a runtime invariant the dispatcher may assume.
+
+---
+
+## 6. Versioning
 
 Protocols are versioned **by filename**. There is no version field, no version syntax in reference strings.
 
 - **Backward-compatible changes** (add optional field, add new `kind`, clarify prose): edit the existing file.
 - **Incompatible changes** (rename a `kind`, remove a field, change `outcome` semantics): create a new file with a new name (e.g. `lazy-review.doc-review-v2-protocol.md`). The old file stays. Consumers migrate by updating routine cfg entries in `lazy.settings.json` to reference the new name.
 
-No version number is embedded in the reference string (`lazycortex-review:lazy-review.doc-review-protocol`). Consumers that need the old contract keep referencing the old filename.
+No version number is embedded in the reference string. Consumers that need the old contract keep referencing the old filename.
 
 ---
 
-## 6. Validation expectations
+## 7. Validation expectations
 
 `lazy-core.audit` (expert-runtime phase) checks:
 
@@ -257,6 +281,6 @@ Failures surface as `FAIL` findings; missing-but-optional content (e.g. § 4.5 "
 
 ---
 
-## 7. Worked example
+## 8. Worked example
 
 See `lazycortex-review/references/lazy-review.doc-review-protocol.md` (forward reference — created by the dev-stage review redesign, not this document). That file is the canonical implementation of a full protocol against this contract.

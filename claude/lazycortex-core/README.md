@@ -90,7 +90,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [agent-models](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/agent-models.md) — Assign haiku/sonnet/opus tiers to every agent in your vault and let the model-router hook route each dispatch automatically.
 - [change-history](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/change-history.md) — Run-log housekeeping and change-history access — clean up orphaned log directories, distill commits into themed prose, and ask "why was X changed?" across every source at once.
 - [experts](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/experts.md) — Dispatch jobs to named expert workers, keep the main session free, and collect results when the daemon finishes them.
-- [git-coordination](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/git-coordination.md) — Inspect and manually break the per-repo staging lock that prevents hooks and skills from stomping each other's git index changes.
+- [git-coordination](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/git-coordination.md) — Inspect and manually break the per-repo staging lock that keeps concurrent hooks and skills from corrupting each other's git index changes.
 - [guardian](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/guardian.md) — Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/install-and-audit.md) — Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
 - [memory](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/memory.md) — Per-expert long-term memory tracked in git — experts consult notes before primary work, write new notes as a side-effect of jobs, and consolidate via reflect passes.
@@ -112,6 +112,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 | `lazy-log.recall` | Search all change-history sources (run logs, changelog, raw commit log, git history, memory) for a query. Returns ranked matches with git SHAs so the user can jump to the actual commit. Use when the user asks 'why was X changed?' or 'when did we change Y?' |
 | `lazy-log.summary` | Synthesize a multi-paragraph summary of all changes related to a topic across time (not chronological). Use when the user wants to understand 'the whole story' of a feature, refactor, or area of the codebase. |
 | `lazy-log.timeline` | Generate a chronological timeline view of all changes matching a date range or topic. Combines changelog entries, commits, and AI run logs. Use when the user wants a 'what happened when' view. |
+| `lazy-runtime.doctor` | Autonomous runtime doctor — triages DEAD expert jobs and dirty-tree halts older than 1 hour, decides retry vs permanent-fail vs commit-system-noise, applies fixes via recover.py primitives. Dispatched hourly by the `lazy-runtime.doctor` routine. Receives one context bundle per invocation; produces one response.json with the actions taken. |
 
 ## Commands
 
@@ -139,7 +140,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Hook | Trigger | Description |
 |---|---|---|
-| `lazy-core.git-guard` | `Bash`, `mcp__git__git_add`, `mcp__git__git_commit`, `mcp__git__git_reset` | Pre/PostToolUse hook: serialize git staging across Claude Code sessions. |
+| `lazy-core.git-guard` | `Bash`, `mcp__git__git_add`, `mcp__git__git_commit`, `mcp__git__git_reset`, `Stop`, `SubagentStop` | Pre/PostToolUse + Stop/SubagentStop hook: serialize git staging across Claude Code sessions and refuse to end a turn with a non-empty git index. |
 | `lazy-core.model-router` | `Agent` | PreToolUse hook — route Agent dispatches to a configured model. |
 | `lazy-guard.check-public` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: scan staged git changes for secrets, PII, and infrastructure |
 | `lazy-guard.settings` | `Edit\|Write` | PreToolUse hook: guard Claude Code settings files against dangerous changes. |

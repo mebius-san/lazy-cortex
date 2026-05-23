@@ -14,9 +14,11 @@
 # Claude Code
 
 .claude/settings.local.json
+.claude/lazy.settings.local.json
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 .logs/
+.runtime/
 
 
 # ---------------------------------------------------------------------------------------
@@ -25,12 +27,6 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
-
-# ---------------------------------------------------------------------------------------
-# Test output
-
-tests/review/interactive/snapshots/
 
 
 # ---------------------------------------------------------------------------------------

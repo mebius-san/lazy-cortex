@@ -46,8 +46,6 @@ Explicit "you must …" statements that bind every expert composing this aspect.
 Authoring notes (delete before saving):
 
 - Placement: `<plugin>/references/<name>-aspect.md`. The suffix triggers this template via `lazy-core.scaffold`.
-- Reference key: `<plugin>:<name>-aspect` in `lazy.settings.json[experts][<expert>].aspects[]` resolves via `reference_resolver.resolve(..., category="aspects", ...)`.
 - Versioning by filename: incompatible changes ship as a new file (e.g. `<name>-v2-aspect.md`); the old file stays until consumers migrate. No version field, no version syntax in reference strings.
 - Contract source of truth: `claude/lazycortex-core/references/lazy-core.expert-aspects-contract.md` — read it before authoring a new aspect.
-- Worked example: `claude/lazycortex-core/references/lazy-memory.persona-aspect.md`.
 -->

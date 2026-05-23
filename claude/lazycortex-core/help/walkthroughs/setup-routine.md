@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-last_regen: 2026-05-16
+last_regen: 2026-05-23
 diagram_spec:
   anchor: "How registration and pickup flow"
   request: "Sequence diagram showing the user running /lazy-routine.register, the skill writing lazy.settings.json, the daemon picking up the new routine on its next cycle without restart, and the user later running /lazy-routine.unregister to remove it. Include the built-in protection check for lazy-expert.pump."
@@ -12,30 +12,37 @@ source_skills:
 ---
 # Register a periodic routine with the runtime daemon
 
-The runtime daemon runs registered plugin routines in serial order on a schedule you control — no two routines ever contend over the working tree or git state. This walkthrough shows you how to add a routine for your plugin, verify the daemon has picked it up, and remove it cleanly when you no longer need it. The two skills involved are `/lazy-routine.register` (a type-aware wizard that validates and writes to `lazy.settings.json`) and `/lazy-routine.unregister` (an idempotent removal that protects the built-in `lazy-expert.pump`).
+The runtime daemon runs registered plugin routines in serial order on a schedule you control — no two routines ever contend over the working tree or git state. This walkthrough covers the full round-trip: add a routine for your plugin, confirm the daemon picks it up on its next cycle without a restart, and remove it cleanly when the work is done. The two skills are `/lazy-routine.register` (a type-aware wizard that validates and writes to `lazy.settings.json`) and `/lazy-routine.unregister` (an idempotent removal that protects the built-in `lazy-expert.pump` from accidental deletion).
 
 ## Outcome
 
-After completing this walkthrough you know how to register any of the five routine types, confirm the daemon picks the routine up on its next cycle without a restart, and remove it cleanly. At the end of the register path the routine's name appears in `routines` in `.claude/lazy.settings.json` and the daemon is scheduling it automatically. At the end of the unregister path the entry is gone and the daemon skips it from the next cycle forward.
+After this walkthrough you know how to register any of the five routine types, verify the daemon picks the new routine up without a restart, and remove it cleanly. At the end of the register path the routine's name appears in the `routines` map in `.claude/lazy.settings.json` and the daemon is scheduling it automatically. At the end of the unregister path the entry is gone and the daemon skips it from the next cycle forward.
 
 ## What you need
 
 - `lazycortex-core` installed in the project with the expert runtime enabled (`/lazy-core.install` with daemon opt-in complete, `run.sh` present).
 - `.claude/lazy.settings.json` already bootstrapped and writable — re-run `/lazy-core.install` if it is absent.
 - A dot-namespaced routine name in `<plugin>.<verb>` form (e.g. `lazy-review.tick`, `acme-lint.sweep`).
-- For `inbox`-type routines: the inbox directory must be gitignored (the wizard will offer to add it if it is not).
+- For `inbox`-type routines: the inbox directory should be gitignored — the wizard checks and offers to add it if not.
 
 ## The journey
 
-### Step 1 — Pick the routine type
+### Step 1 — Decide which routine type fits your use case
 
-Before running the wizard, decide which of the five types fits what your routine does. The daemon runs all routines serially — one at a time — so every type shares the same no-contention guarantee.
+Before running the wizard, decide which of the five types matches what your routine does. All types share the same serial no-contention guarantee — the daemon runs one routine at a time.
 
-- **subprocess** — run a CLI command on a fixed interval (e.g. every 300 seconds). Use this for lint sweeps, data refreshes, or any periodic shell invocation. Required fields: `command` (list), `interval_sec`.
-- **inbox** — watch a directory, dispatch one expert job per file found, and move processed files out. Use for async fan-out patterns where files arrive asynchronously. Required fields: `inbox_dir`, `expert`, `request`, `interval_sec`.
-- **schedule** — fire once per cron boundary (5-field cron expression). Use when wall-clock timing matters more than a fixed cadence. Required fields: `cron`, and either `command` or `expert` + `request` (exactly one).
-- **git** — watch a branch for new commits, new files, changed files, deleted files, or renamed files and dispatch a job per item. Use for post-commit automation scoped to a remote branch. Required fields: `branch`, `watch`, `expert`, `request`, `interval_sec`.
-- **md-scan** — scan markdown files matching vault-relative globs, filter by frontmatter values, and dispatch one agent job per match. Files are edited in place — no file move. Use for frontmatter-driven automation where a flag in the file drives processing (e.g. `request_status: draft` triggers a review pass). Required fields: `paths` (list of globs), `frontmatter_filter` (dict), `agent`, `interval_sec`.
+Every type also takes one of two dispatch shapes:
+
+- `command` — spawn a subprocess on each fire, with PID-based dedup for per-item types so a slow consumer is not re-spawned for the same item.
+- `expert` + `request` — dispatch one job to a named expert via the expert-runtime queue.
+
+The validator enforces exactly-one of the two dispatch shapes. Choose the type, then you will be asked for the type-specific fields followed by the dispatch shape question.
+
+- **subprocess** — fire on a fixed interval (e.g. every 300 seconds). Required: `interval_sec`. Good for lint sweeps, data refreshes, and any periodic invocation.
+- **inbox** — watch a directory and fire once per file found. With `expert + request` the file is moved into job staging; with `command` it stays in the inbox until the consumer removes it. Required: `inbox_dir`, `interval_sec`.
+- **schedule** — fire once per cron boundary (5-field cron expression). Required: `cron`. Use when wall-clock timing matters more than a fixed cadence.
+- **git** — watch a remote branch for new commits, new files, changed files, deleted files, or renamed files; fire once per item. Required: `branch`, `watch`, `interval_sec`.
+- **md-scan** — scan markdown files matching vault-relative globs, filter by frontmatter values, and fire once per match. Files are edited in place by the consumer — no move. Required: `paths` (list of globs), `frontmatter_filter` (dict), `interval_sec`.
 
 ### Step 2 — Run the register wizard
 
@@ -50,9 +57,9 @@ Command:      ["python3", "bin/review_tick.py"]
 interval_sec: 300
 ```
 
-For an `inbox` routine, the wizard additionally checks whether `inbox_dir` is gitignored. If it is not, it offers to append the path to `.gitignore` — accept this. Inbox routines move files between iterations; a tracked inbox directory dirties the working tree and triggers the daemon's halt protection.
+For an `inbox` routine the wizard additionally checks whether `inbox_dir` is gitignored. If it is not, it offers to append the path to `.gitignore` — accept this. Inbox routines move files between iterations; a tracked inbox directory dirties the working tree and triggers the daemon's halt protection.
 
-For an `md-scan` routine, the wizard asks for the glob list, the frontmatter filter dict, and the agent to dispatch. A `null` filter value matches files where the key is absent — useful for picking up files that have never been processed.
+For an `md-scan` routine the wizard asks for the glob list, the frontmatter filter dict, and the dispatch shape. A `null` filter value matches files where the key is absent — useful for picking up files that have never been processed (e.g. `{"request_status": [null, "draft"]}`).
 
 The skill validates the `<plugin>.<verb>` naming pattern and the per-type schema before writing anything. If validation fails it aborts with a clear message — fix the reported field and re-run.
 
@@ -64,13 +71,13 @@ After the wizard completes it prints:
 registered routine `<name>` (type=<type>, <key params>)
 ```
 
-To double-check, run `/lazy-core.doctor` to verify the current routine registry, or re-run `/lazy-routine.register` with the same name — it will refuse with "already registered", which confirms the entry exists.
+To double-check, run `/lazy-core.doctor` to inspect the current routine registry, or attempt to re-run `/lazy-routine.register` with the same name — it refuses with "already registered", which confirms the entry exists.
 
 ### Step 4 — Let the daemon pick it up
 
 No restart is needed. The daemon re-reads `lazy.settings.json` at the start of every sleep cycle. On the next cycle after registration it begins scheduling the new routine according to its `interval_sec` or `cron` expression.
 
-If the daemon is not yet running, start it with:
+If the daemon is not yet running, start it:
 
 ```
 ./run.sh
@@ -78,15 +85,15 @@ If the daemon is not yet running, start it with:
 
 If the daemon has halted on a dirty working tree, run `/lazy-runtime.recover` to walk through cleanup and clear the halt block before starting.
 
-### Step 5 — Verify the routine runs
+### Step 5 — Verify the routine fires
 
-For `subprocess` routines, watch for the command's output in the daemon's log (standard output of `./run.sh`). For `inbox`, `git`, and `md-scan` routines, the daemon dispatches agent jobs — use `/lazy-expert.list-jobs` to confirm jobs are appearing after the first cycle fires.
+For `subprocess` routines, watch for the command's output in the daemon's log (the standard output of `./run.sh`). For `inbox`, `git`, and `md-scan` routines the daemon dispatches agent jobs — run `/lazy-expert.list-jobs` to confirm jobs are appearing after the first cycle fires.
 
 ### Step 6 — Remove the routine when no longer needed
 
 Run `/lazy-routine.unregister <name>` (e.g. `/lazy-routine.unregister lazy-review.tick`).
 
-The skill checks the settings file, prints a confirmation, and removes the entry. Unregistering a routine that does not exist is a no-op — the skill prints an INFO message and exits cleanly without an error.
+The skill checks the settings file, prints a confirmation, and removes the entry. Unregistering a routine that does not exist is a no-op — it prints an INFO message and exits cleanly without an error.
 
 The built-in `lazy-expert.pump` routine is protected from accidental removal. Attempting to unregister it without `--force` aborts with a warning. Only pass `--force` if you intentionally want to stop expert-job processing; re-run `/lazy-core.install` to restore it.
 
@@ -94,40 +101,6 @@ The daemon picks up the removal on its next cycle — no restart needed.
 
 ## After you're done
 
-The routine is no longer in `routines` and the daemon skips it from the next cycle forward. To bring it back, call `/lazy-routine.register` again with the same name and configuration. Plugin install skills (e.g. those triggered by `/lazy-core.install` or `/lazy-core.setup`) can re-register their routines automatically on the next install pass. Run `/lazy-core.doctor` at any time to verify the current routine registry and daemon state are consistent.
+The routine is no longer in `routines` and the daemon skips it from the next cycle forward. To bring it back, call `/lazy-routine.register` again with the same name and configuration. Plugin install skills can re-register their routines automatically on the next install pass. Run `/lazy-core.doctor` at any time to verify the current routine registry and daemon state are consistent.
 
 ## How registration and pickup flow
-
-```mermaid
-%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
-sequenceDiagram
-  participant user as User
-  participant registerSkill as /lazy-routine.register
-  participant settings as lazy.settings.json
-  participant daemon as Routine Daemon
-  participant unregisterSkill as /lazy-routine.unregister
-
-  user->>registerSkill: invoke /lazy-routine.register <routine-name>
-  alt routine is lazy-expert.pump
-    registerSkill-->>user: blocked - lazy-expert.pump is a built-in protected routine
-  else routine is not protected
-    registerSkill->>settings: write new routine entry
-    settings-->>registerSkill: write confirmed
-    registerSkill-->>user: routine registered successfully
-    Note over daemon: next poll cycle begins
-    loop daemon poll cycle
-      daemon->>settings: read lazy.settings.json
-      settings-->>daemon: current routines list
-      daemon-->>daemon: detect new routine without restart
-    end
-    Note over daemon: new routine now active
-    user->>unregisterSkill: invoke /lazy-routine.unregister <routine-name>
-    alt routine is lazy-expert.pump
-      unregisterSkill-->>user: blocked - lazy-expert.pump cannot be unregistered
-    else routine is not protected
-      unregisterSkill->>settings: remove routine entry
-      settings-->>unregisterSkill: write confirmed
-      unregisterSkill-->>user: routine unregistered successfully
-    end
-  end
-```

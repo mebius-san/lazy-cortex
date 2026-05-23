@@ -25,7 +25,7 @@ Each plugin addresses one of these pains without forcing you to adopt the others
 
 Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-model routing + settings management)
 
-Ships 23 skills, 5 agents, 2 commands, 10 rules, and 5 hooks.
+Ships 23 skills, 6 agents, 2 commands, 10 rules, and 5 hooks.
 
 See [`claude/lazycortex-core/`](claude/lazycortex-core/) for details.
 

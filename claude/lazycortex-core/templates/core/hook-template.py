@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""<Pre|Post>ToolUse hook: <one-line purpose>.
+"""
+<Pre|Post>ToolUse hook: <one-line purpose>.
 
 Fires on:
 - ``<MatcherName>`` tool calls — <gate condition, e.g., command matches `git commit`>.
@@ -39,13 +40,23 @@ import sys
 # the contract).
 # ---------------------------------------------------------------------------
 def _is_real_event(root: str) -> bool:
-    """True iff the just-handled event is NOT this hook's own auto-commit.
+  """
+  Report whether the just-handled event is genuine caller activity rather than this hook's own
+  auto-commit footprint.
 
-    Time-based throttles and counter-based guards are not acceptable
-    substitutes — they leak state across sessions and fail when the user
-    reorders or amends commits. Use a content predicate.
-    """
-    return True  # ← replace with real predicate
+  Notes:
+    - Time-based throttles and counter-based guards are not acceptable substitutes — they leak
+      state across sessions and fail when the user reorders or amends commits. Use a content
+      predicate that inspects the event itself.
+
+  Args:
+    root: Absolute path to the repository root for the in-flight event.
+
+  Returns:
+    True when the event is real caller activity; False when it matches this hook's own
+    auto-commit footprint and must be skipped to avoid a loop.
+  """
+  return True  # ← replace with real predicate
 
 
 # ---------------------------------------------------------------------------
@@ -53,21 +64,31 @@ def _is_real_event(root: str) -> bool:
 # Contract: lazy-core.hook-writing § 7.
 # ---------------------------------------------------------------------------
 _TRANSACTIONAL_MARKERS = (
-    "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
-    "REBASE_HEAD", "rebase-merge", "rebase-apply", "BISECT_LOG",
+  "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
+  "REBASE_HEAD", "rebase-merge", "rebase-apply", "BISECT_LOG",
 )
 
 
 def _in_transactional_state(root: str) -> bool:
-    """True if a merge/rebase/cherry-pick/bisect is in progress."""
-    try:
-        git_dir = subprocess.check_output(
-            ["git", "rev-parse", "--git-dir"], cwd=root, text=True
-        ).strip()
-    except subprocess.CalledProcessError:
-        return False
-    git_path = os.path.join(root, git_dir) if not os.path.isabs(git_dir) else git_dir
-    return any(os.path.exists(os.path.join(git_path, m)) for m in _TRANSACTIONAL_MARKERS)
+  """
+  Report whether the repository is currently inside a merge, rebase, cherry-pick, revert, or
+  bisect transaction.
+
+  Args:
+    root: Absolute path to the repository root.
+
+  Returns:
+    True when any transactional marker file is present in the git directory; False otherwise,
+    including when the path is not a git repository.
+  """
+  try:
+    git_dir = subprocess.check_output(
+      [ "git", "rev-parse", "--git-dir" ], cwd = root, text = True
+    ).strip()
+  except subprocess.CalledProcessError:
+    return False
+  git_path = os.path.join(root, git_dir) if not os.path.isabs(git_dir) else git_dir
+  return any(os.path.exists(os.path.join(git_path, m)) for m in _TRANSACTIONAL_MARKERS)
 
 
 # ---------------------------------------------------------------------------
@@ -75,92 +96,118 @@ def _in_transactional_state(root: str) -> bool:
 # Pick one shape per branch; mixing is a bug.
 # ---------------------------------------------------------------------------
 def _context(msg: str, event: str = "PostToolUse") -> None:
-    """Emit a non-blocking transcript message."""
-    json.dump(
-        {"hookSpecificOutput": {"hookEventName": event, "additionalContext": msg}},
-        sys.stdout,
-    )
+  """
+  Emit a non-blocking transcript message to the Claude Code hook output channel.
+
+  Args:
+    msg: Human-readable message to surface in the transcript.
+    event: Hook event name to echo back in the payload; defaults to `PostToolUse`.
+  """
+  json.dump(
+    { "hookSpecificOutput": { "hookEventName": event, "additionalContext": msg } },
+    sys.stdout,
+  )
 
 
 def _deny(reason: str, event: str = "PreToolUse") -> None:
-    """PreToolUse only — veto the in-flight tool call. Exit 0 still."""
-    json.dump(
-        {
-            "hookSpecificOutput": {
-                "hookEventName": event,
-                "permissionDecision": "deny",
-                "permissionDecisionReason": f"<hook-name>: {reason}",
-            }
-        },
-        sys.stdout,
-    )
+  """
+  Emit a PreToolUse veto that instructs Claude Code to refuse the in-flight tool call.
+
+  Notes:
+    - The process still exits with status 0; the decision is carried in the JSON payload.
+    - Only meaningful for PreToolUse events; PostToolUse callers must use `_context` instead.
+
+  Args:
+    reason: Short human-readable explanation surfaced to the user.
+    event: Hook event name to echo back in the payload; defaults to `PreToolUse`.
+  """
+  json.dump(
+    {
+      "hookSpecificOutput": {
+        "hookEventName": event,
+        "permissionDecision": "deny",
+        "permissionDecisionReason": f"<hook-name>: {reason}",
+      }
+    },
+    sys.stdout,
+  )
 
 
 def main() -> int:
-    # § 1 — defensive JSON-stdin parsing, never crash the trigger.
-    try:
-        hook_input = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        return 0
+  """
+  Run the hook's branching logic over a single Claude Code event read from stdin.
 
-    tool_name = hook_input.get("tool_name", "")
-    tool_input = hook_input.get("tool_input", {})
-
-    # § 2 — TRIGGER GATING — broad matchers MUST be narrowed in-script.
-    if tool_name == "Bash":
-        command = tool_input.get("command", "")
-        if not re.match(r"\s*<command-prefix>\b", command):
-            return 0
-    elif tool_name == "<other-matcher>":
-        # narrow this branch too (e.g. subagent_type for Agent).
-        pass
-    else:
-        return 0
-
-    # § 1 — bail outside git repo / wrong workspace shape.
-    try:
-        root = subprocess.check_output(
-            ["git", "rev-parse", "--show-toplevel"], text=True
-        ).strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return 0
-    if not os.path.isdir(os.path.join(root, "<expected-marker-dir>")):
-        return 0
-
-    # § 6 — LOOP GUARD must run before any work.
-    if not _is_real_event(root):
-        return 0
-
-    # § 3 — BRANCH determinism — pick one outcome per branch:
-    #   (a) emit additionalContext via _context() and return.
-    #   (b) write file(s) AND commit them in same execution (§ 4).
-    #   (c) no-op return 0.
-    #
-    # If your branch ends in a write, the same branch MUST end in the
-    # matching commit. Use `-c core.hooksPath=/dev/null` on the inner git
-    # commit to avoid re-entry into the hook chain.
-
-    # ---- Example: write-then-commit branch ----
-    # if not _in_transactional_state(root):
-    #     subprocess.run(
-    #         ["git", "-C", root, "-c", "core.hooksPath=/dev/null",
-    #          "add", "--", "<path>"],
-    #         check=True, capture_output=True,
-    #     )
-    #     subprocess.run(
-    #         ["git", "-C", root, "-c", "core.hooksPath=/dev/null",
-    #          "commit", "-m", "<chore: ...>"],
-    #         check=True, capture_output=True,
-    #     )
-
-    # ---- Example: context-only branch ----
-    # _context("<hook-name>: <one-line summary>")
-
+  Returns:
+    Process exit code; always 0 in practice — decisions are carried in the JSON payload, never
+    in the exit status.
+  """
+  # § 1 — defensive JSON-stdin parsing, never crash the trigger.
+  try:
+    hook_input = json.load(sys.stdin)
+  except (json.JSONDecodeError, ValueError):
     return 0
+
+  tool_name = hook_input.get("tool_name", "")
+  tool_input = hook_input.get("tool_input", {})
+
+  # § 2 — TRIGGER GATING — broad matchers MUST be narrowed in-script.
+  if tool_name == "Bash":
+    command = tool_input.get("command", "")
+    # guard: bail when the Bash command does not match the precise prefix we care about
+    if not re.match(r"\s*<command-prefix>\b", command):
+      return 0
+  elif tool_name == "<other-matcher>":
+    # narrow this branch too (e.g. subagent_type for Agent).
+    pass
+  else:
+    return 0
+
+  # § 1 — bail outside git repo / wrong workspace shape.
+  try:
+    root = subprocess.check_output(
+      [ "git", "rev-parse", "--show-toplevel" ], text = True
+    ).strip()
+  except (subprocess.CalledProcessError, FileNotFoundError):
+    return 0
+  # guard: workspace shape must carry the expected marker directory at the root
+  if not os.path.isdir(os.path.join(root, "<expected-marker-dir>")):
+    return 0
+
+  # § 6 — LOOP GUARD must run before any work.
+  # guard: skip when the event is this hook's own auto-commit footprint
+  if not _is_real_event(root):
+    return 0
+
+  # § 3 — BRANCH determinism — pick one outcome per branch:
+  #   (a) emit additionalContext via _context() and return.
+  #   (b) write file(s) AND commit them in same execution (§ 4).
+  #   (c) no-op return 0.
+  #
+  # If your branch ends in a write, the same branch MUST end in the
+  # matching commit. Use `-c core.hooksPath=/dev/null` on the inner git
+  # commit to avoid re-entry into the hook chain.
+
+  # ---- Example: write-then-commit branch ----
+  # if not _in_transactional_state(root):
+  #     subprocess.run(
+  #         ["git", "-C", root, "-c", "core.hooksPath=/dev/null",
+  #          "add", "--", "<path>"],
+  #         check=True, capture_output=True,
+  #     )
+  #     subprocess.run(
+  #         ["git", "-C", root, "-c", "core.hooksPath=/dev/null",
+  #          "commit", "-m", "<chore: ...>"],
+  #         check=True, capture_output=True,
+  #     )
+
+  # ---- Example: context-only branch ----
+  # _context("<hook-name>: <one-line summary>")
+
+  return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+  sys.exit(main())
 
 
 # ============================================================================

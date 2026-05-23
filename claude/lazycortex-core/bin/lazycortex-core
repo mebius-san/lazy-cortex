@@ -5,7 +5,174 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, runtime, memory-reflect-all")
+         "Subcommands: expert-pump-once, doctor-tick, runtime, memory-reflect-all, dispatch-job, collect-job, consume-job, lookup-expert")
+
+
+def _cmd_consume_job(argv: list[str]) -> int:
+    """Inter-plugin job-consume entrypoint. Reads ``{expert, job_id}``
+    JSON from stdin, marks the job as consumed via
+    ``expert_runtime.consume_job``, prints ``{"status": "ok"}`` on
+    success.
+
+    Idempotent: re-consuming an already-consumed job is a no-op.
+    Missing job dir is also a no-op (already cleaned up).
+
+    This is the contract sibling plugins use to retire a job after
+    they have applied or explicitly discarded its response.
+    """
+    import json
+    from pathlib import Path as _Path
+    from expert_runtime import consume_job as _consume
+    repo = _Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
+    try:
+        req = json.load(sys.stdin)
+    except json.JSONDecodeError as e:
+        print(json.dumps({"error": f"request parse: {e}"})); return 1
+    expert = req.get("expert")
+    job_id = req.get("job_id")
+    if not expert or not job_id:
+        print(json.dumps({"error": "request missing 'expert' or 'job_id'"})); return 1
+    dispatched_from = req.get("dispatched_from")
+    df_kw = {"dispatched_from": _Path(dispatched_from)} if dispatched_from else {}
+    try:
+        _consume(repo, expert, job_id, **df_kw)
+    except Exception as e:
+        print(json.dumps({"error": f"consume failed: {e}"})); return 1
+    print(json.dumps({"status": "ok"}))
+    return 0
+
+
+def _cmd_collect_job(argv: list[str]) -> int:
+    """Inter-plugin job-collection entrypoint. Reads ``{expert, job_id}``
+    JSON from stdin, queries ``expert_runtime.collect_job``, prints the
+    status dict to stdout.
+
+    Output JSON:
+      ``{"status": "pending|done|failed|missing", "response": {...}}``
+      (``response`` is present only when ``status`` is ``done`` or ``failed``.)
+
+    This is the read-side companion to ``dispatch-job`` — the contract
+    sibling plugins use to inspect a job they earlier queued. Same
+    rationale: no filesystem-walk imports across plugin boundaries.
+    """
+    import json
+    from pathlib import Path as _Path
+    from expert_runtime import collect_job as _collect
+    repo = _Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
+    try:
+        req = json.load(sys.stdin)
+    except json.JSONDecodeError as e:
+        print(json.dumps({"error": f"request parse: {e}"})); return 1
+    expert = req.get("expert")
+    job_id = req.get("job_id")
+    if not expert or not job_id:
+        print(json.dumps({"error": "request missing 'expert' or 'job_id'"})); return 1
+    try:
+        out = _collect(repo, expert, job_id)
+    except Exception as e:
+        print(json.dumps({"error": f"collect failed: {e}"})); return 1
+    print(json.dumps(out))
+    return 0
+
+
+def _cmd_dispatch_job(argv: list[str]) -> int:
+    """Inter-plugin job-creation entrypoint. Reads a JSON job-bundle
+    from stdin, atomically creates the job dir via
+    ``expert_runtime.dispatch_job``, prints the result JSON to stdout.
+
+    Input bundle (stdin, JSON):
+      ``{ "expert": "<name>", "payload": {...}, "protocols": [...],
+          "source": {filename: text}, "context": {filename: text},
+          "result": [filename, ...], "job_id": "...", "dedup_key": "..." }``
+
+    Output (stdout, JSON):
+      ``{"job_id": "...", "queue_path": "..."}`` on fresh dispatch,
+      ``{"job_id": "...", "status": "already-queued"}`` on dedup hit.
+
+    Exit codes: 0 on success, 1 on bundle parse / dispatch error
+    (error JSON on stdout).
+
+    This is the contract sibling plugins MUST use to queue jobs —
+    never reach into ``expert_runtime`` directly via filesystem-walk
+    imports.
+    """
+    import json
+    from pathlib import Path as _Path
+    from expert_runtime import dispatch_job as _dispatch
+    repo = _Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
+    try:
+        bundle = json.load(sys.stdin)
+    except json.JSONDecodeError as e:
+        print(json.dumps({"error": f"bundle parse: {e}"})); return 1
+    # Cross-repo `@<repo>` parsing: if bundle.expert carries "@<key>", parse and
+    # resolve target, swap repo for dispatch, and synthesize dispatched_from
+    # so the tracker lands in the caller's repo. Bare names pass through.
+    raw_expert = bundle.get("expert") or ""
+    target_repo = repo
+    expert_for_dispatch = raw_expert
+    df_kw: dict = {}
+    if "@" in raw_expert:
+        try:
+            from expert_name import parse as _parse_expert_name
+            from repo_resolver import resolve as _resolve_target_repo
+            expert_for_dispatch, repo_key = _parse_expert_name(raw_expert)
+            target_repo = _resolve_target_repo(repo, repo_key)
+        except Exception as e:
+            print(json.dumps({"error": f"cross-repo resolve failed: {e}"})); return 1
+        if target_repo != repo.resolve():
+            df_kw = {"dispatched_from": repo}
+    # Explicit bundle.dispatched_from overrides (rarely used; CLI callers
+    # that already know the dispatching repo can pass it).
+    if "dispatched_from" in bundle and bundle["dispatched_from"]:
+        df_kw = {"dispatched_from": _Path(bundle["dispatched_from"])}
+    try:
+        out = _dispatch(
+            target_repo,
+            expert_for_dispatch,
+            bundle.get("payload") or {},
+            protocols=bundle.get("protocols"),
+            source=bundle.get("source"),
+            context=bundle.get("context"),
+            result=bundle.get("result"),
+            job_id=bundle.get("job_id"),
+            dedup_key=bundle.get("dedup_key"),
+            **df_kw,
+        )
+    except KeyError as e:
+        print(json.dumps({"error": f"missing required bundle field: {e}"})); return 1
+    except Exception as e:
+        print(json.dumps({"error": f"dispatch failed: {e}"})); return 1
+    print(json.dumps(out))
+    return 0
+
+
+def _cmd_lookup_expert(argv: list[str]) -> int:
+    """Read ``{"name": "..."}`` from stdin; print
+    ``{"found": true, "entry": {...}}`` or ``{"found": false}`` to stdout.
+    Exit 0 in both cases; non-zero only on settings I/O / parse error.
+    """
+    import json
+    from pathlib import Path as _Path
+    repo = os.environ.get("LAZY_REPO_ROOT")
+    if not repo:
+        print("LAZY_REPO_ROOT not set", file=sys.stderr)
+        return 2
+    try:
+        body = json.loads(sys.stdin.read() or "{}")
+    except json.JSONDecodeError as e:
+        print(f"stdin not JSON: {e}", file=sys.stderr)
+        return 2
+    name = body.get("name")
+    if not name:
+        print('stdin missing "name"', file=sys.stderr)
+        return 2
+    from expert_runtime import _resolve_expert_entry
+    entry = _resolve_expert_entry(_Path(repo), name)
+    if entry:
+        print(json.dumps({"found": True, "entry": entry}))
+    else:
+        print(json.dumps({"found": False}))
+    return 0
 
 
 def _cmd_memory_reflect_all(argv: list[str]) -> int:
@@ -19,7 +186,6 @@ def _cmd_memory_reflect_all(argv: list[str]) -> int:
 
     from lazy_settings import load_section
     from expert_runtime import dispatch_job
-    from routine_types import _write_job_config
 
     repo = Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
     experts = load_section(repo / ".claude/lazy.settings.json", "experts")
@@ -64,13 +230,7 @@ def _cmd_memory_reflect_all(argv: list[str]) -> int:
             "source": sources,
         }
         try:
-            result = dispatch_job(repo, name, payload)
-            _write_job_config(
-                result["queue_path"], name, entry,
-                protocols=[],
-                aspects=aspects,
-                arguments=entry.get("arguments") or {},
-            )
+            dispatch_job(repo, name, payload)
             summary["dispatched"] += 1
         except Exception as e:
             summary["errors"].append({"expert": name, "error": str(e)})
@@ -89,11 +249,25 @@ def main() -> int:
         result = pump(repo)
         print(f"experts={result['experts']} processed={result['processed']} cleaned={result['cleaned']}")
         return 0
+    elif sub == "doctor-tick":
+        import json
+        from doctor_tick import doctor_tick
+        result = doctor_tick(repo)
+        print(json.dumps(result))
+        return 0
     elif sub == "runtime":
         from runtime_daemon import run
         run(repo); return 0
     elif sub == "memory-reflect-all":
         return _cmd_memory_reflect_all(sys.argv[2:])
+    elif sub == "dispatch-job":
+        return _cmd_dispatch_job(sys.argv[2:])
+    elif sub == "collect-job":
+        return _cmd_collect_job(sys.argv[2:])
+    elif sub == "consume-job":
+        return _cmd_consume_job(sys.argv[2:])
+    elif sub == "lookup-expert":
+        return _cmd_lookup_expert(sys.argv[2:])
     else:
         print(f"unknown subcommand: {sub}\n{USAGE}", file=sys.stderr); return 2
 

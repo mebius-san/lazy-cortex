@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
-last_regen: 2026-05-13
+last_regen: 2026-05-23
 diagram_spec:
   anchor: "How the flow works"
   request: "End-to-end participant exchange when /lazy-repo.mark-public runs: user invokes the skill, skill checks git and GitHub visibility (preflight), determines scope (whole-repo vs. subtree), dispatches four parallel security scans (secrets, PII, infra, local paths) via /lazy-guard.check-public, presents unified findings table, loops per FAIL for resolution (encrypt/template/redact) and per WARN for fix/waive/skip, writes .guard-waivers.json with public_author and accepted waivers activating the pre-commit hook, then in whole-repo mode flips visibility via gh repo edit. Five participants: User, /lazy-repo.mark-public, /lazy-guard.check-public, Security Scan Agents, GitHub."
@@ -42,7 +42,7 @@ If you only want to declare a subtree as the public surface — for example, a `
 
 ### 2 — Preflight and scope confirmation
 
-The skill confirms you are in a git repo, reads the current GitHub visibility, and asks which mode it will run in:
+The skill confirms you are in a git repo, reads the current GitHub visibility, and tells you which mode it will run in:
 
 - **Whole-repo mode** (no arguments): the entire repo goes through the audit, and GitHub visibility can change at the end.
 - **Subtree-public mode** (glob arguments): only the listed paths are treated as the public surface. The repo stays private on GitHub; the visibility flip in a later step is skipped.
@@ -113,53 +113,3 @@ The `.guard-waivers.json` file is the ongoing contract for this repo — keep it
 Run `/lazy-guard.check-public` again after any major configuration change, after adding a new plugin, or after pulling in a third-party subtree that might bring in new paths or credentials.
 
 ## How the flow works
-
-```mermaid
-%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
-sequenceDiagram
-  participant user as User
-  participant markPublic as /lazy-repo.mark-public
-  participant checkPublic as /lazy-guard.check-public
-  participant scanAgents as Security Scan Agents
-  participant github as GitHub
-
-  user->>markPublic: invoke mark-public
-  markPublic->>markPublic: preflight — check git status
-  markPublic->>github: query current repo visibility
-  github-->>markPublic: visibility response
-  alt whole-repo mode
-    Note over markPublic: scope = entire repository
-  else subtree mode
-    Note over markPublic: scope = public_scopes globs only
-  end
-  markPublic->>checkPublic: dispatch unified security scan
-  checkPublic->>scanAgents: scan — secrets
-  checkPublic->>scanAgents: scan — PII
-  checkPublic->>scanAgents: scan — infra references
-  checkPublic->>scanAgents: scan — local paths
-  scanAgents-->>checkPublic: secrets findings
-  scanAgents-->>checkPublic: PII findings
-  scanAgents-->>checkPublic: infra findings
-  scanAgents-->>checkPublic: local-path findings
-  checkPublic-->>markPublic: unified findings table
-  markPublic-->>user: present findings — FAILs and WARNs
-  loop per FAIL finding
-    markPublic->>user: resolve FAIL — encrypt, template, or redact
-    user-->>markPublic: resolution applied
-    markPublic->>checkPublic: re-scan resolved item
-    checkPublic-->>markPublic: FAIL cleared
-  end
-  loop per WARN finding
-    markPublic->>user: resolve WARN — fix, waive, or skip
-    user-->>markPublic: decision — fix or waive or skip
-  end
-  markPublic->>markPublic: write .guard-waivers.json with public_author and accepted waivers
-  Note over markPublic: pre-commit hook activated via .guard-waivers.json
-  alt whole-repo mode
-    markPublic->>github: gh repo edit — flip visibility to public
-    github-->>markPublic: visibility updated
-    markPublic-->>user: repo is now public
-  else subtree mode
-    markPublic-->>user: subtree scoped — visibility unchanged
-  end
-```

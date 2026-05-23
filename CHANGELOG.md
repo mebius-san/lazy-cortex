@@ -4,6 +4,22 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 4.0.0 — 2026-05-23 UTC
+
+- **Breaking:** `dispatch_job` redesigned as an atomic primitive — callers no longer pass agent/protocols/git_author; those are derived from `settings.experts[<name>]` inside core. New CLI subcommands `lazycortex-core dispatch-job` and `lazycortex-core collect-job` replace direct Python API calls across plugins.
+- **Breaking:** Pump now processes at most one Claude spawn per invocation. Previously all ready jobs in the queue fired in a single tick; now each job lands on its own tick (default cadence 5 s). In-loop retries are removed; transient failures retry on the next tick. Three settings keys removed: `daemon.default_routine_timeout_sec`, `daemon.expert_pump.claude_spawn_timeout_sec`, `daemon.expert_pump.retry_delays_sec` — migrate any customized values to per-routine `timeout_sec` entries.
+- **Breaking:** Unified routine-types schema — every routine type now accepts either `command:` or `expert: / request:`. The `agent:` field on md-scan routines is removed; migrate to `expert:` + `request:`.
+- **Breaking:** `lazy-recover.dead-jobs` routine renamed to `lazy-runtime.doctor`; CLI subcommand `recover-dead-jobs` renamed to `doctor-tick`. The replacement is a Claude agent that reasons over failure context (request, error output, git status, attempts counter) and decides per case whether to retry, revert-and-retry, or permanently fail.
+- New `expert@<repo>` syntax dispatches routines and CLI jobs to a different registered repo. All five routine types (subprocess, inbox, schedule, git, md-scan) support the syntax. The local side writes a `.remote-jobs/` tracker; `list_jobs` and `doctor-tick` surface stuck trackers in triage context. New `lazycortex-core lookup-expert` CLI subcommand validates expert registration in a target repo before dispatch.
+- New `lazy.settings.local.json` personal-overlay layer lets each machine supply absolute repo paths and machine-specific config without touching the tracked `lazy.settings.json`. Install sets it up automatically and migrates any required keys.
+- New per-routine `priority` key (integer ascending, default 100) lets fast mechanical routines run before slow Claude pumps each tick. New `ignore_halt` flag (default: `false`) allows recovery routines to run while the daemon is halted or the working tree is dirty.
+- New `experts.<name>.model` setting overrides which Claude model the pump spawns for a given expert. Omit to inherit the global default.
+- Expert spawns now run under `dontAsk` mode with a per-repo filesystem whitelist (worktree + plugin dirs), preventing experts from ranging outside their designated paths.
+- Routines' declared `protocols:` list is now correctly forwarded to command-shape subprocess invocations via environment variable. Previously only expert-shape bundles carried protocols; command-shape subprocesses always received the hardcoded default.
+- Daemon reliability fixes: halted state no longer busy-loops at 100% CPU; dirty-tree halts clear automatically when the working tree becomes clean; loop-detect halts the daemon when N consecutive recent commits share a single bot author email (configurable via `daemon.loop_detect_threshold`, default 5, set 0 to disable).
+- Job queue fixes: dedup key lookup now treats DONE-without-CONSUMED jobs as active, preventing unbounded queue growth when a consumer was broken. md-scan tick no longer aborts on a broken candidate file — per-file errors accumulate and remaining files are processed. New `consume-job` CLI primitive marks a completed job consumed so dispatchers do not re-dispatch stale results.
+- Install now automatically removes the legacy `!.memory/` line from `.gitignore` on existing repos; git-guard hook fires on `Stop` and `SubagentStop` events for lock cleanup on session end; md-scan routines use `os.walk` + `fnmatch` instead of `glob.glob`, avoiding mismatches or failures on Python 3.12+.
+
 ### 3.2.0 — 2026-05-16 UTC
 
 - The daemon now halts with a specific reason when remote-sync fails during a tick — diverged history raises `git_pull_diverged`, repeated push refusal raises `git_push_failed` — instead of silently continuing in a broken state. `lazy-runtime.recover` gains a `manual-fix` mode that prints reason-specific repair steps and clears the halt block once resolved.

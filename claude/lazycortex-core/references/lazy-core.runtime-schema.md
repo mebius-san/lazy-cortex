@@ -85,15 +85,24 @@ The daemon's branch is daemon-exclusive but coexists safely with operator pushes
         "branch": "daemon/main",
         "remote_sync": "pull_push"
       },
-      "polling_interval_sec": 30,
+      "polling_interval_sec": 5,
       "cleanup_completed_after": "7d",
       "cleanup_failed_after": "30d",
       "cleanup_dead_after": "7d"
     },
     "routines": {
       "lazy-expert.pump": {
-        "interval_sec": 30,
+        "interval_sec": 5,
+        "timeout_sec": 1800,
+        "priority": 100,
         "command": ["lazycortex-core", "expert-pump-once"]
+      },
+      "lazy-runtime.doctor": {
+        "interval_sec": 3600,
+        "timeout_sec": 60,
+        "priority": 30,
+        "ignore_halt": true,
+        "command": ["lazycortex-core", "doctor-tick"]
       },
       "my-plugin.nightly-sync": {
         "interval_sec": 3600,
@@ -156,7 +165,7 @@ Resolution steps:
 
 **The runtime daemon does not retry plain routine commands.** If a routine exits non-zero, the daemon logs the result and moves on. No automatic backoff or re-schedule.
 
-The only built-in retry is in `expert-pump-once` for `claude --agent` spawns: 5 attempts with exponential backoff (delays: 1, 2, 4, 8, 16 seconds). This lives in `bin/expert_pump.py`, not in the daemon.
+`expert-pump-once` processes AT MOST ONE Claude spawn per invocation; transient Claude failures (non-zero exit, missing `response.json`, daemon-issued SIGTERM via routine timeout) leave the job in `READY+ERROR` state, and the next pump tick retries it from scratch. There is no in-loop retry inside pump — retry granularity is one Claude attempt per pump tick (= every `interval_sec` seconds, default 5s).
 
 Plugin authors writing their own routine commands are responsible for their own retry and backoff logic.
 
@@ -199,14 +208,14 @@ Per-routine record shape:
 ```python
 from expert_runtime import register_routine
 # Legacy subprocess shape (still supported)
-register_routine(repo, "my-plugin.task", ["my-plugin", "run-task"], interval_sec=300)
+register_routine(repo, "my-plugin.task", ["my-plugin", "run-task"], interval_sec=5)
 # Typed cfg shape (required for inbox / schedule / git — see § 8)
 register_routine(repo, "docs.inbox", {
     "type": "inbox",
     "inbox_dir": ".inbox/docs/",
     "expert": "doc-ingester",
     "request": {"role": "process", "file": "{file}"},
-    "interval_sec": 600,
+    "interval_sec": 5,
 })
 ```
 
@@ -222,6 +231,31 @@ unregister_routine(repo, "my-plugin.task")
 Or via the `lazy-routine.unregister` skill.
 
 Both helpers are idempotent and use the atomic write path in `lazy_settings.py`.
+
+### Personal-overlay file (`lazy.settings.local.json`)
+
+`lazy_settings.py` reads a two-file stack, mirroring Claude Code's own `settings.json` / `settings.local.json` semantics:
+
+| File | In git | Owns |
+|---|---|---|
+| `.claude/lazy.settings.json` | tracked | shared, team-visible config — `routines`, `experts`, `daemon`, `agent_models`, etc. |
+| `.claude/lazy.settings.local.json` | gitignored | per-machine / personal overrides applied on top of the tracked file |
+
+**Read semantics** — `lazy_settings.load_section(path, key)` returns the merged view: tracked content with the sibling `.local.json` overlay deep-merged on top, per Claude Code's rules.
+
+| Value shape | Merge behaviour |
+|---|---|
+| scalar (`interval_sec`, `git_author`) | local replaces tracked |
+| array (`aspects[]`, `additionalDirectories[]`) | union with dedupe — tracked order first, novel local entries appended |
+| object (`experts`, `routines`, nested dicts) | recursive deep merge with the rules above |
+
+`_version` is sticky to tracked — migration ladders never run against the local file, and any `_version` field in the overlay is ignored.
+
+**Write semantics** — `save_section(...)` writes **only** to the tracked file. The local overlay is never touched programmatically; the operator edits it by hand. Callers that perform a load → modify → save round-trip on a single layer (e.g. `register_routine`, `unregister_routine`) call `load_tracked_section(...)` instead of `load_section(...)` to avoid leaking overlay entries into the shared tracked file.
+
+**Read-only inspection** — `load_local_only_section(path, key)` returns just the overlay's view of one section (or `{}` when the file is absent). Used by diagnostics and audits.
+
+**Gitignore** — `bootstrap_lazy_settings_local_gitignore` (invoked by `/lazy-core.install` Step 7) ensures `.claude/lazy.settings.local.json` is listed in the consumer's `.gitignore`. No directory is created — the file is opt-in.
 
 ---
 
@@ -282,7 +316,7 @@ The git type is working-tree-neutral by construction: only `git fetch` (refs) an
 
 ## 9. State persistence
 
-The daemon persists scheduling and halt state at `<repo>/.logs/lazy-core/runtime/state.json`. Atomic temp+rename writes; load returns an empty schema on absent or unparseable file (so a corrupt state file never crashes the daemon).
+The daemon persists scheduling and halt state at `<repo>/.runtime/state.json`. Atomic temp+rename writes; load returns an empty schema on absent or unparseable file (so a corrupt state file never crashes the daemon). The directory is bootstrapped alongside `.logs/` by `/lazy-core.install` Step 7 and is listed in `.gitignore`.
 
 Schema:
 

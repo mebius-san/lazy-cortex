@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""PreToolUse hook — route Agent dispatches to a configured model.
+"""
+PreToolUse hook — route Agent dispatches to a configured model.
 
 Reads `.claude/lazy.settings.json` (project) merged under
 `~/.claude/lazy.settings.json` (user), looks up `tool_input.subagent_type`
@@ -33,136 +34,182 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "bin"))
 from lazy_settings import load_section  # noqa: E402
 
-TIER = {"haiku": 1, "sonnet": 2, "opus": 3}
-SENTINELS = {"default", None, ""}
+TIER = { "haiku": 1, "sonnet": 2, "opus": 3 }
+SENTINELS = { "default", None, "" }
 
 
 def _safe_load(path: Path) -> dict:
-    """Load agent_models section, falling back to {} on any IO or parse error."""
-    if not path.exists():
-        return {}
-    try:
-        return load_section(path, "agent_models")
-    except (json.JSONDecodeError, OSError) as e:
-        print(
-            f"[lazy-core.model-router] failed to load {path}: {e}",
-            file=sys.stderr,
-        )
-        return {}
+  """
+  Return the `agent_models` section persisted at the given settings path.
+
+  Args:
+    path: Filesystem location of a `lazy.settings.json` candidate.
+
+  Returns:
+    The stored `agent_models` mapping, or an empty mapping when the file is absent, unreadable,
+    or not valid JSON.
+  """
+  # guard: missing settings file — caller treats as empty section
+  if not path.exists():
+    return {}
+  try:
+    return load_section(path, "agent_models")
+  except (json.JSONDecodeError, OSError) as e:
+    # surface the failure to stderr so operators can diagnose; never abort the hook
+    print(
+      f"[lazy-core.model-router] failed to load {path}: {e}",
+      file = sys.stderr,
+    )
+    return {}
 
 
 def load_config(cwd: str | None) -> dict:
-    """Merge user-scope config under project-scope (project wins per-group).
+  """
+  Return the merged `agent_models` configuration for the current invocation.
 
-    Each scope is loaded via lazy_settings.load_section so that on-disk
-    migration runs transparently. The merge logic matches the original:
-    user groups are applied first, project groups win on collision.
-    """
-    user_path = Path.home() / ".claude" / "lazy.settings.json"
-    proj_path = Path(cwd or ".") / ".claude" / "lazy.settings.json"
+  The user-scope settings file is layered first, then the project-scope file overrides on a
+  per-group basis (project wins on collisions within a group).
 
-    user_section = _safe_load(user_path)
-    proj_section = _safe_load(proj_path)
+  Args:
+    cwd: Working directory reported by the hook payload, used to locate the project settings
+      file. May be None when the payload omits it.
 
-    merged: dict = {}
-    for section in (user_section, proj_section):  # project wins on key collisions within a group
-        for g, entries in section.items():
-            if not isinstance(entries, dict):
-                continue  # skip metadata (`_version: int`, future timestamp fields, etc.).
-                          # Filtering by shape, not name, because `_user`/`_project`/`_builtin`
-                          # are legitimate group keys that share the underscore prefix.
-            merged.setdefault(g, {}).update(entries)
-    return {"agent_models": merged}
+  Returns:
+    A dict with one key `agent_models` whose value is the merged grouped configuration.
+  """
+  # resolve both candidate settings paths (user-scope + project-scope)
+  user_path = Path.home() / ".claude" / "lazy.settings.json"
+  proj_path = Path(cwd or ".") / ".claude" / "lazy.settings.json"
+
+  user_section = _safe_load(user_path)
+  proj_section = _safe_load(proj_path)
+
+  # merge per-group: user first, project overrides within each group
+  merged: dict = {}
+  for section in (user_section, proj_section):  # project wins on key collisions within a group
+    for g, entries in section.items():
+      # guard: non-dict entry is metadata (`_version: int`, future timestamp fields, etc.)
+      if not isinstance(entries, dict):
+        continue  # skip metadata. Filtering by shape, not name, because `_user`/`_project`/`_builtin`
+                  # are legitimate group keys that share the underscore prefix.
+      merged.setdefault(g, {}).update(entries)
+  return { "agent_models": merged }
 
 
 def build_flat_map(cfg: dict) -> dict:
-    """Flatten grouped agent_models to {dispatch_string: model}.
+  """
+  Flatten the grouped `agent_models` configuration into a single dispatch-string lookup.
 
-    Keys inside every group ARE already full dispatch strings — grouping
-    is organizational only. Collisions across groups: last one wins, with
-    a stderr warning. Malformed groups (non-dict) are silently skipped.
-    """
-    out: dict = {}
-    groups = cfg.get("agent_models", {})
-    if not isinstance(groups, dict):
-        return out
-    for _group_name, entries in groups.items():
-        if not isinstance(entries, dict):
-            continue
-        for key, val in entries.items():
-            if key in out and out[key] != val:
-                print(
-                    f"[lazy-core.model-router] duplicate key {key!r} "
-                    f"across groups; using {val!r}",
-                    file=sys.stderr,
-                )
-            out[key] = val
+  Keys inside every group are already full dispatch strings — grouping is organizational only.
+  On cross-group collisions the last entry wins and a warning is emitted to stderr. Malformed
+  groups (non-dict values) are silently skipped.
+
+  Args:
+    cfg: Configuration dict as returned by `load_config`, expected to contain an `agent_models`
+      mapping.
+
+  Returns:
+    A flat dict mapping each dispatch string to its configured model tier.
+  """
+  out: dict = {}
+  groups = cfg.get("agent_models", {})
+  # guard: malformed top-level — return empty flat map
+  if not isinstance(groups, dict):
     return out
+  # walk every group and merge its entries into the flat output
+  for _group_name, entries in groups.items():
+    # guard: malformed group — skip silently
+    if not isinstance(entries, dict):
+      continue
+    for key, val in entries.items():
+      # warn on cross-group collision before overwriting
+      if key in out and out[key] != val:
+        print(
+          f"[lazy-core.model-router] duplicate key {key!r} "
+          f"across groups; using {val!r}",
+          file = sys.stderr,
+        )
+      out[key] = val
+  return out
 
 
 def main() -> None:
-    payload = json.load(sys.stdin)
-    if payload.get("tool_name") != "Agent":
-        sys.exit(0)
+  """
+  Run the PreToolUse hook entry point for one tool-dispatch event.
 
-    ti = dict(payload.get("tool_input", {}))
-    subagent = ti.get("subagent_type")
-    if not subagent:
-        sys.exit(0)
-
-    # 1. Config lookup
-    caller_model = ti.get("model")
-    cfg = load_config(payload.get("cwd"))
-    flat = build_flat_map(cfg)
-    configured = flat.get(subagent)
-    if configured in SENTINELS:
-        configured = None  # explicit no-route
-    elif configured is not None and configured not in TIER:
-        print(
-            f"[lazy-core.model-router] unknown model {configured!r} "
-            f"for {subagent!r}, treating as default",
-            file=sys.stderr,
-        )
-        configured = None
-
-    proposed = caller_model or configured
-
-    # 2. Apply LAZY_AGENT_MODEL_FLOOR cap (wins over caller + config)
-    floor = os.environ.get("LAZY_AGENT_MODEL_FLOOR", "").strip() or None
-    if floor and floor in TIER:
-        if proposed is None:
-            proposed = floor
-        elif proposed in TIER and TIER[proposed] > TIER[floor]:
-            proposed = floor
-    elif floor:
-        print(
-            f"[lazy-core.model-router] unknown "
-            f"LAZY_AGENT_MODEL_FLOOR={floor!r}, ignoring",
-            file=sys.stderr,
-        )
-
-    # 3. No-op when nothing changes
-    if proposed is None or proposed == caller_model:
-        sys.exit(0)
-
-    ti["model"] = proposed
-    json.dump(
-        {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "allow",
-                "updatedInput": ti,
-            }
-        },
-        sys.stdout,
-    )
+  Reads the hook payload from stdin, decides whether to inject a `model` field into the
+  outgoing `tool_input`, and writes the updated-input envelope to stdout when a change is
+  required. Exits silently with status zero in every non-mutating branch so the trigger is
+  never blocked.
+  """
+  payload = json.load(sys.stdin)
+  # guard: only Agent dispatches participate in routing
+  if payload.get("tool_name") != "Agent":
     sys.exit(0)
+
+  # snapshot caller-supplied tool input so any mutation stays local to this hook
+  ti = dict(payload.get("tool_input", {}))
+  subagent = ti.get("subagent_type")
+  # guard: dispatch missing subagent name — nothing to look up
+  if not subagent:
+    sys.exit(0)
+
+  # 1. Config lookup
+  caller_model = ti.get("model")
+  cfg = load_config(payload.get("cwd"))
+  flat = build_flat_map(cfg)
+  configured = flat.get(subagent)
+  if configured in SENTINELS:
+    configured = None  # explicit no-route
+  elif configured is not None and configured not in TIER:
+    print(
+      f"[lazy-core.model-router] unknown model {configured!r} "
+      f"for {subagent!r}, treating as default",
+      file = sys.stderr,
+    )
+    configured = None
+
+  proposed = caller_model or configured
+
+  # 2. Apply LAZY_AGENT_MODEL_FLOOR cap (wins over caller + config)
+  floor = os.environ.get("LAZY_AGENT_MODEL_FLOOR", "").strip() or None
+  if floor and floor in TIER:
+    if proposed is None:
+      proposed = floor
+    elif proposed in TIER and TIER[proposed] > TIER[floor]:
+      proposed = floor
+  elif floor:
+    print(
+      f"[lazy-core.model-router] unknown "
+      f"LAZY_AGENT_MODEL_FLOOR={floor!r}, ignoring",
+      file = sys.stderr,
+    )
+
+  # 3. No-op when nothing changes
+  # guard: routed model identical to caller's choice — leave tool_input untouched
+  if proposed is None or proposed == caller_model:
+    sys.exit(0)
+
+  # emit the updated-input envelope so Claude Code applies the routed model
+  ti["model"] = proposed
+  json.dump(
+    {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
+        "updatedInput": ti,
+      }
+    },
+    sys.stdout,
+  )
+  sys.exit(0)
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except SystemExit:
-        raise
-    except Exception:
-        sys.exit(0)
+  try:
+    main()
+  except SystemExit:
+    raise
+  except Exception:
+    # hooks must never crash the trigger — swallow any unexpected failure
+    sys.exit(0)

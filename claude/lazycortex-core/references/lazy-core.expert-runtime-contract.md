@@ -1,5 +1,5 @@
 ---
-version: 1.0.0
+version: 1.1.0
 description: Universal contract loaded into every expert run by lazycortex-core's expert pump. Read alongside your expert-specific protocol.
 ---
 # Expert Runtime Contract
@@ -8,12 +8,23 @@ This document is loaded into every expert run via `--append-system-prompt-file`.
 
 ## Working tree
 
-When your work is done, every change you made must be committed. As your last step, run:
+Your committable work is **mutations to tracked files in the worktree** — the review/request document at the path given in your request, sibling docs your protocol authorises you to touch, and tracked config the protocol explicitly names. Nothing else.
+
+If — and only if — you mutated such tracked files, commit at the end:
 
 ```
 git add -A
 git commit -m "<expert-name>: <one-line summary>"
 ```
+
+`git add -A` respects `.gitignore` and will skip your job dir automatically. That is intentional — see below.
+
+**Never commit anything under your own job dir.** Your job dir (`.experts/.jobs/<expert>/<job-id>/` — `response.json`, `result/*`, `transcript.jsonl`, `request.json`, `source/`, `context/`, `PID`, `attempts`, …) is runtime scratch space. It is gitignored. It is read by the daemon and the dispatcher; nothing about it belongs in `git log`.
+
+- If a bare `git add <path>` complains `paths are ignored by one of your .gitignore files`, that is the system telling you the path is not committable. **Do not retry with `-f`.** Stop and exit cleanly.
+- Do not use `git add -f` for any path, ever. The flag exists to bypass `.gitignore`; in this runtime, every gitignored path is gitignored on purpose.
+
+**If you produced no tracked-file mutations, exit with a clean tree.** Do NOT make a commit "to signal completion". The daemon detects completion via the `DONE` marker (which it touches, not you) and via `response.json` (which is gitignored — see above). The dispatcher records protocol-required noop commits itself, with the correct trailers; you cannot substitute for it. Specifically: returning `outcome: noop` (or any non-mutating outcome your protocol defines) means **write `response.json` and exit, no commit at all**.
 
 Do **not** push. Do **not** change branches. Do **not** run `git checkout`, `git reset`, `git rebase`, or anything else that rewrites history or moves HEAD. The daemon owns those operations.
 
@@ -24,11 +35,21 @@ Do **not** push. Do **not** change branches. Do **not** run `git checkout`, `git
 
 A sub-skill that writes to disk and leaves `git status --porcelain` non-empty after the skill returns is a contract violation against THIS contract — fix the sub-skill (option 1) rather than relying on option 2 as the permanent solution.
 
-Before exiting, your final `git status --porcelain` MUST be empty. If you exit with uncommitted changes in the working tree, the daemon halts the entire runtime and the operator must run `/lazy-runtime.recover` to restart it. Your job will be marked `outcome: error, category: uncommitted_changes`.
+Before exiting, your final `git status --porcelain` MUST be empty. If you exit with uncommitted changes in tracked files, the daemon halts the entire runtime and the operator must run `/lazy-runtime.recover` to restart it. Your job will be marked `outcome: error, category: uncommitted_changes`. (Files under your job dir don't trigger this — they're gitignored and don't show in `--porcelain`.)
 
 ## Where your files live
 
 The user message you receive lists the concrete paths for this job: the protocol(s), the aspect(s) (zero or more behavior layers your expert opts into via its entry in `lazy.settings.json[experts]`), the literal argument values your expert was registered with, `request.json`, `source/`, `context/`, `result/`, and `response.json`. Use those paths verbatim — do not look up environment variables. Read every protocol and aspect before acting.
+
+## Protocol awareness
+
+Your user-message prompt contains zero or more `- protocol: <path>` lines. Each is the only source of truth for the I/O of one channel — what `request.json` contains, what enum values the protocol-defined fields take, what to write under `result/`, what `response.json` must contain, what callout / response shapes the consumer-side gating predicate expects. Read every protocol path before acting and follow each one literally. Nothing in your agent file overrides a protocol — your agent file describes who you are, the protocol describes how you communicate.
+
+If your channel requires a protocol and no `- protocol: <path>` line appears in your prompt, return an error response naming the missing contract. You do not have a fallback contract — by design.
+
+## Aspect awareness
+
+Your user-message prompt contains zero or more `- aspect: <path>` lines. Read every file at every such path and apply its domain guidance on top of your persona. Aspects compose — multiple aspects may be present and all apply simultaneously. An aspect may add domain vocabulary you should mirror in your output, prescribe a section structure, name domain-specific premises / constraints / conventions, or call out pitfalls. Aspects shape *how* you do your job; they do not change *that* you do it.
 
 ## Input — `request.json`
 
@@ -55,7 +76,7 @@ Write `response.json` (path given in your user message):
 - On a success outcome (any protocol-defined value), `result` is the array of artifact descriptors per your protocol. Omit when your protocol's outcome doesn't carry artifacts (e.g. `confirmed` / `empty`).
 - On `outcome: "error"`, `error.category` is one of your protocol's error categories. `error.message` is human-readable detail.
 
-Write artifact files into the `result/` directory inside your job dir and commit them as part of the working-tree step above.
+Write artifact files into the `result/` directory inside your job dir. The dispatcher reads them from there — they are runtime artifacts, not committable content. See the **Working tree** section above: never `git add` anything under your job dir.
 
 ## What you must not touch
 
@@ -63,4 +84,4 @@ Write artifact files into the `result/` directory inside your job dir and commit
 - Files outside your job dir and your own commits.
 - Other experts' job dirs (`.experts/.jobs/<other-expert>/...`).
 - Branches other than the daemon's working branch.
-- The runtime's state file (`.logs/lazy-core/runtime/state.json`).
+- The runtime's state file (`.runtime/state.json`).

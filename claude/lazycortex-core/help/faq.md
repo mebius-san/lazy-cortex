@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, daemon halt recovery, and change-history access.
-last_regen: 2026-05-16
+summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, daemon halt recovery, and run-log housekeeping.
+last_regen: 2026-05-23
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -27,11 +27,6 @@ source_skills:
   - lazy-memory.reflect
   - lazy-memory.mark-persona
   - lazy-log.clean
-  - lazy-log.distill
-  - lazy-log.recall
-  - lazy-log.timeline
-  - lazy-log.summary
-  - lazy-log.bullets
 ---
 # FAQ
 
@@ -209,7 +204,7 @@ Optional fields — `source` (array of input file paths), `context` (array of co
 
 Run `/lazy-expert.collect-job` with the `expert_name` and `job_id` returned by `/lazy-expert.dispatch-job`. The skill returns one of four statuses: `pending` (the daemon has not processed it yet), `done` (completed successfully — result file paths are listed), `failed` (the daemon ran it but the expert reported an error), or `missing` (the job directory does not exist — wrong `job_id` or `expert_name`, or the job was already cancelled).
 
-You can also run `/lazy-expert.list-jobs` to see the queue at a glance. Filter by `status=pending` to see what is still waiting, or by `expert=<name>` to narrow to one expert's queue.
+You can also run `/lazy-expert.list-jobs` to see the queue at a glance. Filter by `status=queued` to see what is still waiting to run, `status=active` for jobs currently being processed, or `expert=<name>` to narrow to one expert's queue.
 
 ---
 
@@ -223,7 +218,7 @@ For jobs that are already `done`, the skill also asks for confirmation before re
 
 ## What is the difference between `/lazy-expert.list-jobs` and `/lazy-expert.collect-job`?
 
-`/lazy-expert.list-jobs` gives a tabular overview of all jobs across all experts (or filtered by expert or status), sorted oldest-first. It is the right tool when you want situational awareness — how many jobs are queued, which ones have finished, which ones failed.
+`/lazy-expert.list-jobs` gives a tabular overview of all jobs across all experts (or filtered by expert or status), sorted oldest-first. It is the right tool when you want situational awareness — how many jobs are queued or active, which ones have finished, which ones failed. The full status set it filters by is: `queued`, `active`, `dead`, `done`, and `failed`.
 
 `/lazy-expert.collect-job` is targeted: given a specific `expert_name` and `job_id`, it returns the current status and, when the job is done, the result file paths you should `Read` to retrieve the output. Use it after dispatching a job when you know exactly which job you are waiting on.
 
@@ -239,14 +234,15 @@ The built-in `lazy-expert.pump` routine is what drives the expert job queue — 
 
 ## What routine types does `/lazy-routine.register` support?
 
-Four types, each suited to a different scheduling pattern:
+Five types, each suited to a different scheduling pattern:
 
 - **subprocess** — the default. Runs a CLI command on every daemon cycle whose `interval_sec` has elapsed.
 - **inbox** — watches a directory and dispatches one expert job per file it finds there. Good for ingestion pipelines.
 - **schedule** — fires on a cron expression boundary, not on a fixed interval. Useful for calendar-aligned tasks (daily summaries, weekly sweeps).
 - **git** — watches a remote branch for new commits, new files, changed files, deleted files, or renamed files and dispatches an expert job per matched event.
+- **md-scan** — scans markdown files matching vault-relative globs, filters by frontmatter key/value, and fires in-place (no file move) on each match. Good for processing items whose lifecycle state is tracked in their own frontmatter.
 
-All four require a dot-namespaced `name` (e.g. `acme-lint.tick`). The wizard in `/lazy-routine.register` asks for the type first, then prompts only for the fields that type needs.
+All five require a dot-namespaced `name` (e.g. `acme-lint.tick`). The wizard in `/lazy-routine.register` asks for the type first, then prompts only for the fields that type needs.
 
 ---
 
@@ -365,31 +361,3 @@ Every subdirectory under `.logs/claude/` is compared against a live canonical na
 - **Other orphans** — everything that remains.
 
 The skill asks for your decision on each bucket (or cluster, for pattern orphans) one question at a time. For any folder you want to clean up, you can optionally distill its log content into Hindsight memory before deletion. No folder is touched until you have approved every action.
-
----
-
-## What is the difference between `/lazy-log.recall`, `/lazy-log.timeline`, and `/lazy-log.summary`?
-
-All three search the same set of sources — `.logs/changelog.md`, run logs, `.logs/commits.jsonl`, git log, and project memory files — but they answer different questions.
-
-`/lazy-log.recall` answers "where and when did X happen?" It decomposes your query into keywords, searches all sources, ranks matches by tier (changelog and run-log results rank highest), deduplicates by git SHA, and returns a table of the top matches with SHAs you can pass to `git show`.
-
-`/lazy-log.timeline` answers "what happened between these dates?" It collects and sorts all matching entries chronologically and groups them by day, marking internal commits (chore/refactor) separately so you can skim past them. Good for a "what happened last week" overview.
-
-`/lazy-log.summary` answers "tell me the whole story of X." It synthesizes a multi-paragraph narrative grouped by sub-theme rather than date — design decisions, implementation phases, issues that came up, follow-up work. Use it when you want to understand the arc of a feature or refactor, not just find a commit SHA.
-
----
-
-## What does `/lazy-log.distill` produce, and when does it run?
-
-`/lazy-log.distill` converts raw commit entries from `.logs/commits.jsonl` into human-readable themed prose in `.logs/changelog.md`. The output is structured theme-first: a top-level `## <theme>` for each Conventional-commits scope or keyword cluster, then `### YYYY-MM-DD` paragraphs under each theme. Same-day re-runs rewrite today's paragraph in place rather than appending a fragment.
-
-The agent is throttled to once per four hours by default — it checks the mtime of `.logs/changelog.md` and skips if the last write was less than four hours ago. You can bypass the throttle by passing `force` or `manual catch-up` in the invocation prompt. The `lazy-log.logging` rule also decides, on each turn that produces a commit, whether to invoke distill automatically — it walks a gate sequence (was there a commit this turn? did the user say skip? is this a narration-worthy commit?) before dispatching.
-
----
-
-## What does `/lazy-log.bullets` produce, and how is it different from `/lazy-log.distill`?
-
-`/lazy-log.bullets` converts a commit range for one plugin into a user-facing release block ready to prepend to `CHANGELOG.public.md`. It drops internal-only commits (chore, style, test, pure refactor with no behavioral change visible to a user installing the plugin) and rewrites the rest as outcome-led bullets grouped by Conventional-commits scope. The output is the rendered `### <version> — <date> UTC` block, not a file write — the coordinator (typically `pub.publish`) owns prepending it.
-
-`/lazy-log.distill` targets the private `.logs/changelog.md` used for day-to-day recall within the repo; `/lazy-log.bullets` targets the public `CHANGELOG.public.md` shipped with each plugin release. The audiences, filtering criteria, and output destinations are different.
