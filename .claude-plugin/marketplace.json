@@ -31,6 +31,11 @@
       "source": "./claude/lazycortex-obsidian"
     },
     {
+      "name": "lazycortex-python",
+      "description": "Python coding discipline as a plugin: shared rules + reference guidelines + chk/tst checkers + PostToolUse hook + docstring-writer/test-writer agents + canonical file template. Installs once per repo via /lazy-python.install.",
+      "source": "./claude/lazycortex-python"
+    },
+    {
       "name": "lazycortex-specs",
       "description": "Specification and design skills for Claude Code",
       "source": "./claude/lazycortex-specs"

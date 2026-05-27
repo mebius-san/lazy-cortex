@@ -1,0 +1,196 @@
+#!/usr/bin/env zsh
+# chk — Python style/type aggregator for the lazycortex-python plugin.
+#
+# Dispatches subcommands that run the shipped style/type checkers against
+# project source roots. Exclusions and project-specific paths come from the
+# consumer's pyproject.toml — the script itself is project-neutral.
+#
+# Subcommands:
+#   all        run the canonical pipeline: pcf, toi, cmp, mypy, ruff, pylint
+#   pcf        Python code format check (shipped: bin/pcf.py)
+#   toi        type-only imports check (shipped: bin/toi.py)
+#   cmp        py_compile syntax / bytecode-compile check
+#   mypy       run mypy type checks
+#   rf         run ruff checks
+#   pylint     run pylint checks
+#   pch        PyCharm offline inspections (shipped: bin/pch.py) — standalone, NOT in `all`
+#
+# Usage:
+#   chk <subcommand> [module ...]
+#
+# Runs standalone from a bare terminal — CLAUDE_PLUGIN_ROOT / CLAUDE_PLUGIN_DATA
+# are optional (only an optimization for the venv helper's probe 4; probes 1-3 +
+# self-derivation work without them).
+set -e
+set -u
+set -o pipefail
+
+# directory containing the script
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+
+# bootstrap (or reuse) the shared venv; exports PATH with venv/bin first
+ensure_venv() {
+  source "$script_dir/_ensure_venv.sh"
+}
+
+function print_help()
+{
+  echo "run Python code style and type checks"
+  echo "usage: chk <subcommand> [module ...]"
+  echo
+  echo "subcommands:"
+  echo "  all        run all checks in sequence (pcf, toi, cmp, mypy, ruff, pylint)"
+  echo "  pcf        Python code format check"
+  echo "  toi        list type-only imports"
+  echo "  cmp        run py_compile checks"
+  echo "  mypy       run mypy type checks"
+  echo "  rf         run ruff checks"
+  echo "  pylint     run pylint checks"
+  echo "  pch        run PyCharm offline inspections (standalone, not in 'all')"
+  echo
+  echo "options:"
+  echo "  module...  one or more target paths (e.g., src/ pkg/foo.py; default: .)"
+  echo
+}
+
+# help shortcut
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  print_help
+  exit 0
+fi
+
+# parse main arguments
+cmd=""
+mods=()
+
+if [ -n "${1-}" ]; then
+  cmd=$1
+  shift
+fi
+
+while [ -n "${1-}" ]; do
+  # accept -q as a no-op for compat with lazy-python.style.md mandate
+  if [ "$1" = "-q" ]; then
+    shift
+    continue
+  fi
+  mods+=("$1")
+  shift
+done
+
+if [ ${#mods[@]} -eq 0 ]; then
+  mods=(".")
+fi
+
+# no subcommand → usage + non-zero exit
+if [ -z "$cmd" ]; then
+  print_help
+  exit 1
+fi
+
+# run all checks in sequence
+if [ "$cmd" = "all" ]; then
+  echo "=== Running all checks on '${mods[*]}' ==="
+  echo
+
+  export CHK_BATCH_MODE=1
+
+  echo ">>> [1/6] pcf - Python code format check"
+  "$script_dir/chk" pcf "${mods[@]}"
+  echo
+
+  echo ">>> [2/6] toi - type-only imports check"
+  "$script_dir/chk" toi "${mods[@]}"
+  echo
+
+  echo ">>> [3/6] cmp - py_compile check"
+  "$script_dir/chk" cmp "${mods[@]}"
+  echo
+
+  echo ">>> [4/6] mypy - mypy type check"
+  "$script_dir/chk" mypy "${mods[@]}"
+  echo
+
+  echo ">>> [5/6] rf - ruff check"
+  "$script_dir/chk" rf "${mods[@]}"
+  echo
+
+  echo ">>> [6/6] pylint - pylint check"
+  "$script_dir/chk" pylint "${mods[@]}"
+  echo
+
+# mypy type checks (excludes read from pyproject.toml)
+elif [ "$cmd" = "mypy" ]; then
+  ensure_venv
+  mypy "${mods[@]}"
+
+# pylint checks (excludes read from pyproject.toml)
+elif [ "$cmd" = "pylint" ]; then
+  ensure_venv
+  pylint "${mods[@]}"
+
+# ruff checks (excludes read from pyproject.toml)
+elif [ "$cmd" = "rf" ]; then
+  ensure_venv
+  ruff check "${mods[@]}"
+
+# Python code format check
+elif [ "$cmd" = "pcf" ]; then
+  ensure_venv
+  for mod in "${mods[@]}"; do
+    python3 "$script_dir/pcf.py" "$mod"
+  done
+
+# type-only imports check
+elif [ "$cmd" = "toi" ]; then
+  ensure_venv
+  for mod in "${mods[@]}"; do
+    python3 "$script_dir/toi.py" "$mod"
+  done
+
+# PyCharm offline code inspections
+elif [ "$cmd" = "pch" ]; then
+  ensure_venv
+  for mod in "${mods[@]}"; do
+    python3 "$script_dir/pch.py" "$mod"
+  done
+
+# py_compile syntax / bytecode-compile check
+elif [ "$cmd" = "cmp" ]; then
+  ensure_venv
+  files=()
+  for mod in "${mods[@]}"; do
+    while IFS= read -r -d $'\0' pyf; do
+      files+=("$pyf")
+    done < <(find "$mod" \
+      -name ".venv" -prune -o \
+      -path "*/~archive/*" -prune -o \
+      -path "*/~sandbox/*" -prune -o \
+      -type f -name "*.py" -print0)
+  done
+
+  if [ "${#files[@]}" -eq 0 ]; then
+    echo "no Python files found in '${mods[*]}'"
+  else
+    err=0
+    for pyf in "${files[@]}"; do
+      python3 -m py_compile "$pyf" || { echo "compile failed: $pyf"; err=1; }
+    done
+
+    if [ $err -ne 0 ]; then
+      echo "py_compile errors detected"
+      exit 1
+    fi
+
+    echo "py_compile success: ${#files[@]} files"
+  fi
+
+# unknown subcommand
+else
+  echo "Unknown subcommand: '$cmd'"
+  echo
+  print_help
+  exit 1
+fi
+
+echo

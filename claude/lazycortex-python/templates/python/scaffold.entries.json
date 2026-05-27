@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "templates": {
+    ".claude/templates/python/python-template.py": ["**/*.py"]
+  }
+}

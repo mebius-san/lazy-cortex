@@ -1,0 +1,297 @@
+# =============================================================================
+# Canonical lazycortex-python checker config template.
+#
+# /lazy-python.install Phase 3 merges sections from this template into the
+# consumer's pyproject.toml ONLY when the section does not already exist there.
+# Sections already present in the consumer's pyproject.toml are NEVER
+# overwritten — operator edits win.
+#
+# Replace placeholder values (marked `# <add ...>`) with project-specific paths
+# before the checker stack will produce meaningful output.
+#
+# Sections shipped:
+#   [tool.pcf]              — pcf (Python Code Format) checker policy
+#   [tool.pcf.overrides]    — pcf per-path overrides
+#   [tool.toi]              — toi (Type-Only Imports) checker policy
+#   [tool.pch]              — pch (PyCharm inspection runner) policy
+#   [tool.pytest.ini_options] — pytest defaults
+#   [tool.mypy]             — mypy strict-mode policy
+#   [tool.pylint]           — pylint policy
+#   [tool.ruff]             — ruff linter/style policy
+#   [tool.ruff.lint]        — ruff rule selection + ignores
+#   [tool.ruff.lint.per-file-ignores] — ruff per-path rule relaxations
+#   [tool.ruff.lint.pylint] — ruff's pylint-compatible thresholds
+# =============================================================================
+
+
+[tool.pytest.ini_options]
+cache_dir = "~/.cache/pytest"
+testpaths = ["tests"]
+addopts = "-vv --diff-symbols -p no:logging -s --durations=9"
+norecursedirs = "*"
+log_cli = false
+log_level = "CRITICAL"
+
+
+[tool.mypy]
+cache_dir = "~/.cache/mypy"
+python_version = "3.12"
+exclude = [
+  "~archive",
+  "~sandbox",
+  ".venv",
+  ".claude",
+]
+
+strict = true
+follow_imports = "normal"
+
+disable_error_code = [
+  "type-arg",
+  "no-untyped-call",
+  "no-any-return",
+  "redundant-cast",
+  "unused-ignore"
+]
+
+strict_optional = true
+ignore_missing_imports = true
+
+disallow_untyped_defs = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_incomplete_defs = true
+disallow_untyped_globals = true
+
+# explicitly tell mypy which top-level packages to check
+packages = []  # <add your source package roots, e.g. ["myapp", "api"]>
+
+
+[tool.pylint]
+jobs = 0
+init-hook = "import sys; sys.path.insert(0, '.')"
+ignore = [
+  ".venv",
+  ".claude"
+]
+ignore-paths = [".*~.*"]
+
+extension-pkg-allow-list = []  # <add C-extension packages requiring import for introspection, e.g. ["cairo"]>
+
+typevar-rgx = "^[_A-Z][a-zA-Z0-9]*Type?(_co|_contra)?$"
+indent-string = "  "
+
+max-branches = 50
+max-locals = 40
+max-parents = 25
+max-nested-blocks = 10
+max-positional-arguments = 15
+max-args = 17
+max-line-length = 117
+
+disable = [
+  "duplicate-code",                 # R0801
+  "too-many-public-methods",        # R0904
+  "too-many-statements",            # R0915
+  "too-many-instance-attributes",   # R0902
+  "too-many-arguments",             # R0913
+  "too-many-return-statements",     # R0911
+  "too-few-public-methods",         # R0903
+
+  "line-too-long",                  # C0301
+  "missing-module-docstring",       # C0114
+  "trailing-newlines",              # C0305
+  "trailing-whitespace",            # C0303
+  "import-outside-toplevel",        # C0415
+  "too-many-lines",                 # C0302
+  "wrong-import-order",             # C0411
+  "ungrouped-imports",              # C0410
+
+  "wildcard-import",                # W0401
+  "unused-wildcard-import",         # W0614
+  "fixme",                          # W0511
+  "broad-exception-caught",         # W0718
+  "unnecessary-pass",               # W0107
+  "protected-access",               # W0212
+  "f-string-without-interpolation", # W1309
+
+  "relative-beyond-top-level",      # E0402
+]
+
+
+[tool.ruff]
+cache-dir = "~/.cache/ruff"
+output-format = "concise"
+
+target-version = "py312"
+line-length = 117
+indent-width = 2
+
+exclude = [
+  "~archive",
+  "~sandbox",
+  ".venv",
+  ".claude",
+]
+
+[tool.ruff.lint]
+select = [
+  "E",      # pycodestyle errors
+  "W",      # pycodestyle warnings
+  "F",      # pyflakes
+  "I",      # isort
+  "B",      # flake8-bugbear
+  "C4",     # flake8-comprehensions
+  "UP",     # pyupgrade
+  "PL",     # pylint
+  "PIE",    # flake8-pie
+  "SLF",    # flake8-self
+  "SIM",    # flake8-simplify
+  "TID",    # flake8-tidy-imports
+  "RUF",    # ruff-specific rules
+]
+
+ignore = [
+  # equivalent to pylint disabled rules
+  "PLR0904",  # too-many-public-methods
+  "PLR0915",  # too-many-statements
+  "PLR0913",  # too-many-arguments
+  "PLR0911",  # too-many-return-statements
+  "PLR0912",  # too-many-branches
+  "PLR0914",  # too-many-locals
+  "PLR0917",  # too-many-positional-arguments
+  "PLR1702",  # too-many-nested-blocks
+
+  "E501",     # line-too-long (handled separately)
+  "E731",     # lambda-assignment
+
+  "W291",     # trailing-whitespace
+  "W293",     # blank-line-with-whitespace
+  "W391",     # trailing-newlines
+
+  "F403",     # wildcard-import
+  "F405",     # undefined-or-from-star-import
+
+  "I001",     # unsorted-imports (using custom import order)
+
+  "B007",     # unused-loop-control-variable
+  "B904",     # raise-without-from-inside-except
+
+  "SLF001",   # private-member-access
+
+  "SIM102",   # collapsible-if
+  "SIM103",   # return-bool-condition-directly
+  "SIM105",   # suppressible-exception
+  "SIM108",   # if-else-block-instead-of-if-exp
+  "SIM114",   # if-with-same-arms
+  "SIM117",   # multiple-with-statements
+  "UP046",    # non-pep695-generic-class (project uses legacy Generic[] syntax)
+  "UP047",    # non-pep695-generic-function (project uses legacy TypeVar syntax)
+
+  "TID252",   # relative-beyond-top-level
+
+  "UP007",    # non-pep604-annotation (allow Union[X, Y])
+  "UP015",    # unnecessary-mode-argument (open with explicit mode is clearer)
+  "UP035",    # deprecated-import (allow typing imports)
+  "UP040",    # non-pep695-generic-class (TypeVar style is preferred)
+
+  "PIE790",   # unnecessary-placeholder (explicit pass/... is clearer)
+
+  "RUF012",   # mutable-class-default
+  "RUF021",   # parenthesize-chained-operators
+  "RUF100",   # unused-noqa
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "F403", "F405"]
+"tests/*" = ["PLR2004", "SLF001", "PLC0415"]
+"tools/*" = ["PLR2004"]  # magic values are acceptable in tooling scripts
+# <add per-package overrides as needed, e.g.>
+# "<your-pkg>/geo/*" = ["PLR2004"]   # magic values for dimensions are inherent to geometry
+# "<your-pkg>/math/*" = ["PLR2004"]  # magic values for dimensions are inherent to math operations
+
+[tool.ruff.lint.pylint]
+max-args = 17
+max-branches = 50
+max-locals = 40
+max-nested-blocks = 10
+max-positional-args = 15
+
+
+[tool.toi]
+exclude = [
+  "~archive",
+  "~sandbox",
+  "tests",
+  ".venv",
+  ".claude",
+]
+
+
+[tool.pcf]
+exclude = [
+  "~archive",
+  "~sandbox",
+  "tests",
+  ".venv",
+  ".claude",
+]
+
+check_docstrings = true
+check_docstring_content = true
+check_imports = true
+check_code_format = true
+check_assert = true
+check_magic_literal = true
+
+check_line_length = true
+max_line_length = 117
+
+# Substrings rejected anywhere in a docstring body (D5 check).
+# Each entry must be a short, unambiguous phrase that signals
+# implementation-detail leakage or tautology.
+banned_docstring_phrases = [
+  "Enter the context manager",
+  "Exit the context manager",
+  "It validates",
+  "It sets up",
+  "It assigns",
+  "Stores ",
+  "Keeps ",
+  "extended with",
+  "by combining",
+  "sourced from",
+  "under the hood",
+  "internally",
+]
+
+[tool.pcf.overrides]
+# <add per-path overrides as needed, e.g.>
+# "tests"          = { check_assert = false }
+# "tools"          = { check_magic_literal = false }
+# "<your-pkg>/foo" = { check_magic_literal = false }
+
+
+[tool.pch]
+exclude = [
+  "~archive",
+  "~sandbox",
+  "tests",
+  ".venv",
+  ".claude",
+]
+include_extensions = [
+  ".py",
+]
+ignore = [
+  "Grammar",
+  "Spelling",
+  "Duplicated code fragment",
+  "Method is not declared static",
+  "Unsatisfied package requirements",
+  "Incorrect type",
+  "Incorrect call arguments",
+  "Unnecessary type cast",
+  "Unresolved references",
+  "Using function calls that don't return anything as values",
+]

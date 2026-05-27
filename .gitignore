@@ -19,11 +19,13 @@
 .claude/scheduled_tasks.lock
 .logs/
 .runtime/
+.experts/.jobs/
 
 
 # ---------------------------------------------------------------------------------------
 # Python
 
+.venv/
 __pycache__/
 *.py[cod]
 *$py.class

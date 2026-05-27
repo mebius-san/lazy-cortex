@@ -1,0 +1,64 @@
+#!/usr/bin/env zsh
+# tst — Python test runner for the lazycortex-python plugin.
+#
+# Sources the shared venv (mypy/pylint/pytest), then runs pytest scoped to
+# the requested module under tests/<module>/, or all tests if no arg given.
+#
+# Usage:
+#   tst                  # run pytest across all tests/ subdirs
+#   tst <module>         # run pytest on tests/<module>/ only
+#   tst -q [<module>]    # -q is accepted as a no-op (per lazy-python.style.md mandate)
+#   tst --help           # print this usage
+#
+# Runs standalone from a bare terminal — CLAUDE_PLUGIN_ROOT / CLAUDE_PLUGIN_DATA
+# are optional (only an optimization for the venv helper's probe 4; probes 1-3 +
+# self-derivation work without them).
+set -e
+set -u
+set -o pipefail
+
+# directory containing the script
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+
+function print_help() {
+  echo "run Python tests via pytest"
+  echo "usage: tst [<module>]"
+  echo
+  echo "  <module>   one of the names under tests/ (e.g., 'core', 'rpg')"
+  echo "             omit to run all tests"
+  echo
+  echo "  -q         accepted as no-op (lazy-python.style.md compat)"
+  echo "  --help     this help"
+  echo
+}
+
+# help shortcut
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  print_help
+  exit 0
+fi
+
+# parse args: collect non-flag positional, swallow -q
+mod=""
+while [ -n "${1-}" ]; do
+  if [ "$1" = "-q" ]; then
+    shift
+    continue
+  fi
+  if [ -z "$mod" ]; then
+    mod="$1"
+  else
+    echo "tst: unexpected extra arg: $1" >&2
+    print_help
+    exit 1
+  fi
+  shift
+done
+
+source "$script_dir/_ensure_venv.sh"
+
+if [ -z "$mod" ]; then
+  exec pytest -q tests/
+else
+  exec pytest -q "tests/${mod}/"
+fi

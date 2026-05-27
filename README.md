@@ -25,7 +25,7 @@ Each plugin addresses one of these pains without forcing you to adopt the others
 
 Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-model routing + settings management)
 
-Ships 23 skills, 6 agents, 2 commands, 10 rules, and 5 hooks.
+Ships 25 skills, 6 agents, 2 commands, 10 rules, and 5 hooks.
 
 See [`claude/lazycortex-core/`](claude/lazycortex-core/) for details.
 
@@ -69,11 +69,21 @@ Requires: lazycortex-core
 
 See [`claude/lazycortex-obsidian/`](claude/lazycortex-obsidian/) for details.
 
+### lazycortex-python
+
+Python coding discipline as a plugin: shared rules + reference guidelines + chk/tst checkers + PostToolUse hook + docstring-writer/test-writer agents + canonical file template. Installs once per repo via /lazy-python.install.
+
+Ships 3 skills, 2 agents, 1 command, 3 rules, and 1 hook.
+
+Requires: lazycortex-core
+
+See [`claude/lazycortex-python/`](claude/lazycortex-python/) for details.
+
 ### lazycortex-specs
 
 Specification and design skills for Claude Code
 
-Ships 20 skills, 1 agent, and 1 command.
+Ships 20 skills, 2 agents, and 1 command.
 
 Requires: lazycortex-core, lazycortex-diagram
 
@@ -89,7 +99,7 @@ See [`claude/lazycortex-specs/`](claude/lazycortex-specs/) for details.
 
 1. Add the marketplace and enable the plugins you want (see Installation below).
 2. Restart Claude Code.
-3. For each enabled plugin, run its install skill once per project: `/lazy-core.install`, `/lazy-observe.install`, etc. This drops the plugin's rule templates into `.claude/rules/` and sets up any log/changelog scaffolding.
+3. For each enabled plugin, run its install skill once per project: `/lazy-core.install`, `/lazy-python.install`, etc. This drops the plugin's rule templates into `.claude/rules/` and sets up any log/changelog scaffolding.
 4. Invoke skills via slash commands. Hooks activate automatically.
 
 ## Installation
@@ -113,6 +123,7 @@ All plugins live in a single Claude Code marketplace. Add the marketplace and en
     "lazycortex-experts@lazycortex": true,
     "lazycortex-observe@lazycortex": true,
     "lazycortex-obsidian@lazycortex": true,
+    "lazycortex-python@lazycortex": true,
     "lazycortex-specs@lazycortex": true
   }
 }
