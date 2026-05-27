@@ -1,0 +1,17 @@
+{
+  "description": "LazyCortex Python hooks — PostToolUse check-style pass that runs pcf.py on edited .py files",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/lazy-python.check-style.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

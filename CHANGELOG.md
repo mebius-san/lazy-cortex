@@ -474,3 +474,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Three built-in expert agents ship with the plugin: `lazy-experts.designer` (heavy-reasoning UI/UX and visual work), `lazy-experts.interpreter` (code explanation and analysis), and `lazy-experts.planner` (multi-step planning and decomposition) — ready to invoke without any configuration.
 - Three domain aspect files provide pre-built expert context for Claude-plugin development (`lazy-experts.claude-plugin-aspect`), game development (`lazy-experts.game-dev-aspect`), and dotfiles management (`lazy-experts.dotfiles-aspect`), giving the expert agents scoped background knowledge for each domain.
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
+
+## lazycortex-python
+
+### 1.4.1 — 2026-05-27 UTC
+
+- New plugin: `lazycortex-python` ships style, docstring, and test discipline rules (`lazy-python.style`, `lazy-python.docstrings`, `lazy-python.tests`), five reference guidelines, a canonical `python-template.py` skeleton, and a `pyproject-defaults.toml` template — everything needed to bootstrap a compliant Python project.
+- New `lazy-python.check-style` skill, `chk` aggregator (runs `pcf → toi → pch → mypy → ruff → pylint` in one command), and `tst` runner; `ruff` and `cmp` (py_compile) are now included in `chk all`, and `pytest-clarity`/`pytest-sugar` are provisioned in the venv automatically.
+- New `lazy-python.install` skill sets up a consumer project in one step: mirrors rules and wrapper scripts, bootstraps `pyproject.toml`, appends a discipline pointer to `CLAUDE.md`, and registers the PostToolUse check-style hook — no manual wiring needed.
+- New `lazy-python.audit` skill runs 11 invariant checks against an installed consumer project and reports `PASS`/`WARN`/`FAIL` per check, covering rule presence, scaffold registry, `CLAUDE.md` pointer, hook registration, and venv state.
+- New `lazy-python.docstring-writer` and `lazy-python.test-writer` agents automate docstring coverage and test generation for Python modules.
+- The check-style hook is now auto-registered via `hooks.json` at install time without requiring `source_roots` configuration; the hook correctly probes both `CLAUDE.md` and `.claude/CLAUDE.md` when adding the discipline pointer.
+- `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
