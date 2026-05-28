@@ -19,7 +19,7 @@
 .claude/scheduled_tasks.lock
 .logs/
 .runtime/
-.experts/.jobs/
+.experts/
 
 
 # ---------------------------------------------------------------------------------------
