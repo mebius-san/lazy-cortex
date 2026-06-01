@@ -24,16 +24,21 @@ This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Step 1: Detect install scope
 
-Read `~/.claude/plugins/installed_plugins.json` and find the entry for `lazycortex-diagram@lazycortex`. The `scope` field is either:
+Read `~/.claude/plugins/installed_plugins.json`. The `lazycortex-diagram@lazycortex` key holds an **array of entries** — one per project where `/plugin install` was last run. The plugin **cache is shared globally across all projects**, so any non-empty array proves the plugin is installed and usable in the current cwd.
+
+**Do NOT compare an entry's `projectPath` against the current working directory.** `projectPath` records where the install command was last run, not where the plugin "belongs" — Step 2 targets `<repo-root>` (i.e. `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
+
+Look at the `scope` field of the entries in the array:
 - `"user"` — plugin enabled globally in `~/.claude/settings.json`
-- `"project"` — plugin enabled in a project's `.claude/settings.json`
+- `"project"` — plugin enabled per-project in `.claude/settings.json`
 
-If the plugin has entries at both scopes, ask the user which to target. Default: `project`.
+If both scopes appear in the array, ask the user which to target. Default: `project`.
 
-If no entry is found, the plugin isn't actually installed — abort and tell the user to enable it first in their `settings.json`:
+Abort **only** if the `lazycortex-diagram@lazycortex` key is absent or its array is empty. In that case tell the user to install it first:
 ```json
 "enabledPlugins": { "lazycortex-diagram@lazycortex": true }
 ```
+then run `/plugin install lazycortex/lazycortex-diagram`.
 
 ## Step 2: Determine paths
 
@@ -111,10 +116,17 @@ Ensure `agent_models.lazycortex` exists as an object (create empty `{}` if absen
 
 ### Build the seed set from `default-tiers.json`
 
-`lazycortex-core` is a declared dependency (`plugin.json`), so its plugin cache must be present. Locate the canonical defaults file:
+`lazycortex-core` is a declared dependency (`plugin.json`), so it must be installed (in the cache) or co-resident (in the dev vault). Locate the canonical defaults file per the inter-plugin boundary contract — walk `$LAZYCORTEX_PLUGIN_DIRS` first, fall back to the cache glob when env is unset (install-time invocation outside the daemon):
 
 ```bash
-ls ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/skills/lazy-core.agent-models/default-tiers.json | sort -V | tail -1
+FILE=""
+IFS=":" read -ra DIRS <<< "${LAZYCORTEX_PLUGIN_DIRS:-}"
+for d in "${DIRS[@]}"; do
+  if [[ "$d" == *"/lazycortex-core" ]] && [ -f "$d/skills/lazy-core.agent-models/default-tiers.json" ]; then
+    FILE="$d/skills/lazy-core.agent-models/default-tiers.json"; break
+  fi
+done
+[ -z "$FILE" ] && FILE=$(ls ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/skills/lazy-core.agent-models/default-tiers.json 2>/dev/null | sort -V | tail -1)
 ```
 
 The newest version wins. Read the file, parse the JSON, and select every key under `defaults` that starts with `lazycortex-diagram:`. Those are the entries to seed (key + tier verbatim).

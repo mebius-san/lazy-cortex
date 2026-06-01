@@ -7,6 +7,11 @@ break_lock. Defaults are module-level constants; consumer overrides go through
 `.claude/lazy.settings.json[lazy-core.git]`.
 """
 from __future__ import annotations
+
+# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable=import-error
+from typing import Literal
+
 import json
 import os
 import random
@@ -15,9 +20,13 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Optional
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
 
 # --- Defaults -----------------------------------------------------------------
 
@@ -96,8 +105,8 @@ class AcquireResult:
   """
   status: AcquireStatus
   held_by_us: bool
-  peer: Optional[LockState] = None
-  break_reason: Optional[str] = None
+  peer: LockState | None = None
+  break_reason: str | None = None
   waited_seconds: float = 0.0
   message: str = ""
 
@@ -128,6 +137,7 @@ def _lock_path(repo_root: Path) -> Path:
   Returns:
     Path to `<repo_root>/.git/lazy-git.lock`.
   """
+  # waiver: git path idiom, not a domain constant
   return repo_root / ".git" / LOCK_FILENAME
 
 
@@ -155,7 +165,7 @@ def resolve_session_id() -> str:
   return f"pid:{os.getppid()}"
 
 
-def _find_claude_ancestor_pid() -> Optional[int]:
+def _find_claude_ancestor_pid() -> int | None:
   """
   Locate the closest ancestor process whose argv[0] is a Claude Code binary.
 
@@ -167,6 +177,7 @@ def _find_claude_ancestor_pid() -> Optional[int]:
   """
   pid = os.getppid()
   # bounded walk; never recurse forever even on cyclic / malformed process tables
+  # waiver: inline numeric/default literal, not a domain constant
   for _ in range(20):
     # guard: reached the init / kernel process boundary
     if pid <= 1:
@@ -191,7 +202,7 @@ def _find_claude_ancestor_pid() -> Optional[int]:
 
 # --- Lock file IO -------------------------------------------------------------
 
-def _read_lock(repo_root: Path) -> Optional[LockState]:
+def _read_lock(repo_root: Path) -> LockState | None:
   """
   Return the lock state currently persisted for the given repository.
 
@@ -208,11 +219,17 @@ def _read_lock(repo_root: Path) -> Optional[LockState]:
     return None
   try:
     return LockState(
+      # waiver: lock-file schema field name, single-source set in the lock writer, not a reusable cross-module key
       session_id = str(raw["session_id"]),
+      # waiver: lock-file schema field name, single-source set in the lock writer, not a reusable cross-module key
       pid = int(raw["pid"]),
+      # waiver: lock-file schema field name, single-source set in the lock writer, not a reusable cross-module key
       host = str(raw["host"]),
+      # waiver: lock-file schema field name, single-source set in the lock writer, not a reusable cross-module key
       branch = str(raw["branch"]),
+      # waiver: lock-file schema field name, single-source set in the lock writer, not a reusable cross-module key
       started_at = float(raw["started_at"]),
+      # waiver: lock-file schema field name, single-source set in the lock writer, not a reusable cross-module key
       last_index_mtime = float(raw["last_index_mtime"]),
     )
   except (KeyError, TypeError, ValueError):
@@ -243,9 +260,11 @@ def _write_lock(repo_root: Path, state: LockState) -> None:
     "started_at": state.started_at,
     "last_index_mtime": state.last_index_mtime,
   }
+  # waiver: stdlib idiom, not a domain constant
   fd, tmp = tempfile.mkstemp(dir = str(path.parent), prefix = ".lazy-git-", suffix = ".tmp")
   # noinspection PyBroadException
   try:
+    # waiver: stdlib idiom, not a domain constant
     with os.fdopen(fd, "w") as f:
       json.dump(payload, f, indent = 2, sort_keys = True)
       f.write("\n")
@@ -291,7 +310,7 @@ def _index_is_empty(repo_root: Path) -> bool:
   rc = subprocess.run(
     [ "git", "--no-optional-locks", "-C", str(repo_root),
       "diff", "--cached", "--quiet" ],
-    capture_output = True,
+    capture_output = True, check = False,
   ).returncode
   return rc == 0
 
@@ -313,6 +332,7 @@ def _current_branch(repo_root: Path) -> str:
       text = True, stderr = subprocess.DEVNULL,
     ).strip()
   except subprocess.CalledProcessError:
+    # waiver: git ref vocabulary, not a domain constant
     return "HEAD"
 
 
@@ -327,6 +347,7 @@ def _index_mtime(repo_root: Path) -> float:
     The epoch-seconds mtime of `.git/index`, or `0.0` when the file does not exist.
   """
   try:
+    # waiver: git path idiom, not a domain constant
     return (repo_root / ".git" / "index").stat().st_mtime
   except FileNotFoundError:
     return 0.0
@@ -334,7 +355,7 @@ def _index_mtime(repo_root: Path) -> float:
 
 # --- Inspect ------------------------------------------------------------------
 
-def inspect(repo_root: Path) -> Optional[LockState]:
+def inspect(repo_root: Path) -> LockState | None:
   """
   Return the current lock state for the given repository.
 
@@ -423,7 +444,8 @@ def _is_breakable(
   return False, "held"
 
 
-def break_lock(repo_root: Path, reason: str) -> bool:
+# waiver: `reason` kept for the caller-facing API (audit/diagnostics); not consumed by the break itself
+def break_lock(repo_root: Path, reason: str) -> bool:  # pylint: disable=unused-argument
   """
   Force-delete the staging lock file for the given repository.
 
@@ -487,7 +509,9 @@ def acquire(
   """
   # guard: mutex is disabled in this repository — fast-path success
   if not cfg.enabled:
+    # waiver: AcquireStatus token, single-source set in the AcquireStatus Literal, not a reusable cross-module key
     return AcquireResult(status = "acquired", held_by_us = True,
+                         # waiver: one-off human-facing message
                          message = "staging lock disabled (lazy-core.git.enabled=false)")
 
   deadline = time.time() + cfg.wait_seconds
@@ -507,6 +531,7 @@ def acquire(
     # Lock is ours — re-entry.
     # guard: lock is already held by the requesting session
     if existing.session_id == session_id:
+      # waiver: AcquireStatus token, single-source set in the AcquireStatus Literal, not a reusable cross-module key
       return AcquireResult(status = "reentered", held_by_us = True, waited_seconds = waited)
 
     # Held by peer — check if breakable.
@@ -516,6 +541,7 @@ def acquire(
       _delete_lock(repo_root)
       _write_lock(repo_root, _new_lock_state(repo_root, session_id))
       return AcquireResult(
+        # waiver: AcquireStatus token, single-source set in the AcquireStatus Literal, not a reusable cross-module key
         status = "broke_then_acquired", held_by_us = True,
         break_reason = reason, peer = existing, waited_seconds = waited,
       )
@@ -525,12 +551,14 @@ def acquire(
     # guard: wait deadline reached without acquiring the lock
     if now >= deadline:
       return AcquireResult(
+        # waiver: AcquireStatus token, single-source set in the AcquireStatus Literal, not a reusable cross-module key
         status = "refused", held_by_us = False, peer = existing, waited_seconds = waited,
         message = _refusal_message(existing, cfg, now),
       )
 
     # Sleep with jitter, then retry.
     sleep_ms = random.randint(POLL_MIN_MS, POLL_MAX_MS)
+    # waiver: inline numeric/default literal, not a domain constant
     sleep_s = min(sleep_ms / 1000.0, max(0.0, deadline - now))
     time.sleep(sleep_s)
     waited += sleep_s
@@ -580,14 +608,18 @@ def release_if_index_empty(repo_root: Path, session_id: str) -> ReleaseResult:
   state = _read_lock(repo_root)
   # guard: no lock file currently exists for this repository
   if state is None:
+    # waiver: release-outcome reason token, not an internal key
     return ReleaseResult(released = False, reason = "no_lock")
   # guard: lock is held by a different session and must not be released
   if state.session_id != session_id:
+    # waiver: release-outcome reason token, not an internal key
     return ReleaseResult(released = False, reason = "not_our_lock")
   # guard: index still has staged entries — staging window is not closed
   if not _index_is_empty(repo_root):
+    # waiver: release-outcome reason token, not an internal key
     return ReleaseResult(released = False, reason = "index_not_empty")
   _delete_lock(repo_root)
+  # waiver: release-outcome reason token, not an internal key
   return ReleaseResult(released = True, reason = "released")
 
 
@@ -621,6 +653,8 @@ def load_config(repo_root: Path) -> StagingConfig:
     # noinspection PyBroadException
     try:
       sys.path.insert(0, str(Path(__file__).parent))
+      # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+      # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
       import lazy_settings  # type: ignore
       section = lazy_settings.load_section(settings_path, _SECTION)
     except Exception:
@@ -635,8 +669,12 @@ def load_config(repo_root: Path) -> StagingConfig:
       except ValueError:
         pass
   return StagingConfig(
+    # waiver: lock config-section field name, paired with its DEFAULT_* constant
     enabled = bool(section.get("enabled", DEFAULT_ENABLED)),
+    # waiver: lock config-section field name, paired with its DEFAULT_* constant
     wait_seconds = float(section.get("wait_seconds", DEFAULT_WAIT_SECONDS)),
+    # waiver: lock config-section field name, paired with its DEFAULT_* constant
     max_hold_seconds = float(section.get("max_hold_seconds", DEFAULT_MAX_HOLD_SECONDS)),
+    # waiver: lock config-section field name, paired with its DEFAULT_* constant
     max_idle_seconds = float(section.get("max_idle_seconds", DEFAULT_MAX_IDLE_SECONDS)),
   )

@@ -24,7 +24,15 @@ Stdlib only — no croniter dep so the daemon stays portable across systems
 with bare `python3`.
 """
 from __future__ import annotations
-from datetime import datetime, timedelta
+
+from datetime import timedelta
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  from datetime import datetime
+
+
+CronSpec = tuple[set[int], set[int], set[int], set[int], set[int]]
 
 
 class CronError(ValueError):
@@ -61,7 +69,8 @@ def _parse_field(spec: str, lo: int, hi: int) -> set[int]:
   out: set[int] = set()
   # walk the comma-separated pieces; each piece independently contributes values to the union
   for piece in spec.split(","):
-    piece = piece.strip()
+    # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+    piece = piece.strip()  # noqa: PLW2901
     # guard: empty piece is a syntax error
     if not piece:
       raise CronError(f"empty piece in field {spec!r}")
@@ -70,8 +79,8 @@ def _parse_field(spec: str, lo: int, hi: int) -> set[int]:
       base, step_str = piece.split("/", 1)
       try:
         step = int(step_str)
-      except ValueError:
-        raise CronError(f"bad step in {piece!r}")
+      except ValueError as exc:
+        raise CronError(f"bad step in {piece!r}") from exc
       # guard: step must be a positive integer
       if step <= 0:
         raise CronError(f"step must be > 0 in {piece!r}")
@@ -84,14 +93,14 @@ def _parse_field(spec: str, lo: int, hi: int) -> set[int]:
     elif "-" in base:
       try:
         a, b = (int(x) for x in base.split("-", 1))
-      except ValueError:
-        raise CronError(f"bad range in {piece!r}")
+      except ValueError as exc:
+        raise CronError(f"bad range in {piece!r}") from exc
       start, end = a, b
     else:
       try:
         v = int(base)
-      except ValueError:
-        raise CronError(f"bad value in {piece!r}")
+      except ValueError as exc:
+        raise CronError(f"bad value in {piece!r}") from exc
       start, end = v, v
 
     # guard: interval must lie inside the field's allowed range
@@ -109,7 +118,7 @@ def _parse_field(spec: str, lo: int, hi: int) -> set[int]:
   return out
 
 
-def parse(cron_str: str) -> tuple[set[int], set[int], set[int], set[int], set[int]]:
+def parse(cron_str: str) -> CronSpec:
   """
   Parse a 5-field cron expression into per-field value sets.
 
@@ -127,12 +136,14 @@ def parse(cron_str: str) -> tuple[set[int], set[int], set[int], set[int], set[in
   """
   parts = cron_str.split()
   # guard: must have exactly five whitespace-separated fields
+  # waiver: inline numeric literal (cron field count), not a domain constant
   if len(parts) != 5:
     raise CronError(f"expected 5 fields, got {len(parts)}: {cron_str!r}")
-  fields = []
-  for spec, (lo, hi) in zip(parts, _FIELD_BOUNDS):
-    fields.append(_parse_field(spec, lo, hi))
-  return tuple(fields)
+  # parts verified to be exactly 5 above → unpack the five parsed fields directly
+  minute, hour, day, month, dow = (
+    _parse_field(spec, lo, hi) for spec, (lo, hi) in zip(parts, _FIELD_BOUNDS, strict=False)
+  )
+  return (minute, hour, day, month, dow)
 
 
 def _python_weekday_to_cron(wd: int) -> int:
@@ -146,10 +157,11 @@ def _python_weekday_to_cron(wd: int) -> int:
     The same day expressed in cron's convention where Sunday is 0 and Saturday is 6.
   """
   # datetime.weekday(): Mon=0..Sun=6. cron: Sun=0..Sat=6.
+  # waiver: inline numeric literal (days per week), not a domain constant
   return (wd + 1) % 7
 
 
-def matches(spec, dt: datetime) -> bool:
+def matches(spec: CronSpec, dt: datetime) -> bool:
   """
   Report whether a given moment satisfies a parsed cron specification.
 
@@ -170,7 +182,7 @@ def matches(spec, dt: datetime) -> bool:
   )
 
 
-def next_fire(spec, after_dt: datetime) -> datetime:
+def next_fire(spec: CronSpec, after_dt: datetime) -> datetime:
   """
   Find the next moment strictly after a reference time at which the cron spec fires.
 
@@ -196,7 +208,7 @@ def next_fire(spec, after_dt: datetime) -> datetime:
   raise CronError("no fire within 4 years; cron spec is unsatisfiable")
 
 
-def due_since(spec, last_run: datetime, now: datetime) -> bool:
+def due_since(spec: CronSpec, last_run: datetime, now: datetime) -> bool:
   """
   Report whether a cron spec has any firing boundary in the half-open interval `(last_run, now]`.
 

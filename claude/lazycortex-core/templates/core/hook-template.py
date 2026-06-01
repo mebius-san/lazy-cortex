@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
+
 """
 <Pre|Post>ToolUse hook: <one-line purpose>.
 
 Fires on:
-- ``<MatcherName>`` tool calls — <gate condition, e.g., command matches `git commit`>.
+- `<MatcherName>` tool calls — <gate condition, e.g., command matches `git commit`>.
 - (Add more matchers if registered in settings.json.)
 
 Filters by inspecting the hook payload on stdin so the broad matcher in
@@ -18,7 +19,7 @@ Gates (cross-cutting):
 - <e.g., "Only runs inside a git repo with `claude/` at root.">
 - <e.g., "Skips if HEAD diff is folder-notes-only — see § 5 loop guard.">
 
-This template encodes the lazy-core.hook-writing § 1–8 contract:
+This template encodes the lazy-core.hook-writing § 1-8 contract:
   § 1 script discipline · § 2 trigger gating · § 3 branch determinism
   § 4 no-dirty-tree · § 5 no-foreign-staged · § 6 auto-commit loop guard
   § 7 transactional skip · § 8 logging
@@ -27,18 +28,23 @@ Delete the trailing AUTHORING NOTES block before saving; it is a guide, not
 runtime documentation.
 """
 from __future__ import annotations
+
 import json
 import os
 import re
 import subprocess
 import sys
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
 
-# ---------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------------------
 # § 6 LOOP GUARD — content-based bail (replace with the predicate that
 # recognises THIS hook's own footprint; see lazy-core.hook-writing § 6 for
 # the contract).
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 def _is_real_event(root: str) -> bool:
   """
   Report whether the just-handled event is genuine caller activity rather than this hook's own
@@ -59,10 +65,10 @@ def _is_real_event(root: str) -> bool:
   return True  # ← replace with real predicate
 
 
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 # § 7 TRANSACTIONAL SKIP — never auto-commit during merge/rebase/cherry-pick.
 # Contract: lazy-core.hook-writing § 7.
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 _TRANSACTIONAL_MARKERS = (
   "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
   "REBASE_HEAD", "rebase-merge", "rebase-apply", "BISECT_LOG",
@@ -91,10 +97,10 @@ def _in_transactional_state(root: str) -> bool:
   return any(os.path.exists(os.path.join(git_path, m)) for m in _TRANSACTIONAL_MARKERS)
 
 
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 # § 1 EMIT — additionalContext (PostToolUse) or permissionDecision (PreToolUse).
 # Pick one shape per branch; mixing is a bug.
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 def _context(msg: str, event: str = "PostToolUse") -> None:
   """
   Emit a non-blocking transcript message to the Claude Code hook output channel.
@@ -147,15 +153,20 @@ def main() -> int:
   except (json.JSONDecodeError, ValueError):
     return 0
 
+  # waiver: external-format hook-payload field name, not an internal key
   tool_name = hook_input.get("tool_name", "")
+  # waiver: external-format hook-payload field name, not an internal key
   tool_input = hook_input.get("tool_input", {})
 
   # § 2 — TRIGGER GATING — broad matchers MUST be narrowed in-script.
+  # waiver: external Claude Code tool name, not a domain key
   if tool_name == "Bash":
+    # waiver: external-format tool-input field name, not an internal key
     command = tool_input.get("command", "")
     # guard: bail when the Bash command does not match the precise prefix we care about
     if not re.match(r"\s*<command-prefix>\b", command):
       return 0
+  # waiver: scaffold-template placeholder, not a domain constant
   elif tool_name == "<other-matcher>":
     # narrow this branch too (e.g. subagent_type for Agent).
     pass
@@ -170,6 +181,7 @@ def main() -> int:
   except (subprocess.CalledProcessError, FileNotFoundError):
     return 0
   # guard: workspace shape must carry the expected marker directory at the root
+  # waiver: scaffold-template placeholder, not a domain constant
   if not os.path.isdir(os.path.join(root, "<expected-marker-dir>")):
     return 0
 
@@ -219,7 +231,7 @@ if __name__ == "__main__":
 #   Register in settings.json: hooks.{Pre,Post}ToolUse[].matcher = "<MatcherName>"
 #   with hooks[].command = python3 "${CLAUDE_PLUGIN_ROOT}/hooks/<file>".
 #
-# Contract (lazy-core.hook-writing §§ 1–8)
+# Contract (lazy-core.hook-writing §§ 1-8)
 #   § 1 Script discipline   — shebang, JSON-stdin, exit 0, hooksPath=/dev/null
 #                             on inner git ops.
 #   § 2 Trigger gating      — broad matcher in settings.json; in-script gate
@@ -237,7 +249,7 @@ if __name__ == "__main__":
 #                             per lazy-log.logging.
 #
 # Reference implementations
-#   See lazy-core.hook-writing §§ 1–8 for worked patterns covering full
+#   See lazy-core.hook-writing §§ 1-8 for worked patterns covering full
 #   PostToolUse hooks (worker dispatch, auto-commit, loop guard, transactional
 #   skip, index refresh) and PreToolUse hooks (deny / context emission /
 #   write-and-restage rideshare).

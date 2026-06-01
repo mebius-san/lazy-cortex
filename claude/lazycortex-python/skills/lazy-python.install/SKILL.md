@@ -57,15 +57,20 @@ Outcome: `wrappers-deployed-2 + gitignore-ensured` when `.venv/` was added to th
 
 ## Step 3: Bootstrap pyproject.toml checker sections
 
-Merges checker sections from `${CLAUDE_PLUGIN_ROOT}/templates/pyproject-defaults.toml` into the consumer's `pyproject.toml`. Existing sections are preserved (consumer wins) — only missing sections are appended. No user prompt — runs unconditionally.
+Merges checker sections from `${CLAUDE_PLUGIN_ROOT}/templates/pyproject-defaults.toml` into the consumer's `pyproject.toml`. Existing sections are preserved (consumer wins) — only missing sections are appended.
 
-Run:
+The always-on sections (`pcf`, `toi`, `pytest`, `mypy`, `pylint`, `ruff`) deploy unconditionally. The `pch` section (PyCharm offline inspections) is opt-in — it spins up a headless PyCharm and is meaningless without it. Ask with `AskUserQuestion`, one question: `"Enable PyCharm inspections (pch)? Adds a [tool.pch] section. Only useful if you run PyCharm; pch stays out of 'chk all' and is run manually."` (yes / no).
+
+Run phase3, passing the answer through the `LAZY_PYTHON_ENABLE_PCH` env flag:
 
 ```
+# user chose yes — also deploy [tool.pch]:
+Bash(LAZY_PYTHON_ENABLE_PCH=1 python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase3 ${CLAUDE_PROJECT_DIR})
+# user chose no — leave pch out (default):
 Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase3 ${CLAUDE_PROJECT_DIR})
 ```
 
-Outcome: `pyproject-bootstrapped` when at least one missing section was appended; `pyproject-already-complete` when every required section was already present.
+Outcome: `pyproject-bootstrapped` when at least one missing section was appended; `pyproject-already-complete` when every required section was already present — suffixed `+pch-enabled` or `+pch-declined` per the answer.
 
 ## Step 4: Detect PyCharm inspect.sh prerequisite
 

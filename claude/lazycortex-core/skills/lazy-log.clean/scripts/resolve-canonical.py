@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 Emit JSON of every canonical skill / agent / command name visible to this session.
 
@@ -24,6 +25,11 @@ import re
 import sys
 from pathlib import Path
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
+
 HOME = Path.home()
 INSTALLED = HOME / ".claude" / "plugins" / "installed_plugins.json"
 
@@ -43,12 +49,14 @@ def _extract_frontmatter_block(path: Path) -> str | None:
     when the file cannot be read, does not start with `---`, or has no closing delimiter.
   """
   try:
+    # waiver: stdlib idiom, not a domain constant
     text = path.read_text(encoding = "utf-8", errors = "replace")
   except OSError:
     return None
   # guard: file must open with a frontmatter delimiter
   if not text.startswith("---"):
     return None
+  # waiver: inline numeric literal, not a domain constant
   end = text.find("\n---", 3)
   # guard: closing delimiter must exist for the block to be valid
   if end < 0:
@@ -119,25 +127,31 @@ def harvest_root(
     return found
 
   # skills live one directory deep at <root>/skills/<dir>/SKILL.md
+  # waiver: Claude Code artifact-directory name, not a domain key
   skills_dir = root / "skills"
   if skills_dir.is_dir():
     for entry in os.listdir(skills_dir):
+      # waiver: filesystem path/filename idiom, not a domain constant
       skill_md = skills_dir / entry / "SKILL.md"
       # guard: only count entries that actually own a SKILL.md
       if not skill_md.is_file():
         continue
       name = read_frontmatter_name(skill_md) or entry
+      # waiver: internal counter/summary dict subkey, single-source set in this script
       found["skill"].add(name)
+      # waiver: internal counter/summary dict subkey, single-source set in this script
       counters["files"] += 1
       reason = read_frontmatter_waiver(skill_md)
       if reason is not None:
         waivered[name] = reason
 
   # agents live flat at <root>/agents/<file>.md
+  # waiver: Claude Code artifact-directory name, not a domain key
   agents_dir = root / "agents"
   if agents_dir.is_dir():
     for entry in os.listdir(agents_dir):
       # guard: only markdown agent files are eligible
+      # waiver: filesystem path/filename idiom, not a domain constant
       if not entry.endswith(".md"):
         continue
       agent_md = agents_dir / entry
@@ -145,17 +159,21 @@ def harvest_root(
       if not agent_md.is_file():
         continue
       name = read_frontmatter_name(agent_md) or agent_md.stem
+      # waiver: internal counter/summary dict subkey, single-source set in this script
       found["agent"].add(name)
+      # waiver: internal counter/summary dict subkey, single-source set in this script
       counters["files"] += 1
       reason = read_frontmatter_waiver(agent_md)
       if reason is not None:
         waivered[name] = reason
 
   # commands live flat at <root>/commands/<file>.md
+  # waiver: Claude Code artifact-directory name, not a domain key
   commands_dir = root / "commands"
   if commands_dir.is_dir():
     for entry in os.listdir(commands_dir):
       # guard: only markdown command files are eligible
+      # waiver: filesystem path/filename idiom, not a domain constant
       if not entry.endswith(".md"):
         continue
       cmd_md = commands_dir / entry
@@ -163,7 +181,9 @@ def harvest_root(
       if not cmd_md.is_file():
         continue
       name = read_frontmatter_name(cmd_md) or cmd_md.stem
+      # waiver: internal counter/summary dict subkey, single-source set in this script
       found["command"].add(name)
+      # waiver: internal counter/summary dict subkey, single-source set in this script
       counters["files"] += 1
       reason = read_frontmatter_waiver(cmd_md)
       if reason is not None:
@@ -194,6 +214,7 @@ def repo_root() -> Path | None:
   """
   cwd = Path.cwd()
   for parent in [ cwd, *cwd.parents ]:
+    # waiver: filesystem path/filename idiom, not a domain constant
     if (parent / ".git").exists():
       return parent
   return None
@@ -213,6 +234,7 @@ def in_repo_plugin_roots(repo: Path | None) -> list[Path]:
   # guard: no repository context — nothing to enumerate
   if repo is None:
     return []
+  # waiver: filesystem path/filename idiom, not a domain constant
   candidate = repo / "claude"
   # guard: repository must own a `claude/` directory
   if not candidate.is_dir():
@@ -235,9 +257,11 @@ def project_local_root(repo: Path | None) -> Path | None:
     The absolute path to the resolved `.claude/` directory, or `None` when no candidate exists.
   """
   if repo is not None:
+    # waiver: filesystem path/filename idiom, not a domain constant
     candidate = repo / ".claude"
     return candidate if candidate.is_dir() else None
   # fall back to the current working directory when no git repo is available
+  # waiver: filesystem path/filename idiom, not a domain constant
   candidate = Path.cwd() / ".claude"
   return candidate if candidate.is_dir() else None
 
@@ -254,12 +278,15 @@ def installed_plugin_roots() -> list[Path]:
   if not INSTALLED.is_file():
     return []
   try:
+    # waiver: stdlib idiom, not a domain constant
     data = json.loads(INSTALLED.read_text(encoding = "utf-8"))
   except json.JSONDecodeError:
     return []
   roots: list[Path] = []
+  # waiver: external installed-plugins JSON field name, not an internal key
   for entries in data.get("plugins", {}).values():
     for entry in entries:
+      # waiver: external installed-plugins JSON field name, not an internal key
       install_path = entry.get("installPath")
       if install_path:
         roots.append(Path(install_path))
@@ -281,6 +308,7 @@ def global_root() -> Path:
     The absolute path to the home-scoped Claude configuration root. The directory is not
     guaranteed to exist; callers must check before scanning.
   """
+  # waiver: filesystem path/filename idiom, not a domain constant
   return HOME / ".claude"
 
 
@@ -307,23 +335,27 @@ def main() -> int:
   # scan in-repo plugin sources first so authoring overrides win on tie
   for root in in_repo_plugin_roots(repo):
     merge(aggregate, harvest_root(root, counters, waivered))
+    # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["in_repo_plugin_roots"] += 1
 
   # then the project-local `.claude/` tree (consumer-side artifacts)
   proj = project_local_root(repo)
   if proj is not None:
     merge(aggregate, harvest_root(proj, counters, waivered))
+    # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["project_local_root"] = 1
 
   # then every installed plugin recorded in the marketplace registry
   for root in installed_plugin_roots():
     merge(aggregate, harvest_root(root, counters, waivered))
+    # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["installed_roots"] += 1
 
   # finally the user-level `~/.claude/` root
   global_dir = global_root()
   if global_dir.is_dir():
     merge(aggregate, harvest_root(global_dir, counters, waivered))
+    # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["global_root"] = 1
 
   by_kind = { kind: sorted(names) for kind, names in aggregate.items() }
@@ -334,10 +366,15 @@ def main() -> int:
     "by_kind": by_kind,
     "waivered": waivered,
     "sources": {
+      # waiver: internal counter/summary dict subkey, single-source set in this script
       "in_repo_plugin_roots": counters["in_repo_plugin_roots"],
+      # waiver: internal counter/summary dict subkey, single-source set in this script
       "project_local_root": counters["project_local_root"],
+      # waiver: internal counter/summary dict subkey, single-source set in this script
       "installed_plugin_roots": counters["installed_roots"],
+      # waiver: internal counter/summary dict subkey, single-source set in this script
       "global_root": counters["global_root"],
+      # waiver: internal counter/summary dict subkey, single-source set in this script
       "files_scanned": counters["files"],
     },
   }

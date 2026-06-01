@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, doctor-tick, runtime, memory-reflect-all, dispatch-job, collect-job, consume-job, lookup-expert")
+         "Subcommands: expert-pump-once, doctor-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, lookup-expert, scaffold, error-record, error-list")
 
 
 def _cmd_consume_job(argv: list[str]) -> int:
@@ -239,6 +239,100 @@ def _cmd_memory_reflect_all(argv: list[str]) -> int:
     return 0
 
 
+def _cmd_error_record(argv: list[str]) -> int:
+    """Record one error event (or resolve an incident) from CLI flags.
+
+    Other plugins call this over the published CLI to register an error the
+    runtime did not capture as a job/routine failure. Best-effort: the underlying
+    ``error_ledger.record`` never raises. On open, prints ``{"recorded": true, "id": "<ulid>"}``
+    so the caller can correlate; ``--cause`` is required (closed-set) so a plugin can't drop a
+    causeless event into the ledger.
+    """
+    import argparse, json
+    import error_ledger
+    p = argparse.ArgumentParser(prog="lazycortex-core error-record")
+    p.add_argument("--incident", required=True)
+    p.add_argument("--kind", default="plugin_error")
+    p.add_argument("--cause")
+    p.add_argument("--severity", default="error", choices=["error", "warn"])
+    p.add_argument("--detail", default="")
+    p.add_argument("--expert")
+    p.add_argument("--job-id")
+    p.add_argument("--routine")
+    p.add_argument("--resolve", action="store_true")
+    p.add_argument("--resolution", default="manual")
+    a = p.parse_args(argv)
+    repo = Path.cwd()
+    # guard: --resolve closes an incident instead of opening one; cause is meaningless for the close path
+    if a.resolve:
+        event_id = error_ledger.new_id()
+        error_ledger.resolve(repo, a.incident, resolution=a.resolution, id=event_id)
+    else:
+        # guard: opening an event without a cause violates the closed-set contract — refuse the call
+        if not a.cause:
+            print("error-record: --cause is required when opening an event", file=sys.stderr)
+            return 2
+        event_id = error_ledger.new_id()
+        error_ledger.record(repo, {
+            "id": event_id,
+            "incident": a.incident, "phase": "opened", "kind": a.kind, "cause": a.cause,
+            "severity": a.severity, "detail": a.detail, "actor": "plugin-cli",
+            "expert": a.expert, "job_id": a.job_id, "routine": a.routine,
+        })
+    print(json.dumps({"recorded": True, "id": event_id}))
+    return 0
+
+
+def _cmd_resume(argv: list[str]) -> int:
+    """Clear the daemon's halt block so the runtime resumes work.
+
+    Reason-aware (see ``recover.resume``): ``uncommitted_changes`` requires a
+    clean working tree; other reasons (``suspected_loop``, ``git_pull_diverged``,
+    ``git_push_failed``, ``git_remote_unavailable``, future) clear unconditionally.
+    If the underlying cause still holds, the daemon will re-halt on the next
+    iteration — clearing is always safe, never destructive.
+
+    Idempotent: if the daemon is not halted, exits 0 with ``resumed: false``.
+    """
+    import argparse, json
+    import recover
+    p = argparse.ArgumentParser(prog="lazycortex-core resume")
+    p.add_argument("repo", nargs="?", default=None,
+                   help="Repository root (default: $LAZY_REPO_ROOT or cwd)")
+    a = p.parse_args(argv)
+    repo_path = Path(a.repo) if a.repo else Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
+    halt_before = recover.read_halt(repo_path)
+    # guard: daemon is not halted — idempotent no-op
+    if halt_before is None:
+        print(json.dumps({"resumed": False, "halt": None, "note": "daemon not halted"}))
+        return 0
+    try:
+        recover.resume(repo_path)
+    except recover.RecoverError as e:
+        print(json.dumps({"resumed": False, "halt": halt_before, "error": str(e)}), file=sys.stderr)
+        return 1
+    print(json.dumps({"resumed": True, "halt": halt_before}))
+    return 0
+
+
+def _cmd_error_list(argv: list[str]) -> int:
+    """Print error-ledger incidents as JSON, optionally filtered by state / kind / since-cursor."""
+    import argparse, json
+    import error_ledger
+    p = argparse.ArgumentParser(prog="lazycortex-core error-list")
+    p.add_argument("--state", default="all", choices=["all", "open", "needs_operator", "closed"])
+    p.add_argument("--kind", default=None)
+    p.add_argument("--since", default=None,
+                   help="ULID cursor; only incidents whose latest event id is strictly greater are returned")
+    a = p.parse_args(argv)
+    rows = error_ledger.incidents(Path.cwd(), state=a.state, since=a.since)
+    # guard: optional kind filter
+    if a.kind:
+        rows = [r for r in rows if r.get("kind") == a.kind]
+    print(json.dumps(rows, ensure_ascii=False))
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print(USAGE, file=sys.stderr); return 2
@@ -258,6 +352,8 @@ def main() -> int:
     elif sub == "runtime":
         from runtime_daemon import run
         run(repo); return 0
+    elif sub == "resume":
+        return _cmd_resume(sys.argv[2:])
     elif sub == "memory-reflect-all":
         return _cmd_memory_reflect_all(sys.argv[2:])
     elif sub == "dispatch-job":
@@ -268,6 +364,13 @@ def main() -> int:
         return _cmd_consume_job(sys.argv[2:])
     elif sub == "lookup-expert":
         return _cmd_lookup_expert(sys.argv[2:])
+    elif sub == "scaffold":
+        from scaffold_registry import main as _scaffold_main
+        return _scaffold_main(sys.argv[2:])
+    elif sub == "error-record":
+        return _cmd_error_record(sys.argv[2:])
+    elif sub == "error-list":
+        return _cmd_error_list(sys.argv[2:])
     else:
         print(f"unknown subcommand: {sub}\n{USAGE}", file=sys.stderr); return 2
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: The PostToolUse hook that runs `pcf.py` on every `.py` edit and surfaces style violations inline in the next turn — zero install steps, zero config writes.
-last_regen: 2026-05-27
+last_regen: 2026-06-01
 no_diagram: true
 source_skills:
   - lazy-python.check-style.sh
@@ -21,7 +21,7 @@ Every time you save a `.py` file — via `Edit` or `Write` — the plugin's Post
 
 **`hooks.json`** is the plugin manifest that tells Claude Code's hook engine to fire `lazy-python.check-style.sh` on every `Edit` or `Write` call. It declares a single `PostToolUse` entry with `matcher: "Edit|Write"` and a 15-second timeout. When the plugin is enabled, Claude Code reads this manifest and wires the hook automatically — nothing in your project's `settings.json` is touched.
 
-**`lazy-python.check-style.sh`** is the script the hook engine invokes after each `Edit` or `Write`. It reads the tool call's JSON payload from stdin, pulls out the file path, and immediately exits if the file is not a `.py` file — so the hook is truly silent on every non-Python edit. For `.py` files it then runs `python3 -m py_compile` on the just-written file: if the file is syntactically incomplete (an in-progress multi-step edit), it exits cleanly rather than reporting spurious violations. When the file parses, it calls `pcf.py` with the file path and captures the output. If `pcf.py` emits any `: note:` lines it writes a `hookSpecificOutput` JSON payload to stdout with an `additionalContext` block containing the violation list; if the file is clean (or excluded by `pcf.py`'s own exclude logic) it exits without producing any output.
+**`lazy-python.check-style.sh`** is the script the hook engine invokes after each `Edit` or `Write`. It reads the tool call's JSON payload from stdin, pulls out the file path, and immediately exits if the file is not a `.py` file — so the hook is truly silent on every non-Python edit. For `.py` files it then runs `python3 -m py_compile` on the just-written file: if the file is syntactically incomplete (an in-progress multi-step edit), it exits cleanly rather than reporting spurious violations. When the file parses, it calls `pcf.py` with the resolved absolute path and captures the output. If `pcf.py` emits any `: note:` lines it writes a `hookSpecificOutput` JSON payload to stdout with an `additionalContext` block containing the violation list; if the file is clean (or excluded by `pcf.py`'s own exclude logic) it exits without producing any output.
 
 **`pcf.py`** owns the exclude decision. The hook passes the symlink-resolved absolute path of the edited file to `pcf.py` and lets `pcf.py` decide whether to scan it. If the path matches an entry in `[tool.pcf] exclude` in `pyproject.toml`, `pcf.py` exits cleanly and the hook produces no output. This means adding a directory to the `exclude` list in `pyproject.toml` is the only thing you need to do to silence the hook for that directory — there is no separate hook configuration.
 

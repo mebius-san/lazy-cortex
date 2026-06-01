@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 PreToolUse hook — route Agent dispatches to a configured model.
 
@@ -23,16 +24,29 @@ Never blocks. Any error → `sys.exit(0)` (pass-through).
 Protocol reference: https://code.claude.com/docs/en/hooks.md
 """
 from __future__ import annotations
+# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# deferred imports below module code; position intentional (ruff E402 noqa guards it)
+# pylint: disable=import-error,wrong-import-position
 
 import json
 import os
 import sys
 from pathlib import Path
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
+
 # Hooks run as standalone scripts (no package context). Add the plugin's
 # bin/ to sys.path so `lazy_settings` is importable.
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "bin"))
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
 from lazy_settings import load_section  # noqa: E402
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+from constants import AgentToolInput, HookKey, SettingsFile, SettingsKey, ToolName  # noqa: E402
+
 
 TIER = { "haiku": 1, "sonnet": 2, "opus": 3 }
 SENTINELS = { "default", None, "" }
@@ -53,7 +67,7 @@ def _safe_load(path: Path) -> dict:
   if not path.exists():
     return {}
   try:
-    return load_section(path, "agent_models")
+    return load_section(path, SettingsKey.AGENT_MODELS)
   except (json.JSONDecodeError, OSError) as e:
     # surface the failure to stderr so operators can diagnose; never abort the hook
     print(
@@ -78,8 +92,8 @@ def load_config(cwd: str | None) -> dict:
     A dict with one key `agent_models` whose value is the merged grouped configuration.
   """
   # resolve both candidate settings paths (user-scope + project-scope)
-  user_path = Path.home() / ".claude" / "lazy.settings.json"
-  proj_path = Path(cwd or ".") / ".claude" / "lazy.settings.json"
+  user_path = Path.home() / SettingsFile.REL
+  proj_path = Path(cwd or ".") / SettingsFile.REL
 
   user_section = _safe_load(user_path)
   proj_section = _safe_load(proj_path)
@@ -93,7 +107,7 @@ def load_config(cwd: str | None) -> dict:
         continue  # skip metadata. Filtering by shape, not name, because `_user`/`_project`/`_builtin`
                   # are legitimate group keys that share the underscore prefix.
       merged.setdefault(g, {}).update(entries)
-  return { "agent_models": merged }
+  return { SettingsKey.AGENT_MODELS: merged }
 
 
 def build_flat_map(cfg: dict) -> dict:
@@ -112,7 +126,7 @@ def build_flat_map(cfg: dict) -> dict:
     A flat dict mapping each dispatch string to its configured model tier.
   """
   out: dict = {}
-  groups = cfg.get("agent_models", {})
+  groups = cfg.get(SettingsKey.AGENT_MODELS, {})
   # guard: malformed top-level — return empty flat map
   if not isinstance(groups, dict):
     return out
@@ -144,19 +158,19 @@ def main() -> None:
   """
   payload = json.load(sys.stdin)
   # guard: only Agent dispatches participate in routing
-  if payload.get("tool_name") != "Agent":
+  if payload.get(HookKey.TOOL_NAME) != ToolName.AGENT:
     sys.exit(0)
 
   # snapshot caller-supplied tool input so any mutation stays local to this hook
-  ti = dict(payload.get("tool_input", {}))
-  subagent = ti.get("subagent_type")
+  ti = dict(payload.get(HookKey.TOOL_INPUT, {}))
+  subagent = ti.get(AgentToolInput.SUBAGENT_TYPE)
   # guard: dispatch missing subagent name — nothing to look up
   if not subagent:
     sys.exit(0)
 
   # 1. Config lookup
-  caller_model = ti.get("model")
-  cfg = load_config(payload.get("cwd"))
+  caller_model = ti.get(AgentToolInput.MODEL)
+  cfg = load_config(payload.get(HookKey.CWD))
   flat = build_flat_map(cfg)
   configured = flat.get(subagent)
   if configured in SENTINELS:
@@ -191,7 +205,7 @@ def main() -> None:
     sys.exit(0)
 
   # emit the updated-input envelope so Claude Code applies the routed model
-  ti["model"] = proposed
+  ti[AgentToolInput.MODEL] = proposed
   json.dump(
     {
       "hookSpecificOutput": {
@@ -208,7 +222,8 @@ def main() -> None:
 if __name__ == "__main__":
   try:
     main()
-  except SystemExit:
+  # waiver: re-raise SystemExit so a clean sys.exit() from main() propagates past the crash-guard below
+  except SystemExit:  # pylint: disable=try-except-raise
     raise
   except Exception:
     # hooks must never crash the trigger — swallow any unexpected failure

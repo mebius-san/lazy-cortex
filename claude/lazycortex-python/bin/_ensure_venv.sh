@@ -24,7 +24,14 @@
 # Opt out of (4) via [tool.lazy-python] bootstrap-fallback = false.
 set -euo pipefail
 
-_project_dir="${CLAUDE_PROJECT_DIR:-${PWD}}"
+# Resolve the project root: CLAUDE_PROJECT_DIR when set (Claude Code points it at
+# the repo root), else the git top-level, else PWD as a last resort. Keying the
+# fallback on the git root (not bare PWD) stops a stray `.venv` from being created
+# in a subdirectory when chk/tst is run from somewhere below the repo root.
+_project_dir="${CLAUDE_PROJECT_DIR:-}"
+if [ -z "${_project_dir}" ]; then
+  _project_dir="$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "${PWD}")"
+fi
 
 # Check whether a candidate venv is complete: the four required bins (mypy, pylint,
 # pytest, ruff) AND the two pytest plugins (pytest-clarity, pytest-sugar) importable.

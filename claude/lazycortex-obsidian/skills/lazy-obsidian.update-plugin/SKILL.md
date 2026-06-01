@@ -46,17 +46,11 @@ Determine vault:
 
 ### Registry mode (no `--bundled`)
 
-1. Fetch the Obsidian community registry once per session (hold in memory if multiple invocations happen in the same session — the file is ~3–4 MB):
-   ```
-   curl -fsSL https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json
-   ```
+1. Fetch the Obsidian community registry once per session (hold in memory if multiple invocations happen in the same session — the file is ~3–4 MB): ``` curl -fsSL https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json ```
    - Fetch failed → **FAIL**: "Could not fetch Obsidian community registry. Check network and retry."
 2. Find the entry `{id == <id>}` and read `repo` (e.g. `blacksmithgu/obsidian-dataview`).
    - Not found → **FAIL**: "`<id>` not in the Obsidian community registry. Check the id spelling or pass `--bundled` if it's a plugin shipped by this LazyCortex plugin."
-3. Fetch remote manifest:
-   ```
-   source_version=$(curl -fsSL https://github.com/<repo>/releases/latest/download/manifest.json | jq -r '.version')
-   ```
+3. Fetch remote manifest: ``` source_version=$(curl -fsSL https://github.com/<repo>/releases/latest/download/manifest.json | jq -r '.version') ```
    - Fetch or parse failed → **FAIL**: "Could not fetch latest release manifest for `<id>` from `<repo>`. Retry."
 
 ### Bundled mode (`--bundled`)
@@ -124,14 +118,7 @@ If the block is missing or empty (`{}`) → skip. Report state: `no-overrides`.
 Otherwise, deep-merge onto the vault's `data.json`:
 
 1. Ensure `<vault>/plugins/<id>/data.json` exists; if absent, create it with `{}`.
-2. Atomic write:
-   ```
-   jq -s '.[0] * .[1]' \
-     <vault>/plugins/<id>/data.json \
-     <(jq '.["<id>"]' <installPath>/templates/obsidian/plugin-settings.json) \
-     > <vault>/plugins/<id>/data.json.tmp
-   mv <vault>/plugins/<id>/data.json.tmp <vault>/plugins/<id>/data.json
-   ```
+2. Atomic write: ``` jq -s '.[0] * .[1]' \ <vault>/plugins/<id>/data.json \ <(jq '.["<id>"]' <installPath>/templates/obsidian/plugin-settings.json) \ > <vault>/plugins/<id>/data.json.tmp mv <vault>/plugins/<id>/data.json.tmp <vault>/plugins/<id>/data.json ```
 3. Compare pre-merge and post-merge content:
    - Same bytes → `overrides-current`.
    - Different → `overrides-applied`.

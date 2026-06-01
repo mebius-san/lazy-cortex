@@ -83,5 +83,5 @@ Write artifact files into the `result/` directory inside your job dir. The dispa
 - The `DONE` marker inside your job dir — the daemon writes this after you exit cleanly.
 - Files outside your job dir and your own commits.
 - Other experts' job dirs (`.experts/.jobs/<other-expert>/...`).
-- Branches other than the daemon's working branch.
+- Branches other than the daemon's base branch (`daemon.git.base_branch`, the operator's branch the daemon rides).
 - The runtime's state file (`.runtime/state.json`).

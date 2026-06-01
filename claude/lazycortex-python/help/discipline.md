@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Three always-loaded rules shape every Python edit; five reference guidelines back the writer agents and chk-py/tst-py with the full canon.
-last_regen: 2026-05-27
+last_regen: 2026-06-01
 diagram_spec:
   anchor: "How rules and guidelines connect"
   request: "Architecture diagram showing three path-scoped rules (lazy-python.style on **/*.py, lazy-python.docstrings on **/*.py, lazy-python.tests on tests/**/*.py) feeding into Claude's edit loop, and five reference guidelines (coding, documenting, testing, checking, guidelines-index) being read by the docstring-writer agent, test-writer agent, and the chk-py/tst-py checker scripts"
@@ -32,7 +32,7 @@ The split between rules and guidelines is deliberate. Rules are short and always
 
 ## How it fits together
 
-**`lazy-python.style`** loads on every `**/*.py` match and puts the highest-consequence style rules into Claude's active context: 2-space indentation, 117-character line limit, spaces around `=` in named arguments, spaces inside brackets, the `__init__` keyword-only rule, the ban on bare `type` and `Any`, the no-module-level-functions constraint, and the waiver comment convention. It also embeds the three-step Verification Order — `chk-py all <file>.py -q`, then `chk-py all -q`, then `tst-py <module> -q` — so the escalation sequence runs after every batch of edits. Finally, it hard-prohibits calling `mypy`, `pylint`, `ruff`, or `pytest` directly; everything goes through the `chk-py` / `tst-py` aggregators, which apply the full six-step pipeline (`pcf → toi → cmp → mypy → ruff → pylint`) in the correct order. When Claude needs to go deeper than the reminders in this rule, it reads `lazy-python.coding-guidelines.md` for the full canon.
+**`lazy-python.style`** loads on every `**/*.py` match and puts the highest-consequence style rules into Claude's active context: 2-space indentation, 117-character line limit, spaces around `=` in named arguments, spaces inside brackets, the `__init__` keyword-only rule, the ban on bare `type` and `Any`, the no-module-level-functions constraint, no local imports (all imports at module level, except deferred-import libraries per project settings), no `typing.cast()` (use `isinstance` and explicit narrowing instead), TypeAlias placement in module section 3 alongside TypeVars, `__init__` block separation when `super().__init__()` coexists with other code, the no-local-aliases constraint, and the waiver comment convention. It also embeds the three-step Verification Order — `chk-py all <file>.py -q`, then `chk-py all -q`, then `tst-py <module> -q` — so the escalation sequence runs after every batch of edits. Finally, it hard-prohibits calling `mypy`, `pylint`, `ruff`, or `pytest` directly; everything goes through the `chk-py` / `tst-py` aggregators, which apply the full six-step pipeline (`pcf → toi → cmp → mypy → ruff → pylint`) in the correct order. When Claude needs to go deeper than the reminders in this rule, it reads `lazy-python.coding-guidelines.md` for the full canon.
 
 **`lazy-python.docstrings`** also loads on `**/*.py` and enforces a single hard constraint: never write docstrings manually — dispatch the `lazy-python.docstring-writer` agent instead. The rule explains why: the agent reads the full documenting canon plus the project overlay on every dispatch, and hand-writing from session memory reliably violates at least one of the eight Self-Check clauses. The rule also covers the most-forgotten inline conventions: opening and closing `"""` each on their own line, single backticks for inline code, no descriptions of internal algorithms, and preservation of `TODO:` / `TMP:` / `DOC(…):` markers. The full canon lives in `lazy-python.documenting-guidelines.md`.
 
@@ -58,6 +58,8 @@ The split between rules and guidelines is deliberate. Rules are short and always
 
 **Checking a single file quickly.** Run `chk-py all <file>.py -q`. For a module-wide change (more than three files in the same directory) run `chk-py all <module-dir>/ -q` instead. Never run `mypy`, `pylint`, `ruff`, or `pytest` directly — the aggregator applies them in the correct order with shared config.
 
+**Adapting the CLI wrapper names.** The reference guidelines use `chk-py` and `tst-py` as the canonical wrapper names — the names `/lazy-python.install` plants in your `cli/` directory. If you work in a repo where the wrappers were installed under different names (for example, a project that predates the plugin may have named them `./cli/chk` and `./cli/tst`), substitute those names wherever the guidelines say `chk-py` / `tst-py`. The underlying tool order and flags are the same.
+
 ## See also
 
 - [checkers](../checkers.md) — the `chk-py` and `tst-py` wrappers that implement the verification order this block describes
@@ -66,4 +68,66 @@ The split between rules and guidelines is deliberate. Rules are short and always
 
 ## How rules and guidelines connect
 
-<!-- /lazy-diagram.draw lands the fence here; do not author a code block manually. -->
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  subgraph rules [Path-Scoped Rules]
+    styleRule[lazy-python.style\n**/*.py]
+    docstringRule[lazy-python.docstrings\n**/*.py]
+    testsRule[lazy-python.tests\ntests/**/*.py]
+  end
+
+  subgraph references [Reference Guidelines]
+    codingRef[coding guideline]
+    documentingRef[documenting guideline]
+    testingRef[testing guideline]
+    checkingRef[checking guideline]
+    guidelinesIndex[guidelines-index]
+  end
+
+  subgraph agents [Agents and Checkers]
+    editLoop[Claude edit loop]
+    docstringAgent[docstring-writer agent]
+    testAgent[test-writer agent]
+    chkPy[chk-py checker script]
+    tstPy[tst-py checker script]
+  end
+
+  styleRule -->|governs edits via| editLoop
+  docstringRule -->|governs edits via| editLoop
+  testsRule -->|governs edits via| editLoop
+
+  codingRef -->|read by| docstringAgent
+  documentingRef -->|read by| docstringAgent
+  testingRef -->|read by| docstringAgent
+  guidelinesIndex -->|read by| docstringAgent
+
+  codingRef -->|read by| testAgent
+  testingRef -->|read by| testAgent
+  checkingRef -->|read by| testAgent
+  guidelinesIndex -->|read by| testAgent
+
+  checkingRef -->|consulted by| chkPy
+  checkingRef -->|consulted by| tstPy
+  guidelinesIndex -->|consulted by| chkPy
+  guidelinesIndex -->|consulted by| tstPy
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
+  classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
+
+  class styleRule entry
+  class docstringRule entry
+  class testsRule entry
+  class codingRef store
+  class documentingRef store
+  class testingRef store
+  class checkingRef store
+  class guidelinesIndex store
+  class editLoop action
+  class docstringAgent service
+  class testAgent service
+  class chkPy action
+  class tstPy action
+```

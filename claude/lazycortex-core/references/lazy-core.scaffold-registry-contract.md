@@ -1,5 +1,5 @@
 ---
-description: Contract for the scaffold registry YAML block authored by `lazy-core.scaffold` — schema, plain-scalar policy, install-skill responsibilities, and audit invariants.
+description: Contract for the scaffold registry — schema, plain-scalar policy, per-plugin manifest SOT, the scaffold primitive, install via scaffold-sync, the registry-file write discipline, precedence, and audit invariants.
 ---
 # Scaffold registry contract
 
@@ -35,18 +35,23 @@ Globs and template paths are written as YAML plain scalars — no quotes — pro
 - Plugins copy their templates into the consumer's `.claude/templates/<group>/` during install. The plugin's source-tree path (`claude/<plugin>/templates/<group>/`) is the canonical seed; the consumer copy is what the registry points at.
 - `<group>` is plugin-chosen (e.g. `core`, `diagram`, `obsidian`, `specs`). Two plugins SHOULD NOT share a group name — collision means one plugin's templates overwrite the other's during install.
 
+## Manifest — source of truth
+
+Each plugin declares its registry entries in a per-group manifest `claude/<plugin>/templates/<group>/scaffold.entries.json` (`{ "version": 1, "templates": { "<consumer-path>": [globs] } }`). This is the plugin-side SOT; `group` is derived from the directory, not stored. Full shape: `scaffold.entries-schema.md`. The manifest is read in place at install — never copied to the consumer — and is the input to the primitive's upsert. `lazycortex-core` itself uses a manifest (`templates/core/scaffold.entries.json`) like every other plugin; its shipped rule template ships an empty `{}` registry, populated at install.
+
+## The primitive
+
+The `## Registry` block is owned exclusively by the `lazycortex-core scaffold` CLI (`bin/scaffold_registry.py`), a dependency-free parser/serializer (no PyYAML). Subcommands: `upsert --plugin <n> --entries <@file|json>`, `remove --plugin <n>`, `list`, `validate`. Writes are **surgical** — only the target key's line-region is rewritten; every other top-level key (`_local`, sibling plugins) and all bytes outside the fence stay byte-for-byte. `upsert` of identical entries is `unchanged`; a missing registry file is created from a minimal template. `_local` is an ordinary key to the primitive — no special-casing.
+
 ## Install-skill responsibilities
 
-Every plugin install skill that contributes templates to the registry MUST:
+Every plugin that contributes templates to the registry MUST invoke `lazy-core.scaffold-sync` from its install skill: `Skill(skill: "lazycortex-core:lazy-core.scaffold-sync", args: "plugin=<name> installPath=<path> scope=<project|user>")`. That one shipped skill does the whole job:
 
-1. **Copy templates** — `<installPath>/templates/<group>/*` → `<consumerScope>/.claude/templates/<group>/`. Idempotent: skip byte-identical files; prompt on drift the same way the rule sync does.
-2. **Upsert its own top-level key** in the YAML block under `## Registry` of `<consumerScope>/.claude/rules/lazy-core.scaffold.md`:
-   - If the registry file does not exist: create a minimal one — frontmatter (`description`, `always_loaded`), `# Scaffold` H1, the one-line trigger sentence pointing at this contract reference, and an empty `## Registry` YAML block (`{}`). Then proceed with the upsert. This handles cross-scope installs (e.g. `lazycortex-core` global, another plugin per-project — the per-project install creates the project registry on first use, and `lazycortex-core`'s global key remains under its own global registry).
-   - Parse the YAML block. Replace `data[<plugin-dir-name>]` byte-for-byte with the plugin's current `template → [globs]` mapping. Serialize back, preserving formatting of all other top-level keys.
-3. **Never touch any other top-level key.** The plugin owns exactly one key. `_local` and other plugins' keys are out of bounds.
-4. **Report the outcome** per template entry: `registered`, `unchanged`, `removed`, `created-registry-and-registered` (when the install seeded a new registry file), or `skipped` (with reason).
+1. **Copy templates** — `<installPath>/templates/<group>/*` (excluding `scaffold.entries.json`) → `<consumerScope>/.claude/templates/<group>/`. Idempotent; prompts on drift the same way the rule sync does.
+2. **Upsert the plugin's key** — reads the plugin's `scaffold.entries.json` manifest(s), unions them across groups, and calls `scaffold upsert --plugin <name>`, which surgically replaces only `data[<name>]` and creates a minimal registry file if absent.
+3. **Touches no other key** — `_local` and sibling-plugin keys are out of bounds, enforced by the primitive's surgical write (not by convention).
 
-Uninstall skills (when they exist) MUST delete their own top-level key entirely AND remove the template files the key referenced.
+Install skills MUST NOT hand-roll the YAML upsert (parse / replace / serialize) — that logic lives once, in the primitive. Uninstall skills (when they exist) drop their own key via `scaffold remove --plugin <name>` and delete the template files the manifest referenced.
 
 ## Customer-authored entries
 
@@ -60,11 +65,19 @@ _local:
     - docs/runbooks/*.md
 ```
 
-A customer may also use any other top-level key that doesn't collide with an installed plugin directory name. `_local` is the conventional landing spot.
+A customer may also use any other top-level key that doesn't collide with an installed plugin directory name. `_local` is the conventional landing spot. The shipped `lazy-core.scaffold-local` skill is the safe path to add/remove `_local` entries without hand-editing the YAML (it has no manifest — `_local` is its own SOT, with the template authored in place).
+
+## Registry-file write discipline (§5a)
+
+The `## Registry` block is **primitive-owned**. Generic rule-sync (`lazy-core.install` Step 3) MUST exclude `lazy-core.scaffold.md` from its `overwrite` path and MUST NOT rewrite the `## Registry` block — it may additively merge only the prose/frontmatter above it. The block is mutated only by `scaffold upsert` / `remove`, surgically. The file is created (full template + `{}`) only when absent; when present-and-parseable, only key-regions change; when present-but-broken, the primitive FAILs and surfaces the parse error rather than clobbering.
+
+## Precedence & collisions (§7)
+
+When globs from coexisting keys match the same path, resolution (stated in the scaffold rule body, applied by Claude at consumption-time) is: **most-specific glob wins** — within a key and across keys; on an equal-specificity tie, `_local` overrides plugin keys. `scaffold validate` reports cross-key glob overlaps as `WARN` (silent shadowing made visible); a plugin-vs-plugin overlap is the stronger signal (types should not collide).
 
 ## Validation
 
-`lazy-core.audit` enforces:
+`lazy-core.audit` runs `lazycortex-core scaffold validate` against each in-scope registry and maps its findings into the audit glossary. The primitive's deterministic parse enforces:
 
 - **Single fenced YAML block** under `## Registry` — additional blocks or non-YAML content in that section is a finding.
 - **Block parses as valid YAML** — top level must be a mapping; values must be mappings; leaf values must be sequences of strings.
@@ -72,5 +85,6 @@ A customer may also use any other top-level key that doesn't collide with an ins
 - **No path drift** — every template-key path must resolve from the registry's containing scope (`.claude/templates/<group>/...` exists; `~/.claude/templates/<group>/...` for global registries).
 - **No `${CLAUDE_PLUGIN_ROOT}/...`** anywhere in the block — fails because the variable doesn't resolve outside plugin trees.
 - **Plugin keys match an installed plugin** — top-level keys other than `_local` SHOULD correspond to a plugin in `~/.claude/plugins/installed_plugins.json`. Orphan keys (plugin uninstalled but registry entry remains) surface as `[WARN]` for cleanup.
+- **No cross-key glob overlap** — two top-level keys matching the same glob surface as `[WARN]` (silent shadowing); see §7 precedence.
 
 Findings surface in `lazy-core.doctor` Phase 3 alongside the rest of the rule-writing-compliance scan.

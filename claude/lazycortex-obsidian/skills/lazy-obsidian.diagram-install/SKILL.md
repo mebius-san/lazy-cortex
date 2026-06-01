@@ -6,8 +6,7 @@ argument-hint: "(no arguments — scaffolds into <repo-root>/.obsidian/)"
 ---
 # Install diagram render glue (Obsidian)
 
-Scaffold the Obsidian-side render glue for diagrams emitted by the
-lazycortex-diagram engine. Three artifacts land in the vault:
+Scaffold the Obsidian-side render glue for diagrams emitted by the lazycortex-diagram engine. Three artifacts land in the vault:
 
 | Artifact | Target | Source |
 |---|---|---|
@@ -15,18 +14,11 @@ lazycortex-diagram engine. Three artifacts land in the vault:
 | `ascii-fit.css` snippet | `<vault>/.obsidian/snippets/ascii-fit.css` | `${CLAUDE_PLUGIN_ROOT}/templates/obsidian/snippets/ascii-fit.css` |
 | `mermaid-popup` plugin | `<vault>/.obsidian/plugins/mermaid-popup/` | Obsidian community registry (deep-merged with overrides from `templates/obsidian/plugin-settings.json`) |
 
-The engine ships every mermaid fence with the theme directive
-`%%{init: {'themeVariables':{'background':'transparent'}}}%%` so the SVG
-inherits the Obsidian panel background. `mermaid-fit.css` fits the SVG to
-container width without aspect-ratio distortion. `ascii-fit.css` shrinks
-ASCII-diagram code blocks (`language-text` / `language-ascii`) in Reading
-Mode so wide diagrams fit the editor column with horizontal scroll
-fallback. The `mermaid-popup` plugin adds click-to-zoom on every fence.
+The engine ships every mermaid fence with the theme directive `%%{init: {'themeVariables':{'background':'transparent'}}}%%` so the SVG inherits the Obsidian panel background. `mermaid-fit.css` fits the SVG to container width without aspect-ratio distortion. `ascii-fit.css` shrinks ASCII-diagram code blocks (`language-text` / `language-ascii`) in Reading Mode so wide diagrams fit the editor column with horizontal scroll fallback. The `mermaid-popup` plugin adds click-to-zoom on every fence.
 
 ## Scope
 
-Project-local only. There is no global scope — Obsidian render glue is
-inherently per-vault.
+Project-local only. There is no global scope — Obsidian render glue is inherently per-vault.
 
 ## Execution discipline (MANDATORY — read before any action)
 

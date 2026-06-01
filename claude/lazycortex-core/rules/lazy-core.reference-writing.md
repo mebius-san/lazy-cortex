@@ -86,11 +86,13 @@ A `*-protocol.md` file documents the WIRE contract: what the dispatcher writes i
 
 A `*-protocol.md` file MUST NOT include:
 
-- `lazy.settings.json` shape — no `routines:`, no `experts:`, no `review.classes:` JSON snippets. Consumer config goes in the consumer plugin's functional spec (`docs/specs/…`) and its configure-wizard skill (`<plugin>.configure` or equivalent).
+- `lazy.settings.json` shape — no `routines:`, no `experts:`, no `review.classes:` JSON snippets. Consumer config goes in the consumer plugin's functional spec and its configure-wizard skill (`<plugin>.configure` or equivalent).
 - Tutorial JSON snippets showing "how to register this expert" or "where to put this in settings".
-- Lifecycle prose tied to the consumer's state machine that goes beyond what the expert observes per request (`role`, `source/`, `context/`, `result/`, declared fields). Cross-job state transitions belong in the consumer's spec.
+- Lifecycle prose tied to the consumer's state machine that goes beyond what the expert observes per request. Cross-job state transitions belong in the consumer's spec.
+- **Per-`role` behaviour rules.** `role` is a free-form agent-self-label the dispatcher transports verbatim; the protocol MUST NOT enumerate `role` values, prescribe per-`role` behaviour, or include a "## Role rules" / "## Role vocabulary" / "## Per-role" section. Structural ownership / IO contract belongs under a `## Mode rules` section keyed on the closed `mode` enum (see `lazy-core.expert-protocols-contract.md § 4.2`).
+- **Agent-side markup conventions.** Callout shapes, marker formats, intro-callout layouts, "the agent MUST emit `[!question]` with prefix X" — these are agent behaviour, not wire. A "## Markup the agent writes" / "## Output shape" section in a protocol file is a scope violation; that prose belongs in the agent's own `.md` body.
 
-`lazy-core.audit` flags any `*-protocol.md` containing the strings `lazy.settings.json`, `review.classes`, `routines:`, or top-level `experts:` JSON keys as `WARN` ("protocol leaks consumer-config schema; see § 9 of `lazy-core.reference-writing`"). The check has a waiver path for the meta-contract itself (`lazy-core.expert-protocols-contract.md`), which describes what protocols are and necessarily references the settings tree.
+`lazy-core.audit` flags any `*-protocol.md` containing the strings `lazy.settings.json`, `review.classes`, `routines:`, top-level `experts:` JSON keys, `## Role rules`, `## Role vocabulary`, `## Per-role`, `## Markup the agent writes`, `role == "`, or `when role ==` as `WARN` ("protocol carries consumer-config / agent-side content; see § 9 of `lazy-core.reference-writing`"). The check has a waiver path for the meta-contract itself (`lazy-core.expert-protocols-contract.md`), which describes what protocols are and necessarily references the forbidden patterns to forbid them.
 
 ## Enforcement
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Layer project-specific docstring rules on top of the canon guidelines so lazy-python.docstring-writer honours your project's conventions on every dispatch.
-last_regen: 2026-05-27
+last_regen: 2026-06-01
 diagram_spec:
   anchor: "How the overlay layers stack"
   request: "Sequence diagram showing: user edits docs/guidelines/documenting_guidelines.md overlay; user dispatches lazy-python.docstring-writer; agent reads CLAUDE_PLUGIN_ROOT canon reference first, then reads project overlay (override-on-conflict), then reads CLAUDE_PROJECT_DIR/CLAUDE.md ## Documenting section if present; agent applies merged ruleset to target file; agent runs chk-py verification. Show the three-layer read order and that overlay rules win on conflict."
@@ -45,7 +45,16 @@ Open `docs/guidelines/documenting_guidelines.md`. After a fresh install it looks
 
 The file is intentionally empty — the plugin ships the format; you fill in the content. The agent reads this file on every dispatch after it reads the canonical plugin guidelines at `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.documenting-guidelines.md`. If the two conflict, your overlay wins.
 
-Typical things that go in the overlay:
+Phase 5 creates four overlay stubs in `docs/guidelines/`, each read by a different skill:
+
+- `documenting_guidelines.md` — docstring rules, read by `lazy-python.docstring-writer` (this walkthrough).
+- `testing_guidelines.md` — test shape and base-class rules, read by `lazy-python.test-writer`.
+- `coding_guidelines.md` — coding style additions, read by `/lazy-python.check-style`.
+- `checking_guidelines.md` — checker configuration notes, read by `/lazy-python.check-style` and `lazy-python.test-writer`.
+
+Each file is independent. You can leave any of them at the install stub and the agent will simply find nothing to override.
+
+Typical things that go in `documenting_guidelines.md`:
 
 - **Base-class declarations** — which classes in your codebase are "data-set initializers" (the agent applies a different Generation Rules / Value Ranges / Attributes treatment to them).
 - **Line-length override** — if your project enforces a different limit than the plugin default of 117 characters.
@@ -119,15 +128,6 @@ If the output does not reflect your overlay rule, check two things:
 
 Once you confirm the first rule is honoured, add further project-specific rules as your conventions evolve. Because the agent re-reads the overlay on every dispatch, each new rule takes effect immediately without any configuration change.
 
-The three overlay files the plugin provides stubs for cover different concerns:
-
-- `docs/guidelines/documenting_guidelines.md` — docstring rules (read by `lazy-python.docstring-writer`).
-- `docs/guidelines/testing_guidelines.md` — test shape and base-class rules (read by `lazy-python.test-writer`).
-- `docs/guidelines/coding_guidelines.md` — coding style additions (read by `/lazy-python.check-style`).
-- `docs/guidelines/checking_guidelines.md` — checker configuration notes (read by `/lazy-python.check-style` and `lazy-python.test-writer`).
-
-Each file is independent. You can leave any of them at the install stub and the agent will simply find nothing to override.
-
 ## After you're done
 
 The overlay file is a living document. As your project's conventions solidify or evolve, edit `docs/guidelines/documenting_guidelines.md` directly — the next dispatch of `lazy-python.docstring-writer` picks up the change automatically.
@@ -139,44 +139,3 @@ To verify the full installation including all overlay files, run `/lazy-python.a
 If the agent produces a docstring that contradicts one of your overlay rules, the most likely cause is ambiguous or conflicting wording in the overlay itself. Rewrite the rule to be explicit and re-dispatch; the agent will apply the updated version immediately.
 
 ## How the overlay layers stack
-
-```mermaid
-%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
-sequenceDiagram
-  participant user as User
-  participant agent as lazy-python.docstring-writer
-  participant canonRef as CLAUDE_PLUGIN_ROOT canon reference
-  participant overlay as docs/guidelines/documenting_guidelines.md
-  participant claudeMd as CLAUDE_PROJECT_DIR/CLAUDE.md
-  participant targetFile as Target .py file
-  participant chkPy as chk-py verification
-
-  user->>overlay: edit overlay file
-  user->>agent: dispatch lazy-python.docstring-writer
-
-  Note over agent,canonRef: Layer 1 — base ruleset
-  agent->>canonRef: read canon docstring rules
-  canonRef-->>agent: base ruleset loaded
-
-  Note over agent,overlay: Layer 2 — project overlay
-  agent->>overlay: read docs/guidelines/documenting_guidelines.md
-  overlay-->>agent: overlay rules loaded
-
-  Note over agent,claudeMd: Layer 3 — CLAUDE.md section
-  agent->>claudeMd: read ## Documenting section if present
-  alt section present
-    claudeMd-->>agent: section rules loaded
-  else section absent
-    claudeMd-->>agent: no Documenting section — skip
-  end
-
-  Note over agent: merge rulesets — overlay wins on conflict
-  agent->>agent: apply overlay over canon on conflict
-
-  agent->>targetFile: apply merged ruleset to target file
-  targetFile-->>agent: file rewritten
-
-  agent->>chkPy: run chk-py verification
-  chkPy-->>agent: verification result
-  agent-->>user: docstrings applied and verified
-```

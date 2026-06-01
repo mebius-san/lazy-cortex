@@ -16,6 +16,7 @@
 .claude/settings.local.json
 .claude/lazy.settings.local.json
 .claude/worktrees/
+.worktrees/
 .claude/scheduled_tasks.lock
 .logs/
 .runtime/
@@ -25,7 +26,7 @@
 # ---------------------------------------------------------------------------------------
 # Python
 
-.venv/
+.venv
 __pycache__/
 *.py[cod]
 *$py.class

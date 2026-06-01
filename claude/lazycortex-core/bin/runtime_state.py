@@ -8,8 +8,20 @@ Atomic writes via temp+os.replace — same dir as the target file so the rename
 is on the same filesystem.
 """
 from __future__ import annotations
-import json, os, tempfile
+# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable=import-error
+
+import json
+import os
+import tempfile
 from pathlib import Path
+
+from constants import StateKey
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  from collections.abc import Callable
+
 
 STATE_REL = ".runtime/state.json"
 
@@ -34,7 +46,7 @@ def _empty_state() -> dict:
   Returns:
     A dict with empty `last_run` and `git_watch` mappings and no `daemon_halted` block.
   """
-  return { "last_run": {}, "git_watch": {} }
+  return { StateKey.LAST_RUN: {}, StateKey.GIT_WATCH: {} }
 
 
 def load(repo_root: Path) -> dict:
@@ -77,17 +89,45 @@ def save(repo_root: Path, state: dict) -> None:
   path = _state_path(repo_root)
   path.parent.mkdir(parents = True, exist_ok = True)
   # write to a sibling temp file first so an interrupted call leaves the previous state intact
+  # waiver: temp-file naming idiom, not a domain constant
   fd, tmp_name = tempfile.mkstemp(prefix = ".state.", suffix = ".tmp", dir = str(path.parent))
   # noinspection PyBroadException
   try:
+    # waiver: stdlib file-mode idiom
     with os.fdopen(fd, "w") as f:
       json.dump(state, f, indent = 2)
     os.replace(tmp_name, path)
   except Exception:
     # best-effort cleanup of the temp file before re-raising the original failure
-    try: os.unlink(tmp_name)
-    except OSError: pass
+    try:
+      os.unlink(tmp_name)
+    except OSError:
+      pass
     raise
+
+
+def update(repo_root: Path, mutator: Callable[[dict], object]) -> dict:
+  """
+  Atomically read-modify-write the state file.
+
+  Loads the current on-disk state, applies `mutator` (which mutates the dict in place),
+  then persists the result. Re-reading on every call is what prevents one writer from
+  clobbering a key another writer set since the caller last loaded — every write merges
+  into the latest on-disk content rather than overwriting a held snapshot.
+
+  Args:
+    repo_root: Absolute path to the root of the repository.
+    mutator: Callable that receives the loaded state dict and mutates it in place.
+      Its return value is discarded — `object` lets `setdefault` / `pop` lambdas
+      pass without ceremony even though they yield a value.
+
+  Returns:
+    The persisted state dict.
+  """
+  state = load(repo_root)
+  mutator(state)
+  save(repo_root, state)
+  return state
 
 
 def get_halted(repo_root: Path) -> dict | None:
@@ -100,7 +140,7 @@ def get_halted(repo_root: Path) -> dict | None:
   Returns:
     The `daemon_halted` dict from the persisted state, or None if no halt block is present.
   """
-  return load(repo_root).get("daemon_halted")
+  return load(repo_root).get(StateKey.DAEMON_HALTED)
 
 
 def set_halted(repo_root: Path, block: dict) -> None:
@@ -115,7 +155,7 @@ def set_halted(repo_root: Path, block: dict) -> None:
     OSError: If the updated state cannot be written to disk.
   """
   state = load(repo_root)
-  state["daemon_halted"] = block
+  state[StateKey.DAEMON_HALTED] = block
   save(repo_root, state)
 
 
@@ -132,5 +172,5 @@ def clear_halted(repo_root: Path) -> None:
     OSError: If the updated state cannot be written to disk.
   """
   state = load(repo_root)
-  state.pop("daemon_halted", None)
+  state.pop(StateKey.DAEMON_HALTED, None)
   save(repo_root, state)

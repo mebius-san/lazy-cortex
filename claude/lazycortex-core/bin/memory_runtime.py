@@ -6,9 +6,17 @@ CLI verb. Pure functions where possible — caller (skill) owns commits + IO
 sequencing.
 """
 from __future__ import annotations
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable=import-error
+
 import re
-from pathlib import Path
-from typing import Iterable
+
+from constants import MemoryFrontmatterKey, RepoDir
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  from collections.abc import Iterable
+  from pathlib import Path
 
 
 VALID_TYPES = { "persona", "rule", "example", "warning", "fact" }
@@ -76,7 +84,7 @@ def validate_frontmatter(fm: dict) -> None:
     # guard: required field missing from frontmatter
     if field not in fm:
       raise FrontmatterError(f"missing required field: {field}")
-  tags = fm["tags"]
+  tags = fm[MemoryFrontmatterKey.TAGS]
   # guard: tags must be a non-empty list
   if not isinstance(tags, list) or not tags:
     raise FrontmatterError("tags must be a non-empty list")
@@ -85,8 +93,8 @@ def validate_frontmatter(fm: dict) -> None:
     if not isinstance(t, str) or not t.startswith(TAG_PREFIX):
       raise FrontmatterError(f"tag must be prefixed `{TAG_PREFIX}`: {t!r}")
   # guard: type must be drawn from the closed set
-  if fm["type"] not in VALID_TYPES:
-    raise FrontmatterError(f"type must be one of {sorted(VALID_TYPES)}: {fm['type']!r}")
+  if fm[MemoryFrontmatterKey.TYPE] not in VALID_TYPES:
+    raise FrontmatterError(f"type must be one of {sorted(VALID_TYPES)}: {fm[MemoryFrontmatterKey.TYPE]!r}")
 
 
 def topic_from_tag(tag: str) -> str:
@@ -131,6 +139,7 @@ def _read_note_frontmatter(path: Path) -> dict | None:
   if not text.startswith("---"):
     return None
   try:
+    # waiver: inline numeric literal (length of the `---` fence), not a domain constant
     end = text.index("\n---", 3)
   except ValueError:
     return None
@@ -144,6 +153,7 @@ def _read_note_frontmatter(path: Path) -> dict | None:
       pending_list_key = None
       continue
     # comment line — skip
+    # guard: skip comment lines
     if line.lstrip().startswith("#"):
       continue
     # continuation of a block-list value: `  - item`
@@ -192,8 +202,10 @@ def _iter_notes(expert_dir: Path) -> Iterable[Path]:
   if not expert_dir.is_dir():
     return
   for entry in sorted(expert_dir.iterdir()):
+    # guard: skip hidden entries
     if entry.name.startswith("."):
       continue
+    # waiver: filesystem extension idiom, not a domain constant
     if entry.is_file() and entry.suffix == ".md":
       yield entry
 
@@ -213,7 +225,7 @@ def regen_local_tag_file(expert_dir: Path, topic: str) -> None:
   Raises:
     OSError: If the tag file or its parent directory cannot be written or removed.
   """
-  tags_dir = expert_dir / ".tags"
+  tags_dir = expert_dir / RepoDir.TAGS
   tag_file = tags_dir / f"{topic}.md"
   # (slug, type, summary) tuples for every matching note
   matching: list[tuple[str, str, str]] = []
@@ -222,11 +234,11 @@ def regen_local_tag_file(expert_dir: Path, topic: str) -> None:
     # guard: skip notes without parseable frontmatter
     if not fm:
       continue
-    tags = fm.get("tags") or []
+    tags = fm.get(MemoryFrontmatterKey.TAGS) or []
     if isinstance(tags, str):
       tags = [ tags ]
     if f"{TAG_PREFIX}{topic}" in tags:
-      matching.append((note.name, fm.get("type", "?"), fm.get("summary", "")))
+      matching.append((note.name, fm.get(MemoryFrontmatterKey.TYPE, "?"), fm.get(MemoryFrontmatterKey.SUMMARY, "")))
   # no notes carry the topic — remove the stale tag file if any
   if not matching:
     if tag_file.exists():
@@ -252,13 +264,14 @@ def regen_global_tag_file(memory_root: Path, topic: str) -> None:
   Raises:
     OSError: If the global tag file or its parent directory cannot be written or removed.
   """
-  global_tag_file = memory_root / ".tags" / f"{topic}.md"
+  global_tag_file = memory_root / RepoDir.TAGS / f"{topic}.md"
   holders: list[str] = []
   if memory_root.is_dir():
     for expert in sorted(memory_root.iterdir()):
+      # guard: skip non-directory and hidden entries
       if not expert.is_dir() or expert.name.startswith("."):
         continue
-      local = expert / ".tags" / f"{topic}.md"
+      local = expert / RepoDir.TAGS / f"{topic}.md"
       if local.exists():
         holders.append(f"- `../{expert.name}/.tags/{topic}.md`")
   # no expert holds the topic — remove the stale global tag file if any
@@ -288,6 +301,7 @@ def regen_touched_tags(memory_root: Path, expert: str, topics: Iterable[str]) ->
   expert_dir = memory_root / expert
   seen: set[str] = set()
   for topic in topics:
+    # guard: skip topics already emitted
     if topic in seen:
       continue
     seen.add(topic)

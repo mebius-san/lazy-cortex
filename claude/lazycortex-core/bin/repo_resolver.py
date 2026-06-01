@@ -9,9 +9,18 @@ solved by a proper local-overlay mechanism (Claude Code `settings.local.json`
 + `additionalDirectories` integration) as a separate task.
 """
 from __future__ import annotations
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable=import-error
+
 import json
 import os
 from pathlib import Path
+
+from constants import RepoDir, RepoEntryKey, SettingsFile, SettingsKey
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
 
 
 class RepoResolverError(RuntimeError):
@@ -31,7 +40,7 @@ def _load_repos_block(local_repo: Path) -> dict:
     A dict keyed by repo name with the bookkeeping `_version` key removed; empty when the settings
     file is missing, unreadable, not valid JSON, or carries a non-dict `repos` value.
   """
-  settings_path = Path(local_repo) / ".claude" / "lazy.settings.json"
+  settings_path = Path(local_repo) / SettingsFile.REL
   # guard: settings file absent — no repos declared
   if not settings_path.exists():
     return {}
@@ -40,11 +49,11 @@ def _load_repos_block(local_repo: Path) -> dict:
   except json.JSONDecodeError:
     # corrupt or partial settings — fall back to empty repos block
     return {}
-  block = data.get("repos") or {}
+  block = data.get(SettingsKey.REPOS) or {}
   # guard: `repos` field present but not a dict — treat as missing
   if not isinstance(block, dict):
     return {}
-  return { k: v for k, v in block.items() if k != "_version" }
+  return { k: v for k, v in block.items() if k != SettingsKey.VERSION }
 
 
 def resolve(local_repo: Path, repo_key: str) -> Path:
@@ -75,7 +84,7 @@ def resolve(local_repo: Path, repo_key: str) -> Path:
     raise RepoResolverError(
       f"repos.{repo_key} not declared in .claude/lazy.settings.json"
     )
-  raw_path = (repos[repo_key] or {}).get("path")
+  raw_path = (repos[repo_key] or {}).get(RepoEntryKey.PATH)
   # guard: declared entry has no `path` field
   if not raw_path:
     raise RepoResolverError(
@@ -87,7 +96,7 @@ def resolve(local_repo: Path, repo_key: str) -> Path:
     raise RepoResolverError(
       f"repos.{repo_key}.path does not exist: {abs_path}"
     )
-  target_settings = abs_path / ".claude" / "lazy.settings.json"
+  target_settings = abs_path / SettingsFile.REL
   # guard: target repo isn't a lazy-managed repo
   if not target_settings.exists():
     raise RepoResolverError(
@@ -98,7 +107,7 @@ def resolve(local_repo: Path, repo_key: str) -> Path:
     raise RepoResolverError(
       f"repos.{repo_key}.path not readable: {abs_path}"
     )
-  experts_dir = abs_path / ".experts"
+  experts_dir = abs_path / RepoDir.EXPERTS
   check_target = experts_dir if experts_dir.exists() else abs_path
   # guard: target repo (or its .experts/ dir) not writable
   if not os.access(check_target, os.W_OK):
@@ -121,7 +130,7 @@ def reverse_lookup(local_repo: Path, target_path: Path) -> str | None:
   """
   target = Path(target_path).resolve()
   for key, entry in _load_repos_block(Path(local_repo)).items():
-    raw = (entry or {}).get("path")
+    raw = (entry or {}).get(RepoEntryKey.PATH)
     # guard: entry has no `path` field — skip
     if not raw:
       continue

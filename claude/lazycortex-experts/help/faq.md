@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Common questions about installing lazycortex-experts, composing specialists, understanding the three-agent pipeline, and working with domain aspects.
-last_regen: 2026-05-15
+last_regen: 2026-06-01
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -17,6 +17,8 @@ source_skills:
 ## Does /lazy-experts.install create my expert entries automatically?
 
 Yes. `/lazy-experts.install` seeds one composed expert entry per (agent × domain-aspect) pair into `lazy.settings.json[experts]`. For the three agents (interpreter, designer, planner) and three domain aspects (claude-plugin, game-dev, dotfiles), that gives you nine entries out of the box — for example, `claude-plugin-designer`, `game-interpreter`, `dotfiles-planner`. Every seeded entry also carries `lazycortex-core:lazy-memory.persona-aspect` so the expert accumulates private memory across runs.
+
+Each seeded entry also includes a `git_author` block — a `name` (the expert key with hyphens replaced by spaces, title-cased, e.g. `Game Interpreter`) and an `email` using the `@lazycortex.local` domain. This makes commits attributed to the expert visibly distinct from your own commits.
 
 If you need a specialist that doesn't match the cartesian product — say, a custom aspect you authored, or an agent from another plugin — you write that entry yourself in `<repo-root>/.claude/lazy.settings.json` (project scope) or `~/.claude/lazy.settings.json` (global scope). The install skill leaves any hand-authored entries untouched.
 
@@ -44,7 +46,7 @@ If you remove the persona aspect from a seeded entry, the expert stops growing m
 
 ## The agents don't seem to do anything when I invoke them directly. Why?
 
-The three generic agents — interpreter, designer, and planner — have no inline I/O contract. They wait for a dispatching routine to hand them a protocol document (via a `- protocol: <path>` line in the user-message prompt). Without a protocol, an agent returns an error naming the missing contract. You need a routine on your side (consumer-authored, or a future `lazycortex-specs` integration) that dispatches jobs to these agents along with the appropriate protocol. The agents themselves are building blocks, not standalone commands.
+The three generic agents — interpreter, designer, and planner — have no inline I/O contract. They wait for a dispatching routine to hand them a protocol document. Without a protocol, an agent returns an error naming the missing contract. You need a routine on your side (consumer-authored, or via a future `lazycortex-specs` integration) that dispatches jobs to these agents along with the appropriate protocol. The agents themselves are building blocks, not standalone commands.
 
 ---
 
@@ -68,7 +70,7 @@ Yes. The `aspects` array in your `lazy.settings.json[experts]` entry accepts any
 
 ## Can I use an aspect from this plugin with an agent from a different plugin?
 
-That depends on the expert runtime's resolution rules, which are governed by `lazycortex-core`. Aspects shipped by `lazycortex-experts` are pure prompt files — nothing in their body is tied to a specific agent namespace. Whether a cross-plugin pairing is valid is determined by how the dispatching routine constructs the `- aspect: <path>` lines in the user-message prompt. Consult your dispatching routine's documentation or `lazycortex-core`'s expert runtime reference for the resolution contract.
+That depends on the expert runtime's resolution rules, which are governed by `lazycortex-core`. Aspects shipped by `lazycortex-experts` are pure prompt files — nothing in their body is tied to a specific agent namespace. Whether a cross-plugin pairing is valid is determined by how the dispatching routine constructs the aspect references in the user-message prompt. Consult your dispatching routine's documentation or `lazycortex-core`'s expert runtime reference for the resolution contract.
 
 ---
 

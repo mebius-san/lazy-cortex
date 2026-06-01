@@ -7,4 +7,9 @@ migration is needed.
 """
 from __future__ import annotations
 
-MIGRATIONS = {}
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  from collections.abc import Callable
+
+
+MIGRATIONS: dict[int, Callable[[dict], dict]] = {}

@@ -92,7 +92,7 @@ Forbidden: blind `git_add(file)` after writing, "hopes the commit picks it up".
 
 ### Reference incident
 
-The 2026-05-04 git-state-hygiene incident: an autobump rideshare collided with a publish-status auto-commit running with pathspec, leaving a `plugin.json` staged at the *previous* version while HEAD and working tree advanced. A naive `git commit -am` would have silently downgraded the manifest. See `docs/specs/2026-05-04-git-state-hygiene.md`.
+The 2026-05-04 git-state-hygiene incident: an autobump rideshare collided with a publish-status auto-commit running with pathspec, leaving a `plugin.json` staged at the *previous* version while HEAD and working tree advanced. A naive `git commit -am` would have silently downgraded the manifest.
 
 ### Severity
 

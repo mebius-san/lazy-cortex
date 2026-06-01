@@ -13,7 +13,7 @@
 #   mypy       run mypy type checks
 #   rf         run ruff checks
 #   pylint     run pylint checks
-#   pch        PyCharm offline inspections (shipped: bin/pch.py) — standalone, NOT in `all`
+#   pch        PyCharm offline inspections (shipped: bin/pch.py) — standalone, NOT in `all`; skipped unless [tool.pch] is in pyproject.toml
 #
 # Usage:
 #   chk <subcommand> [module ...]
@@ -46,7 +46,7 @@ function print_help()
   echo "  mypy       run mypy type checks"
   echo "  rf         run ruff checks"
   echo "  pylint     run pylint checks"
-  echo "  pch        run PyCharm offline inspections (standalone, not in 'all')"
+  echo "  pch        run PyCharm offline inspections (standalone, not in 'all'; skipped unless [tool.pch] in pyproject.toml)"
   echo
   echo "options:"
   echo "  module...  one or more target paths (e.g., src/ pkg/foo.py; default: .)"
@@ -148,12 +148,20 @@ elif [ "$cmd" = "toi" ]; then
     python3 "$script_dir/toi.py" "$mod"
   done
 
-# PyCharm offline code inspections
+# PyCharm offline code inspections — opt-in per repo via a `[tool.pch]` section
+# in pyproject.toml. pch spins up a headless IDE (minutes) and needs PyCharm
+# installed, so it stays off by default: a repo enables it by declaring
+# `[tool.pch]` (added on request during `lazy-python.install`). No section →
+# skip cleanly (exit 0) instead of running / erroring.
 elif [ "$cmd" = "pch" ]; then
-  ensure_venv
-  for mod in "${mods[@]}"; do
-    python3 "$script_dir/pch.py" "$mod"
-  done
+  if ! grep -qE '^\[tool\.pch\]' pyproject.toml 2>/dev/null; then
+    echo "pch: skipped — no [tool.pch] in pyproject.toml (PyCharm inspections not enabled for this repo)"
+  else
+    ensure_venv
+    for mod in "${mods[@]}"; do
+      python3 "$script_dir/pch.py" "$mod"
+    done
+  fi
 
 # py_compile syntax / bytecode-compile check
 elif [ "$cmd" = "cmp" ]; then

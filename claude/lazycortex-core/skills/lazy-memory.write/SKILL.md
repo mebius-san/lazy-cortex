@@ -1,11 +1,11 @@
 ---
 name: lazy-memory.write
-description: "Atomic memory-note writer for persona-marked experts. Writes one note under `.memory/<expert>/`, regenerates touched `.tags/` files (local + global), optionally drops consolidated log files. The only blessed writer of .memory/."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Write
+description: "Atomic memory-note writer for persona-marked experts. Writes one note under `.memory/<expert>/`, regenerates touched `.tags/` files (local + global), optionally drops consolidated log files, then commits the change atomically under the memory-bot identity (`memory.<expert>`). The only blessed writer of .memory/."
+allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Bash(git *), Write
 ---
 # Memory write
 
-Write one memory note for an expert. Validates frontmatter, picks a non-colliding slug, regenerates touched `.tags/` files (local + global), optionally drops `--consolidate` log paths. Caller (or the expert that invoked the skill) commits.
+Write one memory note for an expert. Validates frontmatter, picks a non-colliding slug, regenerates touched `.tags/` files (local + global), optionally drops `--consolidate` log paths, and lands the change as a single atomic git commit under the memory-bot identity derived from the expert (`memory.<expert>` / `memory.<expert>@bot.lazy-cortex`). The caller and the expert that invoked the skill do NOT commit memory paths themselves — the subsystem owns its own git visibility.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -43,9 +43,11 @@ EOF
 )
 ```
 
-Capture stdout (the resolved note path) or stderr (a `WriteError` line of the form `frontmatter-invalid: …` / `consolidate-out-of-scope: …` / `consolidate-io-error: …`).
+Capture stdout — on success the worker prints `<note_path>\t<commit_sha>` (or `<note_path>\tno-commit` when the write was a byte-identical no-op). On failure stderr carries a `WriteError` line of the form `frontmatter-invalid: …` / `consolidate-out-of-scope: …` / `consolidate-io-error: …` / `commit-failed: …`.
 
-Outcome: `written` (stdout has a path) or `error:<category>` (stderr has a WriteError).
+The worker derives its commit identity from `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` (set by the expert-pump when spawned inside a daemon-driven expert), falling back to `lazy.settings.json[experts][<expert>].git_author` when those env vars are empty (operator-driven `/lazy-memory.reflect` path). The `memory.` prefix is always applied to both name and email local-part.
+
+Outcome: `written` (stdout has a path + sha), `written-no-commit` (sha = `no-commit`, idempotent re-run), or `error:<category>` (stderr has a WriteError).
 
 ## Step 3 — Report
 
@@ -72,3 +74,4 @@ Write to `.logs/claude/lazy-memory.write/<UTC-timestamp>.md` per the logging rul
 - **"frontmatter-invalid: tag must be prefixed `memory/`"** → every tag entry must read `memory/<topic>` (e.g. `memory/auth`).
 - **"consolidate-out-of-scope: <path>"** → `--consolidate` only accepts paths under `.logs/` or `.memory/`. Move the file or remove it from the consolidate list.
 - **"consolidate-target-missing: <path>"** → a non-fatal warning; the note still writes. Verify the path was correct or remove it from the consolidate list.
+- **"commit-failed: git add returned …" / "commit-failed: git commit returned …"** → the staged index is left intact for operator inspection. Usually means a pre-commit hook rejected the change or git was busy with another session's lock. Resolve the underlying cause and re-run the write (idempotent if the note body is unchanged) or commit the staged paths by hand.

@@ -25,6 +25,9 @@
     "superpowers:subagent-driven-development": "sonnet",
     "superpowers:requesting-code-review": "sonnet",
     "claude-code-guide:claude-code-guide": "sonnet",
-    "memory.optimise": "sonnet"
+    "memory.optimise": "sonnet",
+    "lazycortex-wiki:lazy-wiki.curator": "sonnet",
+    "lazycortex-wiki:lazy-wiki.seeker": "sonnet",
+    "lazycortex-wiki:lazy-wiki.gatherer": "sonnet"
   }
 }

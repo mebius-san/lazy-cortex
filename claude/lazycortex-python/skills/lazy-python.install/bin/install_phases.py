@@ -149,13 +149,17 @@ class Phase3Pyproject:
   """Bootstrap consumer's `pyproject.toml` with checker-stack sections from the template.
 
   Sections added: `[tool.pcf]`, `[tool.pcf.overrides]`, `[tool.toi]`, `[tool.pch]`,
-  `[tool.pytest.ini_options]`, `[tool.mypy]`, `[tool.pylint]` (and any nested keys).
-  Existing top-level sections in the consumer's pyproject.toml are NOT overwritten —
-  the consumer's configuration always wins. Idempotent — re-running is a no-op once
-  every checker section is present.
+  `[tool.pytest.ini_options]`, `[tool.mypy]`, `[tool.pylint]`, `[tool.ruff]` (and any
+  nested keys, e.g. `[tool.ruff.lint]`). Existing top-level sections in the consumer's
+  pyproject.toml are NOT overwritten — the consumer's configuration always wins.
+  Idempotent — re-running is a no-op once every checker section is present.
   """
 
-  CHECKER_SECTIONS = ("pcf", "toi", "pch", "pytest", "mypy", "pylint")
+  # Always-deployed checker sections. pch is opt-in — it spins up a headless
+  # PyCharm and is meaningless without it, so it is deployed only when the
+  # install skill sets the matching env flag (see OPTIONAL_SECTIONS + run()).
+  CHECKER_SECTIONS = ("pcf", "toi", "pytest", "mypy", "pylint", "ruff")
+  OPTIONAL_SECTIONS = {"pch": "LAZY_PYTHON_ENABLE_PCH"}
 
   def __init__(self, *, consumer_dir: Path) -> None:
     self.consumer_dir: Path = consumer_dir
@@ -179,8 +183,12 @@ class Phase3Pyproject:
     existing_data = tomllib.loads(existing_text)
     existing_tool = existing_data.get("tool", {})
 
-    # Determine which checker sections are MISSING under [tool] in the consumer file.
-    missing = [s for s in self.CHECKER_SECTIONS if s not in existing_tool]
+    # Always-on sections, plus any opt-in section whose env flag is set by the skill.
+    wanted = list(self.CHECKER_SECTIONS)
+    wanted += [s for s, env in self.OPTIONAL_SECTIONS.items() if os.environ.get(env)]
+
+    # Determine which wanted sections are MISSING under [tool] in the consumer file.
+    missing = [s for s in wanted if s not in existing_tool]
 
     # Idempotent no-op when every checker section is already present.
     if not missing:

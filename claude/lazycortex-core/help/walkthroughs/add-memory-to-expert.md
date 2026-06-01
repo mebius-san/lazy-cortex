@@ -1,10 +1,10 @@
 ---
 chapter_type: walkthrough
 summary: Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
-last_regen: 2026-05-23
+last_regen: 2026-06-01
 diagram_spec:
   anchor: "How memory grows over time"
-  request: "Sequence diagram showing user invoking mark-persona, then dispatching jobs (accumulating run logs), then invoking reflect which reads run logs + existing memory notes and calls lazy-memory.write to produce .memory/<expert>/<slug>.md, and finally a git commit sealing the notes."
+  request: "Sequence diagram showing user invoking mark-persona, then dispatching jobs (accumulating run logs), then invoking reflect which reads run logs + existing memory notes and calls lazy-memory.write to produce .memory/<expert>/<slug>.md, committing atomically under the memory-bot identity."
   kind_hint: sequence
 source_skills:
   - lazy-memory.mark-persona
@@ -13,7 +13,7 @@ source_skills:
 ---
 # Add long-term memory to an existing expert
 
-Your experts already run jobs and leave run logs under `.logs/claude/<expert>/`. This walkthrough turns one of them into a persona-marked expert — one that consults its accumulated notes before primary work, writes new notes as a side-effect of jobs, and consolidates older runs into durable `.memory/<expert>/*.md` entries via reflect passes. Three skills do the work: `/lazy-memory.mark-persona` opts the expert in, `/lazy-memory.reflect` dispatches the consolidation job, and `/lazy-memory.write` (invoked by the expert itself during a reflect job) commits each note atomically.
+Your experts already run jobs and leave run logs under `.logs/claude/<expert>/`. This walkthrough turns one of them into a persona-marked expert — one that consults its accumulated notes before primary work, writes new notes as a side-effect of jobs, and consolidates older runs into durable `.memory/<expert>/*.md` entries via reflect passes. Three skills do the work: `/lazy-memory.mark-persona` opts the expert in, `/lazy-memory.reflect` dispatches the consolidation job, and `/lazy-memory.write` (invoked by the expert itself during a reflect job) writes and commits each note atomically.
 
 ## Outcome
 
@@ -31,7 +31,7 @@ After this walkthrough your expert:
 - The runtime daemon is running (`./run.sh`). If it halted, run `/lazy-runtime.recover` first.
 - You know the expert's registered name — the key under `experts` in `.claude/lazy.settings.json`.
 
-## The flow
+## The journey
 
 ### Step 1 — Opt the expert into the memory subsystem
 
@@ -39,7 +39,7 @@ Run `/lazy-memory.mark-persona <expert>`, substituting the expert's registered n
 
 The skill appends `lazycortex-core:lazy-memory.persona-aspect` to the expert's `aspects[]` in `lazy.settings.json`. The outcome line shows the resulting aspects list. Running it a second time is a no-op (`already-marked`) — it is safe to re-run.
 
-**Verification gate:** the outcome line should read something like:
+**Verification gate:** the outcome line should read:
 
 ```
 expert:        <your-expert>
@@ -72,7 +72,7 @@ One `.md` file per completed job should be present.
 
 Run `/lazy-memory.reflect <expert>`.
 
-The skill checks that the expert is persona-marked, then dispatches a `kind=reflect` job. The job payload includes recent run logs (default: 30 days back) and every existing memory note as `source[]`. The expert receives this source context, applies its persona-aspect obligations, identifies patterns worth retaining, and calls `/lazy-memory.write` once per note.
+The skill confirms the expert carries `lazycortex-core:lazy-memory.persona-aspect`, then dispatches a `kind=reflect` job. The job payload includes recent run logs (default: 30 days back) and every existing memory note as `source[]`. The expert receives this source context, applies its persona-aspect obligations, identifies patterns worth retaining, and calls `/lazy-memory.write` once per note.
 
 Use `--days <N>` to widen the look-back window if you want the expert to consolidate older runs:
 
@@ -123,11 +123,13 @@ ls .memory/.tags/
 
 Expected state:
 
-- One or more `<slug>.md` files under `.memory/<expert>/` — each with valid frontmatter (`title`, `tags`, `type`, `summary`) and the expert's consolidated learnings as the body.
+- One or more `<slug>.md` files under `.memory/<expert>/` — each with valid frontmatter (`title`, `tags`, `type`, `summary`) and the expert's consolidated learnings as the body. The `type` field is one of `persona`, `rule`, `example`, `warning`, or `fact`; every tag carries the `memory/` prefix (e.g. `memory/auth`, `memory/patterns`).
 - One `<topic>.md` per tag the expert used, under `.memory/<expert>/.tags/`, listing the notes tagged with that topic.
 - Matching entries in the global `.memory/.tags/` aggregator, pointing at the per-expert tag file.
 
-All tags in note frontmatter carry the `memory/` prefix (e.g. `memory/auth`, `memory/patterns`). If a tag is missing the prefix, `/lazy-memory.write` would have rejected the note with `frontmatter-invalid: tag must be prefixed memory/` — so any note that landed successfully has valid tags.
+Notes land already committed: `/lazy-memory.write` commits each note atomically under the `memory.<expert>` identity before returning, so the `.memory/` tree is in a clean git state as soon as the reflect job finishes. You do not need to commit these files yourself.
+
+If a tag is missing the `memory/` prefix, `/lazy-memory.write` would have rejected the note with `frontmatter-invalid: tag must be prefixed memory/` — so any note that landed successfully has valid tags.
 
 To check for broader memory-hygiene issues (missing required fields, malformed frontmatter) across the whole tree:
 
@@ -137,16 +139,7 @@ To check for broader memory-hygiene issues (missing required fields, malformed f
 
 `lazy-core.audit` reports memory-hygiene findings under its "Memory hygiene" section.
 
-### Step 6 (optional) — Commit the new notes
-
-`lazy-memory.write` writes files atomically but does not commit. Commit the notes when you are satisfied:
-
-```
-git add .memory/<expert>/
-git commit -m "memory(<expert>): first reflect pass — <summary of what was retained>"
-```
-
-### Step 7 (optional) — Schedule periodic reflection
+### Step 6 (optional) — Schedule periodic reflection
 
 To have the daemon consolidate memory automatically without manual triggers, register a weekly routine:
 
@@ -158,7 +151,7 @@ This fires every 7 days, dispatching one reflect job per persona-marked expert a
 
 ## After you're done
 
-The expert now reads its memory notes at the start of every job. As it handles more work, the memory grows — either via notes the expert writes inline during regular jobs or via periodic reflect passes you trigger manually or via the routine above. When the expert writes a note (via `/lazy-memory.write`), tag files in `.memory/<expert>/.tags/` and `.memory/.tags/` update automatically; you do not need to rebuild the index unless you hand-edit notes (in which case run `/lazy-memory.index <expert>` to repair).
+The expert now reads its memory notes at the start of every job. As it handles more work, the memory grows — either via notes the expert writes inline during regular jobs or via periodic reflect passes you trigger manually or via the routine above. When the expert writes a note via `/lazy-memory.write`, tag files in `.memory/<expert>/.tags/` and `.memory/.tags/` update atomically; you do not need to rebuild the index unless you hand-edit notes outside the skill (in which case run `/lazy-memory.index <expert>` to repair the tag files).
 
 To extend memory to another expert, start again at Step 1 with the new expert's name.
 

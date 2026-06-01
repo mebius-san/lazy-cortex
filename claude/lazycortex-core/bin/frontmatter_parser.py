@@ -9,6 +9,10 @@ filter use case is flat key→scalar/list.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
 
 def parse_frontmatter(text: str) -> dict:
   """
@@ -98,7 +102,7 @@ def _unquote(s: str) -> str:
   return s
 
 
-def _coerce_scalar(s: str):
+def _coerce_scalar(s: str) -> bool | int | float | str | None:
   """
   Convert a raw YAML scalar literal into the closest matching Python value.
 
@@ -113,8 +117,10 @@ def _coerce_scalar(s: str):
     A `bool`, `None`, `int`, `float`, or `str` value depending on which literal shape the input matches.
   """
   s = _unquote(s)
+  # waiver: YAML scalar keyword, external-format token, not an internal key
   if s.lower() == "true":
     return True
+  # waiver: YAML scalar keyword, external-format token, not an internal key
   if s.lower() == "false":
     return False
   if s.lower() in ( "null", "~" ):

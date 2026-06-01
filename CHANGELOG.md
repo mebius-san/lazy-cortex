@@ -4,6 +4,18 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.0.0 — 2026-06-01 UTC
+
+- New error ledger tracks every daemon and job failure as a structured incident — records job deaths, job errors, routine failures, daemon halts, worktree start/finish failures, and doctor triage outcomes, each with a ULID-keyed entry, cause classifier, and resolution state (including `auto_recovered`, `reverted`, `resolved:gone`).
+- New `error-record` and `error-list` CLI subcommands on `lazycortex-core` let operators inspect, filter, and close error incidents from the command line; `error-list --since <cursor>` supports incremental polling.
+- New `lazycortex-core resume [<repo>]` CLI subcommand clears a daemon halt directly from the terminal; reason-aware — skips the dirty-tree gate for halt causes where a clean tree is not the prerequisite (e.g. `suspected_loop`, `git_pull_diverged`).
+- Fixed: the daemon no longer mutates the tracked settings file as a side effect of reading it — `load_section` is now a pure read, eliminating the self-halt loop where every schema bump dirtied the daemon's own tree (Bug 104).
+- Fixed: when an agent process exits cleanly (rc=0) but does not write `response.json`, the pump now recovers the response payload from the stream-json stdout transcript, breaking the retry loop that previously re-dispatched the same job indefinitely (Bug 99).
+- Fixed: the daemon's loop-detection now keys on the full commit file-set rather than any individual file — a regenerated index committed alongside distinct node edits no longer triggers a false-positive halt.
+- Fixed: state.json writes are now atomic — a `runtime_state.update(repo, mutator)` primitive reloads from disk, applies the mutation, and saves, closing a read-modify-write clobber where `dispatch_git` and the main loop overwrote each other's `git_watch` baselines.
+- Fixed: worktree `start()` now raises `WorktreeStartError` on a non-zero `git worktree add` exit (e.g. branch or directory collision) instead of silently registering a broken task; the daemon iteration guard wraps the full iteration so any uncaught exception records a `daemon_error` rather than silently crashing.
+- Fixed: resolved-and-gone job incidents are now garbage-collected, `resolved:retried_ok` is emitted for clean-DONE jobs that still carried an open incident, and the `lazycortex-review` routine now exits non-zero on error so the daemon's error-ledger emit fires correctly (previously exited 0, suppressing the event).
+
 ### 4.0.0 — 2026-05-23 UTC
 
 - **Breaking:** `dispatch_job` redesigned as an atomic primitive — callers no longer pass agent/protocols/git_author; those are derived from `settings.experts[<name>]` inside core. New CLI subcommands `lazycortex-core dispatch-job` and `lazycortex-core collect-job` replace direct Python API calls across plugins.
@@ -334,6 +346,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 2.1.1 — 2026-06-01 UTC
+
+- `lazy-obsidian.install` no longer aborts when `installed_plugins.json` has a `projectPath` mismatch — only a missing or empty entry array stops the install. The skill also now resolves `lazycortex-core`'s `default-tiers.json` via `$LAZYCORTEX_PLUGIN_DIRS` before falling back to the plugin cache, matching the install convention used by all other `lazy-*.install` skills.
+- Fixed latent crashes in `iconize_sync`: a `bytes + str` concatenation on the callback-timeout path now decodes correctly, a `Path|None` value is properly guarded before reuse, and a non-dict icon registry no longer causes an unhandled error.
+
 ### 2.1.0 — 2026-05-09 UTC
 
 - `iconize-reloader` 2.4.0: when Notebook Navigator is installed alongside Iconize, the reloader now automatically aligns Notebook Navigator's frontmatter settings (`useFrontmatterMetadata`, `frontmatterIconField`, `frontmatterColorField`) to match the Iconize configuration on load — no more manual alignment of the two plugins. Re-run `/lazy-obsidian.iconize-install` to deploy the updated reloader.
@@ -431,6 +448,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.0.12 — 2026-06-01 UTC
+
+- _no user-visible changes_
+
 ### 1.0.11 — 2026-05-08 UTC
 
 - _no user-visible changes_
@@ -451,6 +472,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 0.1.7 — 2026-06-01 UTC
+
+- Fixed a template-engine bug where `{{ var }}` expressions inside `{% for %}` loop bodies were evaluated before the loop variable was bound, emitting empty strings on every iteration. On macOS the generated launchd plist had empty `<string></string>` arg entries, so the agent started with no CLI arguments; on Linux the systemd unit's `ExecStart` args slot collapsed to whitespace.
+- Corrected stale configuration-key paths in the README, overview, troubleshooting page, and ship-metrics walkthrough — references to the removed `lazy-core.runtime.metrics` / `lazy-core.runtime.routines` nesting now point to the correct flat keys (`daemon.metrics`, `routines`).
+
 ### 0.1.6 — 2026-05-08 UTC
 
 - New `/lazy-observe.help` command ships a full help layer: three reference chapters (install & audit lifecycle, troubleshooting with a diagnostic flowchart, operator FAQ) and an end-to-end walkthrough for shipping metrics from scratch.
@@ -465,6 +491,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 0.2.1 — 2026-06-01 UTC
+
+- The install skill now resolves sibling-plugin artifacts via `$LAZYCORTEX_PLUGIN_DIRS` before falling back to cache-directory discovery, so installation works correctly when the environment variable is set.
+
 ### 0.2.0 — 2026-05-16 UTC
 
 - `lazy-experts.install` now seeds nine ready-to-use composed expert configurations (each pairing an agent role with an aspect and persona) into the target project automatically at install time, so no manual expert-entry setup is required after installation.
@@ -477,6 +507,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 1.5.0 — 2026-06-01 UTC
+
+- PyCharm inspections (`chk pch`) are now opt-in per project: `chk pch` skips cleanly in repos that have no `[tool.pch]` section in `pyproject.toml`; the installer prompts before adding that section; and `lazy-python.audit` no longer fails repos that omit it.
+- `chk` and `tst` invoked from a subdirectory no longer create a stray `.venv` in that subdirectory — the venv is now anchored to the repo root via `git rev-parse --show-toplevel` when `CLAUDE_PROJECT_DIR` is unset.
+- `pcf` D4 (missing `Returns:` docstring section) no longer false-positives on functions annotated `-> NoReturn` or `-> Never`; those annotations signal no return value, so the section would be incorrect and the check was previously unsuppressable.
+- New `pcf` check detects silent broad-except: `except Exception`, `BaseException`, or bare `except` whose body is a plain `pass` (no log, no return, no re-raise) is flagged; narrow clauses and non-silent bodies are exempt; add `# waiver: <reason>` above the clause to suppress.
+
 ### 1.4.1 — 2026-05-27 UTC
 
 - New plugin: `lazycortex-python` ships style, docstring, and test discipline rules (`lazy-python.style`, `lazy-python.docstrings`, `lazy-python.tests`), five reference guidelines, a canonical `python-template.py` skeleton, and a `pyproject-defaults.toml` template — everything needed to bootstrap a compliant Python project.
@@ -486,3 +523,16 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - New `lazy-python.docstring-writer` and `lazy-python.test-writer` agents automate docstring coverage and test generation for Python modules.
 - The check-style hook is now auto-registered via `hooks.json` at install time without requiring `source_roots` configuration; the hook correctly probes both `CLAUDE.md` and `.claude/CLAUDE.md` when adding the discipline pointer.
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
+
+## lazycortex-wiki
+
+### 1.2.0 — 2026-06-01 UTC
+
+- New `/wiki.query` uses a two-phase subagent retrieval model: a `lazy-wiki.seeker` agent picks entry points from `topics.md`, then `lazy-wiki.gatherer` traverses See-also links and synthesises the answer — keeping large index and node bodies out of the main session context.
+- Fixed query path resolution: entry-point paths from the seeker are now rebased to repo-relative before the gatherer resolves them, fixing broken lookups when `topics.md` lives outside the repo root.
+- Tag consistency across incremental runs: new `collect-tags` and `retag` subcommands survey axis values in use and apply an alias map to normalise synonyms; `/wiki.relink` and the daemon's per-file path both pass existing tag values as an anchor to classify, so the curator reuses established values instead of coining synonyms.
+- New `relink-all` subcommand is now fully implemented — enumerates every scope node and dispatches a classify job for each, enabling a forced full pass when, for example, a new node requires existing nodes to reconsider their links.
+- Incremental backlinks on classify: when a node is classified, link jobs are now also dispatched for every scope node that is a reverse candidate for it, so existing nodes gain links to the new node without waiting for the next weekly relink.
+- Fixed a dispatcher deduplication bug where classify and link jobs for the same node collapsed to the same key (causing link jobs to be silently dropped), and where relative vs. absolute paths produced different keys for the same node.
+- Fixed broken wiki installation: `/wiki.install` was seeding `wiki.scan.watch` as a list instead of a string, crashing the git-routine validator and preventing scan dispatch on every file change.
+- Fixed wiki curator commits using the wrong author identity: the agent's commit step now explicitly instructs the curator not to pass `--author`, relying on the `GIT_AUTHOR_NAME`/`GIT_AUTHOR_EMAIL` env vars the pump already sets.

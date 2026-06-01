@@ -1,35 +1,21 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-05-23
+last_regen: 2026-06-01
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / setup-migration-failed / setup-child-failed; audit-or-doctor → sub-branch on global-rules-empty / experts-json-invalid / ref-unresolvable / routine-path-stale / stall-mid-run; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / cancel-job-not-found / invalid-status-filter / expert-key-mismatch; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / recover-still-dirty / recover-commit-needs-message / state-unparseable; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
-  - lazy-core.audit
   - lazy-core.doctor
-  - lazy-core.optimize
   - lazy-core.setup
-  - lazy-core.agent-models
-  - lazy-core.git-status
-  - lazy-core.git-unlock
+  - lazy-repo.mark-public
+  - lazy-guard.check-public
+  - lazy-runtime.recover
   - lazy-expert.dispatch-job
   - lazy-expert.collect-job
-  - lazy-expert.cancel-job
-  - lazy-expert.list-jobs
-  - lazy-guard.allow-mcp
-  - lazy-guard.check-public
-  - lazy-log.clean
-  - lazy-memory.index
-  - lazy-memory.mark-persona
-  - lazy-memory.reflect
   - lazy-memory.write
-  - lazy-repo.mark-public
-  - lazy-routine.register
-  - lazy-routine.unregister
-  - lazy-runtime.recover
 ---
 # Troubleshooting
 
@@ -271,7 +257,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause**: The expert runtime has not been bootstrapped for this repo. `/lazy-expert.dispatch-job` requires the `.experts/` directory layout to exist before it can write job files.
 
-**Fix**: Run `/lazy-core.install`. When the wizard asks whether to enable the expert runtime, answer yes. The install skill creates `.experts/`, writes `lazy.settings.json[experts]`, and bootstraps the required directory layout. Then re-run `/lazy-expert.dispatch-job`.
+**Fix**: Run `/lazy-core.install`. When the wizard asks whether to bootstrap runtime/experts, answer yes. The install skill creates `.experts/`, writes `lazy.settings.json[experts]`, and bootstraps the required directory layout. Then re-run `/lazy-expert.dispatch-job`.
 
 ---
 
@@ -437,13 +423,23 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## `/lazy-memory.write` fails with "commit-failed"
+
+**Symptom**: `/lazy-memory.write` reaches the commit step but fails with "commit-failed: git add returned …" or "commit-failed: git commit returned …".
+
+**Likely cause**: A pre-commit hook rejected the staged change, or another Claude Code session holds the staging lock (`lazy-core.git-guard`) and the write couldn't acquire it. The skill leaves the staged index intact for inspection.
+
+**Fix**: Run `/lazy-core.git-status` to check whether another session holds the staging lock. If a lock is present and stale, run `/lazy-core.git-unlock` to break it. Then re-run `/lazy-memory.write` — the write is idempotent when the note body is unchanged, so it will complete cleanly on retry.
+
+---
+
 ## `/lazy-memory.index` fails: ".memory/" not present
 
 **Symptom**: Running `/lazy-memory.index` aborts immediately with "`.memory/` not present".
 
 **Likely cause**: The memory subsystem has not been bootstrapped for this repo. The `.memory/` directory is created by `/lazy-core.install` when you accept the expert runtime wizard — if install was skipped or never run, the directory does not exist.
 
-**Fix**: Run `/lazy-core.install`. When the wizard asks whether to enable the expert runtime, answer yes — the install skill creates `.memory/` and bootstraps the directory layout. Then re-run `/lazy-memory.index`.
+**Fix**: Run `/lazy-core.install`. When the wizard asks whether to bootstrap runtime/experts, answer yes — the install skill creates `.memory/` and bootstraps the directory layout. Then re-run `/lazy-memory.index`.
 
 ---
 

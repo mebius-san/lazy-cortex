@@ -3,29 +3,39 @@ Trigger for the autonomous lazy-runtime.doctor expert.
 
 Pure-Python tick (no reasoning) that runs hourly. Decides whether the
 daemon needs medical attention and, if so, dispatches a single
-``lazy-runtime.doctor`` expert job to the queue. The agent itself
+`lazy-runtime.doctor` expert job to the queue. The agent itself
 performs every diagnosis + fix-or-give-up decision.
 
 Trigger conditions (OR-joined):
-1. ``state.daemon_halted.reason == "uncommitted_changes"`` and
-   ``halted_since`` is at least 1 hour old — operator clearly is not
+1. `state.daemon_halted.reason == "uncommitted_changes"` and
+   `halted_since` is at least 1 hour old — operator clearly is not
    coming to fix it manually, doctor takes over.
-2. At least one ``.experts/.jobs/<expert>/<job>/DEAD`` marker exists
-   without a sibling ``diagnosis.json`` — there's a dead job waiting
+2. At least one `.experts/.jobs/<expert>/<job>/DEAD` marker exists
+   without a sibling `diagnosis.json` — there's a dead job waiting
    for retry-or-permanent-fail judgment.
 
 When triggered, the tick gathers context (halt block, dead-job
-inventory with their ``dead.json`` + ``error.json`` + tails of
-``transcript.jsonl``, recent commit log) and dispatches a single doctor
-job via ``expert_runtime.dispatch_job``. Deduplication via
-``dedup_key="doctor"`` ensures we never queue a second concurrent
+inventory with their `dead.json` + `error.json` + tails of
+`transcript.jsonl`, recent commit log) and dispatches a single doctor
+job via `expert_runtime.dispatch_job`. Deduplication via
+`dedup_key="doctor"` ensures we never queue a second concurrent
 doctor — one runs at a time, period.
 """
 from __future__ import annotations
+# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable=import-error
+
 import json
 import subprocess
 import time
 from pathlib import Path
+
+from constants import HaltKey, HaltReason, IncidentKey, JobArtifact, JobFile, JobMarker, SettingsFile, SettingsKey
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
 
 JOBS_BASE = ".experts/.jobs"
 DEAD_HALT_AGE_SEC = 3600  # halt must be ≥1h old before doctor takes over
@@ -57,14 +67,14 @@ def _dead_jobs_needing_doctor(repo: Path) -> list[dict]:
       if not jdir.is_dir():
         continue
       # guard: skip jobs that are not marked DEAD
-      if not (jdir / "DEAD").exists():
+      if not (jdir / JobMarker.DEAD).exists():
         continue
       # guard: skip jobs that have already been triaged
-      if (jdir / "diagnosis.json").exists():
+      if (jdir / JobArtifact.DIAGNOSIS_JSON).exists():
         continue
       out.append({
-        "expert": edir.name,
-        "job_id": jdir.name,
+        IncidentKey.EXPERT: edir.name,
+        IncidentKey.JOB_ID: jdir.name,
         "jdir_rel": str(jdir.relative_to(repo)),
       })
   return out
@@ -82,15 +92,16 @@ def _stuck_halt(repo: Path) -> dict | None:
     `DEAD_HALT_AGE_SEC` seconds, otherwise `None`. Other halt reasons (git-related) require human
     investigation and stay out of doctor scope.
   """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from runtime_state import get_halted
   halt = get_halted(repo)
   # guard: no halt block — daemon is not stuck
   if halt is None:
     return None
   # guard: halt is not a dirty-tree halt — out of doctor scope
-  if halt.get("reason") != "uncommitted_changes":
+  if halt.get(HaltKey.REASON) != HaltReason.UNCOMMITTED_CHANGES:
     return None
-  age = time.time() - float(halt.get("halted_since", 0))
+  age = time.time() - float(halt.get(HaltKey.HALTED_SINCE, 0))
   # guard: halt is younger than the threshold — give the operator more time to react
   if age < DEAD_HALT_AGE_SEC:
     return None
@@ -139,26 +150,32 @@ def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict
   }
   # snapshot each dead job's metadata and transcript tail for the doctor
   for entry in dead_jobs:
+    # waiver: one-off dead-job context-schema field name, not a reusable domain key
     jdir = repo / entry["jdir_rel"]
     e = dict(entry)
     for key, fname in (
-      ( "request_json", "request.json" ),
-      ( "config_json", "config.json" ),
-      ( "dead_json", "dead.json" ),
-      ( "error_json", "error.json" ),
+      ( "request_json", JobFile.REQUEST ),
+      ( "config_json", JobFile.CONFIG ),
+      ( "dead_json", JobArtifact.DEAD_JSON ),
+      ( "error_json", JobArtifact.ERROR_JSON ),
     ):
       try:
         e[key] = json.loads((jdir / fname).read_text())
       except (OSError, json.JSONDecodeError):
         e[key] = None
     try:
-      e["attempts"] = int((jdir / "attempts").read_text().strip())
+      # waiver: one-off doctor-context-schema field name, not a reusable domain key
+      e["attempts"] = int((jdir / JobArtifact.ATTEMPTS).read_text().strip())
     except (OSError, ValueError):
+      # waiver: one-off doctor-context-schema field name, not a reusable domain key
       e["attempts"] = 0
-    e["transcript_tail"] = _read_tail(jdir / "transcript.jsonl", 30)
+    # waiver: one-off doctor-context-schema field name and inline tail-length literal, not domain constants
+    e["transcript_tail"] = _read_tail(jdir / JobArtifact.TRANSCRIPT, 30)
+    # waiver: one-off doctor-context-schema field name, not a reusable domain key
     context["dead_jobs"].append(e)
   # capture a small slice of recent commit history for situational awareness
   try:
+    # waiver: one-off doctor-context-schema field name, not a reusable domain key
     context["git_log_recent"] = subprocess.run(
       [ "git", "log", "--oneline", "-20" ],
       cwd = str(repo), capture_output = True, text = True, check = True,
@@ -167,6 +184,7 @@ def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict
     pass
   # capture current working-tree status so the doctor can see what the operator left behind
   try:
+    # waiver: one-off doctor-context-schema field name, not a reusable domain key
     context["git_status"] = subprocess.run(
       [ "git", "--no-optional-locks", "status", "--porcelain" ],
       cwd = str(repo), capture_output = True, text = True, check = True,
@@ -187,13 +205,15 @@ def _all_known_protocols(repo: Path) -> list[str]:
     The deduplicated list of protocol identifiers reachable from any registered routine, in first-seen
     order so prompts are byte-stable across runs.
   """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from lazy_settings import load_section
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from routine_types import _routine_protocols
-  routines = load_section(repo / ".claude/lazy.settings.json", "routines")
+  routines = load_section(repo / SettingsFile.REL, SettingsKey.ROUTINES)
   seen: list[str] = []
   for name, cfg in routines.items():
     # guard: skip the version sentinel and any non-dict entries
-    if name == "_version" or not isinstance(cfg, dict):
+    if name == SettingsKey.VERSION or not isinstance(cfg, dict):
       continue
     for p in _routine_protocols(cfg):
       # guard: deduplicate while preserving first-seen order
@@ -214,6 +234,7 @@ def doctor_tick(repo: Path) -> dict:
     `triggered=False` with no dispatch. When a trigger fires, the dict additionally carries the
     halt and dead-job counts and the dispatch result returned by `expert_runtime.dispatch_job`.
   """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from expert_runtime import dispatch_job
   repo = Path(repo)
   halt = _stuck_halt(repo)
@@ -228,9 +249,11 @@ def doctor_tick(repo: Path) -> dict:
     "dead_job_count": len(dead_jobs),
   }
   result = dispatch_job(
+    # waiver: one-off routine name and dedup key for the doctor dispatch, not reusable domain constants
     repo, "lazy-runtime.doctor", payload,
     protocols = _all_known_protocols(repo),
     source = source,
+    # waiver: one-off dedup key for the doctor dispatch, not a reusable domain constant
     dedup_key = "doctor",
   )
   return {

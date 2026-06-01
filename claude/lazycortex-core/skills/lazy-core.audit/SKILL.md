@@ -121,6 +121,8 @@ Emit one `[INFO]` per enabled server. Emit `[WARN]`:
 
 Skip both probes silently if neither runs (sandbox restriction); the renderer treats the section as absent.
 
+**Scaffold registry validation** — for each in-scope `lazy-core.scaffold.md` (`.claude/rules/`, `$HOME/.claude/rules/`), run `lazycortex-core scaffold validate --registry <path>` (resolve the core CLI from `installed_plugins.json[lazycortex-core@lazycortex].installPath`/`bin/lazycortex-core`; skip silently if unresolvable). Map each returned finding: `parse_error` / `bad_shape` / `plugin_root_var` → `[FAIL]`; `glob_overlap` → `[WARN]`. The primitive's deterministic parse is the single source of structural truth — do not also eyeball the YAML.
+
 **Path hygiene** — grep every project-level config file (`.claude/agents/*.md`, `.claude/rules/*.md`, `.claude/skills/*/SKILL.md`, `.claude/commands/*.md`, `CLAUDE.md`) and emit `[WARN]` for:
 
 - `/Users/` or `/home/` — hardcoded absolute paths.
@@ -232,7 +234,7 @@ Severity vocabulary: `INFO` (advisory note about a passing chapter or scenario, 
 
 ### Agent D — expert runtime
 
-Scope: `lazy.settings.json[experts]`, `lazy.settings.json[lazy-core.runtime]`, `.jobs/` directories, runtime daemon liveness. Severity vocabulary: `INFO` (informational, non-actionable) / `WARN` (advisory or degraded state) / `FAIL` (structural violation or unresolvable reference).
+Scope: `lazy.settings.json[experts]`, the flat `lazy.settings.json[daemon]` and `lazy.settings.json[routines]` sections, `.jobs/` directories, runtime daemon liveness. Severity vocabulary: `INFO` (informational, non-actionable) / `WARN` (advisory or degraded state) / `FAIL` (structural violation or unresolvable reference).
 
 **CRITICAL PATH RULE** applies: no Bash under `$HOME/.claude/`. Expand `$HOME` once via `Bash(echo $HOME)` then substitute.
 
@@ -321,26 +323,36 @@ For every global tag file (`.memory/.tags/<topic>.md`):
 
 - Every expert pointer (`../<expert>/.tags/<topic>.md`) must exist → `[WARN] global tag file references missing local file: <expert> | <global-tag-file>`. Fix: run `/lazy-memory.index`.
 
-**D3 — `lazy.settings.json[lazy-core.runtime]` schema**
+**D3 — flat `daemon` / `routines` section schema**
 
-Read `.claude/lazy.settings.json`. If absent: `[INFO] lazy.settings.json absent — runtime section not configured` and skip D3 sub-checks. If present, extract the `lazy-core.runtime` section (treat missing section as an empty object):
+The runtime config lives in two flat top-level sections of `lazy.settings.json` — `daemon` (daemon-process settings) and `routines` (the routine map). There is no nested `lazy-core.runtime` object; `runtime_daemon.py` reads these via `load_section(path, "daemon")` / `load_section(path, "routines")`.
+
+Read `.claude/lazy.settings.json`. If absent: `[INFO] lazy.settings.json absent — runtime sections not configured` and skip D3 sub-checks. If present, extract both sections separately. `load_section` returns a `{"_version": <current>}` stub when a section is absent, so a section carrying only `_version` (no other keys) means "not configured" — treat that as INFO/skip, not FAIL:
 
 ```
 Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
-from lazy_settings import load_section
+from lazy_settings import load_section, CURRENT_VERSIONS
 from pathlib import Path
 import json
-s = load_section(Path('.claude/lazy.settings.json'), 'lazy-core.runtime')
-print(json.dumps(s))
+p = Path('.claude/lazy.settings.json')
+daemon = load_section(p, 'daemon')
+routines = load_section(p, 'routines')
+print(json.dumps({
+  'daemon': daemon,
+  'routines': routines,
+  'daemon_version': CURRENT_VERSIONS['daemon'],
+  'routines_version': CURRENT_VERSIONS['routines'],
+}))
 ")
 ```
 
-Validate the returned section:
+Validate the returned sections (`daemon_version` / `routines_version` are the current schema versions from `CURRENT_VERSIONS` — compare against those, do not hardcode):
 
-- `_version` must equal `1`. Wrong value or absent → `[FAIL] lazy-core.runtime section _version mismatch (expected 1) | .claude/lazy.settings.json`.
-- `daemon` block must be a dict and contain: `git` (string or bool), `polling_interval_sec` (positive int), `cleanup_completed_after` (string or int), `cleanup_failed_after` (string or int), `cleanup_dead_after` (string or int). Any missing key → `[FAIL] lazy-core.runtime daemon block missing key(s): <list> | .claude/lazy.settings.json`.
-- Each `cleanup_*_after` value must parse as `<N>d` (days), `<N>h` (hours), or a raw non-negative integer (seconds). Anything else → `[FAIL] lazy-core.runtime daemon.<key> has malformed value '<value>' (expected <N>d / <N>h / int) | .claude/lazy.settings.json` — D6 below would otherwise silently fail to parse and apply a default.
-- `routines` must be a dict (may be empty). Non-dict value → `[FAIL] lazy-core.runtime routines is not a dict | .claude/lazy.settings.json`.
+- **`daemon` section.** When the section carries only `_version` (no daemon keys), it is not configured — `[INFO] daemon section absent — daemon not configured (git-sync off or routines-only repo) | .claude/lazy.settings.json` and skip the remaining daemon checks. Otherwise:
+  - `daemon._version` must equal `daemon_version` (current `CURRENT_VERSIONS['daemon']`, presently 2). Wrong value or absent → `[FAIL] daemon section _version mismatch (expected <daemon_version>) | .claude/lazy.settings.json`.
+  - The `daemon` section must contain: `git` (string or bool), `polling_interval_sec` (positive int), `cleanup_completed_after` (string or int), `cleanup_failed_after` (string or int), `cleanup_dead_after` (string or int). Any missing key → `[FAIL] daemon section missing key(s): <list> | .claude/lazy.settings.json`.
+  - Each `cleanup_*_after` value must parse as `<N>d` (days), `<N>h` (hours), or a raw non-negative integer (seconds). Anything else → `[FAIL] daemon.<key> has malformed value '<value>' (expected <N>d / <N>h / int) | .claude/lazy.settings.json` — D6 below would otherwise silently fail to parse and apply a default.
+- **`routines` section.** The section IS the routines map (each key is a routine name; `_version` is the lone reserved key). `routines._version` must equal `routines_version` (current `CURRENT_VERSIONS['routines']`, presently 2). Wrong value or absent → `[FAIL] routines section _version mismatch (expected <routines_version>) | .claude/lazy.settings.json`. The section must be a dict — a non-dict value → `[FAIL] routines section is not a dict | .claude/lazy.settings.json`.
 - When D1 found at least one expert AND `routines` does not contain a `lazy-expert.pump` entry → `[WARN] experts configured but lazy-expert.pump routine absent from routines | .claude/lazy.settings.json`.
 
 **D4 — Routine command resolvability**
@@ -420,10 +432,12 @@ plugins_scanned: <n>  warn: <m>
 - [FAIL] expert <key>: agent reference '<value>' did not resolve | lazy.settings.json[experts]
 
 ### runtime_settings
-- [INFO] lazy.settings.json absent — runtime section not configured
-- [FAIL] lazy-core.runtime section _version mismatch (expected 1) | .claude/lazy.settings.json
-- [FAIL] lazy-core.runtime daemon block missing key(s): <list> | .claude/lazy.settings.json
-- [FAIL] lazy-core.runtime routines is not a dict | .claude/lazy.settings.json
+- [INFO] lazy.settings.json absent — runtime sections not configured
+- [INFO] daemon section absent — daemon not configured (git-sync off or routines-only repo) | .claude/lazy.settings.json
+- [FAIL] daemon section _version mismatch (expected <daemon_version>) | .claude/lazy.settings.json
+- [FAIL] daemon section missing key(s): <list> | .claude/lazy.settings.json
+- [FAIL] routines section _version mismatch (expected <routines_version>) | .claude/lazy.settings.json
+- [FAIL] routines section is not a dict | .claude/lazy.settings.json
 - [WARN] experts configured but lazy-expert.pump routine absent from routines | .claude/lazy.settings.json
 - [FAIL] routine <name> has no command field | .claude/lazy.settings.json
 - [FAIL] routine <name> command path does not exist: <path> | .claude/lazy.settings.json
@@ -606,7 +620,7 @@ If all L1–L4 checks pass: emit a single `PASS: logging rule installed, .logs/ 
 - Narrative-padding match → review and drop the passage if its removal leaves executable behavior unchanged.
 - `lazy.settings.json[experts]` FAIL → add missing fields per the expert schema; run `/lazy-core.install` wizard step to re-scaffold.
 - Reference resolution FAIL → verify the agent reference uses a valid format (`<plugin>:<name>`, `user:<name>`, or bare `<name>`) and that the referenced artifact exists.
-- Loop settings FAIL → re-run `/lazy-core.install` to scaffold or repair the `lazy-core.runtime` section in `lazy.settings.json`.
+- Loop settings FAIL → re-run `/lazy-core.install` to scaffold or repair the flat `daemon` and `routines` sections in `lazy.settings.json`.
 - Routine command FAIL → install the missing plugin or remove the unresolvable routine entry.
 - Daemon stalled → run `/lazy-core.doctor` for the restart fix-offer.
 - Logging rule not installed in consumer scope → run `/lazy-core.setup` to copy `lazy-log.logging.md` to `.claude/rules/`.
