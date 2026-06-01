@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 PreToolUse hook: guard Claude Code settings files against dangerous changes.
 
@@ -18,14 +19,21 @@ globally-scoped per-tool permissions (opt-in via lazy-guard.allow-mcp). The earl
 permissions.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
 import sys
 
-# ---------------------------------------------------------------------------
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
+
+# ----------------------------------------------------------------------------------------
 # Constants
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 
 GLOBAL_CLAUDE = os.path.realpath(os.path.expanduser("~/.claude"))
 
@@ -61,13 +69,14 @@ DANGEROUS_FLAGS = [
 ]
 
 BULK_THRESHOLD = 5  # warn if this many permissions added at once
+AUTO_CONTEXT_MAX = 20  # suppress the auto-context message above this many newly added permissions
 
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 
 
-def classify_path(file_path, cwd = ""):
+def classify_path(file_path: str, cwd: str = "") -> dict:
   """
   Classify a file path as a Claude Code settings file and determine its scope.
 
@@ -95,7 +104,9 @@ def classify_path(file_path, cwd = ""):
   basename = os.path.basename(resolved)
   parent = os.path.basename(os.path.dirname(resolved))
 
+  # waiver: filesystem path/filename idioms (Claude Code settings layout), not domain constants
   is_settings = parent == ".claude" and basename in ( "settings.json", "settings.local.json" )
+  # waiver: filesystem filename idiom, not a domain constant
   is_local = basename == "settings.local.json"
   is_global = resolved.startswith(GLOBAL_CLAUDE + os.sep) or os.path.dirname(resolved) == GLOBAL_CLAUDE
   is_global_local = is_global and is_local
@@ -109,7 +120,7 @@ def classify_path(file_path, cwd = ""):
   }
 
 
-def is_empty_settings(parsed):
+def is_empty_settings(parsed: dict | None) -> bool:
   """
   Report whether a parsed settings JSON object is effectively empty.
 
@@ -127,12 +138,16 @@ def is_empty_settings(parsed):
   # guard: missing or literally `{}` — treat as empty
   if not parsed or parsed == {}:
     return True
+  # waiver: external-format Claude Code settings field name, not an internal key
   perms = parsed.get("permissions", {})
   # guard: no permissions block at all
   if not perms:
     return parsed == { "permissions": {} }
+  # waiver: external-format Claude Code settings field names, not internal keys
   allow = perms.get("allow", [])
+  # waiver: external-format Claude Code settings field name, not an internal key
   deny = perms.get("deny", [])
+  # waiver: external-format Claude Code settings field name, not an internal key
   ask = perms.get("ask", [])
   other_keys = set(parsed.keys()) - { "permissions", "$schema" }
   # guard: any non-permissions top-level key disqualifies emptiness
@@ -145,7 +160,7 @@ def is_empty_settings(parsed):
   return not allow and not deny and not ask
 
 
-def try_parse_json(text):
+def try_parse_json(text: str) -> dict | None:
   """
   Parse a text payload as JSON, returning None when parsing fails.
 
@@ -163,7 +178,7 @@ def try_parse_json(text):
     return None
 
 
-def extract_permission_entries(text):
+def extract_permission_entries(text: str) -> set[str]:
   """
   Extract Claude Code permission entries (tool names and tool-with-pattern specifiers) from
   a settings payload.
@@ -187,6 +202,7 @@ def extract_permission_entries(text):
   """
   parsed = try_parse_json(text)
   if parsed and isinstance(parsed, dict):
+    # waiver: external-format Claude Code settings field name, not an internal key
     perms = parsed.get("permissions", {})
     entries = set()
     for key in ( "allow", "deny", "ask" ):
@@ -198,7 +214,7 @@ def extract_permission_entries(text):
   return set(re.findall(r'"([A-Z][A-Za-z]+(?:\([^"]*\))?|mcp__[^"]+)"', text))
 
 
-def output_block(reason):
+def output_block(reason: str) -> None:
   """
   Emit a `deny` PreToolUse hook decision to stdout and exit the hook process.
 
@@ -223,7 +239,7 @@ def output_block(reason):
   sys.exit(0)
 
 
-def output_allow_with_message(message):
+def output_allow_with_message(message: str) -> None:
   """
   Emit a non-blocking system message alongside an implicit allow, then exit the hook process.
 
@@ -241,12 +257,12 @@ def output_allow_with_message(message):
   sys.exit(0)
 
 
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 # Analysis
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 
 
-def check_tracked_permissions_leak(classification, old_text, new_text):
+def check_tracked_permissions_leak(classification: dict, old_text: str | None, new_text: str) -> str | None:
   """
   Report when per-tool permissions are being added to a tracked `settings.json`.
 
@@ -266,6 +282,7 @@ def check_tracked_permissions_leak(classification, old_text, new_text):
     destination for personal permissions).
   """
   # guard: writes to settings.local.json or non-settings files are not leaks
+  # waiver: internal classify_path result-schema field names, single-source set in classify_path
   if classification["is_local"] or not classification["is_settings"]:
     return None
   old_perms = extract_permission_entries(old_text) if old_text else set()
@@ -282,7 +299,7 @@ def check_tracked_permissions_leak(classification, old_text, new_text):
   )
 
 
-def check_blocked_allow_patterns(new_text):
+def check_blocked_allow_patterns(new_text: str) -> str | None:
   """
   Detect blocked patterns inside a settings payload's allow list.
 
@@ -301,6 +318,7 @@ def check_blocked_allow_patterns(new_text):
   parsed = try_parse_json(new_text)
   if parsed and isinstance(parsed, dict):
     # Full JSON: only check the allow array
+    # waiver: external-format Claude Code settings field names, not internal keys
     allow_entries = parsed.get("permissions", {}).get("allow", [])
     check_text = " ".join(f'"{e}"' for e in allow_entries)
   else:
@@ -317,7 +335,7 @@ def check_blocked_allow_patterns(new_text):
   return None
 
 
-def check_critical_deny_removal(old_text, new_text):
+def check_critical_deny_removal(old_text: str | None, new_text: str) -> str | None:
   """
   Detect removal of a critical deny rule between the previous and new settings text.
 
@@ -340,7 +358,7 @@ def check_critical_deny_removal(old_text, new_text):
   return None
 
 
-def collect_warnings(old_text, new_text):
+def collect_warnings(old_text: str | None, new_text: str) -> list[str]:
   """
   Collect non-blocking advisory warnings for a settings change.
 
@@ -367,6 +385,7 @@ def collect_warnings(old_text, new_text):
   # Broad MCP wildcards
   if re.search(r'"mcp__[^"]*\*"', new_text):
     if not old_text or not re.search(r'"mcp__[^"]*\*"', old_text):
+      # waiver: one-off human-facing message
       warnings.append("Broad MCP tool wildcard detected. Consider scoping to specific tools.")
 
   # Dangerous flags
@@ -377,7 +396,7 @@ def collect_warnings(old_text, new_text):
   return warnings
 
 
-def generate_auto_context(old_text, new_text):
+def generate_auto_context(old_text: str | None, new_text: str) -> str | None:
   """
   Build an informational message listing newly granted permissions.
 
@@ -399,22 +418,23 @@ def generate_auto_context(old_text, new_text):
   added = new_perms - old_perms
 
   # guard: no additions or too many to inline — suppress the auto-context
-  if not added or len(added) > 20:
+  if not added or len(added) > AUTO_CONTEXT_MAX:
     return None
 
   lines = [ "Settings updated. New permissions granted:" ]
   for p in sorted(added):
     lines.append(f"  - {p}")
+  # waiver: one-off human-facing message
   lines.append("You no longer need to ask for approval to use these.")
   return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 # Main
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 
 
-def main():
+def main() -> None:
   """
   Run the PreToolUse settings-guard hook against the in-flight Edit or Write tool call.
 
@@ -431,23 +451,33 @@ def main():
   raw = sys.stdin.read()
   payload = json.loads(raw)
 
+  # waiver: external-format hook-payload and tool-input field names, not internal keys
   tool_input = payload.get("tool_input", {})
+  # waiver: external-format tool-input field name, not an internal key
   file_path = tool_input.get("file_path", "")
+  # waiver: external-format hook-payload field name, not an internal key
   tool_name = payload.get("tool_name", "")
+  # waiver: external-format hook-payload field name, not an internal key
   cwd = payload.get("cwd", "")
 
   # Fast path: not a settings file
   classification = classify_path(file_path, cwd)
   # guard: not a settings file — let the call through silently
+  # waiver: internal classify_path result-schema field name, single-source set in classify_path
   if not classification["is_settings"]:
     sys.exit(0)
 
   # Extract content for analysis
+  # waiver: external Claude Code tool name, not a domain key
   if tool_name == "Write":
     old_text = None
+    # waiver: external-format tool-input field name, not an internal key
     new_text = tool_input.get("content", "")
+  # waiver: external Claude Code tool name, not a domain key
   elif tool_name == "Edit":
+    # waiver: external-format tool-input field names, not internal keys
     old_text = tool_input.get("old_string", "")
+    # waiver: external-format tool-input field name, not an internal key
     new_text = tool_input.get("new_string", "")
   else:
     sys.exit(0)
@@ -474,6 +504,7 @@ def main():
   if leak:
     warnings.append(leak)
   if warnings:
+    # waiver: one-off human-facing message
     messages.append("Settings guardian warnings:\n" + "\n".join(f"  - {w}" for w in warnings))
 
   context = generate_auto_context(old_text, new_text)

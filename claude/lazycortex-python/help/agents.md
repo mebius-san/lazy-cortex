@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Manual code-quality review via /lazy-python.check-style plus two dispatch-ready writer agents that enforce project conventions for docstrings and tests.
-last_regen: 2026-05-27
+last_regen: 2026-06-01
 diagram_spec:
   anchor: "How the three members fit together"
   request: "Flow showing three parallel entry points: (1) user invokes /lazy-python.check-style — reads canon coding + documenting guidelines and project overlay, runs seven-category manual review, then chk-py per-file and whole-project, then tst-py per touched module; (2) user or skill dispatches lazy-python.docstring-writer — reads documenting guidelines and overlay, writes or fixes docstrings only, runs pre-return self-check (8 semantic checks), then chk-py; (3) user or skill dispatches lazy-python.test-writer — reads testing and checking guidelines and overlay, writes test files only (no production code), then chk-py and tst-py. Highlight the shared guideline-read step and the no-production-code constraint on test-writer."
@@ -29,11 +29,11 @@ All three members share one non-negotiable design: guidelines are never cached. 
 
 ## How it fits together
 
-`/lazy-python.check-style` is a six-step workflow. It starts by reading the coding and documenting guidelines from the plugin plus your project overlay — both layers, every run, regardless of what is already in context. It then enumerates the modified Python files via `git diff` (or uses any file paths you pass explicitly). For each file it walks seven inspection categories: docstring quality, contract consistency, guard clauses, method organisation, naming, structural rules, and comment preservation. Only after the manual pass does it run `chk-py all <file>.py -q` per file, then `chk-py all -q` across the whole project, then `tst-py <module> -q` for each touched module. Every violation from either pass is fixed in a targeted single-line edit, and the skill re-verifies before it closes.
+`/lazy-python.check-style` is a seven-step workflow. It starts by reading the coding and documenting guidelines from the plugin plus your project overlay — both layers, every run, regardless of what is already in context. It then enumerates the modified Python files via `git diff` (or uses any file paths you pass explicitly). For each file it walks seven inspection categories: docstring quality, contract consistency, guard clauses, method organisation, naming, structural rules, and comment preservation. Only after the manual pass does it run `chk-py all <file>.py -q` per file, then `chk-py all -q` across the whole project, then `tst-py <module> -q` for each touched module. Every violation from either pass is fixed in a targeted single-line edit, and the skill re-verifies before it closes. The final step writes a run log.
 
 `lazy-python.docstring-writer` is a focused seven-step agent. On dispatch it reads the documenting guidelines plus your overlay, reads the target files, identifies every missing or non-compliant docstring, and writes or fixes them — never touching any production code. Before returning it walks a mandatory pre-return self-check across eight semantic failure patterns: HOW-not-WHAT leakage, comma-chained call sequences in Summary, private internals in prose, algorithm narration in Scope, speculative future-plans, tautology on dunder summaries, missing `Returns:` sections, and private attributes in `Attributes:`. After the self-check it runs `chk-py` on every changed file. The full class, method, and property docstring rule set is embedded directly in the agent body, so the rules travel with every dispatch.
 
-`lazy-python.test-writer` is an eight-step agent. It reads the testing and checking guidelines plus your overlay first, then reads the production class fully — paying special attention to the docstrings, because the docstring is the specification. It enumerates every testable claim: `__init__` paths, public methods, properties, documented guarantees, documented exceptions, and operator overloads. Tests are written across all seven Paranoid-Testing categories: happy path, wrong or invalid arguments, boundary values, error conditions, state transitions, operator overloading, and documented guarantees. When a correctly-specified test fails against the current implementation, the agent marks it `# FAILS: <reason>` and reports the divergence rather than silently adjusting the test. It verifies with `chk-py` and `tst-py` before returning and never writes a single line of production code.
+`lazy-python.test-writer` is an eight-step agent. It reads the testing and checking guidelines plus your overlay first, then reads the production class fully — paying special attention to the docstrings, because the docstring is the specification. It enumerates every testable claim: `__init__` paths, public methods, properties, documented guarantees, documented exceptions, and operator overloads. Tests are written across all seven Paranoid-Testing categories: happy path, wrong or invalid arguments, boundary values, error conditions, state transitions, operator overloading, and documented guarantees. A dedicated step then adds class and method docstrings to the test file itself (`"Test unit for ..."` on the class, `"Test that ..."` on each method), so the test file meets the same documentation standard as production code. When a correctly-specified test fails against the current implementation, the agent marks it `# FAILS: <reason>` and reports the divergence rather than silently adjusting the test. It verifies with `chk-py` and `tst-py` before returning and never writes a single line of production code.
 
 The two writer agents and the review skill have a clean separation of concern: `/lazy-python.check-style` is the audit-and-fix entry point you run on your change set; the writer agents are composition units you (or another skill) dispatch when work needs to be created from scratch or brought up to a standard the review step surfaced.
 
@@ -53,7 +53,74 @@ The two writer agents and the review skill have a clean separation of concern: `
 
 ## How the three members fit together
 
-<!-- /lazy-diagram.draw lands the fence here; do not author a code block manually. -->
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  invokeCheckStyle[User invokes /lazy-python.check-style]
+  invokeDocstringWriter[User or skill dispatches lazy-python.docstring-writer]
+  invokeTestWriter[User or skill dispatches lazy-python.test-writer]
+
+  readGuidelinesShared[[Read canon coding + documenting guidelines and project overlay]]
+  readDocGuidelinesShared[[Read documenting guidelines and project overlay]]
+  readTestGuidelinesShared[[Read testing + checking guidelines and project overlay]]
+
+  sevenCategoryReview[Run seven-category manual review]
+  writeFixDocstrings[Write or fix docstrings only]
+  noProductionCode[Write test files only - no production code]
+
+  selfCheck{Pre-return self-check: 8 semantic checks pass?}
+
+  chkPyPerFile1[chk-py per-file]
+  chkPyWholeProject[chk-py whole-project]
+  tstPyTouchedModules[tst-py per touched module]
+
+  chkPyDocstring[chk-py]
+
+  chkPyTest[chk-py]
+  tstPyTest[tst-py]
+
+  invokeCheckStyle -->|read guidelines| readGuidelinesShared
+  invokeDocstringWriter -->|read guidelines| readDocGuidelinesShared
+  invokeTestWriter -->|read guidelines| readTestGuidelinesShared
+
+  readGuidelinesShared -->|begin review| sevenCategoryReview
+  sevenCategoryReview -->|check per-file| chkPyPerFile1
+  chkPyPerFile1 -->|check whole-project| chkPyWholeProject
+  chkPyWholeProject -->|run tests| tstPyTouchedModules
+
+  readDocGuidelinesShared -->|draft docstrings| writeFixDocstrings
+  writeFixDocstrings -->|self-check| selfCheck
+  selfCheck -->|all 8 pass| chkPyDocstring
+  selfCheck -->|fix needed| writeFixDocstrings
+
+  readTestGuidelinesShared -->|enforce constraint| noProductionCode
+  noProductionCode -->|check| chkPyTest
+  chkPyTest -->|run tests| tstPyTest
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  classDef sub fill:#2e2240,stroke:#7e63a8,color:#fff
+
+  class invokeCheckStyle entry
+  class invokeDocstringWriter entry
+  class invokeTestWriter entry
+  class readGuidelinesShared sub
+  class readDocGuidelinesShared sub
+  class readTestGuidelinesShared sub
+  class sevenCategoryReview action
+  class writeFixDocstrings action
+  class noProductionCode error
+  class selfCheck guard
+  class chkPyPerFile1 action
+  class chkPyWholeProject action
+  class tstPyTouchedModules success
+  class chkPyDocstring success
+  class chkPyTest action
+  class tstPyTest success
+```
 
 ## See also
 

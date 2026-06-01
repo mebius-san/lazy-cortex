@@ -48,21 +48,21 @@ Requires these plugins from the same marketplace:
 | `lazy-diagram.fix` | Take an existing diagram fence and re-conform it to the current drawer-agent standards. Reads the host section's prose as the request, infers (kind, format) from the existing fence's syntax marker, dispatches the per-format drawer agent, and replaces the fence in place when the body differs. Outcome vocabulary: replaced / unchanged / failed:<reason>. Use when an old diagram drifted from the contract (palette removed, theme directive missing, terminology changed); for inserting a NEW fence under a heading see /lazy-diagram.draw. |
 | `lazy-diagram.install` | Bootstrap the lazycortex-diagram plugin for the current project (or globally). Syncs the authoring rule shipped by the plugin into the consumer's rules directory, seeds agent model tiers for the per-format drawer agents, and cleans up orphaned rules from previous versions. Idempotent — safe to re-run. Detects install scope automatically. |
 
+## Documentation
+
+Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
+
+- [drawing](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/drawing.md) — Insert new diagrams and refresh existing ones — dispatcher picks kind and format from your prose, writer agents render against shipped templates and style schemes.
+- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/install-and-audit.md) — Bootstrap lazycortex-diagram in your project — sync the authoring rule, seed agent-model tiers, and clean up orphans.
+- [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/troubleshooting.md) — Common failure modes across lazycortex-diagram skills — symptoms, likely causes, and fixes.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/faq.md) — Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, split behaviour, direct agent invocation, and install.
+
 ## Agents
 
 | Agent | Description |
 |---|---|
 | `lazy-diagram.draw-ascii` | Single-pass writer agent: produces an ASCII diagram body for a given (kind, request, exemplar). Dispatched by /lazy-diagram.draw or /lazy-diagram.fix, or invokable directly by any caller that supplies kind=<X>. Returns the diagram block content (without surrounding triple-backticks) as its response. Use when you have already chosen kind=<one of: flow, fs-tree, layout> and format=ascii. |
 | `lazy-diagram.draw-mermaid` | Single-pass writer agent: produces a mermaid diagram body for a given (kind, request, scheme). Dispatched by /lazy-diagram.draw or /lazy-diagram.fix, or invokable directly by any caller that supplies kind=<X>. Returns the diagram fence content (without surrounding triple-backticks) as its response. Use when you have already chosen kind=<one of: flow, sequence, state, erd, class, architecture, layout, nav, tree, controls-scheme, decision-tree, screen-scheme, journey, mindmap, gantt, timeline> and format=mermaid. |
-
-## Documentation
-
-Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
-
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/install-and-audit.md) — Bootstrap lazycortex-diagram in your project — sync the authoring rule, seed agent-model tiers, and clean up orphans.
-- [drawing](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/drawing.md) — Insert new diagrams and refresh existing ones — dispatcher picks kind and format from your prose, writer agents render against shipped templates and style schemes.
-- [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/troubleshooting.md) — Common failure modes across lazycortex-diagram skills — symptoms, likely causes, and fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/faq.md) — Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, and split behaviour.
 
 ## Commands
 
@@ -74,7 +74,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Rule | Description |
 |---|---|
-| `lazy-diagram.authoring` | Authoring contract — closure relationship between diagram templates, style files, and emitted fences. |
+| `lazy-diagram.authoring.md` | Authoring contract — closure relationship between diagram templates, style files, and emitted fences. |
 
 ## Installation
 
@@ -107,6 +107,5 @@ Invoke skills with slash commands:
 /lazy-diagram.audit
 /lazy-diagram.draw
 /lazy-diagram.fix
-/lazy-diagram.help
 /lazy-diagram.install
 ```

@@ -17,15 +17,17 @@ A protocol file is a plain markdown file at:
 
 It is referenced from a **routine entry** in `lazy.settings.json` (the routine declares which protocol(s) its dispatched jobs follow) as `<plugin>:<name>` — single via `protocol: <ref>` or list via `protocols: [<ref>, ...]`. The runtime resolver (`reference_resolver.resolve(ref, category="protocols", ...)`) maps the `protocols` category to the plugin's `references/` dir, matching the repo-wide convention used by every plugin's protocol/contract docs. Expert entries in `lazy.settings.json[experts]` do NOT carry a `protocol` field — protocols are routine-side, not expert-side; the dispatcher reads them from routine cfg and writes them to each job's `config.json`. Aspects are a sibling category (see `lazy-core.expert-aspects-contract.md`): a protocol defines the request/response contract for jobs (routine-side); an aspect shapes how the expert acts (expert-side). The two layers compose — the pump lists protocols and aspects in parallel in the user-message prompt.
 
-**Scope**: a protocol file defines only the protocol-specific contract — the `kind` enum, `role` vocabulary, field shapes, and side-effect rules for one protocol. Standard job-dir and JSON shapes (§§ 2–3) apply universally and are not repeated per protocol.
+**Scope**: a protocol file defines only the protocol-specific contract — the `kind` enum, `mode` enum (when applicable), field shapes, and side-effect rules for one protocol. Standard job-dir and JSON shapes (§§ 2–3) apply universally and are not repeated per protocol.
 
 **Out of scope — protocol files MUST NOT include**:
 
 - The consumer's `lazy.settings.json` shape — `routines:`, `experts:`, `review.classes:`, or any other settings-tree fragment. How a consumer wires routines, registers experts, or groups class-level expert lists is consumer configuration; it belongs in the functional spec for the consumer plugin and in the configure-wizard skill, not in the wire protocol.
 - Tutorial JSON snippets that show "how to declare this expert" or "where to put this in settings". A protocol describes what the dispatcher sends to the expert and what the expert sends back — nothing about how a project is configured to dispatch in the first place.
-- Lifecycle prose tied to a specific consumer's state machine that goes beyond what the expert observes per request (`role` value, `source/`, `context/`, `result/`, fields documented in this contract). Cross-job state transitions are the consumer's concern.
+- Lifecycle prose tied to a specific consumer's state machine that goes beyond what the expert observes per request. Cross-job state transitions are the consumer's concern.
+- **Per-`role` behaviour rules** — `role` is a free-form agent-self-label the dispatcher transports verbatim; it MUST NOT appear in protocol prose as a switch (`when role == "X" do Y`). Structural ownership / IO contract is keyed on `mode` (§ 3.1).
+- **Agent-side behaviour, persona, and markup conventions** — what callout shapes the agent emits, how it lifts findings into questions, how it phrases prose, where it places markers. These belong in the agent's own `.md` body. The protocol may declare a callout *transports* on the wire (e.g. "the `concerns` array carries section bodies") but never *prescribes* how the agent should author or react to such content.
 
-The protocol contract is the wire between dispatcher and expert. Anything that lives on either end of that wire (consumer config, state machine internals, agent persona) is out of scope. When in doubt: if an expert running this protocol does not need the information to handle one request, it does not belong in the protocol file.
+The protocol contract is the wire between dispatcher and expert. Anything that lives on either end of that wire (consumer config, state machine internals, agent persona, agent markup conventions) is out of scope. When in doubt: if the dispatcher does not parse / enforce / write the rule, it does not belong in the protocol.
 
 **Versioning by filename** (§ 6). Incompatible changes ship as a new file with a new name; the old file stays until all consumers migrate.
 
@@ -79,7 +81,8 @@ Any of the `source` / `context` / `result` subdirs may be absent when no files o
 ```json
 {
   "kind": "<protocol-defined-string>",
-  "role": "<free-form string — expert's role for this job>",
+  "mode": "<protocol-defined-enum — structural classification>",
+  "role": "<free-form string — agent self-label, transport only>",
   "request": "<free-form prose — what the consumer is asking the expert to do>",
 
   "source": [
@@ -110,7 +113,8 @@ Any of the `source` / `context` / `result` subdirs may be absent when no files o
 Standard field semantics:
 
 - **`kind`** — selects the operation type; must match a value from the protocol's `kind` enum.
-- **`role`** — free-form, but the protocol enumerates the values its expert prompt handles and how each shifts behaviour. Consumer sets it per-job.
+- **`mode`** — closed enum the protocol defines; structural classification the dispatcher derives from the expert's wiring (typically the bucket the expert sits in). The protocol's per-mode rules describe what the dispatcher will accept back from each mode — wire-side ownership / IO contract, never agent behaviour. Optional: protocols whose dispatches are uniform across all consumers may omit `mode` entirely.
+- **`role`** — free-form string transported from the expert's config to the agent verbatim. Pure self-label; the dispatcher does NOT enforce semantics. Two experts sharing a `mode` (same bucket) may carry different `role` values. Protocols MUST NOT enumerate `role` values or define per-role rules — that's agent-side behaviour, not wire contract.
 - **`request`** — free-form prose: the actual instruction or question. Not metadata. Protocol may suggest a template.
 - **`source` / `context` / `result`** — optional file-list arrays. Each entry: `{path, description}`. `path` is full from the source repo root (where the daemon spawned the expert with `cwd=<source-repo>`). Expert reads / writes via these paths directly with `Read` / `Write`. When the corresponding directory exists on disk but its array is absent in `request.json`, the expert sees only the directory path in its prompt (no per-file descriptions) — protocols should populate the array whenever the dir contains files.
 
@@ -166,17 +170,24 @@ Example shape:
 - `repair` — targeted repair of issues identified in a prior review
 ```
 
-### 4.2 `role` vocabulary
+### 4.2 `mode` enum
 
-Enumerate the `role` strings the expert prompt knows to handle. For each value, describe how it shifts the expert's behaviour. Protocol must not leave `role` as an undocumented free-form field.
+When the protocol classifies dispatches into structural modes (typically bucket-derived), enumerate the closed `mode` values it defines and, **for each value, the wire-side contract the dispatcher enforces** — what bytes the dispatcher reads back from the agent, where they land, what is silently dropped. Mode rules are wire rules, not behaviour rules.
+
+Forbidden in this section: per-role behaviour switches (`when role == X do Y`), agent-markup conventions (callout shapes, marker formats), persona prose, lifting rules. Those are agent-side, never protocol-side. If the protocol's dispatches are uniform (one mode), omit § 4.2 entirely.
 
 Example shape:
 ```
-- `main` — main-writer in a doc-review chain; may edit any non-owned section
-- `<section>` — section-writer (e.g. `routing`); may edit only its owned `# <Section>` heading
-- `final` — final-writer; never edits content, only raises `#review/concern` callouts
-- `auto` — historian-style mechanical role; reads source only, writes one summary sentence
-- `repair` — doc_doctor-style structural-repair role; rewrites broken doc, no content review
+- `main` — dispatcher reads full document body from `result/<file>`, grafts it
+  back excluding owned H1 sections + protocol metadata. Frontmatter overlay
+  applied except for reserved keys.
+- `section` — dispatcher reads the body of one owned H1 section from
+  `result/<file>` (no H1 heading, no leading tag — dispatcher emits both).
+  Any leading H1 / tag line in the result file is stripped on reapply.
+- `history` — dispatcher reads `history_entry` from the response; no result
+  file is written.
+- `repair` — dispatcher reads the full file body from `result/<file>` and
+  writes it back byte-for-byte; no reapply, no graft.
 ```
 
 ### 4.3 `request` conventions
@@ -272,12 +283,13 @@ No version number is embedded in the reference string. Consumers that need the o
 `lazy-core.audit` (expert-runtime phase) checks:
 
 - Protocol file is valid markdown and parses without error.
-- All required sections (§§ 4.1–4.9) are present.
+- All required sections (§§ 4.1, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9) are present. § 4.2 (`mode` enum) is optional — present iff the protocol classifies dispatches by mode.
 - Every `kind` value listed in § 4.1 has a corresponding entry in § 4.4.
 - Every routine in `lazy.settings.json` that references this protocol resolves it to an existing file via `reference_resolver`.
 - Protocol filename matches the reference key used by routines.
+- **Scope-fence patterns** (per § 1 Out of scope): protocol bodies do not contain the strings `## Role rules`, `## Role vocabulary`, `## Per-role`, `## Markup the agent writes`, `role == "`, or `when role ==` — those are agent-side concerns. Match → `WARN` ("protocol carries agent-side content; see § 1 Out of scope").
 
-Failures surface as `FAIL` findings; missing-but-optional content (e.g. § 4.5 "No extra fields" omitted) surfaces as `WARN`.
+Failures surface as `FAIL` findings; scope-fence matches and missing-but-optional content (e.g. § 4.5 "No extra fields" omitted) surface as `WARN`.
 
 ---
 

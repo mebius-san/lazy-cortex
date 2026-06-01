@@ -5,7 +5,7 @@ allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Write, 
 ---
 # Routine Unregister
 
-Remove a named routine from the `lazy-core.runtime` section of `.claude/lazy.settings.json`. Idempotent — unregistering a routine that does not exist is a no-op (INFO, not an error). Protects `lazy-expert.pump` (the built-in pump) from accidental removal unless `--force` is passed.
+Remove a named routine from the flat `routines` section of `.claude/lazy.settings.json`. Idempotent — unregistering a routine that does not exist is a no-op (INFO, not an error). Protects `lazy-expert.pump` (the built-in pump) from accidental removal unless `--force` is passed.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -43,15 +43,14 @@ Outcome: `allowed`, `force-override`, or `aborted`.
 
 ## Step 3 — Verify registration
 
-Load the current `lazy-core.runtime` section and check if `name` is present in `routines`:
+Load the flat `routines` section and check if `name` is present (the section IS the routines map — each key is a routine name, with `_version` the lone reserved key):
 
 ```
 Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 import sys
 from pathlib import Path
 from lazy_settings import load_section
-section = load_section(Path('./.claude/lazy.settings.json'), 'lazy-core.runtime')
-routines = section.get('routines', {})
+routines = load_section(Path('./.claude/lazy.settings.json'), 'routines')
 print('present' if sys.argv[1] in routines else 'absent')
 " '<name>')
 ```

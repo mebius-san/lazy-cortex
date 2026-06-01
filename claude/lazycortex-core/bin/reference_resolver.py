@@ -8,11 +8,22 @@ listed in `LAZYCORTEX_PLUGIN_DIRS` before falling back to the Claude Code plugin
 cache.
 """
 from __future__ import annotations
-import json, os
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable=import-error
+
+import json
+import os
 from pathlib import Path
 
+from constants import PluginFile
 
-class ReferenceError(Exception):
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
+
+# waiver: domain exception name imported across modules; shadowing builtin ReferenceError is intentional, not restructured for a checker
+class ReferenceError(Exception):  # pylint: disable=redefined-builtin
   """
   Raised when a reference cannot be resolved to an existing file on disk.
   """
@@ -57,13 +68,13 @@ def _resolve_in_dev_dir(plugin_dir: Path, plugin_name: str, dir_name: str, name:
     matches `plugin_name`; None when the manifest is missing, unreadable, or
     names a different plugin.
   """
-  manifest = plugin_dir / ".claude-plugin" / "plugin.json"
+  manifest = plugin_dir / PluginFile.MANIFEST_DIR / PluginFile.MANIFEST
   try:
     data = json.loads(manifest.read_text())
   except (FileNotFoundError, json.JSONDecodeError):
     return None
   # guard: manifest name does not match the requested plugin scope
-  if data.get("name") != plugin_name:
+  if data.get(PluginFile.NAME) != plugin_name:
     return None
   return plugin_dir / dir_name / f"{name}.md"
 
@@ -108,8 +119,10 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
   dir_name = plugin_dir_for_category.get(category, category)
   if ":" in ref:
     scope, name = ref.split(":", 1)
+    # waiver: one-off reference-scope token, not a domain constant
     if scope == "user":
       # user-scope reference resolves under the global ~/.claude tree
+      # waiver: filesystem path idiom
       p = Path.home() / ".claude" / dir_name / f"{name}.md"
     else:
       # Dev-plugin paths take precedence over the plugin cache.
@@ -120,6 +133,7 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
           if not hit.exists():
             raise ReferenceError(f"{category} not found in dev plugin: {ref} → {hit}")
           return hit
+      # waiver: filesystem path idiom
       cache = Path.home() / ".claude/plugins/cache"
       # Real layout: cache/<registry>/<plugin>/<version>/<dir>/<name>.md.
       # Walk all <registry>/<plugin> dirs under any registry prefix.
@@ -136,7 +150,7 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
       if not plugin_dirs:
         raise ReferenceError(f"plugin not in cache: {scope}")
       # Collect all version subdirectories across matching registry/plugin dirs.
-      all_versions = []
+      all_versions: list[Path] = []
       for pd in plugin_dirs:
         all_versions.extend(v for v in pd.iterdir() if v.is_dir())
       # guard: plugin dir exists but contains no cached versions
@@ -147,6 +161,7 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
       p = latest / dir_name / f"{name}.md"
   else:
     # bare reference resolves under the repo-local .claude tree
+    # waiver: filesystem path idiom
     p = Path(repo) / ".claude" / dir_name / f"{ref}.md"
   # guard: resolved path does not exist on disk
   if not p.exists():

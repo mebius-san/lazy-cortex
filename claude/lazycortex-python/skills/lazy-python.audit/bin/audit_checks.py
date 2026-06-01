@@ -245,7 +245,8 @@ class Check5Pyproject:
     consumer_dir: Absolute path to the consumer repository root.
   """
 
-  REQUIRED: tuple = ("tool.pcf", "tool.toi", "tool.pch", "tool.pytest", "tool.mypy", "tool.pylint", "tool.ruff")
+  # pch is opt-in per repo (added on request during install), so it is NOT a required section.
+  REQUIRED: tuple = ("tool.pcf", "tool.toi", "tool.pytest", "tool.mypy", "tool.pylint", "tool.ruff")
 
   def __init__(self, *, consumer_dir: Path) -> None:
     self.consumer_dir: Path = consumer_dir
@@ -273,10 +274,10 @@ class Check5Pyproject:
       if sub not in tool_table:
         missing.append(section)
     if len(missing) >= 3:
-      return {"severity": "FAIL", "message": f"{len(missing)} of 7 checker sections missing: {missing}"}
+      return {"severity": "FAIL", "message": f"{len(missing)} of 6 checker sections missing: {missing}"}
     if missing:
       return {"severity": "WARN", "message": f"checker sections missing: {missing}"}
-    return {"severity": "PASS", "message": "all 7 checker sections present"}
+    return {"severity": "PASS", "message": "all 6 checker sections present"}
 
 
 # ----------------------------------------------------------------------------------------
@@ -556,7 +557,7 @@ class Check11Venv:
 
   def run(self) -> dict:
     """
-    Walk probes 1–3 plus the repo-root fallback in install order and report venv readiness.
+    Walk probes 1-3 plus the repo-root fallback in install order and report venv readiness.
 
     Returns:
       Finding dict with `severity` (PASS or WARN) and a `message` string.

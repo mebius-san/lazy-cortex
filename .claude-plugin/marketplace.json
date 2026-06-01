@@ -39,6 +39,11 @@
       "name": "lazycortex-specs",
       "description": "Specification and design skills for Claude Code",
       "source": "./claude/lazycortex-specs"
+    },
+    {
+      "name": "lazycortex-wiki",
+      "description": "Maintains a curated, LLM-navigable semantic wiki over a markdown+code base — summaries, hierarchical topic tags, and glossed See-also links, kept in sync via git-watch and weekly full-scan routines.",
+      "source": "./claude/lazycortex-wiki"
     }
   ]
 }

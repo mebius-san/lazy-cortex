@@ -1,31 +1,45 @@
 #!/usr/bin/env python3
+
 """
 Pre/PostToolUse + Stop/SubagentStop hook: serialize git staging across Claude Code sessions and
 refuse to end a turn with a non-empty git index.
 
 Fires on:
-- ``Bash`` tool calls — command starts with `git add|rm|mv|reset|commit`.
-- ``mcp__git__git_add|reset|commit`` MCP tool calls.
-- ``Stop`` and ``SubagentStop`` lifecycle events — block when the git index is non-empty.
+- `Bash` tool calls — command starts with `git add|rm|mv|reset|commit`.
+- `mcp__git__git_add|reset|commit` MCP tool calls.
+- `Stop` and `SubagentStop` lifecycle events — block when the git index is non-empty.
 
-Hook satisfies the lazy-core.hook-writing § 1–8 contract:
+Hook satisfies the lazy-core.hook-writing § 1-8 contract:
   § 1 script discipline · § 2 trigger gating · § 3 branch determinism
   § 4 no-dirty-tree · § 5 no-foreign-staged · § 6 auto-commit loop guard
   § 7 transactional skip · § 8 logging
 """
 from __future__ import annotations
+# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# deferred imports below module code; position intentional (ruff E402 noqa guards it)
+# pylint: disable=import-error,wrong-import-position
+
 import json
-import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
+
 # Locate the helper module relative to this script.
+
 _HOOK_DIR = Path(__file__).resolve().parent
 _BIN_DIR = _HOOK_DIR.parent / "bin"
 sys.path.insert(0, str(_BIN_DIR))
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
 import staging_lock  # noqa: E402
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+from constants import HookKey  # noqa: E402
+
 
 # --- Tool / command gating ----------------------------------------------------
 
@@ -54,7 +68,9 @@ def _gate(tool_name: str, tool_input: dict) -> tuple[bool, str]:
     `verb` is one of `add`, `rm`, `mv`, `reset`, `commit` (empty string when irrelevant).
   """
   # Bash branch: match the command against the index-verb regex.
+  # waiver: external Claude Code tool name, not a domain key
   if tool_name == "Bash":
+    # waiver: external-format tool-input field name, not an internal key
     cmd = tool_input.get("command", "")
     m = _GIT_INDEX_VERBS_RE.match(cmd)
     # guard: command does not invoke an index-mutating git verb
@@ -91,7 +107,7 @@ def _emit_deny(reason: str) -> None:
 
   Args:
     reason: Human-readable explanation of why the call is being denied; surfaced to the operator
-      verbatim under the `lazy-core.git-guard:` prefix.
+      verbatim under the hook's identifying prefix.
   """
   json.dump({
     "hookSpecificOutput": {
@@ -108,7 +124,7 @@ def _emit_context(msg: str, event: str = "PostToolUse") -> None:
 
   Args:
     msg: Human-readable diagnostic message; surfaced to the operator verbatim under the
-      `lazy-core.git-guard:` prefix.
+      hook's identifying prefix.
     event: The Claude Code lifecycle event name to attach the context to. Defaults to
       `PostToolUse`.
   """
@@ -140,13 +156,14 @@ def main() -> int:
     return 0
 
   # Stop / SubagentStop branch — separate event family, no tool_name.
-  event_name = hook_input.get("hook_event_name", "")
+  event_name = hook_input.get(HookKey.HOOK_EVENT_NAME, "")
   if event_name in ("Stop", "SubagentStop"):
     return _handle_stop(hook_input)
 
   # Extract the fields we care about from the hook payload.
-  tool_name = hook_input.get("tool_name", "")
-  tool_input = hook_input.get("tool_input", {})
+  tool_name = hook_input.get(HookKey.TOOL_NAME, "")
+  tool_input = hook_input.get(HookKey.TOOL_INPUT, {})
+  # waiver: external-format hook-payload field name, not an internal key
   is_post = "tool_response" in hook_input
 
   # § 2 — trigger gating.
@@ -175,7 +192,7 @@ def main() -> int:
   return _handle_pre(repo, session_id, verb, cfg)
 
 
-def _handle_pre(repo: Path, session_id: str, verb: str, cfg) -> int:
+def _handle_pre(repo: Path, session_id: str, verb: str, cfg: staging_lock.StagingConfig) -> int:
   """
   Apply the PreToolUse branch of the lock contract for one index-mutating tool call.
 
@@ -196,16 +213,19 @@ def _handle_pre(repo: Path, session_id: str, verb: str, cfg) -> int:
   if verb in _DIAGNOSTIC_ONLY_VERBS:
     peer = staging_lock.inspect(repo)
     if peer and peer.session_id != session_id:
+      # waiver: stdlib module name for __import__, not a domain constant
       age = int(__import__("time").time() - peer.started_at)
       _emit_context(
         f"peer session {peer.session_id} holds the staging lock on {peer.branch} "
         f"(PID {peer.pid}, {age}s old) — proceeding with this commit anyway.",
+        # waiver: external Claude Code hook-event name, not a domain key
         event = "PreToolUse",
       )
     return 0
 
   # Acquiring verbs: try the lock.
   res = staging_lock.acquire(repo, session_id, cfg)
+  # waiver: cross-module AcquireStatus token (staging_lock Literal), not an internal key
   if res.status == "refused":
     _emit_deny(res.message)
   return 0
@@ -232,9 +252,11 @@ def _git_at(cwd: Path, *args: str) -> subprocess.CompletedProcess:
       capture_output = True,
       text = True,
       check = False,
+      # waiver: inline numeric literal (subprocess timeout seconds), not a domain constant
       timeout = 3,
     )
   except (OSError, subprocess.SubprocessError):
+    # waiver: inline numeric literal (git generic-failure exit code), not a domain constant
     return subprocess.CompletedProcess(args = [ "git", *args ], returncode = 128, stdout = "", stderr = "")
 
 
@@ -249,6 +271,7 @@ def _git_dir(cwd: Path) -> Path | None:
     Absolute `Path` to the git dir (`.git`, a linked worktree dir, or a custom GIT_DIR), or None
     when `cwd` is not inside a git repository.
   """
+  # waiver: git CLI vocabulary, not domain constants
   r = _git_at(cwd, "rev-parse", "--git-dir")
   # guard: cwd is not inside a git repository
   if r.returncode != 0:
@@ -290,6 +313,7 @@ def _staged_paths(cwd: Path) -> list[str]:
     List of staged paths in the order reported by `git diff --cached --name-only`. Empty list
     when the index is clean or when the `git` invocation failed.
   """
+  # waiver: git CLI vocabulary, not domain constants
   r = _git_at(cwd, "diff", "--cached", "--name-only")
   # guard: git invocation failed — treat as clean to avoid false positives
   if r.returncode != 0:
@@ -321,6 +345,7 @@ def _handle_stop(payload: dict) -> int:
   if _mid_operation(git_dir):
     return 0
   # Respect the same per-repo kill-switch as the PreTool / PostTool branches.
+  # waiver: git CLI vocabulary, not domain constants
   r = _git_at(cwd, "rev-parse", "--show-toplevel")
   # guard: cannot resolve repo root — fail open
   if r.returncode != 0:

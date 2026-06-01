@@ -1,0 +1,6 @@
+.venv/
+venv/
+env/
+node_modules/
+__pycache__/
+.worktrees/

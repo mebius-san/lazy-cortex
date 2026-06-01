@@ -1,11 +1,14 @@
 ---
 chapter_type: faq
-summary: Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, and split behaviour.
-last_regen: 2026-05-08
+summary: Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, split behaviour, direct agent invocation, and install.
+last_regen: 2026-06-01
 no_diagram: true
 source_skills:
   - lazy-diagram.draw
   - lazy-diagram.fix
+  - lazy-diagram.draw-mermaid
+  - lazy-diagram.draw-ascii
+  - lazy-diagram.install
 ---
 # Frequently asked questions
 
@@ -17,7 +20,7 @@ source_skills:
 
 ## How does the dispatcher choose mermaid vs ASCII?
 
-The dispatcher defaults to mermaid. ASCII is chosen only when the kind is one that the ASCII writer supports (`flow`, `fs-tree`, `layout`) AND your request explicitly uses a signal word like "ASCII", "plain text", "terminal", or asks for a directory tree. If the kind exists in only one format's template library, that format wins regardless of any hint.
+The dispatcher defaults to mermaid. ASCII is chosen only when the kind is one that the ASCII writer supports (`flow`, `fs-tree`, `layout`) AND your request explicitly uses a signal word like "ASCII", "plain text", "terminal", or asks for a directory tree (`kind=fs-tree`). If the kind exists in only one format's template library, that format wins regardless of any hint.
 
 ---
 
@@ -68,3 +71,15 @@ Fix uses the prose surrounding the existing fence — paragraphs between the anc
 ## Can I embed a diagram inside another skill I am writing?
 
 Yes. Follow the Caller contract in the `lazy-diagram.draw` SKILL.md. The contract has four clauses: (1) each invocation must be its own numbered substep in the calling skill's Process — never a trailing one-liner; (2) the calling skill's preamble must declare one `TaskCreate` task per invocation with a title of the form `draw-diagram <file>:<anchor>:<kind|auto>`; (3) the calling skill must include a `## Verify` section that diffs its declared seam set against the run logs written by the dispatcher under `./.logs/claude/lazy-diagram.draw/` — any non-empty difference is a verify failure; (4) a section that has a declared draw seam must carry no other visual-authoring placeholder (no ASCII sketch, no boxed-text diagram) — the seam invocation is the artifact.
+
+---
+
+## Can I call `lazy-diagram.draw-mermaid` or `lazy-diagram.draw-ascii` directly?
+
+Yes, when you have already decided on `(kind, format)` and do not need the dispatcher's heuristic. Supply `kind=<X>` and `request=<description>` (and `scheme=<name>` for mermaid, if you want a non-default palette). The agent returns the fence body without surrounding triple-backticks — your calling skill is responsible for placing it under the right heading and writing the file. For most situations the dispatcher (`/lazy-diagram.draw`) is the right entry point; call the writer agents directly only when you are building a skill that owns the I/O step itself.
+
+---
+
+## Do I need to re-run `/lazy-diagram.install` after a plugin update?
+
+Yes. `/plugin update` refreshes the plugin cache but does not re-sync rule files into your `.claude/rules/` directory. Re-run `/lazy-diagram.install` after every plugin update to pick up any changed or new rules — otherwise your project keeps running the old rule content. The skill is idempotent, so re-running it when nothing has changed is safe and produces no side effects. If any rule was updated, the skill will prompt you to restart Claude Code so the new rule content takes effect.

@@ -6,7 +6,7 @@ dirty-tree-waiver: "registers a routine in lazy.settings.json — operator commi
 ---
 # Routine Register
 
-Register a named routine in the `lazy-core.runtime` section of `.claude/lazy.settings.json`. Enforces `<plugin>.<verb>` naming. Refuses to overwrite an existing routine unless `--force` is set. Validates the per-type schema via `routine_types.validate_routine_entry`.
+Register a named routine in the flat `routines` section of `.claude/lazy.settings.json`. Enforces `<plugin>.<verb>` naming. Refuses to overwrite an existing routine unless `--force` is set. Validates the per-type schema via `routine_types.validate_routine_entry`.
 
 Used by plugin install skills (programmatic call) and by humans via `/lazy-routine.register` (wizard mode).
 
@@ -40,7 +40,7 @@ In wizard mode (no `cfg`), ask via `AskUserQuestion`:
 > - subprocess — periodic command (default)
 > - inbox — scan a dir, fire once per file (job-queue moves the file; command leaves it in place)
 > - schedule — cron-driven; one fire per cron boundary
-> - git — watch <remote>/<branch>; fire once per item
+> - git — watch local HEAD; fire once per item
 > - md-scan — scan markdown files matching globs, filter by frontmatter; fire in-place (no file move)
 
 ### 1b. Collect type-specific fields
@@ -52,8 +52,8 @@ Every type ends with the same EITHER/OR question — `command` (list) OR `expert
 - **subprocess** — `interval_sec` (int), `timeout_sec?` (int). Then EITHER `command` OR `expert` + `request`.
 - **inbox** — `inbox_dir` (path relative to repo), `interval_sec`, `timeout_sec?`. Then EITHER `command` OR `expert` + `request`. With `expert + request`: files are moved into job staging; with `command`: files stay in the inbox until the consumer removes them.
 - **schedule** — `cron` (5-field expression). Then EITHER `command` OR `expert` + `request`.
-- **git** — `repo_dir?` (default `.`), `remote?` (default `origin`), `branch`, `watch` (one of `new_commits` / `new_files` / `changed_files` / `deleted_files` / `renamed_files`), `path_filter?`, `interval_sec`. Then EITHER `command` OR `expert` + `request`.
-- **md-scan** — `paths` (list of vault-relative globs, e.g. `["requests/*.md"]`), `frontmatter_filter` (dict of `key → value-or-list-of-values`; `null` matches missing keys, e.g. `{"request_status": [null, "draft"]}`), `interval_sec`, `timeout_sec?`. Then EITHER `command` OR `expert` + `request`. No file move — the consumer gets the absolute path of each match and edits in place.
+- **git** — `repo_dir?` (default `.`), `remote?` (vestigial/ignored — remote sync is the daemon's job; accepted for schema compatibility but has no effect on the watch), `branch` (vestigial — the watch target is always local HEAD; the field is retained in the schema for legacy round-trip compatibility), `watch` (one of `new_commits` / `new_files` / `changed_files` / `deleted_files` / `renamed_files`), `path_filter?`, `interval_sec`. Then EITHER `command` OR `expert` + `request`.
+- **md-scan** — `paths` (list of vault-relative globs, e.g. `["requests/*.md"]`), `filter` (optional composite filter block; e.g. `{"frontmatter": {"request_status": {"in": [null, "draft"], "not_in": []}}}`; `null` in `in` matches a missing key or explicit null), `interval_sec`, `timeout_sec?`. Then EITHER `command` OR `expert` + `request`. No file move — the consumer gets the absolute path of each match and edits in place.
 
 Build a single `cfg` dict carrying `type` + the collected fields.
 
@@ -69,15 +69,14 @@ Outcome: `validated`, `aborted`, or `gitignore-warned`.
 
 ## Step 2 — Check for existing registration
 
-Load the current `lazy-core.runtime` section and check if `name` is already in `routines`:
+Load the flat `routines` section and check if `name` is already a key (the section IS the routines map — each key is a routine name, with `_version` the lone reserved key):
 
 ```
 Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 import sys
 from pathlib import Path
 from lazy_settings import load_section
-section = load_section(Path('./.claude/lazy.settings.json'), 'lazy-core.runtime')
-routines = section.get('routines', {})
+routines = load_section(Path('./.claude/lazy.settings.json'), 'routines')
 print('present' if sys.argv[1] in routines else 'absent')
 " '<name>')
 ```

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-observe install, uninstall, and doctor — symptoms, likely causes, and fixes.
-last_regen: 2026-05-08
+last_regen: 2026-06-01
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree rooted at the operator's situation: top-level branch on whether the shipper is installed at all (answer file present?); if not-installed routes to install guidance; if installed, branch on whether the service is active; active branch then splits on whether local /metrics is reachable, whether agent self-metrics show successful remote_write (token vs observer-reachability vs WAL-recovery sub-branches), and whether WAL is oversized. Separate top-level branch for uninstall failures (launchctl error 5 vs systemctl unit-not-found). Each leaf cites the troubleshooting entry that resolves it."
@@ -10,6 +10,7 @@ source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
   - lazy-observe.doctor
+  - lazy-observe.audit
 ---
 # Troubleshooting
 
@@ -168,7 +169,7 @@ flowchart TD
 
   fixInstall[Run /lazy-observe.install]
   fixRestart[Kickstart / restart the service]
-  fixMetrics[Enable lazy-core.runtime.metrics in lazy.settings.json]
+  fixMetrics[Enable daemon.metrics in lazy.settings.json]
   fixToken[Re-run /lazy-observe.install Step 5 to rotate token]
   fixNetwork[Resolve operator network - observer unreachable]
   fixWAL[WAL recovering from outage - wait then re-check]

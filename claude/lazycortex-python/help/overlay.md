@@ -1,15 +1,15 @@
 ---
 chapter_type: block
 summary: Project-specific guideline files in docs/guidelines/ let you extend or override the lazycortex-python canon per repo without touching plugin-managed files.
-last_regen: 2026-05-27
+last_regen: 2026-06-01
 no_diagram: true
 source_skills: []
 ---
 # Per-repo overlay guidelines
 
-The canon that ships with `lazycortex-python` — style, docstrings, tests, checkers — is intentionally generic. It covers conventions that hold across every Python project, but your project will have specifics that don't belong in a shared plugin: a custom base test class, a copyright header format, internal naming prefixes, domain-specific code patterns. The overlay convention is how you supply those specifics without forking the plugin or editing files it owns.
+Every Python project has conventions that belong to it alone — a base test class, a copyright header format, internal naming prefixes, domain-specific patterns. The overlay convention is how you supply those specifics without forking the plugin or editing files it owns. You add content to `docs/guidelines/` files; writer agents and the checker read the overlay after the canon on every dispatch, and overlay rules win on conflict.
 
-When `/lazy-python.install` runs its Phase 5, it scaffolds four stub files under `docs/guidelines/` with placeholder headers. You fill them in. Writer agents and the `chk-py` checker read the overlay after the canon on every dispatch; overlay rules win on conflict. The plugin never touches these files again after the initial scaffold — they are yours to maintain.
+When `/lazy-python.install` runs its Phase 5, it scaffolds four stub files under `docs/guidelines/` with placeholder headers. You fill them in. The plugin never touches these files again after the initial scaffold — they are yours to maintain.
 
 ## When you'd use this
 
@@ -47,3 +47,7 @@ After `/lazy-python.install` Phase 5 runs, each file exists as a stub with the h
 **Adding a project-specific naming rule.** Add a named section to the relevant overlay file. The heading structure does not need to match the canon — agents read the whole file and merge the rules — but clear section names (matching the canon's style) make the intent unambiguous and reduce the chance of misinterpretation.
 
 **Scaffolding the stubs if they are missing.** If the `docs/guidelines/` files were never created — for example, you installed the plugin before Phase 5 was added — re-run `/lazy-python.install`. The install wizard is idempotent; Phase 5 skips any stub file that already exists and creates only the missing ones. It will not create a stub if all four are already present.
+
+## Where this fits
+
+The overlay files are scaffolded by the `install-and-audit` block's `/lazy-python.install` Phase 5. The canon they extend lives in the `discipline` block — the five reference guidelines (`coding-guidelines`, `documenting-guidelines`, `testing-guidelines`, `checking-guidelines`, `guidelines-index`) that writer agents load before reading your overlay. The `add-project-overlay` walkthrough covers the end-to-end flow: scaffold stubs, fill them in, and confirm the delta appears in the next writer-agent dispatch.

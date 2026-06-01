@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, daemon halt recovery, and run-log housekeeping.
-last_regen: 2026-05-23
+summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, routine types, and change-history search.
+last_regen: 2026-06-01
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -9,24 +9,14 @@ source_skills:
   - lazy-core.doctor
   - lazy-core.optimize
   - lazy-core.setup
-  - lazy-core.agent-models
-  - lazy-core.git-status
-  - lazy-core.git-unlock
-  - lazy-expert.dispatch-job
-  - lazy-expert.collect-job
-  - lazy-expert.cancel-job
-  - lazy-expert.list-jobs
-  - lazy-guard.allow-mcp
-  - lazy-guard.check-public
   - lazy-repo.mark-public
+  - lazy-guard.check-public
+  - lazy-guard.allow-mcp
   - lazy-routine.register
-  - lazy-routine.unregister
-  - lazy-runtime.recover
-  - lazy-memory.write
-  - lazy-memory.index
-  - lazy-memory.reflect
+  - lazy-expert.dispatch-job
   - lazy-memory.mark-persona
-  - lazy-log.clean
+  - lazy-core.agent-models
+  - lazy-log.recall
 ---
 # FAQ
 
@@ -154,8 +144,6 @@ The `lazy-core.scaffold` rule is always-loaded and fires whenever you create a n
 
 The reason templates are mandatory rather than optional is that every artifact class has structural requirements enforced by `lazy-core.audit`: skills need the `TaskCreate` preamble so skipped phases stay visible, agents need `tools:` allowlists and `model: inherit`, rules need either `paths:` or an `always_loaded:` waiver. Starting from memory reliably misses at least one of these, and the audit finding surfaces after the artifact is already in use. Starting from the template makes the requirement visible on the first edit, before any code runs.
 
-The `lazy-core.skill-writing`, `lazy-core.rule-writing`, and `lazy-core.agent-writing` path-scoped rules then stay loaded for the duration of the edit to enforce the full contract — not just structure, but outcome vocabulary, size budget, and narrative-padding checks.
-
 ---
 
 ## Why does Claude refuse to write to `~/.claude/` by default?
@@ -180,15 +168,9 @@ Author-name findings in tracked manifests (`plugin.json`, `package.json`, etc.) 
 
 ## Do I need to enable the expert runtime, or is it on by default?
 
-The expert runtime is opt-in per repo. When you run `/lazy-core.install`, a wizard phase asks whether to bootstrap runtime and experts for the current repo. If you answer yes, the skill writes the `lazy-core.runtime` block into `.claude/lazy.settings.json`, creates `lazy.settings.json[experts]`, copies the `lazy.runtime.sh` shim to `.claude/bin/`, and adds `.experts/.jobs/` to `.gitignore`. It also offers to install a daemon supervisor (macOS launchd or Linux systemd) and registers the `lazy-expert.pump` routine automatically once you add at least one expert. If you skip that phase or answer no, none of those files are created and the `/lazy-expert.*` skills will abort at Step 2 with "`.experts/` not initialised — run `/lazy-core.install` first."
+The expert runtime is opt-in per repo. When you run `/lazy-core.install`, a wizard phase asks whether to bootstrap runtime and experts for the current repo. If you answer yes, the skill writes the flat `daemon` and `routines` sections into `.claude/lazy.settings.json`, creates `lazy.settings.json[experts]`, copies the `lazy.runtime.sh` shim to `.claude/bin/`, and adds `.experts/` to `.gitignore`. It also offers to install a daemon supervisor (macOS launchd or Linux systemd) and registers the `lazy-expert.pump` routine automatically once you add at least one expert. If you skip that phase or answer no, none of those files are created and the `/lazy-expert.*` skills will abort at Step 2 with "`.experts/` not initialised — run `/lazy-core.install` first."
 
 To enable it later without re-running the full install flow, run `/lazy-core.install` again — it is idempotent and will offer the runtime wizard phase again.
-
----
-
-## What is the expert runtime actually for?
-
-It gives you a team of named workers running in the background. You dispatch a job to a named expert, keep doing other work, and collect the result later when the daemon has finished it. The daemon is a long-lived process (started via the `.claude/bin/lazy.runtime.sh` shim or a supervisor unit) that drains the job queue and runs registered plugin routines on each cycle. Because it runs outside Claude Code's conversation thread, expert jobs do not consume turns or stack against nesting limits; those are footnotes, not the point. The point is that slow work — doc reviews, lint sweeps, analysis passes — runs in parallel while you keep your session focused on the next task.
 
 ---
 
@@ -200,38 +182,6 @@ Optional fields — `source` (array of input file paths), `context` (array of co
 
 ---
 
-## How do I check whether an expert job has finished?
-
-Run `/lazy-expert.collect-job` with the `expert_name` and `job_id` returned by `/lazy-expert.dispatch-job`. The skill returns one of four statuses: `pending` (the daemon has not processed it yet), `done` (completed successfully — result file paths are listed), `failed` (the daemon ran it but the expert reported an error), or `missing` (the job directory does not exist — wrong `job_id` or `expert_name`, or the job was already cancelled).
-
-You can also run `/lazy-expert.list-jobs` to see the queue at a glance. Filter by `status=queued` to see what is still waiting to run, `status=active` for jobs currently being processed, or `expert=<name>` to narrow to one expert's queue.
-
----
-
-## Can I cancel a job that is already being processed by the daemon?
-
-Yes, but with a caveat. `/lazy-expert.cancel-job` asks for confirmation before removing a pending job because the runtime daemon may already be processing it — there is currently no lockfile that distinguishes "queued but not started" from "actively running." If you confirm, the job directory is removed. If the daemon is mid-run, the expert process is left to finish (or fail) but its `response.json` will have nowhere to land, which is a no-op from your perspective.
-
-For jobs that are already `done`, the skill also asks for confirmation before removing them, since done job directories contain the result files you may still want to read. If you answer no to either prompt, no files are deleted.
-
----
-
-## What is the difference between `/lazy-expert.list-jobs` and `/lazy-expert.collect-job`?
-
-`/lazy-expert.list-jobs` gives a tabular overview of all jobs across all experts (or filtered by expert or status), sorted oldest-first. It is the right tool when you want situational awareness — how many jobs are queued or active, which ones have finished, which ones failed. The full status set it filters by is: `queued`, `active`, `dead`, `done`, and `failed`.
-
-`/lazy-expert.collect-job` is targeted: given a specific `expert_name` and `job_id`, it returns the current status and, when the job is done, the result file paths you should `Read` to retrieve the output. Use it after dispatching a job when you know exactly which job you are waiting on.
-
----
-
-## How do routines differ from expert jobs?
-
-Expert jobs are one-off, user-initiated tasks: you dispatch a job, the daemon picks it up, and the result lands in `response.json`. Routines are repeating, plugin-registered tasks: a plugin's install skill calls `/lazy-routine.register` with a name, type, and type-specific config, and the daemon calls that command on every cycle whose interval has elapsed. Routines are intended for ongoing background work (e.g. a lint tick, a review sweep), not for ad-hoc requests.
-
-The built-in `lazy-expert.pump` routine is what drives the expert job queue — it is itself a routine registered at install time. Additional routines registered by other plugins run alongside it in the same daemon cycle.
-
----
-
 ## What routine types does `/lazy-routine.register` support?
 
 Five types, each suited to a different scheduling pattern:
@@ -239,72 +189,16 @@ Five types, each suited to a different scheduling pattern:
 - **subprocess** — the default. Runs a CLI command on every daemon cycle whose `interval_sec` has elapsed.
 - **inbox** — watches a directory and dispatches one expert job per file it finds there. Good for ingestion pipelines.
 - **schedule** — fires on a cron expression boundary, not on a fixed interval. Useful for calendar-aligned tasks (daily summaries, weekly sweeps).
-- **git** — watches a remote branch for new commits, new files, changed files, deleted files, or renamed files and dispatches an expert job per matched event.
+- **git** — watches local HEAD for new commits, new files, changed files, deleted files, or renamed files and dispatches an expert job per matched event.
 - **md-scan** — scans markdown files matching vault-relative globs, filters by frontmatter key/value, and fires in-place (no file move) on each match. Good for processing items whose lifecycle state is tracked in their own frontmatter.
 
 All five require a dot-namespaced `name` (e.g. `acme-lint.tick`). The wizard in `/lazy-routine.register` asks for the type first, then prompts only for the fields that type needs.
 
 ---
 
-## Can I remove a routine that another plugin registered?
-
-Yes, with `/lazy-routine.unregister <name>`. The skill is idempotent — unregistering a routine that does not exist is a no-op (it prints an INFO message rather than an error). The only routine with built-in protection is `lazy-expert.pump`: removing it stops all expert job processing, so the skill requires `--force` and warns you explicitly before proceeding.
-
-If you accidentally remove a plugin's routine, re-running that plugin's install skill re-registers it. For `lazy-expert.pump` specifically, re-running `/lazy-core.install` restores it.
-
----
-
-## What is the staging lock, and why would it get stuck?
-
-The `lazy-core.git-guard` hook uses `.git/lazy-git.lock` to prevent two Claude Code sessions from staging files simultaneously. The lock is held by the session currently running `git add` and released after the commit. In normal operation it is held for a few seconds at most.
-
-It can get stuck when a session is interrupted mid-staging — for example, if Claude Code crashes or the network drops between the `add` and the `commit`. The hook's automatic heuristics handle most stuck-lock cases: if the holding PID is dead, the host differs, or the lock is old and idle, it breaks automatically. Run `/lazy-core.git-status` to see the current lock state without touching it. If the lock is genuinely stuck and the heuristics will not break it (the holder is still alive but you know it has abandoned staging), run `/lazy-core.git-unlock` to confirm and force-delete the lock.
-
----
-
-## When does the runtime daemon halt, and how do I resume it?
-
-The daemon halts in two distinct families of situations.
-
-**Working-tree halts** (`uncommitted_changes`) happen when a routine or expert job leaves modified or untracked tracked files behind without committing them. A dirty tree from one routine can corrupt the next routine's git operations, so the daemon stops and records the triggering routine, the expert and job ID (if the dirt came from inside an expert), and the captured `git status` lines in `state.json`.
-
-**Remote-sync halts** (`git_pull_diverged`, `git_push_failed`, `git_remote_unavailable`) happen when the daemon's pre- or post-tick remote sync fails in a way that automatic retry cannot resolve — for example, a diverged branch, persistent push rejection, or an unreachable origin.
-
-Run `/lazy-runtime.recover` to get out of either family. For working-tree halts, the skill shows you the dirty paths and asks how to clean up: commit the changes, stash them for later, discard them entirely, or abort and leave the daemon halted. For remote-sync halts, the skill prints reason-specific guidance (diverged-branch commands, auth checks, network diagnostics) and asks you to repair the situation by hand before confirming resume — the skill itself does not run git commands to fix these cases, because automatic resolution could silently drop your commits. Once the precondition holds, the skill atomically clears the `daemon_halted` block from `state.json` and the daemon resumes on its next iteration.
-
----
-
-## Why does `/lazy-core.install` check Python version before anything else?
-
-Every plugin in the lazycortex marketplace requires Python 3.12 or newer. The install skill runs the Python check as Step 0 — before it touches any files — because all plugin hooks (`lazy-guard.check-public.py`, `lazy-guard.settings.py`, `lazy-core.model-router.py`, `lazy-core.git-guard.py`) will fail silently at runtime if the Python floor is not met. Failing at Step 0 with a clear "install Python 3.12 via brew or pyenv" message is better than installing all the rule files and discovering hook failures later.
-
-Note that `/lazy-core.audit` uses a lower floor of Python 3.8 for its own runtime probe — that check covers whether the Python version is sufficient for hooks' `__future__` annotations and f-strings. The 3.12 install-floor is stricter and is set as the single marketplace-wide requirement so all plugins can rely on it without per-plugin version guards.
-
----
-
-## Which skills support `--dry-run` and what does it do?
-
-Three skills in this plugin accept `--dry-run`:
-
-- `/lazy-core.setup` — builds and previews the install plan (which skills would run, in what order) without executing any of them. The settings migration step (Step 0) still runs in dry-run mode so the preview reflects the post-migration state.
-- `/lazy-core.agent-models` — walks the wizard and reports what tier assignments would be written, without touching either `lazy.settings.json` file.
-- `/lazy-guard.allow-mcp` — computes and previews the diff (which tools would land in `allow`, `ask`, or skip) without writing to any settings file.
-
-In all three cases, `--dry-run` is purely read-only: no files are created or modified, and the skill exits after the preview. It is safe to run at any time and does not require undoing anything afterward.
-
----
-
 ## What happens if I register a routine whose `inbox_dir` is not gitignored?
 
 `/lazy-routine.register` checks this for `inbox`-type routines using `git check-ignore`. If the directory is tracked rather than gitignored, the skill warns you: an inbox routine moves files between iterations, which dirties the working tree and triggers the daemon's halt protection on every cycle. You get three options — add the directory to `.gitignore` now (recommended), continue anyway and commit moves manually, or abort the registration. If you choose to add it, the skill appends the entry to `.gitignore` but does not auto-commit; you commit when you are ready to coordinate with other in-flight changes.
-
----
-
-## What is the difference between a protocol and an aspect?
-
-A **protocol** is routine-side config that defines the request/response contract for the jobs a routine dispatches — the `kind` enum, `role` vocabulary, field shapes, and outcome enum. Different routines can dispatch jobs against the same protocol.
-
-An **aspect** is expert-side config that shapes how the expert acts on top of its protocol. The same protocol can be paired with different aspects across experts. For example, two experts could share the doc-review protocol but only one carries `lazy-memory.persona-aspect` to keep notes between runs. Protocols and aspects are listed in parallel in the expert's user-message prompt — the expert reads both before acting.
 
 ---
 
@@ -320,44 +214,42 @@ Memory notes are markdown files with frontmatter (`title`, `tags`, `type`, `summ
 
 ---
 
-## What note types does the memory subsystem support?
+## Why does `/lazy-memory.mark-persona` refuse with "expert not registered"?
 
-Every memory note written via `/lazy-memory.write` must declare a `type` in its frontmatter. The accepted values are:
-
-- **persona** — information about the expert's own role, preferences, or accumulated understanding.
-- **rule** — a behavioral constraint or policy the expert has learned to apply.
-- **example** — a concrete past case or worked example worth recalling.
-- **warning** — a known pitfall or anti-pattern the expert has encountered.
-- **fact** — a discrete factual datum the expert needs to remember.
-
-Notes also require `title`, `summary`, and `tags` (all tag entries must be prefixed `memory/`, e.g. `memory/auth`). If any of these fields are missing, `/lazy-memory.write` aborts with a `frontmatter-invalid` error before touching the filesystem.
+`/lazy-memory.mark-persona` checks `lazy.settings.json[experts]` for the expert name you passed. If the key is missing, the skill aborts rather than creating a dangling memory directory for an expert the daemon does not know about. Register the expert first via `/lazy-core.install` (expert-add wizard, Step 11) and then re-run `/lazy-memory.mark-persona`.
 
 ---
 
-## When should I run `/lazy-memory.reflect` versus waiting for the daemon?
+## Why does `/lazy-core.install` check Python version before anything else?
 
-`/lazy-memory.reflect` dispatches a `kind=reflect` job immediately for one persona-marked expert, without waiting for the daemon's next scheduled cycle. Use it when you want to consolidate right now — for example, after a focused burst of sessions with a particular expert where you know patterns have accumulated.
+Every plugin in the lazycortex marketplace requires Python 3.12 or newer. The install skill runs the Python check as Step 0 — before it touches any files — because all plugin hooks (`lazy-guard.check-public.py`, `lazy-guard.settings.py`, `lazy-core.model-router.py`, `lazy-core.git-guard.py`) will fail silently at runtime if the Python floor is not met. Failing at Step 0 with a clear "install Python 3.12 via brew or pyenv" message is better than installing all the rule files and discovering hook failures later.
 
-If you have registered the `memory-reflect-all` routine (enabled during `/lazy-core.install`), the daemon dispatches reflect passes on its own cadence for all persona-marked experts. In that case, `/lazy-memory.reflect` is most useful for catching up a single expert outside the regular cadence, or to verify that the reflect job runs cleanly before trusting the daemon to run it automatically.
-
-`/lazy-memory.reflect` refuses to dispatch for an expert that is not persona-marked. Run `/lazy-memory.mark-persona <expert>` first to opt the expert in.
+Note that `/lazy-core.audit` uses a lower floor of Python 3.12 for its own runtime probe — that check covers whether the Python version is sufficient for hooks' `__future__` annotations and f-strings. The 3.12 install-floor is stricter and is set as the single marketplace-wide requirement so all plugins can rely on it without per-plugin version guards.
 
 ---
 
-## When should I run `/lazy-memory.index`?
+## Which skills support `--dry-run` and what does it do?
 
-`/lazy-memory.index` is a recovery tool, not a routine step. Under normal operation, `/lazy-memory.write` keeps the tag index in sync atomically every time it writes a note: it regenerates the local `.memory/<expert>/.tags/` and the global `.memory/.tags/` in the same operation. You only need `/lazy-memory.index` when the tag files have drifted from the actual notes — for example, after hand-editing note frontmatter directly in a text editor, after merging memory notes from another branch, or after recovering from a partial write failure.
+Three skills in this plugin accept `--dry-run`:
 
-Running it on an already-consistent tree is safe — the worker is idempotent and simply confirms that the note count, tag count, and expert count are as expected.
+- `/lazy-core.setup` — builds and previews the install plan (which skills would run, in what order) without executing any of them. The settings migration step (Step 0) still runs in dry-run mode so the preview reflects the post-migration state.
+- `/lazy-core.agent-models` — walks the wizard and reports what tier assignments would be written, without touching either `lazy.settings.json` file.
+- `/lazy-guard.allow-mcp` — computes and previews the diff (which tools would land in `allow`, `ask`, or skip) without writing to any settings file.
+
+In all three cases, `--dry-run` is purely read-only: no files are created or modified, and the skill exits after the preview. It is safe to run at any time and does not require undoing anything afterward.
 
 ---
 
-## How does `/lazy-log.clean` decide what counts as an orphan?
+## How do I search change history for when or why something was modified?
 
-Every subdirectory under `.logs/claude/` is compared against a live canonical name set that the skill resolves from all skills, agents, and commands found in the enabled plugin set. A folder is canonical if its name exactly matches an artifact name; it is an orphan if it does not. Orphans then split into three further buckets:
+Use the `lazy-log.recall` agent, dispatched automatically when you ask questions like "why was X changed?" or "when did we change Y?". The agent searches across five sources in priority order: the functional prose in `.logs/changelog.md`, individual skill/agent run logs under `.logs/claude/`, the raw commit feed in `.logs/commits.jsonl`, git log (both commit-message search and diff-content search), and project memory files. Matches are ranked by how strongly they corroborate each other — entries with multiple keyword hits across changelog prose rank highest, while diff-only matches rank lowest. Results come back as a table with git SHAs so you can run `git show <sha>` to jump directly to the actual code change.
 
-- **Rename candidates** — the name is ≥ 80% similar (by sequence match) to a canonical name, suggesting a past rename or typo.
-- **Pattern orphans** — the name matches known anonymous-subagent patterns like `task-N`, `subagent-task-N`, or `plan-execute`.
-- **Other orphans** — everything that remains.
+The agent does not modify any files. If your query is ambiguous, it shows matches for both interpretations rather than guessing.
 
-The skill asks for your decision on each bucket (or cluster, for pattern orphans) one question at a time. For any folder you want to clean up, you can optionally distill its log content into Hindsight memory before deletion. No folder is touched until you have approved every action.
+---
+
+## What is the difference between a protocol and an aspect?
+
+A **protocol** is routine-side config that defines the request/response contract for the jobs a routine dispatches — the `kind` enum, `role` vocabulary, field shapes, and outcome enum. Different routines can dispatch jobs against the same protocol.
+
+An **aspect** is expert-side config that shapes how the expert acts on top of its protocol. The same protocol can be paired with different aspects across experts. For example, two experts could share the doc-review protocol but only one carries `lazy-memory.persona-aspect` to keep notes between runs. Protocols and aspects are listed in parallel in the expert's user-message prompt — the expert reads both before acting.

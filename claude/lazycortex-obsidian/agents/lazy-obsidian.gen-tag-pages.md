@@ -139,8 +139,7 @@ Print a summary:
 
 ## Phase 7 — Log the run
 
-After completing all work, write a run log to `.logs/claude/lazy-obsidian.gen-tag-pages/YYYY-MM-DD_HH-MM-SS.md`.
-Use UTC time: `date -u +%Y-%m-%d_%H-%M-%S` for the filename. Create directories with `mkdir -p` (never chain with `&&`; use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool).
+After completing all work, write a run log to `.logs/claude/lazy-obsidian.gen-tag-pages/YYYY-MM-DD_HH-MM-SS.md`. Use UTC time: `date -u +%Y-%m-%d_%H-%M-%S` for the filename. Create directories with `mkdir -p` (never chain with `&&`; use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool).
 
 Log frontmatter (YAML, all required):
 

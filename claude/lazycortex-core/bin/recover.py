@@ -13,9 +13,21 @@ dirty paths to the operator before they pick a mode (so the choice is
 informed); this module assumes the choice was already informed.
 """
 from __future__ import annotations
+# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable=import-error
+
 import subprocess
-from pathlib import Path
+
+import error_ledger
 import runtime_state
+from constants import (
+  HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase,
+  IncidentResolution, JobArtifact, JobFile, JobMarker, RecoverMode,
+)
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  from pathlib import Path
 
 
 class RecoverError(Exception):
@@ -28,7 +40,9 @@ class RecoverError(Exception):
   """
 
 
-VALID_MODES = { "commit", "stash", "discard", "abort", "manual-fix" }
+VALID_MODES = {
+  RecoverMode.COMMIT, RecoverMode.STASH, RecoverMode.DISCARD, RecoverMode.ABORT, RecoverMode.MANUAL_FIX,
+}
 
 # Halt reasons where the working tree is presumed already clean and the
 # operator's repair happened outside the skill (manual git ops). The skill
@@ -70,7 +84,7 @@ def is_clean(repo: Path) -> bool:
   try:
     rc = subprocess.run(
       [ "git", "--no-optional-locks", "-c", "color.status=never", "status", "--porcelain" ],
-      cwd = str(repo), capture_output = True, text = True,
+      cwd = str(repo), capture_output = True, text = True, check = False,
     )
   except FileNotFoundError:
     return True
@@ -107,10 +121,10 @@ def cleanup(repo: Path, mode: str, message: str | None = None) -> None:
     raise RecoverError(f"unknown cleanup mode: {mode!r}")
 
   # guard: abort + manual-fix are both no-op shapes — nothing to do here
-  if mode in { "abort", "manual-fix" }:
+  if mode in { RecoverMode.ABORT, RecoverMode.MANUAL_FIX }:
     return
 
-  if mode == "commit":
+  if mode == RecoverMode.COMMIT:
     # guard: commit mode demands an explicit message — refuse to invent one
     if not message:
       raise RecoverError("commit mode requires a non-empty message")
@@ -121,7 +135,7 @@ def cleanup(repo: Path, mode: str, message: str | None = None) -> None:
                    cwd = str(repo), check = True, capture_output = True)
     return
 
-  if mode == "stash":
+  if mode == RecoverMode.STASH:
     # push everything (including untracked) onto the stash with a recovery marker
     subprocess.run(
       [ "git", "stash", "push", "-u", "-m", "lazycortex-runtime: halt recovery" ],
@@ -129,7 +143,7 @@ def cleanup(repo: Path, mode: str, message: str | None = None) -> None:
     )
     return
 
-  if mode == "discard":
+  if mode == RecoverMode.DISCARD:
     # revert tracked file changes, then remove untracked files + directories
     subprocess.run([ "git", "checkout", "--", "." ],
                    cwd = str(repo), check = True, capture_output = True)
@@ -140,27 +154,41 @@ def cleanup(repo: Path, mode: str, message: str | None = None) -> None:
 
 def resume(repo: Path) -> None:
   """
-  Clear the halt block for the given repository so the daemon can resume work.
+  Clear the active halt block for the given repository so the daemon can resume work.
+
+  Reason-aware: only `uncommitted_changes` requires a clean working tree (that is the
+  halt's root cause and clearing without committing would re-halt immediately). All
+  other reasons (`suspected_loop`, `git_pull_diverged`, `git_push_failed`,
+  `git_remote_unavailable`, future) clear unconditionally — if the underlying cause
+  still holds, the daemon will re-halt on the next iteration.
 
   Args:
     repo: Absolute path to the repository root.
 
   Raises:
-    RecoverError: If the working tree still has uncommitted changes; the error message
-      lists the offending paths in `git status --porcelain` form.
+    RecoverError: If the active halt is `uncommitted_changes` and the working tree
+      still has pending changes; the error message lists the offending paths in
+      `git status --porcelain` form.
   """
-  # guard: refuse to clear the halt block while the working tree is still dirty
-  if not is_clean(repo):
+  halt = runtime_state.get_halted(repo)
+  # guard: daemon is not halted — nothing to clear
+  if halt is None:
+    return
+  reason = halt.get(HaltKey.REASON)
+  # guard: dirty-tree halt specifically requires a clean tree before clearing
+  if reason == HaltReason.UNCOMMITTED_CHANGES and not is_clean(repo):
     # re-query porcelain status so the error message names the offending paths
     rc = subprocess.run(
       [ "git", "--no-optional-locks", "-c", "color.status=never", "status", "--porcelain" ],
-      cwd = str(repo), capture_output = True, text = True,
+      cwd = str(repo), capture_output = True, text = True, check = False,
     )
     raise RecoverError(
       "working tree still dirty; refusing to resume:\n"
       f"{rc.stdout.strip()}"
     )
   runtime_state.clear_halted(repo)
+  error_ledger.resolve(repo, f"halt:{repo.name}", resolution = IncidentResolution.RESUMED,
+                       kind = IncidentKind.DAEMON_HALT, actor = IncidentActor.RECOVER)
 
 
 def cleanup_and_resume(repo: Path, mode: str, message: str | None = None) -> None:
@@ -203,6 +231,12 @@ def revert_files(repo: Path, paths: list[str]) -> None:
     [ "git", "checkout", "HEAD", "--", *paths ],
     cwd = str(repo), check = True, capture_output = True,
   )
+  # spec § Emit points #7 — revert resolves the halt; resume after a revert overwrites with
+  # `resumed` but either resolution alone yields a closed incident
+  error_ledger.resolve(
+    repo, f"halt:{repo.name}", resolution = IncidentResolution.REVERTED,
+    kind = IncidentKind.DAEMON_HALT, actor = IncidentActor.DOCTOR, detail = f"reverted {len(paths)} path(s)",
+  )
 
 
 def clear_dead_job(jdir: Path) -> None:
@@ -216,11 +250,19 @@ def clear_dead_job(jdir: Path) -> None:
     jdir: Absolute path to the job directory to reset.
   """
   # iterate the fixed set of retry-resettable artifacts; missing files are expected
-  for name in ( "DEAD", "dead.json", "PID", "transcript.jsonl", "error.json", "response.json" ):
+  for name in ( JobMarker.DEAD, JobArtifact.DEAD_JSON, JobMarker.PID,
+                JobArtifact.TRANSCRIPT, JobArtifact.ERROR_JSON, JobFile.RESPONSE ):
     try:
       (jdir / name).unlink()
     except FileNotFoundError:
       pass
+  # job dirs always live at <repo>/.experts/.jobs/<expert>/<job> — derive the repo root
+  # waiver: inline numeric literal (parents-index depth), not a domain constant
+  error_ledger.record(jdir.parents[3], {
+    IncidentKey.INCIDENT: f"job:{jdir.parent.name}/{jdir.name}", IncidentKey.PHASE: IncidentPhase.TRIAGED,
+    IncidentKey.KIND: IncidentKind.JOB_DEAD, IncidentKey.CAUSE: "retry", IncidentKey.ACTOR: IncidentActor.DOCTOR,
+    IncidentKey.EXPERT: jdir.parent.name, IncidentKey.JOB_ID: jdir.name,
+  })
 
 
 def permanent_fail(jdir: Path, diagnosis: dict) -> None:
@@ -235,5 +277,15 @@ def permanent_fail(jdir: Path, diagnosis: dict) -> None:
     diagnosis: Doctor-supplied summary of attempts, likely cause, last error excerpt,
       and follow-up actions for the operator.
   """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import json
-  (jdir / "diagnosis.json").write_text(json.dumps(diagnosis, indent = 2))
+  (jdir / JobArtifact.DIAGNOSIS_JSON).write_text(json.dumps(diagnosis, indent = 2))
+  # job dirs always live at <repo>/.experts/.jobs/<expert>/<job> — derive the repo root
+  # waiver: inline numeric literal (parents-index depth), not a domain constant
+  error_ledger.record(jdir.parents[3], {
+    IncidentKey.INCIDENT: f"job:{jdir.parent.name}/{jdir.name}", IncidentKey.PHASE: IncidentPhase.TRIAGED,
+    IncidentKey.KIND: IncidentKind.JOB_DEAD, IncidentKey.CAUSE: "permanent_fail",
+    IncidentKey.ACTOR: IncidentActor.DOCTOR,
+    IncidentKey.EXPERT: jdir.parent.name, IncidentKey.JOB_ID: jdir.name,
+    IncidentKey.REFS: { "diagnosis_json": str(jdir / JobArtifact.DIAGNOSIS_JSON) },
+  })

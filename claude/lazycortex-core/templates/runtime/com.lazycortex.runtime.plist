@@ -9,6 +9,11 @@
         <string>{REPO_ROOT}</string>
     </array>
     <key>WorkingDirectory</key><string>{REPO_ROOT}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- tells _restart_in_place to clean-exit on own-code change; launchd KeepAlive relaunches -->
+        <key>LAZYCORTEX_SUPERVISED</key><string>1</string>
+    </dict>
     <key>KeepAlive</key><true/>
     <key>RunAtLoad</key><true/>
     <key>StandardOutPath</key><string>{REPO_ROOT}/.logs/lazy-core/runtime/launchd.out.log</string>

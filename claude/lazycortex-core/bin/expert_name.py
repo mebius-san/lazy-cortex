@@ -7,7 +7,13 @@ between sibling plugins; this parser is small and stable enough that
 duplication beats a CLI hop.
 """
 from __future__ import annotations
+
 import re
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
 
 _FLAT_PART_RE = re.compile(r"^[a-z0-9_-]+$")
 
@@ -26,6 +32,12 @@ def parse(name: str) -> tuple[str, str]:
   Explicit `@.` → repo_key = "." (synonym for bare name).
   Multiple `@` → split on the LAST one.
   Empty input, or empty left or right part → ExpertNameError.
+
+  Returns:
+    A two-tuple of (expert, repo_key) where repo_key is `"."` for bare names.
+
+  Raises:
+    ExpertNameError: If the name is empty or either side of `@` is empty.
   """
   # guard: empty input is not a valid expert name
   if not name:
@@ -51,6 +63,13 @@ def flatten(name: str) -> str:
   `validator@backend` → `validator__backend`
 
   Validates each part against `^[a-z0-9_-]+$`. Raises on invalid alphabet.
+
+  Returns:
+    The flat string form of the expert name, with `__` separating the expert
+    and repo parts when a repo qualifier is present.
+
+  Raises:
+    ExpertNameError: If any part of the name fails the tag-safe alphabet check.
   """
   expert, repo = parse(name)
   # guard: expert part must match the tag-safe alphabet

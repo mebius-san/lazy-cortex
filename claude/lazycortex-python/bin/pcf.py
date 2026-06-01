@@ -181,6 +181,59 @@ WAIVER_RE = re.compile(r'#\s*waiver:\s*\S')
 TMP_RE = re.compile(r'#\s*TMP\b')
 
 
+_BROAD_EXCEPTION_NAMES = {"Exception", "BaseException"}
+
+
+def _except_handler_catches_broadly(handler_type: ast.expr | None) -> bool:
+  """
+  Determine whether an except-handler clause catches `Exception` / `BaseException` / bare-except.
+
+  Bare `except:` clauses have `handler_type is None`; `except Exception` / `except BaseException`
+  are `ast.Name` nodes; `except (Exception, ValueError)` is an `ast.Tuple` whose elements include
+  at least one broad name. Any of these is "broad" for the silent-swallow check.
+
+  Args:
+    handler_type: The `type` attribute of an `ast.ExceptHandler` — `None` for bare-except,
+      an `ast.Name` for a single class, or an `ast.Tuple` for a multi-class clause.
+
+  Returns:
+    `True` when the handler catches `Exception` or `BaseException` (or is bare-except);
+    `False` for narrower clauses such as `except OSError`.
+  """
+  # guard: bare except — by definition catches everything
+  if handler_type is None:
+    return True
+  if isinstance(handler_type, ast.Name):
+    return handler_type.id in _BROAD_EXCEPTION_NAMES
+  if isinstance(handler_type, ast.Tuple):
+    return any(
+        isinstance(el, ast.Name) and el.id in _BROAD_EXCEPTION_NAMES
+        for el in handler_type.elts
+    )
+  return False
+
+
+def _except_handler_body_is_silent(body: list[ast.stmt]) -> bool:
+  """
+  Determine whether an except-handler body is a silent swallow (only `pass`).
+
+  An expert handler body is "silent" when its sole executable statement is `pass` — it
+  logs nothing, returns nothing, raises nothing, calls no notifier. Bodies with any other
+  statement (`return`, `raise`, a call expression, an assignment) are NOT silent and are
+  outside the check's scope. Pure-comment bodies are unreachable in Python (the parser
+  injects an `ast.Pass` so the function lists exactly one statement when authors wrote
+  only comments inside the handler).
+
+  Args:
+    body: The `body` attribute of an `ast.ExceptHandler` — the list of statements inside
+      the `except` block.
+
+  Returns:
+    `True` when the body is exactly `[Pass()]`; `False` otherwise.
+  """
+  return len(body) == 1 and isinstance(body[0], ast.Pass)
+
+
 def _has_waiver(source_lines: list[str], lineno: int) -> bool:
   """
   Check whether a source line has a waiver comment nearby.
@@ -1763,6 +1816,46 @@ class CodeFormatAnalyzer:
       blank_count = 0
 
 
+  def _check_silent_broad_except(self) -> None:
+    """
+    Flag handlers that catch `Exception` / `BaseException` / bare-except AND swallow silently.
+
+    A handler whose declared type is `Exception`, `BaseException`, or absent (bare `except:`),
+    AND whose body consists only of `pass` (after stripping comments), hides every failure
+    in the protected region including `KeyboardInterrupt`, logic bugs, and the very errors
+    the project's error_ledger is meant to surface. Either narrow the exception class
+    (`except OSError`, `except subprocess.CalledProcessError`, …) or do something in the
+    body (log, return a typed status, re-raise). Exempt with `# waiver: <reason>` on the
+    line above the `except` clause when the swallow is intentional per a documented contract
+    (e.g. the error-ledger contract declares `error-record` to be fire-and-forget).
+    """
+    try:
+      tree = ast.parse('\n'.join(self.source_lines))
+    # waiver: AST parsing failures are reported by the py_compile check; pcf must not block on them
+    except SyntaxError:
+      return
+    for node in ast.walk(tree):
+      # guard: skip nodes that are not exception handlers
+      if not isinstance(node, ast.ExceptHandler):
+        continue
+      # guard: skip handlers that declare a narrow exception class — only broad catches are flagged
+      if not _except_handler_catches_broadly(node.type):
+        continue
+      # guard: skip handlers whose body does something (log, return, re-raise) — only silent swallows flag
+      if not _except_handler_body_is_silent(node.body):
+        continue
+      line_num = node.lineno
+      # guard: waiver comment present — exemption granted
+      if _has_waiver(self.source_lines, line_num):
+        continue
+      self.issues.append((
+        line_num,
+        "silent broad-except: handler catches Exception/BaseException/bare-except and body is `pass` only"
+        " -- narrow the exception class or do something in the body, or add a"
+        " '# waiver: <reason>' comment to exempt"
+      ))
+
+
   def _check_error_suppression(self) -> None:
     """
     Check for forbidden error suppression comments.
@@ -2387,6 +2480,7 @@ class CodeFormatAnalyzer:
       self._check_line_length()
     if self.check_indentation:
       self._check_indentation()
+    self._check_silent_broad_except()
     self._check_error_suppression()
     self._check_double_backticks()
     self._check_guard_comments()
@@ -3018,6 +3112,13 @@ class DocstringAnalyzer(ast.NodeVisitor):
       return
     # guard: explicit `-> None` annotation
     if isinstance(node.returns, ast.Constant) and node.returns.value is None:
+      return
+    no_return_names = ('NoReturn', 'Never')
+    # guard: bare `NoReturn` / `Never` annotation -- the function never returns a value, so a Returns section is meaningless
+    if isinstance(node.returns, ast.Name) and node.returns.id in no_return_names:
+      return
+    # guard: qualified `typing.NoReturn` / `typing.Never` annotation -- same reasoning as the bare form
+    if isinstance(node.returns, ast.Attribute) and node.returns.attr in no_return_names:
       return
     is_property = any(
       isinstance(dec, ast.Name) and dec.id == 'property'

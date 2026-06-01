@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, tests, and the checker stack.
-last_regen: 2026-05-27
+last_regen: 2026-06-01
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -10,7 +10,6 @@ source_skills:
   - lazy-python.docstring-writer
   - lazy-python.test-writer
   - lazy-python.style
-  - lazy-python.docstrings
   - lazy-python.tests
 ---
 # Frequently asked questions
@@ -35,7 +34,7 @@ One or more of the mirrored rule files under `.claude/rules/lazy-python.*.md` ha
 
 ## `/lazy-python.audit` warns about PyCharm inspect.sh (Check 6). Is that a problem?
 
-Not for most of the checker stack. `pch.py` (the PyCharm inspection phase) requires `inspect.sh` from a PyCharm installation, but the other four phases — `pcf`, `toi`, `mypy`, and `pylint` — run without it. If you do not have PyCharm installed, Check 6 will always be `WARN` and `chk-py` will silently skip the `pch` phase. The rest of the pipeline remains fully functional.
+Not for most of the checker stack. `pch.py` (the PyCharm inspection phase) requires `inspect.sh` from a PyCharm installation, but the other phases — `pcf`, `toi`, `cmp`, `mypy`, `ruff`, and `pylint` — run without it. `pch` is also not part of the `chk-py all` gate; it is a separate, slower manual subcommand (`chk-py pch <file>`). If you do not have PyCharm installed, Check 6 will always be `WARN` and `chk-py pch` will be unavailable. The rest of the pipeline remains fully functional.
 
 ---
 
@@ -51,9 +50,9 @@ The PostToolUse hook runs `pcf.py` automatically on every `.py` edit and surface
 
 ---
 
-## Can I run `mypy` or `pylint` directly instead of `chk-py`?
+## Can I run `mypy`, `pylint`, or `ruff` directly instead of `chk-py`?
 
-No. The plugin enforces running all style and type validation through `chk-py`. The aggregator runs `pcf`, `toi`, `pch`, `mypy`, and `pylint` in the correct order with shared config from `pyproject.toml`; calling any one tool directly skips earlier phases and can produce misleading results. Similarly, use `tst-py` rather than raw `pytest` — the wrapper applies project-wide pytest args and uses the correct venv.
+No. The plugin enforces running all style and type validation through `chk-py`. The aggregator runs `pcf`, `toi`, `cmp`, `mypy`, `ruff`, and `pylint` in the correct order with shared config from `pyproject.toml`; calling any one tool directly skips earlier phases and can produce misleading results. Similarly, use `tst-py` rather than raw `pytest` — the wrapper applies project-wide pytest args and uses the correct venv.
 
 ---
 
@@ -107,4 +106,4 @@ Re-run `/lazy-python.install` — Phase 2 deploys `cli/chk-py` and `cli/tst-py` 
 
 ## `pyproject.toml` is missing the checker sections after install.
 
-Run `/lazy-python.audit` Check 5 to confirm which of the six required sections (`[tool.pcf]`, `[tool.toi]`, `[tool.pch]`, `[tool.pytest]`, `[tool.mypy]`, `[tool.pylint]`) are absent, then re-run `/lazy-python.install`. Phase 3 merges only the missing sections from `pyproject-defaults.toml` into your `pyproject.toml`; existing sections are never overwritten. If your `pyproject.toml` does not exist at all, Phase 3 creates it with the defaults.
+Run `/lazy-python.audit` Check 5 to confirm which of the seven required sections (`[tool.pcf]`, `[tool.toi]`, `[tool.pch]`, `[tool.pytest]`, `[tool.mypy]`, `[tool.pylint]`, `[tool.ruff]`) are absent, then re-run `/lazy-python.install`. Phase 3 merges only the missing sections from `pyproject-defaults.toml` into your `pyproject.toml`; existing sections are never overwritten. If your `pyproject.toml` does not exist at all, Phase 3 creates it with the defaults.

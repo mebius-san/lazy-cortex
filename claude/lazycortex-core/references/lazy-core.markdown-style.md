@@ -117,7 +117,7 @@ Markers apply to **mutations of existing body prose** only. Plain unmarked repla
 - `criticmarkup` — inline `{++add++}`, `{--del--}`, `{~~old~>new~~}`, `{>>note<<}`, `{==hi==}` only.
 - `html` — inline `<ins>`, `<del>`, `<mark>`, `<!-- note -->` only.
 
-When a consumer dispatches an expert under one of these styles, the request payload carries `edit_marker_template` — a verbatim copy-paste example of the only accepted marker shape for that style. The expert MUST follow that template verbatim. The descriptive prose here is the human-facing source of truth; the per-request `edit_marker_template` is the machine-readable contract.
+When a consumer dispatches an expert under one of these styles, the expert reads its `edit_marker_style` from `request.json` and locates the matching block above (the `simple` / `diff` / `criticmarkup` / `html` description). This file is the single source of truth for marker shape — no per-request template duplicates it. The expert MUST follow the rules of the named block verbatim.
 
 **No reflow-only markers.** Whitespace-only changes (unwrapping a hard-wrapped paragraph, collapsing blank lines, fixing trailing space) do not earn a marker — they are not a content mutation. Emit the paragraph in its target form raw, without a `` ```diff `` fence or any inline marker. Consumers also defensively strip whitespace-only diff fences before reassembly, so a stray fence is dropped silently — but the rule is "do not emit it in the first place". Touching only the prose you actually mean to change is the discipline; if a paragraph reads correctly as-is, leave its line wrapping alone.
 

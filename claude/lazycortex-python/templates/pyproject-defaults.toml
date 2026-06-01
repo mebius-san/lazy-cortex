@@ -161,6 +161,8 @@ ignore = [
   "PLR0914",  # too-many-locals
   "PLR0917",  # too-many-positional-arguments
   "PLR1702",  # too-many-nested-blocks
+  "PLC0415",  # import-outside-top-level (mirrors pylint C0415 disable — deferred imports allowed)
+  "F541",     # f-string-without-placeholders (mirrors pylint W1309 disable)
 
   "E501",     # line-too-long (handled separately)
   "E731",     # lambda-assignment

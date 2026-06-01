@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-last_regen: 2026-05-23
+last_regen: 2026-06-01
 diagram_spec:
   anchor: "Bootstrap order"
   request: "Flowchart showing the lazycortex-core bootstrap order: enable plugin and restart → single-plugin path via /lazy-core.install or multi-plugin path via /lazy-core.setup → rules changed triggers second restart → /lazy-core.audit → if audit fails resolve issues and re-audit; if audit passes decide whether to run /lazy-core.optimize and /lazy-core.doctor → bootstrap complete"
@@ -14,103 +14,66 @@ source_skills:
 ---
 # Install, audit, and maintain lazycortex-core
 
-Every lazycortex plugin ships lifecycle skills — install, audit, and sometimes doctor, optimize, and setup. For most plugins those skills are scoped to their own rules and config. For `lazycortex-core` the stakes are higher: core ships the shared scaffolding every other plugin assumes is already in place — the rule authoring templates, the `lazy.settings.json` runtime structure, the agent-model routing layer, and the expert runtime daemon. Bootstrapping core is bootstrapping the whole lazycortex baseline.
+Every lazycortex plugin ships lifecycle skills — install, audit, doctor, optimize, and setup. For most plugins those skills are scoped to their own rules and config. For `lazycortex-core` the stakes are higher: core ships the shared scaffolding every other plugin assumes is already in place — the rule authoring templates, the `lazy.settings.json` runtime structure, the agent-model routing layer, and the expert runtime daemon. Bootstrapping core is bootstrapping the whole lazycortex baseline.
 
 This block covers all five of core's lifecycle skills. The order they run in and the way they build on each other is what matters.
 
-**Prerequisite:** all lazycortex plugins require Python 3.12 or later. `/lazy-core.install` checks this at Step 0 and aborts with install instructions if the floor is not met — nothing else in this block runs until Python 3.12+ is available.
+**Prerequisite:** all lazycortex plugins require Python 3.12 or later. `/lazy-core.install` verifies this at Step 0 and aborts with install instructions if the floor is not met — nothing else in this block runs until Python 3.12+ is available.
 
-## When you'd use this
+## What's in this block
 
-- Starting a project from scratch: run `/lazy-core.install` (or `/lazy-core.setup` if you have multiple plugins enabled) to drop all rule templates, seed `lazy.settings.json`, and optionally bootstrap the expert runtime and daemon supervisor.
-- After cloning an existing repo onto a new machine: re-run the install to register the daemon supervisor for the current machine — runtime artifacts like the launchd plist or systemd unit are per-machine and are not committed.
-- After `/plugin update`: re-run `/lazy-core.install` (or `/lazy-core.setup`) to pick up any new or changed rule templates from the refreshed plugin cache; the plugin update does not auto-sync rules into your `.claude/rules/` directory.
-- Checking what is actually loaded at session start: run `/lazy-core.audit` to measure context weight, confirm compliance, and see the merged model-routing view — including aspect resolution and expert memory hygiene checks.
-- When the config feels off or you want a periodic health check: run `/lazy-core.doctor` for a deeper read across rules, settings, memory, hooks, and MCP config.
-- When startup feels slow or after adding several new rules: run `/lazy-core.optimize` to slim oversized rule files and fix settings leakage, including expert memory hygiene for persona-marked experts.
+**`/lazy-core.install`** is the foundation step. Run it once per project (or globally) right after enabling the plugin and restarting Claude Code. It syncs every rule template the plugin ships into the correct rules directory, copies authoring templates into `.claude/templates/core/`, and bootstraps the scaffold registry. It then seeds `lazy.settings.json` with the three built-in agent-model routing defaults. After the rules and settings groundwork is in place, it offers a runtime wizard: if you want the expert daemon in this repo, the wizard writes `.experts/`, the `lazy.runtime.sh` shim, the flat `daemon` and `routines` sections in `lazy.settings.json`, the expert-add wizard, and optionally a launchd or systemd supervisor. Step 10.5 bootstraps `.memory/` when runtime is enabled. Step 13.5 offers to merge the recommended expert-spawn sandbox and permissions block into `settings.local.json`. The skill is idempotent — re-running after a plugin update picks up new rule templates without clobbering rules you chose to keep local.
 
-## How it fits together
+**`/lazy-core.audit`** is the read-only context-weight and compliance measurement. It dispatches four parallel scan agents. Agent A measures everything that loads at conversation start — CLAUDE.md files, always-loaded rules, and the memory index — sorted by size. Agent B covers on-demand assets, MCP server enablement, Python runtime availability, path hygiene, naming hygiene, and skill/agent/rule-writing compliance checks (missing Execution-Discipline preambles, "Optional" headings, narrative padding, broken artifact references, oversize files, non-canonical `paths:` shapes). Agent C checks help-doc coverage and staleness against each plugin's README `## Scenarios` list. Agent D audits the expert runtime across ten sub-checks: `lazy.settings.json[experts]` schema (D1), agent reference resolution (D2), aspect reference resolution (D8), arguments key and size validation (D9), `.memory/` directory hygiene (D10), flat `daemon`/`routines` section schema (D3), routine command resolvability (D4), orphan job directories (D5), stale completed jobs (D6), and daemon liveness (D7). No changes are made.
 
-### lazy-core.install
+**`/lazy-core.doctor`** is the deeper, interactive health check. It dispatches three parallel scan agents to check artifact integrity, config and memory health, and path hygiene across all config files. After collecting findings it checks plugin version currency, applies release-mode suppression so outdated-plugin content findings don't crowd out the root cause, reconciles against your stored per-WARN waivers, and delegates to sibling audit skills (`lazy-guard.check-public`, `lazy-log.audit`, and plugin-specific audits when those plugins are enabled). It re-runs the full D1–D10 expert runtime checks inline. Then it offers targeted fixes — applying them only after your explicit confirmation — and a per-WARN waive loop where each remaining warning can be permanently suppressed with a waiver file.
 
-`/lazy-core.install` is the foundation step. Run it once per project (or globally) right after enabling the plugin and restarting Claude Code.
+**`/lazy-core.optimize`** addresses the two most common sources of bloat. For each rule file over 3 KB it classifies every section as a constraint (a prohibition or one-liner fact needed every turn) or reference material (layouts, tables, procedures, API details), shows the classification, and on confirmation rewrites the rule to constraints only and moves reference material into the agent definition. Phase 2.5 runs an LLM-readability audit across all rules, skills, agents, and commands — flagging decision-logic tables, abstract-header tables, narrative preambles, restated cross-references, decorative markers, and long explanatory paragraphs — and offers rewrites with a diff preview per finding. Phase 5.5 adds expert memory hygiene: orphan notes and near-duplicate note pairs within the same expert's `.memory/` directory are surfaced for interactive resolution. On the settings side it audits global `~/.claude/settings.json` for project-specific entries and migrates them to `settings.local.json`. It closes by running `/lazy-core.agent-models` to fill any missing model-routing entries.
 
-It works in two phases. The first phase syncs every rule template the plugin ships into the correct rules directory — `.claude/rules/` for project scope, `~/.claude/rules/` for user scope. For each rule it detects whether the file is new, unchanged, drifted, or orphaned and asks you what to do one question at a time, with the rule's purpose surfaced so you can decide without digging. It also syncs authoring templates into `.claude/templates/core/` and bootstraps the scaffold registry.
+**`/lazy-core.setup`** is the shortcut for a fresh project bootstrap when you have multiple lazycortex plugins enabled. Step 0 migrates `.claude/lazy.settings.json` through the current per-section version ladder before any installer reads or writes it — if migration fails, the run aborts immediately. Then it scans every enabled plugin for `<namespace>.install` skills and any skill opting in via `lazy_setup_phase:` frontmatter, builds a dependency-ordered execution plan with `lazy-core.install` always first, shows a preview, and runs each child in sequence after a single confirmation. Children that fail are logged but don't abort the loop; you get one coherent summary at the end. Pass `--dry-run` to see the plan without executing.
 
-After syncing rule templates, the install bootstraps the `.logs/` and `.runtime/` directories at the repo root and ensures `.gitignore` covers both. It then migrates any stale hook registrations left over from the retired `lazycortex-log` plugin — stripping the old `hooks/lazy-log.commit-recorder.py` path from all four standard settings files so the retired plugin path no longer appears in your hook pipeline. These steps run unconditionally and are silent no-ops on clean installs.
+## How they work together
 
-The next phase seeds `lazy.settings.json` with the three built-in agent-model routing defaults, then offers the expert runtime wizard. The wizard writes the `.experts/` directory layout, the `lazy.runtime.sh` shim, and the `lazy-core.runtime` block in `lazy.settings.json`. If you register at least one expert, it also bootstraps the expert-pump routine and — optionally — installs a launchd or systemd supervisor so the daemon starts automatically. Step 13.5 then offers to merge the recommended expert-spawn sandbox and permissions block into `settings.local.json` so the daemon's `claude -p` subprocesses can read and write the repo without unrestricted access.
+The five skills form a directed pipeline. `/lazy-core.install` (or `/lazy-core.setup`) lands first and lays the foundation every other skill assumes: rules in the right directory, `lazy.settings.json` seeded, `.logs/` and `.runtime/` bootstrapped. If any rules were created or updated, restart Claude Code before proceeding — rules load only at session start.
 
-Step 10.5 bootstraps the `.memory/` directory and strips any legacy `!.memory/` un-ignore line from `.gitignore` (the negation was retired; memory notes track in git the normal way). This step runs only when runtime/experts setup was confirmed; standalone projects without experts skip it.
+Once the installation is complete, `/lazy-core.audit` gives you a read-only snapshot of what is actually loaded. Run it right after install to confirm the rules landed, measure your startup context weight, and see the merged model-routing view. The audit's Agent D sub-checks are the first indication of whether your expert runtime config is structurally sound; its Agent C sub-checks tell you whether help-doc coverage is current for all your plugins. Because audit makes no changes, you can run it at any time — after adding a rule, after enabling a new MCP server, before a release.
 
-The skill is idempotent: re-running it after a plugin update picks up new or changed rule templates without clobbering rules you chose to keep local. Running it from inside each repo where you want the runtime sets up runtime artifacts there; runtime is always per-repo regardless of whether the plugin itself is installed at user or project scope.
+`/lazy-core.doctor` goes deeper when something feels off. It reads everything the audit reads and more — config consistency across all four settings files, always-loaded context budget (WARN at 20 KB, FAIL at 40 KB), hook registration hygiene, MCP permission wildcard detection, cross-reference integrity, and the full D1–D10 expert runtime sweep. It also checks whether your installed plugins are current against the marketplace manifest and offers to restart a stalled daemon, delete orphan job directories, or unregister routines whose plugin bin path has gone missing. Run doctor periodically or whenever the audit surfaces a pattern you want to investigate interactively.
 
-### lazy-core.audit
+`/lazy-core.optimize` acts on the cost side. When audit or doctor reports oversized rules or settings leakage, optimize is the remediation path: it slims the rules, moves reference material to the right place, patches settings hygiene, and ensures every agent in your vault has a model-routing tier. Because it rewrites files, always run it after — not before — an audit or doctor pass so you know what you're trimming.
 
-`/lazy-core.audit` is a read-only context-weight and compliance measurement. Run it after install to confirm what is actually loaded, and again whenever you add new rules, agents, or skills.
-
-It dispatches four parallel scan agents and renders the merged result. Agent A measures everything that loads at conversation start — global and project CLAUDE.md files, always-loaded rules, and the memory index — sorted by size. Agent B covers on-demand assets (agents, skills, commands, path-scoped rules), MCP server enablement, Python runtime availability, path hygiene, and naming hygiene. Agent B also runs skill-writing, agent-writing, and rule-writing compliance checks: missing Execution-Discipline preambles, "Optional" headings, narrative padding, broken artifact references, oversize files, and non-canonical `paths:` shapes.
-
-Agent C checks help-doc coverage and staleness against the `## Scenarios` list in each plugin's README, flagging scenarios without a walkthrough chapter and chapters whose `last_regen` is older than their source skills. Agent D audits the expert runtime across ten sub-checks: `lazy.settings.json[experts]` schema (D1), agent reference resolution (D2), `lazy-core.runtime` section schema (D3), routine command resolvability (D4), orphan job directories (D5), stale completed jobs (D6), daemon liveness (D7), aspect reference resolution (D8), arguments key and size validation (D9), and `.memory/` directory hygiene — orphan notes, missing persona marks, tag-file cross-consistency, and note frontmatter completeness (D10).
-
-No changes are made. The audit closes with a model-routing section showing the merged `agent_models` view from both project and global `lazy.settings.json` files, with provenance and gap/orphan annotations.
-
-### lazy-core.doctor
-
-`/lazy-core.doctor` is the deeper, interactive health check. Run it when something feels off, after a configuration change, or periodically as a hygiene routine.
-
-It dispatches three parallel scan agents. Agent A checks artifact integrity: rule frontmatter, size budgets, orphaned and drifted rule files, agent and skill frontmatter, hook-language gitignore coverage, cross-reference integrity, plugin dependency declarations, plugin rule sync state, and `lazy.settings.json` schema at both project and global scope. Agent B checks config and memory: settings file validity, permissions leakage into tracked `settings.json`, memory index consistency, CLAUDE.md file health, the always-loaded context budget (WARN at 20 KB total, FAIL at 40 KB), hook registration, MCP enablement and permission hygiene, and MCP permission wildcard detection. Agent C greps all project-level config files for hardcoded absolute paths.
-
-After collecting findings, the doctor checks plugin version currency (live fetch with a 5-second timeout, falling back to the cached manifest) and applies release-mode suppression: content-level findings on a plugin's own rule files are silenced when that plugin is outdated, keeping you focused on the root cause (run `/plugin update`) rather than chasing issues that will be overwritten on upgrade. The doctor then delegates to sibling audit skills — `lazy-guard.check-public` when `.guard-waivers.json` exists, `lazy-log.audit` (shipped by `lazycortex-core`), and similarly for `lazycortex-diagram`, `lazycortex-observe`, and `lazycortex-review`. It also re-runs the full D1–D10 expert runtime checks from `lazy-core.audit` inline.
-
-It then offers targeted fixes — applying them only after your explicit confirmation — and a per-WARN waive loop. For each remaining WARN you can skip it for the current run or waive it permanently; permanent waivers are stored as files under `doctor.waivers/` in your project memory directory and persist across sessions. `FAIL`-severity findings are never waiveable. Three loop-runtime fixes are available when relevant: restarting a stalled daemon, deleting orphan job directories, and unregistering routines whose plugin bin path has gone missing.
-
-### lazy-core.optimize
-
-`/lazy-core.optimize` addresses the two most common sources of bloat: oversized rule files and project-specific entries that leaked into global settings.
-
-For each rule file over 3 KB it classifies every section as a constraint (a prohibition or one-liner fact that needs to load every turn) or reference material (layouts, tables, procedures, API details). It shows you the classification and, on confirmation, rewrites the rule file to constraints only and moves reference material into the corresponding agent definition. It also runs an LLM-readability audit across all rules, skills, agents, and commands — flagging decision-logic tables, abstract-header tables, narrative preambles, restated cross-references, decorative markers, and long explanatory paragraphs — and offers rewrites with a diff preview per finding. Findings you don't want to revisit can be permanently waived.
-
-Phase 5.5 adds expert memory hygiene: for each note under `.memory/<expert>/` it checks whether the note's tags are listed in any local tag file (and vice versa), surfacing orphan notes and near-duplicate note pairs within the same expert. Orphan notes can be resolved by running `/lazy-memory.index`, deleting the note, or leaving it alone. Near-duplicates are surfaced for manual review.
-
-On the settings side it audits your global `~/.claude/settings.json` for entries that are actually project-specific (service permissions, `additionalDirectories`, domain-specific MCP servers, path-specific Read/Write/Edit rules) and migrates them to the correct project `settings.local.json`. It closes by running `/lazy-core.agent-models` to fill any missing model-routing entries.
-
-### lazy-core.setup
-
-`/lazy-core.setup` is the shortcut for a fresh project bootstrap when you have multiple lazycortex plugins enabled.
-
-Before any installer runs, it migrates `.claude/lazy.settings.json` through the current per-section version ladder — a step that ensures every section's schema is current before child installers read or write it. If migration exits non-zero the run aborts immediately; no installers execute until the settings file is current.
-
-Once the settings file is confirmed up-to-date, the skill scans `~/.claude/plugins/installed_plugins.json` for every enabled plugin, discovers their `<namespace>.install` skills and any skill opting in via `lazy_setup_phase:` frontmatter, builds a dependency-ordered execution plan (with `lazy-core.install` always first), shows you a preview, asks for a single confirmation, and then runs each child in sequence. Children that fail are logged but do not abort the loop — you get one coherent summary at the end. Pass `--dry-run` to see the plan without executing it.
-
-The plan is deterministic and the children are all idempotent: re-running `/lazy-core.setup` after a plugin update, after a fresh clone, or after enabling a new plugin is always safe.
+The full journey for a new project: install → restart → audit → doctor if anything looks off → optimize if context is heavy. For an existing project after `/plugin update`: re-run install (or setup) to pick up new rule templates, restart, then audit to confirm the new rules landed cleanly.
 
 ## Common adjustments
 
-**Scope: project vs user** — `/lazy-core.install` detects whether the plugin is enabled at user or project scope and installs rules and templates to the matching directory. If you have both scopes, it asks which to target. For most workflows the project scope (`<repo-root>/.claude/`) is correct; user scope is useful when you want the hygiene and security rules in every project without re-running install per repo.
+**Project scope vs user scope** — `/lazy-core.install` detects whether the plugin is enabled at user or project scope and installs rules and templates to the matching directory. If you have both scopes, it asks which to target. For most workflows the project scope (`<repo-root>/.claude/`) is correct; user scope (`~/.claude/`) installs the hygiene and security rules into every project without re-running per-repo.
 
-**Skipping the expert runtime** — during install, Steps 9–13 cover the runtime daemon and expert wizard. You can decline all of them without affecting the rule and settings steps; just choose "Skip — this repo doesn't need runtime/experts" when prompted. You can re-run `/lazy-core.install` later to set them up.
+**Skipping the expert runtime** — during install, Steps 9–13 cover the runtime daemon and expert wizard. You can decline all of them without affecting the rule and settings steps; choose "Skip — this repo doesn't need runtime/experts" when prompted. Re-run `/lazy-core.install` later to set them up when ready.
 
-**Skipping the daemon supervisor** — if you prefer to start the expert-pump daemon manually (`./lazy.runtime.sh` or `bash .claude/bin/lazy.runtime.sh`), choose "Skip — I'll start the daemon manually" when `/lazy-core.install` offers to install the launchd or systemd unit. The supervisor is a convenience, not a requirement.
+**Skipping the daemon supervisor** — if you prefer to start the expert-pump daemon manually (`bash .claude/bin/lazy.runtime.sh`), choose "Skip — I'll start the daemon manually" when `/lazy-core.install` offers to install the launchd or systemd unit. The supervisor is a convenience, not a requirement.
 
 **Adding experts after initial install** — re-run `/lazy-core.install` to run the expert-add wizard again. It filters out already-registered experts so only new candidates are presented.
 
 **Configuring the expert-spawn sandbox** — re-run `/lazy-core.install` and confirm Step 13.5 to have the skill merge the recommended sandbox and permissions block into `settings.local.json`. The skill unions into your existing keys rather than overwriting them.
 
-**Checking aspect and arguments health** — run `/lazy-core.audit` and look at the Expert runtime section. D8 reports any unresolvable aspect references; D9 flags argument keys that don't match `^[a-z][a-z0-9_]*$` or payloads over 4 KB (suggesting you move them to a protocol file). D10 reports `.memory/` orphans, persona-mark mismatches, and tag-file drift.
-
 **Previewing the setup chain** — run `/lazy-core.setup --dry-run` to see the ordered list of install skills that would run, grouped by phase, with no changes applied.
 
-**Filling missing model-routing entries** — run `/lazy-core.agent-models` directly (or let `/lazy-core.optimize` Phase 7 do it) to assign haiku/sonnet/opus tiers to any newly discovered agents without running the full optimize pipeline.
+**Filling missing model-routing entries** — run `/lazy-core.agent-models` directly (or let `/lazy-core.optimize` Phase 7 do it) to assign haiku/sonnet/opus tiers to newly discovered agents without running the full optimize pipeline.
 
-**Settings migration failed during setup** — if `/lazy-core.setup` aborts at Step 0 with a migration error, read the captured stderr in the Step 6 report. A non-zero exit typically means a malformed migration callable in the `lazy_settings_migrations/` ladder. Fix the root cause, then re-run `/lazy-core.setup` — Steps 1–5 do not execute until the settings file is current.
+**Checking aspect and arguments health** — run `/lazy-core.audit` and look at the Expert runtime section. D8 reports any unresolvable aspect references; D9 flags argument keys that don't match `^[a-z][a-z0-9_]*$` or payloads over 4 KB. D10 reports `.memory/` orphans, persona-mark mismatches, and tag-file drift.
 
-**Stale hook registrations from retired plugins** — if you see references to a `lazycortex-log` plugin path in your hook pipeline, re-run `/lazy-core.install`. Step 8 automatically strips those stale entries from all four standard settings paths so your hook pipeline only references current plugin paths.
+**Settings migration failed during setup** — if `/lazy-core.setup` aborts at Step 0, read the captured stderr in the Step 6 report. A non-zero exit typically means a malformed migration callable in the `lazy_settings_migrations/` ladder. Fix the root cause, then re-run `/lazy-core.setup`.
+
+**Stale hook registrations from retired plugins** — if you see references to a `lazycortex-log` plugin path in your hook pipeline, re-run `/lazy-core.install`. Step 8 automatically strips those stale entries from all four standard settings paths.
+
+**Re-running after `git clone`** — rules, templates, `lazy.settings.json`, and `lazy.runtime.sh` are committed into the repo, but daemon supervisor units (launchd plist / systemd service) are per-machine and not committed. Re-run `/lazy-core.install` after cloning to install the supervisor for the current machine and to pick up any newer shipped plugin versions.
 
 ## Where this fits
 
 Every other lazycortex plugin assumes that `lazy.settings.json` exists and carries the `agent_models` structure, that the scaffold registry in `.claude/templates/core/` is populated, and that the always-loaded hygiene and security rules are in place. Those are all artifacts of `/lazy-core.install`. Other plugins' own install-and-audit documentation covers their plugin-specific bootstrap, but each starts from a foundation that core has already laid.
 
 The audit and doctor can run at any time without side effects and do not require install to have completed first — though their findings are more meaningful once the plugin is properly bootstrapped.
+
+For public-repo safety, see the **guardian** block: `/lazy-repo.mark-public` creates `.guard-waivers.json`, which also activates the pre-commit hook for every subsequent commit. For the async expert team, see the **runtime**, **experts**, and **memory** blocks — their setup walkthroughs pick up where this block's install step leaves off.
 
 ## Bootstrap order

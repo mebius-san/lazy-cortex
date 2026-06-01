@@ -9,7 +9,7 @@ intentionally a constant — operator identity (hostname) must not leak into met
 streams.
 
 The module is inert until `init()` is called: the daemon invokes it only when
-`lazy-core.runtime.metrics.enabled` is true, so importing this module is free
+`daemon.metrics.enabled` is true, so importing this module is free
 when metrics are disabled.
 
 The text exposition format follows the OpenMetrics spec
@@ -17,14 +17,25 @@ The text exposition format follows the OpenMetrics spec
 not need to pull in the `prometheus-client` third-party dependency.
 """
 from __future__ import annotations
+
 import hashlib
 import json
 import re
 import subprocess
 import threading
 import time
-from pathlib import Path
-from wsgiref.simple_server import WSGIServer, make_server
+from wsgiref.simple_server import make_server
+
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from constants import (  # pylint: disable=import-error
+  JobFile, JobMarker, JobOutcome, JobResponseKey, JobStatus, MetricLabel, MetricStateKey,
+)
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  from collections.abc import Callable
+  from pathlib import Path
+  from wsgiref.simple_server import WSGIServer
 
 
 _LABEL_VALUE_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -66,6 +77,7 @@ def _format_labels(labels: dict[str, str]) -> str:
   # sort keys for deterministic output (tests + diff stability)
   pairs = []
   for key in sorted(labels):
+    # waiver: Prometheus label-value escape sequence, not a domain constant
     val = str(labels[key]).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
     pairs.append(f'{key}="{val}"')
   return "{" + ",".join(pairs) + "}"
@@ -128,8 +140,8 @@ class _Counter:
       ValueError: If any label value fails the closed-vocabulary check.
       KeyError: If `label_values` is missing one of the declared label names.
     """
-    for key in self.labelnames:
-      _validate_label_value(key, label_values[key])
+    for label in self.labelnames:
+      _validate_label_value(label, label_values[label])
     key = tuple(label_values[name] for name in self.labelnames)
     self.values[key] = self.values.get(key, 0.0) + amount
 
@@ -144,7 +156,7 @@ class _Counter:
     """
     out = [ f"# HELP {self.name} {self.help}", f"# TYPE {self.name} counter" ]
     for key, val in self.values.items():
-      label_str = _format_labels(dict(zip(self.labelnames, key)))
+      label_str = _format_labels(dict(zip(self.labelnames, key, strict=False)))
       out.append(f"{self.name}{label_str} {_format_value(val)}")
     return out
 
@@ -191,8 +203,8 @@ class _Gauge:
       KeyError: If `label_values` is missing one of the declared label names.
     """
     label_values = label_values or {}
-    for key in self.labelnames:
-      _validate_label_value(key, label_values[key])
+    for label in self.labelnames:
+      _validate_label_value(label, label_values[label])
     key = tuple(label_values[name] for name in self.labelnames)
     self.values[key] = float(value)
 
@@ -214,7 +226,7 @@ class _Gauge:
     """
     out = [ f"# HELP {self.name} {self.help}", f"# TYPE {self.name} gauge" ]
     for key, val in self.values.items():
-      label_str = _format_labels(dict(zip(self.labelnames, key)))
+      label_str = _format_labels(dict(zip(self.labelnames, key, strict=False)))
       out.append(f"{self.name}{label_str} {_format_value(val)}")
     return out
 
@@ -280,8 +292,8 @@ class _Histogram:
       ValueError: If any label value fails the closed-vocabulary check.
       KeyError: If `label_values` is missing one of the declared label names.
     """
-    for key in self.labelnames:
-      _validate_label_value(key, label_values[key])
+    for label in self.labelnames:
+      _validate_label_value(label, label_values[label])
     key = tuple(label_values[name] for name in self.labelnames)
     # guard: lazily initialize the per-key bucket state on first observation
     if key not in self.values:
@@ -302,11 +314,11 @@ class _Histogram:
 
     Returns:
       A list of lines beginning with `# HELP` and `# TYPE` headers, followed by
-      per-bucket, `_sum`, and `_count` lines for each label-value combination.
+      per-bucket, cumulative-sum, and observation-count lines for each label-value combination.
     """
     out = [ f"# HELP {self.name} {self.help}", f"# TYPE {self.name} histogram" ]
     for key, (buckets, total_sum, total_count) in self.values.items():
-      base_labels = dict(zip(self.labelnames, key))
+      base_labels = dict(zip(self.labelnames, key, strict=False))
       for idx, bucket in enumerate(_BUCKETS):
         lbls = { **base_labels, "le": _bucket_label(bucket) }
         out.append(f"{self.name}_bucket{_format_labels(lbls)} {buckets[idx]}")
@@ -338,7 +350,7 @@ def is_enabled() -> bool:
   Returns:
     True after a successful `init` call; False otherwise.
   """
-  return bool(_state.get("initialized"))
+  return bool(_state.get(MetricStateKey.INITIALIZED))
 
 
 def init(repo_label: str, version: str, daemon_name: str) -> None:
@@ -357,74 +369,94 @@ def init(repo_label: str, version: str, daemon_name: str) -> None:
   Raises:
     ValueError: If any argument fails the closed-vocabulary label check.
   """
-  _validate_label_value("repo", repo_label)
-  _validate_label_value("version", version)
-  _validate_label_value("daemon_name", daemon_name)
+  _validate_label_value(MetricLabel.REPO, repo_label)
+  _validate_label_value(MetricLabel.VERSION, version)
+  _validate_label_value(MetricLabel.DAEMON_NAME, daemon_name)
 
-  _state["initialized"] = True
-  _state["repo"] = repo_label
-  _state["version"] = version
-  _state["daemon_name"] = daemon_name
-  _state["lock"] = threading.Lock()
+  _state[MetricStateKey.INITIALIZED] = True
+  _state[MetricStateKey.REPO] = repo_label
+  _state[MetricStateKey.VERSION] = version
+  _state[MetricStateKey.DAEMON_NAME] = daemon_name
+  _state[MetricStateKey.LOCK] = threading.Lock()
 
-  _state["ticks"] = _Counter(
+  _state[MetricStateKey.TICKS] = _Counter(
+    # waiver: external Prometheus metric name and HELP text, not internal keys
     "lazycortex_runtime_routine_ticks_total",
+    # waiver: external Prometheus HELP text, not a domain constant
     "Routine ticks dispatched by the runtime daemon.",
     ("repo", "routine", "status"),
   )
-  _state["errors"] = _Counter(
+  _state[MetricStateKey.ERRORS] = _Counter(
+    # waiver: external Prometheus metric name, not a domain constant
     "lazycortex_runtime_routine_errors_total",
+    # waiver: external Prometheus HELP text, not a domain constant
     "Routine ticks that ended in error.",
     ("repo", "routine", "reason"),
   )
-  _state["tokens"] = _Counter(
+  _state[MetricStateKey.TOKENS] = _Counter(
+    # waiver: external Prometheus metric name, not a domain constant
     "lazycortex_runtime_tokens_total",
+    # waiver: external Prometheus HELP text, not a domain constant
     "Anthropic API tokens consumed by routine subprocesses.",
     ("repo", "routine", "model", "kind"),
   )
-  _state["duration"] = _Histogram(
+  _state[MetricStateKey.DURATION] = _Histogram(
+    # waiver: external Prometheus metric name, not a domain constant
     "lazycortex_runtime_routine_tick_duration_seconds",
+    # waiver: external Prometheus HELP text, not a domain constant
     "Routine tick duration in seconds.",
     ("repo", "routine"),
   )
-  _state["last_tick"] = _Gauge(
+  _state[MetricStateKey.LAST_TICK] = _Gauge(
+    # waiver: external Prometheus metric name, not a domain constant
     "lazycortex_runtime_routine_last_tick_timestamp",
+    # waiver: external Prometheus HELP text, not a domain constant
     "Unix timestamp of the most recent tick for this routine.",
     ("repo", "routine"),
   )
-  _state["queue_depth"] = _Gauge(
+  _state[MetricStateKey.QUEUE_DEPTH] = _Gauge(
+    # waiver: external Prometheus metric name, not a domain constant
     "lazycortex_runtime_queue_depth",
+    # waiver: external Prometheus HELP text, not a domain constant
     "Expert queue depth by state — populated at scrape time from .experts/.jobs/.",
     ("repo", "expert", "state"),
   )
-  _state["up"] = _Gauge(
+  _state[MetricStateKey.UP] = _Gauge(
+    # waiver: external Prometheus metric name, not a domain constant
     "lazycortex_runtime_up",
+    # waiver: external Prometheus HELP text, not a domain constant
     "1 if the daemon's metrics endpoint is up.",
     (),
   )
-  _state["daemon_halted"] = _Gauge(
+  _state[MetricStateKey.DAEMON_HALTED] = _Gauge(
+    # waiver: external Prometheus metric name, not a domain constant
     "lazycortex_runtime_daemon_halted",
+    # waiver: external Prometheus HELP text, not a domain constant
     "1 if the daemon has halted on a dirty working tree, 0 otherwise.",
     ("repo", "reason", "triggered_by"),
   )
-  _state["build_info"] = _Gauge(
+  _state[MetricStateKey.BUILD_INFO] = _Gauge(
+    # waiver: external Prometheus metric name, not a domain constant
     "lazycortex_runtime_build_info",
+    # waiver: external Prometheus HELP text, not a domain constant
     "Static metadata for the running daemon (constant value 1).",
     ("repo", "version", "daemon_name"),
   )
-  _state["halt_count"] = _Counter(
+  _state[MetricStateKey.HALT_COUNT] = _Counter(
+    # waiver: external Prometheus metric name, not a domain constant
     "lazycortex_runtime_daemon_halts_total",
+    # waiver: external Prometheus HELP text, not a domain constant
     "Cumulative number of times the daemon has halted.",
     ("repo", "reason", "triggered_by"),
   )
 
-  _state["up"].set(None, 1)
-  _state["build_info"].set(
-    { "repo": repo_label, "version": version, "daemon_name": daemon_name }, 1,
+  _state[MetricStateKey.UP].set(None, 1)
+  _state[MetricStateKey.BUILD_INFO].set(
+    { MetricLabel.REPO: repo_label, MetricLabel.VERSION: version, MetricLabel.DAEMON_NAME: daemon_name }, 1,
   )
 
   # token_offset is populated by aggregate_tokens_from_log on each scrape
-  _state["token_offset"] = 0
+  _state[MetricStateKey.TOKEN_OFFSET] = 0
 
 
 def _resolve_status(exit_code: int, error: str | None) -> tuple[str, str | None]:
@@ -444,17 +476,22 @@ def _resolve_status(exit_code: int, error: str | None) -> tuple[str, str | None]
   # guard: clean exit short-circuits to ok with no reason
   if exit_code == 0:
     return ("ok", None)
+  # waiver: cross-module daemon error tag, not an internal key
   if error == "timeout":
     return ("timeout", "timeout")
+  # waiver: cross-module daemon error tag, not an internal key
   if error == "git_pre_failed":
     return ("error", "git_pre_failed")
+  # waiver: cross-module daemon error tag, not an internal key
   if error == "git_post_failed":
     return ("error", "git_post_failed")
   if exit_code == -1 and error is not None:
     # the daemon's broad except wraps the original message as
     # "resolve: ..." or "unexpected: ..." — match the prefix
+    # waiver: cross-module daemon error-tag prefix, not an internal key
     if error.startswith("resolve:"):
       return ("error", "resolve")
+    # waiver: cross-module daemon error-tag prefix, not an internal key
     if error.startswith("unexpected:"):
       return ("crash", "unexpected")
   return ("error", "subprocess_error")
@@ -477,16 +514,20 @@ def record_tick(routine: str, exit_code: int, duration_sec: float, error: str | 
   # guard: metrics are off — recording is a no-op
   if not is_enabled():
     return
-  _validate_label_value("routine", routine)
-  repo = _state["repo"]
+  _validate_label_value(MetricLabel.ROUTINE, routine)
+  repo = _state[MetricStateKey.REPO]
   status, reason = _resolve_status(exit_code, error)
 
-  with _state["lock"]:
-    _state["ticks"].inc({ "repo": repo, "routine": routine, "status": status })
+  with _state[MetricStateKey.LOCK]:
+    _state[MetricStateKey.TICKS].inc(
+      { MetricLabel.REPO: repo, MetricLabel.ROUTINE: routine, MetricLabel.STATUS: status })
     if reason is not None:
-      _state["errors"].inc({ "repo": repo, "routine": routine, "reason": reason })
-    _state["duration"].observe({ "repo": repo, "routine": routine }, float(duration_sec))
-    _state["last_tick"].set({ "repo": repo, "routine": routine }, time.time())
+      _state[MetricStateKey.ERRORS].inc(
+        { MetricLabel.REPO: repo, MetricLabel.ROUTINE: routine, MetricLabel.REASON: reason })
+    _state[MetricStateKey.DURATION].observe(
+      { MetricLabel.REPO: repo, MetricLabel.ROUTINE: routine }, float(duration_sec))
+    _state[MetricStateKey.LAST_TICK].set(
+      { MetricLabel.REPO: repo, MetricLabel.ROUTINE: routine }, time.time())
 
 
 def record_daemon_halt(reason: str, triggered_by: str) -> None:
@@ -500,11 +541,11 @@ def record_daemon_halt(reason: str, triggered_by: str) -> None:
   # guard: metrics are off — recording is a no-op
   if not is_enabled():
     return
-  repo = _state["repo"]
-  with _state["lock"]:
-    labels = { "repo": repo, "reason": reason, "triggered_by": triggered_by }
-    _state["daemon_halted"].set(labels, 1)
-    _state["halt_count"].inc(labels)
+  repo = _state[MetricStateKey.REPO]
+  with _state[MetricStateKey.LOCK]:
+    labels = { MetricLabel.REPO: repo, MetricLabel.REASON: reason, "triggered_by": triggered_by }
+    _state[MetricStateKey.DAEMON_HALTED].set(labels, 1)
+    _state[MetricStateKey.HALT_COUNT].inc(labels)
 
 
 def clear_daemon_halt() -> None:
@@ -516,13 +557,13 @@ def clear_daemon_halt() -> None:
   # guard: metrics are off — recording is a no-op
   if not is_enabled():
     return
-  with _state["lock"]:
-    _state["daemon_halted"].clear()
+  with _state[MetricStateKey.LOCK]:
+    _state[MetricStateKey.DAEMON_HALTED].clear()
 
 
 # --- Read API for tests ------------------------------------------------------
 
-def _registry_for(name: str):
+def _registry_for(name: str) -> _Counter | _Gauge | _Histogram | None:
   """
   Look up a registered metric instance by its exposition-format name.
 
@@ -594,6 +635,7 @@ def get_bucket_value(metric_name: str, labels: dict[str, str], le: str) -> float
   if state is None:
     return None
   buckets, _sum, _count = state
+  # waiver: Prometheus histogram +Inf bucket bound, not a domain constant
   if le == "+Inf":
     return float(buckets[-1])
   for idx, bucket in enumerate(_BUCKETS):
@@ -629,10 +671,11 @@ def render() -> bytes:
     if metric is None:
       continue
     lines.extend(metric.render())
+  # waiver: stdlib encoding idiom
   return ("\n".join(lines) + "\n").encode("utf-8")
 
 
-def _wsgi_app(environ, start_response):
+def _wsgi_app(environ: dict, start_response: Callable[..., object]) -> list[bytes]:
   """
   Serve the Prometheus exposition document for the `/metrics` and root endpoints.
 
@@ -645,10 +688,13 @@ def _wsgi_app(environ, start_response):
     a short `404\\n` for everything else.
   """
   # guard: unknown path — return 404 without rendering metrics
+  # waiver: external WSGI environ field name and route paths, not internal keys
   if environ.get("PATH_INFO", "/") not in ("/metrics", "/"):
+    # waiver: external HTTP status line and content-type header, not domain constants
     start_response("404 Not Found", [ ("Content-Type", "text/plain; charset=utf-8") ])
     return [ b"404\n" ]
   body = render()
+  # waiver: external HTTP status line, not a domain constant
   start_response("200 OK", [
     ("Content-Type", CONTENT_TYPE),
     ("Content-Length", str(len(body))),
@@ -675,10 +721,11 @@ def expose(bind: str = "127.0.0.1", port: int = 9464) -> WSGIServer:
   if not is_enabled():
     raise RuntimeError("metrics.expose() called before metrics.init()")
   server = make_server(bind, port, _wsgi_app)
+  # waiver: fixed background-thread name, not a domain constant
   thread = threading.Thread(target = server.serve_forever, name = "lazycortex-metrics", daemon = True)
   thread.start()
-  _state["server"] = server
-  _state["server_thread"] = thread
+  _state[MetricStateKey.SERVER] = server
+  _state[MetricStateKey.SERVER_THREAD] = thread
   return server
 
 
@@ -708,6 +755,7 @@ def resolve_repo_label(repo_root: Path, override: str | None) -> str:
     if rc.returncode == 0:
       url = rc.stdout.strip()
       if url:
+        # waiver: stdlib encoding idiom
         digest = hashlib.sha1(url.encode("utf-8")).hexdigest()
         return digest[:12]
   except FileNotFoundError:
@@ -733,14 +781,16 @@ def set_queue_depth_from_filesystem(repo_root: Path) -> None:
   if not is_enabled():
     return
   # `expert_pump.JOBS_BASE` is the source of truth: `.experts/.jobs`
+  # waiver: filesystem path idiom, not domain constants
   base = repo_root / ".experts" / ".jobs"
   # guard: no jobs directory — clear the gauge and bail
   if not base.exists():
-    _state["queue_depth"].clear()
+    _state[MetricStateKey.QUEUE_DEPTH].clear()
     return
 
   counts: dict[tuple[str, str], int] = {}
   for expert_dir in base.iterdir():
+    # guard: skip non-directory entries beside expert dirs
     if not expert_dir.is_dir():
       continue
     expert = expert_dir.name
@@ -748,17 +798,18 @@ def set_queue_depth_from_filesystem(repo_root: Path) -> None:
     if not _LABEL_VALUE_RE.match(expert):
       continue
     for job_dir in expert_dir.iterdir():
+      # guard: skip non-directory entries inside an expert dir
       if not job_dir.is_dir():
         continue
       state = _classify_job_state(job_dir)
       counts[(expert, state)] = counts.get((expert, state), 0) + 1
 
-  repo = _state["repo"]
-  with _state["lock"]:
-    _state["queue_depth"].clear()
+  repo = _state[MetricStateKey.REPO]
+  with _state[MetricStateKey.LOCK]:
+    _state[MetricStateKey.QUEUE_DEPTH].clear()
     for (expert, state), num in counts.items():
-      _state["queue_depth"].set(
-        { "repo": repo, "expert": expert, "state": state }, num,
+      _state[MetricStateKey.QUEUE_DEPTH].set(
+        { MetricLabel.REPO: repo, "expert": expert, "state": state }, num,
       )
 
 
@@ -783,32 +834,32 @@ def _classify_job_state(job_dir: Path) -> str:
   Returns:
     The closed-set state label for the job.
   """
-  if (job_dir / "DEAD").exists():
-    return "dead"
-  if (job_dir / "DONE").exists():
-    resp_path = job_dir / "response.json"
+  if (job_dir / JobMarker.DEAD).exists():
+    return JobStatus.DEAD
+  if (job_dir / JobMarker.DONE).exists():
+    resp_path = job_dir / JobFile.RESPONSE
     if resp_path.exists():
       try:
-        outcome = json.loads(resp_path.read_text()).get("outcome")
-        if outcome == "error":
-          return "failed"
+        outcome = json.loads(resp_path.read_text()).get(JobResponseKey.OUTCOME)
+        if outcome == JobOutcome.ERROR:
+          return JobStatus.FAILED
       except json.JSONDecodeError:
         # malformed response.json — treat as a generic done
         pass
-    return "done"
-  if (job_dir / "READY").exists():
-    if (job_dir / "PID").exists():
-      return "active"
-    return "queued"
+    return JobStatus.DONE
+  if (job_dir / JobMarker.READY).exists():
+    if (job_dir / JobMarker.PID).exists():
+      return JobStatus.ACTIVE
+    return JobStatus.QUEUED
   # fallback for partial / in-flight job dirs
-  return "queued"
+  return JobStatus.QUEUED
 
 
 # --- Token aggregation (Task B2) ---------------------------------------------
 
 # Tokens are recorded into <repo>/.logs/lazy-core/runtime/tokens.jsonl by
 # the expert pump. This module reads from a checkpointed offset stored
-# in `_state["token_offset"]` (process-local; durable persistence comes
+# in `_state[MetricStateKey.TOKEN_OFFSET]` (process-local; durable persistence comes
 # with the Phase B XDG_STATE checkpoint file — Task B2 step 2).
 
 def aggregate_tokens_from_log(repo_root: Path) -> None:
@@ -826,21 +877,26 @@ def aggregate_tokens_from_log(repo_root: Path) -> None:
   # guard: metrics are off — skip the log read entirely
   if not is_enabled():
     return
+  # waiver: filesystem path idiom (token-log location), not domain constants
   log_path = repo_root / ".logs" / "lazy-core" / "runtime" / "tokens.jsonl"
   # guard: no token log yet — nothing to aggregate
   if not log_path.exists():
     return
-  offset = _state.get("token_offset", 0)
-  repo = _state["repo"]
+  offset = _state.get(MetricStateKey.TOKEN_OFFSET, 0)
+  repo = _state[MetricStateKey.REPO]
+  # waiver: stdlib file-mode idiom
   with log_path.open("rb") as f:
     f.seek(offset)
     for raw in f:
       try:
+        # waiver: stdlib encoding idiom
         rec = json.loads(raw.decode("utf-8"))
       except (UnicodeDecodeError, json.JSONDecodeError):
         # malformed line — skip without poisoning the counter
         continue
+      # waiver: external token-log JSON field name and default, not internal keys
       routine = rec.get("routine") or "expert-pump"
+      # waiver: external token-log JSON field name and default, not internal keys
       model = rec.get("model") or "unknown"
       # guard: closed-vocabulary check rejects entries with unsafe label values
       if not _LABEL_VALUE_RE.match(routine) or not _LABEL_VALUE_RE.match(model):
@@ -853,9 +909,12 @@ def aggregate_tokens_from_log(repo_root: Path) -> None:
       ):
         num = rec.get(key) or 0
         if num:
-          _state["tokens"].inc(
-            { "repo": repo, "routine": routine, "model": model, "kind": kind },
+          _state[MetricStateKey.TOKENS].inc(
+            {
+              MetricLabel.REPO: repo, MetricLabel.ROUTINE: routine,
+              MetricLabel.MODEL: model, MetricLabel.KIND: kind,
+            },
             amount = float(num),
           )
     offset = f.tell()
-  _state["token_offset"] = offset
+  _state[MetricStateKey.TOKEN_OFFSET] = offset

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 PreToolUse hook: scan staged git changes for secrets, PII, and infrastructure leaks before
 committing to a public repo (or to the public subtree of a partially-public repo).
@@ -17,6 +18,10 @@ Gating:
 Waivers from `.guard-waivers.json` suppress known-acceptable findings.
 """
 
+from __future__ import annotations
+
+from typing import TypedDict
+
 import json
 import os
 import re
@@ -24,8 +29,20 @@ import subprocess
 import sys
 from fnmatch import fnmatch
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
 
-def _compile_scope_glob(glob):
+
+class _Check(TypedDict):
+  """
+  One secret/PII scan check: a compiled pattern plus a human-readable name.
+  """
+  name: str
+  pattern: re.Pattern[str]
+
+
+def _compile_scope_glob(glob: str) -> re.Pattern[str]:
   """
   Compile a repo-relative path glob (supporting `**`) to an anchored regular expression.
 
@@ -65,7 +82,7 @@ def _compile_scope_glob(glob):
   return re.compile("^" + "".join(parts) + "$")
 
 
-def _in_public_scope(path, compiled_globs):
+def _in_public_scope(path: str, compiled_globs: list[re.Pattern[str]]) -> bool:
   """
   Return whether the given path is considered part of the public scope.
 
@@ -82,12 +99,12 @@ def _in_public_scope(path, compiled_globs):
     return True
   return any(rx.match(path) for rx in compiled_globs)
 
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 # Check categories and patterns
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 
 # Category A: Secrets (FAIL — blocks commit)
-FAIL_CHECKS = {
+FAIL_CHECKS: dict[str, _Check] = {
   "A1": {
     "name": "Private key marker",
     "pattern": re.compile(r"-----BEGIN (RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----"),
@@ -123,7 +140,7 @@ FAIL_CHECKS = {
 }
 
 # Category B/C/D: WARN — allows commit but injects warning
-WARN_CHECKS = {
+WARN_CHECKS: dict[str, _Check] = {
   "B1": {
     "name": "Email address",
     "pattern": re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"),
@@ -158,12 +175,12 @@ SAFE_LINE_PATTERNS = [
   re.compile(r"Co-Authored-By:"),      # git trailer
 ]
 
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 # Waiver loading
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 
 
-def load_config(root):
+def load_config(root: str) -> tuple[list, list[re.Pattern[str]]]:
   """
   Load the waivers and public-scope globs declared for a repository.
 
@@ -179,13 +196,16 @@ def load_config(root):
     A tuple `(waivers, compiled_scope_globs)` where `waivers` is the list of waiver dicts
     from the file and `compiled_scope_globs` is the list of compiled scope-glob regexes.
   """
+  # waiver: filesystem filename idiom (guard-waivers config file), not a domain constant
   waiver_path = os.path.join(root, ".guard-waivers.json")
   try:
-    with open(waiver_path) as f:
+    with open(waiver_path, encoding = "utf-8") as f:
       data = json.load(f)
   except (json.JSONDecodeError, OSError):
     return [], []
+  # waiver: external-format guard-waivers config field names, not internal keys
   waivers = data.get("waivers", []) or []
+  # waiver: external-format guard-waivers config field name, not an internal key
   scopes_raw = data.get("public_scopes", []) or []
   compiled = []
   for g in scopes_raw:
@@ -200,7 +220,7 @@ def load_config(root):
   return waivers, compiled
 
 
-def is_waived(check_id, file_path, matched_text, waivers):
+def is_waived(check_id: str, file_path: str, matched_text: str, waivers: list) -> bool:
   """
   Return whether a finding is covered by any configured waiver.
 
@@ -217,38 +237,46 @@ def is_waived(check_id, file_path, matched_text, waivers):
   Returns:
     True if at least one waiver covers the finding; False otherwise.
   """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from datetime import date
 
   today = date.today().isoformat()
   for w in waivers:
     # check-id match
+    # waiver: external-format guard-waivers config field name, not an internal key
     wcheck = w.get("check", "*")
-    if wcheck != "*" and wcheck != check_id:
+    # guard: skip waivers whose check id does not match
+    if wcheck not in ("*", check_id):
       continue
     # scope match
+    # waiver: external-format guard-waivers config field name, not an internal key
     scope = w.get("scope", "*")
+    # guard: skip waivers whose scope does not cover this path
     if scope != "*" and not fnmatch(file_path, scope):
       continue
     # pattern match
     try:
+      # guard: skip waivers whose pattern does not match the finding
       if not re.search(w.get("pattern", ""), matched_text, re.IGNORECASE):
         continue
     except re.error:
       continue
     # expiry check
+    # waiver: external-format guard-waivers config field name, not an internal key
     expires = w.get("expires")
+    # guard: skip expired waivers
     if expires and today >= expires:
       continue
     return True
   return False
 
 
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 # Main
-# ---------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------
 
 
-def main():
+def main() -> None:
   """
   Entry point for the PreToolUse hook.
 
@@ -270,15 +298,20 @@ def main():
     # not JSON — ignore silently so a malformed payload never crashes the trigger
     return
 
+  # waiver: external-format hook-payload field name, not an internal key
   tool_name = hook_input.get("tool_name", "")
+  # waiver: external-format hook-payload field name, not an internal key
   tool_input = hook_input.get("tool_input", {})
 
   # gate: only git commit commands (Bash or MCP git)
+  # waiver: external Claude Code tool name, not a domain key
   if tool_name == "Bash":
+    # waiver: external-format tool-input field name, not an internal key
     command = tool_input.get("command", "")
     # guard: ignore Bash calls that aren't `git commit`
     if not re.match(r"git\s+commit\b", command):
       return
+  # waiver: external Claude Code tool name, not a domain key
   elif tool_name == "mcp__git__git_commit":
     pass  # always a commit, no further filtering needed
   else:
@@ -294,6 +327,7 @@ def main():
   except (subprocess.CalledProcessError, FileNotFoundError):
     return
   # guard: opt-in file absent — leave the trigger untouched
+  # waiver: filesystem filename idiom (guard-waivers opt-in file), not a domain constant
   if not os.path.isfile(os.path.join(root, ".guard-waivers.json")):
     return
 
@@ -316,6 +350,7 @@ def main():
   current_file = None
   added_lines = []
   for line in diff.splitlines():
+    # waiver: git diff-output token, not a domain constant
     if line.startswith("diff --git"):
       match = re.search(r" b/(.+)$", line)
       if match:
@@ -330,6 +365,7 @@ def main():
     return
 
   # drop .age files — they're encrypted by design
+  # waiver: filesystem extension idiom (age-encrypted artifact), not a domain constant
   added_lines = [ (f, c) for f, c in added_lines if not f.endswith(".age") ]
   # guard: every staged file was an .age artifact
   if not added_lines:
@@ -350,22 +386,27 @@ def main():
 
   for file_path, content in added_lines:
     # skip safe lines (templates, variable refs, etc.)
+    # guard: skip lines matching a known safe-line pattern
     if any(p.search(content) for p in SAFE_LINE_PATTERNS):
       continue
 
     # check FAIL patterns
     for check_id, check in FAIL_CHECKS.items():
+      # waiver: internal check-definition schema field name, single-source set in FAIL_CHECKS/WARN_CHECKS
       m = check["pattern"].search(content)
       if m and not is_waived(check_id, file_path, m.group(), waivers):
         fail_findings.append(
+          # waiver: internal check-definition schema field name, single-source set in FAIL_CHECKS/WARN_CHECKS
           f"  [{check_id}] {check['name']}: {file_path}"
         )
 
     # check WARN patterns
     for check_id, check in WARN_CHECKS.items():
+      # waiver: internal check-definition schema field name, single-source set in FAIL_CHECKS/WARN_CHECKS
       m = check["pattern"].search(content)
       if m and not is_waived(check_id, file_path, m.group(), waivers):
         warn_findings.append(
+          # waiver: internal check-definition schema field name, single-source set in FAIL_CHECKS/WARN_CHECKS
           f"  [{check_id}] {check['name']}: {file_path}"
         )
 
@@ -384,10 +425,12 @@ def main():
     msg_parts.extend(fail_findings)
     if warn_findings:
       msg_parts.append("")
+      # waiver: one-off human-facing message
       msg_parts.append("Also found warnings:")
       msg_parts.extend(warn_findings)
     msg_parts.append("")
     msg_parts.append(
+      # waiver: one-off human-facing message
       "Run /lazy-guard.check-public for details and fixes, "
       "or add waivers to .guard-waivers.json"
     )
@@ -404,6 +447,7 @@ def main():
     msg_parts.extend(warn_findings)
     msg_parts.append("")
     msg_parts.append(
+      # waiver: one-off human-facing message
       "Run /lazy-guard.check-public to review, "
       "or add waivers to .guard-waivers.json"
     )

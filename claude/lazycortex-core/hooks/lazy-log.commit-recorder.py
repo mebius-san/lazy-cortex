@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 PostToolUse hook that records every successful git commit to `.logs/commits.jsonl`.
 
@@ -14,14 +15,20 @@ Notes:
   - Works whether the commit was invoked via `Bash` or via the `mcp__git__git_commit` tool.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
 import subprocess
 import sys
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
 
-def get_commit_info():
+
+def get_commit_info() -> dict | None:
   """
   Return a dictionary describing the current `HEAD` commit, or `None` when no commit is reachable.
 
@@ -47,6 +54,7 @@ def get_commit_info():
       stderr = subprocess.DEVNULL,
       text = True,
     )
+    # waiver: inline numeric literal (maxsplit count), not a domain constant
     sha, date, author, subject = raw.split("\x00", 3)
   except (subprocess.CalledProcessError, ValueError, FileNotFoundError):
     return None
@@ -85,6 +93,7 @@ def get_commit_info():
   total_del = 0
   for line in numstat.splitlines():
     parts = line.split("\t")
+    # waiver: inline numeric literal (numstat column count), not a domain constant
     if len(parts) == 3:
       ins_raw, del_raw, path = parts
       ins = int(ins_raw) if ins_raw.isdigit() else 0
@@ -107,7 +116,7 @@ def get_commit_info():
   }
 
 
-def should_run(payload):
+def should_run(payload: dict) -> bool:
   """
   Decide whether the current hook invocation corresponds to a successful git commit.
 
@@ -121,15 +130,21 @@ def should_run(payload):
     False for every other tool invocation and for `Bash` git commits whose response carries a
     non-zero exit code.
   """
+  # waiver: external-format hook-payload field name, not an internal key
   tool_name = payload.get("tool_name", "")
+  # waiver: external Claude Code tool name, not a domain key
   if tool_name == "mcp__git__git_commit":
     return True
+  # waiver: external Claude Code tool name, not a domain key
   if tool_name == "Bash":
+    # waiver: external-format hook-payload field names, not internal keys
     command = payload.get("tool_input", {}).get("command", "")
     if re.match(r"git\s+commit\b", command):
       # in PostToolUse we also want to skip failures; consult tool_response when present
+      # waiver: external-format hook-payload field name, not an internal key
       response = payload.get("tool_response", {})
       # response may carry "exit_code" or similar; be permissive when the field is absent
+      # waiver: external-format hook-payload field name, not an internal key
       exit_code = response.get("exit_code")
       # guard: known failure exit code — do not record
       if exit_code is not None and exit_code != 0:
@@ -138,7 +153,7 @@ def should_run(payload):
   return False
 
 
-def main():
+def main() -> None:
   """
   Entry point invoked once per hook trigger.
 
@@ -160,32 +175,36 @@ def main():
   if info is None:
     return
 
+  # waiver: one-off commit-record schema field name, not a reusable domain key
   root = info.pop("root")
+  # waiver: filesystem path idiom (run-log directory), not a domain constant
   logs_dir = os.path.join(root, ".logs")
   try:
     os.makedirs(logs_dir, exist_ok = True)
   except OSError:
     return
 
+  # waiver: filesystem filename idiom (commit-ledger file), not a domain constant
   path = os.path.join(logs_dir, "commits.jsonl")
 
   # idempotency: don't append the same SHA twice (useful if the hook fires multiple times somehow
   # — e.g., for both Bash and MCP on the same commit)
   try:
-    with open(path) as f:
+    with open(path, encoding = "utf-8") as f:
       for line in f:
         try:
           entry = json.loads(line)
         except ValueError:
           continue
         # guard: SHA already recorded — skip duplicate append
+        # waiver: one-off commit-record schema field name, not a reusable domain key
         if entry.get("sha") == info["sha"]:
           return
   except FileNotFoundError:
     pass
 
   try:
-    with open(path, "a") as f:
+    with open(path, "a", encoding = "utf-8") as f:
       f.write(json.dumps(info) + "\n")
   except OSError:
     return

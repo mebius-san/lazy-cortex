@@ -7,98 +7,61 @@ execution-discipline-waiver: "thin dispatcher to iconize_sync.py — discipline 
 ---
 # Iconize Sync (Obsidian)
 
-Drives icon resolution for Obsidian vaults that follow a frontmatter-based
-semantics (role/stage/status/etc.). The worker reads
-`.claude/iconize/obsidian-icon-map.json` — a local, consumer-owned file that
-holds the vault's registries and declarative matchers — and writes
-`iconize_icon` / `iconize_color` keys into each matched note's YAML
-frontmatter. It never edits Iconize's `data.json`.
+Drives icon resolution for Obsidian vaults that follow a frontmatter-based semantics (role/stage/status/etc.). The worker reads `.claude/iconize/obsidian-icon-map.json` — a local, consumer-owned file that holds the vault's registries and declarative matchers — and writes `iconize_icon` / `iconize_color` keys into each matched note's YAML frontmatter. It never edits Iconize's `data.json`.
 
 Two consumers turn that frontmatter into icons on screen:
 
-- **Iconize plugin** (with `iconInFrontmatterEnabled: true`) reads `iconize_icon`
-  live from any `.md` file's frontmatter and paints the file's tab + title.
-- **Iconize Reloader plugin** (bundled by `lazy-obsidian.iconize-install`)
-  watches folder-note frontmatter and bridges it into folder-keyed entries in
-  `.obsidian/plugins/obsidian-icon-folder/data.json`, which Iconize then paints
-  on the folder row in the file-explorer. The reloader is the **sole writer**
-  of `data.json`.
+- **Iconize plugin** (with `iconInFrontmatterEnabled: true`) reads `iconize_icon` live from any `.md` file's frontmatter and paints the file's tab + title.
+- **Iconize Reloader plugin** (bundled by `lazy-obsidian.iconize-install`) watches folder-note frontmatter and bridges it into folder-keyed entries in `.obsidian/plugins/obsidian-icon-folder/data.json`, which Iconize then paints on the folder row in the file-explorer. The reloader is the **sole writer** of `data.json`.
 
 ## Prerequisite
 
-Run `lazy-obsidian.iconize-install` first to scaffold the protocol doc,
-icon-map, and hooks into your vault.
+Run `lazy-obsidian.iconize-install` first to scaffold the protocol doc, icon-map, and hooks into your vault.
 
 ## Subcommands
 
-All subcommands accept `--vault <root>`, `--dry-run`, and
-`--icon-map <path>` as global flags BEFORE the subcommand.
+All subcommands accept `--vault <root>`, `--dry-run`, and `--icon-map <path>` as global flags BEFORE the subcommand.
 
 ### `sync <vault-relative-path>`
 
-Resolve one file. Reads its frontmatter, matches against the icon-map, then
-upserts or clears `iconize_icon` / `iconize_color` in that file's frontmatter.
+Resolve one file. Reads its frontmatter, matches against the icon-map, then upserts or clears `iconize_icon` / `iconize_color` in that file's frontmatter.
 
 Invoked by: the PostToolUse hook, or manually.
 
 ### `sync-staged`
 
-Iterate `git diff --cached --name-only --diff-filter=ACMR -- '*.md'`, resolve
-each, batch-rewrite, then re-stage every modified `.md` so the frontmatter
-update lands in the same commit.
+Iterate `git diff --cached --name-only --diff-filter=ACMR -- '*.md'`, resolve each, batch-rewrite, then re-stage every modified `.md` so the frontmatter update lands in the same commit.
 
 Invoked by: `.githooks/pre-commit`.
 
 ### `reconcile [--prefix <path>]`
 
-Walk every `.md` file (under `--prefix` if given, else whole vault), compute
-the desired `iconize_*` frontmatter, and rewrite each file. Files that no
-longer match a rule have their `iconize_icon` / `iconize_color` keys cleared.
-Use after bulk frontmatter changes or icon-map edits.
+Walk every `.md` file (under `--prefix` if given, else whole vault), compute the desired `iconize_*` frontmatter, and rewrite each file. Files that no longer match a rule have their `iconize_icon` / `iconize_color` keys cleared. Use after bulk frontmatter changes or icon-map edits.
 
 ### `reconcile-plugin <plugin>`
 
-Plugin-scoped reconcile + auto-stage. Walks `claude/<plugin>/**/*.md` only,
-re-resolves icons, rewrites frontmatter where the resolution differs, and
-re-stages touched files so they ride the caller's pending commit.
+Plugin-scoped reconcile + auto-stage. Walks `claude/<plugin>/**/*.md` only, re-resolves icons, rewrites frontmatter where the resolution differs, and re-stages touched files so they ride the caller's pending commit.
 
-Use case: invoked by the pre-commit pipeline after bumping `claude/<plugin>/.claude-plugin/plugin.json`.
-The version delta flips callbacks like `plugin-is-patch-bumped`, so every file
-under the plugin's subtree whose color depends on those callbacks (folder
-note, README) repaints in the same commit. The full `reconcile` walk would
-do the same at vault scope; this one is bounded.
+Use case: invoked by the pre-commit pipeline after bumping `claude/<plugin>/.claude-plugin/plugin.json`. The version delta flips callbacks like `plugin-is-patch-bumped`, so every file under the plugin's subtree whose color depends on those callbacks (folder note, README) repaints in the same commit. The full `reconcile` walk would do the same at vault scope; this one is bounded.
 
 ### `reconcile-dirty`
 
-Safety-net for edits that bypass the PostToolUse `Write|Edit` hook (anything
-written via `Bash`, a shell script, a bulk rename, etc.). Queries `git status`
-for dirty `.md` files — modified, added, deleted, untracked, and renamed — and
-reconciles the unique parent directories of those paths in one pass. Silent
-no-op on a clean tree or a non-git vault.
+Safety-net for edits that bypass the PostToolUse `Write|Edit` hook (anything written via `Bash`, a shell script, a bulk rename, etc.). Queries `git status` for dirty `.md` files — modified, added, deleted, untracked, and renamed — and reconciles the unique parent directories of those paths in one pass. Silent no-op on a clean tree or a non-git vault.
 
 Invoked by: Claude Code's `Stop` hook (fires at the end of every agent turn).
 
 ### `install-hooks`
 
-Write `.githooks/pre-commit` (shim that runtime-resolves the plugin's
-`iconize_sync.py` at exec time, carrying a `HOOK_VERSION` marker). Does **not**
-touch consumer `.claude/settings.json` — the PostToolUse hook is shipped by
-the plugin itself via `hooks/hooks.json` and is auto-loaded when the plugin
-is enabled. Idempotent.
+Write `.githooks/pre-commit` (shim that runtime-resolves the plugin's `iconize_sync.py` at exec time, carrying a `HOOK_VERSION` marker). Does **not** touch consumer `.claude/settings.json` — the PostToolUse hook is shipped by the plugin itself via `hooks/hooks.json` and is auto-loaded when the plugin is enabled. Idempotent.
 
 ### `check-versions`
 
 Reports two independent drift axes:
 
-- **Shim** — compares the installed `.githooks/pre-commit` `HOOK_VERSION`
-  marker vs the worker's current `HOOK_VERSION`.
-- **Icon-map schema** — checks the vault's `obsidian-icon-map.json` `schema_version`
-  against the worker's `SUPPORTED_SCHEMA` set, and verifies `HOOK_VERSION`
-  satisfies the icon-map's optional `min_hook_version`.
+- **Shim** — compares the installed `.githooks/pre-commit` `HOOK_VERSION` marker vs the worker's current `HOOK_VERSION`.
+- **Icon-map schema** — checks the vault's `obsidian-icon-map.json` `schema_version` against the worker's `SUPPORTED_SCHEMA` set, and verifies `HOOK_VERSION` satisfies the icon-map's optional `min_hook_version`.
 
-Exits 0 when both are ok or schema is merely "missing" (vault not opted in);
-exits 5 on shim MAJOR drift, shim missing, or schema incompatible. Run after
-`/plugin update lazycortex-obsidian@lazycortex`.
+Exits 0 when both are ok or schema is merely "missing" (vault not opted in); exits 5 on shim MAJOR drift, shim missing, or schema incompatible. Run after `/plugin update lazycortex-obsidian@lazycortex`.
 
 ## How to run
 
@@ -119,8 +82,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py <subcommand> [flags] [args]
 
 ## Logging
 
-Log every invocation to `./.logs/claude/lazy-obsidian.iconize-sync/YYYY-MM-DD_HH-MM-SS.md`
-per `lazy-log.logging`. Use two separate steps: `Bash(mkdir -p ...)` then `Write`.
+Log every invocation to `./.logs/claude/lazy-obsidian.iconize-sync/YYYY-MM-DD_HH-MM-SS.md` per `lazy-log.logging`. Use two separate steps: `Bash(mkdir -p ...)` then `Write`.
 
 ## Non-goals
 

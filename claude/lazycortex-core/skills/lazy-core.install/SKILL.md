@@ -19,7 +19,7 @@ This skill has 16 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 4 — Sync authoring templates`
    - `Step 5 — Verify`
    - `Step 6 — Seed lazy.settings.json`
-   - `Step 7 — Bootstrap .logs/, .runtime/, and lazy.settings.local.json gitignore`
+   - `Step 7 — Bootstrap .logs/, .runtime/, lazy.settings.local.json gitignore, and .lazyignore`
    - `Step 8 — Migrate stale lazycortex-log hook registrations`
    - `Step 9 — Bootstrap runtime defaults`
    - `Step 10 — Bootstrap experts directory`
@@ -115,10 +115,15 @@ For every rule name in (source ∪ target), determine its state and act:
    - Install → copy source to target, state **installed**. Skip → state **skipped**.
 2. **Unchanged** — both present, byte-identical → no prompt. State **unchanged**.
 3. **Drift** — both present, differ → `AskUserQuestion` with:
-   - question: ``Rule `<name>.md` has drift — overwrite with shipped version?``
-   - description: ``**Purpose:** <source description>\n\n**What changed:** <one-sentence summary of the diff — e.g. \"source removes a blank line and lowercases `Claude/**` → `claude/**` in an example\">\n\n**Full diff:**\n```diff\n<unified diff, truncated to ~40 lines if longer>\n`````
-   - options: **overwrite** / **keep-local**.
-   - Overwrite → copy source to target, state **updated**. Keep-local → state **kept-local**.
+   - question: ``Rule `<name>.md` has drift — how to reconcile?``
+   - description: ``**Purpose (shipped):** <source description>\n**Purpose (local):** <target description>\n\n**Full diff:**\n```diff\n<unified diff, truncated to ~40 lines if longer>\n`````
+   - options: **merge-shipped** (Recommended) / **overwrite** / **keep-local**.
+   - **merge-shipped** is the default. Identify chunks (headings, list items, registry groups, paragraphs) present in shipped but absent in local. For each chunk, sub-prompt with `AskUserQuestion` ("Add `<chunk-title>` from the shipped version?") only when the chunk's intent is non-obvious; uncontroversial additions (e.g. new entries in a registry group that already exists locally with the same key) land without a prompt. Every local-only chunk stays untouched. Apply accepted chunks via `Edit`. State **merged** if any chunk landed, **kept-local** if zero (shipped contributed nothing the local file lacked).
+   - **overwrite** is correct only when the local copy is unintentional drift — no companion-style framing, no project-scope extension, identical purpose to the shipped version. Copy source to target. State **updated**.
+   - **keep-local** — agent declines to merge; preserve local verbatim. State **kept-local**.
+
+   **Heuristic for picking the default in the description text:** when the local file's body or `description:` frontmatter declares itself a companion / project-scope extension / dev-vault variant of the shipped file (phrases like "companion to", "project-scope", "extends the global", or a registry group with a name different from the shipped group), the agent presents `merge-shipped` as `(Recommended)` and explains why in the description. When the local file looks like an unintentional stale copy, the agent surfaces `overwrite` as `(Recommended)` instead.
+
 4. **Orphan** — target present, source missing → `AskUserQuestion` with:
    - question: ``Rule `<name>.md` is no longer shipped by the plugin — delete from `<targetDir>`?``
    - description: ``**Purpose (from your local copy):** <target description>\n\n**Why you're seeing this:** The plugin used to ship this rule but no longer does (renamed, merged into another rule, or deprecated). Keeping it means it stays loaded into your sessions but will never receive updates.``
@@ -131,33 +136,29 @@ One `AskUserQuestion` at a time — wait for the answer before the next prompt.
 
 Orphan detection only considers target files whose filename starts with one of this plugin's owned namespaces. Rules from other plugins and user-authored rules in unrelated namespaces are never offered for deletion.
 
+### `lazy-core.scaffold.md` — registry-block exemption (§5a)
+
+`lazy-core.scaffold.md` is special: its `## Registry` fenced block is **primitive-owned** — written only by `lazycortex-core scaffold` via Step 4's `scaffold-sync`. When this file reaches the per-rule decision:
+
+- **New** — install it as shipped (an empty `{}` registry); Step 4 then populates it.
+- **Drift** — do NOT offer `overwrite`. Reconcile only the prose/frontmatter region *above* `## Registry` (merge-shipped, which never deletes local content); leave the `## Registry` block **byte-for-byte**. The shipped block is `{}`, so it contributes nothing to merge.
+- Never rewrite or clobber the consumer's populated `## Registry` block here — surgical per-key registry writes are `scaffold-sync`'s job.
+
 ## Step 4: Sync authoring templates
 
-The plugin ships authoring templates under `<installPath>/templates/core/` that other plugins and customer-authored scaffolds reference via `.claude/templates/core/...`. Sync them into the consumer scope so the scaffold registry's paths resolve.
+Authoring-template copy **and** scaffold-registry population are both done by `lazy-core.scaffold-sync`, invoked for `lazycortex-core` itself — core registers through the same path as any other plugin (dogfood).
 
-### Enumerate
+Resolve this plugin's own `<installPath>` (the `installPath` field of `lazycortex-core@lazycortex` in `installed_plugins.json`) and the detected `<scope>` (`project` / `user`), then dispatch:
 
-- Source: `Glob <installPath>/templates/core/*.md`. If empty, abort the step with outcome `absent` (the plugin cache is broken).
-- Target dir: `<consumerScope>/templates/core/` (where `<consumerScope>` is `~/.claude/` for user scope, `<repo-root>/.claude/` for project scope).
-- Ensure target dir exists with `mkdir -p`.
+```
+Skill(skill: "lazycortex-core:lazy-core.scaffold-sync", args: "plugin=lazycortex-core installPath=<installPath> scope=<scope>")
+```
 
-### Per-template decision
-
-For each source template, compute state and act:
-
-1. **New** — target missing → copy source to target. State **installed**.
-2. **Unchanged** — both present, byte-identical (`diff -q`) → no action. State **unchanged**.
-3. **Drift** — both present, differ → `AskUserQuestion`:
-   - question: ``Template `<name>` has drift — overwrite with shipped version?``
-   - description: ``**What this is:** `.claude/templates/core/<name>` is referenced by `lazy-core.scaffold` for new artifact authoring.\n\n**Full diff:**\n```diff\n<unified diff, truncated to ~40 lines if longer>\n`````
-   - options: **overwrite** / **keep-local**.
-   - Overwrite → copy source to target, state **updated**. Keep-local → state **kept-local**.
-
-No orphan detection — the plugin owns the `core/` group exclusively, but customer-edited copies are valid keep-local outcomes.
+The skill discovers `<installPath>/templates/core/scaffold.entries.json`, copies `templates/core/*` (excluding the manifest) into `<consumerScope>/.claude/templates/core/` with the same merge / overwrite / keep-local drift handling that previously lived here, and upserts the `lazycortex-core` registry key from the manifest via `scaffold upsert` (surgical — the consumer's `_local` and any sibling-plugin keys stay byte-for-byte; per §5a the rest of `lazy-core.scaffold.md` is untouched).
 
 ### Outcome
 
-One line per template: `<name>: <state> → <targetPath>`.
+The `scaffold-sync` report: per-template copy states plus the registry upsert status.
 
 ## Step 5: Verify
 
@@ -226,28 +227,30 @@ If any mutation happened, write the file with `version: 1` at the top. Preserve 
 
 One line per seeded default: `_builtin.<key> = <value> (<state>)`. Plus `_user`, `_project`: `created (empty)` if new, `unchanged` otherwise.
 
-## Step 7: Bootstrap .logs/, .runtime/, and lazy.settings.local.json gitignore
+## Step 7: Bootstrap .logs/, .runtime/, lazy.settings.local.json gitignore, and .lazyignore
 
-Create `.logs/` and `.runtime/` at the repo root, ensure `.gitignore` covers both, and ensure `.gitignore` also lists `.claude/lazy.settings.local.json` (the gitignored personal overlay companion to the tracked `lazy.settings.json`).
+Create `.logs/` and `.runtime/` at the repo root, ensure `.gitignore` covers both, ensure `.gitignore` also lists `.claude/lazy.settings.local.json` (the gitignored personal overlay companion to the tracked `lazy.settings.json`), and seed a default `.lazyignore` at the repo root when one is absent.
 
 - `.logs/` — gitignored runtime journal (daemon output, recall logs, commit-recorder feed).
 - `.runtime/` — gitignored non-log daemon state (currently `state.json` carrying `last_run` / `git_watch` / `daemon_halted`).
 - `.claude/lazy.settings.local.json` — gitignored personal-overlay file that `lazy_settings.load_section` deep-merges onto the tracked `lazy.settings.json`. No directory is created — the file is opt-in and materializes only when the consumer adds a local override. The `.gitignore` slot is reserved so accidental commits are impossible.
+- `.lazyignore` — tracked git excludes file carrying the *extra* excludes (on top of `.gitignore`) that every tree-walking routine honours via git's ignore engine: venvs, `node_modules`, `__pycache__`, in-tree worktrees. Seeded from the shipped template only when absent — the consumer's own copy is authoritative and never overwritten.
 
-All three concerns are handled by two helpers. This step runs unconditionally (not gated on runtime-setup confirmation); the `.logs/` half is absorbed from the retired `lazy-log.install` skill.
+All four concerns are handled by three helpers. This step runs unconditionally (not gated on runtime-setup confirmation); the `.logs/` half is absorbed from the retired `lazy-log.install` skill.
 
 Run via:
 
 ```
 Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 from pathlib import Path
-from lazy_install_phases import bootstrap_logs_dir, bootstrap_lazy_settings_local_gitignore
+from lazy_install_phases import bootstrap_logs_dir, bootstrap_lazy_settings_local_gitignore, bootstrap_lazyignore
 print('.logs/+.runtime/:', bootstrap_logs_dir(Path('.')))
 print('lazy.settings.local.json:', bootstrap_lazy_settings_local_gitignore(Path('.')))
+print('.lazyignore:', bootstrap_lazyignore(Path('.'), Path('${CLAUDE_PLUGIN_ROOT}/templates/.lazyignore')))
 ")
 ```
 
-Outcome per helper: `bootstrapped` (something was created/appended) or `already-present`.
+Outcome per helper: `bootstrapped` (something was created/appended) or `already-present` for the first two; `seeded` / `already-present` / `template-missing` for `.lazyignore`.
 
 ## Step 8: Migrate stale lazycortex-log hook registrations
 
@@ -298,40 +301,47 @@ Ask once:
 ```
 AskUserQuestion:
   question: "Bootstrap runtime/experts for this repo at `<repo-root>`?"
-  description: "Sets up `lazy.settings.json[experts]`, `.claude/bin/lazy.runtime.sh` shim, the `lazy-core.runtime` block in `.claude/lazy.settings.json`, plus the expert-add wizard and optional daemon supervisor. Skip if you don't need this in this repo yet — the rest of the install is unaffected and you can re-run `/lazy-core.install` later."
+  description: "Sets up `lazy.settings.json[experts]`, `.claude/bin/lazy.runtime.sh` shim, the flat `daemon` + `routines` sections in `.claude/lazy.settings.json`, plus the expert-add wizard and optional daemon supervisor. Skip if you don't need this in this repo yet — the rest of the install is unaffected and you can re-run `/lazy-core.install` later."
   options: ["Yes", "Skip — this repo doesn't need runtime/experts"]
 ```
 
 - On `Skip — this repo doesn't need runtime/experts`: mark Steps 9–13 with outcome `skipped-per-user-choice`, skip to Step 14.
 - On `Yes`: continue with 9c below and run Steps 10–13.
 
-### 9c. Write `lazy-core.runtime`
+### 9c. Write the flat `daemon` + `routines` sections
 
-Read `<repo-root>/.claude/lazy.settings.json`. If the top-level key `lazy-core.runtime` is absent, add it by running:
+The runtime daemon reads its config from **flat top-level section keys** — `runtime_daemon.py` calls `load_section(path, "daemon")` and `load_section(path, "routines")` directly, and `expert_runtime.register_routine` writes the flat `routines` section. Seed those two sections (never a nested `lazy-core.runtime` object — nothing reads that shape).
+
+Read `<repo-root>/.claude/lazy.settings.json`. Seed each section only when its top-level key is absent (do NOT overwrite an existing section):
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+import json
 from lazy_settings import save_section
 from pathlib import Path
-save_section(
-    Path('<repo-root>/.claude/lazy.settings.json'),
-    'lazy-core.runtime',
-    {
-        '_version': 1,
-        'daemon': {
-            'git': None,
-            'polling_interval_sec': 5,
-            'cleanup_completed_after': '7d',
-            'cleanup_failed_after': '30d',
-            'cleanup_dead_after': '7d'
-        },
-        'routines': {}
-    }
-)
+p = Path('<repo-root>/.claude/lazy.settings.json')
+raw = json.loads(p.read_text()) if p.exists() else {}
+if 'daemon' not in raw:
+    save_section(p, 'daemon', {
+        'git': None,
+        'polling_interval_sec': 5,
+        'cleanup_completed_after': '7d',
+        'cleanup_failed_after': '30d',
+        'cleanup_dead_after': '7d'
+    })
+    print('daemon: bootstrapped')
+else:
+    print('daemon: already-present')
+raw = json.loads(p.read_text()) if p.exists() else {}
+if 'routines' not in raw:
+    save_section(p, 'routines', {})
+    print('routines: bootstrapped')
+else:
+    print('routines: already-present')
 "
 ```
 
-State **bootstrapped** if the section was absent and was written; **already-present** if it already existed (do NOT overwrite); **skipped-not-in-git-repo** or **skipped-per-user-choice** if 9a/9b chose to skip.
+State **bootstrapped** if either section was absent and was written; **already-present** if both already existed (do NOT overwrite); **skipped-not-in-git-repo** or **skipped-per-user-choice** if 9a/9b chose to skip.
 
 ## Step 10: Bootstrap experts directory
 
@@ -365,9 +375,9 @@ State **created** if written; **already-present** if it existed.
 ### Ensure `.gitignore` entries
 
 Read `<repo-root>/.gitignore` (or treat as empty if missing). Ensure it contains the following line:
-- `.experts/.jobs/`
+- `.experts/`
 
-`.logs/` and `.runtime/` are owned by Step 7's `bootstrap_logs_dir` helper and need no entry here. If the `.experts/.jobs/` line is absent, append it to `.gitignore` with `Edit` (or `Write` if the file was missing). State **updated** if appended; **already-present** otherwise.
+`.logs/` and `.runtime/` are owned by Step 7's `bootstrap_logs_dir` helper and need no entry here. The whole `.experts/` tree is runtime scratch (job queue, cross-repo trackers, subprocess locks) — ignore the directory, not just `.experts/.jobs/`. If a legacy narrower `.experts/.jobs/` line is present, replace it with `.experts/`; if no `.experts/` line is present, append it with `Edit` (or `Write` if the file was missing). State **updated** if appended or replaced; **already-present** if `.experts/` was already there.
 
 ## Step 10.5: Bootstrap .memory/ directory
 
@@ -502,7 +512,7 @@ If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-ch
 
 Otherwise, check two conditions:
 1. The `experts` section of `<repo-root>/.claude/lazy.settings.json` contains at least one expert entry (a key that is not `_version` and whose value is a dict).
-2. `lazy.settings.json[lazy-core.runtime].routines` does NOT already contain a key `lazy-expert.pump`.
+2. The flat `routines` section of `<repo-root>/.claude/lazy.settings.json` (`load_section(path, 'routines')` — the same section `register_routine` writes to) does NOT already contain a key `lazy-expert.pump`.
 
 If both conditions are true, run:
 
@@ -536,13 +546,13 @@ On `Skip — I'll start the daemon manually`: state **skipped-per-user-choice**.
 
 Before rendering the supervisor unit, decide whether to pass `--dev-mode` to `lazy.runtime.sh`. In dev-mode the shim scans `<repo-root>/claude/*/.claude-plugin/plugin.json` and prefers those plugin sources over the cache — useful when this repo IS the plugin's authoring vault.
 
-Read the persisted choice via:
+Read the persisted choice via (it lives under the flat `daemon` section as `daemon.supervisor.dev_mode` — `dev_mode` is install-skill state with no runtime reader, so it rides inside the flat `daemon` section the daemon already loads, not a separate nested object):
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 from lazy_settings import load_section
 from pathlib import Path
-sec = load_section(Path('<repo-root>/.claude/lazy.settings.json'), 'lazy-core.runtime')
+sec = load_section(Path('<repo-root>/.claude/lazy.settings.json'), 'daemon')
 print((sec.get('supervisor') or {}).get('dev_mode', 'unset'))
 "
 ```
@@ -557,16 +567,16 @@ AskUserQuestion:
   options: ["No (Recommended)", "Yes — prefer in-repo plugin sources"]
 ```
 
-Persist the chosen `dev_mode` (boolean) at `lazy-core.runtime.supervisor.dev_mode`:
+Persist the chosen `dev_mode` (boolean) under the flat `daemon` section at `daemon.supervisor.dev_mode`:
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 from lazy_settings import load_section, save_section
 from pathlib import Path
 p = Path('<repo-root>/.claude/lazy.settings.json')
-sec = load_section(p, 'lazy-core.runtime')
+sec = load_section(p, 'daemon')
 sec.setdefault('supervisor', {})['dev_mode'] = <True|False>
-save_section(p, 'lazy-core.runtime', sec)
+save_section(p, 'daemon', sec)
 "
 ```
 
@@ -660,10 +670,10 @@ Report to the user:
 - Python version probe outcome (Step 0)
 - Scope detected (user vs project)
 - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)
-- For each rule: state (**created**, **updated**, **unchanged**, or **kept-local**) and target `<path>`
+- For each rule: state (**created**, **updated**, **merged**, **unchanged**, **kept-local**, **deleted**, or **kept-orphan**) and target `<path>`
 - For each authoring template: state and target `<path>` (Step 4)
 - Per-key `agent_models` seed outcome from Step 6
-- `.logs/` directory bootstrap outcome (Step 7)
+- `.logs/` directory + `.lazyignore` seed bootstrap outcome (Step 7)
 - Hook migration outcome (Step 8): one line per settings path (`migrated` or `no-stale-entries`)
 - Runtime bootstrap outcome (Step 9)
 - Experts directory bootstrap outcome (Step 10)
@@ -688,7 +698,7 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Step 7 fails: `.logs/` or `.runtime/` not a directory** — a file by either of those names already exists at the repo root → remove or rename it, then re-run.
 - **Step 7 fails: `.gitignore` unwritable** — `bootstrap_logs_dir` raised a permission or I/O error → check permissions on the repo root, then re-run.
 - **Step 8 fails: settings.json malformed JSON** — one of the four standard settings paths contains invalid JSON → fix the file manually, then re-run.
-- **Step 9 fails: settings file unwritable** — `lazy_settings.save_section` raises a permission or I/O error when writing `lazy-core.runtime` into `.claude/lazy.settings.json` → check file permissions on `.claude/lazy.settings.json` and the `.claude/` directory, then re-run.
+- **Step 9 fails: settings file unwritable** — `lazy_settings.save_section` raises a permission or I/O error when writing the flat `daemon` / `routines` sections into `.claude/lazy.settings.json` → check file permissions on `.claude/lazy.settings.json` and the `.claude/` directory, then re-run.
 - **Step 11 wizard: "no candidates found"** — no agent files with `expert_protocol:` frontmatter were found under any of the three discovery scopes → no experts are available to register; the wizard skips automatically.
 - **Step 11 wizard: frontmatter parse failure** — a candidate agent file's frontmatter is malformed YAML → the candidate is skipped and flagged in the report as `parse-error`; fix the frontmatter manually and re-run `/lazy-core.install` to pick it up.
 - **Step 11 wizard: protocol reference unresolvable** — `reference_resolver.resolve_reference` returns `None` or raises for a candidate's `expert_protocol:` value → the candidate is skipped and flagged as `protocol-unresolvable`; verify the protocol file exists at the referenced path or reinstall the owning plugin.

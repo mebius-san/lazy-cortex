@@ -1,0 +1,1173 @@
+#!/usr/bin/env python3
+
+"""lazycortex-wiki CLI dispatcher."""
+
+# waiver: module name matches the installed CLI binary name; renaming breaks the PATH contract.
+# pylint: disable=invalid-name
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
+
+# Add the bin directory to sys.path so sibling modules (scope, etc.) can be imported.
+_BIN_DIR = str(Path(__file__).resolve().parent)
+if _BIN_DIR not in sys.path:
+  sys.path.insert(0, _BIN_DIR)
+
+# pylint: disable=wrong-import-position
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import candidates as _candidates  # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import dispatch as _dispatch  # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import doctor as _doctor      # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import index as _index        # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import nodes as _nodes        # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import relink as _relink      # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import scope as _scope        # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import tags as _tags          # noqa: E402
+# pylint: enable=wrong-import-position
+
+
+# subcommand name -> one-line help; drives argparse registration and dispatch.
+_SUBCOMMANDS = {
+  "resolve-scope":  "Resolve a file path to its scope id and config entry.",
+  "apply-node":     "Apply a curation.json result to a node file (classify or link fields).",
+  "process-file":   "Process a single node: dispatch a classify curation job.",
+  "dispatch-link":  "Dispatch a link curation job for a node (chains from classify).",
+  "relink-all":     "Full pass over all nodes in a scope; rebuild topics index.",
+  "relink-plan":    "Compute the daemon-free relink plan (initial/incremental/anchor-lost) as JSON.",
+  "find-candidates": "Recall a ranked shortlist of link candidates for a node as a JSON array.",
+  "find-back-candidates": "Recall scope nodes that attract a node (target appears in their top-N candidates).",
+  "set-synced-sha": "Write the wiki_synced_sha anchor into a scope's topics.md frontmatter.",
+  "build-index":    "Rebuild the topics.md index from current node tags.",
+  "collect-tags":   "Survey distinct tag values per axis across a scope, as JSON.",
+  "retag":          "Apply an axis-value alias map to a scope's node tags.",
+  "doctor":         "Audit scope integrity: broken links, missing summaries, stale glosses.",
+}
+
+# Environment variable name that carries the repository root.
+_ENV_REPO_ROOT = "LAZY_REPO_ROOT"
+
+
+# ----------------------------------------------------------------------------------------
+class Cli:
+  """
+  Command-line entry point for the lazycortex-wiki dispatcher.
+  """
+
+  _PROG = "lazycortex-wiki"
+  _DESCRIPTION = "lazycortex-wiki — LLM-navigable semantic wiki over a markdown+code base."
+  _DEST = "command"
+  _METAVAR = "subcommand"
+  _CMD_RESOLVE_SCOPE  = "resolve-scope"
+  _CMD_APPLY_NODE     = "apply-node"
+  _CMD_PROCESS_FILE   = "process-file"
+  _CMD_DISPATCH_LINK  = "dispatch-link"
+  _CMD_BUILD_INDEX    = "build-index"
+  _CMD_RELINK_PLAN    = "relink-plan"
+  _CMD_RELINK_ALL     = "relink-all"
+  _CMD_FIND_CANDIDATES = "find-candidates"
+  _CMD_FIND_BACK_CANDIDATES = "find-back-candidates"
+  _CMD_SET_SYNCED_SHA = "set-synced-sha"
+  _CMD_DOCTOR         = "doctor"
+  _CMD_COLLECT_TAGS   = "collect-tags"
+  _CMD_RETAG          = "retag"
+
+  # argparse dest names and help strings — shared or per-subcommand.
+  _ARG_PATH           = "path"
+  _ARG_PATH_HELP      = "File path to resolve (absolute or repo-relative)."
+  _ARG_REPO           = "--repo"
+  _ARG_REPO_HELP      = "Repository root (defaults to $LAZY_REPO_ROOT or cwd)."
+  _ARG_FROM              = "--from"
+  _ARG_FROM_DEST         = "from_file"
+  _ARG_FROM_HELP         = "Path to curation.json produced by the curator."
+  _ARG_ALIAS_HELP        = "Path to the alias-map JSON ({axis: {old-value: new-value}})."
+  _ARG_APPLY_PATH_HELP     = "Absolute path to the markdown node file."
+  _ARG_PROCESS_PATH_HELP   = "Git-item JSON string or bare file path to process."
+  _ARG_SCOPE_ID            = "scope_id"
+  _ARG_SCOPE_ID_HELP       = "Scope identifier as defined in lazy.settings.json[wiki.scopes]."
+  _ARG_DOCTOR_SCOPE_ID_HELP = "Scope id to audit; omit to audit every configured scope."
+  _ARG_RELINK_SCOPE_ID_HELP = "Scope id to plan a relink pass for."
+  _ARG_RELINK_ALL_SCOPE_ID_HELP = (
+    "Scope id to re-classify and re-link every node for (full pass, no src-hash skip)."
+  )
+  _ARG_SHA                  = "sha"
+  _ARG_SHA_HELP             = "Commit SHA to record as the wiki_synced_sha anchor."
+  _ARG_NODE_PATH            = "node_path"
+  _ARG_NODE_PATH_HELP       = "Absolute or repo-relative path to the node to find candidates for."
+  _ARG_SCOPE               = "--scope"
+  _ARG_SCOPE_DEST          = "scope_id"
+  _ARG_SCOPE_HELP          = "Scope id the node belongs to (as in lazy.settings.json[wiki.scopes])."
+  _ARG_TOP_N               = "--top-n"
+  _ARG_TOP_N_DEST          = "top_n"
+  _ARG_TOP_N_DEFAULT       = 20
+  _ARG_TOP_N_TYPE          = int
+  _ARG_TOP_N_HELP          = "Maximum number of candidate paths to return (default 20)."
+  _ARG_APPLY               = "--apply"
+  _ARG_APPLY_DEST          = "apply"
+  _ARG_APPLY_HELP          = "Perform fixable repairs (index rebuild, drop broken see-also, refresh stale glosses)."
+
+  # Curation result JSON field names.
+  _FIELD_WIKI_SUMMARY = "wiki_summary"
+  _FIELD_TOPICS       = "topics"
+  _FIELD_CONNECTORS   = "connectors"
+  _FIELD_SEE_ALSO     = "see_also"
+
+  # Scope config key carrying the tag axis list.
+  _CFG_TAG_AXES        = "tag_axes"
+  # Scope config key carrying the topics-index path.
+  _CFG_TOPICS_INDEX    = "topics_index"
+
+  # Payload field names for the dispatch bundle.
+  _PAYLOAD_KIND              = "kind"
+  _PAYLOAD_NODE_PATH         = "node_path"
+  _PAYLOAD_NODE_CONT         = "node_content"
+  _PAYLOAD_SCOPE_ID          = "scope_id"
+  _PAYLOAD_PINS              = "pins"
+  _PAYLOAD_EXISTING_TAGS     = "existing_tags"
+  _PAYLOAD_TOPICS_INDEX_CONT = "topics_index_content"
+
+  # argparse help string for dispatch-link path argument.
+  _ARG_DISPATCH_LINK_PATH_HELP = "Absolute path to the node file to dispatch a link job for."
+
+  # File encoding used throughout this module.
+  _ENCODING = "utf-8"
+
+  # Git-item JSON path key.
+  _GIT_ITEM_PATH_KEY = "path"
+
+  # Finding-dict keys emitted by Doctor (read-only consumption here).
+  _F_CHECK    = "check"
+  _F_SEVERITY = "severity"
+  _F_NODE     = "node"
+  _F_MESSAGE  = "message"
+  _F_FIXABLE  = "fixable"
+  _F_APPLIED  = "applied"
+
+  # Severity display order: FAIL first, then WARN, then INFO.
+  _SEVERITY_ORDER = ("FAIL", "WARN", "INFO")
+
+  # argparse action for the boolean --apply flag.
+  _ACTION_STORE_TRUE = "store_true"
+
+  # Doctor output / error message strings.
+  _MSG_NO_SCOPES = "doctor: no wiki scopes configured (run /wiki.install and /wiki.configure)"
+  _MSG_CLEAN     = "  (clean)"
+
+  # Frontmatter anchor key written into topics.md by set-synced-sha.
+  _KEY_WIKI_SYNCED_SHA = "wiki_synced_sha"
+
+  def run(self, argv: list[str] | None = None) -> int:
+    """
+    Parse arguments and dispatch to the selected subcommand.
+
+    Args:
+      argv: Argument vector to parse; defaults to the process arguments when not supplied.
+
+    Returns:
+      Integer exit code.
+    """
+    parser = self._build_parser()
+    args = parser.parse_args(argv)
+    # guard: no subcommand given — print help and exit non-zero
+    if getattr(args, self._DEST) is None:
+      parser.print_help(sys.stderr)
+      return 2
+    cmd = getattr(args, self._DEST)
+    if cmd == self._CMD_RESOLVE_SCOPE:
+      return self._cmd_resolve_scope(args)
+    if cmd == self._CMD_APPLY_NODE:
+      return self._cmd_apply_node(args)
+    if cmd == self._CMD_PROCESS_FILE:
+      return self._cmd_process_file(args)
+    if cmd == self._CMD_DISPATCH_LINK:
+      return self._cmd_dispatch_link(args)
+    if cmd == self._CMD_BUILD_INDEX:
+      return self._cmd_build_index(args)
+    if cmd == self._CMD_RELINK_PLAN:
+      return self._cmd_relink_plan(args)
+    if cmd == self._CMD_RELINK_ALL:
+      return self._cmd_relink_all(args)
+    if cmd == self._CMD_FIND_CANDIDATES:
+      return self._cmd_find_candidates(args)
+    if cmd == self._CMD_FIND_BACK_CANDIDATES:
+      return self._cmd_find_back_candidates(args)
+    if cmd == self._CMD_SET_SYNCED_SHA:
+      return self._cmd_set_synced_sha(args)
+    if cmd == self._CMD_DOCTOR:
+      return self._cmd_doctor(args)
+    if cmd == self._CMD_COLLECT_TAGS:
+      return self._cmd_collect_tags(args)
+    if cmd == self._CMD_RETAG:
+      return self._cmd_retag(args)
+    return self._not_implemented(cmd)
+
+  def _build_parser(self) -> argparse.ArgumentParser:
+    """
+    Build the top-level argument parser with one subparser per registered subcommand.
+
+    Returns:
+      The configured argument parser.
+    """
+    parser = argparse.ArgumentParser(prog = self._PROG, description = self._DESCRIPTION)
+    sub = parser.add_subparsers(dest = self._DEST, metavar = self._METAVAR)
+    for name, summary in _SUBCOMMANDS.items():
+      p = sub.add_parser(name, help = summary)
+      if name == self._CMD_RESOLVE_SCOPE:
+        p.add_argument(self._ARG_PATH, help = self._ARG_PATH_HELP)
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_APPLY_NODE:
+        p.add_argument(self._ARG_PATH, help = self._ARG_APPLY_PATH_HELP)
+        p.add_argument(
+          self._ARG_FROM,
+          dest = self._ARG_FROM_DEST,
+          required = True,
+          help = self._ARG_FROM_HELP,
+        )
+      elif name == self._CMD_PROCESS_FILE:
+        p.add_argument(
+          self._ARG_PATH,
+          help = self._ARG_PROCESS_PATH_HELP,
+        )
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_DISPATCH_LINK:
+        p.add_argument(self._ARG_PATH, help = self._ARG_DISPATCH_LINK_PATH_HELP)
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_BUILD_INDEX:
+        p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_SCOPE_ID_HELP)
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_RELINK_PLAN:
+        p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_RELINK_SCOPE_ID_HELP)
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_RELINK_ALL:
+        p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_RELINK_ALL_SCOPE_ID_HELP)
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_FIND_CANDIDATES:
+        p.add_argument(self._ARG_NODE_PATH, help = self._ARG_NODE_PATH_HELP)
+        p.add_argument(
+          self._ARG_SCOPE,
+          dest = self._ARG_SCOPE_DEST,
+          required = True,
+          help = self._ARG_SCOPE_HELP,
+        )
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+        p.add_argument(
+          self._ARG_TOP_N,
+          dest = self._ARG_TOP_N_DEST,
+          type = self._ARG_TOP_N_TYPE,
+          default = self._ARG_TOP_N_DEFAULT,
+          help = self._ARG_TOP_N_HELP,
+        )
+      elif name == self._CMD_FIND_BACK_CANDIDATES:
+        p.add_argument(self._ARG_NODE_PATH, help = self._ARG_NODE_PATH_HELP)
+        p.add_argument(
+          self._ARG_SCOPE,
+          dest = self._ARG_SCOPE_DEST,
+          required = True,
+          help = self._ARG_SCOPE_HELP,
+        )
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+        p.add_argument(
+          self._ARG_TOP_N,
+          dest = self._ARG_TOP_N_DEST,
+          type = self._ARG_TOP_N_TYPE,
+          default = self._ARG_TOP_N_DEFAULT,
+          help = self._ARG_TOP_N_HELP,
+        )
+      elif name == self._CMD_SET_SYNCED_SHA:
+        p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_SCOPE_ID_HELP)
+        p.add_argument(self._ARG_SHA, help = self._ARG_SHA_HELP)
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_DOCTOR:
+        p.add_argument(
+          self._ARG_SCOPE_ID,
+          nargs = "?",
+          default = None,
+          help = self._ARG_DOCTOR_SCOPE_ID_HELP,
+        )
+        p.add_argument(
+          self._ARG_APPLY,
+          dest = self._ARG_APPLY_DEST,
+          action = self._ACTION_STORE_TRUE,
+          help = self._ARG_APPLY_HELP,
+        )
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_COLLECT_TAGS:
+        p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_SCOPE_ID_HELP)
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_RETAG:
+        p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_SCOPE_ID_HELP)
+        p.add_argument(
+          self._ARG_FROM,
+          dest = self._ARG_FROM_DEST,
+          required = True,
+          help = self._ARG_ALIAS_HELP,
+        )
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+    return parser
+
+  def _cmd_resolve_scope(self, args: argparse.Namespace) -> int:
+    """
+    Resolve a file path to its scope and print JSON to stdout.
+
+    Output is `{"scope_id": "<id>", "cfg": {...}}` on a match, or
+    `{"scope_id": null}` when no scope matches.  Always exits 0.
+
+    Args:
+      args: Parsed argument namespace; must carry `.path` and `.repo`.
+
+    Returns:
+      Integer exit code (always 0).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    resolver = _scope.ScopeResolver(repo = repo)
+    result = resolver.resolve_scope_by_path(args.path)
+    if result is None:
+      print(json.dumps({ "scope_id": None }))
+    else:
+      scope_id, cfg = result
+      print(json.dumps({ "scope_id": scope_id, "cfg": cfg }))
+    return 0
+
+  def _cmd_apply_node(self, args: argparse.Namespace) -> int:
+    """
+    Apply a curation.json result file to a node.
+
+    Reads the JSON at `--from`, determines which fields are present
+    (`wiki_summary`/`topics`/`connectors` → classify-apply; `see_also` →
+    link-apply; both → full apply), and writes only those managed regions.
+    The optional `connectors` array flows into the classify-apply path; when
+    absent the node's connectors block is left untouched.  Prints a one-line
+    outcome to stdout.  Always exits 0 on success.
+
+    Args:
+      args: Parsed argument namespace; must carry `.path` and `.from_file`.
+
+    Returns:
+      Integer exit code (0 on success, 1 on failure).
+    """
+    node_path = Path(args.path)
+    curation_path = Path(args.from_file)
+
+    # guard: node file does not exist
+    if not node_path.is_file():
+      print(f"apply-node: node not found: {node_path}", file = sys.stderr)
+      return 1
+    # guard: curation.json does not exist
+    if not curation_path.is_file():
+      print(f"apply-node: curation file not found: {curation_path}", file = sys.stderr)
+      return 1
+
+    with curation_path.open(encoding = self._ENCODING) as fh:
+      curation: dict = json.load(fh)
+
+    has_classify = (
+      self._FIELD_WIKI_SUMMARY in curation
+      or self._FIELD_TOPICS in curation
+      or self._FIELD_CONNECTORS in curation
+    )
+    has_link = self._FIELD_SEE_ALSO in curation
+
+    # guard: neither classify nor link fields present — nothing to apply
+    if not has_classify and not has_link:
+      print(
+        f"apply-node: curation.json has no applicable fields: {curation_path}",
+        file = sys.stderr,
+      )
+      return 1
+
+    node = _nodes.node_for(node_path)
+    # guard: unrecognised file type
+    if node is None:
+      print(
+        f"apply-node: unrecognised file type: {node_path}",
+        file = sys.stderr,
+      )
+      return 1
+
+    if has_classify and has_link:
+      node.apply(
+        wiki_summary = curation.get(self._FIELD_WIKI_SUMMARY, ""),
+        topics = curation.get(self._FIELD_TOPICS, []),
+        see_also_lines = curation.get(self._FIELD_SEE_ALSO, []),
+        connectors = curation.get(self._FIELD_CONNECTORS),
+      )
+      print(f"apply-node: ok (classify+link) {node_path.name}")
+    elif has_classify:
+      node.apply_classify(
+        wiki_summary = curation.get(self._FIELD_WIKI_SUMMARY, ""),
+        topics = curation.get(self._FIELD_TOPICS, []),
+        connectors = curation.get(self._FIELD_CONNECTORS),
+      )
+      print(f"apply-node: ok (classify) {node_path.name}")
+    else:
+      node.apply_link(see_also_lines = curation.get(self._FIELD_SEE_ALSO, []))
+      print(f"apply-node: ok (link) {node_path.name}")
+    return 0
+
+  def _cmd_build_index(self, args: argparse.Namespace) -> int:
+    """
+    Rebuild the topics.md index for the given scope.
+
+    Resolves the scope config from `lazy.settings.json`, then delegates
+    to `TopicIndex.build` to enumerate nodes, aggregate the topic tree,
+    and write the deterministic `topics.md`.  Prints a one-line outcome
+    to stdout.
+
+    Args:
+      args: Parsed argument namespace; must carry `.scope_id` and `.repo`.
+
+    Returns:
+      Integer exit code (0 on success, 1 when the scope is unknown).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    resolver = _scope.ScopeResolver(repo = repo)
+    scopes = resolver.load_scopes()
+
+    # guard: requested scope id not present in settings
+    if args.scope_id not in scopes:
+      print(
+        f"build-index: unknown scope '{args.scope_id}' "
+        f"(known: {', '.join(sorted(scopes)) or 'none'})",
+        file = sys.stderr,
+      )
+      return 1
+
+    cfg = scopes[args.scope_id]
+    builder = _index.TopicIndex(repo = repo, cfg = cfg, scope_id = args.scope_id)
+    out_path = builder.build()
+    rel = out_path.relative_to(repo).as_posix()
+    print(f"build-index: ok {args.scope_id} → {rel}")
+    return 0
+
+  def _cmd_relink_plan(self, args: argparse.Namespace) -> int:
+    """
+    Compute the daemon-free relink plan for a scope and print it as JSON.
+
+    Resolves the scope config, then delegates to `RelinkPlanner.plan`, which
+    selects the mode (`initial` / `incremental` / `anchor-lost`) by comparing
+    the working tree against the `wiki_synced_sha` anchor and emits the
+    classify / link / drop path sets.  The plan dict is printed to stdout as a
+    single JSON object.
+
+    Args:
+      args: Parsed argument namespace; must carry `.scope_id` and `.repo`.
+
+    Returns:
+      Integer exit code (0 on success, 1 when the scope is unknown).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    resolver = _scope.ScopeResolver(repo = repo)
+    scopes = resolver.load_scopes()
+
+    # guard: requested scope id not present in settings
+    if args.scope_id not in scopes:
+      print(
+        f"relink-plan: unknown scope '{args.scope_id}' "
+        f"(known: {', '.join(sorted(scopes)) or 'none'})",
+        file = sys.stderr,
+      )
+      return 1
+
+    planner = _relink.RelinkPlanner(
+      repo     = repo,
+      scope_id = args.scope_id,
+      cfg      = scopes[args.scope_id],
+    )
+    plan = planner.plan()
+    print(json.dumps(plan))
+    return 0
+
+  def _cmd_relink_all(self, args: argparse.Namespace) -> int:
+    """
+    Dispatch a classify curation job for every node in the given scope.
+
+    Re-processes all nodes regardless of whether the operator source has changed,
+    making it suitable for a full-scope vocabulary consolidation pass.  The scope's
+    existing per-axis tag values are collected once and shared across every dispatched
+    payload as the classify anchor, so curators on a cold catalog still pull the
+    consolidated vocabulary.  Primarily fired by the `wiki.relink-weekly` daemon
+    schedule routine; direct invocation is also valid.
+
+    Notes:
+      - Exits 1 with a `relink-all: unknown scope '<id>'` message on stderr when the
+        requested scope is not configured.
+      - Dispatches one classify job per node without waiting for any job to complete.
+      - Prints `{"scope": "<id>", "dispatched": N, "skipped": K}` as a single JSON line
+        on stdout.  `skipped` increments only for files the node factory does not recognise.
+
+    Args:
+      args: Parsed argument namespace; must carry `.scope_id` and `.repo`.
+
+    Returns:
+      Integer exit code (0 on success, 1 when the scope is unknown).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    resolver = _scope.ScopeResolver(repo = repo)
+    scopes = resolver.load_scopes()
+
+    # guard: requested scope id not present in settings
+    if args.scope_id not in scopes:
+      print(
+        f"relink-all: unknown scope '{args.scope_id}' "
+        f"(known: {', '.join(sorted(scopes)) or 'none'})",
+        file = sys.stderr,
+      )
+      return 1
+
+    scope_cfg = scopes[args.scope_id]
+    tag_axes: list[str] = scope_cfg.get(self._CFG_TAG_AXES) or []
+    nodes = resolver.iter_nodes(scope_cfg)
+
+    existing_tags = _tags.TagOps(
+      repo = repo, scope_id = args.scope_id, cfg = scope_cfg,
+    ).collect()
+
+    dispatcher = _dispatch.CoreDispatch()
+    dispatched = 0
+    skipped = 0
+    for abs_path in nodes:
+      node_obj = _nodes.node_for(abs_path)
+      # guard: unrecognised file type — scope glob caught it but node-factory rejected
+      if node_obj is None:
+        skipped += 1
+        continue
+      node_content = abs_path.read_text(encoding = self._ENCODING)
+      pins = {
+        "pinned_topics":    node_obj.pinned_topics,
+        "unrelated_topics": node_obj.unrelated_topics,
+        "pinned_links":     node_obj.pinned_links,
+        "unrelated_links":  node_obj.unrelated_links,
+      }
+      payload = {
+        self._PAYLOAD_KIND:          _dispatch.CoreDispatch.KIND_CLASSIFY,
+        self._PAYLOAD_NODE_PATH:     str(abs_path),
+        self._PAYLOAD_NODE_CONT:     node_content,
+        self._CFG_TAG_AXES:          tag_axes,
+        self._PAYLOAD_SCOPE_ID:      args.scope_id,
+        self._PAYLOAD_PINS:          pins,
+        self._PAYLOAD_EXISTING_TAGS: existing_tags,
+      }
+      dispatcher.dispatch_curator(
+        repo = repo,
+        node_path = abs_path,
+        payload = payload,
+      )
+      dispatched += 1
+
+    print(json.dumps({
+      "scope":      args.scope_id,
+      "dispatched": dispatched,
+      "skipped":    skipped,
+    }))
+    return 0
+
+  def _cmd_find_candidates(self, args: argparse.Namespace) -> int:
+    """
+    Recall a ranked link-candidate shortlist for a node and print it as JSON.
+
+    Resolves the scope config, then delegates to `CandidateFinder` (composed
+    with the default two-layer source stack) to enumerate scope nodes, merge
+    scored suggestions, apply the node's pins, and cap to `--top-n`.  The
+    result — a JSON array of repo-relative POSIX candidate-path strings — is
+    printed to stdout.  An empty array (`[]`) is valid and tells the link
+    curator to fall back to topics.md judgment.
+
+    Args:
+      args: Parsed argument namespace; must carry `.node_path`, `.scope_id`,
+        `.repo`, and `.top_n`.
+
+    Returns:
+      Integer exit code (0 on success, 1 when the scope is unknown).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    resolver = _scope.ScopeResolver(repo = repo)
+    scopes = resolver.load_scopes()
+
+    # guard: requested scope id not present in settings
+    if args.scope_id not in scopes:
+      print(
+        f"find-candidates: unknown scope '{args.scope_id}' "
+        f"(known: {', '.join(sorted(scopes)) or 'none'})",
+        file = sys.stderr,
+      )
+      return 1
+
+    node_path = Path(args.node_path)
+    abs_path = node_path if node_path.is_absolute() else repo / node_path
+
+    finder = _candidates.CandidateFinder.with_default_sources(
+      repo,
+      scopes[args.scope_id],
+      args.scope_id,
+      top_n = args.top_n,
+    )
+    result = finder.find(abs_path)
+    print(json.dumps(result))
+    return 0
+
+  def _cmd_find_back_candidates(self, args: argparse.Namespace) -> int:
+    """
+    Recall scope nodes that attract a node and print them as a JSON array.
+
+    Resolves the scope config, then delegates to `BackCandidateFinder` to
+    enumerate the scope's other nodes and keep every one whose top-N candidate
+    list contains the target — i.e. the set of nodes that should consider
+    linking TO the target. Used by `process-file` for incremental new-node
+    dispatch: the daemon fires link jobs only for these attracted nodes
+    instead of re-linking the entire scope.
+
+    Args:
+      args: Parsed argument namespace; must carry `.node_path`, `.scope_id`,
+        `.repo`, and `.top_n`.
+
+    Returns:
+      Integer exit code (0 on success, 1 when the scope is unknown).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    resolver = _scope.ScopeResolver(repo = repo)
+    scopes = resolver.load_scopes()
+
+    # guard: requested scope id not present in settings
+    if args.scope_id not in scopes:
+      print(
+        f"find-back-candidates: unknown scope '{args.scope_id}' "
+        f"(known: {', '.join(sorted(scopes)) or 'none'})",
+        file = sys.stderr,
+      )
+      return 1
+
+    node_path = Path(args.node_path)
+    abs_path = node_path if node_path.is_absolute() else repo / node_path
+
+    finder = _candidates.BackCandidateFinder(
+      repo,
+      scopes[args.scope_id],
+      args.scope_id,
+      top_n = args.top_n,
+    )
+    result = finder.find(abs_path)
+    print(json.dumps(result))
+    return 0
+
+  def _cmd_collect_tags(self, args: argparse.Namespace) -> int:
+    """
+    Survey the distinct tag values per axis for a scope and print them as JSON.
+
+    Resolves the scope config from `lazy.settings.json`, then delegates to
+    `TagOps.collect` to enumerate scope nodes and aggregate the per-axis value
+    set with counts and example summaries.  The result dict is printed to
+    stdout as a single JSON object.
+
+    Args:
+      args: Parsed argument namespace; must carry `.scope_id` and `.repo`.
+
+    Returns:
+      Integer exit code (0 on success, 1 when the scope is unknown).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    resolver = _scope.ScopeResolver(repo = repo)
+    scopes = resolver.load_scopes()
+
+    # guard: requested scope id not present in settings
+    if args.scope_id not in scopes:
+      print(
+        f"collect-tags: unknown scope '{args.scope_id}' "
+        f"(known: {', '.join(sorted(scopes)) or 'none'})",
+        file = sys.stderr,
+      )
+      return 1
+
+    ops = _tags.TagOps(repo = repo, scope_id = args.scope_id, cfg = scopes[args.scope_id])
+    print(json.dumps(ops.collect()))
+    return 0
+
+  def _cmd_retag(self, args: argparse.Namespace) -> int:
+    """
+    Apply an axis-value alias map to a scope's node tags and print the outcome.
+
+    Resolves the scope config, reads the alias map from the `--from` JSON file,
+    then delegates to `TagOps.retag`, which rewrites each node's aliased tags
+    via `apply-node` (managed region only).  The outcome dict (`nodes_changed`
+    / `tags_remapped`) is printed to stdout as JSON.
+
+    Args:
+      args: Parsed argument namespace; must carry `.scope_id`, `.from_file`,
+        and `.repo`.
+
+    Returns:
+      Integer exit code (0 on success, 1 when the scope is unknown or the
+      alias-map file is missing or malformed).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    resolver = _scope.ScopeResolver(repo = repo)
+    scopes = resolver.load_scopes()
+
+    # guard: requested scope id not present in settings
+    if args.scope_id not in scopes:
+      print(
+        f"retag: unknown scope '{args.scope_id}' "
+        f"(known: {', '.join(sorted(scopes)) or 'none'})",
+        file = sys.stderr,
+      )
+      return 1
+
+    alias_path = Path(args.from_file)
+    # guard: alias-map file does not exist
+    if not alias_path.is_file():
+      print(f"retag: alias-map not found: {alias_path}", file = sys.stderr)
+      return 1
+
+    with alias_path.open(encoding = self._ENCODING) as fh:
+      alias_map = json.load(fh)
+    # guard: alias-map must be a JSON object
+    if not isinstance(alias_map, dict):
+      print(f"retag: alias-map must be a JSON object: {alias_path}", file = sys.stderr)
+      return 1
+
+    ops = _tags.TagOps(repo = repo, scope_id = args.scope_id, cfg = scopes[args.scope_id])
+    print(json.dumps(ops.retag(alias_map)))
+    return 0
+
+  def _cmd_set_synced_sha(self, args: argparse.Namespace) -> int:
+    """
+    Write the `wiki_synced_sha` anchor into a scope's topics.md frontmatter.
+
+    Resolves the scope config to find the topics-index path, then sets the
+    `wiki_synced_sha` scalar frontmatter key to the given SHA, creating the
+    file (with a minimal frontmatter block) when it does not yet exist.  The
+    operation is idempotent — re-running with the same SHA leaves the file
+    unchanged.  Prints a one-line confirmation.
+
+    Args:
+      args: Parsed argument namespace; must carry `.scope_id`, `.sha`, `.repo`.
+
+    Returns:
+      Integer exit code (0 on success, 1 when the scope is unknown or has no
+      topics_index configured).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    resolver = _scope.ScopeResolver(repo = repo)
+    scopes = resolver.load_scopes()
+
+    # guard: requested scope id not present in settings
+    if args.scope_id not in scopes:
+      print(
+        f"set-synced-sha: unknown scope '{args.scope_id}' "
+        f"(known: {', '.join(sorted(scopes)) or 'none'})",
+        file = sys.stderr,
+      )
+      return 1
+
+    cfg = scopes[args.scope_id]
+    index_rel = cfg.get(self._CFG_TOPICS_INDEX, "")
+    # guard: scope has no topics_index path configured
+    if not index_rel:
+      print(
+        f"set-synced-sha: scope '{args.scope_id}' has no topics_index configured",
+        file = sys.stderr,
+      )
+      return 1
+
+    index_path = (repo / index_rel).resolve()
+    existing = index_path.read_text(encoding = self._ENCODING) if index_path.is_file() else ""
+    updated = _nodes.set_scalar_field(existing, self._KEY_WIKI_SYNCED_SHA, args.sha)
+    index_path.parent.mkdir(parents = True, exist_ok = True)
+    index_path.write_text(updated, encoding = self._ENCODING)
+    rel = index_path.relative_to(repo).as_posix()
+    print(f"set-synced-sha: ok {args.scope_id} {self._KEY_WIKI_SYNCED_SHA}={args.sha} → {rel}")
+    return 0
+
+  def _cmd_doctor(self, args: argparse.Namespace) -> int:
+    """
+    Audit one or all scopes for wiki integrity and print grouped findings.
+
+    Resolves the scope set (a single `.scope_id`, or every configured scope
+    when it is omitted), runs `Doctor.run_all` per scope, and prints findings
+    grouped by scope and severity with a per-scope and grand-total count.
+    When `--apply` is given, fixable findings are repaired in-place and the
+    printed lines note which fixes were applied.
+
+    Args:
+      args: Parsed argument namespace; carries `.scope_id` (or `None`),
+        `.apply`, and `.repo`.
+
+    Returns:
+      Integer exit code: 0 when the audit ran (read-only or `--apply`),
+      1 when a named scope id is unknown or no scopes are configured.
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    resolver = _scope.ScopeResolver(repo = repo)
+    scopes = resolver.load_scopes()
+
+    # guard: no scopes configured at all
+    if not scopes:
+      print(self._MSG_NO_SCOPES, file = sys.stderr)
+      return 1
+
+    # Determine which scopes to audit.
+    if args.scope_id is None:
+      target_ids = sorted(scopes)
+    else:
+      # guard: named scope id is not configured
+      if args.scope_id not in scopes:
+        print(
+          f"doctor: unknown scope '{args.scope_id}' "
+          f"(known: {', '.join(sorted(scopes)) or 'none'})",
+          file = sys.stderr,
+        )
+        return 1
+      target_ids = [ args.scope_id ]
+
+    grand_total = 0
+    for scope_id in target_ids:
+      doc = _doctor.Doctor(
+        repo     = repo,
+        scope_id = scope_id,
+        cfg      = scopes[scope_id],
+        apply    = bool(args.apply),
+      )
+      findings = doc.run_all()
+      grand_total += len(findings)
+      self._print_scope_findings(scope_id, findings, apply = bool(args.apply))
+
+    mode = "apply" if args.apply else "read-only"
+    print(f"\ndoctor: {grand_total} finding(s) across {len(target_ids)} scope(s) [{mode}]")
+    return 0
+
+  def _print_scope_findings(
+    self,
+    scope_id: str,
+    findings: list[dict],
+    *,
+    apply: bool,
+  ) -> None:
+    """
+    Print one scope's findings grouped by severity, with a per-scope count.
+
+    Args:
+      scope_id: The scope identifier being reported.
+      findings: List of finding dicts from `Doctor.run_all`.
+      apply: True when `--apply` was requested (annotates applied fixes).
+    """
+    print(f"\n=== scope '{scope_id}' — {len(findings)} finding(s) ===")
+    # guard: a clean scope — nothing to enumerate
+    if not findings:
+      print(self._MSG_CLEAN)
+      return
+
+    by_sev: dict[str, list[dict]] = {}
+    for f in findings:
+      by_sev.setdefault(f[self._F_SEVERITY], []).append(f)
+
+    for sev in self._SEVERITY_ORDER:
+      bucket = by_sev.get(sev, [])
+      # guard: no findings at this severity
+      if not bucket:
+        continue
+      print(f"  [{sev}] {len(bucket)}")
+      for f in bucket:
+        suffix = ""
+        if apply and f.get(self._F_APPLIED):
+          suffix = "  (fixed)"
+        elif f.get(self._F_FIXABLE):
+          suffix = "  (fixable)"
+        print(f"    {f[self._F_CHECK]}: {f[self._F_NODE]} — {f[self._F_MESSAGE]}{suffix}")
+
+  def _cmd_process_file(self, args: argparse.Namespace) -> int:
+    """
+    Resolve a node to its scope and dispatch a classify curation job.
+
+    Accepts `path` as either a git-item JSON string
+    (`{"path": "...", ...}`) or a bare file path.  When the node
+    belongs to no configured scope, prints a skip note and exits 0.
+    Otherwise builds a classify payload — carrying `kind` inside the
+    payload so it reaches the curator's `request.json` — and dispatches
+    it via `CoreDispatch.dispatch_curator`.  Exits promptly without
+    waiting for the curator.
+
+    Args:
+      args: Parsed argument namespace; must carry `.path` and `.repo`.
+
+    Returns:
+      Integer exit code (0 on success or skip, 1 on dispatch error).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+
+    raw_path = self._parse_path_arg(args.path)
+    node_path = Path(raw_path)
+
+    resolver = _scope.ScopeResolver(repo = repo)
+    result = resolver.resolve_scope_by_path(node_path)
+
+    # guard: node does not belong to any configured scope
+    if result is None:
+      print(f"process-file: skip (no scope) {raw_path}")
+      return 0
+
+    scope_id, cfg = result
+
+    abs_path = node_path if node_path.is_absolute() else repo / node_path
+    # guard: node file does not exist on disk
+    if not abs_path.is_file():
+      print(f"process-file: skip (file not found) {raw_path}")
+      return 0
+
+    node_content = abs_path.read_text(encoding = self._ENCODING)
+    tag_axes: list[str] = cfg.get(self._CFG_TAG_AXES) or []
+
+    node_obj = _nodes.node_for(abs_path)
+    # guard: unrecognised file type — skip (scope resolver let it through via glob)
+    if node_obj is None:
+      print(f"process-file: skip (unrecognised type) {raw_path}")
+      return 0
+    # guard: operator source unchanged since last curation — skip dispatch to
+    # break the daemon re-dispatch loop. The curator's own commits touch only
+    # managed regions, so wiki_src_hash stays equal to the node's current
+    # source_hash; a virgin node (no stored hash) or an operator content edit
+    # (differing hash) falls through and is dispatched.
+    stored_hash = node_obj.stored_src_hash
+    if stored_hash is not None and stored_hash == node_obj.source_hash:
+      print(f"process-file: skip (source unchanged) {raw_path}")
+      return 0
+    pins = {
+      "pinned_topics":    node_obj.pinned_topics,
+      "unrelated_topics": node_obj.unrelated_topics,
+      "pinned_links":     node_obj.pinned_links,
+      "unrelated_links":  node_obj.unrelated_links,
+    }
+
+    # The existing per-axis tag values across the scope — the classify anchor, so
+    # the curator reuses a value already in use instead of coining a synonym
+    # (empty axes on cold-start). Same source /wiki.relink feeds inline.
+    existing_tags = _tags.TagOps(repo = repo, scope_id = scope_id, cfg = cfg).collect()
+
+    payload = {
+      self._PAYLOAD_KIND:          _dispatch.CoreDispatch.KIND_CLASSIFY,
+      self._PAYLOAD_NODE_PATH:     raw_path,
+      self._PAYLOAD_NODE_CONT:     node_content,
+      self._CFG_TAG_AXES:          tag_axes,
+      self._PAYLOAD_SCOPE_ID:      scope_id,
+      self._PAYLOAD_PINS:          pins,
+      self._PAYLOAD_EXISTING_TAGS: existing_tags,
+    }
+
+    dispatcher = _dispatch.CoreDispatch()
+    dispatcher.dispatch_curator(
+      repo = repo,
+      node_path = node_path,
+      payload = payload,
+    )
+    print(f"process-file: dispatched (classify) {raw_path}")
+    return 0
+
+  def _cmd_dispatch_link(self, args: argparse.Namespace) -> int:
+    """
+    Resolve a node to its scope and dispatch a link curation job.
+
+    Mirrors `process-file`'s dispatch path but builds a `link` payload:
+    `kind=link`, plus the scope's current `topics.md` content as the
+    candidate catalog.  Called by the classify curator (via Bash) to
+    chain phase 2 after classify+build-index complete.
+
+    When the node belongs to no scope → skip (exit 0).  When the scope's
+    `topics.md` is missing or empty → prints a warning and dispatches
+    anyway with an empty catalog string (link curator will return a
+    `logical` error, which is correct).
+
+    Args:
+      args: Parsed argument namespace; must carry `.path` and `.repo`.
+
+    Returns:
+      Integer exit code (0 on success or skip, 1 on dispatch error).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+
+    node_path = Path(args.path)
+
+    resolver = _scope.ScopeResolver(repo = repo)
+    result = resolver.resolve_scope_by_path(node_path)
+
+    # guard: node does not belong to any configured scope
+    if result is None:
+      print(f"dispatch-link: skip (no scope) {args.path}")
+      return 0
+
+    scope_id, cfg = result
+
+    abs_path = node_path if node_path.is_absolute() else repo / node_path
+    # guard: node file does not exist on disk
+    if not abs_path.is_file():
+      print(f"dispatch-link: skip (file not found) {args.path}")
+      return 0
+
+    node_content = abs_path.read_text(encoding = self._ENCODING)
+
+    node_obj = _nodes.node_for(abs_path)
+    # guard: unrecognised file type — skip
+    if node_obj is None:
+      print(f"dispatch-link: skip (unrecognised type) {args.path}")
+      return 0
+    pins = {
+      "pinned_topics":    node_obj.pinned_topics,
+      "unrelated_topics": node_obj.unrelated_topics,
+      "pinned_links":     node_obj.pinned_links,
+      "unrelated_links":  node_obj.unrelated_links,
+    }
+
+    # Read the scope's topics.md as the link-phase candidate catalog.
+    topics_index_path_rel = cfg.get(self._CFG_TOPICS_INDEX, "")
+    topics_index_content = ""
+    if topics_index_path_rel:
+      topics_index_abs = repo / topics_index_path_rel
+      if topics_index_abs.is_file():
+        topics_index_content = topics_index_abs.read_text(encoding = self._ENCODING)
+      else:
+        print(
+          f"dispatch-link: warning — topics.md not found at {topics_index_abs}; "
+          "dispatching with empty catalog",
+          file = sys.stderr,
+        )
+
+    payload = {
+      self._PAYLOAD_KIND:              _dispatch.CoreDispatch.KIND_LINK,
+      self._PAYLOAD_NODE_PATH:         str(abs_path),
+      self._PAYLOAD_NODE_CONT:         node_content,
+      self._PAYLOAD_TOPICS_INDEX_CONT: topics_index_content,
+      self._PAYLOAD_PINS:              pins,
+      self._PAYLOAD_SCOPE_ID:          scope_id,
+    }
+
+    dispatcher = _dispatch.CoreDispatch()
+    dispatcher.dispatch_curator(
+      repo = repo,
+      node_path = abs_path,
+      payload = payload,
+    )
+
+    # Back-link fan-out — dispatch link jobs for every scope node that lists this
+    # node among its top-N candidates. Runs here (not in process-file) because
+    # the classify tail has already executed apply-node + build-index, so the
+    # topics.md content we just snapshot above is current — every attracted
+    # node's link curator can pick this node from its catalog. Link jobs do not
+    # themselves call dispatch-link, so the fan-out cannot recurse.
+    back_finder = _candidates.BackCandidateFinder(repo, cfg, scope_id)
+    attracted_rel = back_finder.find(abs_path)
+    # The target's repo-relative POSIX path — matched against each attracted
+    # node's existing forward see-also to skip re-link dispatches where the
+    # link is already in place (no LLM work needed). None when the target
+    # path is outside the repo root (a cross-repo dispatch — never skip).
+    try:
+      target_rel = abs_path.resolve().relative_to(repo.resolve()).as_posix()
+    except ValueError:
+      target_rel = None
+    back_dispatched = 0
+    back_skipped_existing = 0
+    for rel in attracted_rel:
+      y_abs = repo / rel
+      # guard: attracted path does not resolve to an existing file — skip
+      if not y_abs.is_file():
+        continue
+      y_node = _nodes.node_for(y_abs)
+      # guard: unrecognised file type — skip
+      if y_node is None:
+        continue
+      # guard: attractor already forward-links to the target — no LLM work needed
+      if target_rel is not None and target_rel in y_node.see_also_targets:
+        back_skipped_existing += 1
+        continue
+      y_pins = {
+        "pinned_topics":    y_node.pinned_topics,
+        "unrelated_topics": y_node.unrelated_topics,
+        "pinned_links":     y_node.pinned_links,
+        "unrelated_links":  y_node.unrelated_links,
+      }
+      y_payload = {
+        self._PAYLOAD_KIND:              _dispatch.CoreDispatch.KIND_LINK,
+        self._PAYLOAD_NODE_PATH:         str(y_abs),
+        self._PAYLOAD_NODE_CONT:         y_abs.read_text(encoding = self._ENCODING),
+        self._PAYLOAD_TOPICS_INDEX_CONT: topics_index_content,
+        self._PAYLOAD_PINS:              y_pins,
+        self._PAYLOAD_SCOPE_ID:          scope_id,
+      }
+      dispatcher.dispatch_curator(
+        repo = repo,
+        node_path = y_abs,
+        payload = y_payload,
+      )
+      back_dispatched += 1
+
+    print(
+      f"dispatch-link: dispatched (link) {args.path}"
+      f" + back-links={back_dispatched} (skipped-already-linked={back_skipped_existing})"
+    )
+    return 0
+
+  def _parse_path_arg(self, raw: str) -> str:
+    """
+    Parse the `path` argument, accepting either a git-item JSON or a bare path.
+
+    A git-item JSON is a JSON object string with at least a `"path"` key,
+    as produced by the git routine when it streams file-change events.
+    A bare path is returned unchanged.
+
+    Args:
+      raw: The raw argument string.
+
+    Returns:
+      The file path string extracted from the argument.
+    """
+    stripped = raw.strip()
+    # guard: does not look like a JSON object — treat as bare path
+    if not stripped.startswith("{"):
+      return raw
+    try:
+      parsed: dict = json.loads(stripped)
+      return str(parsed[self._GIT_ITEM_PATH_KEY])
+    except (json.JSONDecodeError, KeyError):
+      # guard: JSON parse error or missing path key — fall back to raw string
+      return raw
+
+  def _not_implemented(self, name: str) -> int:
+    """
+    Report a not-yet-implemented subcommand on stderr.
+
+    Args:
+      name: The subcommand name that was invoked.
+
+    Returns:
+      A non-zero exit code.
+    """
+    print(f"{self._PROG} {name}: not implemented yet", file = sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+  sys.exit(Cli().run())

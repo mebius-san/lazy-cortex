@@ -9,11 +9,47 @@ the `lazycortex-core` CLI (`dispatch-job`, `collect-job`, `lookup-expert`,
 `consume-job`) — never via direct Python import.
 """
 from __future__ import annotations
-import json, shutil, time, uuid
+# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable=import-error
+
+from typing import TypedDict
+
+import json
+import shutil
+import time
+import uuid
 from pathlib import Path
-from typing import Iterable
+
+from constants import (
+  JobCollectKey, JobConfigKey, JobFile, JobIODir, JobMarker, JobOutcome, JobRequestKey,
+  JobResponseKey, JobStatus, RemoteTrackerKey, RepoDir, RoutineKey, SettingsFile, SettingsKey,
+)
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  from typing import NotRequired
+
 
 JOBS_BASE = ".experts/.jobs"
+
+
+class _RoutineDefaults(TypedDict):
+  """
+  Shape of a built-in routine's default config block.
+
+  Mirrors the keyword surface of `register_routine`; `ignore_halt` is optional
+  because only routines that must run during a halt declare it.
+  """
+  name: str
+  command: list[str]
+  interval_sec: int
+  timeout_sec: int
+  priority: int
+  ignore_halt: NotRequired[bool]
+
+# tier aliases the model-router recognizes; an agent_models value outside this
+# set (including the "default" sentinel and unknown strings) means "no pin"
+_MODEL_TIERS = frozenset({ "haiku", "sonnet", "opus" })
 
 
 def _job_dir(repo: Path, expert: str, job_id: str) -> Path:
@@ -43,6 +79,7 @@ def dispatch_job(
   job_id: str | None = None,
   dedup_key: str | None = None,
   dispatched_from: Path | None = None,
+  can_commit_in_repo: bool | None = None,
 ) -> dict:
   """
   Create one job bundle atomically and queue it for the pump.
@@ -95,15 +132,15 @@ def dispatch_job(
         if not jdir.is_dir():
           continue
         # guard: pre-READY bundles are not yet active
-        if not (jdir / "READY").exists():
+        if not (jdir / JobMarker.READY).exists():
           continue
         # guard: DEAD bundles are not eligible for dedup
-        if (jdir / "DEAD").exists():
+        if (jdir / JobMarker.DEAD).exists():
           continue
         # guard: CONSUMED bundles have been retired by the consumer
-        if (jdir / "CONSUMED").exists():
+        if (jdir / JobMarker.CONSUMED).exists():
           continue
-        req_file = jdir / "request.json"
+        req_file = jdir / JobFile.REQUEST
         # guard: bundle missing request.json is malformed and cannot match
         if not req_file.exists():
           continue
@@ -111,8 +148,8 @@ def dispatch_job(
           existing = json.loads(req_file.read_text())
         except (OSError, json.JSONDecodeError):
           continue
-        if existing.get("_dedup_key") == dedup_key:
-          return { "job_id": jdir.name, "status": "already-queued" }
+        if existing.get(JobRequestKey.DEDUP_KEY) == dedup_key:
+          return { JobCollectKey.JOB_ID: jdir.name, JobCollectKey.STATUS: "already-queued" }
 
   # resolve expert settings before any filesystem mutation so a misconfigured
   # expert surfaces at dispatch time rather than after partial setup
@@ -123,7 +160,7 @@ def dispatch_job(
   # park any prior DEAD bundle at the same slot before reusing it — without
   # this the new job would coexist with the stale DEAD marker and the pump
   # would skip it as a zombie
-  if d.exists() and (d / "DEAD").exists():
+  if d.exists() and (d / JobMarker.DEAD).exists():
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     d.rename(d.with_name(f"{job_id}.dead-{stamp}"))
   d.mkdir(parents = True, exist_ok = True)
@@ -131,44 +168,58 @@ def dispatch_job(
   # auxiliary work files: each bucket dir holds caller-supplied filenames
   # as single segments (no nesting under buckets)
   if source:
-    (d / "source").mkdir(exist_ok = True)
+    (d / JobIODir.SOURCE).mkdir(exist_ok = True)
     for fname, text in source.items():
-      (d / "source" / fname).write_text(text)
+      (d / JobIODir.SOURCE / fname).write_text(text)
   if context:
-    (d / "context").mkdir(exist_ok = True)
+    (d / JobIODir.CONTEXT).mkdir(exist_ok = True)
     for fname, text in context.items():
-      (d / "context" / fname).write_text(text)
+      (d / JobIODir.CONTEXT / fname).write_text(text)
   if result:
-    (d / "result").mkdir(exist_ok = True)
+    (d / JobIODir.RESULT).mkdir(exist_ok = True)
     for fname in result:
-      (d / "result" / fname).touch()
+      (d / JobIODir.RESULT / fname).touch()
+
+  # model: an explicit per-expert override wins verbatim; otherwise fall back
+  # to the agent's tier from agent_models (same settings file), or None to let
+  # the expert subprocess inherit the CLI default
+  model = expert_entry.get(JobConfigKey.MODEL) or _resolve_agent_model(repo, expert_entry.get(JobConfigKey.AGENT))
 
   # config.json derived purely from settings.experts[<expert>] plus the
   # caller-supplied protocols list; pump reads this at spawn time
   cfg_blob = {
-    "agent":             expert_entry.get("agent"),
-    "protocols":         list(protocols or []),
-    "aspects":           list(expert_entry.get("aspects") or []),
-    "arguments":         dict(expert_entry.get("arguments") or {}),
-    "git_author":        expert_entry.get("git_author", {}),
-    "model":             expert_entry.get("model"),
-    "can_commit_in_repo": bool(expert_entry.get("can_commit_in_repo", False)),
+    JobConfigKey.AGENT:             expert_entry.get(JobConfigKey.AGENT),
+    JobConfigKey.PROTOCOLS:         list(protocols or []),
+    JobConfigKey.ASPECTS:           list(expert_entry.get(JobConfigKey.ASPECTS) or []),
+    JobConfigKey.ARGUMENTS:         dict(expert_entry.get(JobConfigKey.ARGUMENTS) or {}),
+    JobConfigKey.GIT_AUTHOR:        expert_entry.get(JobConfigKey.GIT_AUTHOR, {}),
+    JobConfigKey.MODEL:             model,
+    # `can_commit_in_repo` override (Bug 87): md-scan dispatches in-place
+    # (the consumer edits the file where it lies — see routine_types
+    # dispatch_md_scan) and pass True so the apply expert may write +
+    # commit in place; the pump (review writer) passes None and inherits
+    # the per-expert default (foreign-execution, no-commit clause injected).
+    JobConfigKey.CAN_COMMIT_IN_REPO: (
+        can_commit_in_repo if can_commit_in_repo is not None
+        else bool(expert_entry.get(JobConfigKey.CAN_COMMIT_IN_REPO, False))
+    ),
   }
-  (d / "config.json").write_text(json.dumps(cfg_blob, indent = 2))
+  (d / JobFile.CONFIG).write_text(json.dumps(cfg_blob, indent = 2))
 
   out_payload = dict(payload)
   if dedup_key is not None:
-    out_payload["_dedup_key"] = dedup_key
-  (d / "request.json").write_text(json.dumps(out_payload, indent = 2))
+    out_payload[JobRequestKey.DEDUP_KEY] = dedup_key
+  (d / JobFile.REQUEST).write_text(json.dumps(out_payload, indent = 2))
 
   # READY touched LAST — atomic activation marker; pump treats READY presence
   # as "every other file in this bundle is valid and you can spawn now"
-  (d / "READY").touch()
+  (d / JobMarker.READY).touch()
 
   # cross-repo tracker: visibility-only entry for the dispatching repo. The
   # local pump never scans `.remote-jobs/`. Gated by the dispatching repo's
   # `lazy.settings.json[repos]` — repos absent from the registry naturally
   # skip without special test plumbing.
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import os as _os
   local = Path(dispatched_from or _os.getcwd()).resolve()
   target = Path(repo).resolve()
@@ -177,13 +228,13 @@ def dispatch_job(
     from repo_resolver import reverse_lookup
     label = reverse_lookup(local, target)
     if label is not None:
-      tracker_dir = local / ".experts" / ".remote-jobs" / label / expert
+      tracker_dir = local / RepoDir.EXPERTS / RepoDir.REMOTE_JOBS / label / expert
       tracker_dir.mkdir(parents = True, exist_ok = True)
       tracker_payload = {
-        "target_repo":   label,
-        "abs_path":      str(d),
-        "expert":        expert,
-        "dispatched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        RemoteTrackerKey.TARGET_REPO:   label,
+        RemoteTrackerKey.ABS_PATH:      str(d),
+        JobCollectKey.EXPERT:           expert,
+        RemoteTrackerKey.DISPATCHED_AT: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "dedup_key":     dedup_key,
       }
       (tracker_dir / f"{job_id}.json").write_text(
@@ -213,18 +264,57 @@ def _resolve_expert_entry(repo: Path, expert_name: str) -> dict:
   """
   # waiver: deferred import — avoid module-load cycle with lazy_settings
   from lazy_settings import load_section
-  experts = load_section(Path(repo) / ".claude/lazy.settings.json", "experts")
+  experts = load_section(Path(repo) / SettingsFile.REL, SettingsKey.EXPERTS)
   entry = experts.get(expert_name)
   return entry if isinstance(entry, dict) else {}
+
+
+def _resolve_agent_model(repo: Path, agent_ref: str | None) -> str | None:
+  """
+  Return the model tier configured for an agent under `agent_models`, or None.
+
+  Reads `agent_models` from the same settings file as the expert block, so the
+  agent tier and expert entry always resolve from one scope. A tier outside the
+  recognized set — including the `default` sentinel and any unknown string —
+  resolves to None so the expert subprocess inherits the CLI default rather than
+  a bogus pin.
+
+  Args:
+    repo: Absolute path to the repository whose settings file is consulted.
+    agent_ref: The expert's `agent` dispatch string, or None when unset.
+
+  Returns:
+    The recognized tier (`haiku` / `sonnet` / `opus`) configured for the agent,
+    or None when the agent is unconfigured, sentinel-routed, or `agent_ref` is
+    None.
+  """
+  # guard: no agent ref — nothing to look up
+  if not agent_ref:
+    return None
+  # waiver: deferred import — avoid module-load cycle with lazy_settings
+  from lazy_settings import load_section
+  groups = load_section(Path(repo) / SettingsFile.REL, SettingsKey.AGENT_MODELS)
+  tier: str | None = None
+  # flatten grouped agent_models; on cross-group collision the last entry wins
+  for entries in groups.values():
+    # guard: non-dict group value is metadata (`_version`, etc.)
+    if not isinstance(entries, dict):
+      continue
+    if agent_ref in entries:
+      tier = entries[agent_ref]
+  # guard: sentinel / unknown tier — treat as no explicit pin
+  if tier not in _MODEL_TIERS:
+    return None
+  return tier
 
 
 def lookup_expert(target_repo: Path, name: str) -> dict | None:
   """
   Return the expert settings block for a same-plugin lookup.
 
-  Same-plugin convenience wrapper over `_resolve_expert_entry`. Sibling
-  plugins must use the `lookup-expert` CLI subcommand instead — direct
-  cross-plugin Python imports are forbidden.
+  Convenience wrapper for same-plugin callers. Sibling plugins must use
+  the `lookup-expert` CLI subcommand instead — direct cross-plugin Python
+  imports are forbidden.
 
   Args:
     target_repo: Absolute path to the repository whose settings file is consulted.
@@ -256,13 +346,13 @@ def collect_job(repo: Path, expert: str, job_id: str) -> dict:
   d = _job_dir(repo, expert, job_id)
   # guard: caller may poll before the bundle has been queued
   if not d.exists():
-    return { "status": "missing" }
+    return { JobCollectKey.STATUS: JobStatus.MISSING }
   # guard: pump has not finished processing yet
-  if not (d / "DONE").exists():
-    return { "status": "pending" }
-  resp = json.loads((d / "response.json").read_text()) if (d / "response.json").exists() else {}
-  status = "failed" if resp.get("outcome") == "error" else "done"
-  return { "status": status, "response": resp }
+  if not (d / JobMarker.DONE).exists():
+    return { JobCollectKey.STATUS: JobStatus.PENDING }
+  resp = json.loads((d / JobFile.RESPONSE).read_text()) if (d / JobFile.RESPONSE).exists() else {}
+  status = JobStatus.FAILED if resp.get(JobResponseKey.OUTCOME) == JobOutcome.ERROR else JobStatus.DONE
+  return { JobCollectKey.STATUS: status, JobCollectKey.RESPONSE: resp }
 
 
 def list_jobs(
@@ -297,7 +387,7 @@ def list_jobs(
     and `dispatched_at`.
   """
   base = Path(repo) / JOBS_BASE
-  out = []
+  out: list[dict] = []
   # guard: empty repo has no queue at all
   if not base.exists():
     return out
@@ -315,14 +405,14 @@ def list_jobs(
       # guard: bundle in an unrecognised shape is dropped from the listing
       if entry_status is None:
         continue
-      entry = { "expert": e, "job_id": jdir.name, "path": str(jdir),
-                "status": entry_status }
+      entry = { JobCollectKey.EXPERT: e, JobCollectKey.JOB_ID: jdir.name, JobCollectKey.PATH: str(jdir),
+                JobCollectKey.STATUS: entry_status }
       # guard: caller-supplied status filter eliminates non-matching bundles
-      if status and entry["status"] != status:
+      if status and entry[JobCollectKey.STATUS] != status:
         continue
       out.append(entry)
   if include_remote:
-    remote_base = Path(repo) / ".experts" / ".remote-jobs"
+    remote_base = Path(repo) / RepoDir.EXPERTS / RepoDir.REMOTE_JOBS
     if remote_base.exists():
       for target_dir in remote_base.iterdir():
         # guard: skip stray files under the remote-jobs root
@@ -337,6 +427,7 @@ def list_jobs(
             continue
           for tracker_file in expert_dir.iterdir():
             # guard: only tracker JSON payloads are considered
+            # waiver: filesystem extension idiom, not a domain constant
             if tracker_file.suffix != ".json":
               continue
             try:
@@ -344,17 +435,17 @@ def list_jobs(
             except (OSError, json.JSONDecodeError):
               continue
             abs_job = Path(tracker.get("abs_path", ""))
-            live = _job_status(abs_job) if abs_job.exists() else "missing"
+            live = _job_status(abs_job) if abs_job.exists() else JobStatus.MISSING
             entry = {
-              "expert":        expert_dir.name,
-              "job_id":        tracker_file.stem,
-              "path":          str(abs_job),
-              "status":        live or "missing",
-              "target_repo":   target_dir.name,
-              "dispatched_at": tracker.get("dispatched_at"),
+              JobCollectKey.EXPERT:        expert_dir.name,
+              JobCollectKey.JOB_ID:        tracker_file.stem,
+              JobCollectKey.PATH:          str(abs_job),
+              JobCollectKey.STATUS:        live or JobStatus.MISSING,
+              JobCollectKey.TARGET_REPO:   target_dir.name,
+              JobCollectKey.DISPATCHED_AT: tracker.get(RemoteTrackerKey.DISPATCHED_AT),
             }
             # guard: caller-supplied status filter applies to remote entries
-            if status and entry["status"] != status:
+            if status and entry[JobCollectKey.STATUS] != status:
               continue
             out.append(entry)
   return out
@@ -372,22 +463,22 @@ def _job_status(jdir: Path) -> str | None:
     bundle matches one of the recognised marker shapes, or None when
     the bundle is in an unrecognised shape.
   """
-  if (jdir / "DEAD").exists():
-    return "dead"
-  if (jdir / "DONE").exists():
-    resp_path = jdir / "response.json"
+  if (jdir / JobMarker.DEAD).exists():
+    return JobStatus.DEAD
+  if (jdir / JobMarker.DONE).exists():
+    resp_path = jdir / JobFile.RESPONSE
     if resp_path.exists():
       try:
-        outcome = json.loads(resp_path.read_text()).get("outcome")
-        if outcome == "error":
-          return "failed"
+        outcome = json.loads(resp_path.read_text()).get(JobResponseKey.OUTCOME)
+        if outcome == JobOutcome.ERROR:
+          return JobStatus.FAILED
       except json.JSONDecodeError:
         pass
-    return "done"
-  if (jdir / "READY").exists():
-    if (jdir / "PID").exists():
-      return "active"
-    return "queued"
+    return JobStatus.DONE
+  if (jdir / JobMarker.READY).exists():
+    if (jdir / JobMarker.PID).exists():
+      return JobStatus.ACTIVE
+    return JobStatus.QUEUED
   return None
 
 
@@ -417,9 +508,9 @@ def consume_job(
   Mark a job's response as applied or explicitly discarded by its consumer.
 
   After this call, the job is invisible to two lookup paths: the
-  pre-dispatch `already-queued` check in `dispatch_job` no longer
-  blocks fresh dispatches that share the same `dedup_key`, and
-  consumer-side lookups that scan job bundles by `_dedup_key` treat the
+  pre-dispatch duplicate-detection check in `dispatch_job` no longer
+  blocks fresh dispatches that share the same dedup key, and
+  consumer-side lookups that scan job bundles by dedup key treat the
   job as if it were absent so a fresh dispatch happens on the next tick
   instead of re-reading the stale response.
 
@@ -455,7 +546,8 @@ def consume_job(
   # guard: caller may consume a job that no longer exists on disk
   if not d.exists():
     return
-  (d / "CONSUMED").touch()
+  (d / JobMarker.CONSUMED).touch()
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import os as _os
   local = Path(dispatched_from or _os.getcwd()).resolve()
   target = Path(repo).resolve()
@@ -465,11 +557,68 @@ def consume_job(
     label = reverse_lookup(local, target)
     if label is not None:
       tracker = (
-        local / ".experts" / ".remote-jobs"
+        local / RepoDir.EXPERTS / RepoDir.REMOTE_JOBS
         / label / expert / f"{job_id}.json"
       )
       if tracker.exists():
         tracker.unlink()
+
+
+def retire_completed_jobs(
+  repo: Path, expert: str, dedup_key: str,
+  *, dispatched_from: Path | None = None,
+) -> list[str]:
+  """
+  Retire every completed job bundle that shares the given dedup key.
+
+  Marks each matching finished job as consumed so a later dispatch for the
+  same key is no longer refused as already-queued. A fire-and-forget
+  dispatcher whose jobs no other party consumes calls this before it
+  re-dispatches, so a finished prior attempt stops blocking the retry.
+  In-flight bundles, bundles already retired, and bundles marked dead are
+  left untouched.
+
+  Args:
+    repo: Absolute path to the repository that hosts the job queue.
+    expert: Expert name as registered in `lazy.settings.json[experts]`.
+    dedup_key: Dedup key whose finished bundles are retired.
+    dispatched_from: Override of the dispatching repository path, forwarded
+      to the consume step for cross-repo tracker cleanup; the current
+      working directory is used when omitted.
+
+  Returns:
+    The ids of the retired jobs, in directory-iteration order.
+  """
+  retired: list[str] = []
+  edir = Path(repo) / JOBS_BASE / expert
+  # guard: no bundles for this expert yet — nothing to retire
+  if not edir.exists():
+    return retired
+  for jdir in edir.iterdir():
+    # guard: skip non-directory entries that may appear under the expert dir
+    if not jdir.is_dir():
+      continue
+    # guard: only finished bundles are eligible — never retire an in-flight job
+    if not (jdir / JobMarker.DONE).exists():
+      continue
+    # guard: bundle already retired by a prior consumer pass
+    if (jdir / JobMarker.CONSUMED).exists():
+      continue
+    # guard: dead bundles are the dead-job collector's responsibility
+    if (jdir / JobMarker.DEAD).exists():
+      continue
+    req_file = jdir / JobFile.REQUEST
+    # guard: bundle missing request.json is malformed and cannot match
+    if not req_file.exists():
+      continue
+    try:
+      existing = json.loads(req_file.read_text())
+    except (OSError, json.JSONDecodeError):
+      continue
+    if existing.get(JobRequestKey.DEDUP_KEY) == dedup_key:
+      consume_job(repo, expert, jdir.name, dispatched_from = dispatched_from)
+      retired.append(jdir.name)
+  return retired
 
 
 def register_routine(repo: Path, name: str, cfg: dict | None = None, *,
@@ -479,7 +628,7 @@ def register_routine(repo: Path, name: str, cfg: dict | None = None, *,
                      priority: int | None = None,
                      ignore_halt: bool | None = None) -> None:
   """
-  Persist a routine entry under `lazy-core.runtime.routines`.
+  Persist a routine entry under the `routines` section.
 
   Two call shapes are supported. The typed shape passes a fully-formed
   `cfg` dict (with `type`, type-specific keys, and an optional shared
@@ -518,22 +667,22 @@ def register_routine(repo: Path, name: str, cfg: dict | None = None, *,
         "register_routine: pass `cfg` (typed shape), "
         "or pass `command` + `interval_sec` (legacy subprocess shape)"
       )
-    cfg = { "command": list(command), "interval_sec": interval_sec }
+    cfg = { RoutineKey.COMMAND: list(command), RoutineKey.INTERVAL_SEC: interval_sec }
     if timeout_sec is not None:
-      cfg["timeout_sec"] = timeout_sec
+      cfg[RoutineKey.TIMEOUT_SEC] = timeout_sec
   if priority is not None:
-    cfg["priority"] = priority
+    cfg[RoutineKey.PRIORITY] = priority
   if ignore_halt is not None:
-    cfg["ignore_halt"] = ignore_halt
+    cfg[RoutineKey.IGNORE_HALT] = ignore_halt
   validate_routine_entry(name, cfg)
   # load_tracked_section keeps local-overlay routine entries out of the
   # tracked file on save_section
   # waiver: deferred import — avoid module-load cycle with lazy_settings
   from lazy_settings import load_tracked_section, save_section
-  settings = Path(repo) / ".claude/lazy.settings.json"
-  routines = load_tracked_section(settings, "routines")
+  settings = Path(repo) / SettingsFile.REL
+  routines = load_tracked_section(settings, SettingsKey.ROUTINES)
   routines[name] = cfg
-  save_section(settings, "routines", routines)
+  save_section(settings, SettingsKey.ROUTINES, routines)
 
 
 PROTECTED_ROUTINES = { "lazy-expert.pump", "lazy-runtime.doctor" }
@@ -541,7 +690,7 @@ PROTECTED_ROUTINES = { "lazy-expert.pump", "lazy-runtime.doctor" }
 
 def unregister_routine(repo: Path, name: str) -> None:
   """
-  Remove a routine entry from `lazy-core.runtime.routines`.
+  Remove a routine entry from the `routines` section.
 
   Built-in routines required by the expert runtime cannot be removed
   through this entry point — uninstall the plugin instead.
@@ -563,13 +712,13 @@ def unregister_routine(repo: Path, name: str) -> None:
   # tracked layer participates in the load → modify → save round-trip
   # waiver: deferred import — avoid module-load cycle with lazy_settings
   from lazy_settings import load_tracked_section, save_section
-  settings = Path(repo) / ".claude/lazy.settings.json"
-  routines = load_tracked_section(settings, "routines")
+  settings = Path(repo) / SettingsFile.REL
+  routines = load_tracked_section(settings, SettingsKey.ROUTINES)
   routines.pop(name, None)
-  save_section(settings, "routines", routines)
+  save_section(settings, SettingsKey.ROUTINES, routines)
 
 
-DEFAULT_EXPERT_PUMP = {
+DEFAULT_EXPERT_PUMP: _RoutineDefaults = {
   "name":         "lazy-expert.pump",
   "command":      [ "lazycortex-core", "expert-pump-once" ],
   "interval_sec": 5,
@@ -587,7 +736,7 @@ DEFAULT_EXPERT_PUMP = {
 # halt-block ≥ 1h old, and dispatches a `lazy-runtime.doctor` expert job
 # when something needs attention. The Python tick is intentionally dumb —
 # all reasoning (revert vs commit vs permanent-fail) belongs to the agent.
-DEFAULT_DOCTOR_TICK = {
+DEFAULT_DOCTOR_TICK: _RoutineDefaults = {
   "name":         "lazy-runtime.doctor",
   "command":      [ "lazycortex-core", "doctor-tick" ],
   "interval_sec": 3600,
@@ -612,17 +761,24 @@ def bootstrap_default_routines(repo: Path) -> None:
   """
   # waiver: deferred import — avoid module-load cycle with lazy_settings
   from lazy_settings import load_section
-  settings = Path(repo) / ".claude/lazy.settings.json"
-  routines = load_section(settings, "routines")
+  settings = Path(repo) / SettingsFile.REL
+  routines = load_section(settings, SettingsKey.ROUTINES)
   for entry in (DEFAULT_EXPERT_PUMP, DEFAULT_DOCTOR_TICK):
     # guard: never overwrite a user-modified existing routine
+    # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
     if entry["name"] in routines:
       continue
     register_routine(
+      # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
       repo, entry["name"],
+      # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
       command = entry["command"],
+      # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
       interval_sec = entry["interval_sec"],
+      # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
       timeout_sec = entry["timeout_sec"],
+      # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
       priority = entry.get("priority"),
+      # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
       ignore_halt = entry.get("ignore_halt"),
     )

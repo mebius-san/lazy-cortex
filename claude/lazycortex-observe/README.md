@@ -28,7 +28,7 @@ The plugin is **observer-server-blind**: every shipped file (templates, dashboar
 ## Requirements
 
 - **Claude Code** with plugin support.
-- **lazycortex-core ≥ 1.2.0** with `lazy-core.runtime.metrics.enabled: true` in `lazy.settings.json` — see `claude/lazycortex-core/references/lazy-core.runtime-schema.md § 12` for the full settings reference.
+- **lazycortex-core ≥ 1.2.0** with `daemon.metrics.enabled: true` in `lazy.settings.json` — see `claude/lazycortex-core/references/lazy-core.runtime-schema.md § 12` for the full settings reference.
 - **One of**: `grafana-alloy` or `otelcol-contrib` on PATH (operator installs via `brew` / distro package — install skill prints the right command if missing).
 - **A Prometheus-compatible `remote_write` endpoint** the operator already runs — this plugin does not stand up the observer side.
 

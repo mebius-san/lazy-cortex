@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all seven Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-05-27
+last_regen: 2026-06-01
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads); agent writes test file covering all 7 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module; agent logs the run. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -26,6 +26,7 @@ After completing this walkthrough you have:
 
 - `lazycortex-python` installed in your repo (`/lazy-python.install` completed). This places `cli/chk-py` and `cli/tst-py` on your `$PATH`.
 - A Python class whose public API has docstrings. The agent derives every testable claim from docstrings (Summary, Guarantees, Args, Returns, Raises) — a class without docstrings produces shallow tests. If the class has no docstrings yet, dispatch `lazy-python.docstring-writer` first.
+- Your source tree following the standard mirrored layout (`src/<module>/<file>.py` → `tests/<module>/<file>.py`). The agent uses this convention to place the generated test file. If your project uses a different layout, declare it in `docs/guidelines/testing_guidelines.md`.
 - `docs/guidelines/testing_guidelines.md` present (created by `/lazy-python.install` Phase 5). If it does not exist, re-run `/lazy-python.install` — Phase 5 is idempotent and creates the stub without touching other installation artifacts.
 
 ## The journey
@@ -77,7 +78,9 @@ Or target a specific class by name:
 Use the lazy-python.test-writer agent to write tests for the Widget class in src/mymodule/widget.py
 ```
 
-The agent then runs its eight ordered steps. Its task list is created before any tool call, so you can watch each step complete in the sidebar:
+The agent's very first action is to create a task list — one task per step — before any file read or write. This structural discipline makes dropped steps impossible: you can watch each task move from pending to completed in the sidebar as the agent works.
+
+The agent then runs its eight ordered steps:
 
 1. **Read guidelines** — reads the plugin canon (`lazy-python.testing-guidelines.md`, `lazy-python.checking-guidelines.md`), then your project overlay (`docs/guidelines/testing_guidelines.md`, `docs/guidelines/checking_guidelines.md`), then the `## Testing` section of `CLAUDE.md`. Outcome: `guidelines-loaded`.
 2. **Read production class** — reads the full source file. Outcome: `read`.
@@ -146,6 +149,8 @@ The test file lives at the mirrored path and is a stable contract. The `lazy-pyt
 Run `/lazy-python.audit` at any time to confirm the full installation is intact. Check 10 (`overlay-present`) tells you whether the testing overlay exists; the audit does not validate overlay content.
 
 If a future dispatch produces tests that contradict your project's conventions, the fix is a more explicit rule in `docs/guidelines/testing_guidelines.md`, not a hand-edit to the test file. The overlay is re-read on every dispatch; updating it takes effect immediately.
+
+If your project uses an aggregate test file pattern (one file that validates many sibling classes via auto-discovery rather than individual per-class files), declare that pattern in your testing overlay. The agent reads the overlay before deciding whether to create a new file or skip a class it detects is already covered.
 
 Track `docs/guidelines/testing_guidelines.md` in version control. When a teammate dispatches the agent and gets tests that violate your project's base-class mapping, the shared overlay is the single place to fix it.
 

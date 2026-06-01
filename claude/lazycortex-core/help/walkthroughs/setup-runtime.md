@@ -1,10 +1,10 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo serial daemon so the async expert team has an executor — install wizard, start the daemon, then unblock it with /lazy-runtime.recover if the working tree halts.
-last_regen: 2026-05-23
+last_regen: 2026-06-01
 diagram_spec:
   anchor: "How setup and recovery connect"
-  request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, wizard asks about runtime, user opts in, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + lazy-core.runtime block; (2) User runs .claude/bin/lazy.runtime.sh (daemon starts, polls .experts/.jobs/ on interval); (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
+  request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, wizard asks about runtime, user opts in, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh (daemon starts, polls .experts/.jobs/ on interval); (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
   kind_hint: sequence
 source_skills:
   - lazy-core.install
@@ -41,9 +41,10 @@ During install, the wizard asks whether to bootstrap runtime and experts for the
 
 - `lazy.settings.json[experts]` — the experts section, initially containing only `_version`.
 - `.claude/bin/lazy.runtime.sh` — the runtime shim, made executable. The shim resolves the latest `lazycortex-core/bin/runner` from the plugin cache at exec time, so it stays current after `/plugin update` without needing a re-run.
-- `lazy-core.runtime` block inside `.claude/lazy.settings.json` — daemon configuration including polling interval (default: 5 seconds) and job-cleanup retention windows.
+- Flat `daemon` and `routines` sections inside `.claude/lazy.settings.json` — daemon configuration including polling interval (default: 5 seconds), job-cleanup retention windows, and an empty routines map. These are top-level section keys read directly by the daemon; they are never nested under a `lazy-core.runtime` object.
 - `.memory/` directory at the repo root — tracked in git so memory notes survive clones.
-- Entries in `.gitignore` covering `.logs/`, `.runtime/`, `.experts/.jobs/`, and `.claude/lazy.settings.local.json`.
+- Entries in `.gitignore` covering `.logs/`, `.runtime/`, `.experts/`, and `.claude/lazy.settings.local.json`.
+- A `.lazyignore` file at the repo root (seeded from the plugin's template if absent) — extra tree-walking excludes (venvs, `node_modules`, `__pycache__`) that all routines honour via git's ignore engine.
 
 Next, the wizard asks whether to scan for expert candidates and register them. Answer **Yes** and work through the per-candidate prompts (local name, git author name, git author email). When at least one expert is registered, the `lazy-expert.pump` routine is added to `routines` automatically. Because the pump routine was freshly added, the wizard then offers a daemon supervisor — choose **macOS launchd** or **Linux systemd** to start the daemon automatically on login, or **Skip** to start it by hand. On re-runs where the pump routine is already present, the supervisor offer does not appear; use your OS's service manager directly if you need to re-install the supervisor.
 
@@ -63,7 +64,7 @@ If you chose a supervisor in Step 2, the daemon is already running. If you skipp
 .claude/bin/lazy.runtime.sh
 ```
 
-The daemon reads `lazy.settings.json[lazy-core.runtime]`, runs the `lazy-expert.pump` routine on each polling iteration, drains any `READY` jobs it finds, and loops. One daemon per repo means no two routines ever contend over the working tree or git state.
+The daemon reads the flat `daemon` and `routines` sections of `lazy.settings.json`, runs the `lazy-expert.pump` routine on each polling iteration, drains any `READY` jobs it finds, and loops. One daemon per repo means no two routines ever contend over the working tree or git state.
 
 ### Step 5 — Verify the daemon is polling (verification gate)
 

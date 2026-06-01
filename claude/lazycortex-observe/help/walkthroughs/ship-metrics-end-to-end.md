@@ -1,10 +1,10 @@
 ---
 chapter_type: walkthrough
 summary: From a clean checkout to your first dashboard panel — bring up the runtime daemon, install the shipper, produce traffic, verify the pipeline.
-last_regen: 2026-05-08
+last_regen: 2026-06-01
 diagram_spec:
   anchor: "How it flows"
-  request: "Sequence diagram: operator → lazy-core.install installs the runtime daemon and creates expert-pump routine; operator edits lazy.settings.json to enable lazy-core.runtime.metrics.enabled=true and restarts the daemon; daemon now exposes /metrics on 127.0.0.1:9464; operator dispatches an expert job via /lazy-expert.dispatch-job; daemon picks up the job, runs the expert, records a tick → metrics counter increments; operator runs /lazy-observe.install (Alloy or otelcol) which renders agent config + service unit, loads the supervised service; agent scrapes /metrics and remote_writes to operator's Prometheus; operator runs /lazy-observe.doctor; doctor verifies service active + local /metrics reachable + agent self-metrics show successful remote_write + observer URL reachable + WAL bounded; final state: charts populated in operator's Grafana."
+  request: "Sequence diagram: operator → lazy-core.install installs the runtime daemon and creates expert-pump routine; operator edits lazy.settings.json to enable daemon.metrics.enabled=true and restarts the daemon; daemon now exposes /metrics on 127.0.0.1:9464; operator dispatches an expert job via /lazy-expert.dispatch-job; daemon picks up the job, runs the expert, records a tick → metrics counter increments; operator runs /lazy-observe.install (Alloy or otelcol) which renders agent config + service unit, loads the supervised service; agent scrapes /metrics and remote_writes to operator's Prometheus; operator runs /lazy-observe.doctor; doctor verifies service active + local /metrics reachable + agent self-metrics show successful remote_write + observer URL reachable + WAL bounded; final state: charts populated in operator's Grafana."
   kind_hint: sequence
 source_skills:
   - lazy-core.install
@@ -33,11 +33,11 @@ After this step you have: a runnable daemon, an experts directory, the pump rout
 
 ### Step 2 — Enable the metrics endpoint
 
-Open `.claude/lazy.settings.json` and add the `metrics` block under `lazy-core.runtime`:
+The daemon exposes a Prometheus-format `/metrics` endpoint, but it's off by default. Add a `metrics` block to the flat `daemon` section of `.claude/lazy.settings.json` (the same section `/lazy-core.install` Step 9c seeds — you're extending it with a sub-key the install skill leaves for you to opt into):
 
 ```json
 {
-  "lazy-core.runtime": {
+  "daemon": {
     "metrics": {
       "enabled": true,
       "bind": "127.0.0.1",
@@ -90,4 +90,56 @@ To tear down: `/lazy-observe.uninstall` unloads the service and removes the rend
 
 ## How it flows
 
-<!-- /lazy-diagram.draw lands the fence here; do not author a code block manually. -->
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
+sequenceDiagram
+  participant op as Operator
+  participant install as lazy-core.install
+  participant daemon as Runtime Daemon
+  participant settings as lazy.settings.json
+  participant expertDispatch as lazy-expert.dispatch-job
+  participant observeInstall as lazy-observe.install
+  participant agent as Alloy / otelcol Agent
+  participant prometheus as Prometheus
+  participant doctor as lazy-observe.doctor
+  participant grafana as Grafana
+
+  op->>install: run /lazy-core.install
+  install-->>daemon: install runtime daemon binary
+  install-->>daemon: create expert-pump routine
+  install-->>op: install complete
+
+  op->>settings: set daemon.metrics.enabled=true
+  op->>daemon: restart daemon
+  daemon-->>op: daemon ready
+  Note over daemon: exposes /metrics on 127.0.0.1:9464
+
+  op->>expertDispatch: run /lazy-expert.dispatch-job
+  expertDispatch->>daemon: enqueue expert job
+  daemon->>daemon: pick up job, run expert
+  daemon-->>daemon: record tick - metrics counter increments
+  daemon-->>op: job complete
+
+  op->>observeInstall: run /lazy-observe.install
+  observeInstall-->>agent: render agent config
+  observeInstall-->>agent: render service unit, load supervised service
+  observeInstall-->>op: observer installed
+
+  agent->>daemon: scrape /metrics
+  daemon-->>agent: metrics payload
+  agent->>prometheus: remote_write metrics
+
+  op->>doctor: run /lazy-observe.doctor
+  doctor->>daemon: verify /metrics reachable on 127.0.0.1:9464
+  daemon-->>doctor: 200 OK - metrics endpoint live
+  doctor->>agent: verify agent self-metrics - successful remote_write
+  agent-->>doctor: remote_write confirmed
+  doctor->>prometheus: verify observer URL reachable + WAL bounded
+  prometheus-->>doctor: URL reachable - WAL within bounds
+  doctor-->>op: all checks passed
+
+  op->>grafana: view dashboards
+  grafana->>prometheus: query metrics
+  prometheus-->>grafana: time-series data
+  grafana-->>op: charts populated
+```

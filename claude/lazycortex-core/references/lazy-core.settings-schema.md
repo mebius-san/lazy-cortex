@@ -39,14 +39,18 @@ from lazy_settings import load_section, save_section
 
 ## 2. Per-section `_version` invariant
 
-Every section dict carries an `_version: int` field. Example:
+Every section is a flat top-level key whose dict carries an `_version: int` field. `load_section(path, "<key>")` reads each section directly off the top-level JSON. Example:
 
 ```json
 {
-  "lazy-core.runtime": {
-    "_version": 1,
-    "daemon": { ... },
-    "routines": { ... }
+  "daemon": {
+    "_version": 2,
+    "git": { ... },
+    "polling_interval_sec": 5
+  },
+  "routines": {
+    "_version": 2,
+    "lazy-expert.pump": { ... }
   }
 }
 ```
@@ -67,14 +71,14 @@ Section key → module name translation: dots and hyphens become underscores.
 
 | Section key | Module name |
 |---|---|
-| `lazy-core.runtime` | `lazy_core_runtime` |
+| `daemon` | `daemon` |
 | `agent_models` | `agent_models` |
 | `my-plugin.state` | `my_plugin_state` |
 
 Each module exports a single dict:
 
 ```python
-# bin/lazy_settings_migrations/lazy_core_runtime.py
+# bin/lazy_settings_migrations/daemon.py
 MIGRATIONS = {}  # {from_version: callable}
 ```
 

@@ -21,8 +21,8 @@ No agents. No other commands.
 <!-- help-block:start -->
 **Documentation:**
 
-- [ship-metrics-end-to-end](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/walkthroughs/ship-metrics-end-to-end.md) — From a clean checkout to your first dashboard panel — bring up the runtime daemon, install the shipper, produce traffic, verify the pipeline.
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/install-and-audit.md) — Install, verify health, and tear down the lazycortex-observe metrics shipper on any host.
+- [ship-metrics-end-to-end](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/walkthroughs/ship-metrics-end-to-end.md) — From a clean checkout to your first dashboard panel — bring up the runtime daemon, install the shipper, produce traffic, verify the pipeline.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/troubleshooting.md) — Common failure modes across lazycortex-observe install, uninstall, and doctor — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/faq.md) — Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
 

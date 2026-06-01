@@ -45,10 +45,17 @@ Outcome: `scope-detected: <user|project>`.
 | `user` | `~/.claude/lazy.settings.json` |
 | `project` | `<repo-root>/.claude/lazy.settings.json` (root = `git rev-parse --show-toplevel`, or cwd if not in a git repo — warn the user) |
 
-Locate `lazycortex-core`'s shipped defaults file:
+Locate `lazycortex-core`'s shipped defaults file per the inter-plugin boundary contract — walk `$LAZYCORTEX_PLUGIN_DIRS` first, fall back to the cache glob when env is unset (install-time invocation outside the daemon):
 
 ```bash
-ls ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/skills/lazy-core.agent-models/default-tiers.json | sort -V | tail -1
+FILE=""
+IFS=":" read -ra DIRS <<< "${LAZYCORTEX_PLUGIN_DIRS:-}"
+for d in "${DIRS[@]}"; do
+  if [[ "$d" == *"/lazycortex-core" ]] && [ -f "$d/skills/lazy-core.agent-models/default-tiers.json" ]; then
+    FILE="$d/skills/lazy-core.agent-models/default-tiers.json"; break
+  fi
+done
+[ -z "$FILE" ] && FILE=$(ls ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/skills/lazy-core.agent-models/default-tiers.json 2>/dev/null | sort -V | tail -1)
 ```
 
 Newest version wins. If the file is absent → FAIL with `lazycortex-core not installed; install it before /lazy-experts.install`. Do NOT fall through to a hardcoded fallback — silent drift is exactly what the SOT is meant to prevent.

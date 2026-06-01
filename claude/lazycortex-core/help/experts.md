@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Dispatch jobs to named expert workers, keep the main session free, and collect results when the daemon finishes them.
-last_regen: 2026-05-23
+last_regen: 2026-06-01
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing a user dispatching a job via dispatch-job, the runtime daemon draining the queue, and the user collecting results via collect-job. Include list-jobs and cancel-job as optional side paths. Use boxes for the four skills and a distinct shape for the daemon process."
@@ -29,17 +29,17 @@ Each expert is a named role defined in `lazy.settings.json[experts]` at install 
 
 **`/lazy-expert.dispatch-job`** is the entry point into the async team. You supply the expert name, the job payload (kind, role, and request are required; source, context, and result arrays are optional file references), and an optional list of protocol refs. The skill validates the payload, writes the job directory under `.experts/.jobs/<expert_name>/`, and returns `{job_id, queue_path}` immediately. From that point the main session is free.
 
-**`/lazy-expert.list-jobs`** gives you a live snapshot of every job in the queue, sorted oldest-first. Each row shows expert, job_id, status, and age. The five statuses map directly to what the daemon writes to disk: `queued` (READY marker, no PID), `active` (READY + PID, daemon is running it now), `dead` (DEAD marker present — unrecoverable launch error), `done` (DONE marker + successful response.json), and `failed` (DONE marker + error outcome in response.json). Pass `expert=<name>` or `status=<value>` to narrow the listing. Use this before collecting to confirm a job has finished, or to locate a `job_id` you have lost track of.
+**`/lazy-expert.list-jobs`** gives you a live snapshot of every job in the queue, sorted oldest-first. Each row shows expert, job_id, status, and age. The five statuses map directly to what the daemon writes to disk: `queued` (READY marker present, no PID — waiting to be picked up), `active` (READY + PID — daemon is running it now), `dead` (DEAD marker present — unrecoverable launch error), `done` (DONE marker + successful response.json), and `failed` (DONE marker + error outcome in response.json). Pass `expert=<name>` or `status=<value>` to narrow the listing. Use this before collecting to confirm a job has finished, or to locate a `job_id` you have lost track of.
 
 **`/lazy-expert.collect-job`** retrieves the result for a specific job. You supply the expert name and job_id; the skill returns `{status, response}`. When status is `done` it lists the result file paths from `response.json` so you can read them directly. When status is `pending` the daemon has not finished yet — run the skill again later. When status is `failed` it prints the error from `response.json`. When status is `missing` the job directory does not exist — verify the job_id and expert_name or re-dispatch.
 
 **`/lazy-expert.cancel-job`** removes a job directory. For pending jobs it warns that the daemon may already be processing the job and asks for confirmation before deleting. For jobs that are already done it asks whether you want to discard the result. Nothing is deleted until you confirm.
 
-## How they work together
+## How it fits together
 
 You start every interaction with `/lazy-expert.dispatch-job`. The skill validates inputs, checks that `.experts/` is bootstrapped, and hands the job to the runtime daemon's queue. Because dispatch returns in seconds with a `job_id`, you can dispatch several jobs in a row — each goes to its respective expert queue and the daemon processes them in order.
 
-While jobs run, `/lazy-expert.list-jobs` is your view into the pipeline. Check it at any point — immediately after dispatching to confirm the job is queued, or later to see whether the daemon has finished. Narrow to one expert with `expert=<name>` when you have several workers configured, or filter to `status=active` if you want to know whether the daemon is currently busy.
+While jobs run, `/lazy-expert.list-jobs` is your view into the pipeline. Check it at any point — immediately after dispatching to confirm the job is `queued`, or later to see whether the daemon has moved it to `active` and then to `done`. Narrow to one expert with `expert=<name>` when you have several workers configured, or filter to `status=active` if you want to know whether the daemon is currently busy. Note that `/lazy-expert.collect-job` reports `pending` for any job the daemon has not yet finished (whether `queued` or `active`); use `list-jobs status=active` to distinguish the two.
 
 When you see a job reach `done` status in the list, run `/lazy-expert.collect-job` to retrieve the output. If the result status is `pending`, the daemon is still working — call again in a moment. If it comes back `failed`, read the error and check `transcript.jsonl` in the job directory for the full subprocess output.
 
@@ -48,20 +48,12 @@ When you see a job reach `done` status in the list, run `/lazy-expert.collect-jo
 ## Common adjustments
 
 - **Add file references to the dispatch payload.** Pass `source` for files the expert should read as primary input, `context` for background material, and `result` for paths where the expert should write its output. These arrays flow through to the expert agent via the protocol contract.
-- **Verify the expert name before dispatching.** If you mistype the expert key, `/lazy-expert.dispatch-job` aborts with "`<expert_name>` is not registered in `lazy.settings.json[experts]`." Confirm the name with `/lazy-expert.list-jobs` (all known experts appear in the table) or by checking `lazy.settings.json`.
+- **Verify the expert name before dispatching.** If you mistype the expert key, `/lazy-expert.dispatch-job` aborts with "`<expert_name>` is not registered in `lazy.settings.json[experts]`." Confirm the name with `/lazy-expert.list-jobs` (all known experts appear in the table) or check `lazy.settings.json` directly.
 - **Filter the job list by expert.** `/lazy-expert.list-jobs expert=<name>` is the fastest way to check the queue for one worker when you have several experts configured.
-- **Filter by status.** Pass `status=queued` to see jobs waiting to be picked up, `status=active` to confirm the daemon is currently working on a job, `status=dead` to surface jobs the daemon could not launch, or `status=failed` to find jobs with error outcomes. Note that `/lazy-expert.collect-job` reports `pending` for any job the daemon has not yet finished (whether queued or active); use `list-jobs status=active` to distinguish the two.
+- **Filter by status.** Pass `status=queued` to see jobs waiting to be picked up, `status=active` to confirm the daemon is currently working, `status=dead` to surface jobs the daemon could not launch, or `status=failed` to find jobs with error outcomes.
 - **Re-dispatch a failed job.** If `/lazy-expert.collect-job` returns `status: failed`, read the error from `response.json` and check `transcript.jsonl` in the same job directory for the full expert subprocess output. Fix the underlying issue (e.g. a missing source file), cancel the failed job with `/lazy-expert.cancel-job`, and dispatch a new one.
+- **Give an expert persistent aspects or fixed arguments.** Each expert in `lazy.settings.json[experts]` can carry an `aspects[]` list of behavior layers (for example, `lazycortex-core:lazy-memory.persona-aspect` to give an expert private long-term memory) and an `arguments` dict of named values that are injected into every job automatically. To modify them, run `/lazy-core.install` to re-run the expert wizard, or run `/lazy-memory.mark-persona <expert>` to opt into the memory aspect specifically.
 - **Add or reconfigure expert roles.** Each expert's prompt and tools are set in `lazy.settings.json[experts]`. Run `/lazy-core.install` to re-run the expert wizard and update that file.
-
-## Aspects and arguments
-
-Each expert can carry two optional pieces of expert-side configuration in `lazy.settings.json[experts][<expert>]`:
-
-- **Aspects** — a list of `<plugin>:<name>-aspect` references that compose behavior layers on top of the expert's protocol. For example, adding `lazycortex-core:lazy-memory.persona-aspect` to an expert's `aspects[]` gives it a private long-term memory under `.memory/<expert>/`. Aspects shape how the expert acts; protocols define what it returns. Run `/lazy-memory.mark-persona <expert>` to opt into the memory aspect.
-- **Arguments** — a dict of named values the expert is permanently registered with (e.g. `locale: "en-US"`, `max_depth: 3`). Keys must match `^[a-z][a-z0-9_]*$`. Values are any JSON type. The dispatcher copies arguments verbatim into each job's `config.json`, and the pump renders them in the user-message prompt as `- argument: <name> = <json-value>` lines for the expert to read.
-
-When you dispatch a job, aspects and arguments are read automatically from the expert's entry in `lazy.settings.json` — you do not pass them per-job. To modify them, re-run the expert wizard via `/lazy-core.install`, or for the memory aspect specifically, run `/lazy-memory.mark-persona <expert>`.
 
 ## See also
 

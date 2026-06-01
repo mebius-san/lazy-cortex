@@ -89,6 +89,16 @@ Requires: lazycortex-core, lazycortex-diagram
 
 See [`claude/lazycortex-specs/`](claude/lazycortex-specs/) for details.
 
+### lazycortex-wiki
+
+Maintains a curated, LLM-navigable semantic wiki over a markdown+code base — summaries, hierarchical topic tags, and glossed See-also links, kept in sync via git-watch and weekly full-scan routines.
+
+Ships 5 skills, 3 agents, 1 command, and 1 rule.
+
+Requires: lazycortex-core
+
+See [`claude/lazycortex-wiki/`](claude/lazycortex-wiki/) for details.
+
 ## Requirements
 
 - **Claude Code** — the plugins use skills, agents, hooks, and the plugin marketplace system.
@@ -124,7 +134,8 @@ All plugins live in a single Claude Code marketplace. Add the marketplace and en
     "lazycortex-observe@lazycortex": true,
     "lazycortex-obsidian@lazycortex": true,
     "lazycortex-python@lazycortex": true,
-    "lazycortex-specs@lazycortex": true
+    "lazycortex-specs@lazycortex": true,
+    "lazycortex-wiki@lazycortex": true
   }
 }
 ```

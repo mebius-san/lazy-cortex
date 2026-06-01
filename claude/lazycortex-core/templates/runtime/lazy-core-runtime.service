@@ -5,8 +5,11 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory={REPO_ROOT}
+# tells _restart_in_place to clean-exit (code 0) on own-code change instead of os.execv
+Environment=LAZYCORTEX_SUPERVISED=1
 ExecStart={REPO_ROOT}/.claude/bin/lazy.runtime.sh {REPO_ROOT}
-Restart=on-failure
+# Restart=always (not on-failure) so the clean exit-0 self-restart relaunches the daemon with fresh code
+Restart=always
 RestartSec=5
 
 [Install]

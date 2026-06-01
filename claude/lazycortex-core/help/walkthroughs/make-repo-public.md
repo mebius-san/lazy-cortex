@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
-last_regen: 2026-05-23
+last_regen: 2026-06-01
 diagram_spec:
   anchor: "How the flow works"
   request: "End-to-end participant exchange when /lazy-repo.mark-public runs: user invokes the skill, skill checks git and GitHub visibility (preflight), determines scope (whole-repo vs. subtree), dispatches four parallel security scans (secrets, PII, infra, local paths) via /lazy-guard.check-public, presents unified findings table, loops per FAIL for resolution (encrypt/template/redact) and per WARN for fix/waive/skip, writes .guard-waivers.json with public_author and accepted waivers activating the pre-commit hook, then in whole-repo mode flips visibility via gh repo edit. Five participants: User, /lazy-repo.mark-public, /lazy-guard.check-public, Security Scan Agents, GitHub."
@@ -45,7 +45,7 @@ If you only want to declare a subtree as the public surface — for example, a `
 The skill confirms you are in a git repo, reads the current GitHub visibility, and tells you which mode it will run in:
 
 - **Whole-repo mode** (no arguments): the entire repo goes through the audit, and GitHub visibility can change at the end.
-- **Subtree-public mode** (glob arguments): only the listed paths are treated as the public surface. The repo stays private on GitHub; the visibility flip in a later step is skipped.
+- **Subtree-public mode** (glob arguments): only the listed paths are treated as the public surface. The repo stays private on GitHub; the visibility flip is skipped.
 
 If the repo is already public and you passed no scope arguments, the skill asks whether you want to re-audit with `/lazy-guard.check-public` instead of repeating the full setup flow.
 
@@ -56,7 +56,7 @@ The skill invokes `/lazy-guard.check-public`, which dispatches four parallel sca
 Findings come back in three severities:
 
 - **FAIL** (secrets) — private keys, AWS access keys, API tokens, high-entropy base64 on secret-context lines, connection strings with credentials, bearer token literals. These block going public and must be resolved.
-- **WARN** (PII, infrastructure, local paths) — email addresses, internal hostnames, Tailscale or public IPs, hardcoded `/Users/…` paths, `~/Dropbox/`-style refs, author identity in manifests. You decide whether to fix or waive each one.
+- **WARN** (PII, infrastructure, local paths) — email addresses, internal hostnames, Tailscale or public IPs, hardcoded `/Users/…` paths, home-subdirectory refs like `~/Dropbox/`, author identity in manifests. You decide whether to fix or waive each one.
 - **INFO** — lower-confidence signals such as personal names in git config inside dotfiles. You can auto-waive or skip these.
 
 Verification gate: review the findings table before moving on. If a finding looks like a false positive, flag it — the skill can waive it in the next step.
@@ -84,7 +84,7 @@ The skill writes the waiver file to the repo root with all accepted waivers from
 - `waivers` — individual accepted exceptions with check ID, scope, pattern, reason, and date
 - `global_skip_paths` — vendored or third-party directories the audit identified as safe to skip
 
-Creating this file also activates the pre-commit hook: from this point forward, every `git commit` in this repo automatically scans staged changes and blocks on new secrets. To disable pre-commit scanning entirely later, delete `.guard-waivers.json` via a tracked commit. To add new accepted exceptions, re-run `/lazy-guard.check-public` and choose the waiver option for any finding you want to accept — the skill appends the entry.
+Creating this file also activates the pre-commit hook: from this point forward, every `git commit` in this repo automatically scans staged changes and blocks on new secrets. To disable pre-commit scanning entirely, delete `.guard-waivers.json` via a tracked commit. To add new accepted exceptions later, re-run `/lazy-guard.check-public` and choose the waiver option for any finding you want to accept — the skill appends the entry.
 
 Verification gate: confirm `.guard-waivers.json` is committed and the hook is active before continuing.
 
@@ -92,24 +92,20 @@ Verification gate: confirm `.guard-waivers.json` is committed and the hook is ac
 
 This step is skipped entirely in subtree-public mode — the skill prints the active `public_scopes` and you are done.
 
-In whole-repo mode, after all FAIL findings are resolved, the skill asks for your confirmation and runs:
+In whole-repo mode, after all FAIL findings are resolved, the skill asks for your confirmation before changing visibility. If you confirm, it runs `gh repo edit --visibility public` on your behalf.
 
-```bash
-gh repo edit --visibility public
-```
+If you prefer to flip visibility yourself later, say no — the repo is audit-clean and ready whenever you are. The skill prints the exact command to run.
 
-If you prefer to flip visibility yourself later, say no — the repo is audit-clean and ready whenever you are. The skill will print the exact command to run.
-
-If `gh` is not on PATH or is unauthenticated, install the GitHub CLI and run `gh auth login`, then execute the command manually.
+If `gh` is not on PATH or is unauthenticated, install the GitHub CLI and run `gh auth login`, then execute `gh repo edit --visibility public` manually.
 
 ### 7 — Post-flight
 
-The skill confirms the pre-commit hook is active, reminds you to run `/lazy-guard.check-public` periodically or after major configuration changes, and in subtree-public mode confirms which `public_scopes` the hook is protecting on every commit.
+The skill confirms the pre-commit hook is active and reminds you to run `/lazy-guard.check-public` periodically or after major configuration changes. In subtree-public mode it confirms which `public_scopes` the hook is protecting on every commit.
 
 ## After you're done
 
 The `.guard-waivers.json` file is the ongoing contract for this repo — keep it tracked in git. When a new accepted exception appears after a config change (a new email address, a new author field in a manifest), re-run `/lazy-guard.check-public` and add the waiver through the skill.
 
-Run `/lazy-guard.check-public` again after any major configuration change, after adding a new plugin, or after pulling in a third-party subtree that might bring in new paths or credentials.
+Run `/lazy-guard.check-public` again after any major configuration change, after adding a new plugin, or after pulling in a third-party subtree that might introduce new paths or credentials.
 
 ## How the flow works

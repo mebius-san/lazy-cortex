@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-last_regen: 2026-05-23
+last_regen: 2026-06-01
 diagram_spec:
   anchor: "How registration and pickup flow"
   request: "Sequence diagram showing the user running /lazy-routine.register, the skill writing lazy.settings.json, the daemon picking up the new routine on its next cycle without restart, and the user later running /lazy-routine.unregister to remove it. Include the built-in protection check for lazy-expert.pump."
@@ -41,8 +41,8 @@ The validator enforces exactly-one of the two dispatch shapes. Choose the type, 
 - **subprocess** — fire on a fixed interval (e.g. every 300 seconds). Required: `interval_sec`. Good for lint sweeps, data refreshes, and any periodic invocation.
 - **inbox** — watch a directory and fire once per file found. With `expert + request` the file is moved into job staging; with `command` it stays in the inbox until the consumer removes it. Required: `inbox_dir`, `interval_sec`.
 - **schedule** — fire once per cron boundary (5-field cron expression). Required: `cron`. Use when wall-clock timing matters more than a fixed cadence.
-- **git** — watch a remote branch for new commits, new files, changed files, deleted files, or renamed files; fire once per item. Required: `branch`, `watch`, `interval_sec`.
-- **md-scan** — scan markdown files matching vault-relative globs, filter by frontmatter values, and fire once per match. Files are edited in place by the consumer — no move. Required: `paths` (list of globs), `frontmatter_filter` (dict), `interval_sec`.
+- **git** — watch local HEAD for new commits, new files, changed files, deleted files, or renamed files; fire once per item. Required: `watch`, `interval_sec`. The `branch` and `remote` fields are accepted by the schema for legacy compatibility but have no effect — the watch always targets local HEAD and remote sync is the daemon's own job.
+- **md-scan** — scan markdown files matching vault-relative globs, filter by frontmatter values, and fire once per match. Files are edited in place by the consumer — no move. Required: `paths` (list of globs), `interval_sec`. Optional: `filter` (composite filter block, e.g. `{"frontmatter": {"key": {"in": [...], "not_in": [...]}}}`; a `null` value in the `in` list matches files where the key is absent or explicitly null — useful for picking up files that have never been processed; absent `filter` matches all files).
 
 ### Step 2 — Run the register wizard
 
@@ -59,7 +59,9 @@ interval_sec: 300
 
 For an `inbox` routine the wizard additionally checks whether `inbox_dir` is gitignored. If it is not, it offers to append the path to `.gitignore` — accept this. Inbox routines move files between iterations; a tracked inbox directory dirties the working tree and triggers the daemon's halt protection.
 
-For an `md-scan` routine the wizard asks for the glob list, the frontmatter filter dict, and the dispatch shape. A `null` filter value matches files where the key is absent — useful for picking up files that have never been processed (e.g. `{"request_status": [null, "draft"]}`).
+For an `md-scan` routine the wizard asks for the glob list, the optional frontmatter filter dict, and the dispatch shape. A `null` value in the filter's `in` list matches files where the key is absent — useful for picking up files that have never been processed (e.g. `{"frontmatter": {"request_status": {"in": [null, "draft"], "not_in": []}}}`).
+
+For a `git` routine, supply `watch` (one of `new_commits` / `new_files` / `changed_files` / `deleted_files` / `renamed_files`) and `interval_sec`. Skip `branch` and `remote` — the wizard may ask for them (schema compatibility), but they have no effect on which changes are observed.
 
 The skill validates the `<plugin>.<verb>` naming pattern and the per-type schema before writing anything. If validation fails it aborts with a clear message — fix the reported field and re-run.
 
