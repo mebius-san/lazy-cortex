@@ -1,21 +1,30 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-06-01
+last_regen: 2026-06-02
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / setup-migration-failed / setup-child-failed; audit-or-doctor → sub-branch on global-rules-empty / experts-json-invalid / ref-unresolvable / routine-path-stale / stall-mid-run; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / cancel-job-not-found / invalid-status-filter / expert-key-mismatch; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / recover-still-dirty / recover-commit-needs-message / state-unparseable; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
-  - lazy-core.doctor
   - lazy-core.setup
+  - lazy-core.doctor
+  - lazy-core.optimize
   - lazy-repo.mark-public
   - lazy-guard.check-public
+  - lazy-guard.allow-mcp
+  - lazy-routine.register
   - lazy-runtime.recover
   - lazy-expert.dispatch-job
   - lazy-expert.collect-job
   - lazy-memory.write
+  - lazy-memory.reflect
+  - lazy-core.agent-models
+  - lazy-core.git-status
+  - lazy-core.git-unlock
+  - lazy-log.clean
+  - lazy-log.distill
 ---
 # Troubleshooting
 

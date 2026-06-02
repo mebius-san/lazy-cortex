@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
-last_regen: 2026-06-01
+last_regen: 2026-06-02
 diagram_spec:
   anchor: "How memory grows over time"
   request: "Sequence diagram showing user invoking mark-persona, then dispatching jobs (accumulating run logs), then invoking reflect which reads run logs + existing memory notes and calls lazy-memory.write to produce .memory/<expert>/<slug>.md, committing atomically under the memory-bot identity."
@@ -129,7 +129,9 @@ Expected state:
 
 Notes land already committed: `/lazy-memory.write` commits each note atomically under the `memory.<expert>` identity before returning, so the `.memory/` tree is in a clean git state as soon as the reflect job finishes. You do not need to commit these files yourself.
 
-If a tag is missing the `memory/` prefix, `/lazy-memory.write` would have rejected the note with `frontmatter-invalid: tag must be prefixed memory/` — so any note that landed successfully has valid tags.
+If a tag is missing the `memory/` prefix, `/lazy-memory.write` would have rejected the note with `frontmatter-invalid: tag must be prefixed memory/` — so any note that landed successfully has valid tags. If `/lazy-memory.write` reports `consolidate-target-missing: <path>`, the note still writes successfully — this is a non-fatal warning telling you a path passed via `--consolidate` no longer exists; it can be safely ignored or removed from the consolidate list on the next call.
+
+If a commit attempt failed mid-job (`commit-failed: git add returned …` or `commit-failed: git commit returned …`), the staged index is left intact for inspection. This usually means a pre-commit hook rejected the change or another session held the staging lock. Resolve the cause, then re-run `/lazy-memory.write` with the same body — the write is idempotent when the note content is unchanged.
 
 To check for broader memory-hygiene issues (missing required fields, malformed frontmatter) across the whole tree:
 
@@ -151,8 +153,50 @@ This fires every 7 days, dispatching one reflect job per persona-marked expert a
 
 ## After you're done
 
-The expert now reads its memory notes at the start of every job. As it handles more work, the memory grows — either via notes the expert writes inline during regular jobs or via periodic reflect passes you trigger manually or via the routine above. When the expert writes a note via `/lazy-memory.write`, tag files in `.memory/<expert>/.tags/` and `.memory/.tags/` update atomically; you do not need to rebuild the index unless you hand-edit notes outside the skill (in which case run `/lazy-memory.index <expert>` to repair the tag files).
+The expert now reads its memory notes at the start of every job. As it handles more work, the memory grows — either via notes the expert writes inline during regular jobs or via periodic reflect passes you trigger manually or via the routine above.
+
+When the expert writes a note via `/lazy-memory.write`, tag files in `.memory/<expert>/.tags/` and `.memory/.tags/` update atomically; you do not need to rebuild the index unless you hand-edit notes outside the skill (in which case run `/lazy-memory.index <expert>` to repair the tag files). When a reflect pass consolidates run logs you no longer need, pass the log paths via `--consolidate` on the write call — the skill drops them after a successful write so the `.logs/` tree stays trim.
 
 To extend memory to another expert, start again at Step 1 with the new expert's name.
 
 ## How memory grows over time
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
+sequenceDiagram
+  participant user as User
+  participant markPersona as mark-persona
+  participant jobDispatcher as Job Dispatcher
+  participant runLogs as Run Logs
+  participant reflect as reflect
+  participant memoryNotes as Memory Notes
+  participant lazyMemory as lazy-memory.write
+  participant memoryStore as .memory/<expert>/<slug>.md
+  participant git as Git (memory-bot)
+
+  user->>markPersona: invoke mark-persona <expert>
+  markPersona-->>user: persona activated
+
+  loop each dispatched job
+    user->>jobDispatcher: dispatch job
+    jobDispatcher->>runLogs: append run log entry
+    runLogs-->>jobDispatcher: entry written
+    jobDispatcher-->>user: job complete
+  end
+
+  Note over runLogs: run logs accumulated
+
+  user->>reflect: invoke reflect <expert>
+  reflect->>runLogs: read accumulated run logs
+  runLogs-->>reflect: run log entries
+  reflect->>memoryNotes: read existing memory notes
+  memoryNotes-->>reflect: current notes
+  reflect->>lazyMemory: call lazy-memory.write with logs + notes
+  lazyMemory->>memoryStore: write .memory/<expert>/<slug>.md
+  memoryStore-->>lazyMemory: file written
+  lazyMemory-->>reflect: write confirmed
+  reflect->>git: git commit --author memory-bot (atomic)
+  git-->>reflect: commit SHA
+  reflect-->>user: reflection committed
+```
+

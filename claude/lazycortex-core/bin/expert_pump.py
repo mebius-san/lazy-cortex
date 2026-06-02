@@ -21,9 +21,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import error_ledger
+import runtime_state
 from lazy_settings import load_section
 # waiver: ReferenceError is reference_resolver's domain exception, not the builtin
 from reference_resolver import resolve, ReferenceError  # pylint: disable=redefined-builtin
+# Hoisted from inside `_check_post_claude` (Bug 113): the deferred import inside the
+# function was firing every job, and when a sibling editor flushed an update to
+# `constants.py` (e.g. adding a new key like `DaemonKey`) the cached `constants` module
+# in the long-running pump subprocess pointed at V1 while the on-disk file was V2 —
+# `runtime_daemon`'s top-level `from constants import …` then exploded with
+# `ImportError: cannot import name X from constants`. Binding the import at module load
+# means the lookup happens ONCE per process lifetime, not per job.
+from runtime_daemon import _check_working_tree
 from constants import (
   HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase, IncidentState,
   JobArtifact, JobConfigKey, JobErrorCategory, JobFile, JobMarker, JobOutcome, JobRequestKey, JobResponseKey,
@@ -306,9 +315,6 @@ def _check_post_claude(repo: Path, expert_name: str, jdir: Path) -> bool:
     True when the working tree was dirty (caller is expected to raise the halt exception),
     False when the tree was clean.
   """
-  # waiver: deferred imports for test monkeypatch compatibility
-  import runtime_state
-  from runtime_daemon import _check_working_tree
   dirty = _check_working_tree(repo)
   # guard: working tree is clean — nothing to do
   if dirty is None:
@@ -367,6 +373,14 @@ def pump(repo: Path) -> dict:
     return { "experts": 0, "processed": 0, "cleaned": 0, "detected_dead": detected_dead }
 
   processed = cleaned = expert_count = 0
+  # Bug 118: previous loop processed the first READY job in alphabetical order of
+  # expert directories (`designer` < `historian` < `interpreter` < `planner` <
+  # `planner-2` < `spec.request-router` < `spec.request-apply`). Sibling fixtures
+  # continuously enqueueing main-writer / validator jobs starved terminal-barrier
+  # writers indefinitely (RUN 6 observed `spec.request-router` waiting 21 minutes).
+  # Fix: collect ALL READY jobs across every expert dir in one pass, then pick the
+  # oldest by READY-marker mtime. Plain FIFO fairness across the whole queue.
+  ready_candidates: list[tuple[float, str, Path]] = []
   for edir in sorted(jobs_root.iterdir()):
     # guard: skip stray files mixed in beside expert directories
     if not edir.is_dir():
@@ -378,22 +392,30 @@ def pump(repo: Path) -> dict:
       if not jdir.is_dir():
         continue
       cleaned += _maybe_cleanup(jdir, cleanup_done_after, cleanup_fail_after, cleanup_dead_after)
+      ready_marker = jdir / JobMarker.READY
       ready = (
-        (jdir / JobMarker.READY).exists()
+        ready_marker.exists()
         and not (jdir / JobMarker.DONE).exists()
         and not (jdir / JobMarker.DEAD).exists()
       )
-      if ready and processed == 0:
-        try:
-          _process_one(repo, name, jdir)
-          processed += 1
-        except _ExpertLeftDirtyTree as e:
-          processed += 1
-          return {
-            "experts": expert_count, "processed": processed,
-            "cleaned": cleaned, "detected_dead": detected_dead, "halted": True,
-            "halt_expert": e.expert, "halt_job_id": e.job_id,
-          }
+      # guard: only collect actually-ready jobs into the FIFO queue
+      if not ready:
+        continue
+      ready_candidates.append((ready_marker.stat().st_mtime, name, jdir))
+  # guard: no ready jobs at all → return early
+  if ready_candidates:
+    ready_candidates.sort(key = lambda t: t[0])
+    _mtime, name, jdir = ready_candidates[0]
+    try:
+      _process_one(repo, name, jdir)
+      processed = 1
+    except _ExpertLeftDirtyTree as e:
+      processed = 1
+      return {
+        "experts": expert_count, "processed": processed,
+        "cleaned": cleaned, "detected_dead": detected_dead, "halted": True,
+        "halt_expert": e.expert, "halt_job_id": e.job_id,
+      }
   return { "experts": expert_count, "processed": processed, "cleaned": cleaned, "detected_dead": detected_dead }
 
 
