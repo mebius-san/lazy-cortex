@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
-last_regen: 2026-06-01
+last_regen: 2026-06-02
 diagram_spec:
   anchor: "How the flow works"
   request: "End-to-end participant exchange when /lazy-repo.mark-public runs: user invokes the skill, skill checks git and GitHub visibility (preflight), determines scope (whole-repo vs. subtree), dispatches four parallel security scans (secrets, PII, infra, local paths) via /lazy-guard.check-public, presents unified findings table, loops per FAIL for resolution (encrypt/template/redact) and per WARN for fix/waive/skip, writes .guard-waivers.json with public_author and accepted waivers activating the pre-commit hook, then in whole-repo mode flips visibility via gh repo edit. Five participants: User, /lazy-repo.mark-public, /lazy-guard.check-public, Security Scan Agents, GitHub."
@@ -77,12 +77,19 @@ You pick one and the skill applies it. The next step will not proceed until ever
 
 ### 5 — Create `.guard-waivers.json`
 
-The skill writes the waiver file to the repo root with all accepted waivers from the previous step and commits it. The file may contain:
+The skill writes the waiver file to the repo root with all accepted waivers from the previous step and commits it. The file structure the skill produces:
 
-- `public_author` — your chosen public name (and optionally email), recorded as a top-level block; governs every author-field finding under the declared scopes automatically
-- `public_scopes` — the glob list in subtree-public mode
-- `waivers` — individual accepted exceptions with check ID, scope, pattern, reason, and date
-- `global_skip_paths` — vendored or third-party directories the audit identified as safe to skip
+```
+{
+  "version": 1,
+  "public_author": { "name": "...", "email": "...", "notes": "..." },
+  "public_scopes": [ ...glob list in subtree-public mode; omitted in whole-repo mode... ],
+  "waivers": [ ...one entry per accepted exception... ],
+  "global_skip_paths": [ ...vendored or third-party directories identified as safe to skip... ]
+}
+```
+
+The `public_author` block is a top-level key separate from `waivers[]`. It governs every B4 author-field finding under the declared scopes automatically — no per-file waiver entry needed.
 
 Creating this file also activates the pre-commit hook: from this point forward, every `git commit` in this repo automatically scans staged changes and blocks on new secrets. To disable pre-commit scanning entirely, delete `.guard-waivers.json` via a tracked commit. To add new accepted exceptions later, re-run `/lazy-guard.check-public` and choose the waiver option for any finding you want to accept — the skill appends the entry.
 
@@ -109,3 +116,54 @@ The `.guard-waivers.json` file is the ongoing contract for this repo — keep it
 Run `/lazy-guard.check-public` again after any major configuration change, after adding a new plugin, or after pulling in a third-party subtree that might introduce new paths or credentials.
 
 ## How the flow works
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
+sequenceDiagram
+  participant user as User
+  participant markPublic as /lazy-repo.mark-public
+  participant checkPublic as /lazy-guard.check-public
+  participant scanAgents as Security Scan Agents
+  participant github as GitHub
+
+  user->>markPublic: invoke /lazy-repo.mark-public
+  markPublic->>github: GET repo visibility
+  github-->>markPublic: visibility status
+  markPublic->>markPublic: preflight — check git status + branch
+  Note over markPublic: Preflight passed
+  markPublic->>user: prompt — whole-repo or subtree scope?
+  user-->>markPublic: scope selection (whole-repo / subtree path)
+  Note over markPublic: Scope determined
+  markPublic->>checkPublic: dispatch parallel scans (secrets, PII, infra, local paths)
+  checkPublic->>scanAgents: run secrets scan
+  checkPublic->>scanAgents: run PII scan
+  checkPublic->>scanAgents: run infra scan
+  checkPublic->>scanAgents: run local-paths scan
+  scanAgents-->>checkPublic: secrets findings
+  scanAgents-->>checkPublic: PII findings
+  scanAgents-->>checkPublic: infra findings
+  scanAgents-->>checkPublic: local-paths findings
+  checkPublic-->>markPublic: unified findings table (FAILs + WARNs)
+  markPublic->>user: present unified findings table
+  loop per FAIL — must resolve
+    user->>markPublic: resolve FAIL (encrypt / template / redact)
+    markPublic->>checkPublic: re-scan affected file
+    checkPublic->>scanAgents: targeted re-scan
+    scanAgents-->>checkPublic: updated result
+    checkPublic-->>markPublic: FAIL cleared
+  end
+  loop per WARN — choose action
+    markPublic->>user: prompt — fix, waive, or skip WARN?
+    user-->>markPublic: decision (fix / waive / skip)
+  end
+  markPublic->>markPublic: write .guard-waivers.json with public_author + accepted waivers
+  Note over markPublic: Pre-commit hook activated
+  alt whole-repo mode
+    markPublic->>github: gh repo edit --visibility public
+    github-->>markPublic: visibility updated
+    markPublic-->>user: repo is public — done
+  else subtree-public mode
+    markPublic-->>user: subtree scoped as public — done
+  end
+```
+

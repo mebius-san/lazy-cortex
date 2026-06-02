@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo serial daemon so the async expert team has an executor — install wizard, start the daemon, then unblock it with /lazy-runtime.recover if the working tree halts.
-last_regen: 2026-06-01
+last_regen: 2026-06-02
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, wizard asks about runtime, user opts in, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh (daemon starts, polls .experts/.jobs/ on interval); (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
@@ -13,6 +13,10 @@ source_skills:
 # How do I bootstrap the runtime daemon and recover it if the working tree halts?
 
 The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines — without hitting Claude Code's subagent nesting limit. Setting it up takes three actions: run the runtime-daemon wizard inside `/lazy-core.install`, start the daemon with `.claude/bin/lazy.runtime.sh`, and know how to unblock it with `/lazy-runtime.recover` if a job or routine leaves the working tree dirty or a remote-sync operation fails.
+
+## Outcome
+
+After completing this walkthrough you have a running runtime daemon that polls for expert jobs and registered routines on a 5-second interval, a `.claude/bin/lazy.runtime.sh` shim committed to the repo that stays current after every `/plugin update`, and a working recovery path if the daemon ever halts — either from a dirty working tree or a failed remote sync.
 
 ## What you need
 
@@ -104,3 +108,50 @@ After cloning the repo to a new machine, re-run `/lazy-core.install` — the shi
 The `daemon_halted` recovery path is an expected operational event, not an error in the daemon itself. When it fires often from a particular routine, that routine's output logic is leaving dirt behind — investigate there, not in the daemon.
 
 ## How setup and recovery connect
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
+sequenceDiagram
+  participant user as User
+  participant installSkill as /lazy-core.install
+  participant runtimeSh as .claude/bin/lazy.runtime.sh
+  participant daemon as Runtime Daemon
+  participant recoverSkill as /lazy-runtime.recover
+
+  Note over user,installSkill: Phase 1 — Install
+
+  user->>installSkill: run /lazy-core.install
+  installSkill->>user: ask about runtime opt-in
+  user-->>installSkill: opts in
+  installSkill->>runtimeSh: write .claude/bin/lazy.runtime.sh
+  installSkill->>installSkill: write lazy.settings.json [experts + flat daemon + routines sections]
+  installSkill-->>user: install complete
+
+  Note over user,daemon: Phase 2 — Daemon Start
+
+  user->>runtimeSh: execute .claude/bin/lazy.runtime.sh
+  runtimeSh->>daemon: start daemon process
+  loop polls on interval
+    daemon->>daemon: scan .experts/.jobs/ for pending jobs
+  end
+
+  Note over daemon,recoverSkill: Phase 3 — Dirty Tree + Recovery
+
+  daemon->>daemon: detect dirty working tree
+  daemon->>daemon: write daemon_halted to .runtime/state.json
+  user->>recoverSkill: run /lazy-runtime.recover
+  recoverSkill-->>user: show halt context from .runtime/state.json
+  alt commit
+    user-->>recoverSkill: pick commit mode
+    recoverSkill->>recoverSkill: stage and commit dirty files
+  else stash
+    user-->>recoverSkill: pick stash mode
+    recoverSkill->>recoverSkill: git stash dirty files
+  else discard
+    user-->>recoverSkill: pick discard mode
+    recoverSkill->>recoverSkill: discard dirty changes
+  end
+  recoverSkill->>daemon: clear daemon_halted in .runtime/state.json
+  daemon->>daemon: resume polling on next iteration
+```
+

@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.1.0 — 2026-06-02 UTC
+
+- New `lazycortex-core settings-get` and `lazycortex-core settings-set` subcommands let sibling plugins read and write named sections of `lazy.settings.json` from the shell without importing lazycortex-core Python directly.
+- Fixed a daemon restart storm: change-detection now compares only the fields shared between the baseline and the current observation, so lazy-loaded imports no longer trigger spurious self-restarts on every iteration.
+- Fixed expert-queue starvation: ready jobs are now processed oldest-first across all expert queues instead of alphabetically, so a slower expert no longer blocks jobs that arrived later.
+
 ### 5.0.0 — 2026-06-01 UTC
 
 - New error ledger tracks every daemon and job failure as a structured incident — records job deaths, job errors, routine failures, daemon halts, worktree start/finish failures, and doctor triage outcomes, each with a ULID-keyed entry, cause classifier, and resolution state (including `auto_recovered`, `reverted`, `resolved:gone`).

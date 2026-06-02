@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-06-01
+last_regen: 2026-06-02
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -167,6 +167,8 @@ result files (Read these to retrieve output):
 
 Open the listed result files to read the expert's output. If status comes back as `pending`, the daemon has not finished yet — wait a polling cycle and re-run `/lazy-expert.collect-job`. If it comes back as `failed`, the skill prints the error message from `response.json`. If status is `missing`, the `job_id` or `expert_name` is wrong — verify against the output from Step 3.
 
+If `/lazy-expert.list-jobs` shows the job as `dead` but `/lazy-expert.collect-job` returns `pending`, the daemon stalled before writing the DONE marker — the job needs to be re-dispatched or recovered. Run `/lazy-runtime.recover` to clear any daemon halt, then re-dispatch the job.
+
 ## After you're done
 
 - **Dispatch more jobs any time** — the daemon keeps running. Any job you send with `/lazy-expert.dispatch-job` goes into the queue and is picked up on the next polling cycle.
@@ -179,3 +181,34 @@ Open the listed result files to read the expert's output. If status comes back a
 - **Cloned to a new machine?** — run `/lazy-core.install` again in the repo. It re-installs the supervisor unit and merges the expert-spawn sandbox block into the machine's `settings.local.json`. Pick up from Step 1.5 if you only need the sandbox.
 
 ## How the pieces fit
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
+sequenceDiagram
+  participant user as User
+  participant claudeSession as Claude Session
+  participant jobsQueue as .experts/.jobs/ queue
+  participant daemon as Daemon (runner)
+  participant expertAgent as Expert Agent
+
+  user->>claudeSession: /lazy-expert.dispatch-job
+  claudeSession->>jobsQueue: write job descriptor file
+  Note over jobsQueue: job pending
+
+  daemon->>jobsQueue: poll for new job files
+  jobsQueue-->>daemon: job descriptor
+
+  daemon->>expertAgent: spawn expert agent with job context
+  expertAgent->>expertAgent: execute job task
+  expertAgent->>jobsQueue: write response.json
+  expertAgent->>jobsQueue: write DONE marker
+
+  daemon->>jobsQueue: detect DONE marker
+  jobsQueue-->>daemon: response.json content
+
+  user->>claudeSession: /lazy-expert.collect-job
+  claudeSession->>jobsQueue: read response.json
+  jobsQueue-->>claudeSession: job result payload
+  claudeSession-->>user: collected result
+```
+

@@ -62,16 +62,30 @@ class CodeFingerprint:
     """
     Return True only when a hash change is stable across two consecutive observations.
 
+    Comparison is restricted to paths present in BOTH the baseline snapshot and the current
+    observation. New paths appearing in the current set (typically lazy imports adding modules to
+    `sys.modules` between `snapshot()` and `changed()`) are discovery events, not code edits, and
+    do NOT trigger a change signal — without this restriction every iteration that triggered a new
+    lazy import would flap a false-positive restart. Paths that disappear from the current set
+    (rare — would require a module unload) are also out of the comparison set.
+
     Returns:
       True if the same change was observed on both this and the previous call; False otherwise.
     """
     now = self._hashes()
-    # guard: identical to the accepted baseline — no change
-    if now == self._base:
+    shared = self._base.keys() & now.keys()
+    now_shared = { k: now[k] for k in shared }
+    base_shared = { k: self._base[k] for k in shared }
+    # guard: identical to the accepted baseline on the shared key set — no change
+    if now_shared == base_shared:
       self._pending = None
       return False
-    # require the same diff twice in a row (stability) before declaring a change
-    if self._pending == now:
-      return True
+    # require the same diff twice in a row (stability) before declaring a change; compare the
+    # pending snapshot on the SAME shared key set so a lazy-import growing the pending dict
+    # between observations does not invalidate stability.
+    if self._pending is not None:
+      pending_shared = { k: self._pending[k] for k in shared if k in self._pending }
+      if pending_shared == now_shared:
+        return True
     self._pending = now
     return False

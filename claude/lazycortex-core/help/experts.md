@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Dispatch jobs to named expert workers, keep the main session free, and collect results when the daemon finishes them.
-last_regen: 2026-06-01
+last_regen: 2026-06-02
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing a user dispatching a job via dispatch-job, the runtime daemon draining the queue, and the user collecting results via collect-job. Include list-jobs and cancel-job as optional side paths. Use boxes for the four skills and a distinct shape for the daemon process."
@@ -31,9 +31,9 @@ Each expert is a named role defined in `lazy.settings.json[experts]` at install 
 
 **`/lazy-expert.list-jobs`** gives you a live snapshot of every job in the queue, sorted oldest-first. Each row shows expert, job_id, status, and age. The five statuses map directly to what the daemon writes to disk: `queued` (READY marker present, no PID — waiting to be picked up), `active` (READY + PID — daemon is running it now), `dead` (DEAD marker present — unrecoverable launch error), `done` (DONE marker + successful response.json), and `failed` (DONE marker + error outcome in response.json). Pass `expert=<name>` or `status=<value>` to narrow the listing. Use this before collecting to confirm a job has finished, or to locate a `job_id` you have lost track of.
 
-**`/lazy-expert.collect-job`** retrieves the result for a specific job. You supply the expert name and job_id; the skill returns `{status, response}`. When status is `done` it lists the result file paths from `response.json` so you can read them directly. When status is `pending` the daemon has not finished yet — run the skill again later. When status is `failed` it prints the error from `response.json`. When status is `missing` the job directory does not exist — verify the job_id and expert_name or re-dispatch.
+**`/lazy-expert.collect-job`** retrieves the result for a specific job. You supply the expert name and job_id; the skill returns `{status, response}`. When status is `done` it lists the result file paths from `response.json` so you can read them directly. When status is `pending` the daemon has not finished yet — run the skill again later. When status is `failed` it prints the error from `response.json`. When status is `missing` the job directory does not exist — verify the job_id and expert_name, or re-dispatch.
 
-**`/lazy-expert.cancel-job`** removes a job directory. For pending jobs it warns that the daemon may already be processing the job and asks for confirmation before deleting. For jobs that are already done it asks whether you want to discard the result. Nothing is deleted until you confirm.
+**`/lazy-expert.cancel-job`** removes a job directory. For any job that has not yet completed it warns that the daemon may already be processing the job (the skill cannot yet distinguish queued-not-started from actively-running) and asks for confirmation before deleting. For jobs that are already done it asks whether you want to discard the result. Nothing is deleted until you confirm.
 
 ## How it fits together
 
@@ -63,3 +63,44 @@ When you see a job reach `done` status in the list, run `/lazy-expert.collect-jo
 - [add-memory-to-expert](walkthroughs/add-memory-to-expert.md) — opt an existing expert into the memory subsystem and run the first reflect pass.
 
 ## How the pieces fit together
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  userDispatch[dispatch-job]
+  jobQueue[(Job Queue)]
+  runtimeDaemon{{Runtime Daemon}}
+  userListJobs[list-jobs]
+  userCancelJob[cancel-job]
+  userCollect[collect-job]
+  jobDone[Job Complete]
+  jobCancelled[Job Cancelled]
+
+  userDispatch -->|enqueue job| jobQueue
+  jobQueue -->|drain next| runtimeDaemon
+  runtimeDaemon -->|store result| jobQueue
+  jobQueue -->|fetch result| userCollect
+  userCollect -->|result ready| jobDone
+  userListJobs -->|query queue| jobQueue
+  jobQueue -->|return listing| userListJobs
+  userCancelJob -->|remove job| jobQueue
+  jobQueue -->|confirmed cancel| jobCancelled
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
+  classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
+
+  class userDispatch entry
+  class userCollect entry
+  class userListJobs action
+  class userCancelJob action
+  class runtimeDaemon service
+  class jobQueue store
+  class jobDone success
+  class jobCancelled error
+```
+

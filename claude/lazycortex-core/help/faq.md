@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, routine types, and change-history search.
-last_regen: 2026-06-01
+summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, routine types, git coordination, change-history agents, and run-log housekeeping.
+last_regen: 2026-06-02
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -13,10 +13,25 @@ source_skills:
   - lazy-guard.check-public
   - lazy-guard.allow-mcp
   - lazy-routine.register
+  - lazy-routine.unregister
+  - lazy-runtime.recover
   - lazy-expert.dispatch-job
+  - lazy-expert.collect-job
+  - lazy-expert.cancel-job
+  - lazy-expert.list-jobs
+  - lazy-memory.write
+  - lazy-memory.index
+  - lazy-memory.reflect
   - lazy-memory.mark-persona
   - lazy-core.agent-models
+  - lazy-core.git-status
+  - lazy-core.git-unlock
+  - lazy-log.clean
+  - lazy-log.distill
   - lazy-log.recall
+  - lazy-log.timeline
+  - lazy-log.summary
+  - lazy-log.bullets
 ---
 # FAQ
 
@@ -182,6 +197,38 @@ Optional fields — `source` (array of input file paths), `context` (array of co
 
 ---
 
+## How do I check whether a job has finished, and how do I retrieve its output?
+
+Run `/lazy-expert.collect-job` with the `expert_name` and `job_id` returned by `/lazy-expert.dispatch-job`. The skill returns one of four statuses: `pending` (the daemon has not yet processed it), `done` (success), `failed` (the expert wrote an error outcome), or `missing` (the job directory does not exist — the job was never dispatched or was already cancelled). When the status is `done`, the skill also prints the `result` file paths from `response.json` so you can `Read` the output directly.
+
+`/lazy-expert.list-jobs` gives you an overview before you call collect: it prints a table of all jobs — or a filtered subset by expert name or status — with each job's age in seconds. Use the `--status queued` filter to see what is still waiting in the queue, and `--status failed` to identify jobs that need attention.
+
+---
+
+## How do I cancel a job I no longer need?
+
+Run `/lazy-expert.cancel-job` with the `expert_name` and `job_id`. The skill checks whether the job is already `done` (DONE marker present) or still `pending` (READY marker, no DONE). In both cases it asks for confirmation before deleting the job directory. If you cancel a pending job, the daemon may be processing it at that moment — the skill warns you about this and waits for your answer before acting. Cancellation is irreversible: the job directory is removed, and a cancelled job produces no output.
+
+---
+
+## What does `/lazy-routine.unregister` do if the routine name does not exist?
+
+It exits cleanly with an INFO message — "routine `<name>` not found — nothing to unregister" — and logs the outcome as `already-absent`. Unregistering a non-existent routine is treated as a no-op, not an error, so the call is safe to make idempotently.
+
+The one exception is `lazy-expert.pump`, the built-in pump routine. Removing it without passing `--force` aborts with an explicit warning: the pump routine drives the entire expert queue, so removing it stops all expert job processing. If you pass `--force`, the skill removes it with a warning and notes that expert jobs will not run until the routine is re-registered or `/lazy-core.install` is re-run.
+
+---
+
+## When does the runtime daemon halt, and how do I recover it?
+
+The daemon halts in two distinct situations. A **working-tree halt** (`uncommitted_changes`) happens when a routine or expert job leaves the repo in a dirty state — the daemon stops rather than proceeding with uncommitted changes in the tree. A **remote-sync halt** (`git_pull_diverged`, `git_push_failed`, `git_remote_unavailable`) happens when the daemon's pre- or post-tick git sync fails unrecoverably.
+
+Run `/lazy-runtime.recover` to unblock it. For working-tree halts the skill walks you through four options: commit the dirty files (you supply the message), stash them, discard them, or abort and leave the halt in place. For remote-sync halts the skill surfaces reason-specific guidance (the exact git commands to inspect and fix the divergence or push failure) and waits for you to confirm you have resolved the situation before clearing the halt block. Once the halt block is cleared from `.runtime/state.json`, the daemon resumes on its next iteration.
+
+If the cleanup does not produce a clean tree, the skill reports "working tree still dirty; refusing to resume" and leaves the halt intact — inspect with `git status` and re-run the skill.
+
+---
+
 ## What routine types does `/lazy-routine.register` support?
 
 Five types, each suited to a different scheduling pattern:
@@ -217,6 +264,56 @@ Memory notes are markdown files with frontmatter (`title`, `tags`, `type`, `summ
 ## Why does `/lazy-memory.mark-persona` refuse with "expert not registered"?
 
 `/lazy-memory.mark-persona` checks `lazy.settings.json[experts]` for the expert name you passed. If the key is missing, the skill aborts rather than creating a dangling memory directory for an expert the daemon does not know about. Register the expert first via `/lazy-core.install` (expert-add wizard, Step 11) and then re-run `/lazy-memory.mark-persona`.
+
+---
+
+## Can I write to `.memory/` by hand or must I go through `/lazy-memory.write`?
+
+`/lazy-memory.write` is the only supported writer for `.memory/`. It validates note frontmatter (requiring `title`, `tags` with `memory/` prefixes, `type`, and `summary`), picks a non-colliding slug, regenerates the `.tags/` index files for both the expert and the global `.memory/.tags/`, and commits the change atomically under a `memory.<expert>` git identity. Hand-editing bypasses all of that: tag files go stale, the slug counter gets confused, and the commit identity is wrong.
+
+If you do hand-edit and the tag files drift out of sync with the notes, run `/lazy-memory.index` to rebuild the entire `.tags/` tree from scratch. The index skill walks every expert under `.memory/`, recomputes topic sets from note frontmatter, regenerates tag files, and removes stale tag files that have no backing note.
+
+---
+
+## When should I use `/lazy-core.git-status` versus `/lazy-core.git-unlock`?
+
+`/lazy-core.git-status` is always safe to run first — it is purely read-only and tells you everything: who holds the staging lock, how old the lock is, whether the holder's PID is still alive, and whether the automatic break-the-lock heuristics (dead PID, different host, stale-and-idle) would allow breaking it. Run it whenever a `git add` is unexpectedly refused or a session seems stuck.
+
+Only run `/lazy-core.git-unlock` if the status shows a lock that the automatic heuristics will not break — for example, the holder's PID is alive but you know that session has abandoned its staging window (it crashed mid-stage, or you killed it). The skill shows you the lock details and asks for confirmation before deleting `.git/lazy-git.lock`. Skipping status and going straight to unlock when a lock is legitimately held by an active staging session would corrupt that session's commit.
+
+---
+
+## What is the difference between `lazy-log.recall`, `lazy-log.timeline`, and `lazy-log.summary`?
+
+All three search the same five sources — `.logs/changelog.md`, run logs under `.logs/claude/`, `.logs/commits.jsonl`, git log, and memory files — but they answer different questions.
+
+`lazy-log.recall` answers "why was X changed?" or "when did we touch Y?". It returns ranked matches with git SHAs so you can jump to the exact commit. Use it for point lookups.
+
+`lazy-log.timeline` answers "what happened when?" across a date range or topic. It produces a chronological list grouped by day, marking internal commits (chore/refactor) so you can skim past them. Use it when you want the sequence of events.
+
+`lazy-log.summary` answers "what is the whole story of this feature or area?". It synthesizes a multi-paragraph narrative grouped by sub-theme rather than date, citing SHAs inline and flagging gaps where the historical record is incomplete. Use it when you need to understand the arc of a decision, not just find a single change.
+
+---
+
+## What does `/lazy-log.distill` do and when does it run?
+
+`/lazy-log.distill` reads raw commit entries from `.logs/commits.jsonl` (written by the `lazy-log.commit-recorder` PostToolUse hook on every successful commit) and converts them into themed human-readable prose in `.logs/changelog.md`. Commits sharing a Conventional-commits scope form one theme block; same-day re-runs merge new commits into today's paragraph rather than appending fragments. The agent bumps touched theme blocks to the top of the file so the most recently active areas are always visible first.
+
+The `lazy-log.logging` rule decides whether to invoke the agent after each commit. It skips when there is no commit on the current turn, when the changelog was written less than four hours ago (the 4h floor), or when the commit is not narration-worthy (a version bump or README re-render, for example). It runs unconditionally when you ask for it explicitly ("distill" or "catch up"). You can also trigger it by passing `force` in the prompt to bypass the throttle.
+
+---
+
+## What does `/lazy-log.bullets` produce and when should I invoke it?
+
+`/lazy-log.bullets` converts a commit range scoped to one plugin into a formatted `### <version> — <date> UTC` release block ready to prepend to `CHANGELOG.public.md`. It reads commits via git, filters out internal-only work (pure chore/refactor/style/test commits and dev-tooling plumbing), groups surviving commits by scope, and rewrites them as outcome-led user-facing bullets. The coordinator in a release flow (`/pub.publish`) dispatches this agent automatically; you do not normally invoke it directly. If you need a release block outside that flow — for example, to draft changelog copy before a release — dispatch it with the `plugin`, `plugin_dir`, `range`, `new_version`, and `date` fields the agent requires.
+
+---
+
+## What does `/lazy-log.clean` do and when should I run it?
+
+`/lazy-log.clean` is housekeeping for `.logs/claude/`. Over time that directory accumulates directories from subagent runs that used ephemeral names like `task-3` or `subagent-task-17`, from skills that were renamed after their logs were written, and from waivered artifacts that stopped logging. The skill classifies every subdirectory against the live set of canonical skill/agent/command names and presents each non-canonical folder for your decision — merge into the canonical target, distill substantive logs into project memory before deleting, delete outright, or leave alone. Anonymous pattern clusters (all `task-N` folders at once, for example) are batched into a single prompt so you are not asked dozens of times.
+
+Run it periodically — after a major refactor that renames several skills, after a long development session that generated many ephemeral subagent runs, or whenever `/lazy-core.audit` flags `.logs/claude/` as containing orphaned directories. The skill is read-first: nothing is touched until you have approved every action.
 
 ---
 

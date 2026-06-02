@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Per-expert long-term memory tracked in git — experts consult notes before primary work, write new notes as a side-effect of jobs, and consolidate via reflect passes.
-last_regen: 2026-06-01
+last_regen: 2026-06-02
 diagram_spec:
   anchor: "How the four skills compose"
   request: "Flow diagram showing the four memory skills and how they compose: mark-persona opts an expert in (writes lazy.settings.json experts entry); write is the only blessed note writer (writes .memory/<expert>/ notes, regenerates .tags/); reflect dispatches a kind=reflect job that feeds run logs and existing notes to the expert, which then calls write; index rebuilds .tags/ from note frontmatter as a recovery path. Show .memory/<expert>/ and .memory/.tags/ as shared state that write maintains and reflect reads."
@@ -58,41 +58,73 @@ Four skills make this possible: one to opt an expert in, one to write notes atom
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  markPersona[mark-persona]
-  writeSkill[write]
-  reflectSkill[reflect]
-  indexSkill[index]
-  lazySettings[("lazy.settings.json")]
-  notesStore[(".memory/&lt;expert&gt;/")]
-  tagsStore[(".memory/.tags/")]
-  runLogs[("run logs")]
-  reflectJob{kind=reflect job}
+  operatorInvokesMarkPersona[Operator invokes mark-persona]
+  expertOptedIn{Expert entry present?}
+  writeSettingsEntry[Write experts entry to lazy.settings.json]
+  expertAlreadyActive[Expert already active - no-op]
 
-  markPersona -->|opts expert in| lazySettings
-  reflectSkill -->|dispatches| reflectJob
-  runLogs -->|feeds| reflectJob
-  notesStore -->|existing notes feed| reflectJob
-  reflectJob -->|calls write| writeSkill
-  writeSkill -->|writes notes| notesStore
-  writeSkill -->|regenerates| tagsStore
-  indexSkill -->|rebuilds tags from frontmatter| tagsStore
+  operatorCallsWrite[Operator calls write]
+  writeNoteFile[Write note to .memory/expert/]
+  regenerateTags[Regenerate .memory/.tags/ from frontmatter]
+
+  operatorCallsReflect[Operator calls reflect]
+  dispatchReflectJob[Dispatch kind=reflect job]
+  feedLogsAndNotes[Feed run logs and existing notes to expert]
+  expertProducesNote{Note produced?}
+  reflectCallsWrite[Call write with produced note]
+
+  operatorCallsIndex[Operator calls index]
+  rebuildTagsFromFrontmatter[Rebuild .memory/.tags/ from all note frontmatter]
+
+  memoryNotes[(.memory/expert/ notes)]
+  memoryTags[(.memory/.tags/ index)]
+
+  operatorInvokesMarkPersona -->|opt-in request| expertOptedIn
+  expertOptedIn -->|no| writeSettingsEntry
+  expertOptedIn -->|yes| expertAlreadyActive
+  writeSettingsEntry -->|entry written| memoryNotes
+
+  operatorCallsWrite -->|write note| writeNoteFile
+  writeNoteFile -->|note saved| memoryNotes
+  writeNoteFile -->|tags rebuild| regenerateTags
+  regenerateTags -->|index updated| memoryTags
+
+  operatorCallsReflect -->|dispatch| dispatchReflectJob
+  dispatchReflectJob -->|load context| feedLogsAndNotes
+  feedLogsAndNotes -->|reads| memoryNotes
+  feedLogsAndNotes -->|expert reasoning| expertProducesNote
+  expertProducesNote -->|yes| reflectCallsWrite
+  expertProducesNote -->|no insight| operatorCallsReflect
+  reflectCallsWrite -->|delegates| operatorCallsWrite
+
+  operatorCallsIndex -->|recovery path| rebuildTagsFromFrontmatter
+  rebuildTagsFromFrontmatter -->|reads| memoryNotes
+  rebuildTagsFromFrontmatter -->|index rebuilt| memoryTags
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
-  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
-  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
 
-  class markPersona entry
-  class writeSkill action
-  class reflectSkill action
-  class indexSkill action
-  class reflectJob guard
-  class lazySettings store
-  class notesStore store
-  class tagsStore store
-  class runLogs service
+  class operatorInvokesMarkPersona entry
+  class operatorCallsWrite entry
+  class operatorCallsReflect entry
+  class operatorCallsIndex entry
+  class expertOptedIn guard
+  class expertProducesNote guard
+  class writeSettingsEntry action
+  class writeNoteFile action
+  class regenerateTags action
+  class dispatchReflectJob action
+  class feedLogsAndNotes action
+  class reflectCallsWrite action
+  class rebuildTagsFromFrontmatter action
+  class expertAlreadyActive success
+  class memoryNotes store
+  class memoryTags store
 ```
+
 
 ## Where this fits
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
-last_regen: 2026-06-01
+last_regen: 2026-06-02
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing how lazy-guard.check-public feeds findings into lazy-repo.mark-public (which creates .guard-waivers.json and activates the pre-commit hook), and how lazy-guard.allow-mcp independently classifies MCP server tools into allow/ask/skip buckets and writes them to settings.local.json"
@@ -34,10 +34,6 @@ Run `/lazy-guard.allow-mcp` once per MCP server, immediately after adding the se
 
 Optionally, `/lazy-guard.allow-mcp` can also install a SessionStart preload hook that tells Claude Code to resolve the target server's tool schemas at session start. The cost is roughly 1.1k tokens per session, paid once up front; the benefit is that MCP tools become first-class for the rest of the session and Claude Code stops drifting to Bash equivalents when MCP schemas feel expensive to fetch mid-call. The alternative — loading all tool schemas upfront without the preload hook — costs roughly 13–16k tokens per session. The hook writes to the same gitignored `settings.local.json`, so it stays off shared commits.
 
-## Where this fits
-
-The guardian block is self-contained — neither `/lazy-guard.check-public` nor `/lazy-guard.allow-mcp` depends on any other lazycortex-core block. The pre-commit hook that `/lazy-repo.mark-public` arms (`lazy-guard.check-public.py`) is a Python script installed by `/lazy-core.install`; see [install-and-audit](install-and-audit.md) if the hook is missing after a fresh install. For a step-by-step walkthrough of the full publish flow — audit, fix secrets, set public author identity, create the waiver file, and flip GitHub visibility — see [make-repo-public](walkthroughs/make-repo-public.md).
-
 ## Common adjustments
 
 **Subtree-only publish.** Pass a glob to `/lazy-repo.mark-public` — for example `claude/**` — and it runs in subtree-public mode: it audits only those paths, writes `public_scopes` into `.guard-waivers.json`, and skips the GitHub visibility step. The pre-commit hook then limits its checks to files under those globs on every future commit.
@@ -52,5 +48,58 @@ The guardian block is self-contained — neither `/lazy-guard.check-public` nor 
 
 **Cleaning up leaked permissions.** If you previously registered MCP tool permissions in tracked `settings.json` instead of `settings.local.json`, re-running `/lazy-guard.allow-mcp` for that server will find the leaked entries and ask you per-entry whether to move them. Entries in the wrong-scope `settings.local.json` (for example a project server's entries sitting in the global file) are surfaced and cleaned up the same way.
 
+## See also
+
+- [install-and-audit](install-and-audit.md) — if the pre-commit hook is missing after a fresh install, see this block for hook installation details.
+- [make-repo-public](walkthroughs/make-repo-public.md) — step-by-step walkthrough of the full publish flow: audit, fix secrets, set public author identity, create the waiver file, and flip GitHub visibility.
+
 ## How the three skills fit together
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  runCheckPublic[Run lazy-guard.check-public]
+  findingsReady{Findings ready?}
+  invokeMarkPublic[Invoke lazy-repo.mark-public]
+  createWaivers[Create .guard-waivers.json]
+  activateHook[Activate pre-commit hook]
+  guardDone[Guard scan active on commits]
+
+  runAllowMcp[Run lazy-guard.allow-mcp]
+  classifyTools[Classify MCP server tools]
+  bucketGuard{Bucket assigned?}
+  writeSettings[Write to settings.local.json]
+  allowMcpDone[MCP permissions applied]
+
+  runCheckPublic -->|scan completes| findingsReady
+  findingsReady -->|yes - findings present| invokeMarkPublic
+  findingsReady -->|no findings| guardDone
+  invokeMarkPublic -->|create| createWaivers
+  createWaivers -->|enable| activateHook
+  activateHook -->|hook live| guardDone
+
+  runAllowMcp -->|enumerate tools| classifyTools
+  classifyTools -->|per tool| bucketGuard
+  bucketGuard -->|allow, ask, or skip| writeSettings
+  writeSettings -->|persist| allowMcpDone
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+
+  class runCheckPublic entry
+  class runAllowMcp entry
+  class findingsReady guard
+  class bucketGuard guard
+  class invokeMarkPublic action
+  class createWaivers action
+  class activateHook action
+  class classifyTools action
+  class writeSettings action
+  class guardDone success
+  class allowMcpDone success
+```
+
 

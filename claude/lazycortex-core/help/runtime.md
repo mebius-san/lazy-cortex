@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Register, unregister, and recover routines in the per-repo serial daemon — five routine types keep the async team running in order; the recovery skill handles both dirty-tree and remote-sync halts.
-last_regen: 2026-06-01
+last_regen: 2026-06-02
 diagram_spec:
   anchor: "Runtime lifecycle"
   request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers an uncommitted_changes halt; a failed remote sync triggers a git_pull_diverged / git_push_failed / git_remote_unavailable halt; /lazy-runtime.recover (commit/stash/discard/abort for tree halts; manual-fix + resume for remote-sync halts) cleans the precondition and resumes; unregister removes a routine from the loop."
@@ -30,7 +30,7 @@ Every type accepts the same two dispatch shapes: either a `command` list (spawn 
 
 **`/lazy-routine.unregister`** removes a named routine from the registry and is idempotent — calling it on a name that does not exist is an INFO, not an error. One routine is protected: `lazy-expert.pump`, the built-in job that drains the expert queue. Removing it requires `--force` and surfaces a warning that expert jobs will stop processing until the routine is re-registered or `/lazy-core.install` is re-run.
 
-**`/lazy-runtime.recover`** handles daemon halts. The daemon halts in two distinct families: a dirty working tree (a routine or expert left uncommitted changes) and a failed remote sync (the daemon's pre- or post-tick git pull or push hit an unrecoverable state). The skill reads the halt context from `.runtime/state.json`, surfaces which routine triggered the halt, and — for dirty-tree halts — which paths are dirty. It then guides you through the appropriate fix and clears the halt atomically once the precondition holds.
+**`/lazy-runtime.recover`** handles daemon halts. The daemon halts in two distinct families: a dirty working tree (a routine or expert left uncommitted changes) and a failed remote sync (the daemon's pre- or post-tick git pull or push hit an unrecoverable state). The skill reads the halt context from `.runtime/state.json`, surfaces which routine triggered the halt — a routine name, `_git_pre` or `_git_post` for daemon-side remote-sync halts, or `lazy-expert.pump` for pump-internal halts — and for dirty-tree halts, which paths are dirty. It then guides you through the appropriate fix and clears the halt atomically once the precondition holds.
 
 ## How they work together
 
@@ -66,8 +66,49 @@ After you confirm, the skill clears the halt block. It runs no git commands itse
 - **Check daemon halt status before recovering** — inspect `.runtime/state.json` directly to confirm halt state, read the halt reason and `dirty_paths`, and identify which routine or expert triggered the halt (`triggered_by`, `expert`, `job_id`).
 - **Narrow an `md-scan` to specific frontmatter states** — the `filter` field accepts a composite filter block; `null` in the `in` list matches files where the key is absent entirely, so `{"frontmatter": {"request_status": {"in": [null, "draft"], "not_in": []}}}` catches both new files and in-progress ones.
 - **Route a routine's jobs to a remote repo's expert** — use `<expert>@<repo>` in the `expert` field when registering. The target repo must be registered in `lazy.settings.json` and reachable from the daemon's working directory.
+- **Halt re-fires immediately after resume** — if a remote-sync halt returns on the very next daemon tick, the underlying condition was not fully resolved. Run `git fetch origin <branch>; git log --oneline HEAD origin/<branch>` and address the actual cause before re-running `/lazy-runtime.recover`.
 
 ## Runtime lifecycle
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','transitionColor':'#000','transitionLabelColor':'#000','labelBackgroundColor':'#fff','edgeLabelBackground':'#fff','stateLabelColor':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','state':{'diagramPadding':5,'useMaxWidth':true}}}%%
+stateDiagram-v2
+  [*] --> idle
+
+  idle --> running : routine registered
+
+  running --> running : interval_sec or cron tick - execute next routine
+
+  running --> uncommittedChangesHalt : dirty working tree detected
+
+  running --> gitPullDivergedHalt : remote sync diverged
+
+  running --> gitPushFailedHalt : push rejected
+
+  running --> gitRemoteUnavailableHalt : remote unreachable
+
+  uncommittedChangesHalt --> running : lazy-runtime.recover - commit or stash or discard
+
+  uncommittedChangesHalt --> idle : lazy-runtime.recover - abort
+
+  gitPullDivergedHalt --> running : lazy-runtime.recover - manual-fix then resume
+
+  gitPushFailedHalt --> running : lazy-runtime.recover - manual-fix then resume
+
+  gitRemoteUnavailableHalt --> running : lazy-runtime.recover - manual-fix then resume
+
+  running --> idle : routine unregistered - loop empty
+
+  idle --> [*]
+
+  style idle fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  style running fill:#1e5f3a,stroke:#4ae290,color:#fff
+  style uncommittedChangesHalt fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  style gitPullDivergedHalt fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  style gitPushFailedHalt fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  style gitRemoteUnavailableHalt fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+```
+
 
 ## See also
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Inspect and manually break the per-repo staging lock that prevents concurrent Claude Code sessions from corrupting each other's git index changes.
-last_regen: 2026-06-01
+last_regen: 2026-06-02
 diagram_spec:
   anchor: "Lock lifecycle"
   request: "State diagram of the lazy-core.git staging lock lifecycle: NO_LOCK → HELD (a hook or skill acquires the lock before touching the git index) → auto-released when the staging window closes OR auto-broken by heuristics (dead PID / stale-and-idle / different host) → NO_LOCK. Show the manual break path via /lazy-core.git-unlock as an alternative exit from HELD, guarded by /lazy-core.git-status inspection first."
@@ -25,9 +25,9 @@ The staging lock prevents that. Before any hook or skill modifies the index it a
 
 ## What's in this block
 
-**`/lazy-core.git-status`** is a pure read-only inspector. It reads `.git/lazy-git.lock` and reports everything relevant about the current holder: session ID and PID, how long the lock has been held, when the index was last touched, whether the holder process is still alive on this host, and whether the automatic break-the-lock heuristics would fire right now. It also tells you whether the lock belongs to the current session or a peer. Running it is always safe — it never writes, never deletes, and never modifies any state.
+**`/lazy-core.git-status`** is a pure read-only inspector. It reads `.git/lazy-git.lock` and reports everything relevant about the current holder: session ID and PID, how long the lock has been held, when the index was last touched, whether the holder process is still alive on this host, and whether the automatic break-the-lock heuristics would fire right now. It also tells you whether the lock belongs to the current session or a peer. Running it is always safe — it never writes, never deletes, and never modifies any state. Because the operation is entirely read-only, it does not produce a run-log entry.
 
-**`/lazy-core.git-unlock`** is the manual break-glass. It runs the same inspection internally, presents the holder details — session ID, PID, age, host, branch, liveness — in a confirmation prompt, and force-deletes `.git/lazy-git.lock` on your approval. It is the only blessed way to clear the lock manually; do not delete the lock file directly. The skill's confirmation step means you can invoke it without having run `/lazy-core.git-status` first — all the same facts surface in the prompt.
+**`/lazy-core.git-unlock`** is the manual break-glass. It runs the same inspection internally, presents the holder details — session ID, PID, age, host, branch, liveness — in a confirmation prompt, and force-deletes `.git/lazy-git.lock` on your approval. The lock file lives under `.git/` and is never tracked by git, so this operation has no effect on your working tree or staged changes. It is the only blessed way to clear the lock manually; do not delete the lock file directly. The skill's confirmation step means you can invoke it without having run `/lazy-core.git-status` first — all the same facts surface in the prompt.
 
 ## How they work together
 
@@ -60,23 +60,27 @@ stateDiagram-v2
 
   noLock --> held : hook or skill acquires lock before git index touch
 
-  held --> noLock : staging window closes - auto-released on git commit or reset
+  state held {
+    [*] --> stagingOpen
+    stagingOpen --> stagingOpen : git add / rm / mv accumulates index
+    stagingOpen --> committed : git commit empties index
+    committed --> [*]
+  }
 
-  state autoBroken <<choice>>
-  held --> autoBroken : heuristic triggers
-  autoBroken --> noLock : dead PID detected
-  autoBroken --> noLock : stale-and-idle timeout
-  autoBroken --> noLock : different host detected
+  held --> noLock : auto-release on commit or reset empties index
+  held --> noLock : auto-break dead PID detected
+  held --> noLock : auto-break stale-and-idle timeout
+  held --> noLock : auto-break different host mismatch
 
-  held --> inspecting : /lazy-core.git-status inspection
-
-  inspecting --> noLock : /lazy-core.git-unlock confirmed manual break
-  inspecting --> held : inspection only - no break
+  held --> inspecting : operator runs /lazy-core.git-status
+  inspecting --> noLock : operator confirms via /lazy-core.git-unlock
+  inspecting --> held : operator cancels unlock
 
   noLock --> [*]
 
   style noLock fill:#1e3a5f,stroke:#4a90e2,color:#fff
   style held fill:#1e5f3a,stroke:#4ae290,color:#fff
-  style autoBroken fill:#5f4a1e,stroke:#e2a14a,color:#fff
   style inspecting fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  style committed fill:#0d4d2a,stroke:#4ae290,stroke-width:2px,color:#fff
+  style stagingOpen fill:#1e5f3a,stroke:#4ae290,color:#fff
 ```
