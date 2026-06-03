@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, querying the wiki, and interpreting doctor findings.
-last_regen: 2026-06-01
+last_regen: 2026-06-03
 no_diagram: true
 source_skills:
   - lazy-wiki.query
@@ -34,6 +34,14 @@ The id must match `^[a-z][a-z0-9_-]*$` — lowercase letters, digits, hyphens, a
 
 ---
 
+## What does the "review-skip filter" question in `/wiki.configure` do?
+
+During Phase 7 of the configure wizard, you are asked whether to skip documents that are currently under review. If you answer yes, the scope gains a filter that excludes any node with `review_active: true` in its frontmatter — the same flag set by `lazycortex-review` when a review opens. While a document is under active review, the curator will not classify or link it, and it will not appear in the topics index. When the review closes and `review_active` is removed, the document re-enters the wiki on the next relink.
+
+The same filter is also seeded into the `wiki.scan` routine at install time so that the runtime daemon drops review-active documents before they ever reach the curator. Both filters work together — you do not need to configure them separately.
+
+---
+
 ## How do I get the wiki populated for the first time?
 
 Run `/wiki.relink [<scope-id>]`. On a fresh scope with no anchor, the plan runs in `initial` mode and processes every node matched by the scope's path globs. The wiki curator classifies each node (summary, topic tags, connectors), the index is rebuilt once, and then each node receives its glossed See-also links. Everything is committed in a single atomic commit. For large codebases this may take a while — progress is reported step by step.
@@ -51,6 +59,12 @@ Subsequent runs are incremental: only nodes touched since the last committed anc
 ## `/wiki.relink` reported `anchor-lost` — is my wiki data damaged?
 
 No. `anchor-lost` means the `wiki_synced_sha` stored in `topics.md` became unreachable — most commonly because of a rebase, `reset --hard`, squash merge, or a shallow clone that pruned the commit. The plan automatically falls back to a content-hash backstop using each node's `wiki_src_hash` field to decide what needs re-processing. After the run completes, a fresh HEAD anchor is recorded and future runs are incremental again. No wiki metadata written to nodes is lost; only the delta detection needed a backstop.
+
+---
+
+## A curator subagent reported an error during `/wiki.relink` — do I need to restart?
+
+No. When a curator reports an error for a specific node (malformed input, a failed `apply-node`, or a schema violation), `/wiki.relink` skips that node and continues with the rest. The skipped node is picked up on the next relink. After the run finishes, check the report for any skipped nodes and run `/wiki.relink` again to re-process them once the underlying issue is resolved.
 
 ---
 
@@ -78,7 +92,7 @@ Report-only findings (`broken-repo-key`, `missing-summary`, `unknown-axis`, `dup
 
 ## `/wiki.doctor` says "unknown scope" — how do I fix it?
 
-The scope id you passed is not present in `lazy.settings.json[wiki.scopes]`. Either run `/wiki.configure` to create it, or re-invoke `/wiki.doctor` without a scope argument to audit every configured scope. You can check which scopes exist by reading `.claude/lazy.settings.json` — or by running `/wiki.configure` which lists them in edit mode.
+The scope id you passed is not present in `lazy.settings.json[wiki.scopes]`. Either run `/wiki.configure` to create it, or re-invoke `/wiki.doctor` without a scope argument to audit every configured scope. You can list existing scopes by running `/wiki.configure`, which displays them in edit mode.
 
 ---
 

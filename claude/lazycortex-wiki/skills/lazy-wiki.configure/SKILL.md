@@ -11,7 +11,7 @@ Prerequisite: `/wiki.install` has run (the `wiki` settings section exists).
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Verify install + load settings`
@@ -20,7 +20,8 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Phase 4 — Collect exclude_paths`
    - `Phase 5 — Collect tag_axes`
    - `Phase 6 — Collect topics_index`
-   - `Phase 7 — Write back + log`
+   - `Phase 7 — Collect filter`
+   - `Phase 8 — Write back + log`
    - `Report`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** Outcomes: `verified` / `collected` / `skipped-per-user-choice` / `written` / `logged` / `report-emitted`.
 3. **Do not reach the Report step until every prior task is `completed`.**
@@ -82,7 +83,22 @@ Trim whitespace. Must be non-empty; re-ask if blank. The file need not exist yet
 
 Outcome: `collected`.
 
-## Phase 7 — Write back + log
+## Phase 7 — Collect filter
+
+The per-scope `filter` excludes a node from the wiki on the fly by its frontmatter (the node is not curated, not indexed, not linked while it matches). The common case is standing down on documents currently under review.
+
+`AskUserQuestion`:
+- New mode: *"Skip documents that are currently in review? While `review_active: true` (set by lazycortex-review) is present, the document is left out of the wiki and re-enters when review closes. (yes / no)"*
+- Edit mode: *"Review-skip filter for scope `<id>` (current: `<"on" when filter.frontmatter.review_active present, else "off">`; yes keeps it on, no clears it):"*
+
+- **yes** → hold the filter object `{ "frontmatter": { "review_active": { "not_in": [true] } } }`.
+- **no** → hold no filter (clears any existing one in edit mode).
+
+Default: **yes**. Richer predicates (other frontmatter keys, `in` allow-lists, `folder_note`) follow the same schema as a routine's `filter` block and are hand-editable in `lazy.settings.json` — this wizard only collects the review-skip default.
+
+Outcome: `collected`.
+
+## Phase 8 — Write back + log
 
 Build the scope object:
 
@@ -94,7 +110,7 @@ Build the scope object:
 }
 ```
 
-Add `"exclude_paths"` only if the collected array is non-empty.
+Add `"exclude_paths"` only if the collected array is non-empty. Add `"filter"` only when Phase 7 held a filter object (review-skip chosen).
 
 Write the updated settings back: set `lazy.settings.json[wiki.scopes][<id>]` to the constructed object. Preserve all other keys. Use `Write` to the target file.
 
@@ -104,7 +120,7 @@ Outcome: `written` and `logged`.
 
 ## Report
 
-One line per task in the canonical list, with its outcome word. Summary line: `scope <id> <created|updated>: paths=<count>, tag_axes=[<axes>], topics_index=<path>`.
+One line per task in the canonical list, with its outcome word. Summary line: `scope <id> <created|updated>: paths=<count>, tag_axes=[<axes>], topics_index=<path>, filter=<on|off>`.
 
 ## Failure modes
 

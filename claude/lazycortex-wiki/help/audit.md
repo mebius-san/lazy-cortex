@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Run integrity checks across a wiki scope — orphan topics, broken links, missing summaries, stale glosses, unknown axes, and overlapping scopes — with optional auto-repair.
-last_regen: 2026-06-01
+last_regen: 2026-06-03
 no_diagram: true
 source_skills:
   - lazy-wiki.doctor
@@ -22,11 +22,15 @@ Over time a curated wiki drifts: See-also links point to renamed or deleted node
 
 ## How it fits together
 
-You invoke `/wiki.doctor` with an optional scope id. If you omit the id the skill audits every scope configured in your project. Phase 1 runs the audit in read-only mode — nothing is written. Phase 2 presents the findings grouped by severity, distinguishing fixable checks (`orphan-topic`, `index-desync`, `broken-see-also`, `stale-gloss`) from report-only ones (`broken-repo-key`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`). Phase 3 asks you whether to apply the fixable repairs; if you confirm, `--apply` is passed and the skill reports each fix individually.
+You invoke `/wiki.doctor` with an optional scope id. Omit the id and the skill audits every scope configured in your project. The skill runs in two distinct phases separated by a confirmation gate.
 
-Fixable repairs rewrite tracked files — the topic index is rebuilt, broken See-also lines are dropped, and stale glosses are refreshed. Report-only findings require your own action: add a summary to a node, fix a broken repo key in your settings, resolve an unknown axis by running `/wiki.configure`, or manually separate overlapping scope globs.
+Phase 1 is always read-only — nothing is written. The `lazycortex-wiki doctor` command prints per-scope findings grouped by severity, tagging each fixable finding so you can see what automated repair is available. Phase 2 presents those findings to you: per-scope counts by severity and a short list of check name, affected node, and message.
 
-If the scope id you pass is not in `lazy.settings.json`, the command exits non-zero and the skill surfaces the message without proceeding. The remedy is to run `/wiki.configure` to create the scope, or to re-invoke with a scope id that exists.
+Findings fall into two categories. Fixable checks (`orphan-topic`, `index-desync`, `broken-see-also`, `stale-gloss`) have automated repairs the skill can apply. Report-only checks (`broken-repo-key`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`) require your own action — they surface a problem but the right resolution depends on your intent, so the skill does not rewrite your content for them.
+
+If fixable findings exist, the skill asks whether to apply the repairs. On confirmation it passes `--apply` to the same command: the topic index is rebuilt, broken See-also lines are dropped, and stale glosses are refreshed. Each fix is reported individually. If you decline, the read-only audit result stands and no files are modified.
+
+If the scope id you pass is not in `lazy.settings.json`, the command exits non-zero and the skill surfaces the error without proceeding to the presentation or apply phases.
 
 ## Common adjustments
 

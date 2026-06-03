@@ -1,17 +1,17 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-06-01
+last_regen: 2026-06-03
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Decision tree rooted on which skill produced the error; first branch splits on install/configure failures vs. query failures vs. relink failures vs. doctor failures; each symptom leaf points to the troubleshooting entry that resolves it"
+  request: "Decision tree rooted on which skill produced the error; first branch splits on install failures vs. configure failures vs. query failures vs. relink failures vs. doctor failures; install leaves: plugin-not-enabled, core-not-installed, cache-empty; configure leaves: wiki-section-missing, scope-id-invalid, paths-empty; query leaves: no-scopes-configured, no-material-matched; relink leaves: unknown-scope, anchor-lost, curator-error, empty-commit; doctor leaves: unknown-scope, no-scopes-configured; each leaf points to the troubleshooting entry that resolves it"
   kind_hint: decision-tree
 source_skills:
   - lazy-wiki.install
   - lazy-wiki.configure
   - lazy-wiki.query
-  - lazy-wiki.doctor
   - lazy-wiki.relink
+  - lazy-wiki.doctor
 ---
 # Troubleshooting
 
@@ -65,6 +65,16 @@ source_skills:
 
 ---
 
+## `/wiki.configure` keeps re-asking for path globs
+
+**Symptom**: The path globs prompt repeats or rejects your input without saving the scope.
+
+**Likely cause**: At least one path glob is required — a blank entry is not accepted. The wizard loops until a non-empty glob is provided.
+
+**Fix**: Enter at least one path glob, for example `docs/**/*.md` or `src/**/*.py`. Multiple globs can be comma-separated. If you want to cover the whole repo, use `**/*.md` as a starting point and refine later by re-running `/wiki.configure` in edit mode.
+
+---
+
 ## `/wiki.query` reports "No wiki scopes configured"
 
 **Symptom**: `/wiki.query "<question>"` exits immediately with "No wiki scopes configured — run `/wiki.install` and `/wiki.configure` first."
@@ -85,13 +95,23 @@ source_skills:
 
 ---
 
+## `/wiki.doctor` reports "no wiki scopes configured"
+
+**Symptom**: Running `/wiki.doctor` (without a scope id) outputs "no wiki scopes configured" and stops.
+
+**Likely cause**: No scopes have been created yet — `/wiki.install` ran but `/wiki.configure` was skipped, so `lazy.settings.json[wiki.scopes]` is empty.
+
+**Fix**: Run `/wiki.configure` to create at least one scope, then re-run `/wiki.doctor`.
+
+---
+
 ## `/wiki.doctor` reports "unknown scope '<id>'"
 
 **Symptom**: Running `/wiki.doctor <id>` outputs "unknown scope '<id>'" and stops.
 
 **Likely cause**: The scope id passed to `/wiki.doctor` does not match any key in `lazy.settings.json[wiki.scopes]` — it was misspelled, or the scope has not been created yet.
 
-**Fix**: Run `/wiki.configure` to create a scope with the intended id, or re-invoke `/wiki.doctor` with a scope id that already exists. The configured scope ids are visible in `lazy.settings.json` — run `/wiki.configure` to review or add them.
+**Fix**: Run `/wiki.configure` to create a scope with the intended id, or re-invoke `/wiki.doctor` with a scope id that already exists. The configured scope ids are visible by re-running `/wiki.configure`, which lists them in edit mode.
 
 ---
 
@@ -125,74 +145,95 @@ source_skills:
 
 ---
 
+## `/wiki.relink` Step 6 reports "unchanged" and creates no commit
+
+**Symptom**: The relink run completes all steps but reports `unchanged` at Step 6 — no commit is created.
+
+**Likely cause**: An idempotent re-run produced no byte changes to any node or `topics.md`. This happens when the scope is already fully in sync, or when the run's classify and link work yielded no mutations (e.g. nodes were already curated at the same content hash).
+
+**Fix**: No action needed. The scope is in sync. If you expected changes, verify that the target nodes fall within the scope's path globs by re-running `/wiki.configure` in edit mode to review the configured glob patterns.
+
+---
+
 ## Diagnostic flowchart
 
 ```mermaid
 %%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart TD
-  rootSkill{Which skill produced the error?}
+  skillError{Which skill produced the error?}
 
-  installBranch{Install/Configure failure type?}
+  installBranch{Install failure type?}
+  configureBranch{Configure failure type?}
   queryBranch{Query failure type?}
   relinkBranch{Relink failure type?}
   doctorBranch{Doctor failure type?}
 
-  installMissing[Troubleshoot: dependency missing — run install with verbose flag and check PATH]
-  installConfig[Troubleshoot: config validation error — verify config schema and required fields]
-  installPerm[Troubleshoot: permission denied during install — check directory ownership and sudo requirements]
+  pluginNotEnabled[plugin-not-enabled → see Troubleshooting: Install — Plugin Not Enabled]
+  coreNotInstalled[core-not-installed → see Troubleshooting: Install — Core Not Installed]
+  cacheEmpty[cache-empty → see Troubleshooting: Install — Cache Empty]
 
-  queryNoResults[Troubleshoot: query returns empty — verify index is built and filters match stored data]
-  queryTimeout[Troubleshoot: query times out — reduce result limit or rebuild index]
-  queryParse[Troubleshoot: query parse error — check query syntax and escape special characters]
+  wikiSectionMissing[wiki-section-missing → see Troubleshooting: Configure — Wiki Section Missing]
+  scopeIdInvalid[scope-id-invalid → see Troubleshooting: Configure — Scope ID Invalid]
+  pathsEmpty[paths-empty → see Troubleshooting: Configure — Paths Empty]
 
-  relinkBroken[Troubleshoot: broken symlink — re-run relink with force flag to regenerate targets]
-  relinkConflict[Troubleshoot: link conflict — remove stale link manually then relink]
-  relinkNotFound[Troubleshoot: source path not found — confirm source exists before relinking]
+  noScopesConfiguredQ[no-scopes-configured → see Troubleshooting: Query — No Scopes Configured]
+  noMaterialMatched[no-material-matched → see Troubleshooting: Query — No Material Matched]
 
-  doctorFail[Troubleshoot: doctor check failed — inspect reported check name and follow remediation step]
-  doctorMissing[Troubleshoot: required tool missing — install missing tool listed in doctor output]
-  doctorVersion[Troubleshoot: version mismatch — upgrade or pin the tool to the required version]
+  unknownScopeR[unknown-scope → see Troubleshooting: Relink — Unknown Scope]
+  anchorLost[anchor-lost → see Troubleshooting: Relink — Anchor Lost]
+  curatorError[curator-error → see Troubleshooting: Relink — Curator Error]
+  emptyCommit[empty-commit → see Troubleshooting: Relink — Empty Commit]
 
-  rootSkill -->|install-configure| installBranch
-  rootSkill -->|query| queryBranch
-  rootSkill -->|relink| relinkBranch
-  rootSkill -->|doctor| doctorBranch
+  unknownScopeD[unknown-scope → see Troubleshooting: Doctor — Unknown Scope]
+  noScopesConfiguredD[no-scopes-configured → see Troubleshooting: Doctor — No Scopes Configured]
 
-  installBranch -->|missing dependency| installMissing
-  installBranch -->|config invalid| installConfig
-  installBranch -->|permission denied| installPerm
+  skillError -->|install| installBranch
+  skillError -->|configure| configureBranch
+  skillError -->|query| queryBranch
+  skillError -->|relink| relinkBranch
+  skillError -->|doctor| doctorBranch
 
-  queryBranch -->|no results| queryNoResults
-  queryBranch -->|timeout| queryTimeout
-  queryBranch -->|parse error| queryParse
+  installBranch -->|plugin-not-enabled| pluginNotEnabled
+  installBranch -->|core-not-installed| coreNotInstalled
+  installBranch -->|cache-empty| cacheEmpty
 
-  relinkBranch -->|broken link| relinkBroken
-  relinkBranch -->|link conflict| relinkConflict
-  relinkBranch -->|source not found| relinkNotFound
+  configureBranch -->|wiki-section-missing| wikiSectionMissing
+  configureBranch -->|scope-id-invalid| scopeIdInvalid
+  configureBranch -->|paths-empty| pathsEmpty
 
-  doctorBranch -->|check failed| doctorFail
-  doctorBranch -->|tool missing| doctorMissing
-  doctorBranch -->|version mismatch| doctorVersion
+  queryBranch -->|no-scopes-configured| noScopesConfiguredQ
+  queryBranch -->|no-material-matched| noMaterialMatched
+
+  relinkBranch -->|unknown-scope| unknownScopeR
+  relinkBranch -->|anchor-lost| anchorLost
+  relinkBranch -->|curator-error| curatorError
+  relinkBranch -->|empty-commit| emptyCommit
+
+  doctorBranch -->|unknown-scope| unknownScopeD
+  doctorBranch -->|no-scopes-configured| noScopesConfiguredD
 
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class rootSkill guard
+  class skillError guard
   class installBranch guard
+  class configureBranch guard
   class queryBranch guard
   class relinkBranch guard
   class doctorBranch guard
-  class installMissing error
-  class installConfig error
-  class installPerm error
-  class queryNoResults error
-  class queryTimeout error
-  class queryParse error
-  class relinkBroken error
-  class relinkConflict error
-  class relinkNotFound error
-  class doctorFail success
-  class doctorMissing success
-  class doctorVersion success
+  class pluginNotEnabled error
+  class coreNotInstalled error
+  class cacheEmpty error
+  class wikiSectionMissing error
+  class scopeIdInvalid error
+  class pathsEmpty error
+  class noScopesConfiguredQ error
+  class noMaterialMatched error
+  class unknownScopeR error
+  class anchorLost error
+  class curatorError error
+  class emptyCommit error
+  class unknownScopeD error
+  class noScopesConfiguredD error
 ```

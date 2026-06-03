@@ -158,11 +158,14 @@ Ensure `routines` exists as an object (create `{"_version": 1}` if absent — ne
   "watch": "changed_files",
   "branch": "<current-branch>",
   "interval_sec": 60,
+  "filter": { "frontmatter": { "review_active": { "not_in": [true] } } },
   "command": ["lazycortex-wiki", "process-file"]
 }
 ```
 
 Substitute `<current-branch>` with the output of `Bash(git rev-parse --abbrev-ref HEAD)` (the branch the daemon watches). The core `dispatch_git` routine type reads `branch` as a branch-name string for `git rev-parse <remote>/<branch>` — a boolean breaks it.
+
+The `filter` block is the earliest cut: git-watch drops a changed file whose frontmatter matches before `process-file` runs, so a document under review (`review_active: true`) never reaches the curator. It mirrors the per-scope `filter` (the source of truth honored on every path); seeding it here keeps the daemon quiet during review. Absent-only semantics apply to the whole routine — a user who removed the filter is not re-seeded.
 
 **`wiki.relink-weekly`** — weekly full rescan:
 

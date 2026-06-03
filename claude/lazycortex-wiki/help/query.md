@@ -1,14 +1,12 @@
 ---
 chapter_type: block
 summary: Associative Q&A over the wiki graph — /wiki.query dispatches seekers to find entry points then a gatherer to traverse glossed See-also links and synthesise the answer.
-last_regen: 2026-06-01
+last_regen: 2026-06-03
 diagram_spec:
   anchor: "How the query pipeline works"
   request: "Sequence diagram showing /wiki.query dispatching one seeker per scope in parallel to read topics.md and return entry points, then dispatching a single gatherer to traverse See-also links depth-first and return a synthesised answer block back to the skill, which presents the answer and entry-point seed to the user."
 source_skills:
   - lazy-wiki.query
-  - lazy-wiki.seeker
-  - lazy-wiki.gatherer
 ---
 # Wiki query
 
@@ -27,11 +25,11 @@ The seeker and gatherer subagents each run in their own isolated context. The se
 
 You invoke `/wiki.query "<question>"` and the skill does the rest in two ordered phases.
 
-**Phase 1 — Seeking entry points.** The skill reads your wiki scope configuration from `.claude/lazy.settings.json` and, for each scope that has a `topics_index` on disk, dispatches a `lazy-wiki.seeker` subagent in parallel. Each seeker receives the question and the absolute path to its scope's `topics.md`. It reads that index — a structured tree of axis/value/node entries, each with a one-line summary — and returns the nodes most relevant to the question, ranked by apparent relevance with a short reason for each match. The seeker never opens node files; it works entirely from the index. When multiple scopes are configured, all seekers run simultaneously and their results are merged.
+**Phase 1 — Seeking entry points.** The skill reads your wiki scope configuration and, for each scope that has a `topics_index` on disk, dispatches a seeker subagent in parallel. Each seeker receives the question and the absolute path to its scope's `topics.md`. It reads that index — a structured tree of axis/value/node entries, each with a one-line summary — and returns the nodes most relevant to the question, ranked by apparent relevance with a short reason for each match. The seeker never opens node files; it works entirely from the index. When multiple scopes are configured, all seekers run simultaneously and their results are merged.
 
 The skill then validates every returned path on disk and rebases it to a repo-relative form. Any path that doesn't exist on disk is dropped and noted so you can see what the seeker suggested but couldn't deliver.
 
-**Phase 2 — Traversal and synthesis.** With the validated entry points in hand, the skill dispatches a single `lazy-wiki.gatherer` subagent. The gatherer opens each entry-point node in turn, scans its `## See also (auto)` section, and decides — from the gloss text alone — whether a linked node is relevant enough to follow. Glosses are one-line descriptions of the link target, maintained by the curator; they let the gatherer skip whole branches without reading them. The gatherer follows relevant links depth-first up to roughly three hops from any seed, also running backlink searches (grep) when "what points to this node" matters for the question. Once the frontier stabilises it writes a synthesised answer with inline source links, then a sources list naming every node it read.
+**Phase 2 — Traversal and synthesis.** With the validated entry points in hand, the skill dispatches a single gatherer subagent. The gatherer opens each entry-point node in turn, scans its `# See also` section, and decides — from the gloss text alone — whether a linked node is relevant enough to follow. Glosses are one-line descriptions of the link target, maintained by the curator; they let the gatherer skip whole branches without reading them. The gatherer follows relevant links depth-first up to roughly three hops from any seed, also running backlink searches (grep) when "what points to this node" matters for the question. Once the frontier stabilises it writes a synthesised answer with inline source links, then a sources list naming every node it read.
 
 **Presenting the result.** The skill surfaces the gatherer's answer and sources verbatim, and appends the entry-point seed — path, gloss, and scope for each point — plus any dropped paths. You can see exactly where the traversal started and whether anything was filtered out.
 
@@ -41,7 +39,7 @@ If no scope has a topic index on disk, or if the seekers find no relevant entry 
 
 - **Multiple scopes.** If your project has several wiki scopes (e.g. one for source, one for docs), seekers run in parallel across all of them. Run `/lazy-wiki.configure` to add, edit, or remove scopes and their `topics_index` paths.
 - **Index out of date.** The seeker draws only from `topics.md`. If a recently added node hasn't been indexed yet, it won't appear as an entry point. Run `/lazy-wiki.relink` to bring the index up to date, or wait for the next scheduled relink routine.
-- **Cross-repo links.** If your wiki scopes span multiple repositories, the gatherer resolves `@<repo-key>/…` links via the `repos` registry in `.claude/lazy.settings.json`. Add or update repo entries via `/lazy-wiki.configure`.
+- **Cross-repo links.** If your wiki scopes span multiple repositories, the gatherer resolves `@<repo-key>/…` links via the `repos` registry in your wiki settings. Add or update repo entries via `/lazy-wiki.configure`.
 
 ## How the query pipeline works
 
@@ -55,18 +53,26 @@ sequenceDiagram
   participant gatherer as Gatherer
 
   user->>skill: query + scopes
-  Note over skill: dispatch one seeker per scope in parallel
+
+  Note over skill: dispatch seekers in parallel
+
   skill->>seekerA: read topics.md for scope A
   skill->>seekerB: read topics.md for scope B
+
   seekerA-->>skill: entry points — scope A
   seekerB-->>skill: entry points — scope B
-  Note over skill: all entry points collected — seed ready
-  skill->>gatherer: traverse See-also links depth-first from seed
+
+  Note over skill: all entry points collected
+
+  skill->>gatherer: traverse See-also links depth-first from entry points
+
   loop depth-first traversal
-    gatherer->>gatherer: follow See-also link, read page
+    gatherer->>gatherer: follow See-also link — load next node
   end
+
   gatherer-->>skill: synthesised answer block
-  skill-->>user: answer block + entry-point seed
+
+  skill-->>user: answer block + entry-point seeds
 ```
 
 ## See also

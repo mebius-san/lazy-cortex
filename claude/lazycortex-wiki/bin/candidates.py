@@ -571,7 +571,7 @@ class GraphCandidateSource(CandidateSource):
   The graph loader is real and tested: it parses each scope node's existing
   See-also outgoing links into an in-memory directed graph keyed by
   repo-relative path (`{node: set(neighbors)}`).  Both node types are read —
-  markdown via the `## See also (auto)` marker section, code via the
+  markdown via the `# See also` marker section, code via the
   `<wiki>` block `see-also` field.
 
   The scoring method (`suggest`) is a deliberate stub returning no suggestions
@@ -648,7 +648,7 @@ class GraphCandidateSource(CandidateSource):
     Extract the set of outgoing See-also link targets from one node.
 
     Markdown nodes carry markdown list items `- [text](path) — gloss` in the
-    `## See also (auto)` section; the path inside the parentheses is the link
+    `# See also` section; the path inside the parentheses is the link
     target.  Code nodes carry `see-also` items as bare `path — gloss` strings;
     the leading bare path (up to the first whitespace or em-dash) is the target.
 
@@ -667,7 +667,7 @@ class GraphCandidateSource(CandidateSource):
     Parse markdown See-also list items into a set of link-target paths.
 
     Args:
-      inner: The inner content of the `## See also (auto)` marker section, or
+      inner: The inner content of the `# See also` marker section, or
         `None` when the section is absent.
 
     Returns:

@@ -32,8 +32,13 @@ class Markers:
   # Marker-id for the canonical See-also section.
   SEE_ALSO_MARKER_ID = "see-also"
 
-  # Heading text for the canonical See-also section.
-  SEE_ALSO_HEADING = "## See also (auto)"
+  # Heading text for the canonical See-also section — an H1 protected-owner section.
+  SEE_ALSO_HEADING = "# See also"
+
+  # Owner tag on the first content line of the See-also section. Marks the H1 as a protected
+  # cross-plugin region (`#protected/<owner>/<region>`) so any other file-mutating plugin
+  # (e.g. review) preserves it verbatim; the wiki manages the bytes inside via the markers.
+  SEE_ALSO_PROTECTED_TAG = "#protected/wiki/see-also"
 
   def _start_marker(self, marker_id: str) -> str:
     """
@@ -146,13 +151,14 @@ class Markers:
   # ──────────────────────────────────────────────────────────────────────────
   def ensure_see_also(self, body: str, inner: str) -> str:
     """
-    Ensure the `## See also (auto)` section with markers exists and contains `inner`.
+    Ensure the `# See also` section with markers exists and contains `inner`.
 
     If the heading + marker pair is already present, only the inner content
     is rewritten (idempotent).  If absent, the section is appended to the end
     of `body`::
 
-        ## See also (auto)
+        # See also
+        #protected/wiki/see-also
         <!-- auto:see-also:start -->
         <inner lines>
         <!-- auto:see-also:end -->
@@ -183,6 +189,7 @@ class Markers:
 
     section = (
       f"\n{self.SEE_ALSO_HEADING}\n"
+      f"{self.SEE_ALSO_PROTECTED_TAG}\n"
       f"{start}\n"
       f"{inner_block}"
       f"{end}\n"
