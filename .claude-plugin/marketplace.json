@@ -36,6 +36,11 @@
       "source": "./claude/lazycortex-python"
     },
     {
+      "name": "lazycortex-review",
+      "description": "Pure-Python source-side review CLI. Drives mechanical doc-review state machine (parse / approval-marker sync / dispatch); experts run via lazycortex-core's expert runtime queue.",
+      "source": "./claude/lazycortex-review"
+    },
+    {
       "name": "lazycortex-specs",
       "description": "Specification and design skills for Claude Code",
       "source": "./claude/lazycortex-specs"

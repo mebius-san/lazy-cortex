@@ -79,6 +79,16 @@ Requires: lazycortex-core
 
 See [`claude/lazycortex-python/`](claude/lazycortex-python/) for details.
 
+### lazycortex-review
+
+Pure-Python source-side review CLI. Drives mechanical doc-review state machine (parse / approval-marker sync / dispatch); experts run via lazycortex-core's expert runtime queue.
+
+Ships 8 skills, 2 agents, and 1 command.
+
+Requires: lazycortex-core
+
+See [`claude/lazycortex-review/`](claude/lazycortex-review/) for details.
+
 ### lazycortex-specs
 
 Specification and design skills for Claude Code
@@ -134,6 +144,7 @@ All plugins live in a single Claude Code marketplace. Add the marketplace and en
     "lazycortex-observe@lazycortex": true,
     "lazycortex-obsidian@lazycortex": true,
     "lazycortex-python@lazycortex": true,
+    "lazycortex-review@lazycortex": true,
     "lazycortex-specs@lazycortex": true,
     "lazycortex-wiki@lazycortex": true
   }

@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""CLI entry shim for lazy-review.
+
+The daemon's ``lazy-review.scan`` md-scan routine dispatches
+``lazycortex-review process-file <abs-path>`` through this script.
+Operator-facing subcommands (``status``, ``start``, ``stop``,
+``finalize``) also dispatch here. See ``lazy_review.build_parser``
+for the full subcommand list.
+"""
+from __future__ import annotations
+import sys
+from pathlib import Path
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+    sys.path.insert(0, str(_BIN))
+
+
+def main(argv: list[str]) -> int:
+    try:
+        import lazy_review  # type: ignore
+    except ModuleNotFoundError:
+        sys.stderr.write(
+            "lazy-review CLI not yet implemented in this build "
+            "(rewrite in progress).\n"
+        )
+        return 2
+    return lazy_review.main(argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
