@@ -1,0 +1,7 @@
+[Unit]
+Description=lazycortex-review dispatcher (${REPO_ROOT})
+
+[Service]
+Type=oneshot
+WorkingDirectory=${REPO_ROOT}
+ExecStart=/usr/bin/env claude --agent lazy-review.dispatcher

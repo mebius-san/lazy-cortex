@@ -1,0 +1,9 @@
+{
+  "name": "lazycortex-review",
+  "version": "5.0.0",
+  "description": "Pure-Python source-side review CLI. Drives mechanical doc-review state machine (parse / approval-marker sync / dispatch); experts run via lazycortex-core's expert runtime queue.",
+  "author": {
+    "name": "Mebius-san"
+  },
+  "dependencies": ["lazycortex-core"]
+}

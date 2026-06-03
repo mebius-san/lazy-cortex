@@ -472,6 +472,21 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 5.0.0 — 2026-06-03 UTC
+
+- Complete rewrite of the document-review engine. Ownership isolation is now enforced in code, not in agent prompts: if a section writer strays outside the H1 it owns, the operator's body is restored byte-for-byte, and any agent attempt to write the reserved review-state keys is dropped before it can reach the document.
+- The status banner is authoritative and always current. Every change to the top banner is its own mechanical commit and takes priority over all other work, so the operator sees "whose turn it is now" within seconds of any state change. The waiting banner now names the phase it is in (`Waiting: validators` / `Waiting: terminals` / `Waiting: writer`).
+- Frontmatter edits are surgical line edits — block-style YAML, inline arrays, comments, and quoting style all survive byte-for-byte; the review machinery never reformats your frontmatter.
+- New section model. A review class declares its writers as a map keyed by writer group (`main`, `history`, `final`, and one per review section); each section carries its own H1 title, a stable section id, and a `top` / `bottom` position relative to the operator's free body. Exactly one writer owns each section, identified by a two-part ownership tag, so the same expert can safely own two different sections in one document.
+- Post-approve validation and terminal review now run as a barrier instead of a cascade: all validators are dispatched at once and collected in a single pass, so a concern raised by the first validator no longer prevents the others from running in the same round. The historian is invoked exactly once, against the approved state, and finalize waits for any pending historian job.
+- Cross-plugin protected sections are preserved through finalize. A region owned by another plugin (for example the wiki's `# See also` block, inner HTML markers and all) survives a finalize pass verbatim instead of being stripped.
+- Slash commands (`/lazy-review.start` / `stop` / `finalize` / `status` / `iterate`) are now thin, atomic dispatchers over a single `lazycortex-review` CLI — each leaves a clean working tree on return and writes a per-action JSONL run log. The runtime driver is an `md-scan` routine that scans each review class's configured paths and processes one document at a time.
+- A new `/lazy-review.submit` verb opens a review on a document whose changes are already written, skipping the opening writer round.
+- The standalone webhook server and the in-plugin polling mode were removed. Remote git work (pull / push / rebase / reset) is now the `lazycortex-core` runtime daemon's responsibility; lazy-review's own git surface is intentionally narrow.
+- The two always-on `rules/` files were removed — verb discovery, the dispatch contract, and the consumer cheatsheet are now available on demand (via the session skill list, the doc-review protocol reference, and `/lazy-review.help`) instead of taxing every markdown session's context.
+- The `/lazy-review.configure` wizard was rewritten for the new section model, and `/lazy-review.install` now seeds the review scan routine with sensible runtime defaults out of the box.
+- Reliability fixes: every queued job's configuration is written before the job is marked ready (no spawn race); every dispatched expert reliably runs under the doc-review protocol; completed jobs are marked consumed so a daemon restart never re-applies a stale answer; and the operator's whole-document approve is recorded durably before the banner repaints, so the finalize chain always fires.
+
 ### 0.1.0 — 2026-04-30
 
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).

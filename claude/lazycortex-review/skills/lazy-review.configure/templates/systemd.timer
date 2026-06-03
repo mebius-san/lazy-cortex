@@ -1,0 +1,9 @@
+[Unit]
+Description=lazycortex-review timer (${REPO_ROOT})
+
+[Timer]
+OnUnitActiveSec=${CADENCE_SEC}s
+Unit=lazycortex-review-${REPO_HASH}.service
+
+[Install]
+WantedBy=timers.target
