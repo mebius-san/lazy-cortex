@@ -87,7 +87,7 @@ For each absolute node path in `link[]`:
 
    ```
    Agent(subagent_type: "lazycortex-wiki:lazy-wiki.curator",
-         prompt: "kind=link, tail=false. node_path=<abs-node-path>, scope_id=<scope-id>, repo_root=<repo-root>, topics_path=<repo-root>/<topics_index>, candidates=<the JSON array from step 1>. Read the real node (it now carries the classify writes) and the real topics.md (and the node's own pin fields); verify the candidates first (empty → judge from topics.md); build see_also; apply it to the node yourself via `lazycortex-wiki apply-node <node_path> --from <a mktemp curation file you create>` (this grafts only the ## See also (auto) section), then rm the temp; STOP — do NOT git. Report the outcome.")
+         prompt: "kind=link, tail=false. node_path=<abs-node-path>, scope_id=<scope-id>, repo_root=<repo-root>, topics_path=<repo-root>/<topics_index>, candidates=<the JSON array from step 1>. Read the real node (it now carries the classify writes) and the real topics.md (and the node's own pin fields); verify the candidates first (empty → judge from topics.md); build see_also; apply it to the node yourself via `lazycortex-wiki apply-node <node_path> --from <a mktemp curation file you create>` (this grafts only the # See also section), then rm the temp; STOP — do NOT git. Report the outcome.")
    ```
 
 The curator writes the node via `apply-node`; the skill runs no `apply-node`. If a curator reports an error, skip that node and continue. Track each curated node path for the Step 6 commit. Outcome: `linked:<n>` (or `empty-set` when `link[]` was empty).

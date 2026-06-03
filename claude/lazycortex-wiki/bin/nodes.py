@@ -563,7 +563,7 @@ def _markdown_source_for_hash(text: str) -> str:
   perturb the result: the `wiki_summary` / `wiki_src_hash` / `wiki_connectors`
   frontmatter keys are dropped, the `wiki/*`-prefixed tags are dropped
   (non-`wiki/` tags survive in their original order), and the
-  `## See also (auto)` managed section is removed between its markers
+  `# See also` managed section is removed between its markers
   (heading included).  The remainder is whitespace-normalised line by line.
 
   Args:
@@ -653,7 +653,7 @@ def _drop_key(text: str, key: str) -> str:
 
 def _drop_see_also_section(text: str) -> str:
   """
-  Remove the `## See also (auto)` heading and its marker-bounded block.
+  Remove the `# See also` heading (and its `#protected/wiki/see-also` owner tag) plus the marker-bounded block.
 
   Args:
     text: Full document text.
@@ -669,10 +669,14 @@ def _drop_see_also_section(text: str) -> str:
     return text
   start_idx = text.index(start_marker)
   end_idx = text.index(end_marker, start_idx) + len(end_marker)
-  # Pull the cut back over a preceding See-also heading if present.
+  # Pull the cut back over a preceding See-also heading (and its owner-tag line) if present.
   heading = Markers.SEE_ALSO_HEADING
   head_idx = text.rfind(heading, 0, start_idx)
-  if head_idx != -1 and text[head_idx:start_idx].strip() == heading:
+  between = text[head_idx:start_idx].strip() if head_idx != -1 else ""
+  if head_idx != -1 and between in (
+      heading,
+      f"{heading}\n{Markers.SEE_ALSO_PROTECTED_TAG}",
+  ):
     start_idx = head_idx
   return text[:start_idx] + text[end_idx:]
 
@@ -688,7 +692,7 @@ class MarkdownNode:
   2. `wiki/*` subset of `tags:` — the prefix-scoped topic tags.
   3. `wiki_connectors` — a block-sequence frontmatter key of short
      linkable-facet phrases.
-  4. `## See also (auto)` body section between HTML-comment markers.
+  4. `# See also` body section between HTML-comment markers.
 
   All other frontmatter keys, non-`wiki/` tags, body prose, and any
   un-managed sections are preserved byte-for-byte.  `apply` is the
@@ -790,7 +794,7 @@ class MarkdownNode:
   @property
   def see_also_inner(self) -> str | None:
     """
-    Current inner content of the `## See also (auto)` section, or `None`.
+    Current inner content of the `# See also` section, or `None`.
 
     Returns the text between the HTML comment markers, stripped of surrounding
     newlines.  Returns `None` when the marker pair is absent.
@@ -802,7 +806,7 @@ class MarkdownNode:
     """
     Set of forward See-also link target paths as written by the curator.
 
-    Parses `[text](path)` link entries from the `## See also (auto)` marker block
+    Parses `[text](path)` link entries from the `# See also` marker block
     and exposes every unique `path` value verbatim. Same-repo targets appear as
     repo-relative POSIX paths; cross-repo targets keep their `@<repo-key>/path`
     qualifier. Empty when the See-also section is absent or empty. Used by
@@ -822,7 +826,7 @@ class MarkdownNode:
 
     The hash is computed over the document with every wiki-managed region
     removed (`wiki_summary` / `wiki_src_hash` keys, `wiki/*` tags, and the
-    `## See also (auto)` section), so re-curation never changes it.
+    `# See also` section), so re-curation never changes it.
     """
     source = _markdown_source_for_hash(self._text)
     digest = hashlib.sha256(source.encode(self._ENCODING)).hexdigest()
@@ -858,7 +862,7 @@ class MarkdownNode:
     2. Merge `topics` into `tags:` — replace only the `wiki/`-prefixed subset,
        preserving every non-`wiki/` tag in its original relative order.
     3. Replace the `wiki_connectors` block with the given phrases.
-    4. Graft the `## See also (auto)` section via `Markers.ensure_see_also`.
+    4. Graft the `# See also` section via `Markers.ensure_see_also`.
 
     Args:
       wiki_summary: One-line summary string (no newlines).
@@ -883,7 +887,7 @@ class MarkdownNode:
     """
     Write the classify-phase managed regions: `wiki_summary`, `wiki/*` tags, `wiki_connectors`.
 
-    Leaves the `## See also (auto)` section (and any other body content)
+    Leaves the `# See also` section (and any other body content)
     untouched.  The operation is idempotent — applying identical
     `wiki_summary`, `topics`, and `connectors` twice produces byte-identical
     file content on the second call.
@@ -939,13 +943,13 @@ class MarkdownNode:
     see_also_lines: list[str],
   ) -> None:
     """
-    Write the link-phase managed region: the `## See also (auto)` section.
+    Write the link-phase managed region: the `# See also` section.
 
     Leaves `wiki_summary`, `wiki/*` tags, and all other content untouched.
     The operation is idempotent — applying identical `see_also_lines` twice
     produces byte-identical file content on the second call.
 
-    Specifically: grafts the `## See also (auto)` section via
+    Specifically: grafts the `# See also` section via
     `Markers.ensure_see_also`.
 
     Args:

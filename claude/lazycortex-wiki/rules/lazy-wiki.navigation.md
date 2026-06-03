@@ -6,7 +6,7 @@ always_loaded: "wiki navigation is a cross-cutting concern — any agent working
 
 A curated semantic wiki may exist in this repo. Its entry points are the `topics_index` path(s) declared in `.claude/lazy.settings.json[wiki.scopes]`.
 
-**How nodes are structured.** Every wiki node carries a `wiki_summary` (one-line description) in its frontmatter and a `## See also (auto)` section with glossed relative-path links — each link followed by ` — <gloss>` that describes the target. Glosses let you decide whether to open a node without opening it. Topic tags live in `tags:` as `wiki/<axis>/<value>`.
+**How nodes are structured.** Every wiki node carries a `wiki_summary` (one-line description) in its frontmatter and a `# See also` section (tagged `#protected/wiki/see-also` on its first line) with glossed relative-path links — each link followed by ` — <gloss>` that describes the target. Glosses let you decide whether to open a node without opening it. Topic tags live in `tags:` as `wiki/<axis>/<value>`.
 
 **How to find material on a topic.** Use `/wiki.query "<question>"` — do NOT read `topics.md` into your own context for search. The skill dispatches retrieval subagents whose contexts hold the large topic catalog and the traversed node bodies, returning only the entry points and a synthesised answer. When you are already standing on a node, follow its See-also glosses directly. Do not grep blind when the wiki covers the question.
 

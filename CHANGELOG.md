@@ -532,6 +532,18 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-wiki
 
+### 1.3.0 — 2026-06-03 UTC
+
+- Documents currently under review are automatically excluded from wiki curation, indexing, and linking; they rejoin the wiki when the review is finalized. Configure with a per-scope `filter` predicate via `/wiki.configure` or `/wiki.install`.
+- The wiki now emits its See-also block as a `#protected/wiki/see-also` section, establishing a stable cross-plugin contract so that review and other plugins can preserve the region byte-for-byte during their own finalization passes.
+- Tag values stay consistent across incremental runs: new `collect-tags` and `retag` subcommands survey and rename axis values scope-wide; a new `normalize-tags` curator kind judges a canonical value set and self-applies it; `/wiki.relink` and the daemon `process-file` path both feed existing tag values as a classify anchor so the curator reuses in-use values instead of coining synonyms.
+- Existing nodes that attract a newly classified node now receive incremental link updates immediately via reverse-candidate fan-out, rather than waiting for the next weekly `relink-all` pass.
+- Redundant back-link dispatch is skipped when an attractor node already forward-links to the target, saving roughly 60–90 seconds of LLM time per redundant job.
+- `relink-all` subcommand is now implemented; previously it was declared but always returned not-implemented, breaking the `wiki.relink-weekly` scheduled routine.
+- **Fix:** YAML special characters (colons, apostrophes, boolean literals, etc.) in frontmatter scalar fields such as `wiki_summary` are now correctly single-quoted, preventing parse errors in strict YAML consumers like Obsidian.
+- **Fix:** Dispatcher dedup key now includes the job kind and a normalized absolute path, so classify and link jobs for the same node are no longer collapsed into one key — link jobs were silently eaten by a completed classify entry, leaving most relink-all link passes unexecuted.
+- **Fix:** `/wiki.install` previously seeded `wiki.scan.watch` as a list, crashing the git-routine validator on every HEAD change; it now seeds the correct string value.
+
 ### 1.2.0 — 2026-06-01 UTC
 
 - New `/wiki.query` uses a two-phase subagent retrieval model: a `lazy-wiki.seeker` agent picks entry points from `topics.md`, then `lazy-wiki.gatherer` traverses See-also links and synthesises the answer — keeping large index and node bodies out of the main session context.
