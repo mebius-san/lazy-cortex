@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""CLI entry shim for lazy-specs.
+
+Subcommands dispatched here:
+
+- ``open-request <file>`` — mechanical opt-in handler for naked request
+  files. Invoked by the ``spec.request-open`` md-scan routine; writes
+  the minimum frontmatter + banner and commits under the
+  ``spec.request-open`` bot identity. No LLM dispatch — the LLM apply
+  transition (``spec.request-apply`` agent) fires later when the
+  request reaches the post-finalize stage.
+"""
+from __future__ import annotations
+import sys
+from pathlib import Path
+
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+    sys.path.insert(0, str(_BIN))
+
+
+def main(argv: list[str]) -> int:
+    if not argv or argv[0] in ("-h", "--help"):
+        sys.stderr.write(
+            "usage: lazycortex-specs <subcommand> [args...]\n"
+            "subcommands:\n"
+            "  open-request <file>            mechanical opt-in for naked request file\n"
+            "  resolve-product <by-key|by-path> ...   resolve a product from settings\n"
+            "  resolve-language <relpath>     resolve a doc's effective language\n"
+            "  flip-gate <asset_dir> <gate> [--off] [--auto] [--reason TEXT]   move one gate\n"
+            "  gate-tick <asset_note> [--today YYYY-MM-DD]   advance one asset's gates\n"
+            "  scaffold-asset <product> <category> <slug>  deterministic scaffold of a new asset folder\n"
+            "  apply-request <file>           deterministic post-finalize apply transition for a request file\n"
+        )
+        return 0 if argv else 2
+    sub, *rest = argv
+    if sub == "open-request":
+        import open_request  # type: ignore
+        return open_request.main(rest)
+    if sub == "apply-request":
+        import apply_request  # type: ignore
+        return apply_request.main(rest)
+    if sub == "resolve-product":
+        import resolve_product  # type: ignore
+        return resolve_product.main(rest)
+    if sub == "resolve-language":
+        import resolve_language  # type: ignore
+        return resolve_language.main(rest)
+    if sub == "flip-gate":
+        import flip_gate  # type: ignore
+        return flip_gate.main(rest)
+    if sub == "gate-tick":
+        import gate_tick  # type: ignore
+        return gate_tick.main(rest)
+    if sub == "scaffold-asset":
+        import scaffold_asset  # type: ignore
+        return scaffold_asset.main(rest)
+    sys.stderr.write(f"unknown subcommand: {sub}\n")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

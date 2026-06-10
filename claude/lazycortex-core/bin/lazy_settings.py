@@ -337,6 +337,30 @@ def save_section(path: Path | str, section_key: str, section: dict) -> None:
   raw[section_key] = section
   _atomic_write(path, raw)
 
+def save_local_section(path: Path | str, section_key: str, section: dict) -> None:
+  """
+  Persist one section to the gitignored local-overlay file beside the tracked settings file.
+
+  The overlay section is written verbatim with no schema-version stamp: the section version is
+  sticky to the tracked layer, so a version key in the overlay would shadow it on merge. The
+  tracked file is never touched. Intended for per-machine, personal gates that must survive
+  across runs without entering the shared, committed settings file.
+
+  Args:
+    path: Path to the tracked settings file; the sibling `.local.json` overlay is written.
+    section_key: Name of the section to store under in the overlay.
+    section: Section dict to persist into the overlay.
+
+  Raises:
+    OSError: If the overlay file or its parent directory cannot be written.
+    json.JSONDecodeError: If the existing overlay file is not valid JSON.
+  """
+  local_path = _local_overlay_path(Path(path))
+  # waiver: stdlib encoding idiom
+  raw = json.loads(local_path.read_text(encoding = "utf-8") or "{}") if local_path.exists() else {}
+  raw[section_key] = section
+  _atomic_write(local_path, raw)
+
 def _atomic_write(path: Path, data: dict) -> None:
   """
   Write `data` as pretty-printed JSON to `path` atomically.

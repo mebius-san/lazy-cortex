@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fde68a"
 ---
 # lazycortex-diagram
 
@@ -46,7 +46,7 @@ Requires these plugins from the same marketplace:
 | `lazy-diagram.audit` | Audit the lazycortex-diagram plugin: verify template well-formedness, exemplar conformance against the authoring rule, and role + init-block coverage in styles-*.json schemes. Parallel-scan coordinator dispatching 3 read-only Explore agents (A2, A3, A5). Read-first; presents findings, asks before fixing. Severity: PASS / WARN / FAIL / INFO. TODO: re-add fixture-related scans (A1, A4) when the final dev-vs-shipped split is decided. |
 | `lazy-diagram.draw` | Diagram dispatcher — picks (kind, format) for a free-form request, dispatches the per-format drawer agent, byte-compares against the existing fence under the anchor, and writes (or skips) one fenced diagram. Outcome vocabulary: created / replaced / unchanged / skipped-below-threshold / failed:<reason> / split-into-N. Use when you want a NEW diagram inserted under a named heading; for migrating an existing fence to current standards see /lazy-diagram.fix. |
 | `lazy-diagram.fix` | Take an existing diagram fence and re-conform it to the current drawer-agent standards. Reads the host section's prose as the request, infers (kind, format) from the existing fence's syntax marker, dispatches the per-format drawer agent, and replaces the fence in place when the body differs. Outcome vocabulary: replaced / unchanged / failed:<reason>. Use when an old diagram drifted from the contract (palette removed, theme directive missing, terminology changed); for inserting a NEW fence under a heading see /lazy-diagram.draw. |
-| `lazy-diagram.install` | Bootstrap the lazycortex-diagram plugin for the current project (or globally). Syncs the authoring rule shipped by the plugin into the consumer's rules directory, seeds agent model tiers for the per-format drawer agents, and cleans up orphaned rules from previous versions. Idempotent — safe to re-run. Detects install scope automatically. |
+| `lazy-diagram.install` | Bootstrap the lazycortex-diagram plugin for the current project (or globally). Syncs the authoring rule shipped by the plugin into the consumer's rules directory and seeds agent model tiers for the per-format drawer agents. Idempotent and quiet on re-run — an enabled plugin installs its whole surface, decisions are derived not asked, and orphaned rules are left in place. Detects install scope automatically. |
 
 ## Documentation
 
@@ -56,6 +56,8 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/install-and-audit.md) — Bootstrap lazycortex-diagram in your project — sync the authoring rule, seed agent-model tiers, and clean up orphans.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/troubleshooting.md) — Common failure modes across lazycortex-diagram skills — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/faq.md) — Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, split behaviour, direct agent invocation, and install.
+
+Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-diagram/help/`.
 
 ## Agents
 

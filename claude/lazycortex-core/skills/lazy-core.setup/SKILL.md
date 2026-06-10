@@ -26,11 +26,11 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 1 — Discover`
    - `Step 2 — Plan`
    - `Step 3 — Preview`
-   - `Step 4 — Confirm`
+   - `Step 4 — Proceed`
    - `Step 5 — Execute`
    - `Step 6 — Report`
    - `Step 7 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `up-to-date`, `migrated`, `discovered`, `planned`, `previewed`, `confirmed`, `ran`, `failed`, `aborted-by-user`, `dry-run`, `nothing-to-do`).
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `up-to-date`, `migrated`, `discovered`, `planned`, `previewed`, `proceed`, `ran`, `failed`, `dry-run`, `nothing-to-do`).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
@@ -110,16 +110,11 @@ Each line is the exact `<full-dispatch-string>` that will be passed to `Skill`. 
 
 If invoked with `--dry-run`, set Step 4 and Step 5 outcomes to `dry-run` and skip directly to Step 6.
 
-## Step 4: Confirm
+## Step 4: Proceed
 
-Single `AskUserQuestion`:
+No confirmation prompt — running the install chain is the whole point of invoking `/lazy-core.setup`, and `--dry-run` (handled in Step 3) is the only preview-without-execute path. Each child owns its own interactivity, so the meta-installer never adds a redundant top-level gate.
 
-- question: **"Run the planned setup chain (N skills across pre-install / per-plugin / post-install)?"**
-- options:
-  - `run` — proceed to Step 5.
-  - `abort` — stop the run; set Step 5 outcome to `aborted-by-user` and skip to Step 6.
-
-Outcome: `confirmed` or `aborted-by-user`.
+Proceed straight to Step 5. Outcome: `proceed` (or `dry-run` when Step 3 already short-circuited).
 
 ## Step 5: Execute
 
@@ -143,8 +138,8 @@ Step 0 — up-to-date | migrated: N sections (M up-to-date) | failed: <stderr>
 Step 1 — discovered: N skills (M install + K configurator)
 Step 2 — planned: N total (P pre + Q per-plugin + R post)
 Step 3 — previewed
-Step 4 — confirmed | aborted-by-user | dry-run
-Step 5 — ran: X/N ok, Y failed, Z skipped | dry-run | aborted-by-user | aborted-by-migration-failure
+Step 4 — proceed | dry-run
+Step 5 — ran: X/N ok, Y failed, Z skipped | dry-run | aborted-by-migration-failure
 
 ✓ ran successfully:
   • <full-dispatch-string>
@@ -168,7 +163,7 @@ Frontmatter: `git_sha`, `git_branch`, `date`, `input` (the args passed, or `none
 ## Failure modes
 
 - **`/lazy-core.setup` stops at Step 0: migration ladder errored** — `lazy_settings.py migrate` exited non-zero → read the captured stderr in the Step 6 report, fix the underlying ladder bug (typically a malformed `MIGRATIONS = {...}` callable in `lazy_settings_migrations/<section>.py`), then re-run `/lazy-core.setup`. Steps 1–5 do not run until the settings file is current.
-- **`/lazy-core.setup` stops at Step 4: user chose "abort"** — the setup confirmation was declined → re-run when ready to proceed; individual children are idempotent and safe to re-run.
+- **`/lazy-core.setup` ran a child you didn't want** — there is no top-level confirmation; the chain runs every discovered installer. Use `--dry-run` first to preview the plan, or disable the unwanted plugin before re-running. Individual children are idempotent and safe to re-run.
 - **One or more child skills failed during Step 5** — the report shows which children returned `failed: <reason>` → fix the root cause reported per child, then re-run `/lazy-core.setup` (idempotent).
 
 ## Notes

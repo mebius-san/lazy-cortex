@@ -1,6 +1,6 @@
 ---
 name: lazy-observe.uninstall
-description: "Tear down the lazycortex-observe shipper on this host: unload the launchd agent or systemd user unit, remove rendered configs and the WAL dir. Operator-private state under `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` is preserved by default — re-installing later picks it up. Idempotent — re-running on an already-clean host is a no-op."
+description: "Tear down the lazycortex-observe shipper on this host: unload the launchd agent or systemd user unit, remove rendered configs and the WAL dir. DESTRUCTIVE — removes a supervised service, so the WAL/log and operator-private-state teardowns each ask before deleting; operator-private state under `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` is preserved by default. Idempotent — every already-absent target is a silent no-op, never an error; re-running on a clean host does nothing."
 allowed-tools: Read, Glob, Bash(rm *), Bash(launchctl *), Bash(systemctl *), Bash(test *), Bash(date *), Bash(uname *), Bash(python3 *)
 ---
 # Uninstall lazy-observe
@@ -45,23 +45,27 @@ Delete (if present):
 - `~/Library/LaunchAgents/com.lazycortex.observe.plist` (darwin only)
 - `~/.config/systemd/user/lazycortex-observe.service` (linux only)
 
+A target that is already gone is a silent no-op, never an error (idempotent re-run). Use `rm -f`.
+
 Outcome: `removed` (with file count) / `absent`.
 
 ## Step 4 — Remove WAL + log directories
 
-Ask via `AskUserQuestion`: keep or delete the WAL directory at `${XDG_DATA_HOME:-~/.local/share}/lazycortex/observe/wal/`? Default `keep` — WAL preserves not-yet-shipped samples, and reinstalling the same agent will pick them up.
+This is a destructive deletion, so it KEEPS its confirmation. Ask via `AskUserQuestion`: keep or delete the WAL directory at `${XDG_DATA_HOME:-~/.local/share}/lazycortex/observe/wal/`? Default `keep` — WAL preserves not-yet-shipped samples, and reinstalling the same agent will pick them up.
 
 Same for log directory (`~/Library/Logs/lazycortex-observe/` on darwin, `${XDG_STATE_HOME:-~/.local/state}/lazycortex/observe/logs/` on linux).
+
+An already-absent directory needs no question — state `absent` silently. Ask only when there is something to delete.
 
 Outcome: `removed` / `kept-per-user-choice` / `absent`.
 
 ## Step 5 — Offer to wipe answer file + token
 
-`AskUserQuestion` — keep or delete the operator-private state at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` and `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.token`? Default `keep` — these are the only place URL/auth choices live, and a future install picks them up automatically.
+This is a destructive deletion of operator-private state, so it KEEPS its confirmation. `AskUserQuestion` — keep or delete the operator-private state at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` and `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.token`? Default `keep` — these are the only place URL/auth choices live, and a future install picks them up automatically.
 
-If the operator chooses to delete the token file, do it via `rm -f` (the file may already be 0600).
+An already-absent answer file / token needs no question — state `absent` silently. If the operator chooses to delete the token file, do it via `rm -f` (the file may already be 0600).
 
-Outcome: `kept-per-user-choice` / `wiped`.
+Outcome: `kept-per-user-choice` / `wiped` / `absent`.
 
 ## Step 6 — Report
 

@@ -38,10 +38,38 @@ execution-discipline-waiver: "<concrete reason>"
 
 - The value must be a concrete reason. `true` / `yes` / `""` are rejected as `FAIL`.
 - Waivered files surface as `INFO` in `lazy-core.audit` — visibility, not silent skip.
-- Legitimate patterns: help commands (static text); thin dispatchers where real execution is in a sibling script; pure-reference wrappers around another doc.
+- Legitimate patterns: help commands (static text); thin dispatchers where real execution is in a sibling script; pure-reference wrappers around another doc; skills invoked as sub-steps by another skill or agent (see § 1.5 — preamble would compete with the caller's step list and force an early exit).
 - No blanket waivers by directory/glob. Each exemption is per-file and justified.
 
 Agents share this waiver mechanism — see `lazy-core.agent-writing § 4`.
+
+## 1.5 Nested skills — no preamble in sub-skill chains
+
+A skill invoked from another skill's `Skill: ...` call OR from an agent's body is a **nested skill**. The outer caller already runs its own Execution-Discipline preamble — its step list owns orchestration. A MANDATORY numbered-steps preamble inside the nested skill competes with the caller's active mandate: the LLM's attention re-anchors to the most-recently-loaded step list, drops the outer caller's step pointer, and exits at the bottom of the nested skill's last step. The outer caller's remaining steps never execute.
+
+### Rule
+
+A skill invoked from another agent's body or from another skill's `Skill: ...` call MUST declare `execution-discipline-waiver:` in frontmatter (per § 1.4) with a reason naming the nested-call context, AND MUST NOT carry the canonical `## Execution discipline (MANDATORY)` H2 with a numbered "X ordered steps" list and TaskCreate requirement. Replace it with plain procedural prose under `## Process` (or equivalent).
+
+### Top-level vs nested
+
+- **Top-level** (preamble required): invoked by the operator via slash-command (`/spec.create-feature`, `/lazy-review.start`, …) or directly from an operator-facing session. The preamble guards the operator's intent → step mapping.
+- **Nested** (preamble forbidden): invoked by another skill or agent as a sub-step in a longer chain.
+
+A skill needing BOTH paths splits: a thin operator-facing wrapper with the preamble + a separate primitive (Python CLI subcommand preferred, or a sub-skill with the waiver) that does the mechanical work. The wrapper calls the primitive; the nested-from-agent path bypasses the wrapper.
+
+### Why
+
+LLM attention follows the most-recently-loaded mandatory-step-list. A nested skill's MANDATORY preamble re-anchors the calling agent's mental model to the inner skill's steps; the outer step pointer is dropped. The agent reaches the bottom of the inner step list, perceives "job done", echoes the inner skill's final status, exits. Post-sub-skill work in the outer caller (markers stamping, commits, `response.json` writes) never happens.
+
+### Enforcement
+
+`lazy-core.audit` flags any skill that:
+
+1. Is referenced in a `Skill: <plugin>:<name>` call from another skill's SKILL.md OR an agent's body, AND
+2. Carries a canonical `## Execution discipline (MANDATORY)` preamble.
+
+Severity: `WARN`. The waivered variant (frontmatter `execution-discipline-waiver: "nested-from-agent — outer caller owns step discipline"`) is `INFO`.
 
 ## 2. No "Optional" in phase/step headings
 

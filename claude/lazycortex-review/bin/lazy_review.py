@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -38,6 +39,40 @@ if str(_BIN) not in sys.path:
 
 # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
 from keys import JobKey  # noqa: E402
+
+
+def _file_has_uncommitted_edits(repo: Path, file_path: Path) -> bool:
+  """
+  Return True when the given file carries staged or unstaged modifications in the repo.
+
+  Closes the race-window between the daemon's iteration-level `_check_working_tree` (clean at
+  iteration start) and the per-routine subprocess exec (operator may have edited the file in
+  the interim). Without this re-check the subprocess would read the dirty FS, generate output
+  from the operator's WIP, and stage-and-commit it under the bot's identity — silently
+  mis-attributing operator content to a mechanical commit.
+
+  Mirrors the daemon's `_check_working_tree` in `lazycortex-core/bin/runtime_daemon.py`, but
+  scoped to a single path (cheaper and avoids tripping on unrelated dirt in the worktree).
+
+  Args:
+    repo: Repository root path.
+    file_path: The fixture path to inspect.
+
+  Returns:
+    True when `git status --porcelain -- <file>` yields any non-empty output. False on clean
+    state, on a git-invocation failure (best-effort), or when git is unavailable.
+  """
+  try:
+    result = subprocess.run(
+      [ "git", "--no-optional-locks", "status", "--porcelain", "--", str(file_path) ],
+      cwd = str(repo), capture_output = True, text = True, check = False,
+    )
+  except FileNotFoundError:
+    return False
+  # guard: git invocation failed — best-effort, do not block work on a failed probe
+  if result.returncode != 0:
+    return False
+  return bool(result.stdout.strip())
 
 
 def _log_tick(repo: Path, result: dict) -> None:
@@ -75,6 +110,16 @@ def cmd_process_file(args: argparse.Namespace) -> int:
   import dispatcher  # type: ignore
   repo = Path(args.repo).resolve()
   file_path = Path(args.file).resolve()
+  # guard: operator edited this file in the race window between the daemon's iteration-level
+  # dirty-tree check (clean) and this subprocess exec — silent skip mirrors the daemon-level
+  # behavior so the next tick after the operator commits picks up the work cleanly
+  if _file_has_uncommitted_edits(repo, file_path):
+    skip_summary = { JobKey.OUTCOME: "skipped-operator-edit-in-flight",
+                     JobKey.FILE:    str(file_path) }
+    if not args.quiet:
+      print(json.dumps(skip_summary, indent = 2))
+    _log_tick(repo, { JobKey.ACTIONS: [ skip_summary ] })
+    return 0
   summary = dispatcher.process_one_file(repo, file_path)
   if not args.quiet:
     print(json.dumps(summary, indent=2))

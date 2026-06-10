@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fde68a"
 ---
 # lazycortex-review
 
@@ -65,7 +65,7 @@ Requires these plugins from the same marketplace:
 | `lazy-review.audit` | Read-only validation of lazy-review configuration in .claude/lazy.settings.json — checks schema, expert references, git_author completeness, and edit_marker_style. Returns PASS/WARN/FAIL plus per-finding detail. |
 | `lazy-review.configure` | Wizard to add a review class to .claude/lazy.settings.json — collects path globs, main / validation / terminal / history expert assignments under the new experts schema. Strict one-question-per-turn via AskUserQuestion. |
 | `lazy-review.finalize` | Public verb — close out a fully-approved document. Folds all edit-annotation markers into final text, strips the banner and approve checkbox, removes every system callout (keeps # History), sets review_active false, and commits with Doc-Review-Phase: finalize trailer. |
-| `lazy-review.install` | Per-repo bootstrap for lazycortex-review. Seeds lazy.settings.json with review.classes / experts / routines defaults, creates .experts/.jobs/ and .logs/lazy-review/runs/ directories. Idempotent — re-runnable without overwriting existing config. |
+| `lazy-review.install` | Per-repo bootstrap for lazycortex-review. Seeds lazy.settings.json with review.classes / experts defaults, creates .experts/.jobs/ and .logs/lazy-review/runs/ directories, registers the daemon-gated lazy-review.scan routine, and registers the plugin-CLI Bash allow-pattern in settings.local.json. Idempotent and quiet on re-run — every decision is derived or read-first, never re-asked; an enabled plugin installs its whole surface. |
 | `lazy-review.start` | Public verb — opt one document into the review loop. Atomically writes review_active/review_round/approved frontmatter, drops the Waiting banner above the first H1, and commits under the operator's git identity. # History is NOT created here — historian adds it lazily on first entry. |
 | `lazy-review.status` | Public verb — print one-line JSON describing a document's review state (review_active, review_round, approved, current banner, list of owned sections with their owner experts). Read-only. |
 | `lazy-review.stop` | Public verb — opt one document out of the review loop. Sets review_active false; preserves review_round, approved, and # History so a later /lazy-review.start can resume from the operator's last state. |

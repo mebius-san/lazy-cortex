@@ -1,13 +1,27 @@
 ---
 name: lazy-observe.install
-description: "Bootstrap the lazycortex-observe shipper for this host: pick agent kind (Alloy / otelcol), collect remote_write URL + auth, render the agent config + service unit from shipped templates, install + load the supervised service, smoke-test the local /metrics endpoint. Operator-private values stay in `${XDG_CONFIG_HOME:-~/.config}/lazycortex/`. Idempotent — re-running rewrites the rendered configs and reloads the service."
+description: "Bootstrap the lazycortex-observe shipper for this host: pick agent kind (Alloy / otelcol), collect remote_write URL + auth, render the agent config + service unit from shipped templates, install + load the supervised service, smoke-test the local /metrics endpoint. Genuine config (URL, auth, agent kind) is read-first from `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` and never re-asked once on record; rendered files follow the silent file-sync policy. Idempotent and quiet on re-run — re-running rewrites the rendered configs and reloads the service without prompting."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(test *), Bash(date *), Bash(brew *), Bash(which *), Bash(curl *), Bash(uname *), Bash(python3 *)
 ---
 # Install lazy-observe
 
 Bring up a Prometheus-format metrics shipper on the current host that scrapes the lazycortex-core daemon's `/metrics` endpoint and forwards via `remote_write` to the operator's observer (self-hosted Prometheus / Mimir / etc.).
 
-The plugin ships **observer-server-blind** templates only. This skill collects operator-private values (URL, token, basic-auth username) at install time and persists them under `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` — never in the plugin tree, never in tracked settings.
+The plugin ships **observer-server-blind** templates only. This skill collects operator-private values (URL, token, basic-auth username, agent kind) at install time and persists them under `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` — never in the plugin tree, never in tracked settings. These are GENUINE config that cannot be derived; the questions stay, but they are **read-first** — a value already on record is reused silently and never re-asked.
+
+## File-sync policy (applies to every file this skill renders)
+
+Every file this skill renders or writes (agent config, service unit from shipped templates) follows three cases — no per-file "install?" prompt, no drift wizard:
+
+1. **Absent or unchanged** — target missing, or byte-identical to the freshly-rendered version → write silently. State `rendered` / `unchanged`.
+2. **Locally changed but cleanly mergeable** — target diverged, but re-rendering only overwrites the generated region while every operator-owned value is preserved (no contradiction) → render silently. State `rendered`.
+3. **Genuine conflict** — the same region was changed both locally and in the freshly-rendered version in ways that cannot be reconciled automatically → the ONLY case that asks. `AskUserQuestion` naming the file, quoting the conflicting region, options `take-rendered` / `keep-local`.
+
+"Conflict" means you cannot determine what should survive — not merely "the bytes differ". Re-rendering = overwrite the generated region, preserve operator-owned values; no contradiction → no question.
+
+## Read-first config (never re-ask)
+
+Genuine config (`agent_kind`, `remote_write_url`, `auth_kind`, `basic_auth_username`) lives under `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml`. Before any config question, read that file: if the value is already on record, reuse it silently and SKIP the question (outcome `kept-existing`). Ask only when nothing is on record. Persist every collected answer back so the next run is silent.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -49,26 +63,30 @@ Outcome: `reachable` / `core-metrics-disabled`.
 
 ## Step 3 — Collect agent kind
 
-`AskUserQuestion` — single question, two options:
+Read `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` first (per Read-first config). If `agent_kind` is already on record, reuse it silently and skip the question (outcome `kept-existing`).
+
+Otherwise `AskUserQuestion` — single question, two options:
 
 - **Grafana Alloy** (recommended for Grafana Cloud / Mimir-stack operators).
 - **OpenTelemetry Collector** (vendor-neutral; recommended for everyone else).
 
 Persist the choice as `agent_kind` ∈ `{alloy, otelcol}`.
 
-Outcome: `alloy` / `otelcol`.
+Outcome: `alloy` / `otelcol` / `kept-existing`.
 
 ## Step 4 — Collect remote_write URL
 
-`AskUserQuestion` — single free-form prompt for the operator's Prometheus `remote_write` endpoint URL. Validate that it parses as `http(s)://...`. Persist as `remote_write_url`.
+Read `observe.toml` first. If `remote_write_url` is already on record, reuse it silently and skip the question (outcome `kept-existing`) — do NOT re-prompt to keep-or-overwrite.
 
-If the answer file at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` already has a URL, ask whether to keep or overwrite.
+Otherwise `AskUserQuestion` — single free-form prompt for the operator's Prometheus `remote_write` endpoint URL. Validate that it parses as `http(s)://...`. Persist as `remote_write_url`.
 
 Outcome: `collected` / `kept-existing`.
 
 ## Step 5 — Collect auth kind + credentials
 
-`AskUserQuestion` — single question, three options:
+Read `observe.toml` first. If `auth_kind` (and `basic_auth_username` when applicable) is already on record, reuse it silently and skip both the kind and source questions (outcome `kept-existing`) — the operator's token continues to be sourced from the env var or 0600 file as previously recorded.
+
+Otherwise `AskUserQuestion` — single question, three options:
 
 - **Bearer token** — token sourced from `LAZYCORTEX_OBSERVE_TOKEN` env var or a 0600 file at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.token`.
 - **Basic auth** — username collected here; password sourced same way as bearer.
@@ -76,7 +94,7 @@ Outcome: `collected` / `kept-existing`.
 
 If bearer or basic, ask a follow-up `AskUserQuestion` for token-source: `env` (operator handles export themselves) or `file` (we write it 0600). On `file`, prompt for the token value once and call `claude/lazycortex-observe/bin/install.write_token_file()`. Never write the token into the answer file.
 
-Outcome: `bearer-env` / `bearer-file` / `basic-env` / `basic-file` / `none`.
+Outcome: `bearer-env` / `bearer-file` / `basic-env` / `basic-file` / `none` / `kept-existing`.
 
 ## Step 6 — Persist non-secret answers
 
@@ -102,7 +120,9 @@ Call `install.render_to(<template>, vars, target)` where:
 - `<template>` = `alloy.river.j2` if `agent_kind=alloy`, else `otelcol.yaml.j2`.
 - `target` = `${XDG_DATA_HOME:-~/.local/share}/lazycortex/observe/agent.river` or `agent.yaml`.
 
-Outcome: `rendered`.
+Apply the File-sync policy to `target`: absent / unchanged → write silently; locally edited but the generated region overwrites cleanly with operator-owned values preserved → render silently; only a genuine conflict asks. No per-file "overwrite?" prompt.
+
+Outcome: `rendered` / `unchanged`.
 
 ## Step 8 — Render + install service unit
 
@@ -111,7 +131,9 @@ Two paths by host:
 - **darwin**: render `com.lazycortex.observe.plist.j2` → `~/Library/LaunchAgents/com.lazycortex.observe.plist`. Set vars: `agent_binary`, `agent_args`, `rendered_config_path` (from Step 7), `wal_dir`, `log_dir`, `home`, `token_source`, `token_file`.
 - **linux**: render `lazycortex-observe.service.j2` → `~/.config/systemd/user/lazycortex-observe.service`. Set vars: `agent_binary`, `agent_args`, `rendered_config_path`, `wal_dir`, `log_dir`, `env_file`.
 
-Outcome: `installed` (path of the rendered unit).
+Apply the File-sync policy to the rendered unit file (per Step 7) — silent render on absent / unchanged / cleanly-overwritable, ask only on genuine conflict.
+
+Outcome: `rendered` / `unchanged`.
 
 ## Step 9 — Detect or guide install of agent binary
 
