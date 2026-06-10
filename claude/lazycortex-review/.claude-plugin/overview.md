@@ -19,6 +19,15 @@ Pure Python — no LLM is in the CLI itself. Experts run as `lazycortex-core` jo
 - *"Reviewer left a broken markdown block."* — the `lazy-review.doc_doctor` agent fires automatically when the doc has malformed frontmatter or structure, before any expert runs.
 - *"Round 4 was final — close it out."* — `/lazy-review.finalize` folds every edit-annotation marker into the final text, strips banners and approve checkboxes, removes system callouts (keeps `# History`), and commits with `Doc-Review-Phase: finalize`.
 
+## Blocks
+
+- **review-cycle** — Run a multi-expert document review from opt-in to close-out: start a file, submit pre-authored diffs, check round and per-section status, stop a cycle, and finalize the approved document. Members: lazy-review.start, lazy-review.submit, lazy-review.status, lazy-review.stop, lazy-review.finalize.
+- **install-and-audit** — Bootstrap the plugin in a repo, define review classes and their section assignments, and audit the review config. Members: lazy-review.install, lazy-review.configure, lazy-review.audit.
+
+## Walkthroughs
+
+- **run-a-document-review** — Take one document through a full review cycle from opt-in to finalize. Path: lazy-review.start → lazy-review.status → lazy-review.finalize.
+
 ## Requirements
 
 - **Claude Code** with plugin support.

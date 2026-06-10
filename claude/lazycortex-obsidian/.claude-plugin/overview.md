@@ -20,6 +20,17 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 - *"I need to apply the current registry to my notes."* — `/lazy-obsidian.iconize-sync` wraps the worker (`bin/iconize_sync.py`) to reconcile the registry into each matched note's `iconize_icon` / `iconize_color` frontmatter; Iconize and the bundled `iconize-reloader` repaint from there.
 - *"What does this plugin do?"* — `/lazy-obsidian.help`.
 
+## Blocks
+
+- **iconize** — Folder-icon system for the vault: a declarative path→icon registry, a wizard to edit it, and a sync worker that paints each note's `iconize_icon` / `iconize_color` frontmatter. Members: lazy-obsidian.iconize-install, lazy-obsidian.iconize-config, lazy-obsidian.iconize-sync.
+- **diagram-rendering** — Render glue for the lazycortex-diagram engine inside Obsidian: mermaid / ascii fit CSS snippets plus click-to-zoom for fences. Members: lazy-obsidian.diagram-install.
+- **tag-pages** — Generate and refresh Obsidian tag pages from the tags used across the vault's notes, keeping the `Tags/` hierarchy in sync. Members: lazy-obsidian.gen-tag-pages.
+- **install-and-audit** — Bootstrap the vault (rules, tag-page template, Dataview, chained iconize + diagram install), install or refresh an individual community plugin by id, and audit vault config. Members: lazy-obsidian.install, lazy-obsidian.audit, lazy-obsidian.update-plugin.
+
+## Walkthroughs
+
+- **vault-bootstrap** — Take a fresh repo to a fully wired Obsidian vault in one pass. Path: lazy-obsidian.install → lazy-obsidian.iconize-install → lazy-obsidian.diagram-install.
+
 ## Requirements
 
 - **Claude Code** with plugin support.
