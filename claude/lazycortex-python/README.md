@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fde68a"
 ---
 # lazycortex-python
 
@@ -73,6 +73,8 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [write-tests-for-new-class](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/write-tests-for-new-class.md) — Dispatch lazy-python.test-writer against a new class and get a test file that covers all seven Paranoid-Testing categories, verified by tst-py.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/troubleshooting.md) — Symptoms, causes, and fixes for lazycortex-python install, audit, and style checks.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/faq.md) — Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, tests, and the checker stack.
+
+Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-python/help/`.
 
 ## Agents
 

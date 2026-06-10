@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, routine types, git coordination, change-history agents, and run-log housekeeping.
-last_regen: 2026-06-02
+last_regen: 2026-06-09
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -127,7 +127,7 @@ After the fix batch, doctor enters a per-WARN waive loop. For each remaining WAR
 
 ## What does `/lazy-core.optimize` do beyond slimming rule files?
 
-`/lazy-core.optimize` has several phases beyond Phase 2's rule-file slimming. Phase 2.5 runs an LLM-readability audit across all agent-consumed artifact files — detecting decision-logic tables, abstract-header tables, narrative preamble, restated cross-references, decorative markers, and over-long prose paragraphs — and offers rewrites or permanent waivers per finding. Phase 3 and 4 audit global `settings.json` for project-specific entries that have leaked in and offer to migrate them to the correct project `settings.local.json`. Phase 5 checks memory index health. Phase 6 identifies skills that would benefit from the coordinator-plus-parallel-Explore-agents pattern. Phase 7 delegates to `/lazy-core.agent-models` to fill any missing agent routing entries in `lazy.settings.json`. Run it when startup feels slow, after adding new rules or agents, or when `/lazy-core.audit` surfaces readability findings.
+`/lazy-core.optimize` has several phases beyond Phase 2's rule-file slimming. Phase 2.5 runs an LLM-readability audit across all agent-consumed artifact files — detecting decision-logic tables, abstract-header tables, narrative preamble, restated cross-references, decorative markers, and over-long prose paragraphs — and offers rewrites or permanent waivers per finding. Phase 3 and 4 audit global `settings.json` for project-specific entries that have leaked in and offer to migrate them to the correct project `settings.local.json`. Phase 5 checks memory index health (oversized index, orphaned files, broken links, stale entries). Phase 5.5 goes deeper into per-expert memory under `.memory/<expert>/`: it surfaces orphan notes (notes whose tags appear in no local `.tags/` file) and near-duplicate notes (same-tagged notes with very similar titles), offering to reindex, delete, or leave each one. Phase 6 identifies skills that would benefit from the coordinator-plus-parallel-Explore-agents pattern. Phase 7 delegates to `/lazy-core.agent-models` to fill any missing agent routing entries in `lazy.settings.json`. Run it when startup feels slow, after adding new rules or agents, or when `/lazy-core.audit` surfaces readability findings.
 
 ---
 

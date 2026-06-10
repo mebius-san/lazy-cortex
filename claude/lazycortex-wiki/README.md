@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fde68a"
 ---
 # lazycortex-wiki
 
@@ -39,7 +39,7 @@ Requires these plugins from the same marketplace:
 |---|---|
 | `lazy-wiki.configure` | Wizard to create or edit a wiki scope in .claude/lazy.settings.json — collects id, path globs, optional exclude_paths, tag_axes, and topics_index. Strict one-question-per-turn via AskUserQuestion. |
 | `lazy-wiki.doctor` | Audit a wiki scope's integrity: orphan topics, broken See-also links and repo keys, index desync, missing summaries, stale glosses, unknown axes, duplicate branches, broken code <wiki> blocks, and scope overlaps. Read-only by default; applies fixable repairs only after the operator confirms. |
-| `lazy-wiki.install` | Bootstrap the lazycortex-wiki plugin for the current project (or globally). Creates the template dir, syncs the navigation rule, seeds wiki settings + agent_models + routines + expert entry. Idempotent — safe to re-run. |
+| `lazy-wiki.install` | Bootstrap the lazycortex-wiki plugin for the current project (or globally). Creates the template dir, syncs the navigation rule, seeds the wiki settings section + agent_models, registers the `wiki-curator` expert (always), and — when the daemon is enabled — registers the two curator routines. Idempotent and quiet on re-run — every decision is persisted and never re-asked. Detects install scope automatically. |
 | `lazy-wiki.query` | Associative Q&A over the wiki graph. Thin dispatcher: a per-scope seeker subagent picks entry points from topics.md, a single gatherer subagent traverses See-also and synthesises the answer. The large topic index and traversed node bodies stay in the subagents' contexts, never the main session. |
 | `lazy-wiki.relink` | Daemon-free, in-session relink of one wiki scope. Computes the relink plan (initial / incremental / anchor-lost) via lazycortex-wiki relink-plan, then dispatches the wiki curator as a synchronous subagent in tail:false mode to classify then link each node — the curator applies its own curation via apply-node (C-hybrid, no collector). The skill rebuilds topics.md once between phases, records the new wiki_synced_sha anchor, and makes the single commit under the operator identity. Use when there is no runtime daemon (the plugin must work standalone) or to force an in-session relink. |
 

@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fde68a"
 ---
 # lazycortex-experts
 
@@ -53,7 +53,7 @@ Requires these plugins from the same marketplace:
 
 | Skill | Description |
 |---|---|
-| `lazy-experts.install` | Bootstrap the lazycortex-experts plugin for the current project (or globally). Seeds two things into `lazy.settings.json`: (1) agent-model tiers for the three generic agents (interpreter, designer, planner) from `lazycortex-core`'s `default-tiers.json` into `agent_models.lazycortex`; (2) one composed expert entry per (agent × domain-aspect) pair into `experts` — every seeded expert also carries `lazycortex-core:lazy-memory.persona-aspect` so each accumulates private memory across runs. Idempotent — safe to re-run; existing entries are never overwritten. |
+| `lazy-experts.install` | Bootstrap the lazycortex-experts plugin for the current project (or globally). Seeds two things into `lazy.settings.json`: (1) agent-model tiers for the three generic agents (interpreter, designer, planner) from `lazycortex-core`'s `default-tiers.json` into `agent_models.lazycortex`; (2) composed expert entries (agent × domain-aspect) into `experts` — every entry also carries `lazycortex-core:lazy-memory.persona-aspect` and a deterministic bot `git_author`. Asks which expert classes to register ONLY when the experts list is empty; on a populated list it derives the classes already present and completes them without asking. Experts and tiers are dispatch-routing config used by interactive flows AND the daemon — never gated on `daemon.enabled`. Idempotent and quiet on re-run; existing entries are never overwritten. Detects install scope automatically. |
 
 ## Documentation
 
@@ -62,17 +62,19 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [agents](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/agents.md) — Three persona-only agents (interpreter, designer, planner) that transform a raw request into a structured brief, a design spec, and an implementation plan.
 - [aspects](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/aspects.md) — Three domain aspect files (claude-plugin, game-dev, dotfiles) that layer domain knowledge onto any generic expert via lazy.settings.json composition.
 - [composition](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/composition.md) — Assemble a named specialist by pairing one generic agent with one or more domain aspects in lazy.settings.json[experts].
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/install-and-audit.md) — Bootstrap lazycortex-experts by seeding agent-model tiers and pre-composed expert entries for all agent × domain-aspect pairs into lazy.settings.json.
+- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/install-and-audit.md) — Bootstrap lazycortex-experts by seeding agent-model tiers and composed expert entries for all agent × domain-aspect pairs into lazy.settings.json.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/troubleshooting.md) — Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, composing specialists, understanding the three-agent pipeline, and working with domain aspects.
+
+Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-experts/help/`.
 
 ## Agents
 
 | Agent | Description |
 |---|---|
-| `lazy-experts.designer` | Generic designer expert — takes a gap-free brief and writes a detailed design specification with premise-led structure, scope discipline, and declarative-over-prescriptive language. Stays out of implementation choices; those belong to the planner. Dispatch via a routine that supplies a protocol; this agent has no inline I/O contract. |
-| `lazy-experts.interpreter` | Generic interpreter expert — takes a free-form human request, log, or doc and produces a gap-free structured brief that downstream LLM work (designer / planner / etc.) can consume without ambiguity. Surfaces uncertainty as in-doc callouts instead of asking interactively. Dispatch via a routine that supplies a protocol; this agent has no inline I/O contract. |
-| `lazy-experts.planner` | Generic planner expert — takes a detailed design spec and produces an ordered implementation plan: file-level tasks, test plan, rollback procedure. Models its output on superpowers:writing-plans. Stays out of design choices; those belong to the designer. Dispatch via a routine that supplies a protocol; this agent has no inline I/O contract. |
+| `lazy-experts.designer` | Generic designer expert — takes a gap-free brief and writes a detailed design specification with premise-led structure, scope discipline, and declarative-over-prescriptive language. Stays out of implementation choices; those belong to the planner. |
+| `lazy-experts.interpreter` | Generic interpreter expert — takes a free-form human request, log, or doc and produces a gap-free structured brief that downstream LLM work (designer / planner / etc.) can consume without ambiguity. Surfaces uncertainty inside the document instead of asking interactively. |
+| `lazy-experts.planner` | Generic planner expert — takes a detailed design spec and produces an ordered implementation plan: file-level tasks, test plan, rollback procedure. Stays out of design choices; those belong to the designer. |
 
 ## Commands
 

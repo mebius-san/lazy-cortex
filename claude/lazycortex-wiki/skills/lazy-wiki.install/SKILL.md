@@ -1,15 +1,15 @@
 ---
 name: lazy-wiki.install
-description: "Bootstrap the lazycortex-wiki plugin for the current project (or globally). Creates the template dir, syncs the navigation rule, seeds wiki settings + agent_models + routines + expert entry. Idempotent — safe to re-run."
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(ls *), Bash(python3 *)
+description: "Bootstrap the lazycortex-wiki plugin for the current project (or globally). Creates the template dir, syncs the navigation rule, seeds the wiki settings section + agent_models, registers the `wiki-curator` expert (always), and — when the daemon is enabled — registers the two curator routines. Idempotent and quiet on re-run — every decision is persisted and never re-asked. Detects install scope automatically."
+allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(ls *), Bash(python3 *), Bash(lazycortex-core *)
 ---
 # Install lazycortex-wiki
 
-Bootstrap the plugin in the right scope: create the wiki template directory, sync the `lazy-wiki.navigation` rule shipped by the plugin into the consumer's rules directory, seed the `wiki` settings section, seed agent model tiers for the curator, register the two routines (`wiki.scan` and `wiki.relink-weekly`), and compose the `wiki-curator` expert. Idempotent — never overwrites existing user values; asks on drift.
+Bootstrap the plugin in the right scope: create the wiki template directory, sync the `lazy-wiki.navigation` rule shipped by the plugin into the consumer's rules directory, seed the `wiki` settings section, seed agent model tiers for the curator, compose the `wiki-curator` expert (unconditionally — it is dispatch-routing config, not daemon-only), and — only when this project uses the background daemon — register the two curator routines (`wiki.scan` and `wiki.relink-weekly`). Idempotent and quiet on re-run.
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Detect install scope`
@@ -18,11 +18,30 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 4 — Sync navigation rule`
    - `Step 5 — Seed wiki settings section`
    - `Step 6 — Seed agent_models`
-   - `Step 7 — Seed routines + expert`
-   - `Step 8 — Verify / Report + Log`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they produced an explicit outcome (`unchanged`, `skipped-per-user-choice`, `already-present`, …).
+   - `Step 7 — Register curator expert + (daemon-gated) routines`
+   - `Step 8 — Register the plugin-CLI Bash allow-pattern`
+   - `Step 9 — Verify / Report + Log`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they produced an explicit outcome (`unchanged`, `merged`, `kept-local`, `skipped-daemon-disabled`, `already-present`, …).
 3. **Do not reach the Report step until every prior task is `completed`.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
+
+## Decisions are remembered, never re-asked
+
+This skill is **idempotent and quiet on re-run**. Every choice it makes is persisted, and on the next run the persisted value is read first and honoured silently — the user is asked again only when nothing is on record yet.
+
+- **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-rule "install this rule?" prompt and no per-artifact opt-in.
+- **Daemon gate applies to routines only.** The `wiki-curator` expert is dispatch-routing config and is registered unconditionally; only the two curator *routines* depend on the background daemon. This skill reads the tracked `daemon.enabled` flag and gates the routine registration on it silently — it never asks the daemon question itself (Gate 1 belongs to `lazy-core.install`).
+- **Everything derivable is derived, not asked:** install scope (from `installed_plugins.json` — both scopes → `project` silently), curator git identity (a deterministic bot id), the watched branch.
+
+## File-sync policy (applies to every file this skill writes)
+
+Every file this skill creates or updates follows three cases — no per-file "install?" prompt, no drift wizard:
+
+1. **Absent or unchanged** — target missing, or byte-identical to the shipped / last-known version → write the new version silently. State `installed` / `unchanged`.
+2. **Locally changed but cleanly mergeable** — target diverged from shipped, but the shipped delta applies without contradicting local edits (new sections / keys / entries added, every local-only chunk left untouched) → merge silently. State `merged`.
+3. **Genuine conflict** — the same region (a key, a line, a block) was changed both locally and in the shipped version in ways that cannot be reconciled automatically → the ONLY case that asks. `AskUserQuestion` naming the file, quoting the conflicting region, and showing a unified diff; options `merge-shipped` / `keep-local`.
+
+"Conflict" means you cannot determine what should survive — not merely "the bytes differ". No contradiction → no question. A no-longer-shipped file (orphan) is left in place silently (`kept-orphan`); this skill never deletes consumer files.
 
 ## Step 1: Detect install scope
 
@@ -34,7 +53,7 @@ Inspect the `scope` field of the entries:
 - `"user"` → globally enabled, target `~/.claude/`
 - `"project"` → per-project, target `<repo-root>/.claude/`
 
-If both scopes appear, ask the user which to target. Default: `project`.
+The scope is already recorded — derive it, do not ask. Use the entry's `scope`. If both scopes appear in the array, default to `project` silently.
 
 Abort **only** if `lazycortex-wiki@lazycortex` is absent or its array is empty. Message: *"lazycortex-wiki not enabled — add `"lazycortex-wiki@lazycortex": true` to `enabledPlugins` in your `settings.json` and run `/plugin install lazycortex/lazycortex-wiki`."*
 
@@ -88,24 +107,15 @@ Owned namespace: `lazy-wiki`. Target candidates: `Glob <rulesDir>/lazy-wiki.*.md
 
 Ensure the rules directory exists with `Bash(mkdir -p <rulesDir>)`.
 
-For each rule name in (source ∪ target), determine its state and act — one `AskUserQuestion` at a time:
+An enabled plugin installs its whole rule surface — apply the **File-sync policy** per rule, no per-rule "install?" prompt. For every rule name in (source ∪ target):
 
-1. **New** — target missing, source present → `AskUserQuestion`:
-   - question: ``Install rule `<name>.md`?``
-   - description: ``**Purpose:** <source `description:` frontmatter>\n\n**What this does:** Copies the shipped rule into `<targetPath>`. Rules are loaded into every Claude Code session per their `paths:` / `always_loaded:` scope.``
-   - options: **install** / **skip**.
-   - Install → `Bash(cp <source> <target>)`. State **installed**. Skip → state **skipped**.
-2. **Unchanged** — both present, byte-identical → no prompt. State **unchanged**.
-3. **Drift** — both present, differ → `AskUserQuestion`:
-   - question: ``Rule `<name>.md` has drift — overwrite with shipped version?``
-   - description: ``**Purpose:** <source description>\n\n**What changed:** <one-sentence diff summary>\n\n**Full diff:**\n```diff\n<unified diff, truncated to ~40 lines>\n`````
-   - options: **overwrite** / **keep-local**.
-   - Overwrite → `Bash(cp <source> <target>)`. State **updated**. Keep-local → state **kept-local**.
-4. **Orphan** — target present, source missing → `AskUserQuestion`:
-   - question: ``Rule `<name>.md` is no longer shipped by the plugin — delete from `<rulesDir>`?``
-   - description: ``**Purpose (from your local copy):** <target description>\n\n**Why you're seeing this:** The plugin no longer ships this rule. Keeping it means it stays loaded but never receives updates.``
-   - options: **delete** / **keep**.
-   - Delete → `Bash(rm <target>)`. State **deleted**. Keep → state **kept-orphan**.
+- **New** (target missing) → copy source to target silently (`Bash(cp <source> <target>)`). State **installed**.
+- **Unchanged** (byte-identical) → no action. State **unchanged**.
+- **Drift, cleanly mergeable** (both present, differ, the shipped delta applies without contradicting local edits — new headings / list items / scope entries added, every local-only chunk preserved) → merge silently via `Edit`. State **merged**.
+- **Conflict** (the same region changed incompatibly in both) → the only case that asks, per File-sync policy case 3. State **merged** or **kept-local** by the user's choice.
+- **Orphan** (target present, source gone, within the `lazy-wiki` namespace) → leave in place silently. State **kept-orphan**.
+
+Target files outside the `lazy-wiki` namespace (other plugins, user-authored rules) are never touched and never reported as orphans.
 
 Outcome (one line per rule): `<name>.md: <state>`.
 
@@ -144,7 +154,38 @@ Write the file if any mutation happened (preserve `_version: 1` at top level).
 
 Outcome (one line per seeded entry): `agent_models.lazycortex.<key> = <tier> (<state>)`.
 
-## Step 7: Seed routines + expert
+## Step 7: Register curator expert + (daemon-gated) routines
+
+The `wiki-curator` **expert** is dispatch-routing config — the entry that resolves which agent + aspects run when the curator is dispatched. It is registered **unconditionally**, exactly like any other expert (not daemon-gated). The two curator **routines** (`wiki.scan`, `wiki.relink-weekly`) only ever *fire* under the background daemon, so their registration is gated on the project's `daemon.enabled` flag. The non-daemon parts of this install (rule, settings section, `agent_models`, template dir, CLI allow-pattern) are done by Steps 3–6 and Step 8.
+
+### Expert (always registered)
+
+Ensure `experts` exists as an object with `_version: 1` (create if absent — never overwrite). Apply absent-only semantics for the `wiki-curator` key:
+
+```json
+"wiki-curator": {
+  "agent": "lazycortex-wiki:lazy-wiki.curator",
+  "aspects": ["lazycortex-core:lazy-memory.persona-aspect"],
+  "git_author": {
+    "name": "Wiki Curator",
+    "email": "wiki-curator@lazycortex.local"
+  },
+  "can_commit_in_repo": true
+}
+```
+
+State `experts.wiki-curator: <seeded|kept-local>`.
+
+### Daemon gate for the routines (read-first, never ask)
+
+Gate 1 (`daemon.enabled`) is owned by `lazy-core.install`. This skill only **reads** the tracked flag and honours it silently — it never opens an `AskUserQuestion`. Resolve `<core-bin>` (the `bin/` dir of the newest `lazycortex-core` — the parent of the directory holding `default-tiers.json` resolved in Step 2 is its `skills/...`; walk `$LAZYCORTEX_PLUGIN_DIRS` for `*/lazycortex-core/bin`, falling back to `ls ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/bin | sort -V | tail -1`), then read the flag:
+
+```bash
+PYTHONPATH=<core-bin> python3 -c "from lazy_settings import load_tracked_section; from pathlib import Path; print(load_tracked_section(Path('<repo-root>/.claude/lazy.settings.json'),'daemon').get('enabled','unset'))"
+```
+
+- Output `False` → the project does not use the daemon. **Skip ONLY the routine registration silently** (a routine that can't fire is dead config; the expert above stays registered). State the routine outcomes `skipped-daemon-disabled` and jump straight to the *First scope offer* below.
+- Output `True` or `unset` → register the routines below (do NOT ask; `lazy-core.install` owns Gate 1, and `unset` means the user has not yet run it — register so they are ready when the daemon is enabled).
 
 ### Routines
 
@@ -177,25 +218,9 @@ The `filter` block is the earliest cut: git-watch drops a changed file whose fro
 }
 ```
 
-### Expert
-
-Ensure `experts` exists as an object with `_version: 1` (create if absent — never overwrite). Apply absent-only semantics for the `wiki-curator` key:
-
-```json
-"wiki-curator": {
-  "agent": "lazycortex-wiki:lazy-wiki.curator",
-  "aspects": ["lazycortex-core:lazy-memory.persona-aspect"],
-  "git_author": {
-    "name": "Wiki Curator",
-    "email": "wiki-curator@lazycortex.local"
-  },
-  "can_commit_in_repo": true
-}
-```
-
 Write the file if any mutation happened (preserve `_version: 1` for both `routines` and `experts`).
 
-Outcome (one line per seeded entry): `routines.<key>: <seeded|kept-local>`, `experts.wiki-curator: <seeded|kept-local>`.
+Outcome (one line per seeded entry): `experts.wiki-curator: <seeded|kept-local>` (always), `routines.<key>: <seeded|kept-local|skipped-daemon-disabled>`.
 
 ### First scope offer
 
@@ -203,16 +228,34 @@ Skip this prompt entirely if `wiki.scopes` already has entries (a re-run on an a
 
 If yes → invoke `Skill(skill: "lazycortex-wiki:lazy-wiki.configure")`.
 
-## Step 8: Verify / Report + Log
+## Step 8: Register the plugin-CLI Bash allow-pattern
+
+The plugin ships `bin/lazycortex-wiki` which is invoked from other skills via `Bash(lazycortex-wiki ...)` — `lazy-wiki.curator` (the daemon-dispatched expert) calls it to apply node curation, build the index, and dispatch link jobs. Expert subprocesses spawned by the `lazy-core.runtime` daemon run under Claude Code's `dontAsk` permission mode — that mode silently denies any Bash command not on the auto-allow list. Without this entry, every CLI invocation from the curator (`apply-node`, `build-index`, `dispatch-link`, `retag`) fails with `Permission to use Bash has been denied because Claude Code is running in don't ask mode`, and the curator drifts off-protocol mid-job.
+
+Per `lazy-core.hygiene` § Settings split, per-tool permissions live in `settings.local.json` (gitignored), never tracked `settings.json`. Target file resolves from Step 1's scope:
+
+- project install → `<repo-root>/.claude/settings.local.json`
+- user install → `~/.claude/settings.local.json`
+
+Apply via the `lazycortex-core` CLI (idempotent — already-present patterns are no-ops):
+
+```
+Bash(lazycortex-core permission-allow <settings-local> "Bash(lazycortex-wiki *)")
+```
+
+Outcome: `cli-allow-added` or `cli-allow-already-present`.
+
+## Step 9: Verify / Report + Log
 
 - Read back the written `lazy.settings.json` and confirm it parses.
-- Confirm `wiki`, `agent_models.lazycortex`, `routines.wiki.scan`, `routines.wiki.relink-weekly`, and `experts.wiki-curator` are all present.
+- Confirm `wiki` and `agent_models.lazycortex` are present.
+- Confirm `experts.wiki-curator` is present (always registered). When the daemon gate passed (enabled or unset): also confirm `routines.wiki.scan` and `routines.wiki.relink-weekly` are present. When the routines were `skipped-daemon-disabled`, do NOT expect those two routine keys — their absence is correct; `experts.wiki-curator` must still be present.
 - Report to the user:
   - Scope detected.
   - Plugin version + commit synced from `installed_plugins.json`.
   - Defaults file path used.
   - Per-rule outcome from Step 4.
-  - Settings-section outcomes from Steps 5–7.
+  - Settings-section outcomes from Steps 5–7 (including the Step 7 daemon-gate outcome).
 
 Log to `./.logs/claude/lazy-wiki.install/<UTC-timestamp>.md` per `lazy-log.logging`. Required frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input`.
 
@@ -229,3 +272,4 @@ One line per task in the canonical list above, with its outcome word.
 - **`/wiki.install` aborts: "plugin not enabled"** — `lazycortex-wiki@lazycortex` absent or empty in `~/.claude/plugins/installed_plugins.json` → add `"lazycortex-wiki@lazycortex": true` to `enabledPlugins`, restart Claude Code, re-run.
 - **`/wiki.install` aborts: "lazycortex-core not installed"** — `default-tiers.json` not found → install `lazycortex-core` first, then re-run.
 - **`/wiki.install` aborts: "plugin cache is empty"** — rule glob returned zero files → run `/plugin update lazycortex-wiki@lazycortex`, then re-run.
+- **Curator never runs after install (no routines)** — Step 7 read `daemon.enabled = false` in the tracked `lazy.settings.json` and skipped the two curator *routines* (outcome `skipped-daemon-disabled`); the `wiki-curator` expert, rule, settings section, and CLI allow-pattern still installed → enable the daemon via `/lazy-core.install` (Gate 1), then re-run `/wiki.install` to register the curator routines.

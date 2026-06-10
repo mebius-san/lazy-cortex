@@ -23,13 +23,12 @@ from __future__ import annotations
 # waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 # pylint: disable=import-error,wrong-import-position,deprecated-module
 
-import fnmatch
 import json
 import os
 import re
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -526,6 +525,11 @@ def _iter_class_files(repo: Path, paths: list[str]) -> Iterable[Path]:
   Yields:
     Absolute paths of matching files in filesystem walk order.
   """
+  # PurePosixPath.match honors shell-glob semantics where `*` does NOT cross `/`, so
+  # `request/*.md` matches only direct children — unlike `fnmatch.fnmatch`, which
+  # treats `*` as "any character including /" and silently makes class 1 (request/*.md)
+  # swallow files that belong to deeper-nested classes (request/products/*/changes/*/design.md).
+  # Mirrors routine_types.RepoWalk's choice in lazycortex-core for the same reason.
   repo_str = str(repo)
   for base, dirs, files in os.walk(repo_str):
       # Skip dot-folders by default (.git, .claude internals).
@@ -534,7 +538,7 @@ def _iter_class_files(repo: Path, paths: list[str]) -> Iterable[Path]:
       full = Path(base) / name
       rel = full.relative_to(repo).as_posix()
       for pat in paths:
-        if fnmatch.fnmatch(rel, pat):
+        if PurePosixPath(rel).match(pat):
           yield full
           break
 

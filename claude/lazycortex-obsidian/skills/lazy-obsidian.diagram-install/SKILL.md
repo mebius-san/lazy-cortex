@@ -1,6 +1,6 @@
 ---
 name: lazy-obsidian.diagram-install
-description: "Scaffold the Obsidian render glue for the lazycortex-diagram engine into a vault: install the `mermaid-fit.css` and `ascii-fit.css` snippets, enable them in `appearance.json`, and install the `mermaid-popup` community plugin (click-to-zoom for mermaid fences) via `/lazy-obsidian.update-plugin`. Per-file wizard — asks before creating, shows diff on drift, never auto-overwrites local edits. Re-runnable; idempotent. Project-scope only (no global mode — Obsidian render glue is per-vault). Detects and offers to retire the legacy `mermaid-no-bg.css` snippet (made redundant by the engine's theme directive)."
+description: "Scaffold the Obsidian render glue for the lazycortex-diagram engine into a vault: install the `mermaid-fit.css` and `ascii-fit.css` snippets, enable them in `appearance.json`, and install the `mermaid-popup` community plugin (click-to-zoom for mermaid fences) via `/lazy-obsidian.update-plugin`. Quiet file-sync — writes silently when absent or unchanged, merges silently when the shipped delta doesn't contradict local edits, and asks only on a genuine conflict. Re-runnable; idempotent. Project-scope only (no global mode — Obsidian render glue is per-vault). Detects and silently keeps the legacy `mermaid-no-bg.css` snippet (made redundant by the engine's theme directive)."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(jq *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList
 argument-hint: "(no arguments — scaffolds into <repo-root>/.obsidian/)"
 ---
@@ -32,7 +32,7 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5 — Detect legacy mermaid-no-bg.css`
    - `Step 6 — Report`
    - `Step 7 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome word (e.g. `installed`, `unchanged`, `kept-local`, `already-enabled`, `skipped-per-user-choice`, `absent`).
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome word (e.g. `installed`, `unchanged`, `merged`, `already-enabled`, `kept-orphan`, `absent`).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
@@ -44,30 +44,27 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 Outcome: `asserted (vault=<path>)` or `[FAIL] no-vault`.
 
-## Step 2 — Sync CSS snippets (per-file wizard)
+## Step 2 — Sync CSS snippets (file-sync policy)
 
 Iterate over the shipped snippet list — order is `mermaid-fit`, `ascii-fit`. For each `<name>`:
 
 - Source: `${CLAUDE_PLUGIN_ROOT}/templates/obsidian/snippets/<name>.css`.
 - Target: `<vault>/snippets/<name>.css`.
 
-State machine per snippet (one `AskUserQuestion` per file):
+These are quiet-sync artifacts — no per-file install prompt, no drift overwrite/keep prompt. The three cases:
 
-- **New** (target missing) → `AskUserQuestion` with:
-  - question: ``Install the `<name>.css` snippet into this vault?``
-  - description: per-snippet purpose, then ``**What this does:** Copies the shipped snippet to `<targetPath>`. Future installs will show a drift diff, not silently overwrite. Step 3 then enables it in `appearance.json`.``
-    - `mermaid-fit`: `**Purpose:** Fits mermaid SVG to container width without aspect-ratio distortion.`
-    - `ascii-fit`: `**Purpose:** Shrinks ASCII-diagram code blocks (\`language-text\` / \`language-ascii\`) in Reading Mode so wide diagrams fit the editor column; adds horizontal scroll fallback.`
-  - options: **install** / **skip**.
-- **Unchanged** (byte-identical) → no prompt. State **unchanged**.
-- **Drift** (differ) → show unified diff via `Bash(diff -u <target> <source>)`. `AskUserQuestion`:
-  - question: `<name>.css has drift — overwrite with shipped version?`
-  - description: ``**What changed:** <one-sentence summary of the diff>\n\n**Why this matters:** You may have customized the snippet (e.g. tightened the selector, added per-theme tweaks). Overwriting discards those edits. Keep-local preserves your version but means you won't pick up upstream improvements — re-run this skill later to resolve.\n\n**Full diff:**\n```diff\n<unified diff, truncated to ~40 lines if longer>\n````
-  - options: **overwrite** / **keep-local**.
+- **Absent or byte-identical** (target missing, or present and equal to source) → `cp <source> <target>` silently (`mkdir -p` parents first). State **installed** (missing) or **unchanged** (identical). No prompt.
+- **Locally changed, shipped delta applies cleanly** — the local file differs from source but the difference is confined to regions the shipped version did not change (the local edits and the shipped edits touch disjoint regions). Apply the shipped delta on top of the local edits silently. State **merged**.
+- **Genuine conflict** — the local file and the shipped version changed the *same* region incompatibly, and there is no way to tell which should survive. This is the ONLY case that prompts. `AskUserQuestion`:
+  - question: `<name>.css — conflicting edits in the same region. Which version wins for that region?`
+  - description: ``**Conflicting region:**\n```diff\n<the conflicting hunk(s), both sides>\n```\n\nYou customized this snippet (e.g. tightened the selector, added per-theme tweaks) in the same place the shipped version changed. Merge-shipped takes the shipped version for that region; keep-local preserves yours and skips that part of the upstream change.``
+  - options: **merge-shipped** / **keep-local**.
+  - **merge-shipped** → write the shipped version for the conflicting region, keep non-conflicting local edits. State **merged**.
+  - **keep-local** → leave the conflicting region as the user has it; still apply any non-conflicting shipped delta. State **kept-local**.
 
-Use `Read` + `Write` so diffs are visible to the wizard. Create missing parents with `Bash(mkdir -p ...)`.
+Use `Read` + `Write` so the merge stays visible. "Conflict" means same region changed incompatibly on both sides — not merely "bytes differ".
 
-Outcome: per-snippet status word from `installed` / `unchanged` / `overwritten` / `kept-local` / `skipped`. Record both for the Step 6 report.
+Outcome: per-snippet status word from `installed` / `unchanged` / `merged` / `kept-local`. Record for the Step 6 report.
 
 ## Step 3 — Enable snippets in appearance.json
 
@@ -75,14 +72,14 @@ Read `<vault>/appearance.json`. If missing or unparseable, treat its contents as
 
 - Ensure `enabledCssSnippets` exists as an array (create empty `[]` if absent).
 - For each snippet `<name>` in `[mermaid-fit, ascii-fit]`:
-  - If the array does NOT contain `"<name>"`, append it.
-  - If Step 2's per-snippet outcome was **skipped** or **kept-local** AND `<vault>/snippets/<name>.css` does not exist on disk, do NOT add the entry — pointing `enabledCssSnippets` at a missing file is dead config. Record per-snippet outcome **deferred** in this case.
+  - If `<vault>/snippets/<name>.css` does not exist on disk, do NOT add the entry — pointing `enabledCssSnippets` at a missing file is dead config. Record per-snippet outcome **deferred** in this case. (Step 2's quiet sync always writes the file unless a conflict was kept-local in a way that removed it — normally the file is present.)
+  - Otherwise, if the array does NOT contain `"<name>"`, append it.
 - Atomic write (`appearance.json.tmp` → `mv`) only when the array changed.
 
 Per-snippet outcome:
 - `enabled` — added to the array this run.
 - `already-enabled` — entry was already present.
-- `deferred` — Step 2 left the file absent; refused to register a stale entry.
+- `deferred` — snippet file absent on disk; refused to register a stale entry.
 
 Reload note: Obsidian does not watch `appearance.json` for changes mid-session. The Step 6 report tells the user to reload Obsidian (or click ↻ next to each snippet in Settings → Appearance → CSS snippets) when any snippet's outcome this step was **enabled**.
 
@@ -103,28 +100,24 @@ Outcome: state tuple or `failed:<reason>`.
 Vaults that previously used the spec-system's `spec.draw-diagram` skill may carry `<vault>/snippets/mermaid-no-bg.css`. The new engine's theme directive (`background:transparent`) makes that snippet redundant — keeping it does no harm but it's dead config.
 
 1. `test -f <vault>/snippets/mermaid-no-bg.css`. If absent → state **absent**, no prompt.
-2. If present, `AskUserQuestion`:
-   - question: ``Retire legacy `mermaid-no-bg.css`? It is no longer needed — the diagram engine now emits a transparent-background theme directive on every mermaid fence.``
-   - description: ``**What this does:** Deletes `<vault>/snippets/mermaid-no-bg.css` and removes `"mermaid-no-bg"` from `appearance.json`'s `enabledCssSnippets`. Reversible — re-add the snippet manually if needed.\n\n**Why retire it:** The engine's per-fence theme directive sets `themeVariables.background` to transparent natively, which renders the CSS rule a no-op. Keeping the snippet is harmless but it's stale config.``
-   - options: **retire** / **keep**.
-3. **retire** → `rm <target>` AND remove `"mermaid-no-bg"` from `enabledCssSnippets` (preserve other entries; rewrite `appearance.json` only when the array changed). State **retired**.
-4. **keep** → state **kept**.
+2. If present → leave it in place silently. State **kept-orphan**. Orphans are never deleted: the user may have customized the file or still reference it, and we can't prove it's safe to remove. No prompt.
 
-Never auto-delete — wizard discipline.
+The report (Step 6) notes the legacy snippet is present and redundant so the user can remove it manually if they wish. The skill never deletes it.
 
 ## Step 6 — Report
 
 One bullet per step, in order — missing bullet = skipped step, back up and run it.
 
 - **Step 1** — repo-root + vault paths (or abort reason).
-- **Step 2** snippets — one bullet per snippet (`mermaid-fit.css`, `ascii-fit.css`): **installed** / **unchanged** / **overwritten** / **kept-local** / **skipped**, with target path.
+- **Step 2** snippets — one bullet per snippet (`mermaid-fit.css`, `ascii-fit.css`): **installed** / **unchanged** / **merged** / **kept-local**, with target path.
 - **Step 3** appearance.json — one bullet per snippet: **enabled** / **already-enabled** / **deferred**.
 - **Step 4** mermaid-popup: state tuple (`binary=... overrides=... community=...`) or **failed:`<reason>`**.
-- **Step 5** legacy mermaid-no-bg.css: **retired** / **kept** / **absent**.
+- **Step 5** legacy mermaid-no-bg.css: **kept-orphan** / **absent**.
 
 Next steps shown to user:
 - If any Step 3 outcome was **enabled**, remind: "Reload Obsidian (or click ↻ next to the snippet in Settings → Appearance → CSS snippets) — snippets won't apply mid-session."
-- If any Step 2 outcome was **skipped** or **kept-local**, remind: "`mermaid-fit` left absent → mermaid SVGs may render with default sizing; `ascii-fit` left absent → wide ASCII diagrams will overflow the editor column."
+- If any Step 2 outcome was **kept-local**, remind: "you kept a conflicting region in `mermaid-fit` / `ascii-fit` — re-run later to pick up the upstream change once you've reconciled it."
+- If Step 5 outcome was **kept-orphan**, remind: "`mermaid-no-bg.css` is present but redundant (the engine emits a transparent-background directive natively) — remove it manually if you want a clean snippets dir."
 - If Step 4 outcome was **failed:**, remind: "click-to-zoom is unavailable until `mermaid-popup` is installed; re-run `/lazy-obsidian.update-plugin mermaid-popup` later or install via Obsidian's Community Plugins UI."
 
 ## Step 7 — Log the run
@@ -143,10 +136,10 @@ Two-step write: never chain with `&&`.
 
 ## Idempotency
 
-Safe to re-run. Drift prompts only fire when content actually differs. Step 3 no-ops when the array entry is already present. Step 4 delegates to `/lazy-obsidian.update-plugin`, which is itself idempotent. Step 5's prompt fires only while the legacy snippet is still on disk — once retired, re-runs report **absent**.
+Safe to re-run. Step 2's quiet sync is silent on absent/identical/clean-merge and prompts only on a genuine same-region conflict. Step 3 no-ops when the array entry is already present. Step 4 delegates to `/lazy-obsidian.update-plugin`, which is itself idempotent. Step 5 never deletes — the legacy snippet reports **kept-orphan** on every run while it's on disk (no prompt), **absent** once the user removes it manually.
 
 ## Notes
 
 - **No diagram authoring in this skill.** This skill only sets up render glue. Authoring + emitting fences belongs to `/lazy-diagram.draw` (engine entry point).
 - **No engine-side dependency.** This skill works whether or not `lazycortex-diagram` is enabled — the CSS + plugin are useful for any vault that contains mermaid fences. The engine is the recommended *producer*; nothing here requires it.
-- **Chained from `/lazy-obsidian.install`.** That skill offers to chain into this one as part of the standard vault setup. Re-running this skill directly (after install) is the way to pick up template changes after a `/plugin update`.
+- **Chained from `/lazy-obsidian.install`.** That skill runs this one unconditionally as part of the standard vault setup (no per-chain opt-in — full vault setup means full functionality). Re-running this skill directly (after install) is the way to pick up template changes after a `/plugin update`.

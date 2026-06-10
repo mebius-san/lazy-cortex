@@ -67,19 +67,14 @@ For each `<group>` discovered in Step 2, copy the template files from `<installP
 
 Ensure the target directory exists with `mkdir -p <consumerScope>/.claude/templates/<group>/`.
 
-For each source file (every file in `<installPath>/templates/<group>/` except `scaffold.entries.json`):
+An enabled plugin installs its whole template surface — no per-template "install this?" prompt. For each source file (every file in `<installPath>/templates/<group>/` except `scaffold.entries.json`), apply these four cases:
 
-1. **New** — target file missing → copy source to target. State **installed**.
+1. **New** — target file missing → copy source to target silently. State **installed**.
 2. **Unchanged** — both present, byte-identical (`diff -q`) → no action. State **unchanged**.
-3. **Drift** — both present, differ → `AskUserQuestion`:
-   - question: ``Template `<group>/<filename>` has drift — how to reconcile?``
-   - description: ``**What this is:** `.claude/templates/<group>/<filename>` is referenced by `lazy-core.scaffold` for new artifact authoring.\n\n**Full diff:**\n` ```diff\n<unified diff, truncated to ~40 lines if longer>\n` ` ` ``
-   - options: **merge-shipped** (Recommended) / **overwrite** / **keep-local**.
-   - **merge-shipped**: identify chunks (headings, list items, registry groups, paragraphs) present in shipped but absent in local. For each non-obvious chunk, sub-prompt with `AskUserQuestion` ("Add `<chunk-title>` from the shipped version?"). Uncontroversial additions (new entries in a registry group that already exists locally with the same key) land without a prompt. Every local-only chunk stays untouched. Apply accepted chunks via `Edit`. State **merged** if any chunk landed; **kept-local** if zero chunks were accepted.
-   - **overwrite**: copy source to target. State **updated**.
-   - **keep-local**: no action. State **kept-local**.
+3. **Drift, cleanly mergeable** — both present, differ, the shipped delta applies without contradicting local edits (new headings / list items / registry entries added; every local-only chunk preserved) → merge silently via `Edit`. Uncontroversial additions (new entries in a registry group that already exists locally with the same key) just land. State **merged**.
+4. **Conflict** — the same region (a heading body, a block, an entry value) was changed both in shipped and local in ways that cannot be reconciled automatically → the ONLY case that asks. `AskUserQuestion` quoting the conflicting region with a unified diff, options **merge-shipped** / **keep-local**. State **merged** or **kept-local**.
 
-One `AskUserQuestion` at a time — wait for the answer before the next prompt.
+"Conflict" means you cannot determine what should survive — not merely "the files differ". No contradiction → no question.
 
 State for the group as a whole: one line per file as `<group>/<filename>: <state>`.
 
@@ -145,7 +140,7 @@ Templates synced:
 Registry upsert: <status>
 ```
 
-One line per template file. State one of: `installed`, `unchanged`, `merged`, `updated`, `kept-local`. Then the upsert status line.
+One line per template file. State one of: `installed`, `unchanged`, `merged`, `kept-local`. Then the upsert status line.
 
 ## Failure modes
 

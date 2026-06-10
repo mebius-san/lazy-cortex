@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fde68a"
 ---
 # lazycortex-observe
 
@@ -63,8 +63,8 @@ Requires these plugins from the same marketplace:
 |---|---|
 | `lazy-observe.audit` | Audit the lazycortex-observe plugin: verify any rule files still encode their invariants and cross-check artifact conventions. Read-first; presents findings, asks before fixing. Severity: PASS / WARN / FAIL. |
 | `lazy-observe.doctor` | Read-only health check for the lazycortex-observe shipper on this host. Verifies service status, agent process, local /metrics endpoint, agent's own remote_write success counter, observer URL reachability, and WAL bounds. Reports each as PASS / WARN / FAIL with a one-line fix suggestion. Never mutates filesystem or service state. |
-| `lazy-observe.install` | Bootstrap the lazycortex-observe shipper for this host: pick agent kind (Alloy / otelcol), collect remote_write URL + auth, render the agent config + service unit from shipped templates, install + load the supervised service, smoke-test the local /metrics endpoint. Operator-private values stay in `${XDG_CONFIG_HOME:-~/.config}/lazycortex/`. Idempotent — re-running rewrites the rendered configs and reloads the service. |
-| `lazy-observe.uninstall` | Tear down the lazycortex-observe shipper on this host: unload the launchd agent or systemd user unit, remove rendered configs and the WAL dir. Operator-private state under `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` is preserved by default — re-installing later picks it up. Idempotent — re-running on an already-clean host is a no-op. |
+| `lazy-observe.install` | Bootstrap the lazycortex-observe shipper for this host: pick agent kind (Alloy / otelcol), collect remote_write URL + auth, render the agent config + service unit from shipped templates, install + load the supervised service, smoke-test the local /metrics endpoint. Genuine config (URL, auth, agent kind) is read-first from `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` and never re-asked once on record; rendered files follow the silent file-sync policy. Idempotent and quiet on re-run — re-running rewrites the rendered configs and reloads the service without prompting. |
+| `lazy-observe.uninstall` | Tear down the lazycortex-observe shipper on this host: unload the launchd agent or systemd user unit, remove rendered configs and the WAL dir. DESTRUCTIVE — removes a supervised service, so the WAL/log and operator-private-state teardowns each ask before deleting; operator-private state under `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` is preserved by default. Idempotent — every already-absent target is a silent no-op, never an error; re-running on a clean host does nothing. |
 
 ## Documentation
 
@@ -74,6 +74,8 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [ship-metrics-end-to-end](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/walkthroughs/ship-metrics-end-to-end.md) — From a clean checkout to your first dashboard panel — bring up the runtime daemon, install the shipper, produce traffic, verify the pipeline.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/troubleshooting.md) — Common failure modes across lazycortex-observe install, uninstall, and doctor — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/faq.md) — Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
+
+Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-observe/help/`.
 
 ## Commands
 

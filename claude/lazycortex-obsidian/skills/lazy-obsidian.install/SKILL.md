@@ -1,13 +1,13 @@
 ---
 name: lazy-obsidian.install
-description: "Bootstrap the lazycortex-obsidian plugin for the current project (or globally). Syncs rule templates shipped by the plugin (currently none), scaffolds the tag-page template used by the `lazy-obsidian.gen-tag-pages` agent (project scope only), and cleans up orphaned rules from previous versions. At project scope, also installs the Dataview Obsidian plugin into `<repo-root>/.obsidian/` via `/lazy-obsidian.update-plugin` (Dataview renders the `Index` section of tag pages) and offers to chain into `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install` so the full vault setup runs from one entry point. Idempotent — safe to re-run. Detects install scope automatically."
+description: "Bootstrap the lazycortex-obsidian plugin for the current project (or globally). Syncs rule templates shipped by the plugin (currently none) and scaffolds the tag-page template used by the `lazy-obsidian.gen-tag-pages` agent (project scope only) via quiet file-sync — writes/merges silently, asks only on a genuine conflict, leaves orphans in place. At project scope it is the root entry point for the plugin family: installs the Dataview Obsidian plugin into `<repo-root>/.obsidian/` via `/lazy-obsidian.update-plugin` (Dataview renders the `Index` section of tag pages) and runs `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install` so the full vault setup completes in one pass (no per-chain opt-in — plugin enabled means full functionality). Idempotent — safe to re-run. Detects install scope automatically."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), AskUserQuestion
 ---
 # Install lazycortex-obsidian
 
-Bootstrap the plugin in the right scope: sync rule templates shipped by the plugin into the matching rules directory, scaffold the tag-page template consumed by the `lazy-obsidian.gen-tag-pages` agent (project scope only), and offer to delete orphans (rules the plugin dropped between versions). At project scope, this skill is the root entry point for the plugin family — after the rule/template work it installs Dataview (needed by tag pages) and optionally chains into `/lazy-obsidian.iconize-install` so a fresh vault reaches a usable state in one pass.
+Bootstrap the plugin in the right scope: sync rule templates shipped by the plugin into the matching rules directory and scaffold the tag-page template consumed by the `lazy-obsidian.gen-tag-pages` agent (project scope only), all via quiet file-sync (write/merge silently, ask only on a genuine conflict, leave orphans in place). At project scope, this skill is the root entry point for the plugin family — after the rule/template work it installs Dataview (needed by tag pages) and runs `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install` so a fresh vault reaches a usable state in one pass.
 
-The plugin currently ships **zero rules**. If you installed an earlier version of the plugin that shipped `lazy-obsidian.vault-hygiene.md`, this skill will offer to delete it as an orphan.
+The plugin currently ships **zero rules**. If you installed an earlier version of the plugin that shipped `lazy-obsidian.vault-hygiene.md`, this skill leaves it in place as a kept-orphan (it is never auto-deleted).
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -19,12 +19,12 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 3 — Sync rule templates`
    - `Step 4 — Sync the tag-page template`
    - `Step 5 — Install Dataview`
-   - `Step 6 — Chain to /lazy-obsidian.iconize-install`
-   - `Step 6.5 — Chain to /lazy-obsidian.diagram-install`
+   - `Step 6 — Run /lazy-obsidian.iconize-install`
+   - `Step 6.5 — Run /lazy-obsidian.diagram-install`
    - `Step 7 — Verify / Report`
    - `Step 8 — Seed lazy.settings.json`
    - `Step 9 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `installed`, `unchanged`, `merged`, `kept-orphan`, `chained`).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
@@ -61,9 +61,7 @@ Project root is `git rev-parse --show-toplevel` (or current working directory if
 
 If the glob returns zero files, abort and tell the user the plugin cache is empty — they likely need to run `/plugin update lazycortex-obsidian@lazycortex` first.
 
-## Step 3: Sync rule templates (per-rule + orphan detection)
-
-Rules eat context on every session — the user owns the decision to install each one.
+## Step 3: Sync rule templates (file-sync policy)
 
 ### Enumerate source and target
 
@@ -72,26 +70,26 @@ Rules eat context on every session — the user owns the decision to install eac
 - Target candidates: `Glob <targetRulesDir>/<ns>.*.md` for each owned namespace.
 - Ensure the destination directory exists with `mkdir -p`.
 
-### Per-rule decision (wizard-style, one question at a time)
+### Per-rule decision (quiet file-sync)
 
-For every rule name in (source ∪ target), determine its state and act:
+For every rule name in (source ∪ target), determine its state and act. The sync is silent by default — it prompts only on a genuine same-region conflict:
 
-1. **New** — target missing, source present → `AskUserQuestion`: "Install rule `<name>`? (<first-line-of-description>)" with options **install** / **skip**. Install → copy source to target, state **installed**. Skip → state **skipped**.
-2. **Unchanged** — both present, byte-identical → no prompt. State **unchanged**.
-3. **Drift** — both present, differ → show unified diff. `AskUserQuestion`: **overwrite** / **keep-local**. State **updated** or **kept-local**.
-4. **Orphan** — target present, source missing → `AskUserQuestion`: "Rule `<name>` is no longer shipped by the plugin. Delete from `<targetDir>`?" with options **delete** / **keep**. Delete → `rm <target>`, state **deleted**. Keep → state **kept-orphan**.
+1. **Absent or byte-identical** — target missing (source present), or both present and equal → `cp <source> <target>` silently. State **installed** (missing) or **unchanged** (identical). No prompt.
+2. **Locally changed, shipped delta applies cleanly** — both present and differ, but the local edits and the shipped edits touch disjoint regions → apply the shipped delta on top of the local edits silently. State **merged**.
+3. **Genuine conflict** — both present and the same region changed incompatibly on both sides (can't tell which should survive) → the ONLY case that prompts. `AskUserQuestion` quoting the conflicting region + diff: **merge-shipped** / **keep-local**. State **merged** (shipped region wins) or **kept-local** (local region kept; non-conflicting shipped delta still applied).
+4. **Orphan** — target present, source missing → leave it in place silently. State **kept-orphan**. Orphans are never deleted: the rule may be user-customized or still relied on, and we can't prove removal is safe.
 
-One `AskUserQuestion` at a time — wait for the answer before the next prompt.
+"Conflict" ≠ "bytes differ". One `AskUserQuestion` at a time — wait for the answer before the next prompt.
 
-With zero source rules, only orphan prompts fire. Users upgrading from an earlier version see a deletion prompt for `lazy-obsidian.vault-hygiene.md` (the rule was retired when `lazy-obsidian.config` was removed; vault-plugin setup now lives in `/lazy-obsidian.update-plugin` + `/lazy-obsidian.iconize-install`).
+With zero source rules, nothing is written and orphans are silently kept. Users upgrading from an earlier version see `lazy-obsidian.vault-hygiene.md` reported as **kept-orphan** (the rule was retired when `lazy-obsidian.config` was removed; vault-plugin setup now lives in `/lazy-obsidian.update-plugin` + `/lazy-obsidian.iconize-install`) — the report notes it is retired so the user can delete it by hand.
 
-### Namespace-scoped deletion
+### Namespace-scoped orphan handling
 
-Orphan detection only considers target files whose filename starts with one of this plugin's owned namespaces (just `lazy-obsidian.*` today). Rules from other plugins and user-authored rules in unrelated namespaces are never offered for deletion.
+Orphan detection only considers target files whose filename starts with one of this plugin's owned namespaces (just `lazy-obsidian.*` today). Rules from other plugins and user-authored rules in unrelated namespaces are never reported as orphans.
 
 ## Step 4: Sync the tag-page template (project scope only)
 
-The `lazy-obsidian.gen-tag-pages` agent reads its template from the consumer repo at a fixed path. This step scaffolds (or re-prompts on drift for) that file. **Skip this step entirely when scope is `user`** — tag pages only make sense per-vault, so there is no global install mode.
+The `lazy-obsidian.gen-tag-pages` agent reads its template from the consumer repo at a fixed path. This step scaffolds (and quietly re-syncs) that file. **Skip this step entirely when scope is `user`** — tag pages only make sense per-vault, so there is no global install mode.
 
 ### Paths
 
@@ -100,15 +98,15 @@ The `lazy-obsidian.gen-tag-pages` agent reads its template from the consumer rep
 
 Ensure `<repo-root>/.claude/templates/` exists with `mkdir -p` before any write.
 
-### Per-file decision (wizard-style, one question at a time)
+### Per-file decision (quiet file-sync)
 
-Use `AskUserQuestion` exactly like Step 3. Do not batch:
+Same policy as Step 3 — silent on absent/identical/clean-merge, prompt only on a genuine conflict:
 
-1. **New** — target missing → `AskUserQuestion`: "Install tag-page template for the `lazy-obsidian.gen-tag-pages` agent at `.claude/templates/obsidian.tag-page-template.md`?" with options **install** / **skip**. Install → `cp <source> <target>`, state **installed**. Skip → state **skipped** (note to user: the agent will refuse to run until this file exists).
-2. **Unchanged** — both present, byte-identical → no prompt. State **unchanged**.
-3. **Drift** — both present, differ → show unified diff via `Bash(diff -u <target> <source>)`. `AskUserQuestion`: **overwrite** / **keep-local**. State **updated** or **kept-local**. The consumer is expected to customize the template, so **keep-local** is the usual choice after first install.
+1. **Absent or byte-identical** — target missing, or both present and equal → `cp <source> <target>` silently. State **installed** (missing) or **unchanged** (identical). No prompt.
+2. **Locally changed, shipped delta applies cleanly** — both present and differ, local and shipped edits touch disjoint regions → merge silently. State **merged**.
+3. **Genuine conflict** — both present and the same region changed incompatibly on both sides → the ONLY case that prompts. `AskUserQuestion` quoting the conflicting region (`Bash(diff -u <target> <source>)`): **merge-shipped** / **keep-local**. State **merged** or **kept-local**. The consumer is expected to customize the template, so a conflict on a customized region resolves to **keep-local** in most cases.
 
-No orphan detection is needed — the plugin owns exactly one template file under this name.
+"Conflict" ≠ "bytes differ". No orphan detection is needed — the plugin owns exactly one template file under this name.
 
 ### Agent availability
 
@@ -116,53 +114,27 @@ The agent itself (`lazy-obsidian.gen-tag-pages`) is shipped by the plugin at `<i
 
 ## Step 5: Install Dataview (project scope only)
 
-Tag pages rely on the Dataview Obsidian plugin to render the `Index` section. Skip this step entirely when scope is `user` — tag pages are a vault concern.
+Tag pages rely on the Dataview Obsidian plugin to render the `Index` section — it is a hard dependency for the vault setup, not an optional add-on. Skip this step entirely when scope is `user` — tag pages are a vault concern. No opt-in prompt: plugin enabled means full functionality, so the full vault setup installs Dataview unconditionally.
 
-Presence probe (either is sufficient):
+Invoke `/lazy-obsidian.update-plugin dataview` unconditionally — it is version-aware and idempotent (installs if missing, updates if the remote is newer, no-ops when current) and re-enforces the opinionated override block from `plugin-settings.json` on every run. Record its state tuple (`binary=... overrides=... community=...`) for the final report. Outcome: state tuple.
 
-- `<repo-root>/.obsidian/community-plugins.json` exists and contains `"dataview"`, OR
-- `<repo-root>/.obsidian/plugins/dataview/manifest.json` exists.
+If `update-plugin` returns FAIL (registry unreachable, id missing), surface the failure and record `failed:<reason>` — without Dataview the `Summary` section still renders but the `Index` DataviewJS block stays blank. Re-running this skill later picks Dataview up once the network is available.
 
-### Present
-
-Invoke `/lazy-obsidian.update-plugin dataview` unconditionally — it is idempotent and no-ops when the vault is current, so re-runs just re-enforce the opinionated override block from `plugin-settings.json`. Record its state tuple (`binary=... overrides=... community=...`) for the final report.
-
-### Absent
-
-`AskUserQuestion` with:
-
-- question: `Install the Dataview community plugin for this vault?`
-- description: ``**Purpose:** Dataview is a third-party Obsidian community plugin that indexes frontmatter across the vault and renders live query results inside notes.\n\n**Why this skill is asking:** The tag pages scaffolded by `lazy-obsidian.gen-tag-pages` contain an `Index` section built with a DataviewJS block that lists every note carrying the tag. Without Dataview installed and enabled, the `Summary` section still renders correctly but the `Index` block stays blank.\n\n**Either choice is reversible** — you can run `/lazy-obsidian.update-plugin dataview` later to install it, or disable it in Obsidian's Community Plugins settings to remove it.``
-- options: **install** / **skip**.
-
-- **install** → invoke `/lazy-obsidian.update-plugin dataview`. Record its state tuple.
-- **skip** → print:
-
-  > Skipped Dataview install. Tag pages will render their `Summary` section correctly but the `Index` DataviewJS block will stay blank until Dataview is installed. Re-run `/lazy-obsidian.update-plugin dataview` when you're ready.
-
-  Record **skipped** for the report.
-
-## Step 6: Chain to `/lazy-obsidian.iconize-install` (project scope only, MANDATORY)
+## Step 6: Run `/lazy-obsidian.iconize-install` (project scope only)
 
 Skip this step ONLY when scope is `user` — iconize-sync is a vault concern.
 
-**Always ask** in project scope, even when `.claude/iconize/obsidian-icon-map.json` already exists. The presence of the icon map does not imply the rest of the iconize-sync system is current: `/lazy-obsidian.iconize-install` also handles the schema v1→v2 migration on `emit` keys, strips legacy PostToolUse hooks, asserts the three Iconize `data.json` keys (`frontmatterIconKey`, `frontmatterIconColorKey`, `frontmatterColorKey`), rewrites the pre-commit shim, updates `.gitignore`, and version-checks Iconize + Folder Notes + iconize-reloader via `/lazy-obsidian.update-plugin`. None of those states are observable from the icon-map file alone, so the parent skill must not short-circuit on it.
+No opt-in prompt: the full vault setup installs iconize-sync unconditionally (plugin enabled means full functionality). The child skill is itself quiet and idempotent — it installs Iconize + Folder Notes + iconize-reloader via `/lazy-obsidian.update-plugin`, scaffolds the icon-map + pre-commit shim, asserts Iconize frontmatter settings, manages its one `.gitignore` line, and version-checks its hard deps — silently re-running every state and prompting only on a genuine conflict. None of those states are observable from the icon-map file alone, so always run it; never short-circuit on a probe.
 
-`AskUserQuestion`: **run-iconize-install** / **skip**. Frame the question so the user knows it's safe to re-run even if previously installed — phrase it "(Re-)run `/lazy-obsidian.iconize-install` to install or re-audit iconize-sync?" and mention in the description of the **run-iconize-install** option that the child skill is fully idempotent and will no-op unchanged artifacts.
+Invoke `/lazy-obsidian.iconize-install` as the next skill call. Record **chained** for the report.
 
-- **run-iconize-install** → invoke `/lazy-obsidian.iconize-install` as the next skill call. That skill is self-contained (installs Iconize + Folder Notes + iconize-reloader via `/lazy-obsidian.update-plugin`, scaffolds the protocol doc, icon-map, pre-commit shim, etc.) and handles its own wizard prompts. Record **chained** for the report.
-- **skip** → record **skipped**. Print: "Run `/lazy-obsidian.iconize-install` later when you want the iconize-sync system scaffolded or re-audited."
-
-## Step 6.5: Chain to `/lazy-obsidian.diagram-install` (project scope only, MANDATORY)
+## Step 6.5: Run `/lazy-obsidian.diagram-install` (project scope only)
 
 Skip this step ONLY when scope is `user` — diagram render glue is a vault concern.
 
-**Always ask** in project scope, even when `<vault>/snippets/mermaid-fit.css` already exists. The presence of the snippet does not imply the rest of the diagram render glue is current: `/lazy-obsidian.diagram-install` also enables the snippet in `appearance.json`, version-checks `mermaid-popup` via `/lazy-obsidian.update-plugin` (re-applying the `ZoomRatioValue: "0.1"` override block), and offers to retire the legacy `mermaid-no-bg.css` snippet. None of those states are observable from the snippet file alone, so the parent skill must not short-circuit on it.
+No opt-in prompt: the full vault setup installs the diagram render glue unconditionally (plugin enabled means full functionality). The child skill is quiet and idempotent — it syncs the `mermaid-fit.css` + `ascii-fit.css` snippets, enables them in `appearance.json`, installs `mermaid-popup` via `/lazy-obsidian.update-plugin` with the calibrated zoom-ratio override, and leaves the legacy `mermaid-no-bg.css` snippet in place as a kept-orphan — silently re-running every state and prompting only on a genuine conflict. None of those states are observable from the snippet file alone, so always run it; never short-circuit on a probe.
 
-`AskUserQuestion`: **run-diagram-install** / **skip**. Frame the question so the user knows it's safe to re-run even if previously installed — phrase it "(Re-)run `/lazy-obsidian.diagram-install` to install or re-audit the diagram render glue?" and mention in the description of the **run-diagram-install** option that the child skill is fully idempotent and will no-op unchanged artifacts.
-
-- **run-diagram-install** → invoke `/lazy-obsidian.diagram-install` as the next skill call. That skill is self-contained (syncs `mermaid-fit.css` snippet, enables it in `appearance.json`, installs `mermaid-popup` via `/lazy-obsidian.update-plugin` with the calibrated zoom-ratio override, prompts to retire stale palette snippets) and handles its own wizard prompts. Record **chained** for the report.
-- **skip** → record **skipped**. Print: "Run `/lazy-obsidian.diagram-install` later when you want diagram render glue scaffolded or re-audited."
+Invoke `/lazy-obsidian.diagram-install` as the next skill call. Record **chained** for the report.
 
 ## Step 7: Verify
 
@@ -171,11 +143,11 @@ Skip this step ONLY when scope is `user` — diagram render glue is a vault conc
 - Report to the user what was done:
   - Scope detected
   - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)
-  - For each rule: state (**created**, **updated**, **unchanged**, or **kept-local**) and target `<path>`
-  - Tag-page template: state (**installed**, **updated**, **unchanged**, **kept-local**, **skipped**) and target `<path>` — omit when scope is `user`
-  - Dataview install: `update-plugin` state tuple (`binary=... overrides=... community=...`) or **skipped** — omit when scope is `user`
-  - iconize-install chain: **chained** / **skipped** — omit when scope is `user`. This line is mandatory in project scope; emit it unconditionally so a missing line is a visible gap in the report.
-  - diagram-install chain: **chained** / **skipped** — omit when scope is `user`. This line is mandatory in project scope; emit it unconditionally so a missing line is a visible gap in the report.
+  - For each rule: state (**installed**, **merged**, **unchanged**, **kept-local**, or **kept-orphan**) and target `<path>`
+  - Tag-page template: state (**installed**, **merged**, **unchanged**, **kept-local**) and target `<path>` — omit when scope is `user`
+  - Dataview install: `update-plugin` state tuple (`binary=... overrides=... community=...`) or **failed:`<reason>`** — omit when scope is `user`
+  - iconize-install chain: **chained** — omit when scope is `user`. This line is mandatory in project scope; emit it unconditionally so a missing line is a visible gap in the report.
+  - diagram-install chain: **chained** — omit when scope is `user`. This line is mandatory in project scope; emit it unconditionally so a missing line is a visible gap in the report.
 
 ## Step 8: Seed lazy.settings.json
 
@@ -250,4 +222,4 @@ Use two separate steps: `Bash(mkdir -p ...)` then `Write` tool. Never chain with
 - **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does **not** re-sync rule or template files into the consumer repo. Re-run this skill after every plugin update to pick up changes.
 - **Scope independence**: running at project scope does not affect other projects or the global config.
 - **User scope is rule-only**: the tag-page template and Dataview check are project-only concerns (they require a vault).
-- **Next steps shown to user**: if any rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start). If the tag-page template was **installed** or **updated**, mention that the consumer is expected to customize it and that `/lazy-obsidian.install` will prompt on future drift. If the user **skipped** Dataview, remind them they can re-run `/lazy-obsidian.update-plugin dataview` later. If the user **skipped** the iconize-install chain, remind them they can run `/lazy-obsidian.iconize-install` later to scaffold the iconize-sync system. If the user **skipped** the diagram-install chain, remind them they can run `/lazy-obsidian.diagram-install` later to scaffold the diagram render glue.
+- **Next steps shown to user**: if any rule was **installed** or **merged**, remind the user to restart Claude Code (rules are loaded on session start). If the tag-page template was **installed** or **merged**, mention that the consumer is expected to customize it and that future installs merge silently, prompting only on a genuine same-region conflict. If any artifact was **kept-orphan**, note it is retired and can be deleted by hand. If Dataview reported **failed:**, remind them they can re-run `/lazy-obsidian.update-plugin dataview` later. The iconize-install and diagram-install chains run automatically as part of the full vault setup — their own reports surface inline.

@@ -93,7 +93,7 @@ See [`claude/lazycortex-review/`](claude/lazycortex-review/) for details.
 
 Specification and design skills for Claude Code
 
-Ships 22 skills, 2 agents, and 1 command.
+Ships 23 skills, 1 agent, and 1 command.
 
 Requires: lazycortex-core, lazycortex-diagram
 

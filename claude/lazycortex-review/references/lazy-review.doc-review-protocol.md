@@ -1,6 +1,6 @@
 ---
 name: lazy-review.doc-review-protocol
-version: 5
+version: 6
 description: Markdown-document review protocol for lazycortex-review — minimal request/response contract for jobs dispatched to experts via lazycortex-core's expert runtime queue.
 ---
 # doc-review protocol v4
@@ -85,6 +85,8 @@ Dispatcher reads the full document body from `result/<file>` and grafts it back 
 
 The main writer owns the body's free prose. It rewrites paragraphs to address validator concerns, lifts each concern into a `[!question] ... #review/question` callout with discrete answer options the operator ticks, and folds answered callouts into the surrounding prose. Free prose, `[!question] #review/question` callouts, and `[!note]` / `[!info]` for non-system commentary are the allowed shapes. Other `#review/*` system callouts (banner, action-needed, ready, concerns-decision) are dispatcher-owned — the main writer does not author them. The document's first-level heading (`# <title>`) is identity, not editable prose: the main writer MUST return it verbatim as the body's first line and never drop or rename it (dropping it strands downstream banner placement — Bug 105).
 
+**`[!question]` invariant (MANDATORY for ALL `[!question] #review/question` callouts the writer emits, this mode and any other).** Every `[!question]` callout MUST carry at least one `- [ ] <option>` row inside its body. The dispatcher detects an answered callout exclusively by the presence of a ticked `- [x]` row inside the callout body (see `_strip_answered_callouts` in `bin/dispatcher.py`); an open-ended `[!question]` with no `- [ ]` options has no way to be marked answered and silently blocks the chain forever — the operator's prose addition under the callout is not recognised as an answer signal. When the writer wants free-form clarification rather than a multi-choice tick, it MUST write the prompt as plain body prose (`The X dimension is undefined — please name it.`) instead of a `[!question]` callout. Reserve `[!question]` for prompts where the writer can enumerate concrete answer options; "Other" / "Free-form" options are acceptable when the writer accompanies them with a hint that the operator may edit the option text in place before ticking.
+
 ### mode == "validation"
 
 Dispatcher reads the section body from `result/<file>` and grafts it into the H1 section the writer owns. Dispatcher emits the H1 heading and ownership tag itself; the agent never authors them, and any leading H1 / tag line inside the result file is stripped on reapply. No frontmatter overlay accepted from this mode.
@@ -99,7 +101,9 @@ Dispatcher reads the section body from `result/<file>` and grafts it into the H1
 
 A terminal writer produces operator-facing content that **survives finalize**: the section is part of the finished document because a downstream consumer (typically an apply-gate routine that fires after the review closes) needs to read what the operator decided. Typical terminal outputs are routing choices, classification verdicts, domain decisions the consumer plugin will act on.
 
-The writer addresses the operator directly. Each open decision should be expressed as a `[!question] ... #review/question` callout with discrete answer options the operator ticks, alongside prose that explains context. Free prose and `[!note]` / `[!info]` callouts are also fine. Other `#review/*` system callouts (banner, action-needed, ready, concerns-decision) are dispatcher-owned and not authored here.
+The writer addresses the operator directly. Each open decision should be expressed as a `[!question] ... #review/question` callout with discrete answer options the operator ticks, alongside prose that explains context. Free prose and `[!note]` / `[!info]` callouts are also fine. Other `#review/*` system callouts (banner, action-needed, ready, concerns-decision) are dispatcher-owned and not authored here. The `[!question]` invariant from `mode == "main"` applies here too: every `[!question]` MUST carry at least one `- [ ]` row inside its body — the dispatcher's answered-detection lives on a `- [x]` tick inside that row, so an open-ended callout blocks the chain forever. For free-form clarifications, write plain body prose, not a `[!question]` callout.
+
+Ready text is the medium: terminal writers emit the section content as the **settled final form** of the decision, with **no edit-marker fences** (`diff`, `criticmarkup`, `html`) wrapping in-section mutations. Each round either replaces the section's authoritative content with a new settled version, leaves it unchanged, or empties it — the terminal writer is stating a decision, not iterating on prior prose. The dispatch's `edit_marker_style` field governs `mode=main` body-prose refinement and does not apply to this mode (see § Edit-marker persistence across rounds). Downstream consumers parse the section's ready text directly; diff fences here would force every consumer (apply gates, audits) to disambiguate proposed-vs-settled lines — exactly what the ready-text rule eliminates.
 
 ### mode == "history"
 
@@ -111,13 +115,13 @@ Dispatcher reads the full file body from `result/<file>` and writes it back byte
 
 ## Edit-marker persistence across rounds
 
-The dispatch's ``edit_marker_style`` field names a marker shape from ``lazy-core.markdown-style`` (``simple`` / ``diff`` / ``criticmarkup`` / ``html``). That shape governs how the writer renders body-prose mutations THIS round.
+The dispatch's ``edit_marker_style`` field names a marker shape from ``lazy-core.markdown-style`` (``simple`` / ``diff`` / ``criticmarkup`` / ``html``). That shape governs how the ``mode=main`` writer renders body-prose mutations THIS round. ``mode=validation`` and ``mode=terminal`` are plain-text / ready-text modes per their respective sections above and do NOT emit edit markers regardless of ``edit_marker_style``.
 
-Across rounds the invariant is: **every marker emitted by any writer in any prior round MUST be returned to ``result/<file>`` verbatim**. A writer NEVER resolves (collapses, folds, applies) a marker on its own initiative — neither its own from this round nor any other writer's from a prior round. Markers accumulate in the document body across the entire pre-approve review cycle; only the consumer's finalize step (run after the operator approves) folds every marker of the configured style into final prose.
+Across rounds the invariant is: **every marker emitted by the main writer in any prior round MUST be returned to ``result/<file>`` verbatim**. A main writer NEVER resolves (collapses, folds, applies) a marker on its own initiative — not its own from this round, not its own from a prior round. Markers accumulate in the document body across the entire pre-approve review cycle; only the consumer's finalize step (run after the operator approves) folds every marker of the configured style into final prose.
 
 The invariant holds regardless of:
 
-- **Authorship.** Markers from a different writer (a prior round's ``mode=main`` writer, a ``mode=validation`` writer, a ``mode=terminal`` writer) are document state, not per-writer state. Each writer treats the body it receives as the source of truth and preserves every marker it finds.
+- **Round age.** A prior-round marker is document state — the current main writer treats the body it receives as the source of truth and preserves every marker it finds.
 - **Apparent staleness.** A marker sitting unchanged across several operator commits is NOT an implicit acceptance. The operator's silence is the operator's choice; the marker persists until the operator either modifies it (see below) or the document reaches finalize.
 
 The operator REJECTS or REVISES a prior-round marker by editing the document directly. Per-style shapes:
@@ -126,6 +130,16 @@ The operator REJECTS or REVISES a prior-round marker by editing the document dir
 - **``simple`` / ``criticmarkup`` / ``html``** — modify the marker's payload (e.g. change ``==add==`` to ``==revised==``) or delete the span outright. Same re-emission rule.
 
 A writer that "tidies" old markers by silently collapsing them is a protocol violation regardless of how clean the resulting prose reads.
+
+### Cross-fence ``+`` / ``-`` cancellation (``diff`` style)
+
+When a writer in a later round wants to **replace** prose introduced by a prior-round ``+`` line, the writer emits a NEW ``diff`` fence pairing ``- <prior-content>`` with ``+ <revision>``. The ``- <prior-content>`` line MUST be byte-for-byte equal to the prior ``+`` content (no rewrap, no whitespace tidy) — exact match is the cancellation key. The writer does NOT edit the prior fence in place (that would violate the "tidies old markers" prohibition); it emits its own fence and cites the prior emission in its ``-`` line.
+
+At finalize the consumer's ``strip_markers(style="diff")`` resolves the fences as one pass: each ``-`` line in any fence cancels the FIRST surviving ``+`` (or ``!``) emission from any earlier fence whose content matches byte-for-byte. Context (``  ``) lines are never cancellable — they show unchanged prose, not a writer-emitted insertion. A ``-`` that finds no matching prior ``+`` is silently dropped from its own fence (the legacy within-fence behavior for a deletion against plain body prose). Matching is one-shot — one ``-`` cancels exactly one ``+``; a fence wanting to retract two prior insertions of the same line emits two ``-`` entries.
+
+Rationale: without cross-fence cancellation, the writer who emits ``- A / + B`` saw ``A`` cancelled within its own fence (dropped) and ``B`` kept — but the prior fence's ``+ A`` survived independently, leaving both ``A`` and ``B`` in the finalized body as side-by-side near-duplicates. With cross-fence cancellation the prior ``+ A`` is retired and only ``B`` ships, which is the writer's actual intent.
+
+Out of scope here: fuzzy / similarity-based matching. The protocol guarantees only exact-content cancellation; a writer that needs to revise a paragraph whose wording is also slightly reflowed MUST copy the prior content verbatim into its ``-`` line, or accept that both versions ship.
 
 ## When ``concerns`` is populated
 

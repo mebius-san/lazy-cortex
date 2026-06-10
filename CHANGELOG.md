@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.2.0 — 2026-06-10 UTC
+
+- Install and setup are now quiet and idempotent. Two remembered daemon gates — project-level `daemon.enabled` and machine-level `daemon.run_here` — replace the old runtime/supervisor confirmations: asked once, then honoured silently on every re-run. Install scope, supervisor kind, and dev-mode are derived rather than asked; rule and template sync follow a 3-case file-sync policy (write/merge silently, prompt only on a genuine conflict, orphans left in place). `lazy-core.setup` drops its run-the-chain confirmation.
+- Expert and agent-tier registration no longer waits on the daemon being enabled — they are dispatch-routing config used by interactive flows too, so an enabled plugin always registers them. Expert-class selection is asked only when the experts list is still empty; on a populated list the install completes silently.
+
 ### 5.1.0 — 2026-06-02 UTC
 
 - New `lazycortex-core settings-get` and `lazycortex-core settings-set` subcommands let sibling plugins read and write named sections of `lazy.settings.json` from the shell without importing lazycortex-core Python directly.
@@ -326,6 +331,16 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 2.0.0 — 2026-06-10 UTC
+
+- **Spec-conformance rebuild (breaking).** Gates are now flat, products live in `lazy.settings.json`, and assets are organized by category with per-category template folders. Re-run `/spec.install` after updating.
+- Request handling split into two writers — a routing writer that owns the `# Routing` section and a consumer-supplied interpreter that handles content questions — with every operator tick-list always marking at least one recommended option (`★`).
+- The request apply transition is now a deterministic Python primitive instead of an LLM agent: it parses a structured `<!-- routing-decision -->` block, scaffolds spawned assets via the new `scaffold-asset` CLI, distributes the request body, maintains `# Sources` projections, and opens a review cycle on every populated document — in one atomic commit.
+- New `# Sources` model: `spec_source_docs` and `spec_source_requests` frontmatter render into `## Docs` / `## Requests` projections with shape-aware default displays; new `/spec.refresh-sources` primitive re-projects them.
+- `request_status` collapsed to `{draft, accepted, rejected}`; adapted to the lazy-review v4 review contract throughout.
+- Gate cascade hardened — `/spec.gate-tick` promotes `spec_stage` draft→approved and `/spec.flip-gate` auto-promotes an empty `plan.md` to draft, each landing as a single atomic commit.
+- `/spec.install` adopts the quiet-install model: scope derived, drift resolved by the file-sync policy, daemon-gated routines, read-first questions only for genuine project config.
+
 ### 0.1.7 — 2026-04-26
 
 - (No user-facing changes; internal autobumps from cross-cutting commits — versioning callout sync and a logging-rule description sync. See `docs/changelog.md` for commit-level detail.)
@@ -351,6 +366,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 2.2.0 — 2026-06-10 UTC
+
+- The vault installers (`lazy-obsidian.install`, `iconize-install`, `diagram-install`) drop their per-file create / overwrite wizards for the 3-case file-sync policy (write/merge silently, prompt only on a real conflict, orphans kept) and run the full hard-dependency plugin and chained-installer setup without per-step opt-ins.
 
 ### 2.1.1 — 2026-06-01 UTC
 
@@ -454,6 +473,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.1.0 — 2026-06-10 UTC
+
+- `lazy-diagram.install` adopts the 3-case file-sync policy — install scope is derived from `installed_plugins.json`, rule drift is merged silently with a prompt only on a genuine conflict, and no-longer-shipped rules are kept in place. The per-rule install / overwrite / delete prompts are gone.
+
 ### 1.0.12 — 2026-06-01 UTC
 
 - _no user-visible changes_
@@ -471,6 +494,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 5.1.0 — 2026-06-10 UTC
+
+- `lazy-review.install` gates the `lazy-review.scan` routine on the project `daemon.enabled` flag and applies the file-sync policy; `lazy-review.configure` keeps its genuine project questions (class globs, writers, sections, marker style) but reads each from record first, re-prompting only to change a value.
+- Diff edit-markup rendering corrected: `+`/`−` markers that span a fence boundary now cancel properly, so a region added and removed within the same change no longer leaves a stray marker behind. Expert dispatch also fixes a class-match nesting bug that could route a document to the wrong review class.
 
 ### 5.0.0 — 2026-06-03 UTC
 
@@ -493,6 +521,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 0.2.0 — 2026-06-10 UTC
+
+- `lazy-observe.install` reuses persisted operator config (agent kind, remote-write URL, auth) instead of re-asking and renders its configs under the file-sync policy. `lazy-observe.uninstall` keeps its destructive confirmations but is now a silent no-op when the targets are already gone.
+
 ### 0.1.7 — 2026-06-01 UTC
 
 - Fixed a template-engine bug where `{{ var }}` expressions inside `{% for %}` loop bodies were evaluated before the loop variable was bound, emitting empty strings on every iteration. On macOS the generated launchd plist had empty `<string></string>` arg entries, so the agent started with no CLI arguments; on Linux the systemd unit's `ExecStart` args slot collapsed to whitespace.
@@ -512,6 +544,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 0.3.0 — 2026-06-10 UTC
+
+- `lazy-experts.install` seeds agent-model tiers for the three generic agents (interpreter, designer, planner) and composed expert entries (agent × domain-aspect, each carrying a persona aspect and a deterministic bot author). Registration is no longer gated on the daemon — experts and tiers are dispatch-routing config used by interactive flows too. Expert-class selection is asked only when the experts list is still empty; re-runs are idempotent and never overwrite existing entries.
+
 ### 0.2.1 — 2026-06-01 UTC
 
 - The install skill now resolves sibling-plugin artifacts via `$LAZYCORTEX_PLUGIN_DIRS` before falling back to cache-directory discovery, so installation works correctly when the environment variable is set.
@@ -527,6 +563,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 1.6.0 — 2026-06-10 UTC
+
+- `lazy-python.install` resolves drift via the file-sync policy (pyproject and overlay guidelines merge silently, prompt only on a direct contradiction), derives install scope, and persists the `pch` and CLAUDE.md-pointer choices so a 'no' is never re-asked.
 
 ### 1.5.0 — 2026-06-01 UTC
 
@@ -546,6 +586,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 1.4.0 — 2026-06-10 UTC
+
+- `lazy-wiki.install` now registers the `wiki-curator` expert unconditionally — it is dispatch-routing config, not daemon-only — and gates only the two curator routines (`wiki.scan`, `wiki.relink-weekly`) on `daemon.enabled`. Rules sync via the file-sync policy; `lazy-wiki.configure` reads persisted scope config first and re-asks only to change it.
 
 ### 1.3.0 — 2026-06-03 UTC
 

@@ -1,7 +1,7 @@
 ---
 name: lazy-core.install
-description: "Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, syncs authoring templates into `.claude/templates/core/`, bootstraps the scaffold registry, seeds runtime defaults, and offers expert wizard and daemon supervisor setup. Idempotent — safe to re-run. Detects install scope automatically."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *)
+description: "Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, syncs authoring templates into `.claude/templates/core/`, bootstraps the scaffold registry, seeds runtime defaults, registers experts (always — they are dispatch-routing config, not daemon-only), and — behind two remembered gates (project-level `daemon.enabled`, machine-level `daemon.run_here`) — sets up the daemon routines + supervisor. Idempotent and quiet on re-run — every decision is persisted and never re-asked; an enabled plugin installs its whole surface. Detects install scope automatically."
+allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(find *), Bash(date *), Bash(diff *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *)
 ---
 # Install lazycortex-core
 
@@ -24,35 +24,45 @@ This skill has 16 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 9 — Bootstrap runtime defaults`
    - `Step 10 — Bootstrap experts directory`
    - `Step 10.5 — Bootstrap .memory/ directory`
-   - `Step 11 — Expert-add wizard`
+   - `Step 11 — Register expert candidates`
    - `Step 12 — Bootstrap expert-pump routine`
-   - `Step 13 — Offer daemon supervisor install`
-   - `Step 13.5 — Document expert-spawn sandbox in settings.local.json`
+   - `Step 13 — Gate 2 (run_here) + daemon supervisor install`
+   - `Step 13.5 — Configure expert-spawn sandbox in settings.local.json`
    - `Step 14 — Report`
    - `Step 15 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
+## Decisions are remembered, never re-asked
+
+This skill is **idempotent and quiet on re-run**. Every choice it makes is persisted, and on the next run the persisted value is read first and honoured silently — the user is asked again only when nothing is on record yet.
+
+- **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-rule "install this rule?" prompt and no per-artifact opt-in — wanting the plugin means wanting its surface.
+- **Two daemon gates, asked once each:**
+  - `daemon.enabled` (tracked `lazy.settings.json`) — does *this project* use the background daemon at all? Set false → the daemon-only steps (routines, supervisor, sandbox, runtime plumbing) are skipped for the project and never re-raised. Experts, `agent_models` tiers, rules, skills, and manual commands still install — they are not daemon-bound.
+  - `daemon.run_here` (local `lazy.settings.local.json`, gitignored, per-machine) — run the daemon on *this checkout/machine*? Set false → the supervisor + sandbox are skipped here and never re-raised, even though the project keeps `daemon.enabled = true`.
+- **Everything derivable is derived, not asked:** install scope (from `installed_plugins.json`), supervisor kind (from platform), dev-mode (from whether this repo ships plugin sources), expert git identity (a deterministic bot id).
+
+## File-sync policy (applies to every file this skill writes)
+
+Every file this skill creates or updates follows three cases — no per-file "install?" prompt, no routine drift wizard:
+
+1. **Absent or unchanged** — target missing, or byte-identical to the shipped / last-known version → write the new version silently. State `installed` / `unchanged`.
+2. **Locally changed but cleanly mergeable** — target diverged from shipped, but the shipped delta applies without contradicting local edits (new sections / keys / entries added, every local-only chunk left untouched) → merge silently. State `merged`.
+3. **Genuine conflict** — the same region (a key, a line, a block) was changed both locally and in the shipped version in ways that cannot be reconciled automatically → the ONLY case that asks. `AskUserQuestion` naming the file, quoting the conflicting region, and showing a unified diff; options `merge-shipped` / `keep-local`.
+
+"Conflict" means you cannot determine what should survive — not merely "the bytes differ". No contradiction → no question. A no-longer-shipped file (orphan) is left in place silently (`kept-orphan`); this skill never deletes consumer files.
+
 ## Step 0: Verify Python ≥ 3.12 (floor)
 
 Every plugin in this marketplace requires Python ≥ 3.12. This step runs first; on a machine that already meets the floor it is silent (one `python3 -V` invocation) and the install proceeds straight to Step 1. Per-plugin `<ns>.install` skills inherit this gate — they do NOT re-probe.
 
-Run `Bash(python3 -V)` and parse the version. If `python3` is missing or the version is below `3.12.0`, walk the user through install via `AskUserQuestion`:
+Run `Bash(python3 -V)` and parse the version. A missing or below-floor interpreter is an environment prerequisite, not a choice — do NOT open an `AskUserQuestion`. Print one line and stop:
 
-```
-AskUserQuestion:
-  question: "Python 3.12+ is required (found `<detected version or 'not found'>`). How would you like to install it?"
-  description: "All LazyCortex plugins target Python 3.12 as a single floor. Pick the route that matches this machine; once Python is upgraded, re-run `/lazy-core.install`."
-  options:
-    - "macOS — `brew install python@3.12 && brew link python@3.12 --force`"
-    - "Linux / cross-platform — `pyenv install 3.12 && pyenv global 3.12`"
-    - "Skip — abort install"
-```
+> Python 3.12+ required (found `<detected version or 'not found'>`). Install it, then re-run `/lazy-core.install`. macOS: `brew install python@3.12 && brew link python@3.12 --force`. Linux: `pyenv install 3.12 && pyenv global 3.12`.
 
-On macOS / Linux options: print the corresponding command for the user to run in their own shell — do NOT execute it (this skill never installs system packages on the user's behalf). Then state outcome `awaiting-user-install` and abort the run; the user re-runs `/lazy-core.install` once the upgrade lands.
-
-On `Skip — abort install`: state outcome `aborted-python-floor-not-met` and exit with the message `Python 3.12+ required — re-run /lazy-core.install once installed.`. Skip Steps 1–15.
+State outcome `aborted-python-floor-not-met` and skip Steps 1–15.
 
 If `python3 -V` reports ≥ 3.12.0: state outcome `python-floor-ok (<version>)` and proceed to Step 1.
 
@@ -68,7 +78,7 @@ Look at the `scope` field of the entries in the array:
 - `"user"` — plugin enabled globally in `~/.claude/settings.json`
 - `"project"` — plugin enabled per-project in `.claude/settings.json`
 
-If both scopes appear in the array, ask the user which to target. Default: `project`.
+The scope is already recorded — derive it, do not ask. Use the entry's `scope`. If both scopes appear in the array, default to `project` silently.
 
 Abort **only** if the `lazycortex-core@lazycortex` key is absent or its array is empty — i.e. the plugin has never been installed on this machine. In that case tell the user to install it first:
 ```json
@@ -91,9 +101,9 @@ Project root is `git rev-parse --show-toplevel` (or current working directory if
 
 If the glob returns zero files, abort and tell the user the plugin cache is empty — they likely need to run `/plugin update lazycortex-core@lazycortex` first.
 
-## Step 3: Sync rule templates (per-rule + orphan detection)
+## Step 3: Sync rule templates
 
-Rules eat context on every session — the user owns the decision to install each one.
+An enabled plugin installs its whole rule surface — apply the **File-sync policy** per rule, no per-rule "install?" prompt.
 
 ### Enumerate source and target
 
@@ -102,46 +112,24 @@ Rules eat context on every session — the user owns the decision to install eac
 - Target candidates: `Glob <targetRulesDir>/<ns>.*.md` for each owned namespace. Union them.
 - Ensure the destination directory exists with `mkdir -p`.
 
-### Per-rule decision (wizard-style, one question at a time)
+### Apply the File-sync policy per rule
 
-Every per-rule prompt MUST surface the rule's **purpose** so the user (who may not remember what a given rule file does) can make an informed decision. Extract `description:` from the rule file's frontmatter — from the **source** file for New/Drift, from the **target** file for Orphan (source is gone). If the description is longer than ~200 chars, use its first sentence. If no `description:` field exists, fall back to the first non-heading line of the body, and flag the missing-description as a WARN in the report.
+For every rule name in (source ∪ target):
 
-For every rule name in (source ∪ target), determine its state and act:
+- **New** (target missing) → copy source to target silently. State **installed**.
+- **Unchanged** (byte-identical) → no action. State **unchanged**.
+- **Drift, cleanly mergeable** (both present, differ, the shipped delta applies without contradicting local edits — new headings / list items / registry entries added, every local-only chunk preserved) → merge silently via `Edit`. State **merged**.
+- **Conflict** (the same region changed incompatibly in both) → the only case that asks, per File-sync policy case 3. State **merged** or **kept-local** by the user's choice.
+- **Orphan** (target present, source gone, within an owned namespace) → leave in place silently. State **kept-orphan**.
 
-1. **New** — target missing, source present → `AskUserQuestion` with:
-   - question: ``Install rule `<name>.md`?``
-   - description: ``**Purpose:** <source description>\n\n**What this does:** Copies the shipped rule into `<targetPath>`. Rules are auto-loaded into every Claude Code session (when `always_loaded`) or when editing files matching their `paths:` scope.``
-   - options: **install** / **skip**.
-   - Install → copy source to target, state **installed**. Skip → state **skipped**.
-2. **Unchanged** — both present, byte-identical → no prompt. State **unchanged**.
-3. **Drift** — both present, differ → `AskUserQuestion` with:
-   - question: ``Rule `<name>.md` has drift — how to reconcile?``
-   - description: ``**Purpose (shipped):** <source description>\n**Purpose (local):** <target description>\n\n**Full diff:**\n```diff\n<unified diff, truncated to ~40 lines if longer>\n`````
-   - options: **merge-shipped** (Recommended) / **overwrite** / **keep-local**.
-   - **merge-shipped** is the default. Identify chunks (headings, list items, registry groups, paragraphs) present in shipped but absent in local. For each chunk, sub-prompt with `AskUserQuestion` ("Add `<chunk-title>` from the shipped version?") only when the chunk's intent is non-obvious; uncontroversial additions (e.g. new entries in a registry group that already exists locally with the same key) land without a prompt. Every local-only chunk stays untouched. Apply accepted chunks via `Edit`. State **merged** if any chunk landed, **kept-local** if zero (shipped contributed nothing the local file lacked).
-   - **overwrite** is correct only when the local copy is unintentional drift — no companion-style framing, no project-scope extension, identical purpose to the shipped version. Copy source to target. State **updated**.
-   - **keep-local** — agent declines to merge; preserve local verbatim. State **kept-local**.
-
-   **Heuristic for picking the default in the description text:** when the local file's body or `description:` frontmatter declares itself a companion / project-scope extension / dev-vault variant of the shipped file (phrases like "companion to", "project-scope", "extends the global", or a registry group with a name different from the shipped group), the agent presents `merge-shipped` as `(Recommended)` and explains why in the description. When the local file looks like an unintentional stale copy, the agent surfaces `overwrite` as `(Recommended)` instead.
-
-4. **Orphan** — target present, source missing → `AskUserQuestion` with:
-   - question: ``Rule `<name>.md` is no longer shipped by the plugin — delete from `<targetDir>`?``
-   - description: ``**Purpose (from your local copy):** <target description>\n\n**Why you're seeing this:** The plugin used to ship this rule but no longer does (renamed, merged into another rule, or deprecated). Keeping it means it stays loaded into your sessions but will never receive updates.``
-   - options: **delete** / **keep**.
-   - Delete → `rm <target>`, state **deleted**. Keep → state **kept-orphan**.
-
-One `AskUserQuestion` at a time — wait for the answer before the next prompt.
-
-### Namespace-scoped deletion
-
-Orphan detection only considers target files whose filename starts with one of this plugin's owned namespaces. Rules from other plugins and user-authored rules in unrelated namespaces are never offered for deletion.
+Target files outside this plugin's owned namespaces (other plugins, user-authored rules) are never touched and never reported as orphans.
 
 ### `lazy-core.scaffold.md` — registry-block exemption (§5a)
 
-`lazy-core.scaffold.md` is special: its `## Registry` fenced block is **primitive-owned** — written only by `lazycortex-core scaffold` via Step 4's `scaffold-sync`. When this file reaches the per-rule decision:
+`lazy-core.scaffold.md` is special: its `## Registry` fenced block is **primitive-owned** — written only by `lazycortex-core scaffold` via Step 4's `scaffold-sync`. When this file reaches the File-sync policy:
 
 - **New** — install it as shipped (an empty `{}` registry); Step 4 then populates it.
-- **Drift** — do NOT offer `overwrite`. Reconcile only the prose/frontmatter region *above* `## Registry` (merge-shipped, which never deletes local content); leave the `## Registry` block **byte-for-byte**. The shipped block is `{}`, so it contributes nothing to merge.
+- **Drift** — merge only the prose / frontmatter region *above* `## Registry`; leave the `## Registry` block **byte-for-byte** (the shipped block is `{}`, so it contributes nothing to merge anyway).
 - Never rewrite or clobber the consumer's populated `## Registry` block here — surgical per-key registry writes are `scaffold-sync`'s job.
 
 ## Step 4: Sync authoring templates
@@ -154,7 +142,7 @@ Resolve this plugin's own `<installPath>` (the `installPath` field of `lazycorte
 Skill(skill: "lazycortex-core:lazy-core.scaffold-sync", args: "plugin=lazycortex-core installPath=<installPath> scope=<scope>")
 ```
 
-The skill discovers `<installPath>/templates/core/scaffold.entries.json`, copies `templates/core/*` (excluding the manifest) into `<consumerScope>/.claude/templates/core/` with the same merge / overwrite / keep-local drift handling that previously lived here, and upserts the `lazycortex-core` registry key from the manifest via `scaffold upsert` (surgical — the consumer's `_local` and any sibling-plugin keys stay byte-for-byte; per §5a the rest of `lazy-core.scaffold.md` is untouched).
+The skill discovers `<installPath>/templates/core/scaffold.entries.json`, copies `templates/core/*` (excluding the manifest) into `<consumerScope>/.claude/templates/core/` under the same File-sync policy, and upserts the `lazycortex-core` registry key from the manifest via `scaffold upsert` (surgical — the consumer's `_local` and any sibling-plugin keys stay byte-for-byte; per §5a the rest of `lazy-core.scaffold.md` is untouched).
 
 ### Outcome
 
@@ -276,62 +264,85 @@ Idempotent: a second run on already-clean files is a no-op. Report one line per 
 
 Steps 9–13 set up the per-repo runtime layer (`.experts/`, expert wizard, daemon supervisor). They operate on the **current working repo**, independent of the plugin's install scope — runtime artifacts are always per-repo, even when the plugin is installed at user scope.
 
-For Steps 9–13, `<repo-root>` is the cwd's git toplevel (resolved or initialized in 9a below), even if Step 1 detected install scope as `user`.
+For Steps 9–13, `<repo-root>` is the cwd's git toplevel (resolved in 9a, initialized in 9b only if the daemon is enabled and the cwd is not yet a repo), even if Step 1 detected install scope as `user`.
 
 ### 9a. Resolve the runtime repo
 
-Run `git rev-parse --show-toplevel` in cwd:
+Run `git rev-parse --show-toplevel` in cwd. If it succeeds, set `<repo-root>` to the returned path and `is_git = true`. If it fails (cwd is not inside a git repo), set `<repo-root>` to cwd and `is_git = false`. Do NOT prompt to initialize git here — that question (if needed at all) is deferred to 9b's Gate-1-enabled branch, so a project that declines the daemon is never asked to create a repo it doesn't need.
 
-- If it succeeds, set `<repo-root>` to the returned path and proceed to 9b.
-- If it fails (cwd is not inside a git repo), ask:
+### 9b. Gate 1 — does this project use the daemon? (`daemon.enabled`)
 
-  ``` AskUserQuestion:
-    question: "Current directory is not a git repository. Initialize one here to enable runtime/experts setup?"
-    description: "Runtime artifacts (`.experts/`, daemon supervisor units) need a repo root. Initializing here means git-tracking your runtime config alongside the rest of the directory; skipping bypasses runtime/experts setup for this run — Steps 3–8 are unaffected."
-    options: ["Initialize git here", "Skip — no runtime setup"]
-  ```
+Whether the background daemon (routines, supervisor) runs **in this project at all** is a per-project decision, recorded once in the tracked `daemon.enabled` flag and honoured silently on every re-run. Read it first; ask only when nothing is on record. Note: this gates only daemon-only artifacts — expert registration (Step 11) and the `.memory/` dir (Step 10.5) run regardless, since experts are dispatched interactively too.
 
-  - On `Initialize git here`: run `Bash(git init)` in cwd, then set `<repo-root>` to cwd. Proceed to 9b.
-  - On `Skip — no runtime setup`: mark Steps 9–13 with outcome `skipped-not-in-git-repo`, skip to Step 14.
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_tracked_section
+from pathlib import Path
+sec = load_tracked_section(Path('<repo-root>/.claude/lazy.settings.json'), 'daemon')
+print(sec.get('enabled', 'unset'))
+"
+```
 
-### 9b. Confirm runtime setup
-
-Ask once:
+- Output `True` → daemon used in this project; proceed to 9c and run Steps 10–13.5 (each still subject to Gate 2 on this machine). Do NOT ask.
+- Output `False` → daemon not used in this project; mark the daemon-only steps (9c, 10, 12, 13, 13.5) with outcome `skipped-daemon-disabled`, but STILL run Steps 10.5 (`.memory/`) and 11 (expert registration) — experts and their memory dir are dispatch-routing config used by interactive flows too, NOT daemon-gated — then go to Step 14. Do NOT ask.
+- Output `unset` → ask once:
 
 ```
 AskUserQuestion:
-  question: "Bootstrap runtime/experts for this repo at `<repo-root>`?"
-  description: "Sets up `lazy.settings.json[experts]`, `.claude/bin/lazy.runtime.sh` shim, the flat `daemon` + `routines` sections in `.claude/lazy.settings.json`, plus the expert-add wizard and optional daemon supervisor. Skip if you don't need this in this repo yet — the rest of the install is unaffected and you can re-run `/lazy-core.install` later."
-  options: ["Yes", "Skip — this repo doesn't need runtime/experts"]
+  question: "Use the background daemon in this project? (auto-review / scan routines, scheduled work, the expert-pump supervisor)"
+  description: "Recorded in the project's tracked `lazy.settings.json` as `daemon.enabled` and shared with everyone who clones the repo. 'No' permanently skips ALL daemon setup for this project — rules, skills and manual commands still install. Change it later by editing the flag and re-running `/lazy-core.install`."
+  options: ["Yes — this project uses the daemon", "No — no daemon in this project"]
 ```
 
-- On `Skip — this repo doesn't need runtime/experts`: mark Steps 9–13 with outcome `skipped-per-user-choice`, skip to Step 14.
-- On `Yes`: continue with 9c below and run Steps 10–13.
+  Persist the answer into the tracked `daemon` section, then branch:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_tracked_section, save_section
+from pathlib import Path
+p = Path('<repo-root>/.claude/lazy.settings.json')
+sec = load_tracked_section(p, 'daemon')
+sec['enabled'] = <True|False>
+save_section(p, 'daemon', sec)
+"
+```
+
+  - `No` → outcome `daemon-disabled (project)`; skip the daemon-only steps (9c, 10, 12, 13, 13.5) but STILL run Steps 10.5 and 11 (experts are not daemon-gated), then go to Step 14.
+  - `Yes` → outcome `daemon-enabled (project)`; continue below.
+
+When the daemon is enabled but `is_git = false` (from 9a), the runtime layer needs a repo root. Ask once:
+
+```
+AskUserQuestion:
+  question: "Initialize a git repository here so the daemon's runtime config can be tracked?"
+  description: "The current directory is not a git repo, but the daemon you just enabled needs one for `.experts/` and supervisor units. 'Initialize' runs `git init` here; 'Skip' leaves the project daemon-enabled but bypasses runtime/experts setup on this run (re-run after `git init`)."
+  options: ["Initialize git here", "Skip — no runtime setup this run"]
+```
+
+  - `Initialize git here` → `Bash(git init)` in cwd, keep `<repo-root>` = cwd, continue with 9c.
+  - `Skip — no runtime setup this run` → mark Steps 9c–13.5 with outcome `skipped-not-in-git-repo`, go to Step 14.
+
+When `is_git = true`, continue straight to 9c and run Steps 10–13.5.
 
 ### 9c. Write the flat `daemon` + `routines` sections
 
 The runtime daemon reads its config from **flat top-level section keys** — `runtime_daemon.py` calls `load_section(path, "daemon")` and `load_section(path, "routines")` directly, and `expert_runtime.register_routine` writes the flat `routines` section. Seed those two sections (never a nested `lazy-core.runtime` object — nothing reads that shape).
 
-Read `<repo-root>/.claude/lazy.settings.json`. Seed each section only when its top-level key is absent (do NOT overwrite an existing section):
+Seed the default daemon keys with `setdefault` (so 9b's `enabled` flag and any existing values are preserved — never overwrite) and seed an empty `routines` section when absent:
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 import json
-from lazy_settings import save_section
+from lazy_settings import load_tracked_section, save_section
 from pathlib import Path
 p = Path('<repo-root>/.claude/lazy.settings.json')
-raw = json.loads(p.read_text()) if p.exists() else {}
-if 'daemon' not in raw:
-    save_section(p, 'daemon', {
-        'git': None,
-        'polling_interval_sec': 5,
-        'cleanup_completed_after': '7d',
-        'cleanup_failed_after': '30d',
-        'cleanup_dead_after': '7d'
-    })
-    print('daemon: bootstrapped')
-else:
-    print('daemon: already-present')
+sec = load_tracked_section(p, 'daemon')
+before = dict(sec)
+for k, v in {'git': None, 'polling_interval_sec': 5, 'cleanup_completed_after': '7d',
+             'cleanup_failed_after': '30d', 'cleanup_dead_after': '7d'}.items():
+    sec.setdefault(k, v)
+save_section(p, 'daemon', sec)
+print('daemon: bootstrapped' if sec != before else 'daemon: already-present')
 raw = json.loads(p.read_text()) if p.exists() else {}
 if 'routines' not in raw:
     save_section(p, 'routines', {})
@@ -341,11 +352,11 @@ else:
 "
 ```
 
-State **bootstrapped** if either section was absent and was written; **already-present** if both already existed (do NOT overwrite); **skipped-not-in-git-repo** or **skipped-per-user-choice** if 9a/9b chose to skip.
+State **bootstrapped** if any default key or the routines section was newly written; **already-present** if everything was already present; **skipped-not-in-git-repo** or **skipped-daemon-disabled** if 9a/9b chose to skip.
 
 ## Step 10: Bootstrap experts directory
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), inherit the same outcome and skip this step.
 
 Otherwise, perform the following three idempotent operations:
 
@@ -381,7 +392,7 @@ Read `<repo-root>/.gitignore` (or treat as empty if missing). Ensure it contains
 
 ## Step 10.5: Bootstrap .memory/ directory
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
+If Step 9 resolved no repo (outcome `skipped-not-in-git-repo`), inherit that outcome and skip this step. Otherwise run it **even when the daemon is disabled** (`skipped-daemon-disabled`) — registered experts write memory under `.memory/<self>/` when dispatched interactively too, so the dir must exist regardless of the daemon.
 
 Otherwise, ensure `.memory/` exists at the repo root and strip any legacy `!.memory/` line from `.gitignore` (older versions of this skill wrote a defensive un-ignore line; the line was selective paranoia and is now retired — memory notes track in git the normal way):
 
@@ -395,21 +406,11 @@ print(bootstrap_memory_dir(Path('.')))
 
 Outcome: `bootstrapped` (dir created and/or legacy line stripped) or `already-present` (dir existed and no legacy line present).
 
-## Step 11: Expert-add wizard
+## Step 11: Register expert candidates
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
+If Step 9 resolved no repo (outcome `skipped-not-in-git-repo`), inherit that outcome and skip this step (there is no settings file to write). Otherwise run it **even when the daemon is disabled** (`skipped-daemon-disabled`) — experts are dispatch-routing config resolved by interactive flows (spec / review / direct dispatch) as well as the daemon, so they are registered regardless of `daemon.enabled`.
 
-Otherwise, ask the user once:
-
-```
-AskUserQuestion:
-  question: "Scan installed plugins for expert candidates to register in this repo?"
-  options: ["Yes", "Skip — I'll do this later"]
-```
-
-On `Skip — I'll do this later`, state **skipped-per-user-choice** and move to Step 12.
-
-On `Yes`, run the wizard:
+Register every expert candidate the enabled plugins ship — there is no per-candidate prompt and no scan confirmation; an enabled plugin's experts are installed whole.
 
 ### 1. Discover candidates
 
@@ -443,72 +444,40 @@ If no candidates are found after scanning all three scopes, state **no-candidate
 
 ### 2. Filter already-registered candidates
 
-Load the `experts` section of `<repo-root>/.claude/lazy.settings.json` (via `lazy_settings.load_section`). Skip any candidate whose `agent_name` already appears as a key in the section (besides `_version`).
+Load the `experts` section of `<repo-root>/.claude/lazy.settings.json` (via `lazy_settings.load_tracked_section`). Skip any candidate whose `agent_name` already appears as a key in the section (besides `_version`).
 
 If all candidates are filtered out, state **all-already-registered** and proceed to Step 12.
 
-### 3. Present each candidate one at a time
+### 3. Derive each entry — no questions
 
-For each remaining candidate, ask:
+For every remaining candidate:
 
-```
-AskUserQuestion:
-  question: "Install expert candidate `<plugin>:<agent_name>` (protocol `<expert_protocol_ref>`)?"
-  options: ["Yes", "Skip", "Stop wizard"]
-```
+- **local name** = its `agent_name` verbatim.
+- **git_author** = a deterministic bot identity, NOT the operator's `git config`: `{name: <agent_name>, email: <agent_name>@lazycortex.local}`. The daemon distinguishes expert commits from operator commits by this email and runs loop-detection over it — reusing the human's identity would make operator commits look like bot commits and break that safety net.
 
-On `Skip`: move to the next candidate. On `Stop wizard`: stop iterating; proceed to Step 12 with whatever was accepted so far. On `Yes`: ask for the three fields below (one `AskUserQuestion` each, strictly in sequence):
+### 4. Write all candidates to `lazy.settings.json[experts]`
 
-**a.** Local name for this expert in the project:
-```
-AskUserQuestion:
-  question: "Local name for this expert in the project?"
-  description: "Default: <agent_name>"
-  options: ["<agent_name> (default)", "Enter custom name"]
-```
-If `<agent_name> (default)` is chosen, use `agent_name` as the local name. If `Enter custom name`, prompt once more with a free-text question for the name.
-
-**b.** Git author name:
-```
-AskUserQuestion:
-  question: "git_author.name for commits this expert makes?"
-  description: "Default: <output of `git config user.name`>"
-  options: ["<git config user.name> (default)", "Enter custom name"]
-```
-Use default if chosen; otherwise prompt once more.
-
-**c.** Git author email:
-```
-AskUserQuestion:
-  question: "git_author.email for commits this expert makes?"
-  description: "Default: <output of `git config user.email`>"
-  options: ["<git config user.email> (default)", "Enter custom email"]
-```
-Use default if chosen; otherwise prompt once more.
-
-### 4. Write accepted candidates to `lazy.settings.json[experts]`
-
-For each accepted candidate, merge the new entry via:
+For each candidate, merge the new entry via (load → modify → save uses `load_tracked_section` so the local overlay never leaks into the tracked file):
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 from pathlib import Path
-from lazy_settings import load_section, save_section
+from lazy_settings import load_tracked_section, save_section
 p = Path('<repo-root>/.claude/lazy.settings.json')
-section = load_section(p, 'experts')
-section['<local_name>'] = {
+section = load_tracked_section(p, 'experts')
+section['<agent_name>'] = {
     'agent': '<plugin>:<agent_name>',
-    'git_author': {'name': '<author_name>', 'email': '<author_email>'}
+    'git_author': {'name': '<agent_name>', 'email': '<agent_name>@lazycortex.local'}
 }
 save_section(p, 'experts', section)
 "
 ```
 
-State one line per candidate: `<local_name>: registered` or `skipped`.
+State one line per candidate: `<agent_name>: registered`.
 
 ## Step 12: Bootstrap expert-pump routine
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), inherit the same outcome and skip this step.
 
 Otherwise, check two conditions:
 1. The `experts` section of `<repo-root>/.claude/lazy.settings.json` contains at least one expert entry (a key that is not `_version` and whose value is a dict).
@@ -526,65 +495,69 @@ bootstrap_default_routines(Path('<repo-root>'))
 
 State **registered** if the routine was added; **already-present** if it was already there; **skipped-no-experts** if condition 1 was false.
 
-## Step 13: Offer daemon supervisor install
+## Step 13: Gate 2 (run_here) + daemon supervisor install
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), inherit the same outcome and skip this step.
 
-Otherwise, only proceed if Step 12 produced outcome **registered** (i.e., the expert-pump routine was freshly added — there is something to drain). If Step 12 was **already-present** or **skipped-no-experts**, state **skipped-no-pump** and move on.
-
-Ask:
-
-```
-AskUserQuestion:
-  question: "Install a daemon supervisor to run the expert-pump routine automatically?"
-  options: ["macOS launchd", "Linux systemd", "Skip — I'll start the daemon manually"]
-```
-
-On `Skip — I'll start the daemon manually`: state **skipped-per-user-choice**.
-
-### 13a. Resolve dev-mode preference
-
-Before rendering the supervisor unit, decide whether to pass `--dev-mode` to `lazy.runtime.sh`. In dev-mode the shim scans `<repo-root>/claude/*/.claude-plugin/plugin.json` and prefers those plugin sources over the cache — useful when this repo IS the plugin's authoring vault.
-
-Read the persisted choice via (it lives under the flat `daemon` section as `daemon.supervisor.dev_mode` — `dev_mode` is install-skill state with no runtime reader, so it rides inside the flat `daemon` section the daemon already loads, not a separate nested object):
+Whether the daemon actually **runs on this checkout / machine** (Gate 2) is a per-machine decision, recorded once in the gitignored local overlay `daemon.run_here` and honoured silently on every re-run. Read it first; ask only when nothing is on record.
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
-from lazy_settings import load_section
+from lazy_settings import load_local_only_section
 from pathlib import Path
-sec = load_section(Path('<repo-root>/.claude/lazy.settings.json'), 'daemon')
-print((sec.get('supervisor') or {}).get('dev_mode', 'unset'))
+sec = load_local_only_section(Path('<repo-root>/.claude/lazy.settings.json'), 'daemon')
+print(sec.get('run_here', 'unset'))
 "
 ```
 
-- If output is `True` or `False` → use that value, skip the question.
-- If output is `unset` → ask:
+- Output `True` → run here; proceed to 13a and install the supervisor. Do NOT ask.
+- Output `False` → not on this machine; state **run-here-declined**, skip the supervisor and Step 13.5. Do NOT ask.
+- Output `unset` → ask once:
 
 ```
 AskUserQuestion:
-  question: "Run the supervisor in dev-mode?"
-  description: "Dev-mode prefers plugin sources under `<repo-root>/claude/*/` over the plugin cache. Pick `No` unless this repo is a LazyCortex plugin-authoring vault."
-  options: ["No (Recommended)", "Yes — prefer in-repo plugin sources"]
+  question: "Run the LazyCortex daemon on this machine for this checkout?"
+  description: "Recorded per-machine in the gitignored `lazy.settings.local.json` as `daemon.run_here` — not shared with other clones. 'Yes' installs a supervisor (launchd on macOS, systemd on Linux) that keeps the daemon running here. 'No' leaves the project's daemon config in place but never starts it on this machine. Change it later by editing the flag and re-running `/lazy-core.install`."
+  options: ["Yes — run it here", "No — not on this machine"]
 ```
 
-Persist the chosen `dev_mode` (boolean) under the flat `daemon` section at `daemon.supervisor.dev_mode`:
+  Persist the answer into the local overlay:
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
-from lazy_settings import load_section, save_section
+from lazy_settings import load_local_only_section, save_local_section
 from pathlib import Path
 p = Path('<repo-root>/.claude/lazy.settings.json')
-sec = load_section(p, 'daemon')
+sec = load_local_only_section(p, 'daemon')
+sec['run_here'] = <True|False>
+save_local_section(p, 'daemon', sec)
+"
+```
+
+  - `No` → state **run-here-declined**; skip the supervisor install and Step 13.5.
+  - `Yes` → state **run-here**; continue with 13a.
+
+### 13a. Derive supervisor kind and dev-mode (no questions)
+
+- **Supervisor kind** = the platform: macOS (`darwin`) → launchd (13b); Linux → systemd (13c). No question — the platform is known.
+- **dev-mode** = whether this repo IS a plugin-authoring vault. It is True when `Bash(find <repo-root>/claude -maxdepth 3 -path '*/.claude-plugin/plugin.json' -print -quit)` returns a path, else False. In dev-mode the shim prefers in-repo plugin sources under `<repo-root>/claude/*/` over the cache. Persist the derived value under the flat `daemon` section so Step 13.5's sandbox block lists the right plugin-source paths:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_tracked_section, save_section
+from pathlib import Path
+p = Path('<repo-root>/.claude/lazy.settings.json')
+sec = load_tracked_section(p, 'daemon')
 sec.setdefault('supervisor', {})['dev_mode'] = <True|False>
 save_section(p, 'daemon', sec)
 "
 ```
 
-Hold the chosen boolean as `<dev_mode>` for 13b/13c.
+Hold the derived boolean as `<dev_mode>` for 13b/13c.
 
 ### 13b. macOS launchd
 
-On `macOS launchd`:
+When the platform is macOS (`darwin`):
 1. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist`.
 2. Substitute `{REPO_ROOT}` → absolute path of `<repo-root>`, `{REPO_NAME}` → basename of `<repo-root>` (the shim path is built into the templates as `{REPO_ROOT}/.claude/bin/lazy.runtime.sh` — no separate runner-path substitution needed).
 3. **If `<dev_mode>` is True**: insert a `<string>--dev-mode</string>` line into `ProgramArguments` between the `lazy.runtime.sh` line and the `{REPO_ROOT}` line. Indent matches the surrounding `<string>` lines (8 spaces).
@@ -595,7 +568,7 @@ On `macOS launchd`:
 
 ### 13c. Linux systemd
 
-On `Linux systemd`:
+When the platform is Linux:
 1. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy-core-runtime.service`.
 2. Substitute `{REPO_ROOT}` and `{REPO_NAME}` as above.
 3. **If `<dev_mode>` is True**: replace `lazy.runtime.sh {REPO_ROOT}` (after step 2's substitution) with `lazy.runtime.sh --dev-mode {REPO_ROOT}` in the `ExecStart=` line.
@@ -604,28 +577,17 @@ On `Linux systemd`:
 6. `Bash(systemctl --user enable --now lazy-core-runtime-<REPO_NAME>.service)`
 7. State **systemd-installed** (or **systemd-installed-dev-mode** when `<dev_mode>` is True).
 
-## Step 13.5: Document expert-spawn sandbox in settings.local.json
+## Step 13.5: Configure expert-spawn sandbox in settings.local.json
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-per-user-choice`), inherit the same outcome and skip this step.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), OR Step 13 stated `run-here-declined`, inherit the skip with outcome `skipped-not-run-here` and move to Step 14 — there is no daemon running here to sandbox.
 
-Otherwise, the runtime daemon (Step 12+) spawns `claude -p --permission-mode dontAsk` subprocesses for every expert job. Without an explicit `<repo-root>/.claude/settings.local.json` sandbox + permission block, those spawns either run unrestricted (any earlier `bypassPermissions` left over) or are completely deny-by-default (`dontAsk` with no `permissions.allow`) and cannot Read/Write/Edit anything. Neither is correct.
+Otherwise, the runtime daemon spawns `claude -p --permission-mode dontAsk` subprocesses for every expert job. Without a `<repo-root>/.claude/settings.local.json` sandbox + permission block, those spawns either run unrestricted (any earlier `bypassPermissions` left over) or are completely deny-by-default (`dontAsk` with no `permissions.allow`) and cannot Read/Write/Edit anything. Neither is correct.
 
-This step does NOT write the file — `settings.local.json` is per-machine state the operator owns. Instead it (a) shows the recommended block and (b) Edits the file in place ONLY at the operator's explicit go-ahead, MERGING into existing keys rather than overwriting.
-
-### 13.5a. Confirm
-
-```
-AskUserQuestion:
-  question: "Configure expert-spawn sandbox + permissions in `<repo-root>/.claude/settings.local.json`?"
-  description: "The runtime daemon will spawn `claude -p --permission-mode dontAsk` for every expert job. Without sandbox+permissions in settings.local.json those spawns can't Read/Write/Edit (or can read your entire home dir). settings.local.json is per-machine (gitignored). The skill will MERGE — never overwrite — your existing keys."
-  options: ["Yes — merge the recommended block", "Skip — I'll configure manually"]
-```
-
-On `Skip — I'll configure manually`: state outcome `skipped-per-user-choice`. Print the recommended block (below) for reference, then move to Step 14.
+`settings.local.json` is gitignored, per-machine state — exactly the File-sync policy's domain. Adding missing sandbox scope to it is a clean, non-contradictory merge, so apply the policy **silently**: no confirmation, never overwrite an existing key, union missing scope in. Ask only on a genuine conflict per File-sync policy case 3 (e.g. an existing `sandbox.enabled: false` that contradicts the required `true`).
 
 ### 13.5b. Recommended block
 
-Show the operator the full block they should have under `<repo-root>/.claude/settings.local.json`. Substitute `<repo-root>` with the absolute path of the current repo. Substitute `<plugin-source-N>` lines with one entry per plugin source directory the daemon will pass via `--plugin-dir` (Step 13a's `dev_mode` decision dictates whether these are in-repo `<repo-root>/claude/<plugin>/` paths or `~/.claude/plugins/cache/...` paths — list what the supervisor unit will actually use).
+The full block the consumer should have under `<repo-root>/.claude/settings.local.json`. Substitute `<repo-root>` with the absolute path of the current repo. Substitute `<plugin-source-N>` lines with one entry per plugin source directory the daemon will pass via `--plugin-dir` (Step 13a's derived `dev_mode` dictates whether these are in-repo `<repo-root>/claude/<plugin>/` paths or `~/.claude/plugins/cache/...` paths — list what the supervisor unit will actually use).
 
 ```json
 {
@@ -638,31 +600,29 @@ Show the operator the full block they should have under `<repo-root>/.claude/set
   },
   "additionalDirectories": ["<plugin-source-1>", "<plugin-source-2>", "..."],
   "permissions": {
-    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet"],
+    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "Bash(lazycortex-core *)"],
     "deny":  ["Bash(find /*)", "Bash(find /Users/*)", "Bash(grep -r /*)", "Bash(grep -R /*)", "Bash(rg /*)", "Bash(rg --files /*)", "Bash(ls /Users/*)"]
   }
 }
 ```
 
+The `Bash(lazycortex-core *)` entry is required so dispatched experts can invoke the core CLI (`expert-pump-once`, `permission-allow`, etc.) — Claude Code's `dontAsk` permission mode auto-allows only well-known commands (git, python3, ls in PWD) and silently denies any other Bash command without an explicit allow-pattern. Sibling plugins' install skills add their own `Bash(lazycortex-<short> *)` patterns to this same `permissions.allow` list via `lazycortex-core permission-allow`.
+
 Tilde-form (`~/...`) is acceptable for paths the operator wants portable across machines — Claude Code expands `~` at load time. Absolute paths are equally valid.
 
-### 13.5c. Merge into settings.local.json
+### 13.5c. Apply the File-sync policy to settings.local.json
 
-`Read <repo-root>/.claude/settings.local.json`. Three cases:
+`Read <repo-root>/.claude/settings.local.json`:
 
 1. **Missing or unparseable** → `Write` the recommended block verbatim as a new file. State **created**.
-2. **Present, no `sandbox` / `permissions` / `additionalDirectories` keys** → `Edit` the file to add all three blocks (preserve every existing top-level key). State **appended**.
-3. **Present, one or more of those keys already there** → for each clashing key, `AskUserQuestion`:
-   - `sandbox` / `additionalDirectories` collision → ask once: "Union the recommended paths into the existing list, or keep the existing list verbatim?" Options: "Union" / "Keep local". On Union, `Edit` to add only the paths that aren't already present. On Keep local, leave that key alone.
-   - `permissions.allow` collision → same wizard: "Union the recommended tool names with the existing allow list?" Options: "Union" / "Keep local".
-   - `permissions.deny` collision → same wizard.
-   State **merged-N** where N is the number of keys that got unions; **kept-local-N** for those left untouched.
+2. **Present, none of `sandbox` / `permissions` / `additionalDirectories`** → `Edit` the file to add all three blocks (preserve every existing top-level key). State **appended**.
+3. **Present, one or more of those keys already there** → union missing scope into each, silently: add only the paths / tool names not already present; never drop or replace existing entries. State **merged-N** (N keys unioned). Only a genuine contradiction (case 3 of the File-sync policy — e.g. an existing setting that directly opposes a required one) triggers an `AskUserQuestion`.
 
-Never replace an entire key with the recommended value. The operator's existing settings.local.json is authoritative for shape; this skill only adds missing scope.
+Never replace an entire key with the recommended value. The consumer's existing settings.local.json is authoritative for shape; this skill only adds missing scope.
 
 ### Outcome
 
-One line per write action: `created` / `appended` / `merged-N keep-local-K` / `skipped-per-user-choice` / `skipped-not-daemon-repo`.
+One line: `created` / `appended` / `merged-N` / `skipped-not-run-here`.
 
 ## Step 14: Report
 
@@ -670,7 +630,7 @@ Report to the user:
 - Python version probe outcome (Step 0)
 - Scope detected (user vs project)
 - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)
-- For each rule: state (**created**, **updated**, **merged**, **unchanged**, **kept-local**, **deleted**, or **kept-orphan**) and target `<path>`
+- For each rule: state (**installed**, **merged**, **unchanged**, **kept-local**, or **kept-orphan**) and target `<path>`
 - For each authoring template: state and target `<path>` (Step 4)
 - Per-key `agent_models` seed outcome from Step 6
 - `.logs/` directory + `.lazyignore` seed bootstrap outcome (Step 7)
@@ -678,7 +638,7 @@ Report to the user:
 - Runtime bootstrap outcome (Step 9)
 - Experts directory bootstrap outcome (Step 10)
 - `.memory/` directory bootstrap outcome (Step 10.5)
-- Expert-add wizard outcome (Step 11)
+- Expert registration outcome (Step 11)
 - Expert-pump routine registration outcome (Step 12)
 - Daemon supervisor install outcome (Step 13)
 - Sandbox/permissions merge outcome (Step 13.5)
@@ -705,7 +665,8 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Step 13 fails: supervisor template not found** — `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist` or `lazy-core-runtime.service` is missing from the plugin cache → run `/plugin update lazycortex-core@lazycortex` to restore templates, then re-run.
 - **Step 13 fails: `launchctl load` error** — the plist was written but `launchctl load` returned a non-zero exit code → inspect the plist at `~/Library/LaunchAgents/` for substitution errors, then run `launchctl load <path>` manually.
 - **Step 13 fails: `systemctl --user enable --now` error** — the service unit was written but `systemctl` returned a non-zero exit code → run `systemctl --user status lazy-core-runtime-<REPO_NAME>.service` to inspect the error, then correct and re-enable manually.
-- **Step 13: dev-mode enabled but supervisor logs show "no plugin sources found"** — `<dev_mode>` was persisted as `True` but `<repo-root>/claude/` contains no `*/.claude-plugin/plugin.json` files. The shim silently no-ops the scan and the daemon falls back to the cache — no error, but dev-mode is doing nothing. Either disable dev-mode by re-running `/lazy-core.install` and answering "No", or populate `<repo-root>/claude/<plugin>/.claude-plugin/plugin.json` if this is meant to be a plugin-authoring vault.
+- **Daemon never starts on this machine after install** — Gate 2 (`daemon.run_here`) is `false` in the gitignored `lazy.settings.local.json`, so no supervisor was installed here → edit the flag to `true` (or delete it) and re-run `/lazy-core.install` to install the supervisor for this machine.
+- **Re-run never asks about the daemon again** — both gates are already on record (`daemon.enabled` in tracked settings, `daemon.run_here` in the local overlay); this is the intended quiet-on-re-run behaviour → to revisit a decision, edit or delete the relevant flag and re-run.
 
 ## Notes
 
@@ -713,5 +674,5 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does **not** re-sync rule files into `.claude/rules/`. Re-run this skill after every plugin update to pick up rule changes — otherwise projects keep running the old rule content.
 - **Scope independence**: running at project scope does not affect other projects or the global config.
 - **Runtime is per-repo, not per-scope**: Steps 3–8 follow the plugin's install scope (`user` writes to `~/.claude/`, `project` writes to `<repo-root>/.claude/`). Steps 9–13 always target the current working repo (cwd's git toplevel) regardless of install scope, because runtime artifacts (`.experts/`, daemon supervisor units) are inherently per-repo. Run `/lazy-core.install` from inside each repo where you want runtime to be set up.
-- **Re-run after `git clone`**: rules/templates/`lazy.settings.json`/`lazy.runtime.sh` are committed into the repo, but the daemon supervisor units (launchd plist / systemd service) are per-user and not in the repo. Re-run this skill after cloning to install the supervisor for the current machine and to pick up any newer plugin shipped versions. Pick `Skip — no runtime setup` in 9a or `Skip — this repo doesn't need runtime/experts` in 9b if you don't want runtime in this repo at all.
+- **Re-run after `git clone`**: rules/templates/`lazy.settings.json`/`lazy.runtime.sh` are committed into the repo (so `daemon.enabled` — Gate 1 — travels with the clone), but the daemon supervisor units (launchd plist / systemd service) and `daemon.run_here` (Gate 2) are per-machine and not in the repo. Re-run this skill after cloning: it reads Gate 1 silently and asks Gate 2 once for this machine. Answer Gate 2 "No" to keep the daemon off on this checkout.
 - **Next steps shown to user**: if any rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start).

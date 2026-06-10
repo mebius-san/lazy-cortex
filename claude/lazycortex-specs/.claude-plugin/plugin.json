@@ -1,8 +1,9 @@
 {
   "name": "lazycortex-specs",
-  "version": "0.1.7",
+  "version": "2.0.0",
   "description": "Specification and design skills for Claude Code",
   "author": {
     "name": "Mebius-san"
-  }
+  },
+  "dependencies": ["lazycortex-core", "lazycortex-diagram"]
 }

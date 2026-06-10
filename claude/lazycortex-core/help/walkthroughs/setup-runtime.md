@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo serial daemon so the async expert team has an executor — install wizard, start the daemon, then unblock it with /lazy-runtime.recover if the working tree halts.
-last_regen: 2026-06-02
+last_regen: 2026-06-09
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, wizard asks about runtime, user opts in, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh (daemon starts, polls .experts/.jobs/ on interval); (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
@@ -46,11 +46,11 @@ During install, the wizard asks whether to bootstrap runtime and experts for the
 - `lazy.settings.json[experts]` — the experts section, initially containing only `_version`.
 - `.claude/bin/lazy.runtime.sh` — the runtime shim, made executable. The shim resolves the latest `lazycortex-core/bin/runner` from the plugin cache at exec time, so it stays current after `/plugin update` without needing a re-run.
 - Flat `daemon` and `routines` sections inside `.claude/lazy.settings.json` — daemon configuration including polling interval (default: 5 seconds), job-cleanup retention windows, and an empty routines map. These are top-level section keys read directly by the daemon; they are never nested under a `lazy-core.runtime` object.
-- `.memory/` directory at the repo root — tracked in git so memory notes survive clones.
+- `.memory/` directory at the repo root — tracked in git so memory notes survive clones. This directory is created even when the daemon is disabled, because experts can be dispatched interactively too.
 - Entries in `.gitignore` covering `.logs/`, `.runtime/`, `.experts/`, and `.claude/lazy.settings.local.json`.
 - A `.lazyignore` file at the repo root (seeded from the plugin's template if absent) — extra tree-walking excludes (venvs, `node_modules`, `__pycache__`) that all routines honour via git's ignore engine.
 
-Next, the wizard asks whether to scan for expert candidates and register them. Answer **Yes** and work through the per-candidate prompts (local name, git author name, git author email). When at least one expert is registered, the `lazy-expert.pump` routine is added to `routines` automatically. Because the pump routine was freshly added, the wizard then offers a daemon supervisor — choose **macOS launchd** or **Linux systemd** to start the daemon automatically on login, or **Skip** to start it by hand. On re-runs where the pump routine is already present, the supervisor offer does not appear; use your OS's service manager directly if you need to re-install the supervisor.
+Next, the wizard scans all enabled plugins' agent files and the global and project `agents/` directories for files carrying `expert_protocol:` frontmatter, and registers each discovered candidate automatically — there are no per-candidate prompts and no scan confirmation. Each expert receives a deterministic bot git identity (`<agent_name>@lazycortex.local`) so the daemon can distinguish expert commits from operator commits. When at least one expert is registered, the `lazy-expert.pump` routine is added to `routines` automatically. Because the pump routine was freshly added, the wizard then offers a daemon supervisor — choose **macOS launchd** or **Linux systemd** to start the daemon automatically on login, or **Skip** to start it by hand. On re-runs where the pump routine is already present, the supervisor offer does not appear; use your OS's service manager directly if you need to re-install the supervisor.
 
 ### Step 3 — Configure the expert-spawn sandbox
 
@@ -101,7 +101,7 @@ If the tree is still dirty after cleanup (e.g., a submodule left additional chan
 
 The daemon runs continuously, draining jobs and firing registered routines. The built-in `lazy-expert.pump` routine processes them serially per expert so there is never contention.
 
-If you add new expert agents later, re-run `/lazy-core.install` — the wizard's expert-add phase picks up newly discovered agent files without touching existing registrations (it is idempotent). Because the pump routine is already registered on re-runs, the supervisor install offer will not appear again; only the first run that freshly registers the pump triggers it.
+If you add new expert agents later, re-run `/lazy-core.install` — the wizard's expert-discovery phase picks up newly discovered agent files without touching existing registrations (it is idempotent). Because the pump routine is already registered on re-runs, the supervisor install offer will not appear again; only the first run that freshly registers the pump triggers it.
 
 After cloning the repo to a new machine, re-run `/lazy-core.install` — the shim, settings files, and `.memory/` directory are committed to the repo, but the daemon supervisor unit (launchd plist or systemd service) is per-user and is not in the repo. The wizard regenerates and loads it for the current machine. The `settings.local.json` sandbox block is also per-machine; run the wizard or add it manually after cloning.
 
@@ -154,4 +154,3 @@ sequenceDiagram
   recoverSkill->>daemon: clear daemon_halted in .runtime/state.json
   daemon->>daemon: resume polling on next iteration
 ```
-

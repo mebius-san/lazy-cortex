@@ -1,6 +1,6 @@
 {
   "name": "lazycortex-experts",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Generic doc-producing experts (interpreter, designer, planner) plus a starter set of domain aspects (claude-plugin, game-dev, dotfiles). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.",
   "author": {
     "name": "Mebius-san"

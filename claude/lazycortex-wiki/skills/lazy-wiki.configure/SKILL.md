@@ -5,7 +5,9 @@ allowed-tools: Read, Edit, Write, AskUserQuestion, Bash(python3 *), Bash(mkdir -
 ---
 # lazy-wiki.configure
 
-Interactive wizard. Creates or edits a scope entry in `lazy.settings.json[wiki.scopes]` for the current repo. Each field is collected one question at a time via `AskUserQuestion`. Re-running for an existing scope `id` enters edit mode — existing values are shown and can be kept or changed.
+Interactive wizard. Creates or edits a scope entry in `lazy.settings.json[wiki.scopes]` for the current repo. Each field is collected one question at a time via `AskUserQuestion`. This wizard only collects **genuine project config that cannot be derived** — the topics-index path, scope globs, exclude globs, classification axes, and review-skip filter. There is no install-scope question (the wizard always edits the current repo's `lazy.settings.json`) and no environment probe.
+
+**Read-first.** Re-running for an existing scope `id` enters edit mode: each persisted value is read from `lazy.settings.json` first and shown as the current value; pressing Enter keeps it untouched. A field is re-asked only to let the operator change it — never to re-collect a value already on record.
 
 Prerequisite: `/wiki.install` has run (the `wiki` settings section exists).
 

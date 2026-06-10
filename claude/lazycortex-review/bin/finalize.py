@@ -164,10 +164,10 @@ def finalize_text(
   # `#status/<state>` namespace (not under `#review/`) and
   # survives subsequent re-finalize passes (it's upserted, not
   # accumulated). Consumers that own a richer terminal state (e.g.
-  # `spec.request-handler` apply-mode setting request_status to
-  # accepted / rejected / spawned) overwrite this callout with their
-  # own when their action lands; the default is the review-side
-  # "approved & finalized" record below.
+  # `spec.request-apply` setting request_status to accepted /
+  # rejected) overwrite this callout with their own when their action
+  # lands; the default is the review-side "approved & finalized"
+  # record below.
   status = _status_callout_for_finalize(meta, with_concerns=with_concerns)
   if status is not None:
     body = _body.upsert_status_callout(body, **status)
@@ -224,8 +224,8 @@ def _status_callout_for_finalize(meta: dict, *, with_concerns: bool = False) -> 
   """
   Return the status-callout kwargs the finalize transform should stamp on a document.
 
-  Consumer-specific statuses (request accepted / rejected / spawned) are handled by
-  the consumer's apply transition — this function only covers the generic review-side
+  Consumer-specific statuses (request accepted / rejected) are handled by the
+  consumer's apply transition — this function only covers the generic review-side
   outcome.
 
   Args:

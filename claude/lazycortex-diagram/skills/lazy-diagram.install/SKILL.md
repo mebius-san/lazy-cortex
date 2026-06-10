@@ -1,11 +1,11 @@
 ---
 name: lazy-diagram.install
-description: "Bootstrap the lazycortex-diagram plugin for the current project (or globally). Syncs the authoring rule shipped by the plugin into the consumer's rules directory, seeds agent model tiers for the per-format drawer agents, and cleans up orphaned rules from previous versions. Idempotent — safe to re-run. Detects install scope automatically."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), AskUserQuestion
+description: "Bootstrap the lazycortex-diagram plugin for the current project (or globally). Syncs the authoring rule shipped by the plugin into the consumer's rules directory and seeds agent model tiers for the per-format drawer agents. Idempotent and quiet on re-run — an enabled plugin installs its whole surface, decisions are derived not asked, and orphaned rules are left in place. Detects install scope automatically."
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(date *), Bash(diff *), AskUserQuestion
 ---
 # Install lazycortex-diagram
 
-Bootstrap the plugin in the right scope: sync every rule template shipped by the plugin into the consumer's rules directory, seed agent model tiers for the per-format drawer subagents (`lazy-diagram.draw-mermaid`, `lazy-diagram.draw-ascii`), and offer to delete orphan rules from prior versions.
+Bootstrap the plugin in the right scope: sync every rule template shipped by the plugin into the consumer's rules directory and seed agent model tiers for the per-format drawer subagents (`lazy-diagram.draw-mermaid`, `lazy-diagram.draw-ascii`). No-longer-shipped rules in an owned namespace are left in place silently.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -22,6 +22,24 @@ This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
+## Decisions are remembered, never re-asked
+
+This skill is **idempotent and quiet on re-run**. Every choice it makes is persisted (in `lazy.settings.json` or `installed_plugins.json`), and on the next run the persisted value is read first and honoured silently — the user is asked again only when nothing is on record yet.
+
+- **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-rule "install this rule?" prompt and no per-artifact opt-in — wanting the plugin means wanting its surface.
+- **Everything derivable is derived, not asked:** install scope (from `installed_plugins.json`), agent tiers (from `lazycortex-core`'s `default-tiers.json`).
+- This skill collects no genuine project config of its own; every action is mechanical file-sync or tier-seeding.
+
+## File-sync policy (applies to every file this skill writes)
+
+Every file this skill creates or updates follows three cases — no per-file "install?" prompt, no drift wizard:
+
+1. **Absent or unchanged** — target missing, or byte-identical to the shipped / last-known version → write the new version silently. State `installed` / `unchanged`.
+2. **Locally changed but cleanly mergeable** — target diverged from shipped, but the shipped delta applies without contradicting local edits (new sections / keys / entries added, every local-only chunk left untouched) → merge silently. State `merged`.
+3. **Genuine conflict** — the same region (a key, a line, a block) was changed both locally and in the shipped version in ways that cannot be reconciled automatically → the ONLY case that asks. `AskUserQuestion` naming the file, quoting the conflicting region, and showing a unified diff; options `merge-shipped` / `keep-local`.
+
+"Conflict" means you cannot determine what should survive — not merely "the bytes differ". No contradiction → no question. A no-longer-shipped file (orphan) is left in place silently (`kept-orphan`); this skill never deletes consumer files.
+
 ## Step 1: Detect install scope
 
 Read `~/.claude/plugins/installed_plugins.json`. The `lazycortex-diagram@lazycortex` key holds an **array of entries** — one per project where `/plugin install` was last run. The plugin **cache is shared globally across all projects**, so any non-empty array proves the plugin is installed and usable in the current cwd.
@@ -32,7 +50,7 @@ Look at the `scope` field of the entries in the array:
 - `"user"` — plugin enabled globally in `~/.claude/settings.json`
 - `"project"` — plugin enabled per-project in `.claude/settings.json`
 
-If both scopes appear in the array, ask the user which to target. Default: `project`.
+The scope is already recorded — derive it, do not ask. Use the entry's `scope`. If both scopes appear in the array, default to `project` silently.
 
 Abort **only** if the `lazycortex-diagram@lazycortex` key is absent or its array is empty. In that case tell the user to install it first:
 ```json
@@ -55,9 +73,9 @@ Project root is `git rev-parse --show-toplevel` (or current working directory if
 
 If the glob returns zero files, abort and tell the user the plugin cache is empty — they likely need to run `/plugin update lazycortex-diagram@lazycortex` first.
 
-## Step 3: Sync rule templates (per-rule + orphan detection)
+## Step 3: Sync rule templates
 
-Rules eat context on every session — the user owns the decision to install each one.
+An enabled plugin installs its whole rule surface — apply the **File-sync policy** per rule, no per-rule "install?" prompt.
 
 ### Enumerate source and target
 
@@ -66,34 +84,17 @@ Rules eat context on every session — the user owns the decision to install eac
 - Target candidates: `Glob <targetRulesDir>/<ns>.*.md` for each owned namespace. Union them.
 - Ensure the destination directory exists with `mkdir -p`.
 
-### Per-rule decision (wizard-style, one question at a time)
+### Apply the File-sync policy per rule
 
-Every per-rule prompt MUST surface the rule's **purpose** so the user can make an informed decision. Extract `description:` from the rule file's frontmatter — from the **source** file for New/Drift, from the **target** file for Orphan (source is gone). If the description is longer than ~200 chars, use its first sentence. If no `description:` field exists, fall back to the first non-heading line of the body, and flag the missing-description as a WARN in the report.
+For every rule name in (source ∪ target):
 
-For every rule name in (source ∪ target), determine its state and act:
+- **New** (target missing) → copy source to target silently. State **installed**.
+- **Unchanged** (byte-identical) → no action. State **unchanged**.
+- **Drift, cleanly mergeable** (both present, differ, the shipped delta applies without contradicting local edits — new headings / list items added, every local-only chunk preserved) → merge silently via `Edit`. State **merged**.
+- **Conflict** (the same region changed incompatibly in both) → the only case that asks, per File-sync policy case 3. State **merged** or **kept-local** by the user's choice.
+- **Orphan** (target present, source gone, within an owned namespace) → leave in place silently. State **kept-orphan**.
 
-1. **New** — target missing, source present → `AskUserQuestion` with:
-   - question: ``Install rule `<name>.md`?``
-   - description: ``**Purpose:** <source description>\n\n**What this does:** Copies the shipped rule into `<targetPath>`. Rules are auto-loaded into every Claude Code session (when `always_loaded`) or when editing files matching their `paths:` scope.``
-   - options: **install** / **skip**.
-   - Install → copy source to target, state **installed**. Skip → state **skipped**.
-2. **Unchanged** — both present, byte-identical → no prompt. State **unchanged**.
-3. **Drift** — both present, differ → `AskUserQuestion` with:
-   - question: ``Rule `<name>.md` has drift — overwrite with shipped version?``
-   - description: ``**Purpose:** <source description>\n\n**What changed:** <one-sentence summary of the diff>\n\n**Full diff:**\n```diff\n<unified diff, truncated to ~40 lines if longer>\n`````
-   - options: **overwrite** / **keep-local**.
-   - Overwrite → copy source to target, state **updated**. Keep-local → state **kept-local**.
-4. **Orphan** — target present, source missing → `AskUserQuestion` with:
-   - question: ``Rule `<name>.md` is no longer shipped by the plugin — delete from `<targetDir>`?``
-   - description: ``**Purpose (from your local copy):** <target description>\n\n**Why you're seeing this:** The plugin used to ship this rule but no longer does (renamed, merged into another rule, or deprecated). Keeping it means it stays loaded into your sessions but will never receive updates.``
-   - options: **delete** / **keep**.
-   - Delete → `rm <target>`, state **deleted**. Keep → state **kept-orphan**.
-
-One `AskUserQuestion` at a time — wait for the answer before the next prompt.
-
-### Namespace-scoped deletion
-
-Orphan detection only considers target files whose filename starts with one of this plugin's owned namespaces. Rules from other plugins and user-authored rules in unrelated namespaces are never offered for deletion.
+Target files outside this plugin's owned namespaces (other plugins, user-authored rules) are never touched and never reported as orphans.
 
 ## Step 4: Seed lazy.settings.json
 
@@ -157,7 +158,7 @@ One line per seeded entry: `lazycortex.<key> = <value> (<state>)`. Include the r
 - Report to the user what was done:
   - Scope detected
   - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)
-  - For each rule: state (**installed**, **updated**, **unchanged**, **kept-local**, **skipped**, **deleted**, **kept-orphan**) and target `<path>`
+  - For each rule: state (**installed**, **merged**, **unchanged**, **kept-local**, **kept-orphan**) and target `<path>`
   - Per-key `agent_models` seed outcome from Step 4
 
 ## Step 6: Log the run
@@ -176,4 +177,4 @@ Use two separate steps: `Bash(mkdir -p ...)` then `Write` tool. Never chain with
 - **Idempotent**: running this skill multiple times is safe. Files are only created/updated when there's a real change.
 - **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does **not** re-sync rule files into `.claude/rules/`. Re-run this skill after every plugin update to pick up rule changes — otherwise projects keep running the old rule content.
 - **Scope independence**: running at project scope does not affect other projects or the global config.
-- **Next steps shown to user**: if any rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start).
+- **Next steps shown to user**: if any rule was **installed** or **merged**, remind the user to restart Claude Code (rules are loaded on session start).

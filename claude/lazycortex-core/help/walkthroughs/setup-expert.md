@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-06-02
+last_regen: 2026-06-09
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -45,7 +45,7 @@ Run `/lazy-core.install` inside the repo. The install wizard walks through 16 or
 - Bootstraps `.memory/` at the repo root and ensures it is tracked in git (not gitignored), so memory notes written by persona-marked experts are version-controlled alongside your code.
 - Adds `.experts/` to `.gitignore` (`.logs/` and `.runtime/` are handled by an earlier step).
 
-When Step 11 offers to scan installed plugins for expert candidates, answer **Yes**. For each candidate you accept, the wizard asks for a local name (e.g. `designer`, `developer`, `reviewer`), a git author name, and a git author email for commits the expert makes. These are written into `lazy.settings.json[experts]` by the wizard — do not edit the file by hand.
+When Step 11 scans installed plugins for expert candidates, each candidate found is registered automatically using a deterministic bot identity (`<agent_name>@lazycortex.local`) — the wizard does not prompt per candidate. These are written into `lazy.settings.json[experts]` by the skill; do not edit the file by hand.
 
 Once at least one expert is registered, Step 12 bootstraps the `lazy-expert.pump` routine into the flat `routines` section of `.claude/lazy.settings.json`. Step 13 then offers to install a daemon supervisor via macOS launchd or Linux systemd — but only when the pump routine was freshly registered in Step 12. If Step 12 found the routine already present (a re-run), Step 13 is skipped. Choose the supervisor option that matches your machine, or skip and start the daemon manually in Step 2.
 
@@ -55,7 +55,7 @@ If you already ran `/lazy-core.install` and skipped the runtime phase, re-run th
 
 ### Step 1.5 — Configure the expert-spawn sandbox
 
-Step 13.5 of `/lazy-core.install` asks whether to configure the expert-spawn sandbox in `.claude/settings.local.json`. Answer **Yes — merge the recommended block**.
+Step 13.5 of `/lazy-core.install` configures the expert-spawn sandbox in `.claude/settings.local.json`. When it runs, answer **Yes — merge the recommended block** if prompted (on a first-time install it applies silently; it only asks on a genuine conflict).
 
 This step matters: the runtime daemon spawns `claude -p --permission-mode dontAsk` for every expert job. Without an explicit sandbox and permissions block in `settings.local.json`, those spawns cannot `Read`, `Write`, or `Edit` anything in the repo. The skill merges the required `sandbox`, `additionalDirectories`, and `permissions.allow` / `permissions.deny` blocks into your existing `settings.local.json` (or creates the file if absent), scoped to the current repo root — it never overwrites keys you already have.
 
@@ -173,7 +173,7 @@ If `/lazy-expert.list-jobs` shows the job as `dead` but `/lazy-expert.collect-jo
 
 - **Dispatch more jobs any time** — the daemon keeps running. Any job you send with `/lazy-expert.dispatch-job` goes into the queue and is picked up on the next polling cycle.
 - **Check the full queue** — `/lazy-expert.list-jobs` shows all jobs across all experts. Pass `status=done` to review completed work or `status=failed` to find errors. Use `status=dead` to spot jobs that were interrupted mid-run.
-- **Register more experts** — add roles to `lazy.settings.json[experts]` by re-running `/lazy-core.install` and accepting new candidates in the expert-add wizard. Each role corresponds to a named agent the daemon dispatches to.
+- **Register more experts** — add roles to `lazy.settings.json[experts]` by re-running `/lazy-core.install`; the skill picks up any newly eligible candidates and registers them automatically.
 - **Cancel a job you no longer need** — run `/lazy-expert.cancel-job job_id=<job_id>` for any job that is still queued or in progress.
 - **Add memory to an expert** — run `/lazy-memory.mark-persona <expert>` to opt an expert into the long-term memory subsystem. After a few dispatches accumulate run logs, run `/lazy-memory.reflect <expert>` to have the expert write its first memory notes under `.memory/<expert>/`. See the *add-memory-to-expert* walkthrough for the full flow.
 - **Register plugin routines** — if a plugin also needs periodic background work, run `/lazy-routine.register` to add it to the daemon's rotation alongside `lazy-expert.pump`.
@@ -191,24 +191,22 @@ sequenceDiagram
   participant daemon as Daemon (runner)
   participant expertAgent as Expert Agent
 
-  user->>claudeSession: /lazy-expert.dispatch-job
-  claudeSession->>jobsQueue: write job descriptor file
-  Note over jobsQueue: job pending
+  user->>claudeSession: /lazy-expert.dispatch-job with job spec
+  claudeSession->>jobsQueue: write job.json to queue dir
+  claudeSession-->>user: job ID returned
 
   daemon->>jobsQueue: poll for new job files
-  jobsQueue-->>daemon: job descriptor
+  jobsQueue-->>daemon: job.json discovered
+  Note over daemon,expertAgent: daemon spawns expert agent for job
+  daemon->>expertAgent: launch with job.json as input
 
-  daemon->>expertAgent: spawn expert agent with job context
   expertAgent->>expertAgent: execute job task
-  expertAgent->>jobsQueue: write response.json
-  expertAgent->>jobsQueue: write DONE marker
+  expertAgent->>jobsQueue: write response.json to job dir
+  expertAgent->>jobsQueue: write DONE marker to job dir
+  expertAgent-->>daemon: agent process exits
 
-  daemon->>jobsQueue: detect DONE marker
-  jobsQueue-->>daemon: response.json content
-
-  user->>claudeSession: /lazy-expert.collect-job
-  claudeSession->>jobsQueue: read response.json
-  jobsQueue-->>claudeSession: job result payload
-  claudeSession-->>user: collected result
+  user->>claudeSession: /lazy-expert.collect-job with job ID
+  claudeSession->>jobsQueue: read response.json from job dir
+  jobsQueue-->>claudeSession: response.json contents
+  claudeSession-->>user: job result delivered
 ```
-
