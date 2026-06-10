@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fde68a"
 ---
 # lazycortex-core
 
@@ -64,7 +64,7 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 | `lazy-core.doctor` | Health check for Claude Code project configuration. Verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, checks that installed plugins are at the latest marketplace version, and delegates to sibling audit skills (lazy-guard.check-public, lazy-log.audit) when they apply. Reports issues and offers targeted fixes. Run periodically or when something feels off. |
 | `lazy-core.git-status` | Read-only inspect of the lazy-core.git staging lock. Prints holder, age, liveness, and whether the lock is currently breakable. No state mutation. |
 | `lazy-core.git-unlock` | Manually break the lazy-core.git staging lock. Asks before acting (AskUserQuestion). Use only when /lazy-core.git-status shows a lock that the hook's break-the-lock heuristics will not auto-break. |
-| `lazy-core.install` | Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, syncs authoring templates into `.claude/templates/core/`, bootstraps the scaffold registry, seeds runtime defaults, registers experts (always — they are dispatch-routing config, not daemon-only), and — behind two remembered gates (project-level `daemon.enabled`, machine-level `daemon.run_here`) — sets up the daemon routines + supervisor. Idempotent and quiet on re-run — every decision is persisted and never re-asked; an enabled plugin installs its whole surface. Detects install scope automatically. |
+| `lazy-core.install` | Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, syncs authoring templates into `.claude/templates/core/`, bootstraps the scaffold registry, seeds runtime defaults, registers experts (always — they are dispatch-routing config, not daemon-only), and — behind two remembered gates (project-level `daemon.enabled`, per-checkout `daemon.run_here`) — sets up the daemon routines + supervisor. Idempotent and quiet on re-run — every decision is persisted and never re-asked; an enabled plugin installs its whole surface. Detects install scope automatically. |
 | `lazy-core.optimize` | Optimize Claude Code context loading for the current project. Slims oversized rules files by moving reference material to agent definitions, audits global settings for project-specific leakage and moves entries to local settings. Run when startup feels slow or after adding new rules/agents. |
 | `lazy-core.scaffold-local` | Manage `_local` scaffold entries in the consumer repo: add a new repo-specific template type (group + kind + globs) or remove an existing one. Safe path to author `_local` entries without hand-editing the fragile registry YAML. |
 | `lazy-core.scaffold-sync` | Install-time helper: copies a plugin's authoring templates into the consumer's `.claude/templates/<group>/` directories and upserts the corresponding scaffold-registry entries. Invoked by a plugin's install skill via Skill dispatch. |
