@@ -1,6 +1,6 @@
 ---
 name: lazy-core.install
-description: "Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, syncs authoring templates into `.claude/templates/core/`, bootstraps the scaffold registry, seeds runtime defaults, registers experts (always — they are dispatch-routing config, not daemon-only), and — behind two remembered gates (project-level `daemon.enabled`, machine-level `daemon.run_here`) — sets up the daemon routines + supervisor. Idempotent and quiet on re-run — every decision is persisted and never re-asked; an enabled plugin installs its whole surface. Detects install scope automatically."
+description: "Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, syncs authoring templates into `.claude/templates/core/`, bootstraps the scaffold registry, seeds runtime defaults, registers experts (always — they are dispatch-routing config, not daemon-only), and — behind two remembered gates (project-level `daemon.enabled`, per-checkout `daemon.run_here`) — sets up the daemon routines + supervisor. Idempotent and quiet on re-run — every decision is persisted and never re-asked; an enabled plugin installs its whole surface. Detects install scope automatically."
 allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(find *), Bash(date *), Bash(diff *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *)
 ---
 # Install lazycortex-core
@@ -41,7 +41,7 @@ This skill is **idempotent and quiet on re-run**. Every choice it makes is persi
 - **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-rule "install this rule?" prompt and no per-artifact opt-in — wanting the plugin means wanting its surface.
 - **Two daemon gates, asked once each:**
   - `daemon.enabled` (tracked `lazy.settings.json`) — does *this project* use the background daemon at all? Set false → the daemon-only steps (routines, supervisor, sandbox, runtime plumbing) are skipped for the project and never re-raised. Experts, `agent_models` tiers, rules, skills, and manual commands still install — they are not daemon-bound.
-  - `daemon.run_here` (local `lazy.settings.local.json`, gitignored, per-machine) — run the daemon on *this checkout/machine*? Set false → the supervisor + sandbox are skipped here and never re-raised, even though the project keeps `daemon.enabled = true`.
+  - `daemon.run_here` (this checkout's gitignored `lazy.settings.local.json`) — run the daemon for *this checkout* (this working copy)? Per-checkout, NOT per-machine: each clone of the project has its own overlay, so several checkouts on one machine each decide independently. Set false → the supervisor + sandbox are skipped for this checkout and never re-raised, even though the project keeps `daemon.enabled = true`.
 - **Everything derivable is derived, not asked:** install scope (from `installed_plugins.json`), supervisor kind (from platform), dev-mode (from whether this repo ships plugin sources), expert git identity (a deterministic bot id).
 
 ## File-sync policy (applies to every file this skill writes)
@@ -283,15 +283,18 @@ print(sec.get('enabled', 'unset'))
 "
 ```
 
-- Output `True` → daemon used in this project; proceed to 9c and run Steps 10–13.5 (each still subject to Gate 2 on this machine). Do NOT ask.
+- Output `True` → daemon used in this project; proceed to 9c and run Steps 10–13.5 (each still subject to Gate 2 for this checkout). Do NOT ask.
 - Output `False` → daemon not used in this project; mark the daemon-only steps (9c, 10, 12, 13, 13.5) with outcome `skipped-daemon-disabled`, but STILL run Steps 10.5 (`.memory/`) and 11 (expert registration) — experts and their memory dir are dispatch-routing config used by interactive flows too, NOT daemon-gated — then go to Step 14. Do NOT ask.
 - Output `unset` → ask once:
 
+This is a **project-policy** question, NOT an operational one — keep all "run" / "here" / "this machine" language OUT of it (that belongs to Gate 2). Ask whether the daemon is part of the project's design at all:
+
 ```
 AskUserQuestion:
-  question: "Use the background daemon in this project? (auto-review / scan routines, scheduled work, the expert-pump supervisor)"
-  description: "Recorded in the project's tracked `lazy.settings.json` as `daemon.enabled` and shared with everyone who clones the repo. 'No' permanently skips ALL daemon setup for this project — rules, skills and manual commands still install. Change it later by editing the flag and re-running `/lazy-core.install`."
-  options: ["Yes — this project uses the daemon", "No — no daemon in this project"]
+  header: "Use daemon?"
+  question: "Does this project use the background daemon at all? (project-wide policy — NOT about starting it on your machine)"
+  description: "Recorded in the project's tracked `lazy.settings.json` as `daemon.enabled`, shared with everyone who clones the repo — it declares whether the daemon is part of this project's design. Whether to actually START it on this particular working copy is a SEPARATE question (Gate 2, asked next, per-checkout). 'No' permanently skips all daemon-only setup for the project; rules, skills, experts, and manual commands still install. Change it later by editing the flag and re-running `/lazy-core.install`."
+  options: ["Yes — this project is daemon-driven", "No — this project never uses a daemon"]
 ```
 
   Persist the answer into the tracked `daemon` section, then branch:
@@ -499,7 +502,7 @@ State **registered** if the routine was added; **already-present** if it was alr
 
 If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), inherit the same outcome and skip this step.
 
-Whether the daemon actually **runs on this checkout / machine** (Gate 2) is a per-machine decision, recorded once in the gitignored local overlay `daemon.run_here` and honoured silently on every re-run. Read it first; ask only when nothing is on record.
+Whether the daemon runs for **this checkout** (this working copy of the project) (Gate 2) is a per-checkout decision, recorded once in THIS checkout's own gitignored local overlay (`daemon.run_here`) and honoured silently on every re-run. It is NOT per-machine: a machine may hold several checkouts of the same project, each with its own `.claude/lazy.settings.local.json`, and the daemon runs only on the checkout(s) where `run_here` is true. Read it first; ask only when nothing is on record.
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
@@ -510,15 +513,18 @@ print(sec.get('run_here', 'unset'))
 "
 ```
 
-- Output `True` → run here; proceed to 13a and install the supervisor. Do NOT ask.
-- Output `False` → not on this machine; state **run-here-declined**, skip the supervisor and Step 13.5. Do NOT ask.
+- Output `True` → run the daemon for this checkout; proceed to 13a and install the supervisor. Do NOT ask.
+- Output `False` → not this checkout; state **run-here-declined**, skip the supervisor and Step 13.5. Do NOT ask.
 - Output `unset` → ask once:
+
+This is the **operational** question — it OWNS the "run / start / this checkout" language (Gate 1 had none). The project already opted into the daemon; this decides whether to actually start it on this particular working copy:
 
 ```
 AskUserQuestion:
-  question: "Run the LazyCortex daemon on this machine for this checkout?"
-  description: "Recorded per-machine in the gitignored `lazy.settings.local.json` as `daemon.run_here` — not shared with other clones. 'Yes' installs a supervisor (launchd on macOS, systemd on Linux) that keeps the daemon running here. 'No' leaves the project's daemon config in place but never starts it on this machine. Change it later by editing the flag and re-running `/lazy-core.install`."
-  options: ["Yes — run it here", "No — not on this machine"]
+  header: "Run here?"
+  question: "Start the daemon for THIS checkout now? (the project is daemon-driven — this starts it on this working copy only)"
+  description: "Recorded for THIS checkout in its own gitignored `lazy.settings.local.json` as `daemon.run_here` — each clone / working copy decides independently, so several checkouts of this project on one machine can each answer differently. 'Yes' installs a supervisor (launchd on macOS, systemd on Linux) that keeps the daemon running for this checkout. 'No' leaves the project's daemon config in place but never starts it for this checkout. Change it later by editing the flag and re-running `/lazy-core.install`."
+  options: ["Yes — run it for this checkout", "No — not this checkout"]
 ```
 
   Persist the answer into the local overlay:
@@ -537,9 +543,20 @@ save_local_section(p, 'daemon', sec)
   - `No` → state **run-here-declined**; skip the supervisor install and Step 13.5.
   - `Yes` → state **run-here**; continue with 13a.
 
-### 13a. Derive supervisor kind and dev-mode (no questions)
+### 13a. Derive supervisor kind, dev-mode, and the per-checkout unit id (no questions)
 
 - **Supervisor kind** = the platform: macOS (`darwin`) → launchd (13b); Linux → systemd (13c). No question — the platform is known.
+- **`<REPO_ID>`** = a collision-free, per-checkout supervisor identifier: `<basename>-<hash>` where `<basename>` is the basename of `<repo-root>` and `<hash>` is the first 8 hex of `sha256(<absolute-repo-root>)`. The basename alone is NOT unique — two checkouts of this project (e.g. two dirs both named `LazyCortex`) would otherwise produce the same launchd Label / systemd unit name and clobber each other. Hashing the absolute path makes the unit id unique per checkout and stable across re-runs (same path → same id). Compute:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+import hashlib, os, sys
+root = os.path.abspath('<repo-root>')
+print(os.path.basename(root) + '-' + hashlib.sha256(root.encode()).hexdigest()[:8])
+"
+```
+
+  Hold the printed value as `<REPO_ID>` for 13b/13c. `<REPO_NAME>` (bare basename) is still used only for the human-readable systemd `Description`.
 - **dev-mode** = whether this repo IS a plugin-authoring vault. It is True when `Bash(find <repo-root>/claude -maxdepth 3 -path '*/.claude-plugin/plugin.json' -print -quit)` returns a path, else False. In dev-mode the shim prefers in-repo plugin sources under `<repo-root>/claude/*/` over the cache. Persist the derived value under the flat `daemon` section so Step 13.5's sandbox block lists the right plugin-source paths:
 
 ```bash
@@ -558,23 +575,26 @@ Hold the derived boolean as `<dev_mode>` for 13b/13c.
 ### 13b. macOS launchd
 
 When the platform is macOS (`darwin`):
-1. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist`.
-2. Substitute `{REPO_ROOT}` → absolute path of `<repo-root>`, `{REPO_NAME}` → basename of `<repo-root>` (the shim path is built into the templates as `{REPO_ROOT}/.claude/bin/lazy.runtime.sh` — no separate runner-path substitution needed).
-3. **If `<dev_mode>` is True**: insert a `<string>--dev-mode</string>` line into `ProgramArguments` between the `lazy.runtime.sh` line and the `{REPO_ROOT}` line. Indent matches the surrounding `<string>` lines (8 spaces).
-4. `Bash(mkdir -p ~/Library/LaunchAgents/)`
-5. Write the rendered plist to `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist`.
-6. `Bash(launchctl load ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)`
-7. State **launchd-installed** (or **launchd-installed-dev-mode** when `<dev_mode>` is True).
+1. **Migrate a legacy basename-only unit (if present).** Older installs named the unit by bare basename. If `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist` exists AND its body contains `<string><repo-root></string>` (its `WorkingDirectory` points at THIS checkout — confirm with `Bash(grep -F "<repo-root>" ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)`), it is this checkout's old-scheme unit → `Bash(launchctl unload ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)` then `Bash(rm ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)` before installing the new one. If the legacy file is absent, or exists but points at a DIFFERENT checkout (a same-basename sibling), leave it untouched. State **legacy-unit-migrated** or **no-legacy-unit**.
+2. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist`.
+3. Substitute `{REPO_ROOT}` → absolute path of `<repo-root>`, `{REPO_ID}` → the per-checkout id from 13a (the shim path is built into the template as `{REPO_ROOT}/.claude/bin/lazy.runtime.sh` — no separate runner-path substitution needed).
+4. **If `<dev_mode>` is True**: insert a `<string>--dev-mode</string>` line into `ProgramArguments` between the `lazy.runtime.sh` line and the `{REPO_ROOT}` line. Indent matches the surrounding `<string>` lines (8 spaces).
+5. `Bash(mkdir -p ~/Library/LaunchAgents/)`
+6. Write the rendered plist to `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist`.
+7. `Bash(launchctl load ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist)`
+8. State **launchd-installed** (or **launchd-installed-dev-mode** when `<dev_mode>` is True).
 
 ### 13c. Linux systemd
 
 When the platform is Linux:
-1. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy-core-runtime.service`.
-2. Substitute `{REPO_ROOT}` and `{REPO_NAME}` as above.
-3. **If `<dev_mode>` is True**: replace `lazy.runtime.sh {REPO_ROOT}` (after step 2's substitution) with `lazy.runtime.sh --dev-mode {REPO_ROOT}` in the `ExecStart=` line.
-4. `Bash(mkdir -p ~/.config/systemd/user/)`
-5. Write the rendered unit to `~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service`.
-6. `Bash(systemctl --user enable --now lazy-core-runtime-<REPO_NAME>.service)`
+1. **Migrate a legacy basename-only unit (if present).** If `~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service` exists AND its `ExecStart=` references THIS checkout (confirm with `Bash(grep -F "<repo-root>" ~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service)`) → `Bash(systemctl --user disable --now lazy-core-runtime-<REPO_NAME>.service)` then `Bash(rm ~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service)` before installing the new one. If absent, or pointing at a different checkout, leave it. State **legacy-unit-migrated** or **no-legacy-unit**.
+2. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy-core-runtime.service`.
+3. Substitute `{REPO_ROOT}` → absolute path of `<repo-root>`, `{REPO_NAME}` → basename (used only in the human-readable `Description=`).
+4. **If `<dev_mode>` is True**: replace `lazy.runtime.sh {REPO_ROOT}` (after step 3's substitution) with `lazy.runtime.sh --dev-mode {REPO_ROOT}` in the `ExecStart=` line.
+5. `Bash(mkdir -p ~/.config/systemd/user/)`
+6. Write the rendered unit to `~/.config/systemd/user/lazy-core-runtime-<REPO_ID>.service`.
+7. `Bash(systemctl --user enable --now lazy-core-runtime-<REPO_ID>.service)`
+8. State **systemd-installed** (or **systemd-installed-dev-mode** when `<dev_mode>` is True).
 7. State **systemd-installed** (or **systemd-installed-dev-mode** when `<dev_mode>` is True).
 
 ## Step 13.5: Configure expert-spawn sandbox in settings.local.json
@@ -664,8 +684,8 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Step 11 wizard: protocol reference unresolvable** — `reference_resolver.resolve_reference` returns `None` or raises for a candidate's `expert_protocol:` value → the candidate is skipped and flagged as `protocol-unresolvable`; verify the protocol file exists at the referenced path or reinstall the owning plugin.
 - **Step 13 fails: supervisor template not found** — `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist` or `lazy-core-runtime.service` is missing from the plugin cache → run `/plugin update lazycortex-core@lazycortex` to restore templates, then re-run.
 - **Step 13 fails: `launchctl load` error** — the plist was written but `launchctl load` returned a non-zero exit code → inspect the plist at `~/Library/LaunchAgents/` for substitution errors, then run `launchctl load <path>` manually.
-- **Step 13 fails: `systemctl --user enable --now` error** — the service unit was written but `systemctl` returned a non-zero exit code → run `systemctl --user status lazy-core-runtime-<REPO_NAME>.service` to inspect the error, then correct and re-enable manually.
-- **Daemon never starts on this machine after install** — Gate 2 (`daemon.run_here`) is `false` in the gitignored `lazy.settings.local.json`, so no supervisor was installed here → edit the flag to `true` (or delete it) and re-run `/lazy-core.install` to install the supervisor for this machine.
+- **Step 13 fails: `systemctl --user enable --now` error** — the service unit was written but `systemctl` returned a non-zero exit code → run `systemctl --user status lazy-core-runtime-<REPO_ID>.service` to inspect the error, then correct and re-enable manually.
+- **Daemon never starts for this checkout after install** — Gate 2 (`daemon.run_here`) is `false` in this checkout's gitignored `lazy.settings.local.json`, so no supervisor was installed → edit the flag to `true` (or delete it) and re-run `/lazy-core.install` to install the supervisor for this checkout.
 - **Re-run never asks about the daemon again** — both gates are already on record (`daemon.enabled` in tracked settings, `daemon.run_here` in the local overlay); this is the intended quiet-on-re-run behaviour → to revisit a decision, edit or delete the relevant flag and re-run.
 
 ## Notes
@@ -674,5 +694,5 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does **not** re-sync rule files into `.claude/rules/`. Re-run this skill after every plugin update to pick up rule changes — otherwise projects keep running the old rule content.
 - **Scope independence**: running at project scope does not affect other projects or the global config.
 - **Runtime is per-repo, not per-scope**: Steps 3–8 follow the plugin's install scope (`user` writes to `~/.claude/`, `project` writes to `<repo-root>/.claude/`). Steps 9–13 always target the current working repo (cwd's git toplevel) regardless of install scope, because runtime artifacts (`.experts/`, daemon supervisor units) are inherently per-repo. Run `/lazy-core.install` from inside each repo where you want runtime to be set up.
-- **Re-run after `git clone`**: rules/templates/`lazy.settings.json`/`lazy.runtime.sh` are committed into the repo (so `daemon.enabled` — Gate 1 — travels with the clone), but the daemon supervisor units (launchd plist / systemd service) and `daemon.run_here` (Gate 2) are per-machine and not in the repo. Re-run this skill after cloning: it reads Gate 1 silently and asks Gate 2 once for this machine. Answer Gate 2 "No" to keep the daemon off on this checkout.
+- **Re-run after `git clone`**: rules/templates/`lazy.settings.json`/`lazy.runtime.sh` are committed into the repo (so `daemon.enabled` — Gate 1 — travels with the clone), but the daemon supervisor units (launchd plist / systemd service) and `daemon.run_here` (Gate 2) live in this checkout's gitignored overlay, not in the repo, so each clone decides for itself. Re-run this skill after cloning: it reads Gate 1 silently and asks Gate 2 once for this checkout. Answer Gate 2 "No" to keep the daemon off on this checkout.
 - **Next steps shown to user**: if any rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start).

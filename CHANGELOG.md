@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.3.0 — 2026-06-10 UTC
+
+- The "run the daemon here?" decision is now correctly **per-checkout**, not per-machine. `daemon.run_here` lives in each working copy's own gitignored local settings, so several checkouts of the same project on one machine each decide independently — the daemon runs only on the checkouts you opted in.
+- Supervisor units are named per checkout (`com.lazycortex.runtime.<dir>-<path-hash>`), so two checkouts that share a directory name no longer overwrite each other's launchd / systemd unit. Re-running install migrates a legacy single-name unit when it belongs to the current checkout.
+- The two install questions are reworded so they can't be confused: the project-policy gate ("does this project use the daemon at all?") carries no "run / here" wording, while the per-checkout gate ("start the daemon for this checkout now?") owns it.
+
 ### 5.2.0 — 2026-06-10 UTC
 
 - Install and setup are now quiet and idempotent. Two remembered daemon gates — project-level `daemon.enabled` and machine-level `daemon.run_here` — replace the old runtime/supervisor confirmations: asked once, then honoured silently on every re-run. Install scope, supervisor kind, and dev-mode are derived rather than asked; rule and template sync follow a 3-case file-sync policy (write/merge silently, prompt only on a genuine conflict, orphans left in place). `lazy-core.setup` drops its run-the-chain confirmation.
