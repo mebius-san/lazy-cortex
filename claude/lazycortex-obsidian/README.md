@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#fde68a"
+iconize_color: "#86efac"
 ---
 # lazycortex-obsidian
 
@@ -52,6 +52,20 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 Requires these plugins from the same marketplace:
 
 - [`lazycortex-core`](../lazycortex-core/) — Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-model routing + settings management)
+
+## Documentation
+
+Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
+
+- [diagram-rendering](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/diagram-rendering.md) — Wire the lazycortex-diagram engine's CSS snippets and click-to-zoom plugin into your Obsidian vault so mermaid and ASCII diagrams render correctly in Reading Mode.
+- [iconize](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/iconize.md) — Scaffold, configure, and run the iconize-sync system to keep Obsidian file and folder icons in sync with your vault's frontmatter-driven icon registry.
+- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/install-and-audit.md) — Install, keep current, and audit the lazycortex-obsidian plugin — vault bootstrap, Obsidian plugin management, and semantic integrity checks in one pass.
+- [tag-pages](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/tag-pages.md) — Keep a Tags/ folder in sync with every tag used across your vault — pages created, updated, and pruned automatically.
+- [vault-bootstrap](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/walkthroughs/vault-bootstrap.md) — Go from a bare repo to a fully-wired Obsidian vault — Iconize sync, diagram render glue, and click-to-zoom — in a single chained install pass.
+- [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/troubleshooting.md) — Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, and tag pages.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/faq.md) — Answers to common questions about vault setup, Iconize, diagram render glue, plugin updates, and tag pages for lazycortex-obsidian.
+
+Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-obsidian/help/`.
 
 ## Skills
 

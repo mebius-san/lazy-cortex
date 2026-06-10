@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#fde68a"
+iconize_color: "#86efac"
 ---
 # lazycortex-core
 
