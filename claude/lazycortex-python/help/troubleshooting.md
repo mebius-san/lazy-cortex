@@ -45,7 +45,7 @@ source_skills:
 
 ## `pyproject.toml` is absent and checker sections never merged
 
-**Symptom**: `/lazy-python.install` Phase 3 completes but the seven checker sections (`[tool.pcf]`, `[tool.toi]`, `[tool.pytest]`, `[tool.mypy]`, `[tool.pylint]`, `[tool.ruff]`, and optionally `[tool.pch]`) are missing when you run `/lazy-python.audit`. The audit reports `check5 FAIL` (three or more sections missing, or `pyproject.toml` not found).
+**Symptom**: `/lazy-python.install` completes but the six always-on checker sections (`[tool.pcf]`, `[tool.toi]`, `[tool.pytest]`, `[tool.mypy]`, `[tool.pylint]`, `[tool.ruff]`) are missing when you run `/lazy-python.audit` (`[tool.pch]` is separate — added only when PyCharm is present, never a finding). The audit reports `check5 FAIL` (three or more sections missing, or `pyproject.toml` not found).
 
 **Likely cause**: The project has no `pyproject.toml` at the repo root. Phase 3 merges into the existing file; it does not create one from scratch.
 

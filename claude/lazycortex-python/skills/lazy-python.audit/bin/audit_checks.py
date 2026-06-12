@@ -11,11 +11,11 @@ Checks:
   check2 — references cited from rules resolve to plugin reference files
   check3 — plugin tree has all required artifacts
   check4 — wrappers deployed (consumer cli/{chk,tst}-py executable + substituted)
-  check5 — pyproject.toml contains the seven checker sections (incl. [tool.ruff])
+  check5 — pyproject.toml contains the six always-on checker sections ([tool.pch] is optional)
   check6 — PyCharm inspect.sh is available on $PATH (probe)
   check7 — overlay scaffolding files carry the canonical header
   check8 — scaffold registry entry (consumer-local `.claude/templates/python/python-template.py` in `.claude/rules/lazy-core.scaffold.md`)
-  check9 — CLAUDE.md carries a `lazy-python` bullet under `## Guidelines`
+  check9 — informational: reports whether CLAUDE.md carries a `lazy-python` pointer (install never writes one)
   check10 — plugin ships a well-formed PostToolUse hook manifest at `hooks/hooks.json`
   check11 — venv probe-then-fallback state mirrors `_ensure_venv.sh`
 """
@@ -239,13 +239,13 @@ class Check4Wrappers:
 # ----------------------------------------------------------------------------------------
 class Check5Pyproject:
   """
-  Verify consumer `pyproject.toml` contains the seven install-bootstrapped checker sections.
+  Verify consumer `pyproject.toml` contains the six always-on install-bootstrapped checker sections.
 
   Attributes:
     consumer_dir: Absolute path to the consumer repository root.
   """
 
-  # pch is opt-in per repo (added on request during install), so it is NOT a required section.
+  # pch is added by install only when PyCharm is present on the machine, so it is NOT a required section.
   REQUIRED: tuple = ("tool.pcf", "tool.toi", "tool.pytest", "tool.mypy", "tool.pylint", "tool.ruff")
 
   def __init__(self, *, consumer_dir: Path) -> None:
@@ -405,7 +405,11 @@ class Check8Scaffold:
 # ----------------------------------------------------------------------------------------
 class Check9ClaudeMd:
   """
-  Verify the consumer CLAUDE.md references `lazy-python` (typically under `## Guidelines`).
+  Report, informationally, whether the consumer CLAUDE.md carries a `lazy-python` pointer.
+
+  The pointer is optional and is never written by install (the plugin rules load from
+  `.claude/rules/` regardless), so absence is never a finding — this check only surfaces
+  whether an operator added one by hand.
 
   Attributes:
     consumer_dir: Absolute path to the consumer repository root.
@@ -434,23 +438,23 @@ class Check9ClaudeMd:
 
   def run(self) -> dict:
     """
-    Check that a CLAUDE.md exists (at repo root or `.claude/`) and mentions the lazy-python pointer.
+    Report whether a CLAUDE.md (at repo root or `.claude/`) mentions the lazy-python pointer.
 
     Returns:
-      Finding dict with `severity` (PASS or WARN) and a `message` string.
+      Finding dict with `severity` (PASS when a pointer is present, otherwise INFO) and a `message` string.
     """
     claude_md = self._resolve_target(self.consumer_dir)
-    # guard: no CLAUDE.md anywhere → nothing the install pointer could have landed in
+    # guard: no CLAUDE.md anywhere → nothing to report; install never writes a pointer, so this is not a finding
     if claude_md is None:
-      return {"severity": "WARN", "message": "no CLAUDE.md present (root or .claude/)"}
+      return {"severity": "INFO", "message": "no CLAUDE.md (root or .claude/) — optional; install adds none"}
     rel = claude_md.relative_to(self.consumer_dir).as_posix()
     body = claude_md.read_text()
     if self.POINTER not in body:
       return {
-        "severity": "WARN",
-        "message": f"no {self.POINTER!r} pointer in {rel} — user may have declined at install",
+        "severity": "INFO",
+        "message": f"no {self.POINTER!r} pointer in {rel} — optional; the plugin rules load from .claude/rules/ regardless",
       }
-    return {"severity": "PASS", "message": f"{rel} carries a lazy-python pointer"}
+    return {"severity": "PASS", "message": f"{rel} carries a lazy-python pointer (operator-added)"}
 
 
 # ----------------------------------------------------------------------------------------

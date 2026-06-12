@@ -184,7 +184,7 @@ Gate 1 (`daemon.enabled`) is owned by `lazy-core.install`. This skill only **rea
 PYTHONPATH=<core-bin> python3 -c "from lazy_settings import load_tracked_section; from pathlib import Path; print(load_tracked_section(Path('<repo-root>/.claude/lazy.settings.json'),'daemon').get('enabled','unset'))"
 ```
 
-- Output `False` → the project does not use the daemon. **Skip ONLY the routine registration silently** (a routine that can't fire is dead config; the expert above stays registered). State the routine outcomes `skipped-daemon-disabled` and jump straight to the *First scope offer* below.
+- Output `False` → the project does not use the daemon. **Skip ONLY the routine registration silently** (a routine that can't fire is dead config; the expert above stays registered). State the routine outcomes `skipped-daemon-disabled` and jump straight to the *First scope pointer* below.
 - Output `True` or `unset` → register the routines below (do NOT ask; `lazy-core.install` owns Gate 1, and `unset` means the user has not yet run it — register so they are ready when the daemon is enabled).
 
 ### Routines
@@ -222,9 +222,9 @@ Write the file if any mutation happened (preserve `_version: 1` for both `routin
 
 Outcome (one line per seeded entry): `experts.wiki-curator: <seeded|kept-local>` (always), `routines.<key>: <seeded|kept-local|skipped-daemon-disabled>`.
 
-### First scope offer
+### First scope pointer
 
-Skip this prompt entirely if `wiki.scopes` already has entries (a re-run on an already-configured repo must not re-ask). Only when `wiki.scopes` is empty, ask the user: *"No scopes are configured yet — create the first scope now with `/wiki.configure`?"* options: **yes** / **skip**.
+Do NOT ask. When `wiki.scopes` is empty, print a one-line pointer so the operator knows the next step — *"No wiki scopes configured yet — run `/wiki.configure` to add the first one."* When `wiki.scopes` already has entries, say nothing. Configuring a scope is genuine project work the operator drives via `/wiki.configure`; this install step only points at it, never prompts.
 
 If yes → invoke `Skill(skill: "lazycortex-wiki:lazy-wiki.configure")`.
 

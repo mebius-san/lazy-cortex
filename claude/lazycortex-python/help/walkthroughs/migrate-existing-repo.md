@@ -4,7 +4,7 @@ summary: Adopt lazycortex-python in a repo with pre-existing Python, run chk-py 
 last_regen: 2026-06-01
 diagram_spec:
   anchor: "Migration flow"
-  request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → 7 phases complete (mirror rules, deploy wrappers, bootstrap pyproject.toml, detect pch, scaffold overlay, sync scaffold template, offer CLAUDE.md pointer) → user runs chk-py all -q → six-step gate surfaces existing violations → user fixes violations in chunks and commits iteratively until chk-py all exits clean"
+  request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install completes (mirror rules, deploy wrappers, detect PyCharm, bootstrap pyproject.toml with [tool.pch] when PyCharm present, scaffold overlay, sync scaffold template) → user runs chk-py all -q → six-step gate surfaces existing violations → user fixes violations in chunks and commits iteratively until chk-py all exits clean"
   kind_hint: sequence
 source_skills:
   - lazy-python.install
