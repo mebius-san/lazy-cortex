@@ -4,7 +4,7 @@ summary: Run /lazy-python.install in a clean repo, confirm the checker stack is 
 last_regen: 2026-06-01
 diagram_spec:
   anchor: "Install-and-first-check flow"
-  request: "Sequence diagram: user invokes /lazy-python.install → 7 phases (mirror rules, deploy wrappers, bootstrap pyproject.toml, detect pch, scaffold overlay, sync scaffold template, offer CLAUDE.md pointer) → PostToolUse hook auto-registers from plugin manifest → user runs chk-py all -q → venv resolver creates .venv and runs the six-step gate → zero violations reported"
+  request: "Sequence diagram: user invokes /lazy-python.install → install completes (mirror rules, deploy wrappers, detect PyCharm, bootstrap pyproject.toml with [tool.pch] when PyCharm present, scaffold overlay, sync scaffold template) → PostToolUse hook auto-registers from plugin manifest → user runs chk-py all -q → venv resolver creates .venv and runs the six-step gate → zero violations reported"
   kind_hint: sequence
 source_skills:
   - lazy-python.install

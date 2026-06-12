@@ -155,9 +155,9 @@ class Phase3Pyproject:
   Idempotent — re-running is a no-op once every checker section is present.
   """
 
-  # Always-deployed checker sections. pch is opt-in — it spins up a headless
-  # PyCharm and is meaningless without it, so it is deployed only when the
-  # install skill sets the matching env flag (see OPTIONAL_SECTIONS + run()).
+  # Always-deployed checker sections. pch is added only when PyCharm is present —
+  # it spins up a headless PyCharm and is meaningless without it, so it is deployed
+  # only when the install skill sets the matching env flag (see OPTIONAL_SECTIONS + run()).
   CHECKER_SECTIONS = ("pcf", "toi", "pytest", "mypy", "pylint", "ruff")
   OPTIONAL_SECTIONS = {"pch": "LAZY_PYTHON_ENABLE_PCH"}
 

@@ -570,6 +570,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 1.7.0 — 2026-06-11 UTC
+
+- `/lazy-python.install` no longer asks about PyCharm offline inspections (`pch`) or a CLAUDE.md pointer. It probes for PyCharm first and adds `[tool.pch]` to `pyproject.toml` automatically when PyCharm is present (omitting it otherwise) — no prompt — and it never touches your `CLAUDE.md` (the plugin rules load from `.claude/rules/` regardless). `/lazy-python.audit` follows suit: `[tool.pch]` and the CLAUDE.md pointer are no longer treated as required, so their absence is informational rather than a warning.
+
 ### 1.6.0 — 2026-06-10 UTC
 
 - `lazy-python.install` resolves drift via the file-sync policy (pyproject and overlay guidelines merge silently, prompt only on a direct contradiction), derives install scope, and persists the `pch` and CLAUDE.md-pointer choices so a 'no' is never re-asked.
@@ -592,6 +596,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 1.5.0 — 2026-06-11 UTC
+
+- `/lazy-wiki.install` no longer prompts to create your first wiki scope at the end. When no scopes are configured it just points you at `/wiki.configure` — configuring a scope is operator-driven work, not an install question.
 
 ### 1.4.0 — 2026-06-10 UTC
 

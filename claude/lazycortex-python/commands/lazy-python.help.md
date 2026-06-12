@@ -11,7 +11,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 **Skills** (invoke as `/<name>` or via Skill tool):
 
-- `lazy-python.install` — 7-phase wizard: mirrors rules, deploys `chk-py`/`tst-py` wrappers into `cli/`, bootstraps `pyproject.toml` checker sections, gitignores `.venv/`, scaffolds `docs/guidelines/` overlay stubs, syncs the scaffold template, and offers an opt-in CLAUDE.md pointer. The PostToolUse hook auto-registers from the plugin manifest — no install step needed. Idempotent.
+- `lazy-python.install` — quiet install: mirrors rules, deploys `chk-py`/`tst-py` wrappers into `cli/`, bootstraps `pyproject.toml` checker sections (adds `[tool.pch]` automatically when PyCharm is present), gitignores `.venv/`, scaffolds `docs/guidelines/` overlay stubs, syncs the scaffold template. Asks nothing — scope and pch are derived, and it never touches CLAUDE.md. The PostToolUse hook auto-registers from the plugin manifest — no install step needed. Idempotent.
 - `lazy-python.audit` — read-only 11-check health report: rules mirror integrity, reference resolution, artifact presence, wrappers, pyproject sections (incl. `[tool.ruff]`), hook manifest, venv state (`mypy`/`pylint`/`pytest`/`ruff` + `pytest-clarity`/`pytest-sugar`).
 - `lazy-python.check-style` — manual 6-step review: reads canon + overlay, identifies modified files, runs manual inspection categories, then dispatches `chk-py` + `tst-py` to gate.
 

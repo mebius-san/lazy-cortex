@@ -106,4 +106,4 @@ Re-run `/lazy-python.install` — Phase 2 deploys `cli/chk-py` and `cli/tst-py` 
 
 ## `pyproject.toml` is missing the checker sections after install.
 
-Run `/lazy-python.audit` Check 5 to confirm which of the seven required sections (`[tool.pcf]`, `[tool.toi]`, `[tool.pch]`, `[tool.pytest]`, `[tool.mypy]`, `[tool.pylint]`, `[tool.ruff]`) are absent, then re-run `/lazy-python.install`. Phase 3 merges only the missing sections from `pyproject-defaults.toml` into your `pyproject.toml`; existing sections are never overwritten. If your `pyproject.toml` does not exist at all, Phase 3 creates it with the defaults.
+Run `/lazy-python.audit` Check 5 to confirm which of the six always-on sections (`[tool.pcf]`, `[tool.toi]`, `[tool.pytest]`, `[tool.mypy]`, `[tool.pylint]`, `[tool.ruff]`) are absent, then re-run `/lazy-python.install` (`[tool.pch]` is separate — added only when PyCharm is present, never a Check 5 finding). The install merges only the missing sections from `pyproject-defaults.toml` into your `pyproject.toml`; existing sections are never overwritten. If your `pyproject.toml` does not exist at all, it is created with the defaults.

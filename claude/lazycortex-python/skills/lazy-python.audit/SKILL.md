@@ -21,7 +21,7 @@ This skill has 12 ordered steps (11 checks plus the log write). The executing ag
    - `Check 6 — PyCharm inspect.sh available`
    - `Check 7 — Overlay scaffolding headers`
    - `Check 8 — Scaffold registry entry`
-   - `Check 9 — CLAUDE.md pointer presence`
+   - `Check 9 — CLAUDE.md pointer (informational)`
    - `Check 10 — PostToolUse hook registration`
    - `Check 11 — Venv bootstrap state`
    - `Step 12 — Log the run`
@@ -79,7 +79,7 @@ Outcome: `PASS` (both wrappers deployed and substituted) / `WARN` (one or both w
 
 ## Check 5: Pyproject checker sections
 
-Verify `<consumer>/pyproject.toml` carries the seven checker-stack sections (`[tool.pcf]`, `[tool.toi]`, `[tool.pch]`, `[tool.pytest]`, `[tool.mypy]`, `[tool.pylint]`, `[tool.ruff]`). Install Phase 3 merges these from `pyproject-defaults.toml`; absence usually means the install never ran on this repo.
+Verify `<consumer>/pyproject.toml` carries the six always-on checker sections (`[tool.pcf]`, `[tool.toi]`, `[tool.pytest]`, `[tool.mypy]`, `[tool.pylint]`, `[tool.ruff]`). Install merges these from `pyproject-defaults.toml`; absence usually means the install never ran on this repo. `[tool.pch]` is NOT required — install adds it only when PyCharm is present on the machine, so its absence is never a finding here.
 
 Run:
 
@@ -87,7 +87,7 @@ Run:
 Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check5 ${CLAUDE_PROJECT_DIR})
 ```
 
-Outcome: `PASS` (all seven sections present) / `WARN` (1-2 sections missing) / `FAIL` (3+ sections missing, or `pyproject.toml` itself absent).
+Outcome: `PASS` (all six always-on sections present) / `WARN` (1-2 sections missing) / `FAIL` (3+ sections missing, or `pyproject.toml` itself absent).
 
 ## Check 6: PyCharm inspect.sh available
 
@@ -125,9 +125,9 @@ Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py 
 
 Outcome: `PASS` (entry present) / `WARN` (file missing or entry absent).
 
-## Check 9: CLAUDE.md pointer presence
+## Check 9: CLAUDE.md pointer (informational)
 
-Verify `<consumer>/CLAUDE.md` carries a `lazy-python` pointer (typically a bullet under `## Guidelines`). Absence is `WARN` not `FAIL` because the consumer owns CLAUDE.md — they may have declined the install-time offer to write it.
+Report whether `<consumer>/CLAUDE.md` carries a `lazy-python` pointer. This is **informational only** — install never writes such a pointer (the plugin rules load from `.claude/rules/` regardless), so a present pointer is `PASS` and an absent one is `INFO`, never a `WARN`/`FAIL`. An operator may add one by hand if they want it surfaced in their CLAUDE.md.
 
 Run:
 
@@ -135,7 +135,7 @@ Run:
 Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check9 ${CLAUDE_PROJECT_DIR})
 ```
 
-Outcome: `PASS` (pointer present) / `WARN` (CLAUDE.md absent, or no `lazy-python` mention).
+Outcome: `PASS` (pointer present) / `INFO` (CLAUDE.md absent, or no `lazy-python` mention — optional, never a finding).
 
 ## Check 10: PostToolUse hook manifest
 
@@ -182,7 +182,7 @@ Check  5 — Pyproject checker sections     [<sev>] <message>
 Check  6 — PyCharm inspect.sh available   [<sev>] <message>
 Check  7 — Overlay scaffolding headers    [<sev>] <message>
 Check  8 — Scaffold registry entry        [<sev>] <message>
-Check  9 — CLAUDE.md pointer presence     [<sev>] <message>
+Check  9 — CLAUDE.md pointer (info)       [<sev>] <message>
 Check 10 — PostToolUse hook registration  [<sev>] <message>
 Check 11 — Venv bootstrap state           [<sev>] <message>
 

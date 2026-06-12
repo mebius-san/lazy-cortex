@@ -11,7 +11,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 **Skills** (invoke as `/<name>` or via Skill tool):
 
-- `wiki.install` — bootstrap the plugin: create config directories, register the `wiki` settings section, register the git-watch and weekly-scan routines, compose the `wiki-curator` expert, sync `lazy-wiki.navigation` rule to the consumer's rules directory, and optionally create the first scope.
+- `wiki.install` — bootstrap the plugin: create config directories, register the `wiki` settings section, register the git-watch and weekly-scan routines, compose the `wiki-curator` expert, sync `lazy-wiki.navigation` rule to the consumer's rules directory, then point you at `/wiki.configure` for the first scope.
 - `wiki.configure` — interactive wizard (one question at a time) to create or edit a scope: scope id, path globs (markdown and/or code), optional exclude paths, tag axes, topics-index path. Writes the scope entry to `lazy.settings.json[wiki.scopes]`.
 - `wiki.relink-doc` — curate a single node: dispatch the `wiki-curator` expert for that node, then run the deterministic pass to update the topic index.
 - `wiki.relink-all` — full pass over all nodes in a scope: `wiki.relink-doc` per node, then full rebuild of `topics.md`.
