@@ -570,6 +570,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 1.7.1 — 2026-06-13 UTC
+
+- Documentation fix: the `/lazy-python.install` walkthrough now matches the actual install — seven steps that ask nothing (PyCharm `pch` is auto-detected, `CLAUDE.md` is never touched). The previous text still described the removed prompts. No behaviour change — `/plugin update` is all that's needed.
+
 ### 1.7.0 — 2026-06-11 UTC
 
 - `/lazy-python.install` no longer asks about PyCharm offline inspections (`pch`) or a CLAUDE.md pointer. It probes for PyCharm first and adds `[tool.pch]` to `pyproject.toml` automatically when PyCharm is present (omitting it otherwise) — no prompt — and it never touches your `CLAUDE.md` (the plugin rules load from `.claude/rules/` regardless). `/lazy-python.audit` follows suit: `[tool.pch]` and the CLAUDE.md pointer are no longer treated as required, so their absence is informational rather than a warning.
