@@ -10,7 +10,6 @@ Phases:
   phase3 — bootstrap consumer pyproject.toml with checker sections
   phase4 — probe for PyCharm inspect.sh CLI (pch prereq)
   phase5 — scaffold project overlay guidelines under docs/guidelines/
-  phase7 — offer to append lazy-python discipline pointer to consumer's CLAUDE.md
 
 Scaffold-template sync (formerly phase6) is no longer a phase here — the install
 skill's Step 6 dispatches `lazycortex-core:lazy-core.scaffold-sync`, which copies
@@ -298,106 +297,6 @@ class Phase5Overlay:
     )
 
 
-# ----------------------------------------------------------------------------------------
-class Phase7ClaudeMd:
-  """
-  Install phase that appends a lazy-python discipline pointer bullet to the consumer's
-  `CLAUDE.md` under its `## Guidelines` section.
-  """
-
-  MARKER = "lazy-python plugin rules"
-  BULLET = (
-    "- Python style/docstring/test discipline is enforced by lazy-python plugin rules at "
-    "`.claude/rules/lazy-python.*.md`. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.guidelines-index.md` "
-    "for the full canon, and `docs/guidelines/*.md` for project-specific overlays."
-  )
-
-  def __init__(self, *, consumer_dir: Path) -> None:
-    self.consumer_dir: Path = consumer_dir
-    self.target: Path | None = self._resolve_target(consumer_dir)
-
-  @staticmethod
-  def _resolve_target(consumer_dir: Path) -> Path | None:
-    """
-    Locate the consumer's `CLAUDE.md`, preferring the repo root over `.claude/CLAUDE.md`.
-
-    Returns:
-      Path to the located file, or `None` if neither location exists.
-    """
-    root = consumer_dir / "CLAUDE.md"
-    if root.exists():
-      return root
-    dot_claude = consumer_dir / ".claude/CLAUDE.md"
-    if dot_claude.exists():
-      return dot_claude
-    return None
-
-  def run(self) -> int:
-    """
-    Append the discipline pointer bullet to the consumer's `CLAUDE.md` when consent is given.
-
-    Returns:
-      0 on success or when the step is skipped due to missing consent or missing file.
-    """
-    accept = os.environ.get("LAZY_PYTHON_INSTALL_ACCEPT", "0") == "1"
-    # guard: decline → leave the consumer's CLAUDE.md untouched (owner is the consumer)
-    if not accept:
-      print("claude-md-pointer-skipped")
-      return 0
-    # guard: no CLAUDE.md anywhere → nothing to append to; do not silently create one
-    if self.target is None:
-      print("claude-md-pointer-skipped: no CLAUDE.md (root or .claude/)")
-      return 0
-    content = self.target.read_text()
-    # guard: idempotency — bullet already present
-    if self.MARKER in content:
-      print("claude-md-pointer-already-present")
-      return 0
-    # Append to ## Guidelines section, or add the section + bullet at end
-    if "## Guidelines" in content:
-      new_content = self._append_to_guidelines(content)
-    else:
-      new_content = content.rstrip() + "\n\n## Guidelines\n\n" + self.BULLET + "\n"
-    self.target.write_text(new_content)
-    print("claude-md-pointer-added")
-    return 0
-
-  @classmethod
-  def _append_to_guidelines(cls, content: str) -> str:
-    """
-    Insert the pointer bullet at the end of the `## Guidelines` section in the given text.
-
-    Returns:
-      The full file content with the bullet appended inside the `## Guidelines` section.
-    """
-    lines = content.splitlines(keepends = True)
-    out: list[str] = []
-    in_section = False
-    inserted = False
-    for line in lines:
-      # Detect the start of the Guidelines section
-      if line.strip() == "## Guidelines":
-        out.append(line)
-        in_section = True
-        continue
-      # Next top-level section closes the Guidelines block — inject before it
-      if in_section and line.startswith("## ") and line.strip() != "## Guidelines":
-        if out and not out[-1].endswith("\n"):
-          out.append("\n")
-        out.append(cls.BULLET + "\n\n")
-        out.append(line)
-        in_section = False
-        inserted = True
-        continue
-      out.append(line)
-    # guard: hit EOF still inside the Guidelines section → append the bullet at end
-    if in_section and not inserted:
-      if out and not out[-1].endswith("\n"):
-        out.append("\n")
-      out.append(cls.BULLET + "\n")
-    return "".join(out)
-
-
 def main() -> int:
   """
   Dispatch a single named phase against a consumer repository directory.
@@ -417,7 +316,6 @@ def main() -> int:
     "phase3": Phase3Pyproject,
     "phase4": Phase4Pch,
     "phase5": Phase5Overlay,
-    "phase7": Phase7ClaudeMd,
   }
   handler = phases.get(phase)
   if handler is None:
