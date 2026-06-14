@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, doctor-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, lookup-expert, scaffold, error-record, error-list, settings-get, settings-set, permission-allow")
+         "Subcommands: expert-pump-once, doctor-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, lookup-expert, scaffold, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols")
 
 
 def _cmd_consume_job(argv: list[str]) -> int:
@@ -380,6 +380,9 @@ def main() -> int:
     elif sub == "permission-allow":
         from permission_cli import cmd_permission_allow
         return cmd_permission_allow(sys.argv[2:])
+    elif sub == "add-protocols":
+        from protocol_attach import cmd_add_protocols
+        return cmd_add_protocols(sys.argv[2:])
     else:
         print(f"unknown subcommand: {sub}\n{USAGE}", file=sys.stderr); return 2
 

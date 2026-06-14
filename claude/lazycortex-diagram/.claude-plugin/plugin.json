@@ -1,6 +1,6 @@
 {
   "name": "lazycortex-diagram",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "description": "Format-agnostic diagram engine: /lazy-diagram.draw dispatcher + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.",
   "author": {
     "name": "Mebius-san"

@@ -1,7 +1,7 @@
 ---
 name: lazy-review.install
 description: "Per-repo bootstrap for lazycortex-review. Seeds lazy.settings.json with review.classes / experts defaults, creates .experts/.jobs/ and .logs/lazy-review/runs/ directories, registers the daemon-gated lazy-review.scan routine, and registers the plugin-CLI Bash allow-pattern in settings.local.json. Idempotent and quiet on re-run — every decision is derived or read-first, never re-asked; an enabled plugin installs its whole surface."
-allowed-tools: Read, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(lazycortex-core *)
+allowed-tools: Read, AskUserQuestion, Skill, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(lazycortex-core *)
 lazy_setup_phase: install
 ---
 # lazy-review.install
@@ -10,16 +10,17 @@ Per-repo bootstrap: gets a clean checkout to the point where the daemon can star
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
+This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. Canonical titles:
    - `Step 1 — Bootstrap settings + dirs`
    - `Step 2 — Gate the lazy-review.scan routine on daemon.enabled`
-   - `Step 3 — Surface gitignore suggestions`
-   - `Step 4 — Register the plugin-CLI Bash allow-pattern`
-   - `Step 5 — Point user at /lazy-review.configure`
+   - `Step 3 — Attach optional routine protocols`
+   - `Step 4 — Surface gitignore suggestions`
+   - `Step 5 — Register the plugin-CLI Bash allow-pattern`
+   - `Step 6 — Point user at /lazy-review.configure`
    - `Report`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** Each step emits a one-word outcome (`installed` / `already-installed` / `registered` / `already-present` / `skipped-daemon-disabled` / `surfaced` / `cli-allow-added` / `cli-allow-already-present` / `pointed` / `report-emitted`).
+2. **Mark each task `in_progress` on enter and `completed` on exit.** Each step emits a one-word outcome (`installed` / `already-installed` / `registered` / `already-present` / `skipped-daemon-disabled` / `attached` / `no-relevant-candidates` / `declined` / `surfaced` / `cli-allow-added` / `cli-allow-already-present` / `pointed` / `report-emitted`).
 3. **Do not reach the Report step until every prior task is `completed`.**
 
 ## Decisions are remembered, never re-asked
@@ -86,7 +87,22 @@ unregister_routine(Path('.'), 'lazy-review.scan')
 
 - **`unset` or `True`** → proceed; leave the `lazy-review.scan` routine registered as seeded by Step 1. Do NOT re-seed if already present. State **registered** (newly seeded by Step 1) or **already-present** (the routine pre-existed).
 
-## Step 3 — Surface gitignore suggestions
+## Step 3 — Attach optional routine protocols
+
+If Step 2 unregistered `lazy-review.scan` (outcome **skipped-daemon-disabled**), skip this step with the same outcome — there is no routine to attach protocols to.
+
+Step 1's seed gives `lazy-review.scan` its **mandatory** protocols (`lazy-review.doc-review-protocol` + `lazy-core.markdown-style`). Other plugins may ship references flagged `routine_protocol_candidate: true` that the operator may optionally attach. Delegate the discover → relevance-judge → offer → attach flow to the shared core helper, which leaves the routine config untouched apart from its `protocols` list:
+
+```
+Skill(skill: "lazycortex-core:lazy-routine.offer-protocols",
+      args: "--routine lazy-review.scan --context 'review of authored markdown documents — prose the writer may want to illustrate'")
+```
+
+The helper reads each candidate's frontmatter essence, offers only the ones relevant to that context, and unions the operator's picks into `lazy-review.scan`'s existing `protocols` list (idempotent — already-attached ones are not re-offered). Record its returned outcome.
+
+Outcome: the helper's return value — **attached:<n>** / **declined** / **no-relevant-candidates** — or **skipped-daemon-disabled** when Step 2 removed the routine.
+
+## Step 4 — Surface gitignore suggestions
 
 The runtime writes operator-private state into the repo: the whole `.experts/` tree (job queue, cross-repo trackers, subprocess locks) and tick logs under `.logs/lazy-review/`. Operators typically want both gitignored. This skill MUST NOT write to `.gitignore` itself — instead, print the recommended lines and tell the operator to add them by hand:
 
@@ -97,7 +113,7 @@ The runtime writes operator-private state into the repo: the whole `.experts/` t
 
 Outcome: `surfaced`.
 
-## Step 4 — Register the plugin-CLI Bash allow-pattern
+## Step 5 — Register the plugin-CLI Bash allow-pattern
 
 The plugin ships `bin/lazycortex-review` which is invoked from other skills via `Bash(lazycortex-review ...)` — `lazy-review.start`, `lazy-review.finalize`, and the review dispatcher all call it. Expert subprocesses spawned by the `lazy-core.runtime` daemon run under Claude Code's `dontAsk` permission mode — that mode silently denies any Bash command not on the auto-allow list. Without this entry, every cross-skill CLI invocation from a dispatched expert fails with `Permission to use Bash has been denied because Claude Code is running in don't ask mode`, and the agent drifts off-protocol mid-step.
 
@@ -111,7 +127,7 @@ Bash(lazycortex-core permission-allow <repo-root>/.claude/settings.local.json "B
 
 Outcome: `cli-allow-added` or `cli-allow-already-present`.
 
-## Step 5 — Point user at /lazy-review.configure
+## Step 6 — Point user at /lazy-review.configure
 
 Tell the operator: *"Settings scaffolded with empty `review.classes` — run `/lazy-review.configure` to register your first class."*
 

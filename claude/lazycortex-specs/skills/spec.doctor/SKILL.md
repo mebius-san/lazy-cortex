@@ -138,11 +138,11 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/spec.lifecycle-protocol.md`, `${CLAUDE_PLU
 
 **Request intake**
 
-Per `${CLAUDE_PLUGIN_ROOT}/references/spec.request-protocol.md`. Validate `<spec_path>/requests/` — request files stay there for their entire lifecycle (no `archive/` move).
+Per `${CLAUDE_PLUGIN_ROOT}/references/spec.request-protocol.md`. Validate the single vault-root `<vault-root>/requests/` inbox (NOT per-product `<spec_path>/requests/`) — request files stay there for their entire lifecycle (no `archive/` move).
 
 - Each `requests/<slug>.md` carries `spec_role: request`, `request_status` ∈ `{draft, accepted, rejected}`, `request_class` ∈ the closed-meta ∪ asset-category set, and `created` (ISO date). Missing key / out-of-set value / malformed date → FAIL.
 - Active-inbox files (`request_status: draft`) are eligible for routine pick-up; terminal files (`accepted | rejected`) carry a terminal status callout above the title and, for `accepted`, at least one `[[<entity-folder-note>]]` wikilink in the callout body (missing → FAIL).
-- **`source_requests` forward link** — every wikilink in a status folder-note's `spec_source_requests` list MUST resolve to an existing request file under `<spec_path>/requests/`. Unresolvable → FAIL. (Forward-only; the reverse link lives in the request's terminal callout body and is not separately enforced.)
+- **`source_requests` forward link** — every wikilink in a status folder-note's `spec_source_requests` list MUST resolve to an existing request file under the vault-root `requests/` inbox. Unresolvable → FAIL. (Forward-only; the reverse link lives in the request's terminal callout body and is not separately enforced.)
 
 ## Cross-reference check (Check 8, inline in coordinator)
 

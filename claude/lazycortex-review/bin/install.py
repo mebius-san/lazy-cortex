@@ -32,7 +32,7 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
-from keys import Paths, ReviewKey  # noqa: E402
+from keys import Paths, ReviewKey  # noqa: E402  # pylint: disable=wrong-import-position
 
 
 _REQUIRED_DIRS = (
@@ -48,6 +48,25 @@ _DEFAULT_SETTINGS = {
     },
     "experts": {
         "_version": 1,
+        # Plugin-shipped system experts, registered unconditionally so a review
+        # class (or the spec.product-config wizard) can reference them without a
+        # separate wiring step. Absent-only merge — never overwrites local edits.
+        "lazy-review.historian": {
+            "agent": "lazycortex-review:lazy-review.historian",
+            "git_author": {
+                "name": "Doc Review Historian",
+                "email": "lazy-review.historian@lazycortex.local",
+            },
+            # historian commits the Doc-Review trailer locally → needs commit rights
+            "can_commit_in_repo": True,
+        },
+        "doc_doctor": {
+            "agent": "lazycortex-review:lazy-review.doc_doctor",
+            "git_author": {
+                "name": "Doc Doctor",
+                "email": "doc_doctor@lazycortex.local",
+            },
+        },
     },
     "routines": {
         "_version": 1,

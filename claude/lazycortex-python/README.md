@@ -134,5 +134,4 @@ Invoke skills with slash commands:
 /lazy-python.audit
 /lazy-python.check-style
 /lazy-python.install
-/lazy-python.help
 ```

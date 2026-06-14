@@ -1,3 +1,6 @@
+---
+description: Shared logging-waiver classification heuristic for lazy-log.install and lazy-log.audit — the candidate classes and suggested waiver-reason templates, kept as one source of truth.
+---
 # Logging-Waiver Candidate Heuristic
 
 Shared classification rules for `lazy-log.install` and `lazy-log.audit`. One source of truth.
