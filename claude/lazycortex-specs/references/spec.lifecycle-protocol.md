@@ -1,3 +1,8 @@
+---
+name: spec.lifecycle-protocol
+version: 1
+description: Asset progression contract — per-file spec_stage on authored docs and the five flat S0..S5 gates on the status folder-note, with one mutator per layer.
+---
 # Asset lifecycle protocol — per-file stages and gates
 
 Asset progression is tracked at two levels that feed each other:

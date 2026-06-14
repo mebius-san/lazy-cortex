@@ -1,3 +1,8 @@
+---
+name: spec.sources-protocol
+version: 1
+description: Contract for external references a spec doc carries — source attribution, source-code links, and product dependencies, with forward-only frontmatter as source of truth.
+---
 # Sources protocol — attribution, code links, dependencies
 
 Every external reference a spec doc carries goes through one of three channels. They share a single principle: forward-only links in frontmatter as source of truth, optional body-rendering as a projection.
@@ -14,7 +19,7 @@ The pattern is cross-spec — every authored doc (asset-level `design.md`, `plan
 
 ### Frontmatter — `spec_source_requests`
 
-A list of path-qualified wikilinks pointing at request files in `<spec_path>/requests/`. Forward-only — the reverse link (request → asset) lives in the request's terminal status callout body, not as a separate field.
+A list of path-qualified wikilinks pointing at request files in the vault-root `requests/` inbox. Forward-only — the reverse link (request → asset) lives in the request's terminal status callout body, not as a separate field.
 
 Lives on:
 - every authored spec doc (`design.md`, `plan.md`, `bug.md`, asset-level `tech.md`) — the per-doc subset of requests that contributed to THIS doc;
@@ -22,7 +27,7 @@ Lives on:
 
 `[]` when the doc / asset was created directly (no request origin).
 
-`spec.doctor` validates the forward link: every wikilink resolves to an existing request file under `<spec_path>/requests/`. Unresolvable wikilinks are a FAIL finding.
+`spec.doctor` validates the forward link: every wikilink resolves to an existing request file under the vault-root `requests/` inbox. Unresolvable wikilinks are a FAIL finding.
 
 ### Frontmatter — `spec_source_docs`
 

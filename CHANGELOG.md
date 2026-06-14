@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.4.0 — 2026-06-14 UTC
+
+- New `lazy-routine.offer-protocols` skill and `lazycortex-core add-protocols` CLI verb discover optional protocol references and interactively offer them during routine setup — `lazy-review.install` and `spec.install` both use it, so operators are prompted to attach relevant protocols (e.g. `markdown-style`, `doc-review-protocol`) at install time rather than wiring them manually after the fact.
+
 ### 5.3.0 — 2026-06-10 UTC
 
 - The "run the daemon here?" decision is now correctly **per-checkout**, not per-machine. `daemon.run_here` lives in each working copy's own gitignored local settings, so several checkouts of the same project on one machine each decide independently — the daemon runs only on the checkouts you opted in.
@@ -337,6 +341,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 2.1.0 — 2026-06-14 UTC
+
+- During `spec.install`, a new sub-step offers relevant routine protocols for the spec routines and merges the operator's chosen ones into the routine config automatically.
+- Fixed `spec.product-config` incorrectly scaffolding a per-product `requests/` folder — the request inbox is vault-wide (`<vault-root>/requests/`) and is now set up there; `spec.doctor` and the layout / config / sources protocols were updated to match.
+
 ### 2.0.0 — 2026-06-10 UTC
 
 - **Spec-conformance rebuild (breaking).** Gates are now flat, products live in `lazy.settings.json`, and assets are organized by category with per-category template folders. Re-run `/spec.install` after updating.
@@ -479,6 +488,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.1.2 — 2026-06-14 UTC
+
+- Added the `lazy-diagram.authoring` and `lazy-diagram.writer-guide` reference material the per-format drawer agents read while composing a diagram. No change to how diagrams are requested or generated — the guidance sharpens the agents' output.
+
 ### 1.1.0 — 2026-06-10 UTC
 
 - `lazy-diagram.install` adopts the 3-case file-sync policy — install scope is derived from `installed_plugins.json`, rule drift is merged silently with a prompt only on a genuine conflict, and no-longer-shipped rules are kept in place. The per-rule install / overwrite / delete prompts are gone.
@@ -500,6 +513,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 5.2.0 — 2026-06-14 UTC
+
+- `lazy-review.install` now discovers optional routine protocols during setup and asks which ones to add — references that declare themselves protocol candidates are presented as an opt-in choice, and the picks are merged into the routine's protocols list automatically.
+- Fixed `lazy-review.install` never registering the `lazy-review.historian` and `doc_doctor` experts shipped with the plugin, which caused any review class referencing them to fail.
 
 ### 5.1.0 — 2026-06-10 UTC
 

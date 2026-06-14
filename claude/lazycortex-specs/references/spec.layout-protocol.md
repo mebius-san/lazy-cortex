@@ -1,3 +1,8 @@
+---
+name: spec.layout-protocol
+version: 1
+description: Physical disk layout for spec assets — folder kinds, the closed set of file roles, naming conventions, and the asset status folder-note body shape.
+---
 # Layout protocol — folder structure, file roles, naming, status-file shape
 
 Physical disk layout, the closed set of file roles, naming conventions, and the asset status folder-note's body shape — one contract because they're inseparable in practice (a doc's path determines its role determines its allowed content determines its body header).
@@ -15,8 +20,9 @@ Three kinds of folders exist under the vault root:
    - `features/` — feature asset folders (one per feature). Required directory even if empty.
    - `changes/` — change asset folders (one per change — the atomic modification unit; see Part 2 and `spec.create-change`). Required directory even if empty.
    - `bugs/` — bug asset folders (one per bug — see Part 2 and `spec.create-bug`). Required directory even if empty. A bug folder carries `bug.md` (the report: summary, repro steps, observed vs expected) plus `plan.md`; it has NO `design.md` and NO `tech.md`.
-   - `requests/` — free-form user intake. Each request is a single `<slug>.md` file. Full lifecycle + frontmatter contract live in [request-format](./spec.request-protocol.md). Required directory even if empty.
    - **operator-defined category folders** — one per operator-defined asset category declared in `products[<key>].asset_categories` (e.g. `characters/`, `scenes/`, `chapters/`). Each holds asset folders mirroring `features/`.
+
+**The request inbox is NOT a product category.** A single `requests/` folder at the **vault root** (a sibling of the subsystem folders, never under a product `spec_path`) holds all free-form intake for the whole vault — one `<slug>.md` per request. A request may target multiple products, so per-product placement would force duplication; classification routes it to the right product/entity. Full lifecycle + frontmatter contract live in [request-format](./spec.request-protocol.md).
 
 There is **no `backlog/` folder** (removed), **no `human-tasks.md` loose file** (removed — there is no plugin-managed human-attention dashboard; container index dataview is operator-zone), and **no `changelog.md` loose file** (removed — history is recorded per-doc via `## History` H1 sections written by lazy-review.historian, and per-asset via the status folder-note's `## History` section written by `spec.flip-gate` / `spec.set-stage`. There is no separate product-wide changelog).
 
@@ -44,13 +50,14 @@ Every folder in the tree carries a folder-note (the Obsidian convention: a note 
 |--------|-------------|------|
 | product `<spec_path>/` | `<product>.md` | operator-zone (no `spec_role`) |
 | product docs `<spec_path>/docs/` | `docs/docs.md` | operator-zone (no `spec_role`) |
-| built-in category `features/` / `changes/` / `bugs/` / `requests/` | `features/features.md`, … | operator-zone (no `spec_role`) |
+| built-in category `features/` / `changes/` / `bugs/` | `features/features.md`, … | operator-zone (no `spec_role`) |
 | operator-defined category `<spec_path>/<name>/` | `<name>/<name>.md` | operator-zone (no `spec_role`) |
+| vault-root request inbox `requests/` | `requests/requests.md` | operator-zone (no `spec_role`) |
 | asset `<spec_path>/<category>/<slug>/` | `<slug>.md` | status (`spec_role: status`, flat gates) |
 
 #### Managed icon frontmatter + category description
 
-The plugin WRITES two managed keys into every folder-note from config — `iconize_icon` and `iconize_color` (the Obsidian iconize system paints the folder from these). For a product folder-note the values come from `products[<key>].icon`; for a category folder-note from `asset_categories[<name>].icon` / `.color` (built-in categories fall back to defaults: `feature` → `LiRocket`, `change` → `LiRefreshCcw`, `bug` → `LiBug`, `requests` → `LiInbox`). For an asset status folder-note they come from the asset's category icon, injected at scaffold time.
+The plugin WRITES two managed keys into every folder-note from config — `iconize_icon` and `iconize_color` (the Obsidian iconize system paints the folder from these). For a product folder-note the values come from `products[<key>].icon`; for a category folder-note from `asset_categories[<name>].icon` / `.color` (built-in categories fall back to defaults: `feature` → `LiRocket`, `change` → `LiRefreshCcw`, `bug` → `LiBug`; the vault-root request inbox folder-note defaults to `LiInbox`). For an asset status folder-note they come from the asset's category icon, injected at scaffold time.
 
 A category folder-note also carries a `description` frontmatter key — the operator's prose explanation of what the category holds. The plugin **only READS** `description` (and the operator-owned body); it never overwrites operator text.
 
@@ -84,9 +91,9 @@ Spec-system doc templates are organised **per asset category**: one folder per c
 │   ├── plan.md
 │   ├── asset-note.md
 │   └── group-note.md                            ← bugs/bugs.md category folder-note
-├── spec.request/                                ← intake category
+├── spec.request/                                ← vault-root intake inbox
 │   ├── request.md                               ← <slug>.md request file (single-file, NOT a folder-note)
-│   └── group-note.md                            ← requests/requests.md category folder-note
+│   └── group-note.md                            ← <vault-root>/requests/requests.md inbox folder-note
 ├── spec._content/                               ← BASELINE for operator-defined categories (plugin-shipped, never used directly)
 │   ├── design.md                                ← content-flavored design template (Summary / Attributes / Relations / Notes)
 │   ├── plan.md                                  ← content-flavored plan template
@@ -150,15 +157,20 @@ All products follow this shape. No concrete names appear in this rule — skills
         │       ├── <slug>.md                ← status folder-note
         │       ├── bug.md                   ← report: summary, repro steps, observed vs expected
         │       └── plan.md                  ← fix plan (no design.md, no tech.md)
-        ├── requests/                        ← free-form intake; one file per request
-        │   ├── requests.md                  ← category folder-note (operator-zone)
-        │   └── <slug>.md                    ← request file (lifecycle in spec.request-protocol.md)
         └── <category>/                      ← operator-defined asset category (asset_categories key)
             ├── <category>.md                ← category folder-note (operator-zone; description + managed iconize_icon)
             └── <slug>/                      ← asset folder
                 ├── <slug>.md                ← status folder-note
                 ├── design.md
                 └── plan.md
+```
+
+The request inbox sits at the **vault root** — a sibling of the subsystem folders, not inside any product:
+
+```
+requests/                                    ← vault-wide free-form intake (one folder for the whole vault)
+├── requests.md                              ← inbox folder-note (operator-zone; managed iconize_icon, default LiInbox)
+└── <slug>.md                                ← request file (lifecycle in spec.request-protocol.md)
 ```
 
 ## Part 2 — File roles
@@ -195,7 +207,7 @@ The only same-name-as-folder folder-note that DOES carry a `spec_role` is the as
 
 ### Request files
 
-A request file (`<spec_path>/requests/<slug>.md`) is free-form user intake captured before classification. It is governed by [request-format](./spec.request-protocol.md) (its own `request_*` frontmatter and lifecycle); it is not part of the `spec_role` closed set.
+A request file (`<vault-root>/requests/<slug>.md`) is free-form user intake captured before classification. It is governed by [request-format](./spec.request-protocol.md) (its own `request_*` frontmatter and lifecycle); it is not part of the `spec_role` closed set.
 
 ## Part 3 — File naming, header section, wikilinks
 
@@ -211,12 +223,12 @@ Filenames are **role-only** — a plugin-owned spec doc's basename is its role, 
 | `plan` | `plan.md` | `<spec_path>/<category>/<slug>/` (asset-level actionable task list) |
 | `status` | `<slug>.md` (matches parent asset folder name) | `<spec_path>/<category>/<slug>/` |
 | operator folder-note | `<product>.md` / `<category>.md` (matches parent folder name) | product root / category folder root |
-| request | `<slug>.md` | `requests/` |
+| request | `<slug>.md` | `<vault-root>/requests/` (vault-wide inbox) |
 
 - No scope suffix, no name prefix, no underscores. `design.md` is just `design.md` everywhere.
 - **Exception: the `status` role uses a filename matching its parent asset folder** — `features/chapter-log/chapter-log.md`, `changes/rename-chapter-log/rename-chapter-log.md`. This is the Obsidian folder-note convention: clicking the folder opens this file, and the file itself is hidden in the file tree. An asset folder without its status folder-note has no lifecycle state — `spec.doctor` flags it.
 - **Exception: operator folder-notes also use the folder-note convention** — `<spec_path>/<product>.md`, `features/features.md`, `<spec_path>/<category>/<category>.md`. The filename matches the parent folder. These carry NO `spec_role` (operator-zone) and only the managed `iconize_*` keys (plus `description` on category folder-notes) — see Part 2.
-- **Exception: the `request` role uses a user-controlled `<slug>.md` filename.** Requests have no per-folder identity, so the slug IS the identity. Slugs are lowercase-with-hyphens, globally unique across `<spec_path>/requests/`. See [request-format](./spec.request-protocol.md).
+- **Exception: the `request` role uses a user-controlled `<slug>.md` filename.** Requests have no per-folder identity, so the slug IS the identity. Slugs are lowercase-with-hyphens, globally unique across the vault-root `requests/` inbox. See [request-format](./spec.request-protocol.md).
 - Folder names carry identity: product folders, category folders, and asset folders all use lowercase-with-hyphens.
 - Basenames intentionally collide across the vault (every feature and every change has a `design.md`). Collisions are disambiguated by path (in file references) and by the in-file header section (when reading).
 
@@ -297,7 +309,7 @@ Examples:
 - `[[Server/Tester/chapter/features/chapter-log/plan|chapter-log plan]]`
 - `[[Server/Tester/chapter/changes/rename-chapter-log/design|rename-chapter-log design]]`
 
-Asset folder names are NOT required to be globally unique across products — the wikilink path disambiguates them. Request slugs, by contrast, are globally unique within a single product's `requests/` tree.
+Asset folder names are NOT required to be globally unique across products — the wikilink path disambiguates them. Request slugs, by contrast, are globally unique across the single vault-root `requests/` inbox.
 
 ## Part 4 — Status file (folder-note) shape
 

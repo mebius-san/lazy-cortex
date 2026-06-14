@@ -1,3 +1,7 @@
+---
+description: Markdown output conventions every expert follows when editing a target file, authoring a new doc, or composing a callout — callout shapes, edit-annotation markers, recommendation markers, hard-wrap rules.
+routine_protocol_candidate: true
+---
 # Markdown style
 
 Conventions for any markdown content an expert produces — when it edits a target file, writes a new authored doc, or composes a callout.

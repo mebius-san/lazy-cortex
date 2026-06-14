@@ -1,3 +1,8 @@
+---
+name: spec.request-protocol
+version: 1
+description: Format contract for request files in requests/ — frontmatter shape across the request lifecycle, the status mirror tag, and the terminal status callout.
+---
 # Request file format
 
 Contract for files in `<vault-root>/requests/`. The `spec.request-open` and `spec.request-apply` md-scan command-routines (deterministic Python primitives) together with the `spec.request-router` review-loop routing specialist (LLM expert) are the sole writers of frontmatter and the terminal status callout. The four `spec.request-*` primitive skills implement the mechanical pieces; `spec.create-request` writes the body-only initial file. `spec.doctor` reads this reference to validate request-file structure.

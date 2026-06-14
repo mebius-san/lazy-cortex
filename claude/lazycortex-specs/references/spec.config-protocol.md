@@ -1,3 +1,8 @@
+---
+name: spec.config-protocol
+version: 1
+description: Canonical contract for spec product / repo / language config in lazy.settings.json — what the products, repos, and spec sections hold and how spec.* skills resolve product, repo, and language at runtime.
+---
 # Config protocol — products, repos, language resolution
 
 Everything the spec system needs to know about products, source repos, and what language prose is written in lives in two cross-plugin sections of `.claude/lazy.settings.json` (`products`, `repos`) plus one plugin-owned section (`spec`). This document is the canonical contract for what's in each, how to read it, and how `spec.*` skills resolve product / repo / language at runtime.
@@ -70,7 +75,7 @@ Repo records DO NOT carry the repo's URL. The URL is derived at runtime from the
 Product resolution goes through the `lazycortex-specs resolve-product` primitive, which reads the `products` settings section directly. Two modes:
 
 - **by-key** — `lazycortex-specs resolve-product by-key <key>` returns `{"key": <key>, "record": <record-or-null>}`. A direct record fetch by the exact compound-key.
-- **by-path** — `lazycortex-specs resolve-product by-path <vault-relative-path>` returns `{"key": <owning-key-or-null>, "record": <record-or-null>}`. Finds the product whose `spec_path` equals the path or is a segment-wise prefix of it; when several products nest, the longest matching `spec_path` wins. Segment-wise matching means `A/B` owns `A/B/x` but not `A/Bx/...`, so it transparently covers the product's standard subtree (`<spec_path>/docs/...`, `<spec_path>/features/<feat>/...`, `<spec_path>/changes/<change-name>/...`, `<spec_path>/bugs/<bug-name>/...`, `<spec_path>/requests/<slug>.md`) and the product folder-note (`<spec_path>/<product>.md`).
+- **by-path** — `lazycortex-specs resolve-product by-path <vault-relative-path>` returns `{"key": <owning-key-or-null>, "record": <record-or-null>}`. Finds the product whose `spec_path` equals the path or is a segment-wise prefix of it; when several products nest, the longest matching `spec_path` wins. Segment-wise matching means `A/B` owns `A/B/x` but not `A/Bx/...`, so it transparently covers the product's standard subtree (`<spec_path>/docs/...`, `<spec_path>/features/<feat>/...`, `<spec_path>/changes/<change-name>/...`, `<spec_path>/bugs/<bug-name>/...`) and the product folder-note (`<spec_path>/<product>.md`). Request files are NOT under a product — they live in the vault-root `requests/` inbox — so `resolve-product by-path` never attributes them to a product.
 
 `spec.*` skills follow this protocol:
 

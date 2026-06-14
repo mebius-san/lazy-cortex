@@ -328,6 +328,19 @@ The md-scan matcher uses `PurePath.match` semantics where `*` does NOT cross `/`
 
 Outcome: `wiring-applied:<N>` where N is 0..7 (the four 6a–6d blocks plus the two 6e classes plus the 6f paths sync).
 
+### 6g. Offer optional protocols for the spec writer routine
+
+Spec `design.md` / `tech.md` / `plan.md` docs are written by `designer` / `planner` experts dispatched through `lazy-review.scan` (the classes wired in 6e) — there is no separate spec writer routine. That routine is therefore the spec writers' routine too, and optional protocols attached to it reach them. Setting up spec is the moment those writers become relevant, so offer the operator the contextually-relevant optional protocols for `lazy-review.scan`. Delegate to the shared core helper (it judges each flagged candidate's frontmatter essence against the spec context and offers only the relevant ones; the routine config gains no new field — chosen ids are unioned into its existing `protocols` list):
+
+```
+Skill(skill: "lazycortex-core:lazy-routine.offer-protocols",
+      args: "--routine lazy-review.scan --context 'spec authoring — design / tech / plan documents whose structure (flows, architecture, entities, lifecycles) often warrants a diagram'")
+```
+
+Idempotent with the same offer from `lazy-review.install`: already-attached protocols are not re-offered, and nothing is removed. Skip silently when the daemon gate above left `lazy-review.scan` unregistered — the helper returns `routine-absent`; record it and move on.
+
+Outcome: the helper's return — `attached:<n>` / `declined` / `no-relevant-candidates` / `routine-absent`.
+
 ## Step 7: Offer first product registration
 
 Ask via `AskUserQuestion`:

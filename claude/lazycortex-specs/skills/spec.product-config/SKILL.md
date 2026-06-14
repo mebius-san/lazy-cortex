@@ -211,15 +211,15 @@ printf '%s' '<edited-products-json>' | lazycortex-core settings-set products
 
 Initialize the on-disk structure (create mode, or any missing piece in edit mode). Use two separate calls for each folder-note — `Bash(mkdir -p <dir>)` then the `Write` tool (never chain):
 
-1. Empty category dirs under `spec_path`: `features/`, `changes/`, `bugs/`, `requests/`. NO `backlog/`.
+1. Empty category dirs under `spec_path`: `features/`, `changes/`, `bugs/`. NO `backlog/`, and NO per-product `requests/` — the request inbox is a single vault-root folder, created once in step 4 below (a request may target multiple products, so it is never per-product; see `${CLAUDE_PLUGIN_ROOT}/references/spec.request-protocol.md`).
 2. **Product folder-note** `<spec_path>/<leaf>.md` — an operator-zone folder-note. Frontmatter: `iconize_icon: <icon>` ONLY when Step 6 captured an icon. NO `spec_role`. Body: a single `# <leaf>` H1 followed by a one-line HTML comment marking the body operator-owned (e.g. `<!-- Operator-owned: author this product's overview prose here. -->`). Author no further prose.
 3. **Built-in category folder-notes** — one operator-zone folder-note per built-in category, each carrying `iconize_icon` and NO `spec_role`, NO `*-index` role, NO dataviewjs (operator owns the body):
    - `features/features.md` — default icon `LiRocket`.
    - `changes/changes.md` — default icon `LiRefreshCcw`.
    - `bugs/bugs.md` — default icon `LiBug`.
-   - `requests/requests.md` — default icon `LiInbox`.
 
-   A default icon is overridable: if the gathered record carries `asset_categories[<name>].icon` for the built-in name (`feature` / `change` / `bug` / `requests`), use that value instead. Each folder-note body is a single `# <name>` H1 plus the operator-owned HTML comment.
+   A default icon is overridable: if the gathered record carries `asset_categories[<name>].icon` for the built-in name (`feature` / `change` / `bug`), use that value instead. Each folder-note body is a single `# <name>` H1 plus the operator-owned HTML comment.
+4. **Vault-root request inbox** (shared by every product — created once, idempotent): ensure the vault-root `requests/` directory exists (`mkdir -p requests` at the repo root, where `.claude/lazy.settings.json` lives — NOT under `spec_path`). When `requests/requests.md` is absent, `Write` it as an operator-zone inbox folder-note: `iconize_icon: LiInbox`, NO `spec_role`, body a single `# requests` H1 plus the operator-owned HTML comment. If it already exists (an earlier product registration created it), leave it untouched. All request files for the whole vault live in this one inbox.
 
 Real icon values are fine — the iconize hook only strips unresolvable placeholder icon values, not concrete ones.
 

@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#fde68a"
+iconize_color: "#86efac"
 ---
 # lazycortex-core
 
@@ -81,6 +81,7 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 | `lazy-memory.reflect` | Dispatch a single `kind=reflect` job for one persona-marked expert. The expert reviews recent `.logs/claude/<self>/*.md` runs + current `.memory/<self>/*.md` and consolidates via `lazy-memory.write`. Refuses non-persona-marked experts. |
 | `lazy-memory.write` | Atomic memory-note writer for persona-marked experts. Writes one note under `.memory/<expert>/`, regenerates touched `.tags/` files (local + global), optionally drops consolidated log files, then commits the change atomically under the memory-bot identity (`memory.<expert>`). The only blessed writer of .memory/. |
 | `lazy-repo.mark-public` | Use when preparing a local/private repo — or a subtree inside one — to become public. Runs the full lazy-guard.check-public audit, walks through fixes and waivers, creates .guard-waivers.json to enable the pre-commit hook, and optionally flips the repo to public on GitHub. Accepts an optional scope argument to mark a subtree public (e.g., `claude/**`) without touching GitHub visibility. |
+| `lazy-routine.offer-protocols` | Shared configurator helper: discover reference files flagged as routine-protocol candidates, judge which are relevant to a given routine's context from their frontmatter, offer the relevant optional ones to the operator, and union the chosen into the routine's existing protocols list. Invoked as a sub-step from a plugin's install/configure skill via Skill dispatch. The routine config and runtime are untouched apart from the flat protocols list. |
 | `lazy-routine.register` | Register a named routine in lazy.settings.json. Type-aware wizard (subprocess / inbox / schedule / git / md-scan). Wraps expert_runtime.register_routine with closed-set validation. Used by plugin install skills. |
 | `lazy-routine.unregister` | Remove a named routine from lazy.settings.json. Wraps expert_runtime.unregister_routine. Protects the built-in lazy-expert.pump routine. |
 | `lazy-runtime.recover` | Recover the lazycortex-core runtime daemon from a halt — either a working-tree halt (uncommitted_changes) or a remote-sync halt (git_pull_diverged, git_push_failed, git_remote_unavailable). Branches on the halt reason: walks the operator through dirt cleanup for tree halts, or through manual repair guidance for remote-sync halts. Atomically clears the daemon_halted block from state.json once the precondition holds. |
@@ -200,6 +201,7 @@ Invoke skills with slash commands:
 /lazy-memory.reflect
 /lazy-memory.write
 /lazy-repo.mark-public
+/lazy-routine.offer-protocols
 /lazy-routine.register
 /lazy-routine.unregister
 /lazy-runtime.recover

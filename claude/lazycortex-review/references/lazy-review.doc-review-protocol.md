@@ -1,6 +1,7 @@
 ---
 name: lazy-review.doc-review-protocol
 version: 6
+routine_protocol_candidate: true
 description: Markdown-document review protocol for lazycortex-review — minimal request/response contract for jobs dispatched to experts via lazycortex-core's expert runtime queue.
 ---
 # doc-review protocol v4
