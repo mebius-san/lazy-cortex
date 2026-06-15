@@ -254,17 +254,16 @@ Under `review.classes` append an entry for `requests/*.md` if no existing entry'
   experts:
     main:
       - name: <consumer-interpreter-expert>
-        repo: "."
     history:
-      - name: historian
-        repo: "."
+      name: review.historian
     terminal:
       routing:
-        - name: spec.request-router
-          repo: "."
+        name: spec.request-router
+        section: Routing
+        position: bottom
 ```
 
-`main` is the body-content interpreter expert the consumer supplies. `terminal.routing` is `spec.request-router`, the post-approve routing-decision writer that owns the `# Routing` heading — it fires only AFTER the operator approves the body, follows `lazy-review.doc-review-protocol` § `mode == terminal` (surfaces the routing decision as a `[!question]`, folds the operator's answer into prose naming the targets), the `# Routing` section persists through finalize so `spec.request-apply` can read the resolved routing prose, and the section never triggers revert-to-main (operator choices are not concerns). The router declares no `frontmatter` block — per the doc-review protocol, terminal-mode writers do not write frontmatter at all; everything the router decides lives in its section body. `request_class` is stamped by `spec.request-apply` post-finalize (it reads the class verdict from the routing prose and writes the field alongside `request_status` and the mirror tag — see the `spec.request-apply` agent body for the full apply contract). `main` writers and validators likewise own the document BODY only; daemon state keys (`review_*`) are written mechanically, never through an expert overlay. `history` declares the historian explicitly; absent, the dispatcher falls back to the built-in `historian` expert from the `experts:` section.
+Writer shapes per the new schema (audit-enforced): `main` is a LIST of `{name}` writer objects; `history` is a SINGLE `{name}` object (no list, no `repo`); each `validation` / `terminal` section is a SINGLE writer object `{name, section, position}` (no list, no `repo` — the deprecated `repo` field is omitted; cross-repo dispatch uses `@<repo>` in `name`). `main` is the body-content interpreter expert the consumer supplies. `terminal.routing` is `spec.request-router`, the post-approve routing-decision writer that owns the `# Routing` heading — it fires only AFTER the operator approves the body, follows `lazy-review.doc-review-protocol` § `mode == terminal` (surfaces the routing decision as a `[!question]`, folds the operator's answer into prose naming the targets), the `# Routing` section persists through finalize so `spec.request-apply` can read the resolved routing prose, and the section never triggers revert-to-main (operator choices are not concerns). The router declares no `frontmatter` block — per the doc-review protocol, terminal-mode writers do not write frontmatter at all; everything the router decides lives in its section body. `request_class` is stamped by `spec.request-apply` post-finalize (it reads the class verdict from the routing prose and writes the field alongside `request_status` and the mirror tag — see the `spec.request-apply` agent body for the full apply contract). `main` writers and validators likewise own the document BODY only; daemon state keys (`review_*`) are written mechanically, never through an expert overlay. `history` declares `review.historian` explicitly (the registered expert key); absent, the dispatcher falls back to its built-in default name.
 
 If the consumer has not yet registered an interpreter expert, omit `main` — the class still dispatches `spec.request-router` on `# Routing` changes and the historian on human commits.
 
@@ -285,10 +284,8 @@ Under `review.classes` append two entries if no existing entry's `paths` already
   experts:
     main:
       - name: designer
-        repo: "."
     history:
-      - name: historian
-        repo: "."
+      name: review.historian
 # plan.md class — planner writes; no validators
 - paths:
     - "<spec_path_prefix>/products/*/features/*/plan.md"
@@ -297,10 +294,8 @@ Under `review.classes` append two entries if no existing entry's `paths` already
   experts:
     main:
       - name: planner
-        repo: "."
     history:
-      - name: historian
-        repo: "."
+      name: review.historian
 ```
 
 `designer` and `planner` are the consumer-supplied expert agents (typically from `lazycortex-experts` or a project-local override). When the consumer has not registered one of them yet, omit the class until the expert exists — without a registered `main`, the dispatcher logs a no-writer warning per-tick. For built-in `bug.md` docs (bug-kind layout substitutes `bug.md` for `design.md`), extend the design class's `paths` with the matching bug glob or add a separate `bug.md` class with a bug-specific main writer.
