@@ -45,26 +45,31 @@ _DEFAULT_SETTINGS = {
         "_version": 1,
         "classes": [],
         "edit_marker_style": "simple",
+        # Repairer name the dispatcher resolves for parse-broken files. Pinned to
+        # the registered expert key so the marketplace `<domain>.<role>` convention
+        # holds (the dispatcher's bare `Role.DOC_DOCTOR` default is a last resort).
+        "doc_doctor": "review.doc_doctor",
     },
     "experts": {
         "_version": 1,
         # Plugin-shipped system experts, registered unconditionally so a review
         # class (or the spec.product-config wizard) can reference them without a
-        # separate wiring step. Absent-only merge — never overwrites local edits.
-        "lazy-review.historian": {
+        # separate wiring step. Keys follow the marketplace `<domain>.<role>`
+        # convention. Absent-only merge — never overwrites local edits.
+        "review.historian": {
             "agent": "lazycortex-review:lazy-review.historian",
             "git_author": {
                 "name": "Doc Review Historian",
-                "email": "lazy-review.historian@lazycortex.local",
+                "email": "review.historian@lazycortex.local",
             },
             # historian commits the Doc-Review trailer locally → needs commit rights
             "can_commit_in_repo": True,
         },
-        "doc_doctor": {
+        "review.doc_doctor": {
             "agent": "lazycortex-review:lazy-review.doc_doctor",
             "git_author": {
                 "name": "Doc Doctor",
-                "email": "doc_doctor@lazycortex.local",
+                "email": "review.doc_doctor@lazycortex.local",
             },
         },
     },

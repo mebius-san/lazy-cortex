@@ -128,16 +128,16 @@ Seed one composed expert entry per (role × class) for the **class set from Step
 
 ### Compose
 
-For each `(class, role)` pair (the Step 3 roles × the Step 3 class set), build the expert key by prefix-mapping the class to its short form:
+For each `(class, role)` pair (the Step 3 roles × the Step 3 class set), build the expert key by domain-mapping the class to its short form:
 
-| Class (aspect basename suffix) | Expert-key prefix |
+| Class (aspect basename suffix) | Expert-key domain |
 |---|---|
-| `claude-plugin` | `claude-plugin-` |
-| `game-dev` | `game-` |
-| `dotfiles` | `dotfiles-` |
-| *(other / future)* | `<class>-` (verbatim) |
+| `claude-plugin` | `claude-plugin` |
+| `game-dev` | `game` |
+| `dotfiles` | `dotfiles` |
+| *(other / future)* | `<class>` (verbatim) |
 
-The expert key is `<prefix><role>`. Examples: `claude-plugin-designer`, `game-interpreter`, `dotfiles-planner`. The prefix map is closed-set for the three v1 classes; future classes fall through to the verbatim form.
+The expert key is `<domain>.<role>` — dot-separated. Examples: `claude-plugin.designer`, `game.interpreter`, `dotfiles.planner`. The domain map is closed-set for the three v1 classes; future classes fall through to the verbatim class name. This is the marketplace-wide expert-key convention `<domain>.<role>` (cf. `review.historian`, `wiki.curator`, `spec.request-router`).
 
 The composed entry's shape:
 
@@ -155,7 +155,7 @@ The composed entry's shape:
 }
 ```
 
-The `git_author.name` is the expert key with hyphens replaced by spaces, title-cased (e.g. `Claude Plugin Designer`, `Game Interpreter`). The email pins the canonical local domain so commits attributed to the expert are visibly distinct from operator commits.
+The `git_author.name` is the expert key with the `.` separator and any `-` replaced by spaces, title-cased (e.g. `claude-plugin.designer` → `Claude Plugin Designer`, `game.interpreter` → `Game Interpreter`). The email pins the canonical local domain so commits attributed to the expert are visibly distinct from operator commits.
 
 ### Apply
 

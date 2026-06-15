@@ -341,6 +341,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 2.1.1 — 2026-06-15 UTC
+
+- `/spec.install` now seeds review-class writers in the correct schema shape — single-object `history` / `terminal.routing` writers carrying `section` + `position`, with the deprecated `repo` field dropped — and references the `review.historian` expert. Fixes new spec installs producing review classes the audit rejected.
+
 ### 2.1.0 — 2026-06-14 UTC
 
 - During `spec.install`, a new sub-step offers relevant routine protocols for the spec routines and merges the operator's chosen ones into the routine config automatically.
@@ -514,6 +518,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 5.2.1 — 2026-06-15 UTC
+
+- The plugin's shipped experts are now keyed `review.historian` / `review.doc_doctor` (the `<domain>.<role>` convention). `/lazy-review.install` registers them under those names and pins the `review.doc_doctor` repair resolver so it still resolves.
+
 ### 5.2.0 — 2026-06-14 UTC
 
 - `lazy-review.install` now discovers optional routine protocols during setup and asks which ones to add — references that declare themselves protocol candidates are presented as an opt-in choice, and the picks are merged into the routine's protocols list automatically.
@@ -568,6 +576,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 0.3.1 — 2026-06-15 UTC
+
+- Composed expert keys now use the `<domain>.<role>` convention (`claude-plugin.designer`, `game.interpreter`, …), consistent with the other plugins' expert keys. Re-run `/lazy-experts.install` to register the dotted names; existing entries are left untouched.
+
 ### 0.3.0 — 2026-06-10 UTC
 
 - `lazy-experts.install` seeds agent-model tiers for the three generic agents (interpreter, designer, planner) and composed expert entries (agent × domain-aspect, each carrying a persona aspect and a deterministic bot author). Registration is no longer gated on the daemon — experts and tiers are dispatch-routing config used by interactive flows too. Expert-class selection is asked only when the experts list is still empty; re-runs are idempotent and never overwrite existing entries.
@@ -618,6 +630,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 1.5.1 — 2026-06-15 UTC
+
+- The curator expert is now keyed `wiki.curator` (was `wiki-curator`) to match the `<domain>.<role>` expert-key convention. Re-run `/lazy-wiki.install` to register the dotted name.
 
 ### 1.5.0 — 2026-06-11 UTC
 
