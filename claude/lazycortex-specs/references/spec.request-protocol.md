@@ -9,7 +9,9 @@ Contract for files in `<vault-root>/requests/`. The `spec.request-open` and `spe
 
 ## Location
 
-Vault-wide inbox: all request files live at `<vault-root>/requests/*.md`. Per-product `<product>/requests/` subfolders are NOT used — a request may target multiple products and per-product placement would require duplication. The `request/<status>` mirror tag (see "Status mirror tag" below) distinguishes active inbox from terminal records without filesystem moves; the file lives in `requests/` for its entire lifecycle.
+Vault-wide inbox: all request files live at `<content-root>/requests/*.md`, where `<content-root>` is `<settings-dir>/<spec.vault_root>` (default `<settings-dir>/specs`). Per-product `<product>/requests/` subfolders are NOT used — a request may target multiple products and per-product placement would require duplication. The `request/<status>` mirror tag (see "Status mirror tag" below) distinguishes active inbox from terminal records without filesystem moves; the file lives in `requests/` for its entire lifecycle.
+
+The inbox folder-note `requests/requests.md` is always present and committed — `spec.install` seeds it and the install contract keeps it tracked — so `requests/` is a tracked directory even when no request files have been created yet.
 
 ## Frontmatter
 
@@ -123,7 +125,7 @@ Not every class spawns/attaches the same set of docs. The detection map above is
 | change | yes | yes | no |
 | bug | no | yes | yes |
 
-Assets carry no per-asset `tech.md` — feature/change are `design.md` + `plan.md`, bug is `bug.md` + `plan.md`. Product-level architecture lives in `docs/tech.md`, which is not a request-distribution target.
+Assets carry no per-asset `tech.md` — feature/change are `design.md` + `plan.md`, bug is `bug.md` + `plan.md`. Product-level architecture lives in `tech.md` at the product root, which is not a request-distribution target.
 
 If a body section maps to a doc the target doesn't have, the content falls back to the target's WTR doc (`design.md` for feature/change, `bug.md` for bug). E.g. a `## Design` section on a bug-class request goes into `bug.md` rather than being lost.
 
@@ -177,5 +179,5 @@ The request walks three stages: the `spec.request-open` routine opens it (naked 
 - The request-handling subsystem is the SOLE writer of `spec_role`, `request_status`, `request_class`, and the `request/<value>` tag. Other skills / agents / humans MUST NOT mutate these. `spec.request-open` writes the minimal set at open; the `spec.request-apply` worker writes the terminal set (including `request_class`) at apply. The review-loop routing specialist (`spec.request-router`) writes only its own section body and never touches frontmatter.
 - `request_status` transitions: `draft → accepted` OR `draft → rejected`. Both terminal — a request file in any terminal status is an audit record; there is no path back without manual operator intervention.
 - `source_requests` on every spawned / attached folder-note resolves to an existing request file. Forward-only link — the reverse direction (request → spawned entities) lives in the terminal status callout body, not as a separate body section.
-- The request file stays in `<vault-root>/requests/` for its entire lifetime. Never moved.
+- The request file stays in `<content-root>/requests/` for its entire lifetime. Never moved.
 - The `spec.request-open` md-scan routine uses the composite filter `review_active: {in: [null], not_in: []} + review_result: {in: [null], not_in: []}` to match files that have not yet entered the review loop; the `spec.request-apply` routine uses `request_status: {in: ["draft"], not_in: []} + review_result: {in: ["approved", "approved-with-concerns"], not_in: []}` to match post-finalize files ready for apply. Terminal-state files (`request_status` ∈ `accepted | rejected`) are silent — no filter matches them.

@@ -1,6 +1,13 @@
 ---
 description: {{description}}
 ---
-# {{name}}
+# Summary
+#protected/spec/summary
+<!-- spec:precis:start -->
+_TBD — one-line description; regenerated on refresh._
+<!-- spec:precis:end -->
+<!-- spec:stats:start -->
 
-<!-- Body is operator-zone. The plugin writes only the managed iconize_* keys (and reads `description` but never overwrites operator text). -->
+<!-- spec:stats:end -->
+
+<!-- Body below is operator-zone. The plugin owns only the # Summary section above. -->

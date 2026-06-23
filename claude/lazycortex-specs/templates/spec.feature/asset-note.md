@@ -10,8 +10,11 @@ spec_tests_passing: false
 spec_released: false
 spec_cancelled: false
 ---
-# {{slug}} — status
+# Summary
+#protected/spec/summary
 
-## Gates
+# Gates
+#protected/spec/gates
 
-## History
+# History
+#protected/spec/history

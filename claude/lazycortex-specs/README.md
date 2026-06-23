@@ -1,12 +1,10 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fca5a5"
 ---
 # lazycortex-specs
 
 Specification and design skills for Claude Code
-
-## Why this plugin
 
 `lazycortex-specs` keeps a product's specifications next to its code as ordinary Markdown notes in an Obsidian-friendly vault, and gives Claude Code the skills to author and maintain that structure so you don't carry it in your head. A product is registered once in `lazy.settings.json[products]`; its work is organised into assets — built-in `feature` / `change` / `bug` plus any operator-defined categories (characters, scenes, …) you declare. Each asset advances through five flat, linear readiness gates (`spec_design_done` … `spec_released`), and the plugin keeps the spec aligned with the source repo, links sections to specific branches, and audits for drift.
 
@@ -57,7 +55,7 @@ Requires these plugins from the same marketplace:
 Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
 
 - [authoring](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/authoring.md) — Create spec assets of any category — features, changes, bugs, and operator-defined kinds — and capture raw ideas into the requests inbox.
-- [code-sync](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/code-sync.md) — Keep a product spec aligned with its source repo — sync ongoing code changes into the tech doc and rebase branch pins after a merge.
+- [code-sync](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/code-sync.md) — Keep a product spec aligned with its source repo — pull in-flight code changes into the tech doc and rebase branch pins after a merge.
 - [gates](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/gates.md) — Drive an asset's readiness gates and per-file doc stages from creation through release using a two-layer progression model.
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/install-and-audit.md) — Bootstrap the plugin, register products, audit spec health, and discover all available skills — the starting point before any authoring work begins.
 - [requests](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/requests.md) — Ingest free-form requests and route them into the right place in the spec tree — classify, find candidates, then attach or spawn.
@@ -65,7 +63,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [asset-to-release](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/walkthroughs/asset-to-release.md) — Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
 - [new-product-from-code](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/walkthroughs/new-product-from-code.md) — Register a product bound to an existing codebase, generate its design and tech docs from source, then scaffold the first feature.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/troubleshooting.md) — Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/faq.md) — Answers to common questions about products, gates, assets, requests, code sync, and the request pipeline in lazycortex-specs.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/faq.md) — Answers to common questions about products, gates, assets, requests, code sync, source links, and the request pipeline in lazycortex-specs.
 
 Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-specs/help/`.
 
@@ -73,35 +71,35 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-specs/help/`.
 
 | Skill | Description |
 |---|---|
-| `spec.add-asset-category` | Register a new operator-defined asset category on a product — writes the category block (`icon`, optional `color`) into `products[<key>].asset_categories.<name>`, scaffolds the category folder + operator-zone folder-note (carrying the managed `iconize_icon`/`iconize_color` and an operator-authored `description`), and appends the two default review classes (design + plan) so the category's docs enter the review loop. Invoke when an operator wants a product to grow a new asset kind (characters / scenes / chapters / …) beyond the built-in feature / change / bug set. |
-| `spec.create-asset` | Universal asset-creation skill — scaffolds one asset folder (`<spec_path>/<category>/<slug>/`) under a registered product for any asset category (built-in feature / change / bug, or an operator-defined category from the product's `asset_categories`), asks category-scaled clarifying questions, authors the docs in the product's language, and draws the primary behavioral diagram(s). The three built-in `spec.create-feature` / `spec.create-change` / `spec.create-bug` skills are thin wrappers that pin `<category>` and delegate here. |
-| `spec.create-bug` | Built-in wrapper over `spec.create-asset` — pins `<category>` to `bug` and delegates. Use when filing a bug against a product spec; all clarification, scaffolding, prose, and diagrams are owned by `spec.create-asset`. The bug layout is `bug.md` + `plan.md` (NO `design.md`). |
-| `spec.create-change` | Built-in wrapper over `spec.create-asset` — pins `<category>` to `change` and delegates. Use when requesting a change to an existing product spec; all clarification, scaffolding, prose, and diagrams are owned by `spec.create-asset`. A "change" is the atomic modification unit, peer to a feature. |
-| `spec.create-feature` | Built-in wrapper over `spec.create-asset` — pins `<category>` to `feature` and delegates. Use when adding a new feature to a product that already has a spec; all clarification, scaffolding, prose, and diagrams are owned by `spec.create-asset`. |
-| `spec.create-from-code` | Use when generating a specification FROM an existing codebase for an already-registered, code-bound product — fans heavy source scanning out to parallel Explore agents, then writes a behavior-only product design doc and a code-grounded product tech doc with source URLs. Product mode documents the product itself; feature mode delegates one feature-candidate to spec.create-asset. Requires the product to be registered with a `source` binding via /spec.product-config first. |
-| `spec.create-request` | Capture a raw user idea into the vault-wide requests/ inbox as a body-only markdown file. Asks 3-5 wizard questions to clarify before writing. Frontmatter (spec_role, request_status, request_class, status-mirror tags) is added by the spec.request-open routine on the next md-scan tick — this skill writes the body only. |
-| `spec.doctor` | Use when checking a product spec for staleness, broken links, missing sections, role/header violations, or inconsistencies with the actual source code — audits a product's folder tree, status folder-notes (flat gate booleans), per-file stages, source links, and wikilinks, then reports issues grouped by severity and offers targeted fixes. Read-only by default; pass `--apply` to write fixes. |
-| `spec.finalize-branch` | Use after merging or deleting a source-repo branch to rebase any specs pinned to that branch back to the repo's default branch — walks every `spec_source_branches` frontmatter entry in the vault, applies the shared Pin Reconciliation primitive, refuses to rewrite unmerged pins, and proposes `spec_released` for assets whose pinned docs covered the now-merged branch. |
-| `spec.flip-gate` | Flip one asset progression gate (spec_design_done / spec_plan_done / spec_develop_done / spec_tests_passing / spec_released) true→false or back, by subprocessing the flip-gate primitive. Confirms the flip with one wizard question unless invoked --auto. |
-| `spec.gate-tick` | Script-only md-scan worker that advances one asset's gates per tick — auto-flips the next derived gate, drops a readiness callout for the next human-signal gate, or withdraws a stale readiness callout. Dispatched per-file by the daemon; performs no Claude calls. |
-| `spec.install` | Bootstrap the lazycortex-specs plugin for the current project (or globally). Ensures the per-category template-override dirs exist (`.claude/templates/spec.feature/`, `spec.change/`, `spec.bug/`, `spec.product/`, `spec.request/`), reads-or-seeds the repo default language into the plugin-owned `spec` settings section, registers the `spec.gate-tick` md-scan routine so the daemon advances asset gates, wires the request-handler runtime (md-scan routines + experts + review class) at project scope, and offers to register the first product via `spec.product-config`. Daemon-routine registrations honor the tracked `daemon.enabled` gate; install scope is derived; file writes follow the absent/merge/conflict policy. Idempotent — safe to re-run. |
-| `spec.product-config` | Use when creating a new product in the spec system OR editing an existing product's registration — unified wizard that collects answers via AskUserQuestion, writes the product record into lazy.settings.json[products][<compound-key>], scaffolds the on-disk folder tree + operator-zone folder-notes with iconize icons, generates the built-in design/tech/feature/change/bug review classes, and auto-detects code dependencies. Edit mode adds source to a design-only product, extends dependencies, or switches language/icon without clobbering asset_categories. |
-| `spec.refresh-sources` | Re-project a spec doc's body `# Sources` sub-sections from frontmatter — `## Requests` from `spec_source_requests`, `## Docs` from `spec_source_docs` — preserving any operator-authored glosses on existing wikilink lines (matched by wikilink target). Pure projection, one file, no other side effects. Use after manually editing a doc's `spec_source_docs` / `spec_source_requests` frontmatter to bring the body back in sync. |
-| `spec.request-attach` | Attach a request to an existing entity. Distributes the request body across the entity's docs by content type (whole-doc match → section-split → fallback per spec.request-protocol.md), maintains a `# Sources` H1 attribution section in every populated doc, appends a wikilink-only entry to the folder-note's ## Source requests, opens a fresh review cycle on every populated doc via lazy-review.start. Idempotent on re-invocation. |
-| `spec.request-classify` | Classify a request file's body into a request_class token. The valid set is an OPEN set — closed meta classes (task \| spec \| plan \| feedback \| unknown) plus asset categories (built-in feature \| change \| bug, plus any operator-defined keys from products[<key>].asset_categories such as characters / scenes / chapters). The skill resolves the asset-category half dynamically from lazy.settings.json on every dispatch — a category registered via spec.add-asset-category is recognised on the next run without a rubric update. Output is a single lowercase token. |
-| `spec.request-find-candidates` | Search the vault for existing entities (features/changes/bugs) that might be the attach target for a given request body + class. Returns a ranked list with similarity rationale. Reads folder-notes and authored docs; never writes. |
-| `spec.request-spawn` | Spawn a new feature/change/bug entity from a request, then delegate to spec.request-attach to populate it from the request body. Calls the deterministic `lazycortex-specs scaffold-asset` primitive for the empty-scaffold step, then invokes `spec.request-attach` on the freshly-created folder-note. |
-| `spec.resolve-dependency` | Use to resolve a product dependency entry to concrete links (spec wikilink, dev GitHub URL) and optional local spec path. Reads a product's `dependencies` from `lazy.settings.json[products]` and returns a structured record. Called by callers that need to classify or link a dep entry (e.g., `spec.product-config` import classification). |
-| `spec.resolve-repo` | Use to resolve a repo key (e.g., `backend`, `shared`) to its runtime metadata by reading the cross-plugin `lazy.settings.json[repos]` section and inspecting the local checkout's git remote. Returns `{local_path, branch, remote_url, host, owner, repo, forge, base_url}`. The forge type is derived from the remote's hostname via the known-forges table in `${CLAUDE_PLUGIN_ROOT}/references/spec.sources-protocol.md`; an explicit `forge:` override in the repo record is honored for self-hosted instances. |
-| `spec.set-stage` | Use to change the per-file `spec_stage` of an authored spec doc (design/tech/plan/bug). Accepts a stage from the closed set `empty \| draft \| approved \| rejected \| cancelled`, rewrites `spec_stage` in frontmatter, mirrors the `spec/<stage>` tag, and appends a transition line to the nearest folder-note's `## History`. Every per-file stage change in the system goes through this primitive. |
-| `spec.source-url` | Use to build a single forge-correct source URL for a file in a source repo. Takes `(repo_key, path, kind="blob", branch=None)` and returns the URL using the forge's path scheme from the known-forges table in `${CLAUDE_PLUGIN_ROOT}/references/spec.sources-protocol.md`. All `spec.*` skills and generator agents MUST go through this primitive — never inline `<base>/blob/<branch>/<path>` or other forge-specific path schemes. |
-| `spec.sync-with-code` | Use when source code has changed since the last spec sync — compares a registered code-bound product's source commits against the last synced commit, updates the product tech doc, surfaces behavior changes for the product design doc, reconciles branch pins, and proposes flat-gate / per-file-stage corrections from the code state. No-ops on a design-only product. |
+| `spec.add-asset-category` | Register a new operator-defined asset category on a product with icon and review classes. |
+| `spec.create-asset` | Universal asset-creation skill — scaffolds one asset folder for any category with authored docs and behavioral diagrams. |
+| `spec.create-bug` | Built-in wrapper over `spec.create-asset` — pins category to bug and delegates. |
+| `spec.create-change` | Built-in wrapper over `spec.create-asset` — pins category to change and delegates. |
+| `spec.create-feature` | Built-in wrapper over `spec.create-asset` — pins category to feature and delegates. |
+| `spec.create-from-code` | Generate product or feature-level spec from an existing codebase via parallel Explore agents. |
+| `spec.create-request` | Capture a raw user idea into the vault-wide requests/ inbox as a body-only markdown file. |
+| `spec.doctor` | Audit a product spec for staleness, broken links, missing sections, role/gate/stage inconsistencies. |
+| `spec.finalize-branch` | Rebase any specs pinned to a branch back to the repo's default branch after merge or deletion. |
+| `spec.flip-gate` | Flip one asset progression gate true/false by subprocessing the flip-gate primitive. |
+| `spec.gate-tick` | Script-only md-scan worker that advances one asset's gates per tick — auto-flips derived gates or drops readiness callouts. |
+| `spec.install` | Bootstrap the lazycortex-specs plugin — ensures template dirs exist, seeds language config, registers spec.gate-tick routine. |
+| `spec.product-config` | Create or edit a product registration — writes to lazy.settings.json[products], scaffolds folder tree and review classes. |
+| `spec.refresh-sources` | Re-project a spec doc's body Sources sub-sections from frontmatter, preserving operator-authored glosses. |
+| `spec.request-attach` | Attach a request to an existing entity and distribute body across entity's docs. |
+| `spec.request-classify` | Classify a request file's body into a request_class token from closed meta classes plus asset categories. |
+| `spec.request-find-candidates` | Search the vault for existing entities that might be the attach target for a given request. |
+| `spec.request-spawn` | Spawn a new feature/change/bug entity from a request, then delegate to spec.request-attach. |
+| `spec.resolve-dependency` | Resolve a product dependency entry to concrete links and optional local spec path. |
+| `spec.resolve-repo` | Resolve a repo key to runtime metadata by reading lazy.settings.json[repos] and inspecting git remote. |
+| `spec.set-stage` | Change the per-file spec_stage of an authored spec doc and mirror the spec/<stage> tag. |
+| `spec.source-url` | Build a single forge-correct source URL for a file in a source repo. |
+| `spec.sync-with-code` | Compare source commits against last synced commit and propagate relevant changes into product spec. |
 
 ## Agents
 
 | Agent | Description |
 |---|---|
-| `spec.request-router` | Routing specialist for request files in review. Fires after the operator has approved a request body. Classifies the request (via spec.request-classify), names candidate targets to attach to (via spec.request-find-candidates), and surfaces the routing decision for the operator to confirm. Reads the vault read-only; writes only inside its own section, never the document frontmatter. Never carries out the routing — that is spec.request-apply, once the review closes. |
+| `spec.request-router` | Review-loop specialist — classifies request, finds candidates, writes Routing section surfacing decision for operator confirmation. |
 
 ## Commands
 

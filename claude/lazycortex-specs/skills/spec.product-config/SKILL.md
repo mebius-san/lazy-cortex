@@ -212,14 +212,42 @@ printf '%s' '<edited-products-json>' | lazycortex-core settings-set products
 Initialize the on-disk structure (create mode, or any missing piece in edit mode). Use two separate calls for each folder-note — `Bash(mkdir -p <dir>)` then the `Write` tool (never chain):
 
 1. Empty category dirs under `spec_path`: `features/`, `changes/`, `bugs/`. NO `backlog/`, and NO per-product `requests/` — the request inbox is a single vault-root folder, created once in step 4 below (a request may target multiple products, so it is never per-product; see `${CLAUDE_PLUGIN_ROOT}/references/spec.request-protocol.md`).
-2. **Product folder-note** `<spec_path>/<leaf>.md` — an operator-zone folder-note. Frontmatter: `iconize_icon: <icon>` ONLY when Step 6 captured an icon. NO `spec_role`. Body: a single `# <leaf>` H1 followed by a one-line HTML comment marking the body operator-owned (e.g. `<!-- Operator-owned: author this product's overview prose here. -->`). Author no further prose.
+2. **Product folder-note** `<spec_path>/<leaf>.md` — an operator-zone folder-note. Frontmatter: `iconize_icon: <icon>` ONLY when Step 6 captured an icon. NO `spec_role`. Body: the protected `# Summary` skeleton first, then operator-zone body after the closing stats marker:
+
+   ```markdown
+   # Summary
+   #protected/spec/summary
+   <!-- spec:precis:start -->
+   _TBD — one-line description; regenerated on refresh._
+   <!-- spec:precis:end -->
+   <!-- spec:stats:start -->
+
+   <!-- spec:stats:end -->
+
+   <!-- Body below is operator-zone. The plugin owns only the # Summary section above. -->
+   ```
+
 3. **Built-in category folder-notes** — one operator-zone folder-note per built-in category, each carrying `iconize_icon` and NO `spec_role`, NO `*-index` role, NO dataviewjs (operator owns the body):
    - `features/features.md` — default icon `LiRocket`.
    - `changes/changes.md` — default icon `LiRefreshCcw`.
    - `bugs/bugs.md` — default icon `LiBug`.
 
-   A default icon is overridable: if the gathered record carries `asset_categories[<name>].icon` for the built-in name (`feature` / `change` / `bug`), use that value instead. Each folder-note body is a single `# <name>` H1 plus the operator-owned HTML comment.
-4. **Vault-root request inbox** (shared by every product — created once, idempotent): ensure the vault-root `requests/` directory exists (`mkdir -p requests` at the repo root, where `.claude/lazy.settings.json` lives — NOT under `spec_path`). When `requests/requests.md` is absent, `Write` it as an operator-zone inbox folder-note: `iconize_icon: LiInbox`, NO `spec_role`, body a single `# requests` H1 plus the operator-owned HTML comment. If it already exists (an earlier product registration created it), leave it untouched. All request files for the whole vault live in this one inbox.
+   A default icon is overridable: if the gathered record carries `asset_categories[<name>].icon` for the built-in name (`feature` / `change` / `bug`), use that value instead. Each folder-note body uses the same protected `# Summary` skeleton shown in item 2 above (précis placeholder + stats markers + operator-zone comment), substituting the category leaf name in any narrative prose the product's language requires.
+
+   After writing all folder-notes (items 2 and 3), author the `<!-- spec:precis -->` region for each container note — one-line description drawn from the product's design intent (for the product root) and the category purpose (for each built-in category) — and write the précis inline between the `<!-- spec:precis:start -->` and `<!-- spec:precis:end -->` markers, replacing the `_TBD` placeholder. Then run `render-container-stats` for each container note so the `<!-- spec:stats:* -->` region is populated:
+
+   ```bash
+   lazycortex-specs render-container-stats <content_root>/<spec_path>/<leaf>.md
+   lazycortex-specs render-container-stats <content_root>/<spec_path>/features/features.md
+   lazycortex-specs render-container-stats <content_root>/<spec_path>/changes/changes.md
+   lazycortex-specs render-container-stats <content_root>/<spec_path>/bugs/bugs.md
+   ```
+
+4. **Vault-root request inbox** (shared by every product — created once, idempotent): resolve the spec content-root `<content_root> = <repo>/<spec.vault_root>` (default `specs`; read `spec.vault_root` from `.claude/lazy.settings.json`). Ensure `<content_root>/requests/` exists (`Bash(mkdir -p <content_root>/requests)`). ALWAYS `Write` `<content_root>/requests/requests.md` when absent as the operator-zone inbox folder-note (`iconize_icon: LiInbox`, NO `spec_role`, the `# Summary` skeleton from the group-note template with the static précis `Vault-wide request intake inbox.` filled in, then operator-zone body) and ALWAYS `git add` it so the `requests/` directory is committed and pushed even with zero request files. If it already exists, leave the body untouched (stats are refreshed by the event-driven primitive). When creating the requests inbox, run `render-container-stats` on it too:
+
+   ```bash
+   lazycortex-specs render-container-stats <content_root>/requests/requests.md
+   ```
 
 Real icon values are fine — the iconize hook only strips unresolvable placeholder icon values, not concrete ones.
 
@@ -240,7 +268,7 @@ In the parsed object, append the classes below to `review.classes` (create the l
 - `experts.validation` and `experts.terminal` — a DICT keyed by stable `section-id` (`^[a-z][a-z0-9_-]*$`), each value a writer object `{ "name": <expert>, "section": "<H1 title>", "position": "top" | "bottom" }`. These author named post-approve H1 sections; `validation` sections block finalize and trigger revert-to-main on concerns. There is NO flat "list of reviewers" bucket — a reviewer is expressed as one named validation section.
 - `experts.history` — a single `{ "name": <historian> }` object (no `repo`, no `@<repo>` syntax).
 
-Generate the classes below (substituting `<spec_path>`, `<key>` = compound-key, `<designer>`, `<developer>`, `<tester>`, `<historian>`). Three reusable validation dicts plus a no-validation case. **`designer` is never a validation writer in any class** — it appears only as a `main` writer; plan validation is tester-only; `docs/tech` carries no validation bucket at all:
+Generate the classes below (substituting `<spec_path>`, `<key>` = compound-key, `<designer>`, `<developer>`, `<tester>`, `<historian>`). Three reusable validation dicts plus a no-validation case. **`designer` is never a validation writer in any class** — it appears only as a `main` writer; plan validation is tester-only; `tech` carries no validation bucket at all:
 
 - **D = developer + tester review** — `{ "developer_review": { "name": "<developer>", "section": "Developer review", "position": "bottom" }, "tester_review": { "name": "<tester>", "section": "Tester review", "position": "bottom" } }`.
 - **T = tester review** — `{ "tester_review": { "name": "<tester>", "section": "Tester review", "position": "bottom" } }`.
@@ -251,8 +279,8 @@ Every class also carries `experts.history: { "name": "<historian>" }`.
 
 | `class` label | `paths` | `experts.main` | `experts.validation` |
 |---|---|---|---|
-| `spec.design@<key>` | `["<spec_path>/docs/design.md"]` | `[{ "name": "<designer>" }]` | D |
-| `spec.tech@<key>` | `["<spec_path>/docs/tech.md"]` | `[{ "name": "<developer>" }]` | NONE |
+| `spec.design@<key>` | `["<spec_path>/design.md"]` | `[{ "name": "<designer>" }]` | D |
+| `spec.tech@<key>` | `["<spec_path>/tech.md"]` | `[{ "name": "<developer>" }]` | NONE |
 | `features.design@<key>` | `["<spec_path>/features/**/design.md"]` | `[{ "name": "<designer>" }]` | D |
 | `features.plan@<key>` | `["<spec_path>/features/**/plan.md"]` | `[{ "name": "<developer>" }]` | T |
 | `changes.design@<key>` | `["<spec_path>/changes/**/design.md"]` | `[{ "name": "<designer>" }]` | D |

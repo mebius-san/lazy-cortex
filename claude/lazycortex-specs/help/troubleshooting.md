@@ -1,44 +1,42 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-06-10
-diagram_spec:
-  anchor: "Diagnostic flowchart"
-  request: "Decision-tree rooted on the skill group where the failure occurred (install/product-config, authoring, gates/stages, code-sync/branch, source-links, requests); each branch splits on observed error message; each leaf names the fix."
+last_regen: 2026-06-23
 source_skills:
   - spec.install
   - spec.product-config
+  - spec.doctor
   - spec.create-asset
-  - spec.create-feature
-  - spec.create-change
-  - spec.create-bug
-  - spec.add-asset-category
   - spec.create-from-code
-  - spec.create-request
   - spec.flip-gate
   - spec.gate-tick
   - spec.set-stage
   - spec.sync-with-code
   - spec.finalize-branch
-  - spec.resolve-repo
-  - spec.resolve-dependency
-  - spec.source-url
-  - spec.request-router
-  - spec.request-classify
-  - spec.request-find-candidates
   - spec.request-attach
   - spec.request-spawn
-  - spec.doctor
+  - spec.add-asset-category
+  - spec.resolve-dependency
 ---
 # Troubleshooting
 
-## `/spec.install` says the plugin is not installed
+## `/spec.install` aborts: plugin not installed
 
 **Symptom**: Running `/spec.install` prints a refusal along the lines of "plugin not installed — no entry in `installed_plugins.json`".
 
-**Likely cause**: `lazycortex-specs@lazycortex` has not been added to `enabledPlugins` in your Claude Code settings, so the plugin cache does not exist yet.
+**Likely cause**: `lazycortex-specs@lazycortex` has not been added to `enabledPlugins` in your Claude Code settings, so the plugin has no install record.
 
 **Fix**: Add `"lazycortex-specs@lazycortex": true` to `enabledPlugins` in your `~/.claude/settings.json` (or the project-level `.claude/settings.json`), restart Claude Code, then run `/plugin install lazycortex/lazycortex-specs`. After that re-run `/spec.install`.
+
+---
+
+## `/spec.install` reports the gate-tick routine is already registered
+
+**Symptom**: The install report includes `routine-already-present` for `spec.gate-tick`.
+
+**Likely cause**: A prior install already wired the routine. The skill never force-overwrites an existing registration.
+
+**Fix**: This is a normal idempotent outcome — no action needed. If you need to change the routine's shape (interval, filter, paths), run `/lazy-routine.unregister spec.gate-tick` first, then re-run `/spec.install` to register the updated version.
 
 ---
 
@@ -72,6 +70,16 @@ source_skills:
 
 ---
 
+## `/spec.product-config` or `/spec.add-asset-category` audit reports FAIL after writing review classes
+
+**Symptom**: The skill's final report includes an `audit: FAIL` line from `lazy-review.audit`, naming unregistered experts or schema violations.
+
+**Likely cause**: One or more of the designer, developer, tester, or historian names you chose in the wizard are not registered as experts, or the generated review-class schema is inconsistent (for example, a validation section references a missing expert).
+
+**Fix**: Identify the failing expert from the audit output, compose that persona via `lazycortex-experts`, then re-run `/spec.product-config` (or `/spec.add-asset-category`) to regenerate the review classes with valid expert assignments.
+
+---
+
 ## `/spec.add-asset-category` aborts saying an icon is required
 
 **Symptom**: The wizard refuses to write anything and prints "icon is required — the category is not registered without one".
@@ -82,21 +90,21 @@ source_skills:
 
 ---
 
-## `/spec.add-asset-category` or `/spec.product-config` audit reports FAIL after writing review classes
+## `/spec.add-asset-category` refuses because the category already exists
 
-**Symptom**: The skill's final report includes an `audit: FAIL` line from `lazy-review.audit`, naming unregistered experts or schema violations.
+**Symptom**: The wizard aborts with a message that `<name>` is already a key in the product's `asset_categories`.
 
-**Likely cause**: One or more of the designer / developer / tester / historian names you chose in the wizard are not registered as experts, or the generated review-class schema is inconsistent (e.g. a validation section references a missing expert).
+**Likely cause**: You ran the skill a second time with the same category name, or an earlier partial run already wrote the category block.
 
-**Fix**: Identify the failing expert from the audit output, compose that persona via `lazycortex-experts`, then re-run `/spec.product-config` (or `/spec.add-asset-category`) to regenerate the review classes with valid expert assignments.
+**Fix**: If the existing category is the correct one, use it directly with `/spec.create-asset <product> <name> <slug>` — no re-registration is needed. If you need to change the category's icon, description, or experts, edit the category folder-note and update the config block via `/spec.product-config` in edit mode.
 
 ---
 
-## `/spec.create-asset` (or `create-feature` / `create-change` / `create-bug`) refuses naming an unknown product
+## `/spec.create-asset` refuses naming an unknown product
 
 **Symptom**: The skill prints a refusal naming the product key and suggesting `/spec.product-config`.
 
-**Likely cause**: The product compound-key you passed has no record in `lazy.settings.json[products]`. The product was never registered, or the key was misspelled.
+**Likely cause**: The product compound-key you passed has no record in `lazy.settings.json[products]`. The product was never registered, or the key was mistyped.
 
 **Fix**: Run `/spec.product-config` to register the product, then re-invoke `/spec.create-asset <product> <category> <slug>`. Verify the compound-key matches exactly what the wizard wrote into config.
 
@@ -114,11 +122,11 @@ source_skills:
 
 ## `/spec.create-from-code` refuses an unregistered product or no-ops on a design-only product
 
-**Symptom**: The skill either refuses with "product not registered" or prints "product is design-only — no code binding to sync" and stops without writing any files.
+**Symptom**: The skill either refuses with "product not registered" or prints "product has no code binding" and stops without writing any files.
 
 **Likely cause**: For the "not registered" case, the product key is not in `products`. For the "design-only" case, the product record exists but has no `source` block binding it to a code repo.
 
-**Fix**: For an unregistered product, run `/spec.product-config` first. For a design-only product, re-run `/spec.product-config` in edit mode to attach a source repo — the wizard adds the `source.repo` + `source.paths` block without clobbering any existing asset categories.
+**Fix**: For an unregistered product, run `/spec.product-config` first. For a design-only product, re-run `/spec.product-config` in edit mode to attach a source repo — the wizard adds the `source.repo` and `source.paths` block without clobbering any existing asset categories.
 
 ---
 
@@ -158,7 +166,7 @@ source_skills:
 
 **Likely cause**: You called `/spec.set-stage` on a status folder-note, a category folder-note, or another non-authored file. Per-file stages apply only to `design`, `tech`, `plan`, and `bug` docs.
 
-**Fix**: Run `/spec.set-stage` on the authored doc inside the asset folder (`design.md`, `plan.md`, `bug.md`, or the product-level `docs/tech.md`), not on the folder-note.
+**Fix**: Run `/spec.set-stage` on the authored doc inside the asset folder (`design.md`, `plan.md`, `bug.md`, or the product-level `tech.md` at the product root), not on the folder-note.
 
 ---
 
@@ -184,9 +192,9 @@ source_skills:
 
 ## `/spec.sync-with-code` refuses or no-ops for a product
 
-**Symptom**: The skill either refuses naming an unregistered product, or prints "product is design-only" and stops without syncing.
+**Symptom**: The skill either refuses naming an unregistered product, or prints "product is design-only — no code binding to sync" and stops without syncing.
 
-**Likely cause**: Same as `spec.create-from-code` — the product is missing from `products` or has no `source` block.
+**Likely cause**: The product is missing from `products` or has no `source` block.
 
 **Fix**: Register the product via `/spec.product-config`, or attach a source repo in edit mode. Then re-run `/spec.sync-with-code`.
 
@@ -202,7 +210,7 @@ source_skills:
 
 ---
 
-## A proposed `spec_develop_done` flip during `spec.sync-with-code` is refused
+## A proposed `spec_develop_done` flip during `/spec.sync-with-code` is refused
 
 **Symptom**: After approving the gate proposal in the sync wizard, the skill surfaces a `flip_gate` refusal message rather than advancing the gate.
 
@@ -232,63 +240,13 @@ source_skills:
 
 ---
 
-## A proposed `spec_released` flip during `spec.finalize-branch` is refused
+## A proposed `spec_released` flip during `/spec.finalize-branch` is refused
 
 **Symptom**: After approving the release proposal for an asset, the skill surfaces a `flip_gate` refusal rather than setting `spec_released`.
 
 **Likely cause**: The release precondition (`spec_tests_passing: true`) does not hold. The full ladder must be satisfied: design done → plan done → develop done → tests passing → released.
 
-**Fix**: Settle the holding gate. For `spec_tests_passing`, flip it once a green test report exists for the asset's code (run `/spec.flip-gate <asset> spec_tests_passing`). The branch rebase from `spec.finalize-branch` is already applied — only the release flip is held back. Re-run `/spec.finalize-branch` to re-propose the release once the gate is set.
-
----
-
-## `/spec.resolve-repo` aborts naming a key not registered in `repos`
-
-**Symptom**: The skill prints "repo key `<key>` not in `lazy.settings.json[repos]`".
-
-**Likely cause**: The `repos` section has no entry for the key. This key should have been written by `/spec.product-config`'s inline repo wizard when you first attached a source repo to a product.
-
-**Fix**: Run `/spec.product-config` in edit mode on any product that uses this repo. The inline repo wizard registers the `local_path` and `branch` into `lazy.settings.json[repos][<key>]`. Then re-invoke the skill that triggered this error.
-
----
-
-## `/spec.resolve-repo` aborts with an unknown forge
-
-**Symptom**: The skill prints "unknown forge for host `<host>`" and lists the supported forge keys.
-
-**Likely cause**: The remote's hostname is not in the known-forges table and no explicit `forge:` override is set on the `repos[<key>]` record. This occurs with self-hosted GitLab, Gitea, or Forgejo instances whose hostnames are not publicly recognisable.
-
-**Fix**: Add `"forge": "<key>"` to the repo's record in `lazy.settings.json[repos][<key>]` — supported values are `github`, `gitlab`, `bitbucket`, `gitea`, `forgejo`, `sourcehut`. Use `/spec.product-config` in edit mode (the inline repo wizard) to write the record; do not hand-edit the settings file.
-
----
-
-## `/spec.resolve-dependency` refuses a malformed entry or missing product/repo
-
-**Symptom**: The skill aborts with "malformed dep entry", "product not found", or "repo not found".
-
-**Likely cause**: A `dependencies` entry in `products[<key>].dependencies` is missing the required `product:`, `repo:`, or `external:` key, or names a product/repo key that is not registered.
-
-**Fix**: For a malformed entry, check each dependency entry shape in the product record — each must carry exactly one of the three keys. For a missing product, run `/spec.product-config` to register it. For a missing repo, re-run `/spec.product-config` (inline repo wizard) to register the `repos[<key>]` record. Edit the entry via `/spec.product-config` in edit mode; do not hand-edit `lazy.settings.json`.
-
----
-
-## `/spec.create-request` reports that `requests/` does not exist
-
-**Symptom**: The skill tries to write the request file and prints an error because the `requests/` inbox directory is missing.
-
-**Likely cause**: The vault-wide `requests/` directory was never created. It is normally scaffolded during `/spec.product-config` as part of the product's built-in category dirs, but may be absent if the product was registered before this convention or the directory was deleted.
-
-**Fix**: The skill creates `requests/` automatically when absent, so a second invocation should succeed. If the directory is still missing, run `/spec.product-config` in edit mode for any registered product to re-scaffold the built-in dirs.
-
----
-
-## `/spec.request-find-candidates` refuses with "class is unknown"
-
-**Symptom**: The search refuses to run and prints "unknown class — classify first".
-
-**Likely cause**: `spec.request-classify` returned `unknown` for the request body, meaning the body is too vague or ambiguous to place in any category. `spec.request-find-candidates` requires a concrete class token to scope its search.
-
-**Fix**: Provide more detail in the request body. Edit the request file to clarify the intent — add a scope section, describe what the user will be able to do, or identify whether it is a bug, change, or new feature. Once the body has enough signal, the classifier will return a concrete class and the search will proceed.
+**Fix**: Settle the holding gate. For `spec_tests_passing`, flip it once a green test report exists for the asset's code by running `/spec.flip-gate <asset> spec_tests_passing`. The branch rebase from `spec.finalize-branch` is already applied — only the release flip is held back. Re-run `/spec.finalize-branch` to re-propose the release once the gate is set.
 
 ---
 
@@ -308,7 +266,17 @@ source_skills:
 
 **Likely cause**: An entity with the same product, kind, and slug combination was already scaffolded — either by a previous spawn attempt that partially succeeded, or by a manual `/spec.create-asset` run.
 
-**Fix**: If the existing entity is the correct target, use `/spec.request-attach` directly on the existing folder-note rather than spawning again. If it is a collision from a failed earlier run, inspect the existing folder to confirm it is a stale partial scaffold, then remove it and re-run.
+**Fix**: If the existing entity is the correct target, use `/spec.request-attach` directly on the existing folder-note rather than spawning again. If the existing folder is a stale partial scaffold, inspect it, then remove it and re-run.
+
+---
+
+## `/spec.resolve-dependency` refuses a malformed entry or missing product/repo
+
+**Symptom**: The skill aborts with "malformed dep entry", "product not found", or "repo not found".
+
+**Likely cause**: A `dependencies` entry in `products[<key>].dependencies` is missing the required `product:`, `repo:`, or `external:` key, or names a product/repo key that is not registered.
+
+**Fix**: For a malformed entry, check each dependency entry shape in the product record — each must carry exactly one of the three keys. For a missing product, run `/spec.product-config` to register it. For a missing repo, re-run `/spec.product-config` (inline repo wizard) to register the `repos[<key>]` record. Edit entries via `/spec.product-config` in edit mode; do not hand-edit `lazy.settings.json`.
 
 ---
 
@@ -329,38 +297,3 @@ source_skills:
 **Likely cause**: The `spec_stage` frontmatter and the mirrored `spec/<stage>` tag diverged — this happens when frontmatter was edited by hand without going through `/spec.set-stage`, which keeps both fields in lock-step.
 
 **Fix**: Run `/spec.set-stage <doc> <current-stage>` — even when the stage value is not changing, the skill re-syncs the tag. For bulk drift after a migration, run `/spec.doctor <product> --apply` and accept each re-sync proposal.
-
----
-
-## Diagnostic flowchart
-
-```mermaid
-%%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
-flowchart TD
-  whichGroup{Which skill group failed?}
-
-  installConfig[See the matching section below for the specific error and fix.]
-  authoring[See the matching section below for the specific error and fix.]
-  gatesStages[See the matching section below for the specific error and fix.]
-  codeSyncBranch[See the matching section below for the specific error and fix.]
-  sourceLinks[See the matching section below for the specific error and fix.]
-  requests[See the matching section below for the specific error and fix.]
-
-  whichGroup -->|install / product-config| installConfig
-  whichGroup -->|authoring| authoring
-  whichGroup -->|gates / stages| gatesStages
-  whichGroup -->|code-sync / branch| codeSyncBranch
-  whichGroup -->|source-links| sourceLinks
-  whichGroup -->|requests| requests
-
-  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
-  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-
-  class whichGroup guard
-  class installConfig success
-  class authoring success
-  class gatesStages success
-  class codeSyncBranch success
-  class sourceLinks success
-  class requests success
-```

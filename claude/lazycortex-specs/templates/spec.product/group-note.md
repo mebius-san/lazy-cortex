@@ -1,3 +1,10 @@
-# {{product}}
+# Summary
+#protected/spec/summary
+<!-- spec:precis:start -->
+_TBD — one-line description; regenerated on refresh._
+<!-- spec:precis:end -->
+<!-- spec:stats:start -->
 
-<!-- Body is operator-zone. The plugin writes only the managed iconize_* keys; everything below is operator-owned (navigational prose, dataview-rendered lists, freeform notes, or empty). -->
+<!-- spec:stats:end -->
+
+<!-- Body below is operator-zone. The plugin owns only the # Summary section above. -->

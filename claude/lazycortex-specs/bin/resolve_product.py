@@ -17,11 +17,15 @@ Both read the settings JSON directly to stay dependency-light; no
 import of the `lazy_settings` loader, no yaml dependency.
 """
 from __future__ import annotations
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
 import sys
 from pathlib import Path
+
+from spec_paths import _vault_root_value
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -112,7 +116,12 @@ def resolve_product_by_path(vault: Path, rel_path: str) -> tuple[str | None, dic
     A `(key, record)` pair for the longest-matching product, or `(None, None)`
     when no product's `spec_path` matches.
   """
-  doc_segments = Path(rel_path).parts
+  vroot = _vault_root_value(vault)
+  parts = list(Path(rel_path).parts)
+  # guard: caller passed a repo-root-relative path including the vault-root prefix
+  if vroot != "." and parts and parts[0] == vroot:
+    parts = parts[1:]
+  doc_segments = tuple(parts)
   best_key: str | None = None
   best_record: dict | None = None
   best_len = -1

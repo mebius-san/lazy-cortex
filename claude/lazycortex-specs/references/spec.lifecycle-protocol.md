@@ -7,7 +7,7 @@ description: Asset progression contract — per-file spec_stage on authored docs
 
 Asset progression is tracked at two levels that feed each other:
 
-- **Per-file `spec_stage`** on every authored doc — author-level state of `design.md` / `plan.md` / `bug.md` / `docs/tech.md` / `docs/design.md`. Closed set: `empty | draft | approved | rejected | cancelled`.
+- **Per-file `spec_stage`** on every authored doc — author-level state of `design.md` / `plan.md` / `bug.md` / product-level `tech.md` / `design.md`. Closed set: `empty | draft | approved | rejected | cancelled`.
 - **Five flat gates** on the status folder-note — the asset's overall progress through `S0..S5`. Gates are flipped from per-file `spec_stage` (derived gates) or from external signals (human-signal gates).
 
 The two layers share one mutator-per-layer: `spec.set-stage` for per-file stages, `spec.flip-gate` (driven by `gate-tick` for derived gates) for gates. No other code path mutates these fields.
@@ -36,9 +36,9 @@ Exactly five values. The old `review`, `done`, and `wtr` are gone — "in review
 
 ### Applies to
 
-Authored docs that carry `spec_stage`: feature/change-level `design.md` and `plan.md`; bug-level `bug.md` and `plan.md`; product-level `docs/tech.md` and `docs/design.md`.
+Authored docs that carry `spec_stage`: feature/change-level `design.md` and `plan.md`; bug-level `bug.md` and `plan.md`; product-level `tech.md` and `design.md` (loose at the product root).
 
-Does NOT carry `spec_stage`: the status folder-note (carries gates instead); container folder-notes (`docs/docs.md`, `features/features.md`, …).
+Does NOT carry `spec_stage`: the status folder-note (carries gates instead); container folder-notes (`<product>.md`, `features/features.md`, …).
 
 ### Mapping to lazycortex-review v4 flags
 
@@ -81,18 +81,18 @@ The tag enables Obsidian queries (`#spec` for all stage-bearing docs, `#spec/app
 1. Validates the file's role (`design` / `tech` / `plan` / `bug`) and path, and validates the requested stage against the closed set. Anything outside the set — including the removed `review` / `done` / `wtr` — is refused with a clear error.
 2. Rewrites `spec_stage` in frontmatter, preserving all other keys and their order.
 3. Updates the `spec/<stage>` tag in `tags:` in the same edit (strips the old `spec/*` entry, appends `spec/<new>`).
-4. Appends one line to the nearest enclosing folder-note's `## History`: `- <YYYY-MM-DD> — spec.set-stage · <doc>.md spec_stage <old>→<new>` (substituting a passed author for `spec.set-stage`). For product-level authored docs under `docs/` the history line lands in the `docs/docs.md` operator folder-note (`## History` section appended if absent).
+4. Appends one line to the nearest enclosing status folder-note's `# History`: `- <YYYY-MM-DD> — spec.set-stage · <doc>.md spec_stage <old>→<new>` (substituting a passed author for `spec.set-stage`). Product-level authored docs (`design.md` / `tech.md` at the product root) have no status folder-note in scope — the product folder-note is operator-zone — so the history append is skipped for them.
 
 It does NOT advance the folder-note's gates — gate flips are the responsibility of `spec.flip-gate` / the `gate-tick` worker (see Part 2 below). The full skill contract lives at `${CLAUDE_PLUGIN_ROOT}/skills/spec.set-stage/SKILL.md`.
 
 ### Auto-promotion equivalents (worker-driven)
 
-The `gate-tick` worker performs the same `spec_stage` mutation set as `spec.set-stage` (rewrite scalar + mirror tag + folder-note `## History` line + atomic commit) for two transitions it can derive without operator input:
+The `gate-tick` worker performs the same `spec_stage` mutation set as `spec.set-stage` (rewrite scalar + mirror tag + folder-note `# History` line + atomic commit) for two transitions it can derive without operator input:
 
 - **`empty → draft`** at `_auto_open_plan_review` time. When the design-done cascade is about to open `plan.md` for review, `flip_gate` promotes `plan.md.spec_stage` from `empty` to `draft` BEFORE the `lazycortex-review start` subprocess. Reason: per § Mapping above, `draft` covers "review_active: true (in the loop)"; leaving the stage at `empty` while opt-in lands `review_active: true` would commit an intermediate state that contradicts the mapping. Idempotent: when plan is already `draft`, no mutation; out-of-band stages (`approved` / `cancelled` / `rejected`) are skipped defensively. Commit identity: `spec.flip-gate@bot.lazy-cortex`, subject `spec.flip-gate: plan.md spec_stage empty→draft on <asset>`.
 - **`draft → approved`** at `gate-tick` Step 0. On every tick, before evaluating gate flips, the worker walks the asset's sibling authored docs (`design.md` / `bug.md` / `plan.md` / `tech.md`) and promotes each whose `review_result ∈ {approved, approved-with-concerns}` AND `spec_stage == draft`. The `draft` filter is strict — terminal stages (`approved` / `cancelled`) and operator-attention stages (`rejected` / `empty`) are skipped. When one or more docs are promoted, the worker emits one atomic commit under `spec.gate-tick@bot.lazy-cortex` covering every promoted sibling plus the folder-note history append, returns `{action: stage-promoted, docs: [...]}`, and skips gate evaluation for that tick (the next tick re-reads stages and gates flip naturally).
 
-Both transitions are equivalents of `spec.set-stage`: same frontmatter shape, same mirror-tag maintenance, same `## History` line format (substituting `spec.flip-gate` / `spec.gate-tick` for the author). `spec.doctor`'s field-vs-tag consistency checks cannot tell auto-promoted docs from interactively set ones.
+Both transitions are equivalents of `spec.set-stage`: same frontmatter shape, same mirror-tag maintenance, same `# History` line format (substituting `spec.flip-gate` / `spec.gate-tick` for the author). `spec.doctor`'s field-vs-tag consistency checks cannot tell auto-promoted docs from interactively set ones.
 
 ## Part 2 — Gates (asset progression)
 
@@ -152,8 +152,8 @@ Each gate is one of two kinds, which determines how it gets flipped:
 1. Reads the folder-note frontmatter + sibling per-file `spec_stage` values.
 2. Checks the gate's precondition. On mismatch it refuses with a message and produces no side effects.
 3. Rewrites the gate boolean in frontmatter.
-4. Appends a callout to the `## Gates` section: `> [!gate] spec_<gate> — flipped <date> (<reason>)`, carrying an `auto:` annotation when invoked with `--auto`.
-5. Appends a line to `## History`.
+4. Appends a callout to the `# Gates` section: `> [!gate] spec_<gate> — flipped <date> (<reason>)`, carrying an `auto:` annotation when invoked with `--auto`.
+5. Appends a line to `# History`.
 6. **Atomic git commit of the folder-note edit** under `spec.flip-gate@bot.lazy-cortex` (subject `spec.flip-gate: <gate> → <true|false> on <asset>`). Without this commit the daemon's next iteration trips its dirty-tree-skip guard and silently halts every routine on the asset. The commit happens BEFORE the post-flip cascade so any follow-up subprocess sees a clean tree. Defensive skip when the asset is not inside a git repository (test-fixture path) — the file write remains but the commit step is no-op.
 7. Writes a run log under `.logs/claude/spec.flip-gate/`.
 8. **Post-flip cascade** — after a derived gate flips forward (not `--off`), the primitive opens lazy-review on the next document in the chain (e.g. after `spec_design_done` flips, `/lazy-review.start <plan.md>` is invoked iff `plan.md.spec_stage ∈ {empty, draft}` and `review_active != true`). `spec_plan_done` has no follow-up document (next gate is human-signal). For bug-category assets the same logic applies (design_done flips from `bug.md`, follow-up is still `plan.md`).
@@ -166,12 +166,12 @@ CLI: `lazycortex-specs flip-gate <asset_dir> <gate> [--off] [--auto] [--reason T
 
 `bin/gate_tick.py` is a pure script — zero Claude calls, no checkboxes ever. It is dispatched per matched status folder-note by the `spec.gate-tick` `md-scan` routine. For each asset it advances state in two passes:
 
-**Step 0 — per-file stage promotion.** Before evaluating any gate, the worker walks the asset's sibling authored docs (`design.md` / `bug.md` / `plan.md` / `tech.md`) and promotes each whose `review_result ∈ {approved, approved-with-concerns}` AND `spec_stage == draft` to `spec_stage: approved`. Mutations are equivalent to `spec.set-stage` (scalar + mirror tag + folder-note `## History`); commit identity is `spec.gate-tick@bot.lazy-cortex`. When one or more docs are promoted, the worker emits one atomic commit covering every promoted sibling plus the folder-note append, returns `{action: stage-promoted, docs: [...]}`, and skips gate evaluation for that tick. The next tick re-reads stages and the gate-flip path picks up the newly-approved sibling. See § Auto-promotion equivalents in Part 1 for the full contract.
+**Step 0 — per-file stage promotion.** Before evaluating any gate, the worker walks the asset's sibling authored docs (`design.md` / `bug.md` / `plan.md` / `tech.md`) and promotes each whose `review_result ∈ {approved, approved-with-concerns}` AND `spec_stage == draft` to `spec_stage: approved`. Mutations are equivalent to `spec.set-stage` (scalar + mirror tag + folder-note `# History`); commit identity is `spec.gate-tick@bot.lazy-cortex`. When one or more docs are promoted, the worker emits one atomic commit covering every promoted sibling plus the folder-note append, returns `{action: stage-promoted, docs: [...]}`, and skips gate evaluation for that tick. The next tick re-reads stages and the gate-flip path picks up the newly-approved sibling. See § Auto-promotion equivalents in Part 1 for the full contract.
 
 **Step 1 — gate advancement.** Find the lowest gate that is currently false and whose precondition holds, then advance the asset one notch:
 
 - **Next gate is derived** → auto-flip it in-process via `flip_gate.flip_gate(..., auto=True)` (the worker imports the sibling primitive and calls it directly so the callout / history / log side effects are produced exactly once by their one owner; `flip_gate`'s atomic commit obligation, § single mutation channel step 6, applies).
-- **Next gate is human-signal** → append a `> [!ready]` callout to `## Gates` telling the operator how to flip it by hand, then **atomic commit** of the folder-note under `spec.gate-tick@bot.lazy-cortex` (subject `spec.gate-tick: drop readiness callout for <gate> on <asset>`). Idempotent — when the callout is already present, no mutation and no commit. Without the commit the daemon's next iteration would trip its dirty-tree-skip guard.
+- **Next gate is human-signal** → append a `> [!ready]` callout to `# Gates` telling the operator how to flip it by hand, then **atomic commit** of the folder-note under `spec.gate-tick@bot.lazy-cortex` (subject `spec.gate-tick: drop readiness callout for <gate> on <asset>`). Idempotent — when the callout is already present, no mutation and no commit. Without the commit the daemon's next iteration would trip its dirty-tree-skip guard.
 - **A previously-dropped `[!ready]` whose precondition has since regressed** → rewrite it in place as a `> [!info] readiness withdrawn — <gate> precondition no longer met` callout, then **atomic commit** of the folder-note under `spec.gate-tick@bot.lazy-cortex` (subject `spec.gate-tick: withdraw readiness for <gate> on <asset>`). Same dirty-tree-guard rationale.
 
 CLI: `lazycortex-specs gate-tick <asset_note> [--today YYYY-MM-DD]`.
@@ -181,10 +181,10 @@ CLI: `lazycortex-specs gate-tick <asset_note> [--today YYYY-MM-DD]`.
 ```
 design.md одобрен в lazy-review (review_result: approved)
   → gate-tick Step 0: spec.gate-tick promote design.md spec_stage draft→approved
-       (worker-owned mutation: scalar + spec/approved mirror tag + folder-note ## History,
+       (worker-owned mutation: scalar + spec/approved mirror tag + folder-note # History,
         atomic commit under spec.gate-tick@bot.lazy-cortex; equivalent to spec.set-stage)
   → gate-tick Step 1: precondition spec_design_done выполнен (sibling design.md.spec_stage == approved)
-  → flip_gate.py --auto: spec_design_done: true (callout in ## Gates, line in ## History)
+  → flip_gate.py --auto: spec_design_done: true (callout in # Gates, line in # History)
        (atomic commit under spec.flip-gate@bot.lazy-cortex — single mutation channel step 6)
   → flip_gate.py post-flip cascade:
        1) plan.md spec_stage empty→draft (atomic commit; promote BEFORE subprocess so

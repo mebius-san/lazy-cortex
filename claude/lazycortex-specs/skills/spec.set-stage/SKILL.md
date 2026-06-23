@@ -1,6 +1,6 @@
 ---
 name: spec.set-stage
-description: Use to change the per-file `spec_stage` of an authored spec doc (design/tech/plan/bug). Accepts a stage from the closed set `empty | draft | approved | rejected | cancelled`, rewrites `spec_stage` in frontmatter, mirrors the `spec/<stage>` tag, and appends a transition line to the nearest folder-note's `## History`. Every per-file stage change in the system goes through this primitive.
+description: Use to change the per-file `spec_stage` of an authored spec doc (design/tech/plan/bug). Accepts a stage from the closed set `empty | draft | approved | rejected | cancelled`, rewrites `spec_stage` in frontmatter, mirrors the `spec/<stage>` tag, and appends a transition line to the nearest folder-note's `# History`. Every per-file stage change in the system goes through this primitive.
 execution-discipline-waiver: "Single-purpose primitive — wraps the per-file-stages reference; no multi-phase orchestration where step-skip can hide."
 ---
 # Set Per-file Stage
@@ -48,17 +48,27 @@ tags:
 
 The mirror is required, not optional. `spec.doctor` flags any mismatch as a finding.
 
-### 3. Append to the nearest folder-note's `## History`
+### 3. Append to the nearest folder-note's `# History`
 
-The folder-note is the file whose basename matches the enclosing folder (e.g., `features/chapter-log/chapter-log.md`). For `design.md` / `tech.md` / `plan.md` under `<spec_path>/features/<feat>/` or `<spec_path>/changes/<change-name>/`, and for `bug.md` / `plan.md` under `<spec_path>/bugs/<bug-name>/`, the folder-note is in the same directory. For product-level authored docs under `<spec_path>/docs/` (the product design/tech), there is no folder-note in scope — skip the history step.
+The folder-note is the file whose basename matches the enclosing folder (e.g., `features/chapter-log/chapter-log.md`). For `design.md` / `tech.md` / `plan.md` under `<spec_path>/features/<feat>/` or `<spec_path>/changes/<change-name>/`, and for `bug.md` / `plan.md` under `<spec_path>/bugs/<bug-name>/`, the folder-note is in the same directory. For product-level authored docs at the product root (`<spec_path>/design.md` / `<spec_path>/tech.md`), there is no status folder-note in scope (the product folder-note is operator-zone) — skip the history step.
 
-When a folder-note is in scope, append one line to its `## History` section:
+When a folder-note is in scope, append one line to its `# History` section:
 
 ```
 - <YYYY-MM-DD> — spec.set-stage · <doc>.md spec_stage <old>→<new>
 ```
 
-`<doc>` is the doc's basename (e.g. `design`). Substitute the resolved author for `spec.set-stage` when an author was passed. Use UTC date (`date -u +%Y-%m-%d`). Do not touch existing history entries or any frontmatter of the folder-note. If the folder-note has no `## History` section, create one at the end of the body.
+`<doc>` is the doc's basename (e.g. `design`). Substitute the resolved author for `spec.set-stage` when an author was passed. Use UTC date (`date -u +%Y-%m-%d`). Do not touch existing history entries or any frontmatter of the folder-note. If the folder-note has no `# History` section, create one at the end of the body.
+
+### 3a. Recompute the category container note stats
+
+The asset's category container note is the note whose basename matches the category folder that holds the asset (e.g. `features/features.md` for an asset under `features/<slug>/`). When that container note exists, refresh its `<!-- spec:stats:* -->` region so the bucket counts reflect this stage change:
+
+```
+Bash(lazycortex-specs render-container-stats <category_note>)
+```
+
+Then `git add` the category note into the SAME commit as the doc and folder-note edits. Guard: skip silently when the category container note does not exist (a product-level authored doc with no category container, or a container carrying no stats markers — `render-container-stats` is a no-op there).
 
 ### 4. Do NOT advance the folder-note's gate
 

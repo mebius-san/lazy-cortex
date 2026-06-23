@@ -7,6 +7,14 @@ description: Canonical contract for spec product / repo / language config in laz
 
 Everything the spec system needs to know about products, source repos, and what language prose is written in lives in two cross-plugin sections of `.claude/lazy.settings.json` (`products`, `repos`) plus one plugin-owned section (`spec`). This document is the canonical contract for what's in each, how to read it, and how `spec.*` skills resolve product / repo / language at runtime.
 
+### `spec` settings section — vault root
+
+The `spec` section of `.claude/lazy.settings.json` carries plugin-owned settings. The key relevant to layout is:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `spec.vault_root` | `specs` | Path of the spec content-root relative to the settings-dir (the directory holding `.claude/lazy.settings.json`, i.e. the repo root). All spec content — subsystem folders and the `requests/` inbox — lives under `<settings-dir>/<spec.vault_root>`. Use `.` to place content directly at the settings-dir (content-root = settings-dir). Vault-relative paths (`spec_path`, wikilinks, tags) are relative to this content-root. See [layout](./spec.layout-protocol.md) Part 1 § Spec content-root. |
+
 ## Part 1 — Config files (products + repos)
 
 Product config and repo config are both records in `lazy.settings.json`: products under the `products` section, repos under the cross-plugin `repos` section.
@@ -75,7 +83,7 @@ Repo records DO NOT carry the repo's URL. The URL is derived at runtime from the
 Product resolution goes through the `lazycortex-specs resolve-product` primitive, which reads the `products` settings section directly. Two modes:
 
 - **by-key** — `lazycortex-specs resolve-product by-key <key>` returns `{"key": <key>, "record": <record-or-null>}`. A direct record fetch by the exact compound-key.
-- **by-path** — `lazycortex-specs resolve-product by-path <vault-relative-path>` returns `{"key": <owning-key-or-null>, "record": <record-or-null>}`. Finds the product whose `spec_path` equals the path or is a segment-wise prefix of it; when several products nest, the longest matching `spec_path` wins. Segment-wise matching means `A/B` owns `A/B/x` but not `A/Bx/...`, so it transparently covers the product's standard subtree (`<spec_path>/docs/...`, `<spec_path>/features/<feat>/...`, `<spec_path>/changes/<change-name>/...`, `<spec_path>/bugs/<bug-name>/...`) and the product folder-note (`<spec_path>/<product>.md`). Request files are NOT under a product — they live in the vault-root `requests/` inbox — so `resolve-product by-path` never attributes them to a product.
+- **by-path** — `lazycortex-specs resolve-product by-path <path>` returns `{"key": <owning-key-or-null>, "record": <record-or-null>}`. The `<path>` argument is resolved relative to the content-root (`<settings-dir>/<spec.vault_root>`); if the caller supplies a path that begins with the vault-root segment (e.g. `specs/Server/Tester/chapter/features/foo`), that leading segment is stripped before matching. Finds the product whose `spec_path` equals the normalised path or is a segment-wise prefix of it; when several products nest, the longest matching `spec_path` wins. Segment-wise matching means `A/B` owns `A/B/x` but not `A/Bx/...`, so it transparently covers the product's standard subtree (`<spec_path>/features/<feat>/...`, `<spec_path>/changes/<change-name>/...`, `<spec_path>/bugs/<bug-name>/...`) and the product-root files (`<spec_path>/<product>.md` folder-note, `<spec_path>/design.md`, `<spec_path>/tech.md`). Request files are NOT under a product — they live in `<content-root>/requests/` — so `resolve-product by-path` never attributes them to a product.
 
 `spec.*` skills follow this protocol:
 
@@ -106,7 +114,7 @@ Skills that write or edit spec content MUST honour the resolved language (ISO 63
 
 - ALL frontmatter keys and values (e.g., `spec_role: design`, `spec_stage: draft`).
 - Role words in the body header and breadcrumb — the `<role>` in `# <Title> — <role>` and `> **…** — <role>` lines.
-- Fixed H2/H3 section headers — `## Summary`, `## Gates`, `## History`, `## Repro steps`, etc. Skills use the canonical English heading even when the body below is localized.
+- Fixed section headers — `# Summary`, `# Gates`, `# History` (H1 on the status folder-note), `## Summary`, `## Repro steps`, etc. (H2/H3 on authored docs). Skills use the canonical English heading even when the body below is localized.
 - Review-class `class` labels and section ids.
 - Source URLs and wikilink targets — the part before `|` in `[[path|display text]]` stays English; the display text MAY be translated.
 - Code blocks, command snippets, function/class names, file names.

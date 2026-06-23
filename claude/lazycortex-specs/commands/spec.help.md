@@ -28,7 +28,7 @@ Authors product / feature / change / bug (and operator-defined) specs as Markdow
 
 - `spec.flip-gate` — The single channel for flipping one asset gate (`spec_design_done` … `spec_released`) after its precondition is met; interactive confirm, or `--auto`.
 - `spec.gate-tick` (worker) — Script-only md-scan worker: auto-flips derived gates and drops `[!ready]` callouts for human-signal gates. Dispatched by the `spec.gate-tick` routine.
-- `spec.set-stage` — Change one authored doc's `spec_stage` (`empty | draft | approved | rejected | cancelled`), mirror the `spec/<stage>` tag, and log to the folder-note `## History`.
+- `spec.set-stage` — Change one authored doc's `spec_stage` (`empty | draft | approved | rejected | cancelled`), mirror the `spec/<stage>` tag, and log to the folder-note `# History` section.
 - `spec.finalize-branch` — Rebase pinned specs back to the repo's default branch after a source branch is merged or deleted; propose `spec_released` flips.
 
 ## Request processing
@@ -58,7 +58,7 @@ See `${CLAUDE_PLUGIN_ROOT}/references/` for the protocol contracts each skill re
 **Documentation:**
 
 - [authoring](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/authoring.md) — Create spec assets of any category — features, changes, bugs, and operator-defined kinds — and capture raw ideas into the requests inbox.
-- [code-sync](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/code-sync.md) — Keep a product spec aligned with its source repo — sync ongoing code changes into the tech doc and rebase branch pins after a merge.
+- [code-sync](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/code-sync.md) — Keep a product spec aligned with its source repo — pull in-flight code changes into the tech doc and rebase branch pins after a merge.
 - [gates](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/gates.md) — Drive an asset's readiness gates and per-file doc stages from creation through release using a two-layer progression model.
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/install-and-audit.md) — Bootstrap the plugin, register products, audit spec health, and discover all available skills — the starting point before any authoring work begins.
 - [requests](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/requests.md) — Ingest free-form requests and route them into the right place in the spec tree — classify, find candidates, then attach or spawn.
@@ -66,7 +66,7 @@ See `${CLAUDE_PLUGIN_ROOT}/references/` for the protocol contracts each skill re
 - [asset-to-release](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/walkthroughs/asset-to-release.md) — Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
 - [new-product-from-code](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/walkthroughs/new-product-from-code.md) — Register a product bound to an existing codebase, generate its design and tech docs from source, then scaffold the first feature.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/troubleshooting.md) — Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/faq.md) — Answers to common questions about products, gates, assets, requests, code sync, and the request pipeline in lazycortex-specs.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/faq.md) — Answers to common questions about products, gates, assets, requests, code sync, source links, and the request pipeline in lazycortex-specs.
 
 Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-specs/help/`.
 <!-- help-block:end -->

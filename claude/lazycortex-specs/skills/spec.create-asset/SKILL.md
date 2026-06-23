@@ -19,9 +19,10 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 3 — Ask clarifying questions`
    - `Step 4 — Resolve the layout + icon`
    - `Step 5 — Scaffold the asset folder`
-   - `Step 6 — Author the prose`
-   - `Step 7 — Draw the behavioral diagram(s)`
-   - `Step 8 — Log the run`
+   - `Step 6 — Author the asset précis`
+   - `Step 7 — Author the prose`
+   - `Step 8 — Draw the behavioral diagram(s)`
+   - `Step 9 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". A no-op counts only when it emits an explicit outcome (`skipped-empty-mode`, `unchanged`, `skipped-per-user-choice`, …).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -42,8 +43,9 @@ When invoked with `--empty`:
 - Skip Step 3 (no clarifying questions) — emit outcome `skipped-empty-mode`.
 - Step 4 still resolves the layout + icon (the scaffold needs both).
 - Step 5 (scaffold) runs as usual; authored docs keep their templates' default `spec_stage: empty` for `plan.md`, and the design/bug doc is set to `draft` via `spec.set-stage` as in normal mode — see Step 5 note.
-- Skip Step 6 (no prose) — emit outcome `skipped-empty-mode`.
-- Skip Step 7 (no diagrams) — emit outcome `skipped-empty-mode`.
+- Skip Step 6 (no précis) — emit outcome `skipped-empty-mode`.
+- Skip Step 7 (no prose) — emit outcome `skipped-empty-mode`.
+- Skip Step 8 (no diagrams) — emit outcome `skipped-empty-mode`.
 
 `--empty` mode is silent on stdout (no `AskUserQuestion`). The audit trail for empty-mode scaffolds lives in the originating request file's body until the asset's docs are filled and reviewed; no separate changelog entry is needed.
 
@@ -87,7 +89,7 @@ Scale the topics to the category:
 - **built-in `bug`** — `bug.md` (from `spec.bug/bug.md`, start stage `draft`) + `plan.md` (from `spec.bug/plan.md`, start stage `empty`). NO `design.md`.
 - **everything else** (`feature` / `change` / any operator-defined) — `design.md` (from `spec.<category>/design.md`, start stage `draft`) + `plan.md` (from `spec.<category>/plan.md`, start stage `empty`). The per-category template folder is `${CLAUDE_PLUGIN_ROOT}/templates/spec.<category>/`; operator-defined categories must have a folder seeded by `/spec.add-asset-category`.
 
-There is NO per-asset `tech.md` (removed — only the product carries `docs/tech.md`) and NO `layout` doc/role (removed).
+There is NO per-asset `tech.md` (removed — only the product carries `tech.md` at its root) and NO `layout` doc/role (removed).
 
 **Icon** — resolve the iconize icon to inject into the status folder-note frontmatter (Step 5):
 
@@ -104,25 +106,37 @@ Invoke the deterministic scaffold primitive via `Bash`:
 Bash(lazycortex-specs scaffold-asset <product> <category> <slug>)
 ```
 
-The primitive (`claude/lazycortex-specs/bin/scaffold_asset.py`) owns the mechanical scaffold work — template resolution (3-layer fallback: per-product override → project-wide override → plugin baseline), token substitution (`{{product}}`, `{{slug}}`, `{{subsystem}}`, `{{product_tag}}`, `iconize_icon`, `iconize_color`), file writes (folder-note + authored docs per category layout), per-file stage seeding, and folder-note `## History` line stamping (one line per doc transition). It refuses if the target folder already exists; the operator must pick a unique slug.
+The primitive (`claude/lazycortex-specs/bin/scaffold_asset.py`) owns the mechanical scaffold work — template resolution (3-layer fallback: per-product override → project-wide override → plugin baseline), token substitution (`{{product}}`, `{{slug}}`, `{{subsystem}}`, `{{product_tag}}`, `iconize_icon`, `iconize_color`), file writes (folder-note + authored docs per category layout), per-file stage seeding, and folder-note `# History` line stamping (one line per doc transition). It refuses if the target folder already exists; the operator must pick a unique slug.
 
 On success the primitive prints a JSON object to stdout:
 
 ```json
 {
   "outcome": "success",
-  "folder": "<spec_path>/<category-folder>/<slug>",
-  "folder_note": "<spec_path>/<category-folder>/<slug>/<slug>.md",
+  "folder": "specs/<spec_path>/<category-folder>/<slug>",
+  "folder_note": "specs/<spec_path>/<category-folder>/<slug>/<slug>.md",
   "docs": [{"file": "...design.md", "stage": "draft"}, {"file": "...plan.md", "stage": "empty"}],
   "history_lines": 3
 }
 ```
 
+The `folder` and `folder_note` fields are **repo-root-relative** (they include the vault-root prefix, e.g. `specs/`). Consumers that need to open a file use `<repo-root>/<folder>`; wikilinks remain content-root-relative (omit the vault-root prefix).
+
 On `outcome: error` (logical failure — folder exists, unknown product, missing template, etc.) propagate the JSON to the caller and abort; do NOT improvise the scaffold inline. Emit outcome word: `scaffolded:<N>` where N is the doc count, or `refused:<error.category>`.
 
-After this step, the folder exists with template-substituted content, `spec_source_docs` defaults populated, `# Sources / ## Docs` projection rendered, and per-file stages matching the template defaults (`design.md` / `bug.md` → `draft`, `plan.md` → `empty`). The folder-note's `## History` carries one scaffold line + one line per authored doc's stage transition.
+After this step, the folder exists with template-substituted content, `spec_source_docs` defaults populated, `# Sources / ## Docs` projection rendered, and per-file stages matching the template defaults (`design.md` / `bug.md` → `draft`, `plan.md` → `empty`). The folder-note's `# History` section carries one scaffold line + one line per authored doc's stage transition.
 
-## Step 6 — Author the prose
+## Step 6 — Author the asset précis
+
+Skip entirely under `--empty` (outcome `skipped-empty-mode`).
+
+Otherwise author the asset's `# Summary` précis: 1–2 phrases capturing the feature / change / bug essence drawn from the clarification answers (Step 3) and the doc just scaffolded. Write the précis between the `<!-- spec:precis:start -->` and `<!-- spec:precis:end -->` markers in the asset's `<slug>.md` folder-note (the `folder_note` path from the scaffold's JSON output), replacing the `_TBD` placeholder. The `# Summary` section in the folder-note is protected (`#protected/spec/summary`) — edit ONLY the précis text inside the markers; do not touch the `<!-- spec:stats:* -->` markers or the operator-zone body below the section.
+
+Commit the updated folder-note atomically (`git add <folder_note> && git commit -m "docs(<slug>): author précis"`).
+
+Outcome: `precis-authored` or `skipped-empty-mode`.
+
+## Step 7 — Author the prose
 
 Skip entirely under `--empty` (outcome `skipped-empty-mode`).
 
@@ -133,7 +147,7 @@ Otherwise author the authored-doc bodies in the product's language (Step 1), dra
 
 `plan.md` stays a placeholder — an external planning tool fills it during planning. Do not populate it here.
 
-## Step 7 — Draw the behavioral diagram(s)
+## Step 8 — Draw the behavioral diagram(s)
 
 Skip entirely under `--empty` (outcome `skipped-empty-mode`).
 
@@ -146,7 +160,7 @@ Diagram set by layout:
 
 This is a deliberate reduction. The obsolete fixed five-seam list (architecture / erd / state-or-flow / layout across a per-asset `design.md`+`tech.md`) no longer applies now that per-asset `tech.md` and the `layout` role are gone. Draw ONLY diagrams with a real anchor section in `design.md` / `bug.md`; never invent a section to host a diagram.
 
-## Step 8 — Log the run
+## Step 9 — Log the run
 
 Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/spec.create-asset/YYYY-MM-DD_HH-MM-SS.md`. Create the dir with `Bash(mkdir -p ./.logs/claude/spec.create-asset)`, then `Write` the file — never chain. Frontmatter: `git_sha` (`git rev-parse HEAD`), `git_branch`, `date` (UTC), `input` (the arguments passed). Body: `# spec.create-asset` heading, then `## Actions` and `## Result`. The `## Actions` list MUST record one line per task in the preamble's canonical list with its outcome word — a missing line is a bug.
 

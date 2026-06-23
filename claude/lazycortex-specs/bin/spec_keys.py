@@ -216,15 +216,17 @@ class SiblingDoc:
 # ----------------------------------------------------------------------------------------
 class Section:
   """
-  Body section headings the gate primitives read and append to.
+  Folder-note body section headings (H1).
 
   Attributes:
-    GATES: The `## Gates` heading carrying gate callouts.
-    HISTORY: The `## History` heading carrying gate-change log lines.
+    SUMMARY: The `# Summary` heading carrying the plugin-owned précis/stats.
+    GATES: The `# Gates` heading carrying gate callouts.
+    HISTORY: The `# History` heading carrying gate/stage-change log lines.
   """
 
-  GATES = "## Gates"
-  HISTORY = "## History"
+  SUMMARY = "# Summary"
+  GATES = "# Gates"
+  HISTORY = "# History"
 
 
 # ----------------------------------------------------------------------------------------

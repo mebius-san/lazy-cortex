@@ -309,17 +309,17 @@ No validators are wired — the WTR doc is approved by the operator directly thr
 The md-scan matcher uses `PurePath.match` semantics where `*` does NOT cross `/`, so each level of nesting needs its own glob. Append the missing globs to `routines.lazy-review.scan.paths`:
 
 ```yaml
-# product-level files (status folder-note at <spec_path>/<product>/<product>.md)
-- "<spec_path_prefix>/products/*/*.md"
-# product docs (<spec_path>/<product>/docs/design.md, tech.md, ...)
-- "<spec_path_prefix>/products/*/docs/*.md"
+# product-level files (operator folder-note + product design.md / tech.md)
+- "<vault_root>/<spec_path_prefix>/products/*/*.md"
 # per-asset dirs (folder-note + authored docs)
-- "<spec_path_prefix>/products/*/features/*/*.md"
-- "<spec_path_prefix>/products/*/changes/*/*.md"
-- "<spec_path_prefix>/products/*/bugs/*/*.md"
+- "<vault_root>/<spec_path_prefix>/products/*/features/*/*.md"
+- "<vault_root>/<spec_path_prefix>/products/*/changes/*/*.md"
+- "<vault_root>/<spec_path_prefix>/products/*/bugs/*/*.md"
+# request inbox
+- "<vault_root>/requests/*.md"
 ```
 
-`<spec_path_prefix>` is the leading segment of every registered product's `spec_path` — e.g. `Server` for `Server/products/<key>`, or empty (no prefix) for `products/<key>`. Append only the globs not already in the list (dedupe).
+`<vault_root>` is `spec.vault_root` from settings (default `specs`). `<spec_path_prefix>` is the leading segment of every registered product's `spec_path` — e.g. `Server` for `Server/products/<key>`, or empty (no prefix) for `products/<key>`. Append only the globs not already in the list (dedupe).
 
 Outcome: `wiring-applied:<N>` where N is 0..7 (the four 6a–6d blocks plus the two 6e classes plus the 6f paths sync).
 

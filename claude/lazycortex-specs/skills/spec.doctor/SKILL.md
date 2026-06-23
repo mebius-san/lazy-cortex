@@ -38,6 +38,7 @@ Resolve the product record from `lazy.settings.json[products]` — there is NO `
 2. **`record` null** — the product is not registered. Report as an error and stop: "product `<key>` is not in `lazy.settings.json[products]`; register it via `/spec.product-config`." Do NOT proceed.
 3. **`record` present** — capture `spec_path` (required, vault-relative), optional `source` (`{ repo, paths }`), optional `language` (default `en`), `icon` (optional), and `asset_categories` (default `{}`).
    - Verify `spec_path` exists as a directory. Missing → error.
+   - Verify the product folder leaf (basename of `spec_path`) is not a reserved name (`design` or `tech`): such a slug makes the product folder-note (`<leaf>.md`) collide with the product-level `design.md` / `tech.md` at the root (FAIL, per `${CLAUDE_PLUGIN_ROOT}/references/spec.layout-protocol.md` Part 3). No auto-fix — the operator must rename the product.
    - **Code-bound** (`source` block present) — resolve `source.repo` via the `spec.resolve-repo` primitive to get `{ local_path, branch, host, owner, repo, forge, base_url, … }`. Resolution failure (repo key not registered in `lazy.settings.json[repos]`, missing `local_path`, no git remote, unknown host with no `forge:` override on the repo record) is an error — report the underlying cause. Code-bound products run the full check set (A + B + C + D).
    - **Design-only** (no `source` block) — there is no code to diff. Run structural-only checks: A (link health, minus source-URL host matching), C (role/header), D (status/gates/folders). Skip Agent B (source staleness) entirely with outcome `no-source-binding`.
    - **Repo records** — repos live in the `lazy.settings.json[repos]` section (read via `lazycortex-core settings-get repos`); `spec.resolve-repo` reads them. Verify each referenced repo record's `branch` matches the checkout's actual default branch; a mismatch breaks every source link (error, offer to rewrite in `--apply`).
@@ -74,7 +75,7 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/spec.layout-protocol.md` (Wikilinks) and `
 
 Per `${CLAUDE_PLUGIN_ROOT}/references/spec.sources-protocol.md`. Diff the documented surface in the product **tech file** against current source. The design file is NOT checked for staleness — it describes behavior, not code 1:1.
 
-1. Read the product tech file (`<spec_path>/docs/tech.md`) and any feature/change-level `tech.md`; extract documented routes/methods, function/class names, constants and values, and file references.
+1. Read the product tech file (`<spec_path>/tech.md`) and any feature/change-level `tech.md`; extract documented routes/methods, function/class names, constants and values, and file references.
 2. Read the actual source from `<local_path>/<source.paths>`.
 3. Report deltas:
    - **Missing from tech (WARN)** — route/function/class in code but not documented.
@@ -91,7 +92,8 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/spec.layout-protocol.md`, `${CLAUDE_PLUGIN
   - `design.md` → `spec_role: design`; `tech.md` → `tech`; `plan.md` → `plan`; `bug.md` → `bug`.
   - The asset status folder-note (`<spec_path>/<category>/<slug>/<slug>.md`, basename matches the parent folder) → `spec_role: status`.
   - Source URLs / `source_branches:` are permitted ONLY on `tech` and feature/change-level `plan` docs. A source URL or `source_branches:` on any other role is a FAIL (propose to move into the tech file / strip the frontmatter).
-- **Header section** — every role-bearing authored doc must start with the expected H1 (`# <title> — <role>`) and breadcrumb (`> **<Subsystem>** · **<Product>**[ · **<asset>**] — <role>`) per `spec.layout-protocol.md`. Mismatch is a FAIL — the header is the file's identity under role-only filenames. (The status folder-note carries the `# <slug> — status` H1; it does NOT require the breadcrumb line.)
+- **Header section** — every role-bearing authored doc must start with the expected H1 (`# <title> — <role>`) and breadcrumb (`> **<Subsystem>** · **<Product>**[ · **<asset>**] — <role>`) per `spec.layout-protocol.md`. Mismatch is a FAIL — the header is the file's identity under role-only filenames. (The status folder-note carries NO `# <slug> — status` title H1; that form is removed.)
+- **Status note protected sections** — the status folder-note (`<category>/<slug>/<slug>.md`) MUST carry exactly three plugin-owned H1 sections in any order: `# Summary` (tag `#protected/spec/summary` as its first content line), `# Gates` (tag `#protected/spec/gates`), and `# History` (tag `#protected/spec/history`). A missing section or a duplicate → FAIL. These tags are the ownership markers; no other H1 in the status note may carry a `#protected/spec/*` tag.
 - **Required sections** — feature/change `design.md` carries a non-empty Requirements/Changes section; `bug.md` carries non-empty `## Repro steps`, `## Observed behavior`, `## Expected behavior`. Missing → FAIL.
 - **`spec_stage` closed set + tag mirror** — every authored doc (`design`, `tech`, `plan`, `bug`) carries `spec_stage` in the closed set `{empty, draft, approved, rejected, cancelled}` AND a `spec/<stage>` tag in `tags:` mirroring it in lock-step (per `spec.lifecycle-protocol.md` → status mirror tag; `spec.set-stage` is the only writer of both). FAIL on: missing `spec_stage`; value outside the set (including the removed `review` / `done` / `wtr`); missing/stale/duplicate `spec/*` tag. The fix is `spec.set-stage <doc> <current-stage>` (re-syncs the tag), or `spec.set-stage <doc> draft|approved` to map a removed value.
 - **Cancellability** — `spec_stage: cancelled` on `design.md` (feature/change mandatory doc) or `bug.md` (bug mandatory doc) is FAIL, always. `tech.md` / `plan.md` may be `cancelled`.
@@ -102,14 +104,14 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/spec.lifecycle-protocol.md`, `${CLAUDE_PLU
 
 **Top-level folders**
 
-- The product's top-level folders MUST be a subset of `{features, changes, bugs, requests}` ∪ `asset_categories` keys. Any other top-level `.md`-bearing folder is an **unknown folder** (FAIL). Each built-in folder (`features`, `changes`, `bugs`, `requests`) is expected to exist — a missing built-in is a WARN (operator may not have used it yet; in `--apply` offer to create).
+- The product's top-level folders MUST be a subset of `{features, changes, bugs, requests}` ∪ `asset_categories` keys. Any other top-level `.md`-bearing folder is an **unknown folder** (FAIL). A top-level `docs/` folder specifically is the **removed product-docs subfolder** (FAIL) — product-level `design.md` / `tech.md` now live loose at the product root; in `--apply` offer to move them up and delete `docs/`. Each built-in folder (`features`, `changes`, `bugs`, `requests`) is expected to exist — a missing built-in is a WARN (operator may not have used it yet; in `--apply` offer to create).
 
 **Status folder-notes**
 
 - Every asset folder (`<spec_path>/<category>/<slug>/`) contains exactly one status folder-note (basename matches the parent folder). Missing / duplicate / misplaced → FAIL.
 - Frontmatter carries `spec_role: status` and the five flat boolean gates plus the overlay: `spec_design_done`, `spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, `spec_released`, `spec_cancelled`. Each must be present and a boolean. Missing key or non-boolean value → FAIL. A `gates:` dict, a `stage:` key, `awaits_human:`, or a `## Workflow` section on the folder-note are old-model artifacts → FAIL (propose to strip).
 - Managed `iconize_icon` (and `iconize_color` when the category config carries a color) — see Icon drift below.
-- Body carries `## Gates` and `## History` sections. Missing either → FAIL.
+- Body carries exactly three `#protected/spec/*` H1 sections (`# Summary`, `# Gates`, `# History`). Missing any → FAIL (enforced by Agent C's protected-section check). Old-style `## Gates` / `## History` H2 sections without a plugin-owned H1 wrapper are an old-shape artifact — flag as FAIL but do NOT auto-rewrite (report-only, no `--apply`).
 
 **Linear gate precedence (S0..S5)**
 
@@ -120,16 +122,17 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/spec.lifecycle-protocol.md`, `${CLAUDE_PLU
 
 - `spec_design_done: true` ⇒ the WTR doc is `approved`: feature/change `design.md.spec_stage == approved`; bug `bug.md.spec_stage == approved`. Mismatch → FAIL.
 - `spec_plan_done: true` ⇒ `plan.md.spec_stage ∈ {approved, cancelled}`. Mismatch → FAIL.
-- `spec_released: true` ⇒ every authored doc present under the asset is resolved: the mandatory WTR doc (`design.md` for feature/change, `bug.md` for bug) is `approved` (never `cancelled`); the `plan.md` is `approved` or `cancelled`. Any doc still `empty`/`draft`/`rejected` → FAIL. (Assets carry no `tech.md` — only the product `docs/tech.md` does.)
+- `spec_released: true` ⇒ every authored doc present under the asset is resolved: the mandatory WTR doc (`design.md` for feature/change, `bug.md` for bug) is `approved` (never `cancelled`); the `plan.md` is `approved` or `cancelled`. Any doc still `empty`/`draft`/`rejected` → FAIL. (Assets carry no `tech.md` — only the product `tech.md` at its root does.)
 - The per-file `spec_stage` re-validation here repeats Agent C's closed-set check only as needed to evaluate coupling — coupling findings are D's, the closed-set / tag-mirror findings are C's. Do not double-report.
 
 **Per-file stage surfacing**
 
 - Any doc stuck at `spec_stage: rejected` is a WARN in every run — valid state, but signals unfinished review work. Fix: `spec.set-stage <doc> draft` + re-open review (`review_active: true`).
 
-**Operator-zone folder-notes + icon drift**
+**Operator-zone folder-notes + container-note protected section + icon drift**
 
 - The product folder-note (`<spec_path>/<leaf>.md`) and each category folder-note (`<spec_path>/<category>/<category>.md` for built-in `features`/`changes`/`bugs`/`requests` and for every `asset_categories` key) are operator-zone folder-notes: they carry NO `spec_role`, NO `*-index` role, NO dataviewjs. Finding `spec_role` on one → FAIL. Category folder-notes additionally carry a `description` frontmatter key (operator-authored prose; the plugin only reads it) — absent on a category folder-note is a WARN.
+- **Container-note `#protected/spec/summary` section** — the product root folder-note and every category folder-note MUST each carry a `# Summary` section whose first content line is `#protected/spec/summary`. That section body MUST contain both a `<!-- spec:precis:* -->` marker and a `<!-- spec:stats:* -->` marker (used by the plugin to inject generated precis text and aggregate stats). Missing `# Summary` section → FAIL. Missing either marker inside the section → FAIL. Stats-marker content staleness is NOT a doctor finding — stats are kept fresh by event-driven writes and do not require periodic validation. Asset status folder-notes carry a `# Summary` section with a precis marker only — no stats marker required on assets; apply that narrower check only to asset notes. (The vault-root `requests/` inbox note is validated separately in Check 8, which is the only check that runs outside any product's `spec_path`.)
 - **`iconize_icon` drift (WARN)** — the managed `iconize_icon` on each operator-zone folder-note must match its config source of truth. Resolve the expected value:
   - Product folder-note → `products[<key>].icon` (absent in config ⇒ no `iconize_icon` expected; a stray one is the drift).
   - Category folder-note → `asset_categories[<name>].icon` for operator-defined categories; for built-in categories the default applies unless overridden in `asset_categories`: `features` → `LiRocket`, `changes` → `LiRefreshCcw`, `bugs` → `LiBug`, `requests` → `LiInbox`.
@@ -146,8 +149,11 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/spec.request-protocol.md`. Validate the si
 
 ## Cross-reference check (Check 8, inline in coordinator)
 
+This check runs once, vault-wide — not scoped to any single product's `spec_path`. It is the only place checks outside all products' `spec_path` boundaries are performed.
+
 - Verify the product is referenced in any relevant index pages.
-- A loose `<spec_path>/changelog.md` is a FAIL: the role is removed from the model. The fix is to delete the file (its history has migrated into per-doc `## History` H1 sections and the status folder-note `## History` of each asset).
+- A loose `<spec_path>/changelog.md` is a FAIL: the role is removed from the model. The fix is to delete the file (its history has migrated into per-doc `# History` H1 sections written by `lazy-review.historian`, and the status folder-note's `# History` H1 section of each asset).
+- **Requests-inbox `#protected/spec/summary` section** — the vault-root `requests/requests.md` inbox note (at `<content-root>/requests/requests.md`, outside any product's `spec_path`) MUST carry a `# Summary` section whose first content line is `#protected/spec/summary`. That section body MUST contain both a `<!-- spec:precis:* -->` marker and a `<!-- spec:stats:* -->` marker. Missing `# Summary` section → FAIL. Missing either marker → FAIL. This check is report-only — no `--apply` auto-rewrite.
 
 ## Output (Report)
 
@@ -165,8 +171,8 @@ scan: Check 8 cross-reference — <PASS|WARN> (<N> findings)
 
 ### Errors (must fix)
 - [ ] Bare wikilink: `[[design]]` in `features/<feat>/plan.md:<line>` — use `[[<path>|<display>]]`
-- [ ] Broken wikilink: `[[<target>]]` in `docs/design.md:<line>`
-- [ ] Role violation: source URL in `docs/design.md:<line>` — belongs in `docs/tech.md`
+- [ ] Broken wikilink: `[[<target>]]` in `<spec_path>/design.md:<line>`
+- [ ] Role violation: source URL in `<spec_path>/design.md:<line>` — belongs in `<spec_path>/tech.md`
 - [ ] Role violation: `source_branches:` frontmatter on `features/<feat>/design.md`
 - [ ] Unknown `spec_role`: `<file>` carries `spec_role: <value>` (closed set: design, plan, bug, tech, status)
 - [ ] Loose `changelog.md`: `<spec_path>/changelog.md` exists — the role is removed; delete the file
@@ -180,15 +186,24 @@ scan: Check 8 cross-reference — <PASS|WARN> (<N> findings)
 - [ ] Gate precedence: `spec_tests_passing: true` but `spec_develop_done: false` (gates are a strict ladder S0..S5)
 - [ ] Gate/stage coupling: `spec_design_done: true` but `design.md.spec_stage: draft` (must be approved)
 - [ ] Release coupling: `spec_released: true` but `plan.md.spec_stage: draft` (every doc must resolve before release)
-- [ ] Missing `## Gates`/`## History`: `features/<feat>/<feat>.md`
+- [ ] Old-shape H2 sections: `features/<feat>/<feat>.md` carries `## Gates`/`## History` H2 without a `#protected/spec/*` H1 wrapper — old-model artifact (report-only; no auto-rewrite)
+- [ ] Missing protected section: `features/<feat>/<feat>.md` has no `# Summary` (`#protected/spec/summary`) — status note must carry Summary, Gates, and History protected H1 sections
+- [ ] Missing protected section: `features/<feat>/<feat>.md` has no `# Gates` (`#protected/spec/gates`)
+- [ ] Missing protected section: `features/<feat>/<feat>.md` has no `# History` (`#protected/spec/history`)
+- [ ] Duplicate protected section: `features/<feat>/<feat>.md` has two `# Summary` sections
+- [ ] Missing container Summary section: `<spec_path>/features/features.md` has no `# Summary` (`#protected/spec/summary`)
+- [ ] Missing precis marker: `<spec_path>/features/features.md` `# Summary` body lacks `<!-- spec:precis:* -->` marker
+- [ ] Missing stats marker: `<spec_path>/features/features.md` `# Summary` body lacks `<!-- spec:stats:* -->` marker (required on container notes; not required on asset status notes)
 - [ ] `spec_role` on operator-zone folder-note: `<spec_path>/features/features.md` carries `spec_role` (must have none)
 - [ ] Unknown top-level folder: `<spec_path>/<folder>/` is neither built-in nor a declared asset category
+- [ ] Removed `docs/` subfolder: `<spec_path>/docs/` exists — move `design.md` / `tech.md` to the product root and delete `docs/`
+- [ ] Reserved product slug: product folder leaf is `design`/`tech` — collides with the product-level doc of the same name; rename the product
 - [ ] Request schema: `requests/<slug>.md` missing/invalid `request_status`/`request_class`/`created`
 - [ ] Unresolvable `spec_source_requests`: `<feat>/<feat>.md` lists `<path>` but no request file exists there
 
 ### Warnings (should fix)
 - [ ] Missing display text: path-qualified wikilink with no `|<display>` in `<file>:<line>`
-- [ ] Route `<METHOD> <path>` exists in code but not in `docs/tech.md`
+- [ ] Route `<METHOD> <path>` exists in code but not in `<spec_path>/tech.md`
 - [ ] Constant `<NAME>` changed: tech file says `<X>`, code says `<Y>`
 - [ ] Missing built-in folder: `<spec_path>/changes/` does not exist
 - [ ] Missing category description: `<spec_path>/characters/characters.md` has no `description`
@@ -212,14 +227,14 @@ In **`--apply` mode**, walk the errors and warnings and, **per finding**, call `
 - Strip a forbidden source URL / `source_branches:` from a role that may not carry it (move the URL into the tech file when the user confirms).
 - Re-sync a `spec/<stage>` tag to its `spec_stage` value (delegate to `spec.set-stage <doc> <current-stage>` — never raw-edit the tag).
 - Turn off a precedence-orphaned gate (`spec.flip-gate <asset> <gate> --off`).
-- Add a missing gate boolean / `## Gates` / `## History` to a status folder-note.
+- Add a missing gate boolean to a status folder-note.
 - Rewrite a drifted `iconize_icon` / `iconize_color` to the config value.
 - Create a missing built-in folder.
 - Add missing routes/functions or update changed values in the tech file.
 
 Never auto-fix without the per-finding confirmation. **Never** change product config in `lazy.settings.json`, run any migration, or touch a doc's content beyond the specific approved fix.
 
-When `--apply` writes fixes, the audit trail is the per-doc `## History` entries written by the canonical writers it delegates to (`spec.set-stage`, `spec.flip-gate`) plus this skill's own run log under `.logs/claude/spec.doctor/`. There is no product-wide changelog to update.
+When `--apply` writes fixes, the audit trail is the per-doc `# History` entries written by the canonical writers it delegates to (`spec.set-stage`, `spec.flip-gate`) plus this skill's own run log under `.logs/claude/spec.doctor/`. There is no product-wide changelog to update.
 
 ## Key rules
 
@@ -234,6 +249,7 @@ When `--apply` writes fixes, the audit trail is the per-doc `## History` entries
 - **Top-level folders** — built-in `{features, changes, bugs, requests}` ∪ the product's `asset_categories` keys; anything else is an unknown-folder error.
 - **`iconize_*` is config-derived** — managed icon/color on every folder-note must match `products[<key>].icon` (product), `asset_categories[<name>].icon` (category), or the built-in default (feature→LiRocket / change→LiRefreshCcw / bug→LiBug / requests→LiInbox); drift is a warning.
 - **Naming, folder structure, header section, wikilink format, gates, per-file stages, and request schema** are owned by `${CLAUDE_PLUGIN_ROOT}/references/` — this skill enforces but never inlines them.
+- **Layout/body-shape findings are report-only — no `--apply` auto-migrate** — findings about stray repo-root `requests/`, content outside `vault_root`, or old-shape note bodies (missing protected sections, old title H1) are flagged but MUST NOT trigger an `--apply` action that moves, relocates, or rewrites existing content. The operator resolves these manually.
 
 ## Logging
 

@@ -15,7 +15,7 @@ Every external reference a spec doc carries goes through one of three channels. 
 
 How an asset (and each of its authored docs) records which external inputs contributed to it AND which reference documents accompany it. Two `spec_source_*` frontmatter keys are sources of truth; the body's `# Sources` H1 section is a human-readable projection of both.
 
-The pattern is cross-spec — every authored doc (asset-level `design.md`, `plan.md`, `bug.md`, plus product-level `docs/design.md`, `docs/tech.md`) and the asset's status folder-note carry the same attribution shape. Today two source kinds contribute — requests (via `spec.request-attach`) and source-docs (via `spec.create-asset` at scaffold time + `spec.refresh-sources` later); the body shape is designed so additional source kinds (external links, RFCs, tickets) can land alongside them without restructuring.
+The pattern is cross-spec — every authored doc (asset-level `design.md`, `plan.md`, `bug.md`, plus product-level `design.md`, `tech.md`) and the asset's status folder-note carry the same attribution shape. Today two source kinds contribute — requests (via `spec.request-attach`) and source-docs (via `spec.create-asset` at scaffold time + `spec.refresh-sources` later); the body shape is designed so additional source kinds (external links, RFCs, tickets) can land alongside them without restructuring.
 
 ### Frontmatter — `spec_source_requests`
 
@@ -33,7 +33,7 @@ Lives on:
 
 A list of path-qualified wikilinks pointing at reference documents that any agent processing this document should see as context. Distinct from `spec_source_requests`: requests record *provenance* (where the doc's content came from); source-docs record *companion references* (what the doc relies on or relates to).
 
-Lives on every authored spec doc (`design.md`, `plan.md`, `bug.md`, asset-level `tech.md`, and product-level `docs/design.md` + `docs/tech.md`). Folder-note (status file) does NOT carry `spec_source_docs` — it's a managed status artifact with gates and `## History`, not content with companion references.
+Lives on every authored spec doc (`design.md`, `plan.md`, `bug.md`, asset-level `tech.md`, and product-level `design.md` + `tech.md`). Folder-note (status file) does NOT carry `spec_source_docs` — it's a managed status artifact with gates and `# History`, not content with companion references.
 
 Defaults are written by `spec.create-asset` at scaffold time (see `lazy-specs.functional-spec.md` § «Контекст эксперта при ревью» for the per-doc-role default lists). The operator may extend or trim the list manually.
 
@@ -93,10 +93,10 @@ The bullet list between `<!-- auto:spec-docs:start --> / :end -->` is a determin
 - one bullet per wikilink, in the same order as the frontmatter list;
 - bullet format: `- [[<doc-wikilink>|<display>]]` (no date — docs are stable references, not point-in-time events);
 - the `<display>` default is shape-aware so the rendered bullet reads sensibly without operator rewrites:
-  - product-level docs (`<spec_path>/docs/<role>`) render as `<product> — product <role>` (e.g. `[[<spec_path>/docs/design|<product> — product design]]`);
+  - product-level docs (`<spec_path>/<role>`) render as `<product> — product <role>` (e.g. `[[<spec_path>/design|<product> — product design]]`);
   - sibling-asset docs (`<spec_path>/<category>/<slug>/<role>`) render as `<slug> — <role>` (e.g. `[[<spec_path>/<category>/<slug>/design|<slug> — design]]`);
   - any other shape falls back to the bare last segment of the wikilink path.
-  The operator may rewrite the display to a more meaningful gloss (e.g. `[[<spec_path>/docs/design|<chapter>: product spec]]`) and the writer preserves these operator-edited displays across re-projections by matching on the wikilink path (the bytes left of the `|`);
+  The operator may rewrite the display to a more meaningful gloss (e.g. `[[<spec_path>/design|<chapter>: product spec]]`) and the writer preserves these operator-edited displays across re-projections by matching on the wikilink path (the bytes left of the `|`);
 - duplicates dedupe on the wikilink path.
 
 Writers:
@@ -157,7 +157,7 @@ Source code is referenced by forge URL (GitHub / GitLab / Bitbucket / Gitea / Fo
 - The `<path>` is relative to the repo root, not relative to the product's `source.paths`
 - Skills **read** source from `<repo-config>.local_path/<path>` during generation; only the written links go through the forge
 
-**Where source URLs belong** — see [file-roles](./spec.layout-protocol.md). Source URLs are permitted in `tech` files (product-level `docs/tech.md`), `plan` files, and the `## Related code / logs` section of a `bug` file. They are FORBIDDEN in any `design` file. Behavior/design docs describe WHAT; source references belong with the code-level architecture.
+**Where source URLs belong** — see [file-roles](./spec.layout-protocol.md). Source URLs are permitted in `tech` files (product-level `tech.md`), `plan` files, and the `## Related code / logs` section of a `bug` file. They are FORBIDDEN in any `design` file. Behavior/design docs describe WHAT; source references belong with the code-level architecture.
 
 ### Known-forges table
 
@@ -193,7 +193,7 @@ spec_source_branches:
 - **Key present**: source links for that repo use the named branch — `spec.source-url(<repo-key>, <path>, <kind>, branch=<branch-name>)`.
 - Dict shape — one spec can pin different branches per repo.
 
-**Which files may carry pins**: only files whose role permits source URLs and may pin — `plan` files and the product-level `docs/tech.md`. A `spec_source_branches` key on any other file is a bug; `spec.finalize-branch` and `spec.doctor` treat it as a violation.
+**Which files may carry pins**: only files whose role permits source URLs and may pin — `plan` files and the product-level `tech.md`. A `spec_source_branches` key on any other file is a bug; `spec.finalize-branch` and `spec.doctor` treat it as a violation.
 
 **When to pin**: content-generating skills auto-pin a file they are creating IF (a) the source repo is currently checked out on a non-default branch AND (b) the generated file body will contain at least one forge URL for that repo. Files with no source URLs get no pin.
 
@@ -240,7 +240,7 @@ A product MAY declare upstream dependencies in its `dependencies` array under `p
 
 Each dep entry resolves to `{kind, spec_link, dev_link, local_spec_path?}` via the shared primitive `spec.resolve-dependency`:
 
-- `product` entries: `kind: internal-product`, `spec_link` = path-qualified wikilink to the dep's `<spec_path>/docs/design`, `dev_link` = `base_url` from `spec.resolve-repo(<dep product's source.repo>)`, `local_spec_path` = the dep's `spec_path`.
+- `product` entries: `kind: internal-product`, `spec_link` = path-qualified wikilink to the dep's `<spec_path>/design`, `dev_link` = `base_url` from `spec.resolve-repo(<dep product's source.repo>)`, `local_spec_path` = the dep's `spec_path`.
 - `repo` entries: `kind: internal-repo`, `spec_link` = wikilink to whichever product owns that repo as `source.repo` (or a documentation page; skill chooses the first product that lists the repo), `dev_link` = `base_url` from `spec.resolve-repo(<repo key>)`, `local_spec_path` = that product's `spec_path` if resolvable.
 - `external` entries: `kind: external`, `spec_link` = `spec_url` (plain URL), `dev_link` = `dev_url`, `local_spec_path` = unset.
 

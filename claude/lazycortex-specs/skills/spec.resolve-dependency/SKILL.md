@@ -42,14 +42,14 @@ One dep entry in its YAML shape, one of:
 2. Refuse if missing — suggest registering the product under `products[<product-key>]` with `spec.product-config`.
 3. Read `spec_path` and `source.repo` from the product record.
 4. Resolve `source.repo` via the `spec.resolve-repo` primitive to get `{base_url, …}`.
-5. Emit: ``` kind: internal-product spec_link: [[<spec_path>/docs/design|<product-key> design]] dev_link:  <base_url> local_spec_path: <spec_path> ```
+5. Emit: ``` kind: internal-product spec_link: [[<spec_path>/design|<product-key> design]] dev_link:  <base_url> local_spec_path: <spec_path> ```
 
 ### 3. Resolve internal-repo
 
 1. Confirm `<repo-key>` is a key in the `repos` settings section (`lazycortex-core settings-get repos`). Refuse if absent.
 2. Resolve via `spec.resolve-repo(<repo-key>)` to get `{base_url, …}`.
 3. Find which product (if any) declares this repo as its `source.repo` by scanning `lazy.settings.json[products]`. If multiple, pick the first product in alphabetic-by-key order; record the fact that there are multiple.
-4. Emit: ``` kind: internal-repo spec_link: [[<picked product spec_path>/docs/design|<repo-key> (<picked product>)]] dev_link:  <base_url> local_spec_path: <picked product spec_path, or unset if no product uses this repo> ```
+4. Emit: ``` kind: internal-repo spec_link: [[<picked product spec_path>/design|<repo-key> (<picked product>)]] dev_link:  <base_url> local_spec_path: <picked product spec_path, or unset if no product uses this repo> ```
 
 ### 4. Resolve external
 

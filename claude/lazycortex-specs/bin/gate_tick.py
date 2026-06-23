@@ -13,7 +13,7 @@ then advances the asset one notch:
   one owner of those mutations.
 - A HUMAN-SIGNAL gate (`spec_develop_done` / `spec_tests_passing` /
   `spec_released`) cannot be auto-derived: the worker appends a
-  `[!ready]` callout to `## Gates` (once — idempotent) telling the
+  `[!ready]` callout to `# Gates` (once — idempotent) telling the
   operator how to flip it by hand.
 - A previously-appended `[!ready]` callout whose precondition has since
   regressed is rewritten in place to a `[!info]` withdrawal callout.
@@ -23,7 +23,7 @@ to-do item.
 """
 from __future__ import annotations
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
+# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -54,6 +54,8 @@ from spec_keys import (  # noqa: E402
     StageKey,
     TickAction,
 )
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+from summary_render import parent_container_note, apply_container_stats  # noqa: E402
 
 
 # Marker fragments for locating the readiness callout in the body.
@@ -67,7 +69,7 @@ _READY_TAIL = " ready to flip"
 # terminal (`approved`, `cancelled`) or operator-attention (`rejected`, `empty`); only `draft`
 # is auto-promotable. The promotion mirrors what `/spec.set-stage <doc> approved` does
 # interactively: rewrite the `spec_stage:` frontmatter value, update the `spec/<stage>` mirror
-# tag in lock-step, append one `## History` line to the asset's status folder-note.
+# tag in lock-step, append one `# History` line to the asset's status folder-note.
 _APPROVED_REVIEW_RESULTS = frozenset({Stage.APPROVED, "approved-with-concerns"})
 _STAGEABLE_SIBLINGS = (
     SiblingDoc.DESIGN,
@@ -131,13 +133,13 @@ def _rewrite_doc_for_promotion(doc_path: Path) -> bool:
 
 def _append_promotion_history(asset_note: Path, doc_name: str, today: str) -> None:
   """
-  Append one `## History` line to the asset's status folder-note recording the promotion.
+  Append one `# History` line to the asset's status folder-note recording the promotion.
 
   Mirrors the `spec.set-stage` history format so doctor-side tag-vs-history consistency checks
   cannot tell auto-promotions from interactive ones.
 
   Args:
-    asset_note: The status folder-note whose `## History` section receives the line.
+    asset_note: The status folder-note whose `# History` section receives the line.
     doc_name: Bare filename of the promoted sibling (e.g. `design.md`).
     today: ISO date string pinned into the history line.
   """
@@ -168,6 +170,9 @@ def _commit_promotions(asset_dir: Path, promoted_docs: list[str]) -> None:
   repo = flip_gate._repo_root(asset_dir)
   paths = [str(asset_dir / name) for name in promoted_docs]
   paths.append(str(asset_dir / f"{asset_dir.name}.md"))
+  parent = parent_container_note(asset_dir)
+  if parent is not None and apply_container_stats(parent):
+    paths.append(str(parent))
   subprocess.run(
       ["git", "add", "--", *paths],
       cwd = str(repo), check = True, capture_output = True,
@@ -352,7 +357,7 @@ def _has_ready(body: str, gate: str) -> bool:
 
 def _append_callout(body: str, block: str) -> str:
   """
-  Append a callout block under the `## Gates` section.
+  Append a callout block under the `# Gates` section.
 
   Returns:
     The body text with the block inserted at the end of the Gates section.
@@ -414,7 +419,7 @@ def gate_tick(asset_note: Path, today: str | None = None) -> dict:
   # Step 0 — sibling-doc stage promotion (per README/overview promise: "Drive an asset's
   # readiness gates AND per-file stages"). When a sibling doc's review finalized as approved
   # and its `spec_stage` is still `draft`, flip the stage in lock-step with its mirror tag and
-  # append the asset's `## History`. Return early — the gate-flip pass on the next tick reads
+  # append the asset's `# History`. Return early — the gate-flip pass on the next tick reads
   # the freshly promoted stages and advances `spec_design_done` / `spec_plan_done` naturally.
   promoted = _advance_stages_from_review(asset_dir, asset_note, today_str)
   # guard: a promotion happened this tick — surface it and let the next tick advance gates

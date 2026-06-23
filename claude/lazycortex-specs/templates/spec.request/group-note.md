@@ -1,6 +1,13 @@
 ---
 description: _TBD — operator-edited description of the requests intake._
 ---
-# requests
+# Summary
+#protected/spec/summary
+<!-- spec:precis:start -->
+Vault-wide request intake inbox.
+<!-- spec:precis:end -->
+<!-- spec:stats:start -->
 
-<!-- Body is operator-zone. The plugin writes only the managed iconize_* keys (and reads `description` but never overwrites operator text). -->
+<!-- spec:stats:end -->
+
+<!-- Body below is operator-zone. The plugin owns only the # Summary section above. -->
