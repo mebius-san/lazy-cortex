@@ -105,7 +105,7 @@ Skill(skill: "lazycortex-specs:spec.flip-gate", args: "<asset-dir> spec_released
 
 `flip_gate` enforces the `spec_released` precondition itself — `spec_tests_passing == true` (the full ladder: a release requires tests passing, which in turn requires develop-done, plan-done, design-done). When the precondition is unmet, `flip_gate` refuses cleanly and mutates nothing — surface its refusal message verbatim (it names which gate is holding the release up), skip the release for that asset, and do NOT work around it. The rebase from Step 4 is already applied regardless; only the release flip is held back. The operator settles the stuck gate (e.g. flips `spec_tests_passing` once a green test report exists) and re-runs `/spec.finalize-branch`.
 
-If `spec_cancelled: true`, skip silently — cancelled assets never advance. Every release flip's audit trail lives in the status folder-note's `## History` line written by `spec.flip-gate`; no separate product changelog is updated.
+If `spec_cancelled: true`, skip silently — cancelled assets never advance. Every release flip's audit trail lives in the status folder-note's `# History` section written by `spec.flip-gate`; no separate product changelog is updated.
 
 ## Step 7 — Verify
 

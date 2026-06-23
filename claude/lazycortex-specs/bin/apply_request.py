@@ -71,6 +71,18 @@ if TYPE_CHECKING:
   pass
 
 
+_BIN = Path(__file__).resolve().parent
+if str(_BIN) not in sys.path:
+  sys.path.insert(0, str(_BIN))
+
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable=import-error,wrong-import-position
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+from summary_render import apply_container_stats  # noqa: E402
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+from spec_paths import find_settings_root, spec_content_root  # noqa: E402
+
+
 class _K:
   """
   String / int constants used by the apply worker.
@@ -109,6 +121,8 @@ class _K:
   PRODUCTS = "products"
   SPEC_PATH = "spec_path"
   GIT_DIR = ".git"
+  REQUESTS_DIR = "requests"
+  REQUESTS_NOTE = "requests.md"
   # Routing-section markers
   ROUTING_H1 = "# Routing"
   HISTORY_H1 = "# History"
@@ -888,7 +902,13 @@ class _FolderNote:
       new_block = cleaned + ("\n\n" if cleaned else "\n") + bullet + "\n"
       new_text = text[:m.start(1)] + new_block + text[m.end(1):]
     else:
-      # Insert section before ## History when present, otherwise append.
+      # Insert section before ## History anchor when present, otherwise append.
+      # NOTE: The status folder-note body shape uses `# History` (H1, Section.HISTORY) since A4.
+      # HISTORY_H2 = "## History" is a stale anchor — the `## Source requests` block is written
+      # into the operator-zone of the folder-note, where the legacy H2 anchor may still appear in
+      # pre-migration notes. This constant and the insertion logic are intentionally left as-is
+      # pending an A9-code task that updates the anchor to Section.HISTORY and verifies the insert
+      # correctly lands above the protected `# History` section.
       hist_idx = text.find(f"\n{_K.HISTORY_H2}\n")
       block_text = f"{_K.SOURCE_REQUESTS_H2}\n\n{bullet}\n\n"
       if hist_idx >= 0:
@@ -1109,6 +1129,9 @@ class _Apply:
     Args:
       subject: One-line commit subject describing the staged diff.
     """
+    inbox = spec_content_root(find_settings_root(self.file_path.parent)) / _K.REQUESTS_DIR / _K.REQUESTS_NOTE
+    if inbox.is_file():
+      apply_container_stats(inbox)
     add_res = subprocess.run(
         [ _K.GIT, "add", "-A" ],
         cwd = str(self.repo),

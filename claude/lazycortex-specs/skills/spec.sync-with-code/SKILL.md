@@ -5,7 +5,7 @@ allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Skill, Task, AskUserQuestion
 ---
 # Spec Sync
 
-Synchronize a product specification with source code changes since the last sync. Updates the product tech doc from the code, surfaces user-visible behavior changes to the operator for the product design doc, reconciles branch pins, and proposes flat-gate / per-file-stage corrections grounded in the observed code state — never silently. Per-asset history of these proposals lives in each touched status folder-note's `## History`, written by `spec.flip-gate` and `spec.set-stage`; per-document history of design/tech rewrites lives in the rewritten doc's `## History` H1 section. There is no separate product-wide changelog.
+Synchronize a product specification with source code changes since the last sync. Updates the product tech doc from the code, surfaces user-visible behavior changes to the operator for the product design doc, reconciles branch pins, and proposes flat-gate / per-file-stage corrections grounded in the observed code state — never silently. Per-asset history of these proposals lives in each touched status folder-note's `# History` H1 section, written by `spec.flip-gate` and `spec.set-stage`; per-document history of design/tech rewrites lives in the rewritten doc's `# History` H1 section. There is no separate product-wide changelog.
 
 Product config, the five flat gates, per-file stages, source URLs, and pin reconciliation are all owned by `${CLAUDE_PLUGIN_ROOT}/references/` — this skill never inlines those mechanics; it calls the named primitives and references the reference docs.
 
@@ -55,11 +55,11 @@ Branch on the record:
 - **`record` present but no `source` block** — the product is design-only (specs ahead of code, no code to sync). No-op with the message: "product is design-only — no code binding to sync; use /spec.product-config to attach a repo." Do NOT proceed.
 - **`record` present with a `source` block** — capture `spec_path`, `source.repo`, `source.paths`, `language` (default `en`), and `asset_categories`. Resolve `source.repo` via the `spec.resolve-repo` primitive to get `{ local_path, branch, host, owner, repo, forge, base_url, … }`. All source URLs emitted by this skill go through `spec.source-url(<repo-key>, …)` — never inline forge-specific path schemes. Continue.
 
-All narrative prose this skill writes (`## Current`-style blurbs, folder-note `## History` lines, user-facing summaries presented via `AskUserQuestion`) is rendered in the product's `language` per `${CLAUDE_PLUGIN_ROOT}/references/spec.config-protocol.md`. Frontmatter keys/values, role words, fixed section headers, wikilinks, URLs, file paths, and gate names stay English.
+All narrative prose this skill writes (folder-note `# History` lines, user-facing summaries presented via `AskUserQuestion`) is rendered in the product's `language` per `${CLAUDE_PLUGIN_ROOT}/references/spec.config-protocol.md`. Frontmatter keys/values, role words, fixed section headers, wikilinks, URLs, file paths, and gate names stay English.
 
 ## Step 1 — Determine scope
 
-1. Read the product design doc (`<spec_path>/docs/design.md` — behavior) and product tech doc (`<spec_path>/docs/tech.md` — code architecture) per `${CLAUDE_PLUGIN_ROOT}/references/`. The design doc describes WHAT; the tech doc describes the code. This skill mostly touches the tech doc; it only flags design-doc changes to the operator for their decision.
+1. Read the product design doc (`<spec_path>/design.md` — behavior) and product tech doc (`<spec_path>/tech.md` — code architecture) per `${CLAUDE_PLUGIN_ROOT}/references/`. The design doc describes WHAT; the tech doc describes the code. This skill mostly touches the tech doc; it only flags design-doc changes to the operator for their decision.
 2. Read `.state/spec-sync-<product-key>.json` to get `last_commit`:
 
    ```json
@@ -150,7 +150,7 @@ Walk every asset folder under the product's `asset_categories` (e.g. `<spec_path
 
 **Missing folder-note (scaffold)**
 
-If an asset folder has no status folder-note, scaffold one from `${CLAUDE_PLUGIN_ROOT}/templates/spec.<category>/asset-note.md` (where `<category>` is the asset's category, derived from its enclosing folder). The category-level template carries the same flat-gate body for every built-in and operator-defined category. Substitute `{{product_tag}}`, `{{slug}}` (the asset folder basename), and the resolved `{{iconize_icon}}` / `{{iconize_color}}` (from the category's config). Write it at `<asset-folder>/<asset-folder-basename>.md` (basename matches the parent folder per the status-file invariant). Append a `## History` line: `- <YYYY-MM-DD> — spec.sync-with-code · status folder-note scaffolded`. Do NOT infer or set any gate to `true` during the scaffold — the gate proposals below are a separate, operator-confirmed step.
+If an asset folder has no status folder-note, scaffold one from `${CLAUDE_PLUGIN_ROOT}/templates/spec.<category>/asset-note.md` (where `<category>` is the asset's category, derived from its enclosing folder). The category-level template carries the same flat-gate body for every built-in and operator-defined category. Substitute `{{product_tag}}`, `{{slug}}` (the asset folder basename), and the resolved `{{iconize_icon}}` / `{{iconize_color}}` (from the category's config). Write it at `<asset-folder>/<asset-folder-basename>.md` (basename matches the parent folder per the status-file invariant). Append a `# History` line: `- <YYYY-MM-DD> — spec.sync-with-code · status folder-note scaffolded`. Do NOT infer or set any gate to `true` during the scaffold — the gate proposals below are a separate, operator-confirmed step.
 
 **Code-grounded gate proposal**
 
@@ -160,7 +160,7 @@ For each asset (freshly scaffolded or pre-existing), inspect whether the code th
 Skill(skill: "lazycortex-specs:spec.flip-gate", args: "<asset-dir> spec_develop_done")
 ```
 
-`flip_gate` enforces its own precondition (`spec_plan_done` true) and refuses cleanly if unmet — surface its refusal verbatim, do NOT work around it. Never propose `spec_tests_passing` or `spec_released` here — `spec_tests_passing` needs a green test report and `spec_released` is owned by `/spec.finalize-branch`. The flip's audit trail lives in the status folder-note's `## History` (written by `spec.flip-gate` itself) and in this skill's run log.
+`flip_gate` enforces its own precondition (`spec_plan_done` true) and refuses cleanly if unmet — surface its refusal verbatim, do NOT work around it. Never propose `spec_tests_passing` or `spec_released` here — `spec_tests_passing` needs a green test report and `spec_released` is owned by `/spec.finalize-branch`. The flip's audit trail lives in the status folder-note's `# History` section (written by `spec.flip-gate` itself) and in this skill's run log.
 
 **Per-file stage correction**
 
@@ -170,7 +170,7 @@ When an authored doc's per-file `spec_stage` is objectively wrong against the co
 Skill(skill: "lazycortex-specs:spec.set-stage", args: "<doc-path> <stage>")
 ```
 
-The closed stage set is `empty | draft | approved | rejected | cancelled` — owned by `spec.set-stage`. `spec.set-stage` keeps the `## History` line and the `spec/<stage>` tag mirror in sync; never rewrite `spec_stage` frontmatter directly. Docs missing on disk are skipped — this skill never creates placeholder authored docs during sync.
+The closed stage set is `empty | draft | approved | rejected | cancelled` — owned by `spec.set-stage`. `spec.set-stage` keeps the `# History` line and the `spec/<stage>` tag mirror in sync; never rewrite `spec_stage` frontmatter directly. Docs missing on disk are skipped — this skill never creates placeholder authored docs during sync.
 
 If `spec_cancelled: true` on the folder-note, skip both proposals for that asset — cancelled assets never advance. Every change in this step is operator-confirmed; this skill writes no gate or stage silently.
 

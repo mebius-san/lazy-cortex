@@ -34,7 +34,7 @@ apply-gate mode.
 """
 from __future__ import annotations
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
+# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import re
@@ -53,6 +53,10 @@ if str(_BIN) not in sys.path:
 
 # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
 from spec_keys import BannerTag, Outcome, SpecKey, SpecValue, State  # noqa: E402
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+from spec_paths import find_settings_root, spec_content_root  # noqa: E402
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+from summary_render import apply_container_stats  # noqa: E402
 
 
 _REQUIRED_REVIEW_KEYS = (SpecKey.REVIEW_ACTIVE, SpecKey.REVIEW_ROUND, SpecKey.REVIEW_APPROVED)
@@ -301,8 +305,13 @@ def _atomic_commit(
     git config (same trick `lazycortex-review/bin/git_ops.py` uses).
     """
   cwd = file_path.parent
+  add_paths: list[str] = [str(file_path)]
+  # waiver: inbox path segments are fixed protocol constants; no constants class in this module
+  inbox = spec_content_root(find_settings_root(file_path.parent)) / "requests" / "requests.md"
+  if inbox.is_file() and apply_container_stats(inbox):
+    add_paths.append(str(inbox))
   subprocess.run(
-      ["git", "add", "--", str(file_path.name)],
+      ["git", "add", "--", *add_paths],
       cwd = cwd, check = True, capture_output = True,
   )
   subprocess.run(

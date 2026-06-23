@@ -135,11 +135,17 @@ Create the category directory and write the operator-zone folder-note from the j
    - `{{description}}` → the prose from Step 3 (rendered in the product's `language`);
    - `{{iconize_icon}}` → `<icon>` from Step 4;
    - `{{iconize_color}}` → `<color>` from Step 4 if captured. If Step 4 captured no color, REMOVE the `iconize_color:` frontmatter line entirely (do not leave it as `iconize_color: ` with an empty value — that produces a `null` key which iconize misreads as "transparent" rather than "fall back to default").
-3. Write the substituted result to `<spec_path>/<name>/<name>.md`.
+3. Write the substituted result to `<spec_path>/<name>/<name>.md`. The rendered body carries the protected `# Summary` skeleton (from the `group-note.md` template: précis placeholder + stats markers + operator-zone comment), which replaces the bare `# <name>` H1 previously authored here.
 
-The folder-note carries NO `spec_role` line (it is an operator-zone folder-note, not a status/role-bearing doc). The body is the operator-owned H1 + HTML comment from the template — author no further prose; the operator fills the body.
+The folder-note carries NO `spec_role` line (it is an operator-zone folder-note, not a status/role-bearing doc). The body is the operator-owned HTML comment from the template — author no further prose; the operator fills the body.
 
 Real icon values are fine in both the seeded template and the rendered instance — the iconize hook only strips unresolvable placeholder icon values (e.g. `LiPlaceholder`), not concrete Lucide names or emojis.
+
+After writing the folder-note, author an initial précis one-liner for the category — one sentence drawn from the category's purpose and the description from Step 3 (rendered in the product's `language`) — and write it between the `<!-- spec:precis:start -->` and `<!-- spec:precis:end -->` markers in the folder-note, replacing the `_TBD` placeholder. Then run `render-container-stats` so the `<!-- spec:stats:* -->` region is populated:
+
+```bash
+lazycortex-specs render-container-stats <spec_path>/<name>/<name>.md
+```
 
 Outcome: `rendered`.
 

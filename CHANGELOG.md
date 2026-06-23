@@ -341,6 +341,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.0.0 — 2026-06-23 UTC
+
+- **Breaking:** Product-level `design.md` and `tech.md` now live directly at the product root instead of under a `docs/` subfolder. Existing vaults must move `<product>/docs/design.md` and `<product>/docs/tech.md` up one level and delete the empty `docs/` directory. `spec.doctor` flags stray `docs/` folders and the now-reserved product slugs `design` and `tech`.
+- **Breaking:** Asset notes now have a structured three-section body — `# Summary`, `# Gates`, `# History` — owned and protected by the plugin (no more `# <slug> — status` title or H2 `Gates`/`History`). `spec.doctor` validates this shape and reports notes still using the old form; existing vaults re-author note bodies into the new shape.
+- **Breaking:** New `spec.vault_root` setting (default `specs`) keeps your spec tree in a subfolder separate from the repo root. Subsystem folders and the shared `requests/` inbox are created under `<vault_root>/`, the inbox is always tracked even when empty, and path resolution strips the vault-root prefix when callers pass repo-root-relative paths. Existing vaults move their subsystem folders and `requests/` under the chosen root.
+- Category and product-root folder-notes now carry a `# Summary` with an LLM-written précis and a live asset-count statistics line that refreshes automatically after every child-mutating skill (`spec.create-asset`, `spec.set-stage`, `spec.flip-gate`, …). A new `render-container-stats` CLI subcommand refreshes a container note on demand.
+- `spec.refresh-sources` regenerates the `# Summary` précis (and container stats) alongside the existing source-attribution re-projection.
+
 ### 2.1.1 — 2026-06-15 UTC
 
 - `/spec.install` now seeds review-class writers in the correct schema shape — single-object `history` / `terminal.routing` writers carrying `section` + `position`, with the deprecated `repo` field dropped — and references the `review.historian` expert. Fixes new spec installs producing review classes the audit rejected.

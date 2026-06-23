@@ -30,6 +30,8 @@ Stdout: a JSON object describing the produced asset. On error: a JSON
 object with `error` field and non-zero exit.
 """
 from __future__ import annotations
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable=import-error,wrong-import-position
 
 from typing import NoReturn
 
@@ -39,6 +41,8 @@ import json
 import re
 import sys
 from pathlib import Path
+
+import spec_paths
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -72,9 +76,8 @@ class _K:
   CLAUDE_DIR = ".claude"
   SETTINGS_FILE = "lazy.settings.json"
   TEMPLATES_DIR = "templates"
-  DOCS_DIR = "docs"
   # Body markers + headings
-  HISTORY_HEADING = "## History"
+  HISTORY_HEADING = "# History"
   DOCS_MARKER_START = "<!-- auto:spec-docs:start -->"
   DOCS_MARKER_END = "<!-- auto:spec-docs:end -->"
   # Error categories + outcome strings
@@ -390,7 +393,7 @@ def _default_source_docs(spec_path: str, category_folder: str, slug: str,
   Each entry is a `(target, display)` tuple. The default display is shape-aware so
   the rendered body bullet reads sensibly without the operator having to rewrite it:
 
-  - Product-level docs (`<spec_path>/docs/<role>`) render as `<product> — product <role>`.
+  - Product-level docs (`<spec_path>/<role>`) render as `<product> — product <role>`.
   - Sibling-asset docs (`<spec_path>/<category>/<slug>/<role>`) render as `<slug> — <role>`.
 
   Args:
@@ -405,9 +408,9 @@ def _default_source_docs(spec_path: str, category_folder: str, slug: str,
     List of `(wikilink_target, display)` tuples in projection order.
   """
   product_docs: list[tuple[str, str]] = [
-      (f"{spec_path}/{_K.DOCS_DIR}/{_K.DESIGN_STEM}",
+      (f"{spec_path}/{_K.DESIGN_STEM}",
        f"{product} — product {_K.DESIGN_STEM}"),
-      (f"{spec_path}/{_K.DOCS_DIR}/{_K.TECH_STEM}",
+      (f"{spec_path}/{_K.TECH_STEM}",
        f"{product} — product {_K.TECH_STEM}"),
   ]
   if doc == _K.PLAN_MD:
@@ -455,7 +458,7 @@ def _set_source_docs(text: str, docs: list[tuple[str, str]]) -> str:
 
 def _append_history(folder_note_path: Path, lines: list[str]) -> None:
   """
-  Append history entries to the folder-note's `## History` section.
+  Append history entries to the folder-note's `# History` section.
 
   Args:
     folder_note_path: Path to the asset's status folder-note.
@@ -502,7 +505,8 @@ def main(argv: list[str]) -> int:
   product_tag = _product_tag(record)
   subsystem = _subsystem(record).capitalize() or args.product.capitalize()
   spec_path = record[_K.SPEC_PATH]
-  target_folder = repo / spec_path / folder / args.slug
+  content_root = spec_paths.spec_content_root(repo)
+  target_folder = content_root / spec_path / folder / args.slug
   if target_folder.exists():
     _fail(_K.CAT_LOGICAL, f"target folder already exists: {target_folder}")
   target_folder.mkdir(parents=True, exist_ok=False)

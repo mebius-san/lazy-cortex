@@ -14,7 +14,7 @@ read with a minimal flat-scalar parser — no yaml dependency.
 """
 from __future__ import annotations
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
+# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json

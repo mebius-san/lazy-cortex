@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Answers to common questions about products, gates, assets, requests, code sync, and the request pipeline in lazycortex-specs.
-last_regen: 2026-06-10
+summary: Answers to common questions about products, gates, assets, requests, code sync, source links, and the request pipeline in lazycortex-specs.
+last_regen: 2026-06-23
 no_diagram: true
 source_skills:
   - spec.create-asset
@@ -20,22 +20,19 @@ source_skills:
   - spec.resolve-dependency
   - spec.source-url
   - spec.request-router
-  - spec.request-classify
-  - spec.request-find-candidates
   - spec.request-attach
   - spec.request-spawn
   - spec.install
   - spec.product-config
   - spec.doctor
-  - spec.help
 ---
 # Frequently asked questions
 
 ## What is a "product" and do I need one before I can create any assets?
 
-Yes — a product must be registered first. A product is the top-level unit in the spec system: it has a folder path in the vault, an optional binding to a source-code repo, and a language setting that controls what language the plugin uses for narrative prose. Every asset (feature, change, bug, or any operator-defined category) lives under a product.
+Yes — a product must be registered first. A product is the top-level unit in the spec system: it has a folder path in the vault, an optional binding to a source-code repo, a language setting that controls what language the plugin uses for narrative prose, and optional operator-defined asset categories. Every asset (feature, change, bug, or any operator-defined category) lives under a product.
 
-Run `/spec.product-config` to register a new product. The wizard asks for the folder location, whether there is source code to bind, and which review experts should handle each doc type. Once the product is saved, `/spec.create-feature`, `/spec.create-change`, and `/spec.create-bug` will accept it by name.
+Run `/spec.product-config` to register a new product. The wizard asks for the folder location, whether there is source code to bind, which review experts should handle each doc type, and whether to add any operator-defined categories beyond the built-in set. Once the product is saved, `/spec.create-feature`, `/spec.create-change`, and `/spec.create-bug` will accept it by name.
 
 ---
 
@@ -51,7 +48,7 @@ The document layout differs too. Features and changes get `design.md` + `plan.md
 
 Yes. Run `/spec.add-asset-category` on your product to declare an operator-defined category (e.g. `characters`, `scenes`, `chapters`). The skill writes the category into the product's settings record, scaffolds the category folder and its folder-note, seeds local template files so you can customise the design and plan structure for that category, and wires the design and plan review classes so the review daemon picks up docs of that type automatically.
 
-Once registered, `/spec.create-asset <product> characters <slug>` works the same way as `/spec.create-feature`. The request classifier also recognises operator-defined categories on the next run without any rubric update.
+Once registered, `/spec.create-asset <product> characters <slug>` works the same way as `/spec.create-feature`. The request pipeline also recognises operator-defined categories on the next run without any rubric update.
 
 ---
 
@@ -59,15 +56,15 @@ Once registered, `/spec.create-asset <product> characters <slug>` works the same
 
 Every asset has five flat boolean gates on its status folder-note: `spec_design_done`, `spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, and `spec_released`. They form a strict linear ladder — each gate requires every earlier gate to be true before it can be flipped on.
 
-The first two (`spec_design_done`, `spec_plan_done`) are **derived**: the daemon's `spec.gate-tick` routine flips them automatically when the corresponding doc (`design.md` / `plan.md`) reaches `spec_stage: approved`. The last three are **human-signal** gates: the daemon drops a `[!ready]` callout in the asset's `## Gates` section prompting you to flip the gate once the external condition is actually met. To flip any gate manually, run `/spec.flip-gate <asset> <gate>`. The skill confirms with you before running the primitive, and the primitive enforces the precondition — it refuses cleanly if the ladder is not satisfied.
+The first two (`spec_design_done`, `spec_plan_done`) are **derived**: the daemon's `spec.gate-tick` routine flips them automatically when the corresponding doc (`design.md` or `bug.md` / `plan.md`) reaches `spec_stage: approved`. The last three are **human-signal** gates: the daemon drops a `[!ready]` callout in the asset's `# Gates` section prompting you to flip the gate once the external condition is actually met. To flip any gate manually, run `/spec.flip-gate <asset> <gate>`. The skill confirms with you before running the primitive, and the primitive enforces the precondition — it refuses cleanly if the ladder is not satisfied.
 
 ---
 
 ## How do I move an asset forward — do I edit the gate frontmatter directly?
 
-No. Gate frontmatter is managed entirely by `/spec.flip-gate` (interactive) and `spec.gate-tick` (daemon-driven, automatic for derived gates). Editing the frontmatter directly bypasses the side-effects: the history line in `## History`, the log entry, and the tag mirror update. Always use `/spec.flip-gate` for manual flips.
+No. Gate frontmatter is managed entirely by `/spec.flip-gate` (interactive) and `spec.gate-tick` (daemon-driven, automatic for derived gates). Editing the frontmatter directly bypasses the side-effects: the history line in `# History`, the log entry, and the tag mirror update. Always use `/spec.flip-gate` for manual flips.
 
-Similarly, per-file stage (`spec_stage` on `design.md`, `plan.md`, `bug.md`) is always changed through `/spec.set-stage` — not by hand-editing the frontmatter. That skill rewrites both `spec_stage` and the `spec/<stage>` mirror tag in a single atomic edit, and appends a transition line to the folder-note's `## History`.
+Similarly, per-file stage (`spec_stage` on `design.md`, `plan.md`, `bug.md`) is always changed through `/spec.set-stage` — not by hand-editing the frontmatter. That skill rewrites both `spec_stage` and the `spec/<stage>` mirror tag in a single atomic edit, and appends a transition line to the folder-note's `# History` section.
 
 ---
 
@@ -110,7 +107,7 @@ For squash-merges where the ancestor check returns false, pass `--force-merged` 
 
 The `requests/` folder at the vault root is the intake inbox. Run `/spec.create-request` with a raw idea; the skill asks three to five wizard questions to clarify scope, outcome, and constraints, then writes a body-only Markdown file at `requests/<slug>.md`. Frontmatter is added automatically by the `spec.request-open` daemon routine on the next tick.
 
-Once the request is in the review loop the `spec.request-router` agent classifies it (via `spec.request-classify`), searches for existing entities it might belong to (via `spec.request-find-candidates`), and surfaces a routing decision for you to confirm. If the request should attach to an existing feature or change, `spec.request-attach` distributes the body across that entity's docs and opens a fresh review cycle. If it spawns new work, `spec.request-spawn` scaffolds an empty entity and then delegates to `spec.request-attach` to populate it. The whole pipeline runs without you hand-editing any frontmatter.
+Once the request is in the review loop the `spec.request-router` agent classifies it, searches for existing entities it might belong to, and surfaces a routing decision for you to confirm. If the request should attach to an existing feature or change, `spec.request-attach` distributes the body across that entity's docs and opens a fresh review cycle. If it spawns new work, `spec.request-spawn` scaffolds an empty entity and then delegates to `spec.request-attach` to populate it. The whole pipeline runs without you hand-editing any frontmatter.
 
 ---
 
@@ -124,7 +121,7 @@ If the doc is `rejected` or `cancelled`, the attach is refused. Those are termin
 
 ## Source links in my tech doc are pointing at the wrong forge URL format. How do I fix that?
 
-All source URLs in the spec system are produced by the `spec.source-url` primitive, which looks up the forge-correct URL template from a known-forges table rather than inlining a GitHub-style `/blob/<branch>/<path>`. If a doc contains a hard-coded URL in the wrong format, run `/spec.doctor <product>` — Agent A reports every source link that was not produced by this primitive and flags links whose branch segment doesn't match the file's pin or the repo default.
+All source URLs in the spec system are produced by the `spec.source-url` primitive, which looks up the forge-correct URL template from a known-forges table rather than inlining a GitHub-style `/blob/<branch>/<path>`. If a doc contains a hard-coded URL in the wrong format, run `/spec.doctor <product>` — it reports every source link that was not produced by this primitive and flags links whose branch segment does not match the file's pin or the repo default.
 
 If a repo key is missing from the `repos` settings section or has an unknown forge hostname, `spec.resolve-repo` will abort with a message describing the gap. Fix the repo record by running `/spec.product-config` in edit mode, which writes the `repos` entry. Once the record is correct, re-run the sync or the creation skill that emits source links.
 
@@ -138,6 +135,12 @@ Re-run `/spec.doctor <product> --apply` — the fix loop will offer to strip the
 
 ---
 
-## How do I see what lazycortex-specs can do without reading all the docs?
+## I registered a repo but `spec.resolve-repo` still aborts with "unknown forge". How do I fix that?
 
-Run `/spec.help` — it prints the plugin's purpose and a one-line summary of every skill it ships.
+`spec.resolve-repo` detects the forge from the remote URL's hostname against a built-in known-forges table (GitHub, GitLab, Bitbucket, Gitea, Forgejo, SourceHut). When you run a self-hosted instance on a custom hostname not in that table, auto-detection fails. Add `forge: <key>` to the repo record by running `/spec.product-config` in edit mode and providing one of the supported forge keys (`github`, `gitlab`, `bitbucket`, `gitea`, `forgejo`, `sourcehut`). Once the record carries an explicit `forge:` override, resolution and URL construction work normally.
+
+---
+
+## A dependency in my product record points at a product or repo key that no longer exists. What do I do?
+
+`spec.resolve-dependency` refuses with a clear error naming the missing key. Run `/spec.product-config` in edit mode to correct or remove the stale dependency entry from the product's `dependencies` list. The skill shows you the current record and lets you extend or modify it; it never drops entries you do not explicitly remove.

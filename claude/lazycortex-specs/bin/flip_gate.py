@@ -21,7 +21,7 @@ invoking `flip_gate`.
 """
 from __future__ import annotations
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-# pylint: disable=import-error
+# pylint: disable=import-error,wrong-import-position
 
 import argparse
 import json
@@ -57,6 +57,8 @@ from spec_keys import (  # noqa: E402
     Stage,
     StageKey,
 )
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+from summary_render import parent_container_note, apply_container_stats  # noqa: E402
 
 
 # Per-file stages that count as "accepted" for a derived-gate precondition.
@@ -228,7 +230,9 @@ def _append_under_heading(body: str, heading: str, line: str) -> str:
   Append `line` to the section opened by `heading` in `body`.
 
   Inserts after the heading and any existing section lines, before the next
-  heading; appends a fresh section at end-of-body when the heading is absent.
+  ATX heading (`^#{1,6}\\s`); appends a fresh section at end-of-body when
+  the heading is absent. Lines beginning with `#` but no space (e.g.
+  `#protected/spec/…` tags) are NOT treated as section boundaries.
 
   Returns:
     The body text with the new line placed inside the named section.
@@ -245,8 +249,9 @@ def _append_under_heading(body: str, heading: str, line: str) -> str:
     return body + f"{suffix}\n{heading}\n\n{line}\n"
   insert_at = len(lines)
   for j in range(head_idx + 1, len(lines)):
-    # guard: stop before the next markdown heading
-    if lines[j].startswith("#"):
+    # guard: stop before the next real ATX heading; a `#protected/...` tag
+    # line has no space after `#` and is NOT a boundary
+    if re.match(r"^#{1,6}\s", lines[j]):
       insert_at = j
       break
   # Trim trailing blanks inside the section so the new line sits flush.
@@ -452,8 +457,12 @@ def _commit_flip(asset_dir: Path, note: Path, gate: str, value: bool) -> None:
   if not top:
     return
   repo = Path(top)
+  add_paths = [str(note)]
+  parent = parent_container_note(asset_dir)
+  if parent is not None and apply_container_stats(parent):
+    add_paths.append(str(parent))
   subprocess.run(
-      ["git", "add", "--", str(note)],
+      ["git", "add", "--", *add_paths],
       cwd = str(repo), check = True, capture_output = True,
   )
   subject = f"{FLIP_GATE_NAME}: {gate} → {str(value).lower()} on {asset_dir.name}"
@@ -481,7 +490,7 @@ def _promote_to_draft_if_empty(asset_dir: Path, plan: Path, plan_fm: dict) -> bo
   intermediate snapshot.
 
   Mutation set: rewrites `spec_stage:` value in plan's frontmatter, rewrites the
-  `- spec/<stage>` mirror tag in lock-step, appends one `## History` line to the asset's status
+  `- spec/<stage>` mirror tag in lock-step, appends one `# History` line to the asset's status
   folder-note, atomic git commit under `spec.flip-gate@bot.lazy-cortex`. Skipped silently when
   the asset is not inside a git repository (matches `_commit_flip`'s test-fixture defence).
 
@@ -572,8 +581,8 @@ def flip_gate(
   A false→true flip is refused (no file mutation) when the gate's
   precondition does not hold; an `off` flip skips precondition checks. Any
   flip is refused while the asset is cancelled. On success the folder-note
-  frontmatter is rewritten, a `[!gate]` callout is appended to `## Gates`, a
-  line is appended to `## History`, and a run-log file is written.
+  frontmatter is rewritten, a `[!gate]` callout is appended to `# Gates`, a
+  line is appended to `# History`, and a run-log file is written.
 
   Args:
     asset_dir: The asset folder holding `<asset_dir.name>.md` and siblings.
