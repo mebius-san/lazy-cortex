@@ -584,6 +584,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 0.4.0 — 2026-06-23 UTC
+
+- Three new execution-stage experts — `implementer` (test-first discipline, Sonnet), `debugger` (root-cause-first four-phase investigation, Opus), and `reviewer` (ranked findings with evidence, Opus) — each ships with a default model tier pre-registered so no manual configuration is needed after install.
+- A new cross-cutting discipline aspect is now composed onto every expert, enforcing verify-before-completion, refusing to guess past a knowledge gap, suppressing performative agreement, and converting human-gate moments into open document points rather than silent assumptions.
+- The `interpreter`, `designer`, and `planner` experts now enforce tighter behavioral invariants: interpreter surfaces 2–3 candidate directions rather than settling silently, designer treats scope boundary and declarative voice as hard constraints, and planner flags any placeholder as an incomplete task.
+- The plugin's help command now lists all six expert agents and the discipline aspect, reflecting the full current surface.
+- Fixed stale install copy — the skill description and role-selection prompt now correctly enumerate all six expert roles.
+
 ### 0.3.1 — 2026-06-15 UTC
 
 - Composed expert keys now use the `<domain>.<role>` convention (`claude-plugin.designer`, `game.interpreter`, …), consistent with the other plugins' expert keys. Re-run `/lazy-experts.install` to register the dotted names; existing entries are left untouched.

@@ -17,7 +17,7 @@
     },
     {
       "name": "lazycortex-experts",
-      "description": "Generic doc-producing experts (interpreter, designer, planner) plus a starter set of domain aspects (claude-plugin, game-dev, dotfiles). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.",
+      "description": "Generic lifecycle experts (interpreter, designer, planner, implementer, debugger, reviewer) plus a starter set of domain aspects (claude-plugin, game-dev, dotfiles) and a cross-cutting discipline aspect. Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.",
       "source": "./claude/lazycortex-experts"
     },
     {
