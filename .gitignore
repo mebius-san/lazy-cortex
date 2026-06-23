@@ -66,3 +66,6 @@ __pycache__/
 .obsidian/plugins/github-copilot/secure-credentials.dat
 .obsidian/plugins/github-copilot/conversations.json
 .obsidian/plugins/github-copilot/copilot-*/
+
+# obsidian-git — per-device settings (auto-pull/push, author); auth in localStorage
+.obsidian/plugins/obsidian-git/data.json

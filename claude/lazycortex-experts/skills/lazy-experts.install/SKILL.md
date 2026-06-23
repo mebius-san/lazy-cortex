@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.install
-description: "Bootstrap the lazycortex-experts plugin for the current project (or globally). Seeds two things into `lazy.settings.json`: (1) agent-model tiers for the three generic agents (interpreter, designer, planner) from `lazycortex-core`'s `default-tiers.json` into `agent_models.lazycortex`; (2) composed expert entries (agent × domain-aspect) into `experts` — every entry also carries `lazycortex-core:lazy-memory.persona-aspect` and a deterministic bot `git_author`. Asks which expert classes to register ONLY when the experts list is empty; on a populated list it derives the classes already present and completes them without asking. Experts and tiers are dispatch-routing config used by interactive flows AND the daemon — never gated on `daemon.enabled`. Idempotent and quiet on re-run; existing entries are never overwritten. Detects install scope automatically."
+description: "Bootstrap the lazycortex-experts plugin for the current project (or globally). Seeds two things into `lazy.settings.json`: (1) agent-model tiers for the generic agents from `lazycortex-core`'s `default-tiers.json` into `agent_models.lazycortex`; (2) composed expert entries (agent × domain-aspect) into `experts` — every entry also carries the cross-cutting `lazycortex-experts:lazy-experts.discipline-aspect`, `lazycortex-core:lazy-memory.persona-aspect`, and a deterministic bot `git_author`. Asks which expert classes to register ONLY when the experts list is empty; on a populated list it derives the classes already present and completes them without asking. Experts and tiers are dispatch-routing config used by interactive flows AND the daemon — never gated on `daemon.enabled`. Idempotent and quiet on re-run; existing entries are never overwritten. Detects install scope automatically."
 allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *)
 ---
 # Install lazycortex-experts
@@ -82,7 +82,7 @@ The expert "classes" are the domain aspects this plugin ships. Enumerate the ava
 
 - `<installPath>` is the `installPath` field from `~/.claude/plugins/installed_plugins.json` for `lazycortex-experts@lazycortex`.
 - **Classes (domain aspects)**: `Glob <installPath>/references/lazy-experts.*-aspect.md`. The class key is the basename minus the `lazy-experts.` prefix and the `-aspect.md` suffix — currently `claude-plugin`, `game-dev`, `dotfiles`.
-- **Roles (agents)**: `Glob <installPath>/agents/lazy-experts.*.md`. The role is the basename minus the `lazy-experts.` prefix and `.md` suffix — currently `interpreter`, `designer`, `planner`.
+- **Roles (agents)**: `Glob <installPath>/agents/lazy-experts.*.md`. The role is the basename minus the `lazy-experts.` prefix and `.md` suffix — currently `interpreter`, `designer`, `planner`, `implementer`, `debugger`, `reviewer`.
 
 If either glob is empty, abort with `plugin-cache-incomplete: <missing-dir>`.
 
@@ -95,7 +95,7 @@ Load the `experts` section (via `lazy_settings.load_tracked_section`). Count the
 ```
 AskUserQuestion:
   question: "Which expert classes should this project register?"
-  description: "Each class is a domain the generic interpreter / designer / planner experts specialise in (the aspect they load). Pick the domain(s) this project works in — re-run later to add more. All roles are seeded in full for each chosen class."
+  description: "Each class is a domain the generic experts specialise in (the aspect they load). Pick the domain(s) this project works in — re-run later to add more. All roles are seeded in full for each chosen class."
   multiSelect: true
   options: one per available class (e.g. "claude-plugin", "game-dev", "dotfiles")
 ```
@@ -124,7 +124,7 @@ Outcome (one line per seeded entry): `lazycortex.<key> = <tier> (<state>)`.
 
 ## Step 5: Seed expert entries
 
-Seed one composed expert entry per (role × class) for the **class set from Step 3** — NOT every shipped aspect. Every seeded entry also carries `lazycortex-core:lazy-memory.persona-aspect` so the expert is opted into the memory subsystem.
+Seed one composed expert entry per (role × class) for the **class set from Step 3** — NOT every shipped aspect. Every seeded entry also carries `lazycortex-experts:lazy-experts.discipline-aspect` (cross-cutting execution discipline, composed onto every expert regardless of class) and `lazycortex-core:lazy-memory.persona-aspect` (memory subsystem opt-in).
 
 ### Compose
 
@@ -146,6 +146,7 @@ The composed entry's shape:
   "agent": "lazycortex-experts:lazy-experts.<role>",
   "aspects": [
     "lazycortex-experts:lazy-experts.<class>-aspect",
+    "lazycortex-experts:lazy-experts.discipline-aspect",
     "lazycortex-core:lazy-memory.persona-aspect"
   ],
   "git_author": {
@@ -170,8 +171,8 @@ Outcome (one line per composed entry): `experts.<expert-key> (<state>)`.
 
 ## Step 6: Verify / Report
 
-- Read back the written `lazy.settings.json` and confirm it parses + contains the three `lazycortex-experts:*` keys under `agent_models.lazycortex` AND the expected (roles × class-set) expert keys under `experts`.
-- For each seeded expert, confirm both aspect refs resolve (the file glob from Step 3 already proved the class aspect; the persona aspect must exist in `~/.claude/plugins/cache/lazycortex/lazycortex-core/*/references/lazy-memory.persona-aspect.md`).
+- Read back the written `lazy.settings.json` and confirm it parses + contains the `lazycortex-experts:*` keys under `agent_models.lazycortex` (one per shipped generic agent) AND the expected (roles × class-set) expert keys under `experts`.
+- For each seeded expert, confirm all three aspect refs resolve: the class aspect (already proved by the Step 3 glob), `lazy-experts.discipline-aspect` (under `<installPath>/references/`), and `lazy-memory.persona-aspect` (under `~/.claude/plugins/cache/lazycortex/lazycortex-core/*/references/`).
 - Report to the user:
   - Scope detected.
   - Plugin version + commit synced from (from `installed_plugins.json`).

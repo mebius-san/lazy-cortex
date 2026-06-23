@@ -4,14 +4,14 @@ LazyCortex experts run as queued jobs through `lazycortex-core`'s expert runtime
 
 ## Who it's for
 
-- LazyCortex users who want a starting set of generic doc-producing experts — interpret a free-form request into a gap-free brief, write a design spec from that brief, write an implementation plan from that design.
+- LazyCortex users who want a starting set of generic experts spanning the whole lifecycle — interpret a free-form request into a gap-free brief, write a design spec from that brief, write an implementation plan from that design, then carry the plan into code with test-first execution, root-cause debugging, and review.
 - Plugin / domain authors who want to ship aspect files that layer their expertise on top of these generic agents instead of authoring a fresh agent per domain.
 
 ## Blocks
 
-- **install-and-audit** — Bootstrap `lazycortex-experts` in your project. `/lazy-experts.install` seeds agent-model tiers for the three generic agents from `lazycortex-core`'s defaults. No health-audit skill — health verification routes through `/lazy-core.doctor`. Members: lazy-experts.install.
-- **agents** — Three generic doc-producing agents. Each is persona-only; the protocol comes from whichever routine dispatches the job. Members: lazy-experts.interpreter, lazy-experts.designer, lazy-experts.planner.
-- **aspects** — Three domain aspect files that compose into any of the three generic agents via `lazy.settings.json[experts][<expert>].aspects[]`. Members: lazy-experts.claude-plugin-aspect, lazy-experts.game-dev-aspect, lazy-experts.dotfiles-aspect.
+- **install-and-audit** — Bootstrap `lazycortex-experts` in your project. `/lazy-experts.install` seeds agent-model tiers for the generic agents from `lazycortex-core`'s defaults and composes every expert with the cross-cutting discipline aspect. No health-audit skill — health verification routes through `/lazy-core.doctor`. Members: lazy-experts.install.
+- **agents** — Six generic agents. Each is persona-only; the protocol comes from whichever routine dispatches the job. Three design-time (lazy-experts.interpreter, lazy-experts.designer, lazy-experts.planner) and three execution-stage (lazy-experts.implementer, lazy-experts.debugger, lazy-experts.reviewer).
+- **aspects** — Domain aspect files plus one cross-cutting discipline aspect, composed into the generic agents via `lazy.settings.json[experts][<expert>].aspects[]`. Domain members (operator picks per project): lazy-experts.claude-plugin-aspect, lazy-experts.game-dev-aspect, lazy-experts.dotfiles-aspect. Cross-cutting (auto-composed onto every seeded expert): lazy-experts.discipline-aspect.
 - **composition** — How to assemble a concrete specialist (e.g. `game-designer`, `claude-plugin-planner`) by pairing one agent with one or more aspects in `lazy.settings.json[experts]`. No skills in this block — it's documentation only.
 
 ## Requirements
