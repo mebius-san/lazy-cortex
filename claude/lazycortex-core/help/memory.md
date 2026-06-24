@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Per-expert long-term memory tracked in git — experts consult notes before primary work, write new notes as a side-effect of jobs, and consolidate via reflect passes.
-last_regen: 2026-06-02
+last_regen: 2026-06-24
 diagram_spec:
   anchor: "How the four skills compose"
   request: "Flow diagram showing the four memory skills and how they compose: mark-persona opts an expert in (writes lazy.settings.json experts entry); write is the only blessed note writer (writes .memory/<expert>/ notes, regenerates .tags/); reflect dispatches a kind=reflect job that feeds run logs and existing notes to the expert, which then calls write; index rebuilds .tags/ from note frontmatter as a recovery path. Show .memory/<expert>/ and .memory/.tags/ as shared state that write maintains and reflect reads."
@@ -25,7 +25,7 @@ Four skills make this possible: one to opt an expert in, one to write notes atom
 
 **`lazy-memory.reflect`** converts accumulated experience into durable knowledge. It dispatches a `kind=reflect` job to one persona-marked expert, bundling recent run logs (last 30 days by default) and every current note under `.memory/<expert>/` as the job's source. The daemon picks up the job and the expert reads the material, identifies patterns worth retaining, and calls `/lazy-memory.write` one or more times with consolidated insights. The job returns `outcome=edited` when notes changed, or `outcome=empty` when nothing new emerged. You collect the job with `/lazy-expert.collect-job` and the new notes are already committed.
 
-**`lazy-memory.index`** is the recovery tool. Under normal operation you will never need it — `/lazy-memory.write` keeps the tag tree in sync atomically. When a note has been hand-edited outside the subsystem, the tag files can drift from the actual frontmatter. Running `/lazy-memory.index` walks every expert under `.memory/`, recomputes the topic set from live frontmatter, regenerates both the local and global `.tags/` trees, and removes stale tag files that no longer have a backing note.
+**`lazy-memory.index`** is the recovery tool. Under normal operation you will never need it — `/lazy-memory.write` keeps the tag tree in sync atomically. When a note has been hand-edited outside the subsystem, the tag files can drift from the actual frontmatter. Running `/lazy-memory.index` walks every expert under `.memory/`, recomputes the topic set from live frontmatter, regenerates both the local and global `.tags/` trees, and removes stale tag files that no longer have a backing note. If the `.memory/` directory is absent entirely (the subsystem was never initialized), the skill reports that state rather than failing; run `/lazy-core.install` to bootstrap the directory.
 
 ## How they work together
 

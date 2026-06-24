@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.5.0 — 2026-06-24 UTC
+
+- Headless daemon installs can now get a login-equivalent environment via two new `daemon.supervisor` options: `login_shell` re-execs the startup shim through `$SHELL -lc` so `.zprofile`/`.zshrc` export `CLAUDE_CODE_OAUTH_TOKEN` and a full `PATH`; `env_files` sources named env files for token-only injection. Both default off — existing installs are unchanged.
+
 ### 5.4.0 — 2026-06-14 UTC
 
 - New `lazy-routine.offer-protocols` skill and `lazycortex-core add-protocols` CLI verb discover optional protocol references and interactively offer them during routine setup — `lazy-review.install` and `spec.install` both use it, so operators are prompted to attach relevant protocols (e.g. `markdown-style`, `doc-review-protocol`) at install time rather than wiring them manually after the fact.

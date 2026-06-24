@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
-last_regen: 2026-06-02
+last_regen: 2026-06-24
 diagram_spec:
   anchor: "How the flow works"
   request: "End-to-end participant exchange when /lazy-repo.mark-public runs: user invokes the skill, skill checks git and GitHub visibility (preflight), determines scope (whole-repo vs. subtree), dispatches four parallel security scans (secrets, PII, infra, local paths) via /lazy-guard.check-public, presents unified findings table, loops per FAIL for resolution (encrypt/template/redact) and per WARN for fix/waive/skip, writes .guard-waivers.json with public_author and accepted waivers activating the pre-commit hook, then in whole-repo mode flips visibility via gh repo edit. Five participants: User, /lazy-repo.mark-public, /lazy-guard.check-public, Security Scan Agents, GitHub."
@@ -22,7 +22,7 @@ After completing this walkthrough you have a `.guard-waivers.json` committed at 
 
 - Claude Code with `lazycortex-core` enabled
 - `git` — the repo must be a git repository
-- `gh` (GitHub CLI) — optional; only needed if you want the skill to flip visibility for you; skip if you prefer to flip visibility manually when you are ready
+- `gh` (GitHub CLI) — optional; only needed if you want the skill to flip visibility for you; skip if you prefer to flip visibility manually when you are ready. If `gh` is not on PATH or is unauthenticated, the skill prints the exact `gh repo edit` command for you to run at any point
 
 ## The journey
 
@@ -57,7 +57,7 @@ Findings come back in three severities:
 
 - **FAIL** (secrets) — private keys, AWS access keys, API tokens, high-entropy base64 on secret-context lines, connection strings with credentials, bearer token literals. These block going public and must be resolved.
 - **WARN** (PII, infrastructure, local paths) — email addresses, internal hostnames, Tailscale or public IPs, hardcoded `/Users/…` paths, home-subdirectory refs like `~/Dropbox/`, author identity in manifests. You decide whether to fix or waive each one.
-- **INFO** — lower-confidence signals such as personal names in git config inside dotfiles. You can auto-waive or skip these.
+- **INFO** — lower-confidence signals such as personal names in git config inside dotfiles. Show for awareness; auto-waive or skip as you prefer.
 
 Verification gate: review the findings table before moving on. If a finding looks like a false positive, flag it — the skill can waive it in the next step.
 
@@ -166,4 +166,3 @@ sequenceDiagram
     markPublic-->>user: subtree scoped as public — done
   end
 ```
-

@@ -1,30 +1,20 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-06-02
+last_regen: 2026-06-24
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / setup-migration-failed / setup-child-failed; audit-or-doctor → sub-branch on global-rules-empty / experts-json-invalid / ref-unresolvable / routine-path-stale / stall-mid-run; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / cancel-job-not-found / invalid-status-filter / expert-key-mismatch; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / recover-still-dirty / recover-commit-needs-message / state-unparseable; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed; audit-or-doctor → sub-branch on global-rules-empty / experts-json-invalid / ref-unresolvable / routine-path-stale / stall-mid-run; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
   - lazy-core.setup
-  - lazy-core.doctor
-  - lazy-core.optimize
-  - lazy-repo.mark-public
-  - lazy-guard.check-public
-  - lazy-guard.allow-mcp
-  - lazy-routine.register
   - lazy-runtime.recover
   - lazy-expert.dispatch-job
   - lazy-expert.collect-job
-  - lazy-memory.write
-  - lazy-memory.reflect
-  - lazy-core.agent-models
-  - lazy-core.git-status
   - lazy-core.git-unlock
-  - lazy-log.clean
-  - lazy-log.distill
+  - lazy-guard.check-public
+  - lazy-memory.write
 ---
 # Troubleshooting
 
@@ -89,6 +79,38 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Fix (macOS launchctl)**: Inspect the plist at `~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` for literal `{REPO_ROOT}` or `{REPO_NAME}` placeholders. If found, re-run `/lazy-core.install` to regenerate. Otherwise run `launchctl load <path>` manually from your terminal.
 
 **Fix (Linux systemd)**: Run `systemctl --user daemon-reload` then `systemctl --user enable --now lazy-core-runtime-<repo-name>.service`, or re-run `/lazy-core.install` to reinstall the unit.
+
+---
+
+## `/lazy-core.install` Step 7 fails: file exists where `.logs/` or `.runtime/` directory is expected
+
+**Symptom**: `/lazy-core.install` fails at Step 7 with a message like "`.logs/` or `.runtime/` not a directory".
+
+**Likely cause**: A plain file named `.logs` or `.runtime` already exists at the repo root. The bootstrap helper requires these to be directories, not files.
+
+**Fix**: Rename or remove the file by hand from your terminal, then re-run `/lazy-core.install`. The helper will create the directory on retry.
+
+---
+
+## The daemon never starts for this checkout after install
+
+**Symptom**: `/lazy-core.install` completed without errors and reported a daemon supervisor installed, but the daemon does not appear to be running for this checkout.
+
+**Likely cause**: Gate 2 (`daemon.run_here`) is recorded as `false` in this checkout's gitignored `lazy.settings.local.json`. The install skill records the per-checkout decision once and never re-asks; if you declined at the prompt, the supervisor was skipped and will not start.
+
+**Fix**: Open `.claude/lazy.settings.local.json` in this checkout, set `daemon.run_here` to `true` (or delete the key), then re-run `/lazy-core.install`. The skill reads the flag on entry and, finding the decision reversed, proceeds to install the supervisor for this checkout.
+
+---
+
+## `/lazy-core.install` never re-asks about the daemon
+
+**Symptom**: You want to change your daemon setup choices (enable it for a project, or start it on this checkout) but re-running `/lazy-core.install` silently skips all daemon questions.
+
+**Likely cause**: Both gates are already persisted — `daemon.enabled` in the tracked `lazy.settings.json` (shared with all clones) and `daemon.run_here` in this checkout's gitignored `lazy.settings.local.json`. The skill honours recorded decisions silently, so it never re-prompts.
+
+**Fix**: Edit the relevant flag directly and re-run `/lazy-core.install`:
+- To change the project-wide daemon policy, update `daemon.enabled` in `.claude/lazy.settings.json`.
+- To change the decision for this checkout only, update `daemon.run_here` in `.claude/lazy.settings.local.json` (or delete that key to let the next install re-ask).
 
 ---
 
@@ -304,6 +326,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## `/lazy-expert.collect-job` reports `status: failed` with a malformed response
+
+**Symptom**: `/lazy-expert.collect-job` returns `status: failed` and the error output suggests the expert's `response.json` is unreadable or contains invalid JSON.
+
+**Likely cause**: The expert agent wrote an invalid JSON response, or a crash mid-write left `response.json` in a truncated state. The collect skill reads this file directly and raises `json.JSONDecodeError` if it cannot parse it.
+
+**Fix**: Inspect the file at `.experts/.jobs/<expert>/<job_id>/response.json` directly to see what the expert wrote. If the file is corrupt, the job cannot be recovered — cancel it with `/lazy-expert.cancel-job` and re-dispatch with the same payload.
+
+---
+
 ## `/lazy-expert.list-jobs` rejects the status filter
 
 **Symptom**: Running `/lazy-expert.list-jobs` with a `status` argument fails immediately with "status must be one of: queued, active, dead, done, failed."
@@ -385,6 +417,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Fix (empty message)**: Re-invoke `/lazy-runtime.recover`, choose "commit" again, and supply a non-empty commit message when prompted. The default suggestion is `<triggered_by>: recover from halt`.
 
 **Fix (unparseable state)**: The daemon itself treats an unparseable state file as "not halted" and resumes automatically on its next polling iteration. If you want to force the issue, delete `.runtime/state.json` from your terminal (the daemon recreates it on the next iteration), then confirm the daemon is live via `/lazy-core.doctor`.
+
+---
+
+## A remote-sync halt re-fires immediately after `/lazy-runtime.recover`
+
+**Symptom**: You confirmed the repair through `/lazy-runtime.recover` for a `git_pull_diverged`, `git_push_failed`, or `git_remote_unavailable` halt, but the daemon halts again on the very next tick with the same reason.
+
+**Likely cause**: `/lazy-runtime.recover` on the manual-fix path only clears the halt block — it does not itself run any git commands. If the underlying network issue, divergence, or push rejection was not fully resolved before you confirmed, the daemon's next pre-tick remote sync re-detects the same failure and halts again.
+
+**Fix**: Re-inspect the actual git state from your terminal: run `git fetch origin <branch>` to test reachability, `git log --oneline HEAD origin/<branch>` to check for divergence, or `git push origin <branch>` to observe the push rejection message. Resolve the root cause first, then re-run `/lazy-runtime.recover` and confirm once the situation is genuinely clear.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Assign haiku/sonnet/opus tiers to every agent in your vault and let the model-router hook route each dispatch automatically.
-last_regen: 2026-06-01
+last_regen: 2026-06-24
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
@@ -23,9 +23,9 @@ This block gives you two things: an interactive wizard that assigns each agent a
 
 ## How it fits together
 
-Run `/lazy-core.agent-models`. The skill loads the `agent_models` sections from both your global `~/.claude/lazy.settings.json` and the project `./.claude/lazy.settings.json` (including any personal-overlay values from `lazy.settings.local.json`), merges them into a single lookup, and discovers every dispatchable agent across your vault — Claude Code built-ins (`Explore`, `Plan`, `general-purpose`, `statusline-setup`), globally-authored agents under `~/.claude/agents/`, project-local agents under `./.claude/agents/`, and plugin-shipped agents from the plugin cache. Any agent whose dispatch string already appears in the merged lookup — including those explicitly set to `default` — is considered decided and stays out of the wizard.
+Run `/lazy-core.agent-models`. The skill loads the `agent_models` sections from both your global `~/.claude/lazy.settings.json` and the project `./.claude/lazy.settings.json`, merges them into a single lookup, and discovers every dispatchable agent across your vault — Claude Code built-ins (`Explore`, `Plan`, `general-purpose`, `statusline-setup`), globally-authored agents under `~/.claude/agents/`, project-local agents under `./.claude/agents/`, and plugin-shipped agents from the plugin cache. Any agent whose dispatch string already appears in the merged lookup — including those explicitly set to `default` — is considered decided and stays out of the wizard.
 
-The remaining agents surface in three ordered batches. The first covers built-ins and agents from plugins that ship a curated tier table — LazyCortex plugin agents and several common third-party plugins. For these the wizard already knows the right tier: `Explore` routes to haiku (fast, cheap navigation), `Plan` to opus (deliberate multi-step reasoning), review dispatchers and log taggers to haiku, and synthesis agents to sonnet. The second batch covers any other plugin agents not in the curated table. The third covers your own project agents. Each batch is a single prompt: accept all suggestions, review each agent individually, mass-set the whole batch to `default`, or skip it for now.
+The remaining agents surface in three ordered batches. The first covers built-ins and agents from LazyCortex plugins that ship a curated tier table. For these the wizard already knows the right tier: `Explore` routes to haiku (fast, cheap navigation), `Plan` to opus (deliberate multi-step reasoning), review dispatchers and log taggers to haiku, and synthesis agents to sonnet. The second batch covers any other plugin agents not in the curated table. The third covers your own project agents. Each batch is a single prompt: accept all suggestions, review each agent individually, mass-set the whole batch to `default`, or skip it for now.
 
 Accepting a batch records every entry as planned. Reviewing routes those agents into a per-agent prompt where you can accept the suggestion, pick a neighboring tier, fall back to `default`, or skip. For agents outside the curated table the wizard applies a heuristic: names containing `log`, `distill`, `tag`, or `timeline` land on haiku; names hinting at review, audit, or planning land on opus; everything else lands on sonnet.
 

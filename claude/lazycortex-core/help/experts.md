@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Dispatch jobs to named expert workers, keep the main session free, and collect results when the daemon finishes them.
-last_regen: 2026-06-02
+last_regen: 2026-06-24
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing a user dispatching a job via dispatch-job, the runtime daemon draining the queue, and the user collecting results via collect-job. Include list-jobs and cancel-job as optional side paths. Use boxes for the four skills and a distinct shape for the daemon process."
@@ -20,10 +20,11 @@ Each expert is a named role defined in `lazy.settings.json[experts]` at install 
 ## When you'd use this
 
 - You want to run a lengthy review, doc-generation, or analysis task without holding the main session open the whole time.
-- You have multiple jobs in flight and need to check their status at a glance before deciding which result to retrieve first.
+- You have multiple jobs in flight and want a status snapshot before deciding which result to retrieve first.
 - You dispatched a job but your requirements changed — you want to cancel it before the daemon starts it.
 - You need to filter the queue by expert name or status to locate a specific job.
 - The daemon marked a job `dead` (an unrecoverable error during launch) and you need to identify which job failed before re-dispatching.
+- You want to check whether a job is still `queued`, already `active`, or has reached `done` or `failed` without attempting to collect it yet.
 
 ## What's in this block
 
@@ -103,4 +104,3 @@ flowchart LR
   class jobDone success
   class jobCancelled error
 ```
-

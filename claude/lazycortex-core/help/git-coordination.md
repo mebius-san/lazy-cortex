@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Inspect and manually break the per-repo staging lock that prevents concurrent Claude Code sessions from corrupting each other's git index changes.
-last_regen: 2026-06-02
+last_regen: 2026-06-24
 diagram_spec:
   anchor: "Lock lifecycle"
   request: "State diagram of the lazy-core.git staging lock lifecycle: NO_LOCK → HELD (a hook or skill acquires the lock before touching the git index) → auto-released when the staging window closes OR auto-broken by heuristics (dead PID / stale-and-idle / different host) → NO_LOCK. Show the manual break path via /lazy-core.git-unlock as an alternative exit from HELD, guarded by /lazy-core.git-status inspection first."
@@ -25,7 +25,7 @@ The staging lock prevents that. Before any hook or skill modifies the index it a
 
 ## What's in this block
 
-**`/lazy-core.git-status`** is a pure read-only inspector. It reads `.git/lazy-git.lock` and reports everything relevant about the current holder: session ID and PID, how long the lock has been held, when the index was last touched, whether the holder process is still alive on this host, and whether the automatic break-the-lock heuristics would fire right now. It also tells you whether the lock belongs to the current session or a peer. Running it is always safe — it never writes, never deletes, and never modifies any state. Because the operation is entirely read-only, it does not produce a run-log entry.
+**`/lazy-core.git-status`** is a pure read-only inspector. It reads `.git/lazy-git.lock` and reports everything relevant about the current holder: session ID and PID, how long the lock has been held, when the index was last touched, whether the holder process is still alive on this host, and whether the automatic break-the-lock heuristics would fire right now. It also tells you whether the lock belongs to the current session or a peer. Running it is always safe — it never writes, never deletes, and never modifies any state.
 
 **`/lazy-core.git-unlock`** is the manual break-glass. It runs the same inspection internally, presents the holder details — session ID, PID, age, host, branch, liveness — in a confirmation prompt, and force-deletes `.git/lazy-git.lock` on your approval. The lock file lives under `.git/` and is never tracked by git, so this operation has no effect on your working tree or staged changes. It is the only blessed way to clear the lock manually; do not delete the lock file directly. The skill's confirmation step means you can invoke it without having run `/lazy-core.git-status` first — all the same facts surface in the prompt.
 
@@ -43,9 +43,7 @@ If you are uncertain whether the holder is truly stuck, run `/lazy-core.git-stat
 
 ## Common adjustments
 
-The automatic break-the-lock thresholds — how long before "stale-and-idle" fires, and the idle-index grace period — are configurable in `lazy.settings.json`. If the defaults are too aggressive or too conservative for your workflow, run `/lazy-core.install` and navigate to the git-guard configuration section. The skill writes the threshold fields; do not edit `lazy.settings.json` directly.
-
-If you work in a single-session repo where the lock is only ever held by one session at a time, you can disable the lock entirely by running `/lazy-core.install` and toggling off the git-guard option. The lock becomes a no-op and the hook short-circuits on every call.
+The automatic break-the-lock thresholds — how long before "stale-and-idle" fires and the idle-index grace period — are controlled by `lazy.settings.json` under the `git` key. If you want to disable the lock entirely for a single-session repo where concurrent sessions never occur, add `{"git": {"enabled": false}}` to `<repo>/.claude/lazy.settings.json`. With that flag present the hook short-circuits on every call and the lock becomes a no-op. Re-enable by removing the key or setting it to `true`.
 
 ## Where this fits
 
