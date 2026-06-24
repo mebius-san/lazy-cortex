@@ -1,49 +1,19 @@
 ---
 chapter_type: faq
-summary: Answers to non-obvious questions about skill selection, upgrade flows, settings placement, plugin composition, agent routing, MCP scope decisions, the expert runtime, memory subsystem, routine types, git coordination, change-history agents, and run-log housekeeping.
-last_regen: 2026-06-09
+summary: Answers to non-obvious questions about install vs setup, settings placement, plugin composition, agent routing, the expert runtime, memory subsystem, routine types, daemon recovery, job dispatch, and the public-repo guard scanner.
+last_regen: 2026-06-24
 no_diagram: true
 source_skills:
   - lazy-core.install
-  - lazy-core.audit
-  - lazy-core.doctor
-  - lazy-core.optimize
   - lazy-core.setup
-  - lazy-repo.mark-public
-  - lazy-guard.check-public
-  - lazy-guard.allow-mcp
   - lazy-routine.register
-  - lazy-routine.unregister
   - lazy-runtime.recover
   - lazy-expert.dispatch-job
-  - lazy-expert.collect-job
-  - lazy-expert.cancel-job
-  - lazy-expert.list-jobs
   - lazy-memory.write
-  - lazy-memory.index
-  - lazy-memory.reflect
-  - lazy-memory.mark-persona
   - lazy-core.agent-models
-  - lazy-core.git-status
-  - lazy-core.git-unlock
-  - lazy-log.clean
-  - lazy-log.distill
-  - lazy-log.recall
-  - lazy-log.timeline
-  - lazy-log.summary
-  - lazy-log.bullets
+  - lazy-guard.check-public
 ---
 # FAQ
-
-## What is the difference between `/lazy-core.audit` and `/lazy-core.doctor`?
-
-`/lazy-core.audit` is read-only and focuses on measurement: it tells you how many kilobytes load into context on every turn, flags oversized rule files, checks authoring compliance (missing Execution-Discipline preambles, "Optional" headings, narrative padding), verifies rule-file frontmatter and scope, scans MCP enablement state, and checks Python runtime availability for plugin hooks. It also covers help-doc coverage and staleness via its Agent C. No changes are made.
-
-`/lazy-core.doctor` is the full health check: it runs the same content scans and then continues into plugin version currency checks, waiver reconciliation, delegated audits (public-repo guard, logging coverage, diagram coverage, review coverage), and an interactive fix phase where you can repair findings in place, waive persistent WARNs, or migrate settings. It distinguishes between local-tool mode (you are authoring plugins here) and release mode (you are consuming them), suppressing content findings on plugin-owned rules when a newer version of that plugin is available.
-
-Use `/lazy-core.audit` when you want a quick, safe read of the current state. Use `/lazy-core.doctor` when something feels off and you want to diagnose and repair in the same session.
-
----
 
 ## When should I run `/lazy-core.install` versus `/lazy-core.setup`?
 
@@ -77,63 +47,13 @@ A **patch bump** (e.g. `1.0.0` → `1.0.1`) is safe to drop in with no action �
 
 `lazy.settings.json` is a separate config file used by the `lazy-core.model-router` hook to route subagent dispatches to model tiers (`haiku`, `sonnet`, `opus`, or `default`). It lives alongside the Claude Code `settings.json` files but is not read by Claude Code itself — it is read by the hook at dispatch time.
 
-The file exists separately because model-routing preferences are architectural decisions (cheapest agent for Explore work, strongest for commit-message generation) that belong in a structured config, not interleaved with per-tool permission lists. Run `/lazy-core.agent-models` to fill and update it interactively. The scope rules are: entries under `_user.*` go to the global `~/.claude/lazy.settings.json`; entries under `_project.*` go to the project `.claude/lazy.settings.json`; plugin-domain groups go to the plugin's own install scope. Run `/lazy-core.optimize` to create the file if it does not exist yet.
+The file exists separately because model-routing preferences are architectural decisions (cheapest agent for Explore work, strongest for commit-message generation) that belong in a structured config, not interleaved with per-tool permission lists. Run `/lazy-core.agent-models` to fill and update it interactively. The scope rules are: entries under `_user.*` go to the global `~/.claude/lazy.settings.json`; entries under `_project.*` go to the project `.claude/lazy.settings.json`; plugin-domain groups go to the plugin's own install scope.
 
 ---
 
 ## What is safe to commit to git, and what should stay gitignored?
 
 The tracked `settings.json` files (global `~/.claude/settings.json` and project `.claude/settings.json`) are for enablement-only entries: `enabledPlugins`, `enabledMcpjsonServers`, `hooks` registrations, non-secret `env` vars, model selection, and status-line config. Per-tool permission entries (`permissions.allow`, `permissions.ask`), `additionalDirectories`, and machine-specific `env` values belong in the gitignored `settings.local.json` files. Committing permission lists leaks your personal risk preferences to teammates who may have different policies. The `lazy-guard.settings` PreToolUse hook enforces this split by intercepting writes to settings files that violate it.
-
----
-
-## Does `/lazy-guard.allow-mcp` write to `settings.json` or `settings.local.json`?
-
-It writes to `settings.local.json` by default — the gitignored file — because permission choices are personal and machine-local. For a server defined in `.mcp.json` (project scope), it targets `.claude/settings.local.json`. For a server defined in `~/.mcp.json` (global scope), it checks whether existing `mcp__<server>__*` entries already pin the server to global or project scope; if they do, it infers the scope silently. Only when the scope is genuinely undetermined does it ask. It never writes to tracked `settings.json` unless you explicitly override that default during the Phase 5 confirmation.
-
----
-
-## Why does `/lazy-guard.allow-mcp` leave some tools out of both `allow` and `ask`?
-
-The skill uses a three-bucket classifier. Safe and reversible tools go to `permissions.allow` (no prompt). Truly destructive tools — deletions, force-pushes, working-tree resets — go to `permissions.ask` (prompt on every call). A third category, medium-risk tools, goes to neither list deliberately. Examples include `git_commit` (creates a commit that is locally reversible but worth an acknowledgment) and `cancel_operation`. Tools left out of both lists fall back to Claude Code's built-in per-call prompt, where you decide in context. This skip bucket is intentional: Claude Code's default behavior is a reasonable one-time prompt, and pinning medium-risk tools to either list would either over-trust or over-restrict them.
-
----
-
-## What is the SessionStart preload hook that `/lazy-guard.allow-mcp` offers, and should I install it?
-
-MCP tools are surfaced to the agent as deferred — only tool names appear at session start; calling one requires a `ToolSearch` round-trip to load its schema. That friction is asymmetric with always-loaded tools like `Bash`, so the agent can drift to shell equivalents even when a rule forbids it. The SessionStart hook injects a short instruction at session start that tells the agent to resolve specific MCP tool schemas via `ToolSearch` immediately, making them first-class for the rest of the session. The cost is approximately 1.1k tokens per session.
-
-`/lazy-guard.allow-mcp` asks whether to install this hook after registering a server's tools. If you say yes, it also asks whether to install at project scope (`.claude/settings.local.json`) or global scope (`~/.claude/settings.local.json`). Because the token cost varies by user and workload, the hook is written only to the gitignored `settings.local.json` — never to tracked `settings.json`.
-
----
-
-## Can I use `lazy-guard.check-public` on a private repo that has a public subtree?
-
-Yes. The skill supports a `public_scopes` array in `.guard-waivers.json`. When that array is set, only files matching one of its globs are treated as the public surface — everything else is implicitly private and excluded from the scan. The pre-commit hook respects the same array, so commits that only touch files outside the public scopes are not scanned. Run `/lazy-repo.mark-public <glob>` with one or more scope glob arguments to set this up: it adds the globs to `public_scopes`, runs the audit scoped to those paths, walks you through fixes and waivers, and never touches your GitHub repo visibility.
-
----
-
-## What is the difference between `/lazy-guard.check-public` and `/lazy-repo.mark-public`?
-
-`/lazy-guard.check-public` is a point-in-time audit: it scans, reports, and offers to walk you through fixes, but it does not create the waiver file and does not change GitHub visibility. `/lazy-repo.mark-public` is the full workflow: it calls `/lazy-guard.check-public` internally, then additionally creates `.guard-waivers.json` (which activates the pre-commit hook for future commits), and in whole-repo mode optionally flips the GitHub repo to public via the `gh` CLI. Run `/lazy-guard.check-public` for ongoing hygiene checks on an already-public repo; run `/lazy-repo.mark-public` when you are preparing a repo or subtree for its first public release.
-
----
-
-## How does `/lazy-core.doctor` handle findings I want to permanently ignore?
-
-After the fix batch, doctor enters a per-WARN waive loop. For each remaining WARN you have not fixed, it offers two options: skip for now (the finding reappears next run) or waive permanently. If you choose waive permanently, a second prompt confirms the action and asks whether to save the waiver under this project or for all projects on this machine. Doctor writes the waiver to a `doctor.waivers/` directory inside your project memory folder; future runs load it and suppress the matching finding automatically. To remove a waiver you delete the file directly — there is no un-waive command. FAIL findings are never offered a waive option.
-
----
-
-## What does `/lazy-core.optimize` do beyond slimming rule files?
-
-`/lazy-core.optimize` has several phases beyond Phase 2's rule-file slimming. Phase 2.5 runs an LLM-readability audit across all agent-consumed artifact files — detecting decision-logic tables, abstract-header tables, narrative preamble, restated cross-references, decorative markers, and over-long prose paragraphs — and offers rewrites or permanent waivers per finding. Phase 3 and 4 audit global `settings.json` for project-specific entries that have leaked in and offer to migrate them to the correct project `settings.local.json`. Phase 5 checks memory index health (oversized index, orphaned files, broken links, stale entries). Phase 5.5 goes deeper into per-expert memory under `.memory/<expert>/`: it surfaces orphan notes (notes whose tags appear in no local `.tags/` file) and near-duplicate notes (same-tagged notes with very similar titles), offering to reindex, delete, or leave each one. Phase 6 identifies skills that would benefit from the coordinator-plus-parallel-Explore-agents pattern. Phase 7 delegates to `/lazy-core.agent-models` to fill any missing agent routing entries in `lazy.settings.json`. Run it when startup feels slow, after adding new rules or agents, or when `/lazy-core.audit` surfaces readability findings.
-
----
-
-## Do plugins share settings, or is each plugin's configuration independent?
-
-Each plugin installs its own rule templates and may seed its own section of `lazy.settings.json` (for agent-model routing), but all plugins share the same `settings.json` / `settings.local.json` pair and the same `.guard-waivers.json`. `/lazy-core.setup` runs every plugin's installer in dependency order (core first, then others alphabetically, then post-install cross-cutters) so that later plugins can rely on templates and settings keys seeded by earlier ones. Plugin-owned rule files in `.claude/rules/` are identified by their dot-namespace prefix (e.g. `lazy-core.*`, `lazy-guard.*`), which lets `/lazy-core.install` do orphan detection without touching rules from other plugins or user-authored rules.
 
 ---
 
@@ -153,34 +73,6 @@ Run a plugin's install skill directly only when you want to re-sync exactly one 
 
 ---
 
-## Why is my new skill, rule, or agent forced into a template?
-
-The `lazy-core.scaffold` rule is always-loaded and fires whenever you create a new file whose path matches the scaffold registry. For skills and commands it points to `skill-template.md`; for agents to `agent-template.md`; for rules to `rule-template.md`. Each template carries the Execution-Discipline preamble (for skills and agents), mandatory frontmatter, and an authoring-notes block you delete before saving.
-
-The reason templates are mandatory rather than optional is that every artifact class has structural requirements enforced by `lazy-core.audit`: skills need the `TaskCreate` preamble so skipped phases stay visible, agents need `tools:` allowlists and `model: inherit`, rules need either `paths:` or an `always_loaded:` waiver. Starting from memory reliably misses at least one of these, and the audit finding surfaces after the artifact is already in use. Starting from the template makes the requirement visible on the first edit, before any code runs.
-
----
-
-## Why does Claude refuse to write to `~/.claude/` by default?
-
-The `lazy-core.hygiene` rule (always-loaded) sets project-local scope as the default for every artifact — skills, agents, hooks, rules, and config. Writing to `~/.claude/` without an explicit request violates this rule because global artifacts affect every project on the machine: a rule added globally loads into every session, a permission entry allowed globally persists after the project context is gone, and MCP server configs placed globally expose that server everywhere.
-
-The rule is enforced by `lazy-core.audit` and `lazy-core.doctor`. It does not make global writes impossible — it makes them require an explicit instruction ("add this globally" or "this is a cross-project artifact"). When you give that instruction, writes to `~/.claude/` proceed normally. The same rule also enforces dot-namespace naming for every artifact (`namespace.name`, not a flat name like `logging`), the settings split between tracked `settings.json` and gitignored `settings.local.json`, and narrowest-scope MCP placement (project `.mcp.json` unless the server is truly universal).
-
----
-
-## What is a waivable WARN versus an unwaivable FAIL in the guard scanner?
-
-The distinction is whether the finding represents a certain security boundary violation or a context-dependent judgment call.
-
-**FAILs are never waivable.** They cover secrets that would be directly exploitable if the repo went public: private keys, AWS access keys, API key or token literals, bearer tokens, high-entropy base64 on lines that look like credential assignments, and connection strings with embedded credentials. The scanner blocks the commit or the public-repo workflow and requires you to encrypt, template-ize, or redact the value before proceeding. There is no waiver path for these — the threat model does not have a "it's fine this time" branch.
-
-**WARNs are waivable with a documented reason.** They cover findings that are often real problems but sometimes legitimate: email addresses (yours on a public README is fine; a customer's in a config is not), service user IDs, Tailscale or public IP addresses, internal hostnames, and hardcoded local paths (`/Users/…` or `~/Dropbox/…` style). To accept a WARN, re-run `/lazy-guard.check-public` and pick the "Add waiver" option when the scanner presents the finding — the skill writes the waiver entry including check ID, scope glob, match pattern, reason, and date. Waivers live in `.guard-waivers.json` and are checked on every subsequent scan.
-
-Author-name findings in tracked manifests (`plugin.json`, `package.json`, etc.) are also WARNs. Set your `public_author` by letting `/lazy-guard.check-public` prompt you for it on first use; it records the value in `.guard-waivers.json` and auto-waives matching literals on all future scans.
-
----
-
 ## Do I need to enable the expert runtime, or is it on by default?
 
 The expert runtime is opt-in per repo. When you run `/lazy-core.install`, a wizard phase asks whether to bootstrap runtime and experts for the current repo. If you answer yes, the skill writes the flat `daemon` and `routines` sections into `.claude/lazy.settings.json`, creates `lazy.settings.json[experts]`, copies the `lazy.runtime.sh` shim to `.claude/bin/`, and adds `.experts/` to `.gitignore`. It also offers to install a daemon supervisor (macOS launchd or Linux systemd) and registers the `lazy-expert.pump` routine automatically once you add at least one expert. If you skip that phase or answer no, none of those files are created and the `/lazy-expert.*` skills will abort at Step 2 with "`.experts/` not initialised — run `/lazy-core.install` first."
@@ -197,25 +89,9 @@ Optional fields — `source` (array of input file paths), `context` (array of co
 
 ---
 
-## How do I check whether a job has finished, and how do I retrieve its output?
+## What happens if I dispatch a job for an expert that is not registered?
 
-Run `/lazy-expert.collect-job` with the `expert_name` and `job_id` returned by `/lazy-expert.dispatch-job`. The skill returns one of four statuses: `pending` (the daemon has not yet processed it), `done` (success), `failed` (the expert wrote an error outcome), or `missing` (the job directory does not exist — the job was never dispatched or was already cancelled). When the status is `done`, the skill also prints the `result` file paths from `response.json` so you can `Read` the output directly.
-
-`/lazy-expert.list-jobs` gives you an overview before you call collect: it prints a table of all jobs — or a filtered subset by expert name or status — with each job's age in seconds. Use the `--status queued` filter to see what is still waiting in the queue, and `--status failed` to identify jobs that need attention.
-
----
-
-## How do I cancel a job I no longer need?
-
-Run `/lazy-expert.cancel-job` with the `expert_name` and `job_id`. The skill checks whether the job is already `done` (DONE marker present) or still `pending` (READY marker, no DONE). In both cases it asks for confirmation before deleting the job directory. If you cancel a pending job, the daemon may be processing it at that moment — the skill warns you about this and waits for your answer before acting. Cancellation is irreversible: the job directory is removed, and a cancelled job produces no output.
-
----
-
-## What does `/lazy-routine.unregister` do if the routine name does not exist?
-
-It exits cleanly with an INFO message — "routine `<name>` not found — nothing to unregister" — and logs the outcome as `already-absent`. Unregistering a non-existent routine is treated as a no-op, not an error, so the call is safe to make idempotently.
-
-The one exception is `lazy-expert.pump`, the built-in pump routine. Removing it without passing `--force` aborts with an explicit warning: the pump routine drives the entire expert queue, so removing it stops all expert job processing. If you pass `--force`, the skill removes it with a warning and notes that expert jobs will not run until the routine is re-registered or `/lazy-core.install` is re-run.
+`/lazy-expert.dispatch-job` loads `lazy.settings.json[experts]` and looks up the expert name you provided. If the key is absent, the skill aborts with "`<expert_name>` is not registered in `lazy.settings.json[experts]`" — no job directory is created. Register the expert first via `/lazy-core.install` (expert wizard, Step 11) or, if the expert was recently added by enabling a plugin, re-run `/lazy-core.setup` to pick it up, then re-dispatch.
 
 ---
 
@@ -261,12 +137,6 @@ Memory notes are markdown files with frontmatter (`title`, `tags`, `type`, `summ
 
 ---
 
-## Why does `/lazy-memory.mark-persona` refuse with "expert not registered"?
-
-`/lazy-memory.mark-persona` checks `lazy.settings.json[experts]` for the expert name you passed. If the key is missing, the skill aborts rather than creating a dangling memory directory for an expert the daemon does not know about. Register the expert first via `/lazy-core.install` (expert-add wizard, Step 11) and then re-run `/lazy-memory.mark-persona`.
-
----
-
 ## Can I write to `.memory/` by hand or must I go through `/lazy-memory.write`?
 
 `/lazy-memory.write` is the only supported writer for `.memory/`. It validates note frontmatter (requiring `title`, `tags` with `memory/` prefixes, `type`, and `summary`), picks a non-colliding slug, regenerates the `.tags/` index files for both the expert and the global `.memory/.tags/`, and commits the change atomically under a `memory.<expert>` git identity. Hand-editing bypasses all of that: tag files go stale, the slug counter gets confused, and the commit identity is wrong.
@@ -275,45 +145,21 @@ If you do hand-edit and the tag files drift out of sync with the notes, run `/la
 
 ---
 
-## When should I use `/lazy-core.git-status` versus `/lazy-core.git-unlock`?
+## What is a waivable WARN versus an unwaivable FAIL in the guard scanner?
 
-`/lazy-core.git-status` is always safe to run first — it is purely read-only and tells you everything: who holds the staging lock, how old the lock is, whether the holder's PID is still alive, and whether the automatic break-the-lock heuristics (dead PID, different host, stale-and-idle) would allow breaking it. Run it whenever a `git add` is unexpectedly refused or a session seems stuck.
+The distinction is whether the finding represents a certain security boundary violation or a context-dependent judgment call.
 
-Only run `/lazy-core.git-unlock` if the status shows a lock that the automatic heuristics will not break — for example, the holder's PID is alive but you know that session has abandoned its staging window (it crashed mid-stage, or you killed it). The skill shows you the lock details and asks for confirmation before deleting `.git/lazy-git.lock`. Skipping status and going straight to unlock when a lock is legitimately held by an active staging session would corrupt that session's commit.
+**FAILs are never waivable.** They cover secrets that would be directly exploitable if the repo went public: private keys, AWS access keys, API key or token literals, bearer tokens, high-entropy base64 on lines that look like credential assignments, and connection strings with embedded credentials. The scanner blocks the commit or the public-repo workflow and requires you to encrypt, template-ize, or redact the value before proceeding. There is no waiver path for these — the threat model does not have a "it's fine this time" branch.
 
----
+**WARNs are waivable with a documented reason.** They cover findings that are often real problems but sometimes legitimate: email addresses (yours on a public README is fine; a customer's in a config is not), service user IDs, Tailscale or public IP addresses, internal hostnames, and hardcoded local paths (`/Users/…` or `~/Dropbox/…` style). To accept a WARN, re-run `/lazy-guard.check-public` and pick the "Add waiver" option when the scanner presents the finding — the skill writes the waiver entry including check ID, scope glob, match pattern, reason, and date. Waivers live in `.guard-waivers.json` and are checked on every subsequent scan.
 
-## What is the difference between `lazy-log.recall`, `lazy-log.timeline`, and `lazy-log.summary`?
-
-All three search the same five sources — `.logs/changelog.md`, run logs under `.logs/claude/`, `.logs/commits.jsonl`, git log, and memory files — but they answer different questions.
-
-`lazy-log.recall` answers "why was X changed?" or "when did we touch Y?". It returns ranked matches with git SHAs so you can jump to the exact commit. Use it for point lookups.
-
-`lazy-log.timeline` answers "what happened when?" across a date range or topic. It produces a chronological list grouped by day, marking internal commits (chore/refactor) so you can skim past them. Use it when you want the sequence of events.
-
-`lazy-log.summary` answers "what is the whole story of this feature or area?". It synthesizes a multi-paragraph narrative grouped by sub-theme rather than date, citing SHAs inline and flagging gaps where the historical record is incomplete. Use it when you need to understand the arc of a decision, not just find a single change.
+Author-name findings in tracked manifests (`plugin.json`, `package.json`, etc.) are also WARNs. Set your `public_author` by letting `/lazy-guard.check-public` prompt you for it on first use; it records the value in `.guard-waivers.json` and auto-waives matching literals on all future scans.
 
 ---
 
-## What does `/lazy-log.distill` do and when does it run?
+## Can I use `lazy-guard.check-public` on a private repo that has a public subtree?
 
-`/lazy-log.distill` reads raw commit entries from `.logs/commits.jsonl` (written by the `lazy-log.commit-recorder` PostToolUse hook on every successful commit) and converts them into themed human-readable prose in `.logs/changelog.md`. Commits sharing a Conventional-commits scope form one theme block; same-day re-runs merge new commits into today's paragraph rather than appending fragments. The agent bumps touched theme blocks to the top of the file so the most recently active areas are always visible first.
-
-The `lazy-log.logging` rule decides whether to invoke the agent after each commit. It skips when there is no commit on the current turn, when the changelog was written less than four hours ago (the 4h floor), or when the commit is not narration-worthy (a version bump or README re-render, for example). It runs unconditionally when you ask for it explicitly ("distill" or "catch up"). You can also trigger it by passing `force` in the prompt to bypass the throttle.
-
----
-
-## What does `/lazy-log.bullets` produce and when should I invoke it?
-
-`/lazy-log.bullets` converts a commit range scoped to one plugin into a formatted `### <version> — <date> UTC` release block ready to prepend to `CHANGELOG.public.md`. It reads commits via git, filters out internal-only work (pure chore/refactor/style/test commits and dev-tooling plumbing), groups surviving commits by scope, and rewrites them as outcome-led user-facing bullets. The coordinator in a release flow (`/pub.publish`) dispatches this agent automatically; you do not normally invoke it directly. If you need a release block outside that flow — for example, to draft changelog copy before a release — dispatch it with the `plugin`, `plugin_dir`, `range`, `new_version`, and `date` fields the agent requires.
-
----
-
-## What does `/lazy-log.clean` do and when should I run it?
-
-`/lazy-log.clean` is housekeeping for `.logs/claude/`. Over time that directory accumulates directories from subagent runs that used ephemeral names like `task-3` or `subagent-task-17`, from skills that were renamed after their logs were written, and from waivered artifacts that stopped logging. The skill classifies every subdirectory against the live set of canonical skill/agent/command names and presents each non-canonical folder for your decision — merge into the canonical target, distill substantive logs into project memory before deleting, delete outright, or leave alone. Anonymous pattern clusters (all `task-N` folders at once, for example) are batched into a single prompt so you are not asked dozens of times.
-
-Run it periodically — after a major refactor that renames several skills, after a long development session that generated many ephemeral subagent runs, or whenever `/lazy-core.audit` flags `.logs/claude/` as containing orphaned directories. The skill is read-first: nothing is touched until you have approved every action.
+Yes. The skill supports a `public_scopes` array in `.guard-waivers.json`. When that array is set, only files matching one of its globs are treated as the public surface — everything else is implicitly private and excluded from the scan. The pre-commit hook respects the same array, so commits that only touch files outside the public scopes are not scanned. Run `/lazy-repo.mark-public <glob>` with one or more scope glob arguments to set this up: it adds the globs to `public_scopes`, runs the audit scoped to those paths, walks you through fixes and waivers, and never touches your GitHub repo visibility.
 
 ---
 
@@ -327,21 +173,34 @@ Note that `/lazy-core.audit` uses a lower floor of Python 3.12 for its own runti
 
 ## Which skills support `--dry-run` and what does it do?
 
-Three skills in this plugin accept `--dry-run`:
+Two skills covered in this block accept `--dry-run`:
 
 - `/lazy-core.setup` — builds and previews the install plan (which skills would run, in what order) without executing any of them. The settings migration step (Step 0) still runs in dry-run mode so the preview reflects the post-migration state.
 - `/lazy-core.agent-models` — walks the wizard and reports what tier assignments would be written, without touching either `lazy.settings.json` file.
-- `/lazy-guard.allow-mcp` — computes and previews the diff (which tools would land in `allow`, `ask`, or skip) without writing to any settings file.
 
-In all three cases, `--dry-run` is purely read-only: no files are created or modified, and the skill exits after the preview. It is safe to run at any time and does not require undoing anything afterward.
+In both cases, `--dry-run` is purely read-only: no files are created or modified, and the skill exits after the preview. It is safe to run at any time and does not require undoing anything afterward.
 
 ---
 
-## How do I search change history for when or why something was modified?
+## Why is my new skill, rule, or agent forced into a template?
 
-Use the `lazy-log.recall` agent, dispatched automatically when you ask questions like "why was X changed?" or "when did we change Y?". The agent searches across five sources in priority order: the functional prose in `.logs/changelog.md`, individual skill/agent run logs under `.logs/claude/`, the raw commit feed in `.logs/commits.jsonl`, git log (both commit-message search and diff-content search), and project memory files. Matches are ranked by how strongly they corroborate each other — entries with multiple keyword hits across changelog prose rank highest, while diff-only matches rank lowest. Results come back as a table with git SHAs so you can run `git show <sha>` to jump directly to the actual code change.
+The `lazy-core.scaffold` rule is always-loaded and fires whenever you create a new file whose path matches the scaffold registry. For skills and commands it points to `skill-template.md`; for agents to `agent-template.md`; for rules to `rule-template.md`. Each template carries the Execution-Discipline preamble (for skills and agents), mandatory frontmatter, and an authoring-notes block you delete before saving.
 
-The agent does not modify any files. If your query is ambiguous, it shows matches for both interpretations rather than guessing.
+The reason templates are mandatory rather than optional is that every artifact class has structural requirements enforced by `lazy-core.audit`: skills need the `TaskCreate` preamble so skipped phases stay visible, agents need `tools:` allowlists and `model: inherit`, rules need either `paths:` or an `always_loaded:` waiver. Starting from memory reliably misses at least one of these, and the audit finding surfaces after the artifact is already in use. Starting from the template makes the requirement visible on the first edit, before any code runs.
+
+---
+
+## Why does Claude refuse to write to `~/.claude/` by default?
+
+The `lazy-core.hygiene` rule (always-loaded) sets project-local scope as the default for every artifact — skills, agents, hooks, rules, and config. Writing to `~/.claude/` without an explicit request violates this rule because global artifacts affect every project on the machine: a rule added globally loads into every session, a permission entry allowed globally persists after the project context is gone, and MCP server configs placed globally expose that server everywhere.
+
+The rule is enforced by `lazy-core.audit` and `lazy-core.doctor`. It does not make global writes impossible — it makes them require an explicit instruction ("add this globally" or "this is a cross-project artifact"). When you give that instruction, writes to `~/.claude/` proceed normally. The same rule also enforces dot-namespace naming for every artifact (`namespace.name`, not a flat name like `logging`), the settings split between tracked `settings.json` and gitignored `settings.local.json`, and narrowest-scope MCP placement (project `.mcp.json` unless the server is truly universal).
+
+---
+
+## Do plugins share settings, or is each plugin's configuration independent?
+
+Each plugin installs its own rule templates and may seed its own section of `lazy.settings.json` (for agent-model routing), but all plugins share the same `settings.json` / `settings.local.json` pair and the same `.guard-waivers.json`. `/lazy-core.setup` runs every plugin's installer in dependency order (core first, then others alphabetically, then post-install cross-cutters) so that later plugins can rely on templates and settings keys seeded by earlier ones. Plugin-owned rule files in `.claude/rules/` are identified by their dot-namespace prefix (e.g. `lazy-core.*`, `lazy-guard.*`), which lets `/lazy-core.install` do orphan detection without touching rules from other plugins or user-authored rules.
 
 ---
 

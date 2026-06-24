@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
-last_regen: 2026-06-02
+last_regen: 2026-06-24
 diagram_spec:
   anchor: "How memory grows over time"
   request: "Sequence diagram showing user invoking mark-persona, then dispatching jobs (accumulating run logs), then invoking reflect which reads run logs + existing memory notes and calls lazy-memory.write to produce .memory/<expert>/<slug>.md, committing atomically under the memory-bot identity."
@@ -89,9 +89,11 @@ queue_path:   .experts/.jobs/<expert>/<job-id>/
 source_count: <N>
 ```
 
-If `source_count` is 0, the expert has no recent run logs and no existing memory; dispatch more jobs first (Step 2).
+`source_count` is the combined total of recent run logs and existing memory notes fed to the expert. If `source_count` is 0, the expert has no recent run logs and no existing memory; dispatch more jobs first (Step 2).
 
 If the skill reports `<expert> is not marked persona`, run `/lazy-memory.mark-persona <expert>` (Step 1) and re-try.
+
+If the skill reports `<expert>` is unknown (not found in `lazy.settings.json[experts]`), verify the expert name or register the expert via `/lazy-core.install` first.
 
 ### Step 4 — Collect the reflect job's result
 
@@ -130,6 +132,8 @@ Expected state:
 Notes land already committed: `/lazy-memory.write` commits each note atomically under the `memory.<expert>` identity before returning, so the `.memory/` tree is in a clean git state as soon as the reflect job finishes. You do not need to commit these files yourself.
 
 If a tag is missing the `memory/` prefix, `/lazy-memory.write` would have rejected the note with `frontmatter-invalid: tag must be prefixed memory/` — so any note that landed successfully has valid tags. If `/lazy-memory.write` reports `consolidate-target-missing: <path>`, the note still writes successfully — this is a non-fatal warning telling you a path passed via `--consolidate` no longer exists; it can be safely ignored or removed from the consolidate list on the next call.
+
+If the expert wrote a note whose content was byte-identical to an existing note (for example because re-running a reflect over the same source logs), `/lazy-memory.write` reports `written-no-commit` — the file on disk is unchanged and no new commit is created. This is safe and idempotent; no action is needed.
 
 If a commit attempt failed mid-job (`commit-failed: git add returned …` or `commit-failed: git commit returned …`), the staged index is left intact for inspection. This usually means a pre-commit hook rejected the change or another session held the staging lock. Resolve the cause, then re-run `/lazy-memory.write` with the same body — the write is idempotent when the note content is unchanged.
 
@@ -199,4 +203,3 @@ sequenceDiagram
   git-->>reflect: commit SHA
   reflect-->>user: reflection committed
 ```
-

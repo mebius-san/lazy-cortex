@@ -133,8 +133,21 @@ The `supervisor` key (nested under the flat `daemon` section) is optional and re
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `dev_mode` | bool | `false` | When `true`, the rendered supervisor invokes `lazy.runtime.sh` with `--dev-mode`. The shim then scans `<repo-root>/claude/*/.claude-plugin/plugin.json` and injects one `--plugin-dir <plugin-root>` per match before the runner's positional repo-root. The runner consults those paths first and falls back to the plugin cache. Useful when this repo IS the authoring vault for the plugins the daemon needs — local source edits take effect without a `/plugin update` cycle. |
+| `login_shell` | bool | `false` | When `true`, the rendered supervisor invokes `lazy.runtime.sh` with `--login-shell`. The shim re-execs itself through a login shell (`$SHELL -lc`, default `/bin/zsh`) so the daemon inherits the operator's login environment (`.zprofile` / `.zshrc` → `CLAUDE_CODE_OAUTH_TOKEN` + full PATH). See § Headless hosts below. |
+| `env_files` | `[string]` | `[]` | A list of env-file paths. Each is rendered as a `--env-file <path>` flag on the shim invocation; the shim sources each (`set -a; . <path>; set +a`) so its exported vars reach the runner → daemon → `claude`. A leading `~` is expanded by the shim. Surgical alternative to `login_shell` when only a token file is needed, not a full login PATH. |
 
-`dev_mode` is install-skill state, not runtime config — flipping it in `lazy.settings.json` does NOT affect the running daemon. To change effective mode, re-run `/lazy-core.install` so the supervisor unit is re-rendered, then reload the unit (`launchctl unload && launchctl load` on macOS, `systemctl --user daemon-reload && systemctl --user restart` on Linux).
+`dev_mode`, `login_shell`, and `env_files` are install-skill state, not runtime config — changing them in `lazy.settings.json` does NOT affect the running daemon. To apply a change, re-run `/lazy-core.install` so the supervisor unit is re-rendered, then reload the unit (`launchctl unload && launchctl load` on macOS, `systemctl --user daemon-reload && systemctl --user restart` on Linux).
+
+### Headless hosts: giving the daemon a login environment
+
+launchd and systemd `exec` the shim directly — not through a login shell — so the daemon does not run the operator's `.zprofile` / `.zshrc`. On an interactive box this is invisible (the operator's own shell already exported everything), but on a headless host the daemon spawns `claude -p` with no `CLAUDE_CODE_OAUTH_TOKEN` (→ "Not logged in") and an incomplete PATH (→ `claude` may not resolve). The environment the shim sets up flows all the way down: shim → runner → daemon → `expert-pump` `claude` spawn and routine commands all inherit it.
+
+Two opt-in remedies, both off by default (absent → byte-identical to the historical behaviour):
+
+- `supervisor.login_shell: true` — full login-equivalent environment (token **and** PATH), host-agnostic, no personal paths in plugin code. This is the minimally-sufficient fix for both symptoms.
+- `supervisor.env_files: ["~/.claude/.env"]` — sources just the named file(s); fixes the token without a full login PATH. Combine with `login_shell` when both a custom env file and a login PATH are wanted.
+
+Edge: under launchd `$SHELL` is often unset, so the shim falls back to `/bin/zsh` (present on macOS); the chosen login shell must exist and read the dotfiles that export the token.
 
 ---
 

@@ -378,7 +378,7 @@ Bash(cp ${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy.runtime.sh <repo-root>/.cla
 Bash(chmod +x <repo-root>/.claude/bin/lazy.runtime.sh)
 ```
 
-The shim resolves the latest `lazycortex-core/bin/runner` from the plugin cache at exec time, so supervisor units don't need re-rendering after `/plugin update`. Re-copying on content drift is safe — the shim's interface is stable (positional repo-root + repeatable `--plugin-dir`; the new `--dev-mode` flag is additive).
+The shim resolves the latest `lazycortex-core/bin/runner` from the plugin cache at exec time, so supervisor units don't need re-rendering after `/plugin update`. Re-copying on content drift is safe — the shim's interface is stable (positional repo-root + repeatable `--plugin-dir`; the `--dev-mode`, `--login-shell`, and repeatable `--env-file <path>` flags are additive and stripped by the shim before the runner exec).
 
 ### Ensure `lazy.settings.json[experts]`
 
@@ -572,17 +572,35 @@ save_section(p, 'daemon', sec)
 
 Hold the derived boolean as `<dev_mode>` for 13b/13c.
 
+- **login-shell / env-files** = operator-provided supervisor options (NOT derived — read verbatim from the `daemon.supervisor` block, alongside `dev_mode`). They give the daemon a login-equivalent environment on headless hosts where launchd/systemd exec the shim without a login shell, so `claude -p` otherwise fails "Not logged in" and `claude` may not resolve in PATH. Both default off → byte-identical behaviour when absent.
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_tracked_section
+from pathlib import Path
+sup = load_tracked_section(Path('<repo-root>/.claude/lazy.settings.json'), 'daemon').get('supervisor', {})
+print('login_shell=' + ('1' if sup.get('login_shell') else '0'))
+for ef in sup.get('env_files', []) or []:
+    print('env_file=' + ef)
+"
+```
+
+  Hold `<login_shell>` (bool) and the ordered `<env_files>` list for 13b/13c. Render each `env_files` entry **verbatim** — the shim expands a leading `~` itself (launchd does not), so do not pre-expand. `login_shell` solves both token and PATH; `env_files` is the surgical token-only path. They may combine.
+
 ### 13b. macOS launchd
 
 When the platform is macOS (`darwin`):
 1. **Migrate a legacy basename-only unit (if present).** Older installs named the unit by bare basename. If `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist` exists AND its body contains `<string><repo-root></string>` (its `WorkingDirectory` points at THIS checkout — confirm with `Bash(grep -F "<repo-root>" ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)`), it is this checkout's old-scheme unit → `Bash(launchctl unload ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)` then `Bash(rm ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_NAME>.plist)` before installing the new one. If the legacy file is absent, or exists but points at a DIFFERENT checkout (a same-basename sibling), leave it untouched. State **legacy-unit-migrated** or **no-legacy-unit**.
 2. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist`.
 3. Substitute `{REPO_ROOT}` → absolute path of `<repo-root>`, `{REPO_ID}` → the per-checkout id from 13a (the shim path is built into the template as `{REPO_ROOT}/.claude/bin/lazy.runtime.sh` — no separate runner-path substitution needed).
-4. **If `<dev_mode>` is True**: insert a `<string>--dev-mode</string>` line into `ProgramArguments` between the `lazy.runtime.sh` line and the `{REPO_ROOT}` line. Indent matches the surrounding `<string>` lines (8 spaces).
+4. **Inject the shim flags** into `ProgramArguments`, between the `lazy.runtime.sh` line and the `{REPO_ROOT}` line, in this order (each is its own `<string>` element; indent matches the surrounding `<string>` lines — 8 spaces). Omit any whose source value is unset:
+   - **If `<login_shell>` is True**: a `<string>--login-shell</string>` line.
+   - **For each `<env_files>` entry** (in order): a `<string>--env-file</string>` line immediately followed by a `<string><path></string>` line carrying the verbatim path (`--env-file` and its value are two separate array elements).
+   - **If `<dev_mode>` is True**: a `<string>--dev-mode</string>` line.
 5. `Bash(mkdir -p ~/Library/LaunchAgents/)`
 6. Write the rendered plist to `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist`.
 7. `Bash(launchctl load ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist)`
-8. State **launchd-installed** (or **launchd-installed-dev-mode** when `<dev_mode>` is True).
+8. State **launchd-installed** (or **launchd-installed-dev-mode** when `<dev_mode>` is True; append **-login-shell** / **-env-files** when those flags were injected).
 
 ### 13c. Linux systemd
 
@@ -590,7 +608,7 @@ When the platform is Linux:
 1. **Migrate a legacy basename-only unit (if present).** If `~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service` exists AND its `ExecStart=` references THIS checkout (confirm with `Bash(grep -F "<repo-root>" ~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service)`) → `Bash(systemctl --user disable --now lazy-core-runtime-<REPO_NAME>.service)` then `Bash(rm ~/.config/systemd/user/lazy-core-runtime-<REPO_NAME>.service)` before installing the new one. If absent, or pointing at a different checkout, leave it. State **legacy-unit-migrated** or **no-legacy-unit**.
 2. Read `${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy-core-runtime.service`.
 3. Substitute `{REPO_ROOT}` → absolute path of `<repo-root>`, `{REPO_NAME}` → basename (used only in the human-readable `Description=`).
-4. **If `<dev_mode>` is True**: replace `lazy.runtime.sh {REPO_ROOT}` (after step 3's substitution) with `lazy.runtime.sh --dev-mode {REPO_ROOT}` in the `ExecStart=` line.
+4. **Inject the shim flags** into the `ExecStart=` line (after step 3's substitution). Build a flag prefix and splice it between `lazy.runtime.sh` and `{REPO_ROOT}`, in order: `--login-shell` (if `<login_shell>` is True), then `--env-file <path>` per `<env_files>` entry (quote a path containing spaces), then `--dev-mode` (if `<dev_mode>` is True). With no flags the line is unchanged. Example with all three: `lazy.runtime.sh --login-shell --env-file ~/.claude/.env --dev-mode {REPO_ROOT}`.
 5. `Bash(mkdir -p ~/.config/systemd/user/)`
 6. Write the rendered unit to `~/.config/systemd/user/lazy-core-runtime-<REPO_ID>.service`.
 7. `Bash(systemctl --user enable --now lazy-core-runtime-<REPO_ID>.service)`

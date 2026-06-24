@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo serial daemon so the async expert team has an executor — install wizard, start the daemon, then unblock it with /lazy-runtime.recover if the working tree halts.
-last_regen: 2026-06-09
+last_regen: 2026-06-24
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, wizard asks about runtime, user opts in, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh (daemon starts, polls .experts/.jobs/ on interval); (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
@@ -44,7 +44,7 @@ The install first verifies Python 3.12 or later is available. If Python is absen
 During install, the wizard asks whether to bootstrap runtime and experts for the repo. Answer **Yes**. The skill writes:
 
 - `lazy.settings.json[experts]` — the experts section, initially containing only `_version`.
-- `.claude/bin/lazy.runtime.sh` — the runtime shim, made executable. The shim resolves the latest `lazycortex-core/bin/runner` from the plugin cache at exec time, so it stays current after `/plugin update` without needing a re-run.
+- `.claude/bin/lazy.runtime.sh` — the runtime shim, made executable. The shim resolves the latest `lazycortex-core/bin/runner` from the plugin cache at exec time, so it stays current after `/plugin update` without needing a re-run. On subsequent installs the shim is content-tracked and refreshed if it has drifted from the shipped version.
 - Flat `daemon` and `routines` sections inside `.claude/lazy.settings.json` — daemon configuration including polling interval (default: 5 seconds), job-cleanup retention windows, and an empty routines map. These are top-level section keys read directly by the daemon; they are never nested under a `lazy-core.runtime` object.
 - `.memory/` directory at the repo root — tracked in git so memory notes survive clones. This directory is created even when the daemon is disabled, because experts can be dispatched interactively too.
 - Entries in `.gitignore` covering `.logs/`, `.runtime/`, `.experts/`, and `.claude/lazy.settings.local.json`.
@@ -99,7 +99,7 @@ If the tree is still dirty after cleanup (e.g., a submodule left additional chan
 
 ## After you're done
 
-The daemon runs continuously, draining jobs and firing registered routines. The built-in `lazy-expert.pump` routine processes them serially per expert so there is never contention.
+The daemon runs continuously, draining jobs and firing registered routines. The built-in `lazy-expert.pump` routine processes them serially per expert so there is never contention. An autonomous `lazy-runtime.doctor` routine runs hourly and handles DEAD expert jobs automatically — retrying recoverable failures and permanently failing jobs the daemon can no longer make progress on — without requiring operator action.
 
 If you add new expert agents later, re-run `/lazy-core.install` — the wizard's expert-discovery phase picks up newly discovered agent files without touching existing registrations (it is idempotent). Because the pump routine is already registered on re-runs, the supervisor install offer will not appear again; only the first run that freshly registers the pump triggers it.
 

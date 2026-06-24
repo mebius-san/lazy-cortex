@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
-last_regen: 2026-06-02
+last_regen: 2026-06-24
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing how lazy-guard.check-public feeds findings into lazy-repo.mark-public (which creates .guard-waivers.json and activates the pre-commit hook), and how lazy-guard.allow-mcp independently classifies MCP server tools into allow/ask/skip buckets and writes them to settings.local.json"
@@ -58,30 +58,44 @@ Optionally, `/lazy-guard.allow-mcp` can also install a SessionStart preload hook
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  runCheckPublic[Run lazy-guard.check-public]
-  findingsReady{Findings ready?}
-  invokeMarkPublic[Invoke lazy-repo.mark-public]
-  createWaivers[Create .guard-waivers.json]
-  activateHook[Activate pre-commit hook]
-  guardDone[Guard scan active on commits]
+  invokeCheckPublic[invoke lazy-guard.check-public]
+  scanFindings{findings?}
+  failSecrets{secrets found?}
+  warnPii[surface PII / path warnings]
+  blockPublish[block publish — resolve secrets]
+  invokeMarkPublic[invoke lazy-repo.mark-public]
+  createWaivers[create .guard-waivers.json]
+  activateHook[activate pre-commit hook]
+  publishDone[repo marked public — Done]
 
-  runAllowMcp[Run lazy-guard.allow-mcp]
-  classifyTools[Classify MCP server tools]
-  bucketGuard{Bucket assigned?}
-  writeSettings[Write to settings.local.json]
-  allowMcpDone[MCP permissions applied]
+  invokeAllowMcp[invoke lazy-guard.allow-mcp]
+  enumerateTools[enumerate MCP server tools]
+  classifyTools{classify each tool}
+  bucketAllow[assign to allow bucket]
+  bucketAsk[assign to ask bucket]
+  bucketSkip[assign to skip bucket]
+  writeSettings[write to settings.local.json]
+  mcpDone[MCP permissions applied — Done]
 
-  runCheckPublic -->|scan completes| findingsReady
-  findingsReady -->|yes - findings present| invokeMarkPublic
-  findingsReady -->|no findings| guardDone
-  invokeMarkPublic -->|create| createWaivers
-  createWaivers -->|enable| activateHook
-  activateHook -->|hook live| guardDone
+  invokeCheckPublic -->|run scan| scanFindings
+  scanFindings -->|no issues| invokeMarkPublic
+  scanFindings -->|issues found| failSecrets
+  failSecrets -->|yes| blockPublish
+  failSecrets -->|no| warnPii
+  warnPii -->|acknowledged| invokeMarkPublic
+  invokeMarkPublic -->|create file| createWaivers
+  createWaivers -->|enable hook| activateHook
+  activateHook -->|complete| publishDone
 
-  runAllowMcp -->|enumerate tools| classifyTools
-  classifyTools -->|per tool| bucketGuard
-  bucketGuard -->|allow, ask, or skip| writeSettings
-  writeSettings -->|persist| allowMcpDone
+  invokeAllowMcp -->|discover| enumerateTools
+  enumerateTools -->|classify| classifyTools
+  classifyTools -->|safe tool| bucketAllow
+  classifyTools -->|interactive tool| bucketAsk
+  classifyTools -->|excluded tool| bucketSkip
+  bucketAllow -->|merge| writeSettings
+  bucketAsk -->|merge| writeSettings
+  bucketSkip -->|merge| writeSettings
+  writeSettings -->|saved| mcpDone
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
@@ -89,17 +103,22 @@ flowchart LR
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class runCheckPublic entry
-  class runAllowMcp entry
-  class findingsReady guard
-  class bucketGuard guard
+  class invokeCheckPublic entry
+  class invokeAllowMcp entry
+  class scanFindings guard
+  class failSecrets guard
+  class classifyTools guard
+  class warnPii action
   class invokeMarkPublic action
   class createWaivers action
   class activateHook action
-  class classifyTools action
+  class enumerateTools action
+  class bucketAllow action
+  class bucketAsk action
+  class bucketSkip action
   class writeSettings action
-  class guardDone success
-  class allowMcpDone success
+  class blockPublish error
+  class publishDone success
+  class mcpDone success
 ```
-
 

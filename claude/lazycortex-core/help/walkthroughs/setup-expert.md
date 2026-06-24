@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-06-09
+last_regen: 2026-06-24
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -47,7 +47,7 @@ Run `/lazy-core.install` inside the repo. The install wizard walks through 16 or
 
 When Step 11 scans installed plugins for expert candidates, each candidate found is registered automatically using a deterministic bot identity (`<agent_name>@lazycortex.local`) — the wizard does not prompt per candidate. These are written into `lazy.settings.json[experts]` by the skill; do not edit the file by hand.
 
-Once at least one expert is registered, Step 12 bootstraps the `lazy-expert.pump` routine into the flat `routines` section of `.claude/lazy.settings.json`. Step 13 then offers to install a daemon supervisor via macOS launchd or Linux systemd — but only when the pump routine was freshly registered in Step 12. If Step 12 found the routine already present (a re-run), Step 13 is skipped. Choose the supervisor option that matches your machine, or skip and start the daemon manually in Step 2.
+Once at least one expert is registered, Step 12 bootstraps the `lazy-expert.pump` routine into the flat `routines` section of `.claude/lazy.settings.json`. Step 13 then reads the per-checkout `daemon.run_here` gate from the gitignored local overlay — when it is unset (a first-time install), it asks whether to install a daemon supervisor via macOS launchd or Linux systemd for this checkout. Choose the supervisor option that matches your machine, or decline to start the daemon manually in Step 2.
 
 If you already ran `/lazy-core.install` and skipped the runtime phase, re-run the skill — it is idempotent and detects what is already present.
 
