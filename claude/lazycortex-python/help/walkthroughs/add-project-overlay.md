@@ -1,16 +1,16 @@
 ---
 chapter_type: walkthrough
 summary: Layer project-specific docstring rules on top of the canon guidelines so lazy-python.docstring-writer honours your project's conventions on every dispatch.
-last_regen: 2026-06-01
+last_regen: 2026-06-27
 diagram_spec:
   anchor: "How the overlay layers stack"
-  request: "Sequence diagram showing: user edits docs/guidelines/documenting_guidelines.md overlay; user dispatches lazy-python.docstring-writer; agent reads CLAUDE_PLUGIN_ROOT canon reference first, then reads project overlay (override-on-conflict), then reads CLAUDE_PROJECT_DIR/CLAUDE.md ## Documenting section if present; agent applies merged ruleset to target file; agent runs chk-py verification. Show the three-layer read order and that overlay rules win on conflict."
+  request: "Sequence diagram showing: user edits docs/guidelines/documenting_guidelines.md overlay; user dispatches lazy-python.docstring-writer; agent reads CLAUDE_PLUGIN_ROOT canon reference first, then reads project overlay at CLAUDE_PROJECT_DIR/docs/guidelines/documenting_guidelines.md (override-on-conflict), then reads CLAUDE_PROJECT_DIR/CLAUDE.md ## Documenting section if present (third overlay layer); agent applies merged ruleset to target file; agent runs chk-py verification. Show the three-layer read order and that overlay rules win on conflict with canon."
 source_skills:
   - lazy-python.docstring-writer
 ---
 # Add project-specific docstring rules that the writer agent always honours
 
-Your project has naming patterns, base classes, or documentation expectations that go beyond the plugin's built-in docstring rules. The `lazy-python.docstring-writer` agent was designed for this: on every dispatch it reads the plugin's canonical guidelines first, then reads your project's overlay file at `docs/guidelines/documenting_guidelines.md`. Anything you put in the overlay either extends or overrides the canon — no plugin changes required, no Claude Code restart needed.
+Your project has naming patterns, base classes, or documentation expectations that go beyond the plugin's built-in docstring rules. The `lazy-python.docstring-writer` agent was designed for this: on every dispatch it reads the plugin's canonical guidelines first, then reads your project's overlay file at `docs/guidelines/documenting_guidelines.md`, and finally reads the `## Documenting` section of your `CLAUDE.md` if one exists. Anything you put in the overlay or the `CLAUDE.md` section either extends or overrides the canon — no plugin changes required, no Claude Code restart needed.
 
 This walkthrough takes you from an empty overlay stub (created by `/lazy-python.install` Phase 5) to a verified overlay rule that shows up in a freshly generated docstring.
 
@@ -43,7 +43,13 @@ Open `docs/guidelines/documenting_guidelines.md`. After a fresh install it looks
 <!-- These override the plugin canon on conflict. -->
 ```
 
-The file is intentionally empty — the plugin ships the format; you fill in the content. The agent reads this file on every dispatch after it reads the canonical plugin guidelines at `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.documenting-guidelines.md`. If the two conflict, your overlay wins.
+The file is intentionally empty — the plugin ships the format; you fill in the content. On every dispatch the agent reads guidelines in three layers, in this order:
+
+1. The canonical plugin guidelines at `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.documenting-guidelines.md`.
+2. Your project overlay at `${CLAUDE_PROJECT_DIR}/docs/guidelines/documenting_guidelines.md`.
+3. The `## Documenting` section of your `${CLAUDE_PROJECT_DIR}/CLAUDE.md`, if that section exists.
+
+When two layers conflict, the later layer wins — your overlay overrides the canon, and a `## Documenting` section in `CLAUDE.md` overrides both. You can use any combination of the three layers; most projects use only the overlay file.
 
 Phase 5 creates four overlay stubs in `docs/guidelines/`, each read by a different skill:
 
@@ -107,7 +113,7 @@ Pick a Python file that has a class or method whose docstring you want to write 
 Use the lazy-python.docstring-writer agent to write docstrings for src/mymodule/widget.py
 ```
 
-The agent's Step 1 — Read guidelines — reads the canonical reference first, then the overlay. In its outcome line you will see `guidelines-loaded` reported for that step, confirming both layers were consumed.
+The agent's Step 1 — Read guidelines — reads the canonical reference first, then the overlay, then the `## Documenting` section of your `CLAUDE.md` if present. In its outcome line you will see `guidelines-loaded` reported for that step, confirming all layers were consumed.
 
 If your overlay introduced a base-class declaration, include a file that has one of those classes in the dispatch — that is the clearest way to see the overlay in action.
 

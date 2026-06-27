@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Canonical Python file skeleton that seeds every new .py file Claude composes — installed once via /lazy-python.install Step 6.
-last_regen: 2026-06-01
+last_regen: 2026-06-27
 diagram_spec:
   anchor: "How the template reaches your project"
   request: "Flow showing python-template.py and scaffold.entries.json shipping from the plugin, scaffold-sync copying the template into .claude/templates/python/ in the consumer project, and the lazy-core.scaffold rule matching any new *.py file against the consumer-local copy"
@@ -16,9 +16,9 @@ Every Python file Claude composes starts from the same canonical skeleton rather
 
 ## What's in this block
 
-**`python-template.py`** is the canonical module skeleton. It encodes the conventions from `lazy-python.coding-guidelines.md` sections "Module Structure" and "Import Organization" directly into a starting shape: a module-level docstring with summary and optional extended-description placeholders, a `from __future__ import annotations` declaration, the six import blocks in canonical order (future, typing, stdlib, third-party, local project, and the `TYPE_CHECKING`-guarded block for deferred annotations), a comment slot for module-level constants and TypeVars, and a separator-commented example class stub. The authoring note at the top of the template instructs Claude to replace all `<PLACEHOLDER>` markers and strip the scaffolding docstring before adding real content.
+**`python-template.py`** is the canonical module skeleton. It encodes the conventions from `lazy-python.coding-guidelines.md` sections "Module Structure" and "Import Organization" directly into a starting shape: a module-level docstring with summary and optional extended-description placeholders, a `from __future__ import annotations` declaration, the six import blocks in canonical order (future, typing, stdlib, third-party, local project, and the `TYPE_CHECKING`-guarded block for deferred annotations), a comment slot for module-level constants and TypeVars, and a separator-commented example class stub. The authoring note at the top of the template instructs Claude to replace all placeholder markers and strip the scaffolding docstring before adding real content.
 
-**`scaffold.entries.json`** is the manifest that tells `lazy-core.scaffold-sync` exactly what to install and how. It declares one entry: the consumer-local destination path (`.claude/templates/python/python-template.py`) mapped to the glob `**/*.py`. When `/lazy-python.install` Step 6 dispatches `lazy-core.scaffold-sync`, the sync skill reads this manifest, copies `python-template.py` to that consumer-local path, and upserts a `lazycortex-python` registry key in the project's `lazy-core.scaffold.md` rule — so the scaffold rule fires on every new `.py` file you compose.
+**`scaffold.entries.json`** is the manifest that tells `lazy-core.scaffold-sync` exactly what to install and how. It declares one entry under a `templates` key: the consumer-local destination path (`.claude/templates/python/python-template.py`) mapped to the glob `**/*.py`. When `/lazy-python.install` Step 6 dispatches `lazy-core.scaffold-sync`, the sync skill reads this manifest, copies `python-template.py` to that consumer-local path, and upserts a `lazycortex-python` registry key in the project's `lazy-core.scaffold.md` rule — so the scaffold rule fires on every new `.py` file you compose.
 
 ## How they work together
 

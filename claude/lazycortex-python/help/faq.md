@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, tests, and the checker stack.
-last_regen: 2026-06-01
+last_regen: 2026-06-27
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -9,14 +9,14 @@ source_skills:
   - lazy-python.check-style
   - lazy-python.docstring-writer
   - lazy-python.test-writer
-  - lazy-python.style
-  - lazy-python.tests
 ---
 # Frequently asked questions
 
-## Do I need to run `/lazy-python.install` again after a plugin update?
+## Do I need to re-run `/lazy-python.install` after a plugin update?
 
-Yes. `/lazy-python.install` is idempotent — re-running it after an update is the correct way to pick up new canon rules, refreshed wrapper scripts, and any new `pyproject.toml` sections the update introduces. It only overwrites the three mirrored rule files (your `.claude/rules/lazy-python.*.md`) and any sections that are missing from your `pyproject.toml`; your existing project additions are left untouched. Consumer-edited files (overlay guidelines, `CLAUDE.md`, etc.) are never clobbered.
+It depends on what you want to pick up. The `chk-py` and `tst-py` wrappers self-resolve the active plugin at exec time — they locate the current plugin source each time they run, so they keep working correctly across a `/plugin update` without a re-install. Any new canon rules, updated checker configuration, or new overlay stubs that came with the update do require a re-run of `/lazy-python.install`, because those artifacts land in your project tree only when the install phases run.
+
+A practical rule: re-run `/lazy-python.install` after any plugin update where the release notes mention changes to rules, `pyproject.toml` defaults, or the wrapper scripts themselves. The install is idempotent — it only overwrites the mirrored rule files and adds missing sections; your existing project additions are left untouched.
 
 ---
 

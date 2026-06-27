@@ -1,18 +1,17 @@
 ---
 chapter_type: walkthrough
 summary: Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation, and fix them in committed chunks.
-last_regen: 2026-06-01
+last_regen: 2026-06-27
 diagram_spec:
   anchor: "Migration flow"
-  request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install completes (mirror rules, deploy wrappers, detect PyCharm, bootstrap pyproject.toml with [tool.pch] when PyCharm present, scaffold overlay, sync scaffold template) → user runs chk-py all -q → six-step gate surfaces existing violations → user fixes violations in chunks and commits iteratively until chk-py all exits clean"
+  request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install runs 7 ordered phases fully automatically (mirror rules, deploy wrappers, detect PyCharm, bootstrap pyproject.toml with [tool.pch] when PyCharm present, scaffold overlay, sync scaffold template, log) → user runs chk-py all -q → six-step gate surfaces existing violations → user fixes violations in chunks and commits iteratively until chk-py all exits clean"
   kind_hint: sequence
 source_skills:
   - lazy-python.install
-  - lazy-python.audit
 ---
 # Adopt the plugin in a repo with pre-existing Python that drifted from the canon
 
-This walkthrough is for anyone bringing `lazycortex-python` into a repo that already has Python files — code written before the plugin existed, imported from another project, or accumulated without a consistent discipline layer. The install wizard wires up the checker stack without touching your existing source; `chk-py all -q` then inventories every violation the canon sees against your tree so you can work through them in small, committed chunks rather than one enormous diff. By the end, every checker passes and the PostToolUse hook prevents new drift from silently accumulating.
+This walkthrough is for anyone bringing `lazycortex-python` into a repo that already has Python files — code written before the plugin existed, imported from another project, or accumulated without a consistent discipline layer. The install wires up the checker stack without touching your existing source; `chk-py all -q` then inventories every violation the canon sees against your tree so you can work through them in small, committed chunks rather than one enormous diff. By the end, every checker passes and the PostToolUse hook prevents new drift from silently accumulating.
 
 ## Outcome
 
@@ -29,11 +28,11 @@ After this walkthrough you have:
 - `lazycortex-python@lazycortex` installed and enabled — `enabledPlugins` in your `~/.claude/settings.json`.
 - Python 3 reachable on `$PATH`.
 - Write access to the repo root (`pyproject.toml`, `.gitignore`, `cli/`, `docs/guidelines/`, `.claude/`).
-- A `pyproject.toml` at the repo root — even a minimal one. If the repo predates `pyproject.toml`, create a stub with `[project]` before running the wizard; Phase 3 merges into it without replacing consumer sections.
+- A `pyproject.toml` at the repo root — even a minimal one. If the repo predates `pyproject.toml`, create a stub with `[project]` before running the install; Phase 4 merges checker sections into it without replacing consumer sections.
 
 ## The journey
 
-### Step 1 — Run the install wizard
+### Step 1 — Run the install
 
 In your Claude Code session, with the repo open, invoke:
 
@@ -41,14 +40,11 @@ In your Claude Code session, with the repo open, invoke:
 /lazy-python.install
 ```
 
-The wizard runs eight ordered phases and asks two questions:
+The install runs 7 ordered phases automatically and asks you nothing. Install scope is derived from your `installed_plugins.json` entry. PyCharm support (`pch`) is derived from whether `inspect.sh` is present on the machine — Phase 3 probes for it, Phase 4 deploys `[tool.pch]` in `pyproject.toml` only when PyCharm is actually available. The install never touches `CLAUDE.md` (the plugin rules load from `.claude/rules/` automatically once the plugin is enabled).
 
-1. **Enable PyCharm inspections (`pch`)?** — Answer `no` unless you run PyCharm. `pch` sits outside the `chk-py all` gate and is a manual subcommand; skipping it has no effect on the six-step canonical gate.
-2. **Add Python discipline pointer to `CLAUDE.md`?** — Answer `yes`. In a migration context the reminder is especially useful: it keeps the style rules in session context while you work through violation batches.
+Every phase is idempotent — safe to re-run if interrupted.
 
-No other prompts appear. Every phase is automatic and idempotent — safe to re-run if interrupted.
-
-**Verification gate**: the wizard ends with a one-line-per-phase report. Confirm each phase shows an outcome word: `mirrored-3`, `wrappers-deployed-2 + gitignore-ensured`, `pyproject-bootstrapped`, and so on. If any line shows `ERROR` or is missing, see the troubleshooting doc before proceeding.
+**Verification gate**: the install ends with a one-line-per-phase report. Confirm each phase shows an outcome word: `mirrored-3`, `wrappers-deployed-2 + gitignore-ensured`, `pch-ready` or `pch-missing-inspect-sh`, `pyproject-bootstrapped`, and so on. If any line shows `ERROR` or is missing, see the troubleshooting doc before proceeding.
 
 ### Step 2 — Take a full violation inventory
 
@@ -74,7 +70,7 @@ Before starting remediation, confirm the installation is complete and healthy:
 /lazy-python.audit
 ```
 
-The audit runs 11 read-only checks and prints a `pass/warn/fail` line for each. You are looking for all greens (or only `WARN` on `pch` absent, which is expected if you declined `pch` in Step 1). Any `FAIL` finding means the install did not complete cleanly — re-run `/lazy-python.install` to resolve it before proceeding.
+The audit runs 11 read-only checks and prints a `pass/warn/fail` line for each. You are looking for all greens (or only `WARN` on `pch` absent, which is expected if PyCharm was not detected in Step 1). Any `FAIL` finding means the install did not complete cleanly — re-run `/lazy-python.install` to resolve it before proceeding.
 
 ### Step 4 — Fix violations in chunks, committing as you go
 
@@ -93,8 +89,8 @@ After each batch:
 
 Confirm the batch clears the targeted checker without introducing new violations in others. Then commit:
 
-```
-/pub.pre-commit final "fix(<scope>): remediate <checker> violations"
+```bash
+git commit -am "fix(<scope>): remediate <checker> violations"
 ```
 
 Repeat until `chk-py all -q` exits with `All checks passed`.
@@ -121,7 +117,7 @@ The exit should be clean. Then run the audit one more time to confirm the instal
 /lazy-python.audit
 ```
 
-All 11 checks should show `PASS` or `WARN` (only the PyCharm `pch` check is expected to `WARN` if you declined that option).
+All 11 checks should show `PASS` or `WARN` (only the PyCharm `pch` check is expected to `WARN` if PyCharm was not present at install time).
 
 ## After you're done
 

@@ -620,6 +620,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 1.8.0 — 2026-06-27 UTC
+
+- **Action required (re-run install):** The `chk-py` and `tst-py` CLI wrappers now resolve the active plugin installation at runtime instead of baking an absolute, version-pinned path at install time. This fixes the wrappers going stale after every plugin update. Existing consumers must re-run `/lazy-python.install` to redeploy the new wrappers; a bare `/plugin update` alone does not propagate the fix.
+
 ### 1.7.1 — 2026-06-13 UTC
 
 - Documentation fix: the `/lazy-python.install` walkthrough now matches the actual install — seven steps that ask nothing (PyCharm `pch` is auto-detected, `CLAUDE.md` is never touched). The previous text still described the removed prompts. No behaviour change — `/plugin update` is all that's needed.

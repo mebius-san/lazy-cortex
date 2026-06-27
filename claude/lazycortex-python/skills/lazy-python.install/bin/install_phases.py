@@ -101,8 +101,8 @@ class Phase2Wrappers:
   """
 
   WRAPPERS = (
-    ("chk-wrapper.sh", "chk-py", "{{CHK_BIN_PATH}}", "bin/chk"),
-    ("tst-wrapper.sh", "tst-py", "{{TST_BIN_PATH}}", "bin/tst"),
+    ("chk-wrapper.sh", "chk-py"),
+    ("tst-wrapper.sh", "tst-py"),
   )
 
   def __init__(self, *, consumer_dir: Path) -> None:
@@ -118,10 +118,11 @@ class Phase2Wrappers:
       0 on success.
     """
     self.target_dir.mkdir(parents = True, exist_ok = True)
-    for template_name, target_name, placeholder, bin_rel in self.WRAPPERS:
-      template = (PLUGIN_ROOT / "templates" / template_name).read_text()
-      abs_bin = str((PLUGIN_ROOT / bin_rel).resolve())
-      content = template.replace(placeholder, abs_bin)
+    for template_name, target_name in self.WRAPPERS:
+      # Templates are path-agnostic: deployed verbatim, they resolve the active
+      # plugin install at exec time. No path is substituted here — that is the
+      # whole point (a baked path goes stale on the next plugin update).
+      content = (PLUGIN_ROOT / "templates" / template_name).read_text()
       target = self.target_dir / target_name
       target.write_text(content)
       target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)

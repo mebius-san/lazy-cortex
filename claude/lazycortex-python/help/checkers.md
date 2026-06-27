@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: The `chk-py` and `tst-py` CLI wrappers that gate every Python change — style, type-only imports, syntax, mypy, ruff, pylint, and pytest — backed by a shared venv resolver that works from any terminal.
-last_regen: 2026-06-01
+last_regen: 2026-06-27
 diagram_spec:
   anchor: "How the pieces connect"
   request: "Flow diagram showing chk-py and tst-py as entry points; chk-py fans out to six subcommands in the all gate (pcf, toi, cmp, mypy, rf, pylint) plus pch as a separate standalone subcommand outside the all gate; tst-py calls pytest; both wrappers source _ensure_venv.sh which probes four venv locations in order (VIRTUAL_ENV env var, project .venv, pyproject.toml config path, fallback create/augment project .venv); pcf is also invoked by the PostToolUse hook on every .py edit; all tools read pyproject.toml for configuration."
@@ -15,7 +15,7 @@ source_skills:
 ---
 # Python checkers
 
-`chk-py` and `tst-py` are the two commands you use every day in a project that has lazycortex-python installed. `chk-py` runs the style and type pipeline — format rules, type-only import analysis, syntax checking, mypy, ruff, and pylint — against any path you point it at. `tst-py` runs pytest scoped to the module you name, or the whole `tests/` tree when you omit the argument. Both are thin wrappers in your project's `cli/` directory that delegate to the shipped `chk` and `tst` aggregators in the plugin; re-running `/lazy-python.install` refreshes the wrappers if the plugin updates.
+`chk-py` and `tst-py` are the two commands you use every day in a project that has lazycortex-python installed. `chk-py` runs the style and type pipeline — format rules, type-only import analysis, syntax checking, mypy, ruff, and pylint — against any path you point it at. `tst-py` runs pytest scoped to the module you name, or the whole `tests/` tree when you omit the argument. Both are thin wrappers in your project's `cli/` directory; they resolve the active lazycortex-python plugin at exec time rather than delegating to a path frozen at install time, so they keep working across plugin version updates without needing to be re-deployed. If a wrapper ever cannot find the plugin it prints a clear error directing you to re-run `/lazy-python.install`.
 
 Behind both commands sits `_ensure_venv.sh`, a shared venv resolver that finds mypy, pylint, pytest, and ruff wherever they live in your project — an activated venv, a project-local `.venv/`, a path in `pyproject.toml`, or a fallback that creates and augments `.venv/` in the repo root — without requiring any environment setup beyond a plain terminal.
 
@@ -45,7 +45,7 @@ The PostToolUse hook slots into this block at the `pcf` level: on every `.py` ed
 
 ## Where this fits
 
-The `install-and-audit` block is what puts `chk-py` and `tst-py` in your project's `cli/` directory. The install also seeds the `[tool.pcf]`, `[tool.toi]`, and `[tool.ruff]` sections in `pyproject.toml` that these checkers read (plus `[tool.pch]` when PyCharm is present on the machine). The `discipline` block documents the rules and guidelines that `pcf.py` enforces and that the writer agents consult when generating or reviewing code.
+The `install-and-audit` block is what puts `chk-py` and `tst-py` in your project's `cli/` directory. The wrappers are self-resolving: each time you run one, it locates the active lazycortex-python install (checking the dev source tree first, then the daemon-provided plugin-dirs env, then the Claude Code plugin manifest) rather than delegating to a path frozen at install time. This means the wrappers keep working across plugin version updates — the versioned cache dir changes on every `/plugin update`, but the wrapper finds the new location automatically. If the wrapper cannot locate the plugin — for example after an unusual cache clear — it prints `chk-py: cannot locate the lazycortex-python plugin` and directs you to re-run `/lazy-python.install`. The install also seeds the `[tool.pcf]`, `[tool.toi]`, and `[tool.ruff]` sections in `pyproject.toml` that these checkers read (plus `[tool.pch]` when PyCharm is present on the machine). The `discipline` block documents the rules and guidelines that `pcf.py` enforces and that the writer agents consult when generating or reviewing code.
 
 ## Common adjustments
 

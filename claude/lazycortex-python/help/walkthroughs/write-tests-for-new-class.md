@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all seven Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-06-01
+last_regen: 2026-06-27
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads); agent writes test file covering all 7 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module; agent logs the run. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -24,7 +24,7 @@ After completing this walkthrough you have:
 
 ## What you need
 
-- `lazycortex-python` installed in your repo (`/lazy-python.install` completed). This places `cli/chk-py` and `cli/tst-py` on your `$PATH`.
+- `lazycortex-python` installed in your repo (`/lazy-python.install` completed). This deploys `chk-py` and `tst-py` into `cli/`. Add `cli/` to your `$PATH` to invoke them without a prefix, or call `./cli/chk-py` and `./cli/tst-py` directly from the repo root.
 - A Python class whose public API has docstrings. The agent derives every testable claim from docstrings (Summary, Guarantees, Args, Returns, Raises) — a class without docstrings produces shallow tests. If the class has no docstrings yet, dispatch `lazy-python.docstring-writer` first.
 - Your source tree following the standard mirrored layout (`src/<module>/<file>.py` → `tests/<module>/<file>.py`). The agent uses this convention to place the generated test file. If your project uses a different layout, declare it in `docs/guidelines/testing_guidelines.md`.
 - `docs/guidelines/testing_guidelines.md` present (created by `/lazy-python.install` Phase 5). If it does not exist, re-run `/lazy-python.install` — Phase 5 is idempotent and creates the stub without touching other installation artifacts.
@@ -124,7 +124,7 @@ The agent ran `tst-py <module> -q` in Step 7. Run it again to confirm the suite 
 tst-py mymodule -q
 ```
 
-`tst-py` is the project-local wrapper installed by `/lazy-python.install`. It uses bare module names, not file paths and not `.py` extensions. If the module path is nested, use the dotted path:
+`tst-py` is the project-local wrapper deployed into `cli/` by `/lazy-python.install`. It uses bare module names, not file paths and not `.py` extensions. If the module path is nested, use the dotted path:
 
 ```bash
 tst-py mymodule.subpackage -q
@@ -161,53 +161,45 @@ Track `docs/guidelines/testing_guidelines.md` in version control. When a teammat
 sequenceDiagram
   participant user as User
   participant agent as lazy-python.test-writer
-  participant canon as Plugin Canon
+  participant canon as Plugin Canon (lazycortex-python)
   participant overlay as Project Overlay
-  participant fs as Filesystem
-  participant toolchain as Toolchain (chk-py / tst-py)
-  participant log as Run Log
+  participant fs as File System
 
-  user->>agent: invoke with target class path
+  user->>agent: invoke for target class
 
-  Note over agent,canon: Phase 1 — Read guidelines (canon first)
+  Note over agent,canon: Phase 1 — Guideline ingestion (canon first)
   agent->>canon: read testing-guidelines.md
-  canon-->>agent: Paranoid-Testing rules + 7 categories
+  canon-->>agent: Paranoid-Testing categories + test discipline
   agent->>canon: read checking-guidelines.md
-  canon-->>agent: chk-py invocation contract
+  canon-->>agent: chk-py rules + lint/type discipline
 
-  Note over agent,overlay: Phase 2 — Read project overlay (overlay second)
+  Note over agent,overlay: Phase 2 — Project overlay (second)
   agent->>overlay: read docs/guidelines/testing_guidelines.md
-  overlay-->>agent: project-specific testing overrides
+  overlay-->>agent: project-specific test overrides
   agent->>overlay: read docs/guidelines/checking_guidelines.md
-  overlay-->>agent: project-specific checking overrides
-  agent->>overlay: read CLAUDE.md - Testing section
-  overlay-->>agent: repo-level testing constraints
+  overlay-->>agent: project-specific check overrides
+  agent->>overlay: read .claude/CLAUDE.md — Testing section
+  overlay-->>agent: repo-level test constraints
 
-  Note over agent,fs: Phase 3 — Identify test targets
-  agent->>fs: read target class source file
-  fs-->>agent: class source (init paths + public methods + properties)
-  agent->>agent: enumerate documented guarantees + exceptions + operator overloads
+  Note over agent: Phase 3 — Target identification
+  agent->>fs: read target class source
+  fs-->>agent: class AST — init paths, public methods, properties
+  Note over agent: identifies: init paths, public methods, properties, documented guarantees, exceptions, operator overloads, edge cases
 
-  Note over agent,fs: Phase 4 — Write test file (all 7 categories)
-  agent->>fs: write test file covering init paths
-  agent->>fs: write test file covering public methods
-  agent->>fs: write test file covering properties
-  agent->>fs: write test file covering documented guarantees
-  agent->>fs: write test file covering exceptions
-  agent->>fs: write test file covering operator overloads
-  agent->>fs: write test file covering boundary + edge cases
-  fs-->>agent: test file written
+  Note over agent,fs: Phase 4 — Test file authoring
+  agent->>fs: write test_<TargetClass>.py covering all 7 Paranoid-Testing categories
+  fs-->>agent: file written
 
-  Note over agent,toolchain: Phase 5 — Three-step toolchain verification
-  agent->>toolchain: chk-py on test file (per-file check)
-  toolchain-->>agent: per-file lint + type result
-  agent->>toolchain: chk-py all (full-project check)
-  toolchain-->>agent: full-project lint + type result
-  agent->>toolchain: tst-py on module
-  toolchain-->>agent: test run result
+  Note over agent,fs: Phase 5 — Three-step toolchain verification
+  agent->>fs: chk-py test_<TargetClass>.py (per-file lint + type)
+  fs-->>agent: per-file check result
+  agent->>fs: chk-py all (full-project lint + type)
+  fs-->>agent: full-project check result
+  agent->>fs: tst-py <module> (module tests)
+  fs-->>agent: test suite result
 
-  Note over agent,log: Phase 6 — Log run
-  agent->>log: write run log with actions + result
-  log-->>agent: log written
+  Note over agent: Phase 6 — Run logging
+  agent->>fs: write .logs/claude/lazy-python.test-writer/YYYY-MM-DD_HH-MM-SS.md
+  fs-->>agent: log written
   agent-->>user: test file path + verification summary
 ```
