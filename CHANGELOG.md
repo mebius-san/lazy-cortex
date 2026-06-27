@@ -620,6 +620,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 1.8.1 — 2026-06-27 UTC
+
+- **`pcf` false-positive fixes:** the critical-fail style checker no longer flags dunder tokens (`__name__`-style) as unresolved identifiers, and now resolves the attribute-name literal of `getattr` / `setattr` / `hasattr` / `delattr` in its main analyzer pass — fewer spurious magic-literal findings on dynamic-attribute code. Drop-in via `/plugin update`.
+
 ### 1.8.0 — 2026-06-27 UTC
 
 - **Action required (re-run install):** The `chk-py` and `tst-py` CLI wrappers now resolve the active plugin installation at runtime instead of baking an absolute, version-pinned path at install time. This fixes the wrappers going stale after every plugin update. Existing consumers must re-run `/lazy-python.install` to redeploy the new wrappers; a bare `/plugin update` alone does not propagate the fix.

@@ -4087,7 +4087,8 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
       if idents is None:
         return
       missing = [ tok for tok in _IDENT_TOKEN_RE.findall(value)
-                  if tok not in _SKIP_TOKEN_NAMES and tok not in idents ]
+                  if tok not in _SKIP_TOKEN_NAMES and tok not in idents
+                  and not (tok.startswith('__') and tok.endswith('__')) ]
       # guard: every token resolves to a known identifier -- real name reference
       if not missing:
         return
@@ -4320,6 +4321,13 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
           recv_tail = _resolve_func_tail(receiver.func)
           if recv_tail in _MEMBER_LIST_CALL_NAMES:
             return True
+
+    # attribute-name 2nd positional of getattr/setattr/hasattr/delattr: a literal name
+    # must resolve to a real project identifier (dynamic name exprs never reach this visitor).
+    if isinstance(parent, ast.Call) and len(parent.args) >= 2 and parent.args[1] is node:
+      tail = _resolve_func_tail(parent.func)
+      if tail in _ATTR_NAME_BUILTINS:
+        return True
 
     return False
 
@@ -4640,12 +4648,6 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
     # path constructors: first positional string is a filesystem path
     if tail in _PATH_CTOR_NAMES:
       if call.args and call.args[0] is child:
-        return True
-
-    # getattr/setattr/hasattr/delattr: second positional string is an attribute name
-    if tail in _ATTR_NAME_BUILTINS:
-      # guard: attribute name is the second positional
-      if len(call.args) >= 2 and call.args[1] is child:
         return True
 
     # open(...) / Path(...).open(...): mode (2nd positional) and encoding kwarg are standard
