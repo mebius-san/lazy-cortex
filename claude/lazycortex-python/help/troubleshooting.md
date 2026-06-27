@@ -1,15 +1,17 @@
 ---
 chapter_type: troubleshooting
-summary: Symptoms, causes, and fixes for lazycortex-python install, audit, and style checks.
-last_regen: 2026-06-01
+summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, and writer agents.
+last_regen: 2026-06-27
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Decision-tree routing install/audit/check-style failures: top-level branch on skill invoked (install vs audit vs check-style); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails); audit branch splits on check number (check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); each leaf names the fix action"
+  request: "Decision-tree routing install/audit/check-style/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, wrapper-cannot-locate-plugin-post-bump); audit branch splits on check number (check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
   kind_hint: decision-tree
 source_skills:
   - lazy-python.install
   - lazy-python.audit
   - lazy-python.check-style
+  - lazy-python.docstring-writer
+  - lazy-python.test-writer
 ---
 # Troubleshooting
 
@@ -40,6 +42,16 @@ source_skills:
 **Likely cause**: The local plugin cache is incomplete — the templates directory was not fully synced when the plugin was installed or last updated.
 
 **Fix**: Run `/plugin update lazycortex-python@lazycortex` to restore the full plugin cache, then re-run `/lazy-python.install`.
+
+---
+
+## `chk-py` or `tst-py` cannot locate the lazycortex-python plugin
+
+**Symptom**: Running `chk-py` or `tst-py` from the terminal (or via `/lazy-python.check-style`) fails immediately with a message like "cannot locate the lazycortex-python plugin" — even though the wrappers are present in `cli/`.
+
+**Likely cause**: The wrappers deployed in `cli/` contain absolute paths to the plugin's binaries that were resolved at install time. After a plugin version bump, those paths point at a now-superseded cache directory. A `/plugin update` refreshes the plugin's templates but does not redeploy the per-repo `cli/` wrappers — that step requires re-running `/lazy-python.install`. The same symptom can appear if the plugin is uninstalled or disabled between the original install and the current session.
+
+**Fix**: Ensure `lazycortex-python@lazycortex` is installed and enabled, then re-run `/lazy-python.install`. Phase 2 redeploys both wrappers with paths that resolve against the current plugin cache, making them operational again.
 
 ---
 
@@ -160,6 +172,26 @@ source_skills:
 **Likely cause**: The fix was targeted at a single file or line, but the violation spans multiple files (a removed public API, a broken import chain, a cross-file type reference) or the canon rule was misread and the fix introduced a different issue.
 
 **Fix**: Read the remaining violation list carefully. If the issue is cross-file, run `chk-py all -q` manually to see the full picture and address each file in turn. If the violation is a misread rule, consult `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.coding-guidelines.md` for the canonical wording before re-applying the fix.
+
+---
+
+## `lazy-python.docstring-writer` Step 6 reports `chk-py` violations after writing
+
+**Symptom**: After the agent writes or fixes docstrings, its Step 6 verification run of `chk-py all <file>.py -q` reports violations — typically line-length errors (exceeding 117 characters) or indentation issues inside the newly written docstring blocks.
+
+**Likely cause**: The generated docstring text exceeded the 117-character line limit, or a section body was indented at the wrong depth. These are syntactic violations the agent should have caught in its Step 5 self-check but may have missed on long prose lines.
+
+**Fix**: The agent will apply targeted fixes in Step 6 and re-run the check. If violations persist, the agent reports them and stops. You can re-dispatch `lazy-python.docstring-writer` against the specific file, or run `/lazy-python.check-style` to perform the full review loop — Step 4 will surface the remaining violations and Step 5 will fix them.
+
+---
+
+## `lazy-python.test-writer` marks a test `# FAILS:` — what does that mean?
+
+**Symptom**: After `lazy-python.test-writer` finishes, one or more test methods carry a `# FAILS: <reason>` comment above them. Running `tst-py <module> -q` confirms those tests fail.
+
+**Likely cause**: A test correctly reflects documented behaviour (what the class's docstring promises) but fails against the current implementation. The agent follows the Golden Rule: it does not alter the test to match a possibly buggy implementation, and it does not delete the test. The `# FAILS:` flag is intentional — it signals a divergence between the spec (docstring) and the code.
+
+**Fix**: The flagged test is a bug report, not a broken test. Investigate the production class: either the implementation has a defect (fix the code), or the docstring overstates what the class actually does (update the docstring via `lazy-python.docstring-writer` to reflect the real contract, then revisit the test). Do not remove the `# FAILS:` comment or alter the assertion to make it pass without first resolving the underlying divergence.
 
 ---
 
