@@ -11,7 +11,7 @@ spec_source_docs: []
 
 > **{{subsystem}}** · **{{product}}** · **{{slug}}** — design
 
-_Populated by `spec.create-asset` (called directly or via `spec.create-change`). Behavior-only — describes WHAT the change does. No source URLs, file paths, or code identifiers here._
+_Populated by `spec.create-asset` (called directly or via `spec.create-change`). Behavior-only — describes WHAT the change does. No source URLs, file paths, or code identifiers here. Describes the intended target behavior, not what the code does today; only an explicit operator decision narrows scope, never the state of the implementation._
 
 # Sources
 #protected/spec/sources

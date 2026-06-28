@@ -11,7 +11,7 @@ spec_source_docs: []
 
 > **{{subsystem}}** · **{{product}}** · **{{slug}}** — design
 
-_Populated by `spec.create-asset` (called directly or via `spec.create-feature`). Behavior-only — no source URLs, file paths, or code identifiers._
+_Populated by `spec.create-asset` (called directly or via `spec.create-feature`). Behavior-only — no source URLs, file paths, or code identifiers. Describes the intended behavior, not what the code does today; only an explicit operator decision narrows scope, never the state of the implementation._
 
 # Sources
 #protected/spec/sources
