@@ -1,6 +1,6 @@
 {
   "name": "lazycortex-experts",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Generic lifecycle experts (interpreter, designer, planner, implementer, debugger, reviewer) plus a starter set of domain aspects (claude-plugin, game-dev, dotfiles) and a cross-cutting discipline aspect. Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.",
   "author": {
     "name": "Mebius-san"

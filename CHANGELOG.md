@@ -345,6 +345,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.0.1 — 2026-06-28 UTC
+
+- Spec designs now describe intended behavior, not current code state — `spec.create-asset` and the feature/change design templates forbid writing existing gaps or unimplemented branches in as limitations unless an explicit operator decision narrows scope.
+
 ### 3.0.0 — 2026-06-23 UTC
 
 - **Breaking:** Product-level `design.md` and `tech.md` now live directly at the product root instead of under a `docs/` subfolder. Existing vaults must move `<product>/docs/design.md` and `<product>/docs/tech.md` up one level and delete the empty `docs/` directory. `spec.doctor` flags stray `docs/` folders and the now-reserved product slugs `design` and `tech`.
