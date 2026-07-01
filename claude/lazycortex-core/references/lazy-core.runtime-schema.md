@@ -315,14 +315,16 @@ Both must be booleans when present — a non-boolean value raises `RoutineConfig
 
 ### `inbox`
 
-Scans `inbox_dir` each tick. For every non-hidden, non-dir, non-symlink file:
+Scans `inbox_dir` each tick. The input file is never copied into the job bundle — only its **path** is passed, so the inbox is the single source of truth for the file (parity with `git` / `md-scan`, which also pass a path).
 
-1. Create `<repo>/.experts/.jobs/<expert>/<uuid>/source/`.
-2. `f.rename(...)` the file into `source/<filename>` (atomic on same filesystem).
-3. Render `request` template — substitute `{file}` with the filename in any string value.
-4. Write `request.json`, touch `READY`.
+`command` sub-shape — spawn `command + [<absolute-path-to-file>]` per file (blocking, one at a time). The consumer command owns the file; the routine never removes it.
 
-The inbox dir is empty when the routine returns. The expert handles the file from `<job_dir>/source/<filename>` afterwards.
+`expert + request` sub-shape — two passes per tick:
+
+1. **Reconcile** finished work via `completed_dedup_jobs`: for every prior job keyed on an inbox path, if it **succeeded** (`outcome` ≠ `error`) drain the input (`unlink`, best-effort — the expert may have filed it away itself on success) and mark the bundle `CONSUMED`; if it **failed** leave the input parked — the bundle stays `DONE`-but-unconsumed so its dedup key keeps the file from re-dispatching. This is a **dead-letter**: the failed input sits in the inbox with its bundle's forensics retained for the operator to triage; it is not retried automatically (a crashed/`DEAD` job is the doctor's retry path, not this one).
+2. **Dispatch** every remaining non-hidden, non-dir, non-symlink file: render `request` (substitute `{file}` with the file's **absolute path** in any string value) and dispatch one job keyed on that path (`dedup_key = <path>`), so an in-flight or parked file is never dispatched twice.
+
+The expert reads the file at the given path in place. It may move or delete the input **only as its last action on success** — see `lazy-core.expert-runtime-contract.md` ("What you must not touch"). On any failure the original must stay put: it is the only copy left to reprocess.
 
 ### `schedule`
 

@@ -85,3 +85,4 @@ Write artifact files into the `result/` directory inside your job dir. The dispa
 - Other experts' job dirs (`.experts/.jobs/<other-expert>/...`).
 - Branches other than the daemon's base branch (`daemon.git.base_branch`, the operator's branch the daemon rides).
 - The runtime's state file (`.runtime/state.json`).
+- The input file, until your work has succeeded. The input handed to you (`source/*` and any external paths passed as input) may be moved, deleted, or filed away — but only as the **last action once your result is ready and you return a success outcome**. While `outcome: "error"` is still possible, leave the original in place: on failure it is the only copy left to reprocess. (Leaving it untouched is equally fine — the dispatcher removes it on `outcome: "done"`.)

@@ -36,7 +36,7 @@ from runtime_daemon import _check_working_tree
 from constants import (
   HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase, IncidentState,
   JobArtifact, JobConfigKey, JobErrorCategory, JobFile, JobMarker, JobOutcome, JobRequestKey, JobResponseKey,
-  SettingsFile, SettingsKey,
+  RuntimeFile, SettingsFile, SettingsKey,
 )
 
 from typing import TYPE_CHECKING
@@ -468,6 +468,24 @@ def _compose_user_prompt(jdir: Path, *, protocols: list, aspects: list, argument
   return "\n".join(prompt_lines)
 
 
+def _spawn_settings_argv(repo: Path) -> list[str]:
+  """
+  Build the `--settings` argv fragment for an expert spawn.
+
+  Args:
+    repo: Repository root the spawn runs inside.
+
+  Returns:
+    A two-element `["--settings", <path>]` list when the sandbox settings file exists,
+    otherwise an empty list.
+  """
+  settings_file = repo / RuntimeFile.SANDBOX_SETTINGS
+  # guard: sandbox settings file absent (daemon not installed here) — spawn unsandboxed
+  if not settings_file.is_file():
+    return []
+  return [ "--settings", str(settings_file) ]
+
+
 def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   """
   Run one Claude spawn for a single READY job.
@@ -561,10 +579,11 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   attempts_file.write_text(f"{n + 1}\n")
   # `--permission-mode dontAsk` (not `bypassPermissions`): auto-deny any
   # tool call outside the worktree+plugin-dirs sandbox declared in the
-  # consumer's `<repo>/.claude/settings.json` (operator-authored, not
-  # daemon-generated). bypassPermissions skips even deny rules and lets a
-  # misguided agent burn minutes on `find /Users/...`; dontAsk fails the
-  # tool call immediately so the agent surfaces an error and exits.
+  # daemon-owned `.runtime/sandbox.settings.json` (passed below via `--settings`),
+  # combined with the permission scope from the consumer's `.claude/settings.local.json`.
+  # bypassPermissions skips even deny rules and lets a misguided agent burn minutes
+  # on `find /Users/...`; dontAsk fails the tool call immediately so the agent
+  # surfaces an error and exits.
   claude_argv = [ "claude", "-p", "--permission-mode", "dontAsk",
                   "--output-format", "stream-json", "--verbose",
                   "--append-system-prompt-file", str(contract_path) ]
@@ -579,6 +598,11 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   for pd in (env.get("LAZYCORTEX_PLUGIN_DIRS") or "").split(os.pathsep):
     if pd:
       claude_argv.extend([ "--plugin-dir", pd ])
+  # Confine the spawn to the daemon-owned sandbox declared in `.runtime/sandbox.settings.json`.
+  # Passing it via `--settings` (not the consumer's `.claude/settings.local.json`) keeps the
+  # sandbox scoped to spawned `claude -p` processes — the interactive session in the same
+  # checkout, which never passes `--settings`, stays unsandboxed.
+  claude_argv.extend(_spawn_settings_argv(repo))
   if model:
     claude_argv.extend([ "--model", model ])
   # `--agent` resolves an agent by NAME, never by file path. A plugin-provided
