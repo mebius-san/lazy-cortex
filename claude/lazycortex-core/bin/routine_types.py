@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import overload
 
-from constants import JobConfigKey, RoutineKey, StateKey, TickResultKey
+from constants import JobCollectKey, JobConfigKey, JobStatus, RoutineKey, StateKey, TickResultKey
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -486,21 +486,21 @@ def _render_template(template: object, values: dict) -> object:
 
 def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   """
-  Scan `cfg["inbox_dir"]` and dispatch one job per non-hidden file.
+  Scan `cfg["inbox_dir"]` and dispatch one job per non-hidden file found.
 
   Two sub-shapes (validator enforces exactly-one):
 
-    - `expert + request`: move the file into a new job dir under
-      `.experts/.jobs/<expert>/<uuid>/source/`, write `request.json` with the
-      `{file}` placeholder substituted, touch READY. The file is removed from
-      the inbox once the job dir is sealed.
+    - `expert + request`: each tick performs a reconcile pass followed by a
+      dispatch pass. The reconcile pass drains succeeded jobs by unlinking the
+      input file and consuming the bundle; failed jobs are left parked — the
+      unconsumed bundle's dedup key blocks re-dispatch until an operator
+      triages the dead letter. The dispatch pass submits one job per remaining
+      file, keyed on the file's absolute path via `dedup_key` and the `{file}`
+      placeholder in `request`. The inbox is the source of truth; the file is
+      never copied into the job bundle.
     - `command`: spawn `command + [<absolute-path-to-inbox-file>]` as a
-      non-blocking subprocess with PID-based dedup per file. The file stays in
-      the inbox until the consumer command moves or deletes it — the routine
-      does not clean up after `command`.
-
-  The inbox directory is empty when the routine returns successfully in
-  `expert + request` mode (the historical contract).
+      blocking subprocess per file. The file stays in the inbox until the
+      consumer command moves or deletes it — the routine never removes it.
 
   Args:
     repo: Path-like reference to the repository.
@@ -613,32 +613,40 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   expert = cfg[RoutineKey.EXPERT]
   request_template = cfg["request"]
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from expert_runtime import dispatch_job
+  from expert_runtime import completed_dedup_jobs, consume_job, dispatch_job
   protocols = _routine_protocols(cfg)
+  bare_expert, target_repo, xrepo_kwargs = _resolve_cross_repo_target(repo, expert)
+
+  # Reconcile finished work against the inbox. The input file is never copied
+  # into the job bundle (only its path is passed), so the inbox is the single
+  # source of truth: a succeeded job drains its input here; a failed job is
+  # left parked — its bundle stays DONE-but-unconsumed so the dedup key keeps
+  # the file from re-dispatching (a dead-letter the operator triages).
+  for done_job in completed_dedup_jobs(target_repo, bare_expert):
+    # guard: failed job — leave the input parked behind its dead-letter bundle
+    if done_job[JobCollectKey.STATUS] != JobStatus.DONE:
+      continue
+    try:
+      # the expert may have filed the input away itself on success; a missing
+      # original is the expected post-success state, so unlink is best-effort
+      Path(done_job[JobCollectKey.DEDUP_KEY]).unlink()
+    except OSError:
+      pass
+    consume_job(target_repo, bare_expert, done_job[JobCollectKey.JOB_ID], **xrepo_kwargs)
 
   dispatched = 0
   for f in candidates:
-    request = _render_template(request_template, { "file": f.name })
+    # guard: reconcile (or an external actor) drained this file — nothing to send
+    if not f.exists():
+      continue
+    request = _render_template(request_template, { "file": str(f) })
     try:
-      text = f.read_text()
-    except OSError as e:
-      return {
-        TickResultKey.NAME: name, TickResultKey.EXIT: -1,
-        TickResultKey.DURATION_SEC: time.time() - started,
-        "dispatched_count": dispatched,
-        TickResultKey.ERROR: f"inbox read failed at {f.name}: {e}",
-      }
-    try:
-      bare_expert, target_repo, xrepo_kwargs = _resolve_cross_repo_target(repo, expert)
-      dispatch_job(
+      result = dispatch_job(
         target_repo, bare_expert, request,
         protocols = protocols,
-        source = { f.name: text },
+        dedup_key = str(f),
         **xrepo_kwargs,
       )
-      # remove from inbox now that the source is captured in the job dir
-      f.unlink()
-      dispatched += 1
     except Exception as e:
       return {
         TickResultKey.NAME: name, TickResultKey.EXIT: -1,
@@ -646,6 +654,10 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
         "dispatched_count": dispatched,
         TickResultKey.ERROR: f"inbox dispatch failed at {f.name}: {e}",
       }
+    # guard: an in-flight or parked (dead-letter) bundle already owns this file
+    if result.get(JobCollectKey.STATUS) == JobStatus.ALREADY_QUEUED:
+      continue
+    dispatched += 1
 
   return {
     TickResultKey.NAME: name, TickResultKey.EXIT: 0,

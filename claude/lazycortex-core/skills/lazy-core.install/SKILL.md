@@ -27,7 +27,7 @@ This skill has 16 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 11 — Register expert candidates`
    - `Step 12 — Bootstrap expert-pump routine`
    - `Step 13 — Gate 2 (run_here) + daemon supervisor install`
-   - `Step 13.5 — Configure expert-spawn sandbox in settings.local.json`
+   - `Step 13.5 — Configure expert-spawn sandbox in .runtime/sandbox.settings.json`
    - `Step 14 — Report`
    - `Step 15 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
@@ -615,17 +615,21 @@ When the platform is Linux:
 8. State **systemd-installed** (or **systemd-installed-dev-mode** when `<dev_mode>` is True).
 7. State **systemd-installed** (or **systemd-installed-dev-mode** when `<dev_mode>` is True).
 
-## Step 13.5: Configure expert-spawn sandbox in settings.local.json
+## Step 13.5: Configure expert-spawn sandbox in .runtime/sandbox.settings.json
 
 If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), OR Step 13 stated `run-here-declined`, inherit the skip with outcome `skipped-not-run-here` and move to Step 14 — there is no daemon running here to sandbox.
 
-Otherwise, the runtime daemon spawns `claude -p --permission-mode dontAsk` subprocesses for every expert job. Without a `<repo-root>/.claude/settings.local.json` sandbox + permission block, those spawns either run unrestricted (any earlier `bypassPermissions` left over) or are completely deny-by-default (`dontAsk` with no `permissions.allow`) and cannot Read/Write/Edit anything. Neither is correct.
+Otherwise, the runtime daemon spawns `claude -p --permission-mode dontAsk` subprocesses for every expert job, passing `--settings <repo-root>/.runtime/sandbox.settings.json`. The sandbox scope lives in that daemon-owned runtime file — NOT in `.claude/settings.local.json` — because `.claude/settings.local.json` is loaded by EVERY Claude session in the checkout, so a `sandbox.enabled: true` there would also confine the operator's interactive session (e.g. breaking `git push` over SSH, which the sandbox's HTTP/HTTPS proxy cannot carry). `--settings` is passed only on the spawn, so the sandbox reaches the expert subprocess and never the interactive session.
 
-`settings.local.json` is gitignored, per-machine state — exactly the File-sync policy's domain. Adding missing sandbox scope to it is a clean, non-contradictory merge, so apply the policy **silently**: no confirmation, never overwrite an existing key, union missing scope in. Ask only on a genuine conflict per File-sync policy case 3 (e.g. an existing `sandbox.enabled: false` that contradicts the required `true`).
+The spawn loads `--settings` AND the cwd's `.claude/settings.local.json`, merged (CLI layer wins on conflict). So the split is: the **sandbox** block goes to `.runtime/sandbox.settings.json`; the **permission scope** (`permissions` + `additionalDirectories`) stays in `.claude/settings.local.json`, where it serves both the spawn (via the merge) and the operator's interactive session (which needs those allows when running plugin CLIs manually).
 
-### 13.5b. Recommended block
+Both writes are clean, non-contradictory merges — apply the File-sync policy **silently**: no confirmation, never overwrite an existing key, union missing scope in. Ask only on a genuine conflict per File-sync policy case 3 (e.g. an existing `sandbox.enabled: false` that contradicts the required `true`).
 
-The full block the consumer should have under `<repo-root>/.claude/settings.local.json`. Substitute `<repo-root>` with the absolute path of the current repo. Substitute `<plugin-source-N>` lines with one entry per plugin source directory the daemon will pass via `--plugin-dir` (Step 13a's derived `dev_mode` dictates whether these are in-repo `<repo-root>/claude/<plugin>/` paths or `~/.claude/plugins/cache/...` paths — list what the supervisor unit will actually use).
+### 13.5b. Recommended blocks
+
+Substitute `<repo-root>` with the absolute path of the current repo. Substitute `<plugin-source-N>` lines with one entry per plugin source directory the daemon will pass via `--plugin-dir` (Step 13a's derived `dev_mode` dictates whether these are in-repo `<repo-root>/claude/<plugin>/` paths or `~/.claude/plugins/cache/...` paths — list what the supervisor unit will actually use).
+
+Block 1 — `<repo-root>/.runtime/sandbox.settings.json` (daemon-owned; read only by spawns via `--settings`):
 
 ```json
 {
@@ -635,7 +639,14 @@ The full block the consumer should have under `<repo-root>/.claude/settings.loca
       "allowRead":  ["<repo-root>", "<plugin-source-1>", "<plugin-source-2>", "..."],
       "allowWrite": ["<repo-root>"]
     }
-  },
+  }
+}
+```
+
+Block 2 — `<repo-root>/.claude/settings.local.json` (permission scope; loaded by every session in the checkout):
+
+```json
+{
   "additionalDirectories": ["<plugin-source-1>", "<plugin-source-2>", "..."],
   "permissions": {
     "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "Bash(lazycortex-core *)"],
@@ -648,19 +659,25 @@ The `Bash(lazycortex-core *)` entry is required so dispatched experts can invoke
 
 Tilde-form (`~/...`) is acceptable for paths the operator wants portable across machines — Claude Code expands `~` at load time. Absolute paths are equally valid.
 
-### 13.5c. Apply the File-sync policy to settings.local.json
+### 13.5c. Apply the File-sync policy to both files
 
-`Read <repo-root>/.claude/settings.local.json`:
+`Read <repo-root>/.runtime/sandbox.settings.json` and apply Block 1:
 
-1. **Missing or unparseable** → `Write` the recommended block verbatim as a new file. State **created**.
-2. **Present, none of `sandbox` / `permissions` / `additionalDirectories`** → `Edit` the file to add all three blocks (preserve every existing top-level key). State **appended**.
-3. **Present, one or more of those keys already there** → union missing scope into each, silently: add only the paths / tool names not already present; never drop or replace existing entries. State **merged-N** (N keys unioned). Only a genuine contradiction (case 3 of the File-sync policy — e.g. an existing setting that directly opposes a required one) triggers an `AskUserQuestion`.
+1. **Missing or unparseable** → `Write` Block 1 verbatim as a new file. State **sandbox-created**.
+2. **Present, no `sandbox` key** → `Edit` to add it (preserve every existing key). State **sandbox-appended**.
+3. **Present, `sandbox` already there** → union missing `filesystem.allowRead` / `allowWrite` paths in, silently; never drop or replace existing entries. State **sandbox-merged**. Only a direct contradiction (e.g. `enabled: false`) triggers an `AskUserQuestion`.
 
-Never replace an entire key with the recommended value. The consumer's existing settings.local.json is authoritative for shape; this skill only adds missing scope.
+`Read <repo-root>/.claude/settings.local.json` and apply Block 2 + migrate:
+
+4. **Missing or unparseable** → `Write` Block 2 verbatim. State **perms-created**.
+5. **Present** → union missing `permissions` / `additionalDirectories` scope in, silently (add only paths / tool names not already present; never drop existing). State **perms-merged**.
+6. **Migration** — if this file carries a legacy top-level `sandbox` key (written by an earlier version of this step), REMOVE it: the sandbox now lives in the runtime file, and a `sandbox` here would confine the interactive session. State **migrated-local-sandbox**; **no-legacy-sandbox** when absent.
+
+Never replace an entire key with the recommended value. The consumer's existing files are authoritative for shape; this skill only adds missing scope (and removes the migrated `sandbox` key).
 
 ### Outcome
 
-One line: `created` / `appended` / `merged-N` / `skipped-not-run-here`.
+One line combining the sandbox-file state, the permissions-file state, and the migration state — e.g. `sandbox-created · perms-merged · no-legacy-sandbox`, or `skipped-not-run-here`.
 
 ## Step 14: Report
 

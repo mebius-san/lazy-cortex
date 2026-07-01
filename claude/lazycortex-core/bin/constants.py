@@ -499,6 +499,18 @@ class SettingsFile:
 
 
 # ----------------------------------------------------------------------------------------
+class RuntimeFile:
+  """
+  Repository-relative paths of daemon-owned files under the `.runtime/` directory.
+
+  Attributes:
+    SANDBOX_SETTINGS: The Claude Code settings file that confines expert spawns to the sandbox scope.
+  """
+
+  SANDBOX_SETTINGS = ".runtime/sandbox.settings.json"
+
+
+# ----------------------------------------------------------------------------------------
 class JobArtifact:
   """
   Per-attempt forensic filenames written inside a job bundle directory.
@@ -605,6 +617,7 @@ class JobCollectKey:
     PATH: The absolute job-directory path.
     TARGET_REPO: The label of the foreign repo for a remote tracker entry.
     DISPATCHED_AT: The dispatch timestamp carried on a remote tracker entry.
+    DEDUP_KEY: The dedup key carried on a reconcilable finished-job entry.
   """
 
   STATUS = "status"
@@ -614,6 +627,7 @@ class JobCollectKey:
   PATH = "path"
   TARGET_REPO = "target_repo"
   DISPATCHED_AT = "dispatched_at"
+  DEDUP_KEY = "dedup_key"
 
 
 # ----------------------------------------------------------------------------------------
@@ -629,6 +643,7 @@ class JobStatus:
     DONE: The bundle finished without an error outcome.
     FAILED: The bundle finished with an error outcome.
     DEAD: The bundle carries a DEAD marker.
+    ALREADY_QUEUED: Dispatch result token — a live bundle already owns the dedup key.
   """
 
   MISSING = "missing"
@@ -638,6 +653,7 @@ class JobStatus:
   DONE = "done"
   FAILED = "failed"
   DEAD = "dead"
+  ALREADY_QUEUED = "already-queued"
 
 
 # ----------------------------------------------------------------------------------------

@@ -149,7 +149,7 @@ def dispatch_job(
         except (OSError, json.JSONDecodeError):
           continue
         if existing.get(JobRequestKey.DEDUP_KEY) == dedup_key:
-          return { JobCollectKey.JOB_ID: jdir.name, JobCollectKey.STATUS: "already-queued" }
+          return { JobCollectKey.JOB_ID: jdir.name, JobCollectKey.STATUS: JobStatus.ALREADY_QUEUED }
 
   # resolve expert settings before any filesystem mutation so a misconfigured
   # expert surfaces at dispatch time rather than after partial setup
@@ -619,6 +619,76 @@ def retire_completed_jobs(
       consume_job(repo, expert, jdir.name, dispatched_from = dispatched_from)
       retired.append(jdir.name)
   return retired
+
+
+def completed_dedup_jobs(repo: Path, expert: str) -> list[dict]:
+  """
+  List finished, unconsumed bundles for an expert that carry a dedup key.
+
+  Returns one entry per bundle whose `DONE` marker is present, that has not
+  been consumed, and that is not marked dead, carrying its `job_id`, its
+  `dedup_key`, and its `status` (`done` for a success outcome, `failed` for
+  an error outcome). In-flight bundles, dead bundles, already-consumed
+  bundles, and bundles without a dedup key are omitted.
+
+  A dispatcher that keeps the source artifact outside the bundle (the inbox
+  routine) reconciles finished work against its input store with this: drain
+  the input whose job succeeded, leave the input whose job failed parked
+  behind its still-unconsumed bundle so the dedup key keeps it from being
+  re-dispatched.
+
+  Args:
+    repo: Absolute path to the repository that hosts the job queue.
+    expert: Expert name as registered in `lazy.settings.json[experts]`.
+
+  Returns:
+    A list of `{job_id, dedup_key, status}` dicts in directory-iteration
+    order.
+  """
+  out: list[dict] = []
+  edir = Path(repo) / JOBS_BASE / expert
+  # guard: no bundles for this expert yet
+  if not edir.exists():
+    return out
+  for jdir in edir.iterdir():
+    # guard: skip non-directory entries that may appear under the expert dir
+    if not jdir.is_dir():
+      continue
+    # guard: only finished bundles are reconcilable
+    if not (jdir / JobMarker.DONE).exists():
+      continue
+    # guard: already retired by a prior reconcile pass
+    if (jdir / JobMarker.CONSUMED).exists():
+      continue
+    # guard: dead bundles are the dead-job collector's responsibility
+    if (jdir / JobMarker.DEAD).exists():
+      continue
+    req_file = jdir / JobFile.REQUEST
+    # guard: bundle missing request.json is malformed and carries no key
+    if not req_file.exists():
+      continue
+    try:
+      req = json.loads(req_file.read_text())
+    except (OSError, json.JSONDecodeError):
+      continue
+    dedup_key = req.get(JobRequestKey.DEDUP_KEY)
+    # guard: only keyed bundles are reconcilable against an external input store
+    if dedup_key is None:
+      continue
+    resp_file = jdir / JobFile.RESPONSE
+    outcome = None
+    if resp_file.exists():
+      try:
+        outcome = json.loads(resp_file.read_text()).get(JobResponseKey.OUTCOME)
+      except (OSError, json.JSONDecodeError):
+        outcome = None
+    status = JobStatus.FAILED if outcome == JobOutcome.ERROR else JobStatus.DONE
+    out.append({
+      JobCollectKey.JOB_ID:    jdir.name,
+      JobCollectKey.DEDUP_KEY: dedup_key,
+      JobCollectKey.STATUS:    status,
+    })
+  return out
 
 
 def register_routine(repo: Path, name: str, cfg: dict | None = None, *,

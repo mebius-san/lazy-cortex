@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-last_regen: 2026-06-24
+last_regen: 2026-07-01
 source_skills:
   - lazy-core.install
   - lazy-core.audit
@@ -51,7 +51,7 @@ The full journey for a new project: install → restart → audit → doctor if 
 
 **Adding experts after initial install** — re-run `/lazy-core.install` to pick up newly discovered expert candidates. It filters out already-registered experts so only new candidates are added.
 
-**Configuring the expert-spawn sandbox** — re-run `/lazy-core.install` and confirm Step 13.5 to have the skill merge the recommended sandbox and permissions block into `settings.local.json`. The skill unions into your existing keys rather than overwriting them.
+**Configuring the expert-spawn sandbox** — re-run `/lazy-core.install` and confirm Step 13.5 to have the skill write the recommended sandbox block into `.runtime/sandbox.settings.json` (the daemon-owned file passed via `--settings` to every spawned expert subprocess) and union the permissions and `additionalDirectories` scope into `.claude/settings.local.json`. The sandbox and permission files are separate because the sandbox settings apply only to daemon-spawned experts, never to your interactive session. If you previously had a `sandbox` key directly in `settings.local.json` (written by an older install), Step 13.5 removes it automatically and moves the block to the correct runtime file.
 
 **Previewing the setup chain** — run `/lazy-core.setup --dry-run` to see the ordered list of install skills that would run, grouped by phase, with no changes applied.
 

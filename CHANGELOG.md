@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.6.0 — 2026-07-01 UTC
+
+- Expert spawns now load their sandbox from a daemon-owned `.runtime/sandbox.settings.json` (passed via `--settings`) instead of the session-wide `settings.local.json`, so the interactive session in the same checkout is no longer sandboxed — fixing `git push` over SSH being blocked by the HTTP/HTTPS proxy the sandbox injects.
+- Inbox `expert` and `request` routines now pass the input file's path to the expert rather than reading and inlining its content, preventing binary inputs from being corrupted by UTF-8 decoding. Failed jobs are parked as dead-letters whose dedup key blocks re-dispatch until the operator triages; succeeded jobs drain their input automatically.
+
 ### 5.5.0 — 2026-06-24 UTC
 
 - Headless daemon installs can now get a login-equivalent environment via two new `daemon.supervisor` options: `login_shell` re-execs the startup shim through `$SHELL -lc` so `.zprofile`/`.zshrc` export `CLAUDE_CODE_OAUTH_TOKEN` and a full `PATH`; `env_files` sources named env files for token-only injection. Both default off — existing installs are unchanged.
@@ -591,6 +596,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 0.4.1 — 2026-06-28 UTC
+
+- The designer and interpreter agents no longer trim specs down to match the current state of the code. Existing gaps, partial paths, and TODOs are treated as evidence of work in progress — not as constraints to encode. Only an explicit operator decision can narrow scope.
 
 ### 0.4.0 — 2026-06-23 UTC
 
