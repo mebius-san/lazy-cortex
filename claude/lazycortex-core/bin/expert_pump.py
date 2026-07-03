@@ -486,6 +486,85 @@ def _spawn_settings_argv(repo: Path) -> list[str]:
   return [ "--settings", str(settings_file) ]
 
 
+def _normalize_mcp_config(mcp_config: str | list[str] | None, repo: Path) -> list[str]:
+  """
+  Resolve a per-expert MCP-config setting into absolute config-file paths.
+
+  Accepts a single path string or a list of them; a relative entry is anchored
+  at the repository root (the spawn's working directory). A falsy or empty
+  setting yields an empty list — the hermetic default.
+
+  Args:
+    mcp_config: The `mcp_config` value from the job's `config.json`, or None.
+    repo: Repository root that relative config paths resolve against.
+
+  Returns:
+    Absolute MCP-config paths in declaration order, or an empty list.
+  """
+  # guard: no per-expert MCP config declared — hermetic spawn, zero servers
+  if not mcp_config:
+    return []
+  paths = [ mcp_config ] if isinstance(mcp_config, str) else list(mcp_config)
+  out: list[str] = []
+  for p in paths:
+    # guard: skip non-string / empty entries defensively
+    if not isinstance(p, str) or not p:
+      continue
+    pp = Path(p)
+    out.append(str(pp if pp.is_absolute() else (Path(repo) / pp)))
+  return out
+
+
+def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
+                      model: str | None, mcp_config: str | list[str] | None,
+                      agent_ref: str, prompt: str) -> list[str]:
+  """
+  Assemble the `claude -p` command line for an expert spawn.
+
+  The spawn always runs `--strict-mcp-config`, so ambient operator MCP servers
+  (`~/.claude.json`, project `.mcp.json`) are never inherited — a headless
+  daemon spawn has no TTY and would otherwise block on an interactive-auth
+  server's initialization until the job times out. MCP servers come only from
+  the per-expert `mcp_config` allow-list, if any. The pump and the launchability
+  preflight share this builder so the probed command line matches the real one.
+
+  Args:
+    repo: Repository root the spawn runs inside.
+    env: Environment mapping the spawn inherits; read for `LAZYCORTEX_PLUGIN_DIRS`.
+    contract_path: Path to the expert-runtime contract appended as a system prompt.
+    model: Model tier pin, or None to inherit the CLI default.
+    mcp_config: Per-expert MCP-config path(s), or None for a hermetic spawn.
+    agent_ref: Scoped agent reference the spawn resolves.
+    prompt: The user prompt passed to `claude -p`.
+
+  Returns:
+    The full argv list ready for `subprocess.run`.
+  """
+  # `--permission-mode dontAsk` (not `bypassPermissions`): auto-deny any tool
+  # call outside the sandbox — bypassPermissions skips even deny rules and lets a
+  # misguided agent burn minutes on `find /Users/...`; dontAsk fails immediately.
+  argv = [ "claude", "-p", "--permission-mode", "dontAsk",
+           "--output-format", "stream-json", "--verbose",
+           "--append-system-prompt-file", str(contract_path),
+           "--strict-mcp-config" ]
+  for cfg_path in _normalize_mcp_config(mcp_config, repo):
+    argv.extend([ "--mcp-config", cfg_path ])
+  # Propagate plugin-dir flags so the spawn sees the same plugin tree as the
+  # daemon; without them `claude -p` falls back to its cache and chases sibling
+  # skills via slow `find` on Dropbox checkouts. Set by runtime_daemon.
+  # waiver: environment-variable name, not a domain key
+  for pd in (env.get("LAZYCORTEX_PLUGIN_DIRS") or "").split(os.pathsep):
+    if pd:
+      argv.extend([ "--plugin-dir", pd ])
+  argv.extend(_spawn_settings_argv(repo))
+  if model:
+    argv.extend([ "--model", model ])
+  # `--agent` resolves by NAME (scoped `<plugin>:<name>`), never by file path — a
+  # path or de-scoped name silently falls back to the body-less default assistant.
+  argv.extend([ "--agent", agent_ref, prompt ])
+  return argv
+
+
 def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   """
   Run one Claude spawn for a single READY job.
@@ -523,6 +602,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   aspects_refs   = cfg.get(JobConfigKey.ASPECTS) or []
   arguments      = cfg.get(JobConfigKey.ARGUMENTS) or {}
   model          = cfg.get(JobConfigKey.MODEL)
+  mcp_config     = cfg.get(JobConfigKey.MCP_CONFIG)
   # guard: agent reference must be present in config
   if not agent_ref:
     # waiver: one-off human-facing message
@@ -577,42 +657,16 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   except (OSError, ValueError):
     n = 0
   attempts_file.write_text(f"{n + 1}\n")
-  # `--permission-mode dontAsk` (not `bypassPermissions`): auto-deny any
-  # tool call outside the worktree+plugin-dirs sandbox declared in the
-  # daemon-owned `.runtime/sandbox.settings.json` (passed below via `--settings`),
-  # combined with the permission scope from the consumer's `.claude/settings.local.json`.
-  # bypassPermissions skips even deny rules and lets a misguided agent burn minutes
-  # on `find /Users/...`; dontAsk fails the tool call immediately so the agent
-  # surfaces an error and exits.
-  claude_argv = [ "claude", "-p", "--permission-mode", "dontAsk",
-                  "--output-format", "stream-json", "--verbose",
-                  "--append-system-prompt-file", str(contract_path) ]
-  # Propagate plugin-dir flags so the expert spawn sees the same plugin
-  # tree as the daemon. Without these, `claude -p` falls back to its
-  # cache and the agent can't resolve sibling-plugin skills (e.g.
-  # `lazy-review.start`) through Skill discovery — it then chases the
-  # names by running `find` against agent_path's parent dir, which is
-  # massively slow on Dropbox checkouts. Source: `LAZYCORTEX_PLUGIN_DIRS`
-  # is set by `runtime_daemon.set_plugin_dirs` (runner's --plugin-dir).
-  # waiver: environment-variable name, not a domain key
-  for pd in (env.get("LAZYCORTEX_PLUGIN_DIRS") or "").split(os.pathsep):
-    if pd:
-      claude_argv.extend([ "--plugin-dir", pd ])
-  # Confine the spawn to the daemon-owned sandbox declared in `.runtime/sandbox.settings.json`.
-  # Passing it via `--settings` (not the consumer's `.claude/settings.local.json`) keeps the
-  # sandbox scoped to spawned `claude -p` processes — the interactive session in the same
-  # checkout, which never passes `--settings`, stays unsandboxed.
-  claude_argv.extend(_spawn_settings_argv(repo))
-  if model:
-    claude_argv.extend([ "--model", model ])
-  # `--agent` resolves an agent by NAME, never by file path. A plugin-provided
-  # agent resolves by its SCOPED ref `<plugin>:<name>`, which requires that
-  # plugin to be enabled (consumer `enabledPlugins`) AND its files reachable
-  # (`--plugin-dir` above, or the installed cache). Passing a file PATH — or a
-  # bare, de-scoped name — silently falls back to the default assistant
-  # (body-less, no persona). So pass `agent_ref` verbatim.
+  # The spawn command line — permission mode, hermetic `--strict-mcp-config` +
+  # any per-expert `--mcp-config`, plugin dirs, `--settings` sandbox, model, and
+  # `--agent` — is assembled by `build_expert_argv`, shared with the
+  # `lazy-runtime.preflight` launchability probe so the probe matches the real spawn.
   # (`agent_path` is still resolved above and used for the read-only check below.)
-  claude_argv.extend([ "--agent", agent_ref, prompt ])
+  claude_argv = build_expert_argv(
+    repo, env,
+    contract_path = contract_path, model = model, mcp_config = mcp_config,
+    agent_ref = agent_ref, prompt = prompt,
+  )
   proc = subprocess.run(
     claude_argv,
     env = env, cwd = repo, capture_output = True, text = True, check = False,

@@ -194,6 +194,11 @@ def dispatch_job(
     JobConfigKey.ARGUMENTS:         dict(expert_entry.get(JobConfigKey.ARGUMENTS) or {}),
     JobConfigKey.GIT_AUTHOR:        expert_entry.get(JobConfigKey.GIT_AUTHOR, {}),
     JobConfigKey.MODEL:             model,
+    # Per-expert MCP allow-list: path(s) to explicit --mcp-config files. Owner
+    # reads its own settings (dev.plugin-boundaries § 3); the spawn always runs
+    # --strict-mcp-config so ambient operator MCP servers are never inherited —
+    # a headless daemon spawn must not hang on interactive-auth server init.
+    JobConfigKey.MCP_CONFIG:        expert_entry.get(JobConfigKey.MCP_CONFIG),
     # `can_commit_in_repo` override (Bug 87): md-scan dispatches in-place
     # (the consumer edits the file where it lies — see routine_types
     # dispatch_md_scan) and pass True so the apply expert may write +

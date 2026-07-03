@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#fde68a"
+iconize_color: "#86efac"
 ---
 # lazycortex-core
 
@@ -25,7 +25,7 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 
 - **install-and-audit** — Bootstrap and verify the lazycortex-core plugin in your project. Covers what `/lazy-core.install` drops (rules, authoring templates, the `lazy.settings.json` scaffold, optional expert-runtime + daemon-supervisor wizard) and the deeper checks `/lazy-core.audit`, `/lazy-core.doctor`, and `/lazy-core.optimize` perform. Plus `/lazy-core.setup`, the meta-installer that chains every enabled plugin's install in dependency order. Members: lazy-core.install, lazy-core.audit, lazy-core.doctor, lazy-core.optimize, lazy-core.setup.
 - **guardian** — Public-repo guardrails and MCP permission management. Catches secrets, PII, and internal paths before they ship; classifies new MCP servers' tools so consumers stop drowning in allow prompts. Members: lazy-repo.mark-public, lazy-guard.check-public, lazy-guard.allow-mcp.
-- **runtime** — Per-repo serial daemon that drives the async team. Routines and expert jobs run in order without contending over the working tree; the recovery skill restores the daemon after a halt. Members: lazy-routine.register, lazy-routine.unregister, lazy-runtime.recover.
+- **runtime** — Per-repo serial daemon that drives the async team. Routines and expert jobs run in order without contending over the working tree; the recovery skill restores the daemon after a halt, and the preflight skill validates that a routine's expert is actually launchable (config + MCP servers) before it runs live. Members: lazy-routine.register, lazy-routine.unregister, lazy-runtime.recover, lazy-runtime.preflight.
 - **experts** — An async team of named experts. Dispatch jobs to specialized workers, keep the main session free, and collect results later. Each expert is a role configured at install time with its own prompt and tools; the runtime daemon drains the queue without holding up the caller. Members: lazy-expert.dispatch-job, lazy-expert.collect-job, lazy-expert.cancel-job, lazy-expert.list-jobs.
 - **memory** — Per-expert long-term memory under `.memory/<expert>/`, tracked in git. Persona-marked experts grow over runs: they consult notes before primary work, write new notes via `lazy-memory.write` as a side-effect of jobs, and consolidate via `kind=reflect` passes. Members: lazy-memory.write, lazy-memory.index, lazy-memory.reflect, lazy-memory.mark-persona.
 - **agent-models** — Per-agent Claude model tier routing. The wizard fills in haiku/sonnet/opus tiers for every dispatchable agent in your vault; the `lazy-core.model-router` PreToolUse hook injects the configured tier on every `Agent` call so cheap-by-default works without per-agent flags. Members: lazy-core.agent-models.
@@ -85,6 +85,7 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 | `lazy-routine.register` | Register a named routine in lazy.settings.json. Type-aware wizard (subprocess / inbox / schedule / git / md-scan). Wraps expert_runtime.register_routine with closed-set validation. Used by plugin install skills. |
 | `lazy-routine.unregister` | Remove a named routine from lazy.settings.json. Wraps expert_runtime.unregister_routine. Protects the built-in lazy-expert.pump routine. |
 | `lazy-runtime.recover` | Recover the lazycortex-core runtime daemon from a halt — either a working-tree halt (uncommitted_changes) or a remote-sync halt (git_pull_diverged, git_push_failed, git_remote_unavailable). Branches on the halt reason: walks the operator through dirt cleanup for tree halts, or through manual repair guidance for remote-sync halts. Atomically clears the daemon_halted block from state.json once the precondition holds. |
+| `lazy-runtime.preflight` | Validate that every routine-dispatched expert is actually launchable — its spawn config is well-formed, its agent / aspects / protocols resolve, and its optional per-expert MCP servers initialize without hanging. Emulates each expert launch with a trivial prompt (no real work), then for a broken config proposes a concrete fix and applies it only after the operator confirms. Run before wiring a new expert or MCP server into a live routine, or when a routine's expert spawns keep timing out. |
 
 ## Documentation
 
@@ -97,7 +98,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [guardian](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/guardian.md) — Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/install-and-audit.md) — Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
 - [memory](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/memory.md) — Per-expert long-term memory tracked in git — experts consult notes before primary work, write new notes as a side-effect of jobs, and consolidate via reflect passes.
-- [runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/runtime.md) — Register, unregister, and recover routines in the per-repo serial daemon — five routine types keep the async team running in order; the recovery skill handles both dirty-tree and remote-sync halts.
+- [runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/runtime.md) — Register, unregister, preflight, and recover routines in the per-repo serial daemon — five routine types keep the async team running in order, with a validator that catches broken expert configs before they run live.
 - [add-memory-to-expert](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/add-memory-to-expert.md) — Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
 - [make-repo-public](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/make-repo-public.md) — Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
 - [setup-expert](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-expert.md) — Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.

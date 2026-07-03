@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-06-24
+last_regen: 2026-07-03
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed; audit-or-doctor → sub-branch on global-rules-empty / experts-json-invalid / ref-unresolvable / routine-path-stale / stall-mid-run; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed; audit-or-doctor → sub-branch on global-rules-empty / experts-json-invalid / ref-unresolvable / routine-path-stale / stall-mid-run; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
@@ -12,6 +12,7 @@ source_skills:
   - lazy-runtime.recover
   - lazy-expert.dispatch-job
   - lazy-expert.collect-job
+  - lazy-runtime.preflight
   - lazy-core.git-unlock
   - lazy-guard.check-public
   - lazy-memory.write
@@ -279,6 +280,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: `.guard-waivers.json` is missing from the repo root. The pre-commit hook uses the presence of this file as the opt-in signal — without it, scanning is disabled.
 
 **Fix**: Run `/lazy-repo.mark-public`. The skill creates `.guard-waivers.json` at the repo root with the correct schema, which is the opt-in signal that activates the hook. From the next commit onward, every `git commit` triggers the scan automatically.
+
+---
+
+## A routine's expert spawns keep timing out or the job dies doing nothing
+
+**Symptom**: A routine (inbox, schedule, git, or md-scan) that dispatches to an expert never produces a result — the job sits until it eats the routine's wall timeout and dies, with no useful output in `response.json`. `/lazy-expert.collect-job` eventually reports `status: failed` or the job never leaves `active`.
+
+**Likely cause**: Expert spawns run headless and hermetic (`claude -p ... --strict-mcp-config`) — by default an expert loads no MCP servers at all, only the ones declared per-expert via `mcp_config` in `lazy.settings.json[experts]`. If one of those declared servers hangs on initialization (a stdio server waiting on a socket that never connects, a remote server that needs interactive auth) or fails to spawn, the whole `claude -p` invocation stalls until the routine's timeout kills it. The expert never gets to write a response, so the job looks like it silently died.
+
+**Fix**: Run `/lazy-runtime.preflight` (optionally `/lazy-runtime.preflight <expert-name>` to target one expert). It emulates the same spawn the pump uses, with a trivial prompt that does no real work, and reports each declared MCP server's status — `connected`, `timed-out`, `auth-required`, or `spawn-failed`. For a timed-out or failing server it offers to drop the server from that expert's `mcp_config` (the expert then spawns hermetically without it) or, for a server that needs interactive login, prints the exact `claude mcp login <name>` command to run by hand before re-running. Re-run `/lazy-runtime.preflight` after applying a fix to confirm the expert is launchable, then re-dispatch the routine.
 
 ---
 

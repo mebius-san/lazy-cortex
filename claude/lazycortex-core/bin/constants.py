@@ -207,6 +207,7 @@ class JobConfigKey:
     ARGUMENTS: The routine-supplied keyword arguments for the expert.
     GIT_AUTHOR: The git identity block for any commits the expert makes.
     MODEL: The model tier pin, or unset to inherit the CLI default.
+    MCP_CONFIG: Explicit MCP-config path(s) the spawn loads under strict mode, or unset for none.
   """
 
   AGENT = "agent"
@@ -216,6 +217,7 @@ class JobConfigKey:
   GIT_AUTHOR = "git_author"
   MODEL = "model"
   CAN_COMMIT_IN_REPO = "can_commit_in_repo"
+  MCP_CONFIG = "mcp_config"
 
 
 # ----------------------------------------------------------------------------------------
