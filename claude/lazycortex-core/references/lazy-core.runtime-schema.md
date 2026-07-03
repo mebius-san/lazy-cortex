@@ -466,6 +466,21 @@ Contract sections:
 - **Output** — `response.json` schema (`outcome`, `result`, `error`).
 - **What you must not touch** — `DONE`, other experts' job dirs, state.json, branches.
 
+### MCP servers — hermetic by default
+
+Expert spawns always run `claude -p --strict-mcp-config`, so **ambient operator MCP servers are never inherited** (`~/.claude.json`, project `.mcp.json`). This is deliberate: the daemon spawns experts headless with no TTY, and an interactively-authenticated MCP server (OAuth / claude.ai connectors) blocks on initialization until the job hits its routine timeout and dies. Expert memory is file-based (`.memory/<self>/`, see `lazy-memory.persona-aspect`), not MCP — hermetic spawns lose no capability by default.
+
+An expert that genuinely needs one or more MCP servers declares them per-expert:
+
+```
+experts:
+  <name>:
+    mcp_config: .claude/mcp/<name>.json          # single path
+    # or: mcp_config: [.claude/mcp/a.json, .claude/mcp/b.json]
+```
+
+Each path (relative to the repo root) is passed as `--mcp-config <path>`; under `--strict-mcp-config` the spawn loads **only** those servers. The referenced files use the standard MCP-config JSON shape. Only headless-safe servers work here (token/env auth, no interactive login, launcher on `PATH`); an interactive-auth server declared this way still blocks. Validate a config's launchability with `/lazy-runtime.preflight` before wiring it into a live routine.
+
 ---
 
 ## 12. Metrics

@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.7.0 — 2026-07-03 UTC
+
+- Expert spawns now run fully isolated from ambient MCP servers (`--strict-mcp-config`), fixing headless expert jobs that hung on an interactive-auth MCP server's initialization until they timed out. An expert that genuinely needs specific MCP servers declares them via a new per-expert `mcp_config` field under `lazy.settings.json[experts]`; ambient operator servers (`~/.claude.json`, project `.mcp.json`) are no longer inherited.
+- New `/lazy-runtime.preflight` skill validates that every routine-dispatched expert is actually launchable — static config checks plus a trivial-prompt launch probe that catches hanging or auth-blocked MCP servers before a job runs — and proposes operator-confirmed fixes.
+
 ### 5.6.0 — 2026-07-01 UTC
 
 - Expert spawns now load their sandbox from a daemon-owned `.runtime/sandbox.settings.json` (passed via `--settings`) instead of the session-wide `settings.local.json`, so the interactive session in the same checkout is no longer sandboxed — fixing `git push` over SSH being blocked by the HTTP/HTTPS proxy the sandbox injects.
