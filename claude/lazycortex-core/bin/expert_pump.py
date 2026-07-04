@@ -562,8 +562,7 @@ def _normalize_setting_sources(setting_sources: str | list[str] | None) -> list[
 def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
                       model: str | None, mcp_config: str | list[str] | None,
                       agent_ref: str, prompt: str,
-                      setting_sources: str | list[str] | None = None,
-                      bare: bool = False) -> list[str]:
+                      setting_sources: str | list[str] | None = None) -> list[str]:
   """
   Assemble the `claude -p` command line for an expert spawn.
 
@@ -576,10 +575,8 @@ def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
   The spawn also always passes `--setting-sources`, defaulting to `project,local`
   so operator user-scope settings — where interactive plugins and their hooks
   live — never load in a headless spawn; an expert opts back into `user` scope
-  explicitly. When `bare` is set the spawn adds `--bare` (minimal mode: no hooks,
-  auto-memory, or keychain reads; auth becomes API-key-only), off by default so
-  an OAuth login keeps working. The pump and the launchability preflight share
-  this builder so the probed command line matches the real one.
+  explicitly. The pump and the launchability preflight share this builder so the
+  probed command line matches the real one.
 
   Args:
     repo: Repository root the spawn runs inside.
@@ -590,7 +587,6 @@ def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
     agent_ref: Scoped agent reference the spawn resolves.
     prompt: The user prompt passed to `claude -p`.
     setting_sources: Per-expert setting scopes, or None for the hermetic `project,local` default.
-    bare: Whether to add `--bare` minimal mode; off by default to preserve OAuth auth.
 
   Returns:
     The full argv list ready for `subprocess.run`.
@@ -603,11 +599,6 @@ def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
            "--append-system-prompt-file", str(contract_path),
            "--strict-mcp-config",
            "--setting-sources", ",".join(_normalize_setting_sources(setting_sources)) ]
-  # `--bare` skips hooks / auto-memory / keychain and forces API-key-only auth;
-  # opt-in per expert so the default OAuth-backed spawn is untouched.
-  if bare:
-    # waiver: external Claude Code CLI flag, not an internal key
-    argv.append("--bare")
   for cfg_path in _normalize_mcp_config(mcp_config, repo):
     argv.extend([ "--mcp-config", cfg_path ])
   # Propagate plugin-dir flags so the spawn sees the same plugin tree as the
@@ -665,7 +656,6 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   model          = cfg.get(JobConfigKey.MODEL)
   mcp_config     = cfg.get(JobConfigKey.MCP_CONFIG)
   setting_sources = cfg.get(JobConfigKey.SETTING_SOURCES)
-  bare           = bool(cfg.get(JobConfigKey.BARE, False))
   # guard: agent reference must be present in config
   if not agent_ref:
     # waiver: one-off human-facing message
@@ -721,16 +711,16 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     n = 0
   attempts_file.write_text(f"{n + 1}\n")
   # The spawn command line — permission mode, hermetic `--strict-mcp-config` +
-  # any per-expert `--mcp-config`, hermetic `--setting-sources` + optional
-  # `--bare`, plugin dirs, `--settings` sandbox, model, and
-  # `--agent` — is assembled by `build_expert_argv`, shared with the
-  # `lazy-runtime.preflight` launchability probe so the probe matches the real spawn.
+  # any per-expert `--mcp-config`, hermetic `--setting-sources`, plugin dirs,
+  # `--settings` sandbox, model, and `--agent` — is assembled by
+  # `build_expert_argv`, shared with the `lazy-runtime.preflight` launchability
+  # probe so the probe matches the real spawn.
   # (`agent_path` is still resolved above and used for the read-only check below.)
   claude_argv = build_expert_argv(
     repo, env,
     contract_path = contract_path, model = model, mcp_config = mcp_config,
     agent_ref = agent_ref, prompt = prompt,
-    setting_sources = setting_sources, bare = bare,
+    setting_sources = setting_sources,
   )
   proc = subprocess.run(
     claude_argv,
