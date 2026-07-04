@@ -38,7 +38,9 @@ sys.path.insert(0, str(_BIN_DIR))
 # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
 import staging_lock  # noqa: E402
 # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
-from constants import HookKey  # noqa: E402
+import hook_gate  # noqa: E402
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+from constants import HookKey, HookName  # noqa: E402
 
 
 # --- Tool / command gating ----------------------------------------------------
@@ -149,6 +151,12 @@ def main() -> int:
     The process exit code; always 0 for this hook (denials and stop-blocks are signaled via the
     JSON payload, not the exit status).
   """
+  # Enablement gate — first action, before stdin/git. An expert spawn short-circuits here via a
+  # pure env check; an interactive session skips only when the operator disabled this hook.
+  # guard: hook disabled in the current context
+  if not hook_gate.is_enabled(HookName.GIT_GUARD):
+    return 0
+
   # § 1 — defensive JSON parse; never crash.
   try:
     hook_input = json.load(sys.stdin)

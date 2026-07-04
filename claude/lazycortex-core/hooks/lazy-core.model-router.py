@@ -45,7 +45,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "bin"))
 # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
 from lazy_settings import load_section  # noqa: E402
 # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
-from constants import AgentToolInput, HookKey, SettingsFile, SettingsKey, ToolName  # noqa: E402
+import hook_gate  # noqa: E402
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+from constants import AgentToolInput, HookKey, HookName, SettingsFile, SettingsKey, ToolName  # noqa: E402
 
 
 TIER = { "haiku": 1, "sonnet": 2, "opus": 3 }
@@ -156,6 +158,11 @@ def main() -> None:
   required. Exits silently with status zero in every non-mutating branch so the trigger is
   never blocked.
   """
+  # Enablement gate — first action. An expert spawn short-circuits here via a pure env check.
+  # guard: hook disabled in the current context
+  if not hook_gate.is_enabled(HookName.MODEL_ROUTER):
+    sys.exit(0)
+
   payload = json.load(sys.stdin)
   # guard: only Agent dispatches participate in routing
   if payload.get(HookKey.TOOL_NAME) != ToolName.AGENT:

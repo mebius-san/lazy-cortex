@@ -49,12 +49,13 @@ If `experts[]` is empty: print "No expert-shape routines carry a local expert to
 
 Otherwise render one markdown table row per expert:
 
-| expert | verdict | static issues | server statuses |
-|---|---|---|---|
+| expert | verdict | static issues | server statuses | active hooks |
+|---|---|---|---|---|
 
 - **verdict** — `ok` or `fail`.
 - **static issues** — the `message` of each `static[]` finding, or `—` when none. Prefix each with its `level` (`fail` / `warn`).
 - **server statuses** — `<name>: <status>` per `dynamic.servers[]`, or `—` when the expert declares no MCP servers or the probe was skipped.
+- **active hooks** — the comma-joined `hooks_enabled[]` list — the lazycortex hooks that run in this expert's spawns — or `none` when empty (every hook no-ops; the hermetic default).
 
 Below the table, note any expert whose `dynamic.best_effort_plugin_dirs` is true: "plugin-dir resolution was best-effort for <expert> — a probe-only failure there may be a false negative; re-run under the daemon or with `LAZYCORTEX_PLUGIN_DIRS` set to confirm." List `skipped_cross_repo` targets as unvalidated.
 

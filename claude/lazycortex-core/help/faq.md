@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to non-obvious questions about install vs setup, settings placement, plugin composition, agent routing, the expert runtime, memory subsystem, routine types, daemon recovery, job dispatch, and the public-repo guard scanner.
-last_regen: 2026-07-03
+last_regen: 2026-07-04
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -102,6 +102,23 @@ Optional fields — `source` (array of input file paths), `context` (array of co
 Yes, but every expert spawn is hermetic by default. When the daemon or `/lazy-expert.dispatch-job` launches an expert, the underlying `claude -p` spawn always runs with `--strict-mcp-config`, which means it never inherits your ambient MCP servers from `~/.claude.json` or the project's `.mcp.json` — even servers you already approved interactively. This is deliberate: a headless spawn has no TTY, so an MCP server that expects interactive auth at startup would hang until the job times out.
 
 If an expert genuinely needs one or more MCP servers, declare them per-expert via the `mcp_config` field on that expert's entry in `lazy.settings.json[experts]` — a path (or list of paths) to an MCP-config JSON file whose `mcpServers` object lists only the servers that expert is allowed to use. Only servers that initialize cleanly without interactive input work in this context; a server that needs a login prompt on first use will still hang the spawn even when it is listed in `mcp_config`. Leave `mcp_config` unset for experts that don't need any servers — that is the hermetic default, and it is the safer choice unless you have a concrete reason to widen it.
+
+---
+
+## Does every lazycortex hook run on every `Bash` call inside an expert spawn?
+
+No — by default, none of them do. Every core hook (`git-guard`, `check-public`, `model-router`, `settings-guard`, `commit-recorder`) checks an allow-list environment variable as its first action, and the pump exports that variable on every expert spawn. When it is present but the expert's name is not on the list, the hook no-ops immediately instead of running its checks — this removes the tens-of-seconds `check-public` / `git-guard` tax on every `Bash` call inside a headless expert, since none of those interactive-commit checks apply to a spawn that never touches the operator's own commit.
+
+An expert that genuinely needs a specific hook opts it back in on its entry in `lazy.settings.json[experts]`:
+
+```
+experts:
+  <name>:
+    hooks:
+      enabled: [git-guard]
+```
+
+Only the named hooks run for that expert's spawns; every other lazycortex hook stays gated off. `/lazy-runtime.preflight` surfaces the effective allow-list for each expert in its verdict table's "active hooks" column, so you can confirm the configuration before wiring the expert into a live routine.
 
 ---
 
@@ -227,4 +244,3 @@ Each plugin installs its own rule templates and may seed its own section of `laz
 A **protocol** is routine-side config that defines the request/response contract for the jobs a routine dispatches — the `kind` enum, `role` vocabulary, field shapes, and outcome enum. Different routines can dispatch jobs against the same protocol.
 
 An **aspect** is expert-side config that shapes how the expert acts on top of its protocol. The same protocol can be paired with different aspects across experts. For example, two experts could share the doc-review protocol but only one carries `lazy-memory.persona-aspect` to keep notes between runs. Protocols and aspects are listed in parallel in the expert's user-message prompt — the expert reads both before acting.
-</content>

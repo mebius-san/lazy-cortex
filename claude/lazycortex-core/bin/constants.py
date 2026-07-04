@@ -210,6 +210,7 @@ class JobConfigKey:
     CAN_COMMIT_IN_REPO: Whether the expert may write and commit inside the repo it runs in.
     MCP_CONFIG: Explicit MCP-config path(s) the spawn loads under strict mode, or unset for none.
     SETTING_SOURCES: Setting scopes the spawn loads (`user`/`project`/`local`), or unset for the hermetic default.
+    HOOKS_ENABLED: The resolved allow-list of hook short names the spawn opts into, or empty for none.
   """
 
   AGENT = "agent"
@@ -221,6 +222,7 @@ class JobConfigKey:
   CAN_COMMIT_IN_REPO = "can_commit_in_repo"
   MCP_CONFIG = "mcp_config"
   SETTING_SOURCES = "setting_sources"
+  HOOKS_ENABLED = "hooks_enabled"
 
 
 # ----------------------------------------------------------------------------------------
@@ -235,6 +237,7 @@ class SettingsKey:
     EXPERTS: The expert registry section name.
     AGENT_MODELS: The agent-model-tier registry section name.
     REPOS: The cross-repo target registry section name.
+    HOOKS: The lifecycle-hook enablement section name.
     LEGACY_VERSION: The pre-split root-level version key migrations fold away.
   """
 
@@ -244,6 +247,7 @@ class SettingsKey:
   EXPERTS = "experts"
   AGENT_MODELS = "agent_models"
   REPOS = "repos"
+  HOOKS = "hooks"
   LEGACY_VERSION = "version"
 
 
@@ -321,6 +325,58 @@ class HookKey:
   TOOL_INPUT = "tool_input"
   HOOK_EVENT_NAME = "hook_event_name"
   CWD = "cwd"
+
+
+# ----------------------------------------------------------------------------------------
+class EnvVar:
+  """
+  Environment-variable names the runtime sets on a spawn and the hooks read back.
+
+  Attributes:
+    HOOKS_ALLOW_LIST: The comma-separated allow-list of hook short names that may run. Its
+      presence (even empty) puts every lazycortex hook into allow-list mode — only the named
+      hooks run; the pump sets it for every expert spawn so a spawn runs no hook unless opted in.
+  """
+
+  HOOKS_ALLOW_LIST = "LAZYCORTEX_HOOKS_ALLOW_LIST"
+
+
+# ----------------------------------------------------------------------------------------
+class HookName:
+  """
+  Canonical short names identifying each lazycortex-core lifecycle hook to the enablement gate.
+
+  A hook passes its own name to `hook_gate.is_enabled` so a single vocabulary drives both the
+  per-expert `hooks.enabled` allow-list and the interactive `hooks.disabled` block-list. The
+  names are stable configuration surface — renaming one silently breaks every operator's config.
+
+  Attributes:
+    GIT_GUARD: The staging-mutex / dirty-index guard hook.
+    MODEL_ROUTER: The subagent model-tier routing hook.
+    CHECK_PUBLIC: The public-repo secret / PII scan hook.
+    SETTINGS_GUARD: The settings-file edit guard hook.
+    COMMIT_RECORDER: The commit-log recorder hook.
+  """
+
+  GIT_GUARD = "git-guard"
+  MODEL_ROUTER = "model-router"
+  CHECK_PUBLIC = "check-public"
+  SETTINGS_GUARD = "settings-guard"
+  COMMIT_RECORDER = "commit-recorder"
+
+
+# ----------------------------------------------------------------------------------------
+class HooksKey:
+  """
+  Keys in the `hooks` configuration block of `lazy.settings.json` and in a per-expert `hooks` block.
+
+  Attributes:
+    DISABLED: Root-section block-list — hook short names silenced in interactive sessions.
+    ENABLED: Per-expert allow-list — hook short names an expert spawn opts back into.
+  """
+
+  DISABLED = "disabled"
+  ENABLED = "enabled"
 
 
 # ----------------------------------------------------------------------------------------
