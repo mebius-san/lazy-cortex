@@ -203,8 +203,6 @@ def dispatch_job(
     # setting sources the spawn loads. None → pump applies the project,local
     # default, so operator user-scope plugins/hooks never load headless.
     JobConfigKey.SETTING_SOURCES:   expert_entry.get(JobConfigKey.SETTING_SOURCES),
-    # Opt-in --bare minimal mode; off by default so the spawn keeps OAuth auth.
-    JobConfigKey.BARE:              bool(expert_entry.get(JobConfigKey.BARE, False)),
     # `can_commit_in_repo` override (Bug 87): md-scan dispatches in-place
     # (the consumer edits the file where it lies — see routine_types
     # dispatch_md_scan) and pass True so the apply expert may write +

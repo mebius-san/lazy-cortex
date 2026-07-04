@@ -4,9 +4,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.8.1 — 2026-07-04 UTC
+
+- Removed the `--bare` minimal-mode option for expert spawns that shipped in 5.8.0; expert spawns now only use the hermetic `--setting-sources project,local` default (and its explicit per-expert opt-in). No change for the default spawn path.
+
 ### 5.8.0 — 2026-07-04 UTC
 
-- Expert spawns are now hermetic on settings scope too: by default only project/local settings load (`--setting-sources project,local`), so a stuck user-scope plugin hook can no longer hang a headless expert job the way an interactive-auth MCP server used to. An expert opts back into user-scope settings, or into fully minimal `--bare` mode, per entry under `lazy.settings.json[experts]`; `/lazy-runtime.preflight` reports each expert's effective settings scopes and warns when `bare` runs without an API-key credential.
+- Expert spawns are now hermetic on settings scope too: by default only project/local settings load (`--setting-sources project,local`), so a stuck user-scope plugin hook can no longer hang a headless expert job the way an interactive-auth MCP server used to. An expert opts back into user-scope settings per entry under `lazy.settings.json[experts]`; `/lazy-runtime.preflight` reports each expert's effective settings scopes.
 
 ### 5.7.0 — 2026-07-03 UTC
 

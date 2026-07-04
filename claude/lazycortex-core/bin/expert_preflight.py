@@ -33,7 +33,7 @@ from expert_pump import build_expert_argv, _normalize_mcp_config, _normalize_set
 from lazy_settings import load_section
 # waiver: ReferenceError is reference_resolver's domain exception, not the builtin
 from reference_resolver import resolve, ReferenceError  # pylint: disable=redefined-builtin
-from constants import JobConfigKey, RoutineKey, RuntimeFile, SettingsFile, SettingsKey
+from constants import JobConfigKey, RoutineKey, SettingsFile, SettingsKey
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -111,7 +111,6 @@ class RKey:
     STATIC: The static-check finding list.
     DYNAMIC: The dynamic-probe result block, or null when the probe was skipped.
     SETTING_SOURCES: The effective `--setting-sources` scopes the spawn will pass.
-    BARE: Whether the spawn runs `--bare` minimal mode.
     VERDICT: The `ok` / `fail` verdict for the expert.
     FIXES: The proposed-fix list for a failing expert.
     LEVEL: The severity of a static finding.
@@ -133,7 +132,6 @@ class RKey:
   STATIC = "static"
   DYNAMIC = "dynamic"
   SETTING_SOURCES = "setting_sources"
-  BARE = "bare"
   VERDICT = "verdict"
   FIXES = "fixes"
   LEVEL = "level"
@@ -189,9 +187,6 @@ _MSG_MISSING_AGENT = "missing 'agent' reference (spawn would fall back to the de
 _MSG_AGENT_UNRESOLVED = "agent ref does not resolve"
 # Substrings that fingerprint the agent-unresolved static findings (gates the probe).
 _AGENT_UNRESOLVED_MARKERS = (_MSG_AGENT_UNRESOLVED, _MSG_MISSING_AGENT)
-
-# The warn finding emitted when `bare: true` has no reachable Anthropic credential.
-_MSG_BARE_NO_AUTH = "bare: true but neither ANTHROPIC_API_KEY nor apiKeyHelper is set — the spawn will have no auth"
 
 # Server statuses that make a spawn's verdict `fail` when any declared server hits them.
 _SRV_BAD = frozenset({ Srv.TIMED_OUT, Srv.AUTH_REQUIRED, Srv.SPAWN_FAILED, Srv.PENDING_APPROVAL })
@@ -384,7 +379,6 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
 
   findings.extend(_mcp_config_checks(repo, entry.get(JobConfigKey.MCP_CONFIG)))
   findings.extend(_setting_sources_checks(entry.get(JobConfigKey.SETTING_SOURCES)))
-  findings.extend(_bare_checks(repo, entry.get(JobConfigKey.BARE)))
 
   model = entry.get(JobConfigKey.MODEL)
   if model and isinstance(model, str) and not _model_is_known(repo, model):
@@ -461,63 +455,6 @@ def _setting_sources_checks(setting_sources: object) -> list[dict]:
         Level.WARN, f"setting_sources value '{s}' is not one of user / project / local (dropped)"
       ))
   return findings
-
-
-def _bare_auth_available(repo: Path, env: dict[str, str] | None = None) -> bool:
-  """
-  Return whether a `--bare` spawn would have a usable Anthropic credential.
-
-  In `--bare` mode Claude reads auth strictly from `ANTHROPIC_API_KEY` or an
-  `apiKeyHelper` supplied via `--settings` — OAuth and keychain are never read.
-  This checks the probe environment for the API-key variable and the sandbox
-  settings file the spawn passes via `--settings` for an `apiKeyHelper` entry.
-
-  Args:
-    repo: Repository root whose sandbox settings file is consulted.
-    env: Environment mapping to inspect; the process environment when None.
-
-  Returns:
-    True when `ANTHROPIC_API_KEY` is set or the sandbox settings declare an
-    `apiKeyHelper`; False otherwise.
-  """
-  env = env if env is not None else dict(os.environ)
-  # waiver: external Anthropic environment-variable name, not an internal key
-  if env.get("ANTHROPIC_API_KEY"):
-    return True
-  settings_file = Path(repo) / RuntimeFile.SANDBOX_SETTINGS
-  # guard: no sandbox settings file — no apiKeyHelper can be declared
-  if not settings_file.is_file():
-    return False
-  try:
-    # waiver: stdlib encoding idiom
-    data = json.loads(settings_file.read_text(encoding = "utf-8"))
-  except (OSError, json.JSONDecodeError):
-    return False
-  # waiver: external Claude Code settings field name, not an internal key
-  return bool(isinstance(data, dict) and data.get("apiKeyHelper"))
-
-
-def _bare_checks(repo: Path, bare: object) -> list[dict]:
-  """
-  Warn when `--bare` mode would leave the spawn without a usable credential.
-
-  Emits a `warn` only when bare mode is enabled and no API-key credential is
-  reachable — a bare spawn drops OAuth, so without `ANTHROPIC_API_KEY` or an
-  `apiKeyHelper` it cannot authenticate. Whether bare mode is on travels as a
-  result field, not a finding, so an authenticated bare entry stays clean.
-
-  Args:
-    repo: Repository root whose sandbox settings file is consulted for auth.
-    bare: The expert's `bare` value; only a truthy value enables bare mode.
-
-  Returns:
-    A list of `{level, message}` finding dicts; empty when bare mode is off or
-    a credential is reachable.
-  """
-  # guard: bare mode not requested, or a credential is reachable — no warning
-  if not bare or _bare_auth_available(repo):
-    return []
-  return [ _finding(Level.WARN, _MSG_BARE_NO_AUTH) ]
 
 
 def _model_is_known(repo: Path, model: str) -> bool:
@@ -791,14 +728,13 @@ def _run_probe(repo: Path, entry: dict) -> dict:
   mcp_config = entry.get(JobConfigKey.MCP_CONFIG)
   model = entry.get(JobConfigKey.MODEL)
   setting_sources = entry.get(JobConfigKey.SETTING_SOURCES)
-  bare = bool(entry.get(JobConfigKey.BARE, False))
   declared_servers = _servers_in_config(repo, mcp_config)
 
   argv = build_expert_argv(
     repo, env,
     contract_path = _contract_path(), model = model, mcp_config = mcp_config,
     agent_ref = agent_ref, prompt = _PROBE_PROMPT,
-    setting_sources = setting_sources, bare = bare,
+    setting_sources = setting_sources,
   )
   # waiver: temp-file naming idiom, not a domain constant
   fd, debug_file = tempfile.mkstemp(prefix = "lazy_preflight_", suffix = ".log")
@@ -931,7 +867,7 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
 
   Returns:
     A per-expert result dict carrying `name`, `static`, `dynamic` (or `None`),
-    `setting_sources`, `bare`, `verdict`, and `fixes`.
+    `setting_sources`, `verdict`, and `fixes`.
   """
   experts = load_section(_settings_path(repo), SettingsKey.EXPERTS)
   raw_entry = experts.get(expert)
@@ -942,7 +878,6 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
   effective_sources = _normalize_setting_sources(
     raw_sources if isinstance(raw_sources, (str, list)) else None
   )
-  bare = bool(entry.get(JobConfigKey.BARE, False)) if entry is not None else False
 
   dynamic: dict | None = None
   # Only probe a registered expert whose agent statically resolves — a probe with
@@ -961,7 +896,6 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
     RKey.STATIC: static,
     RKey.DYNAMIC: dynamic,
     RKey.SETTING_SOURCES: effective_sources,
-    RKey.BARE: bare,
     RKey.VERDICT: verdict,
     RKey.FIXES: fixes,
   }

@@ -495,14 +495,6 @@ experts:
 
 Valid scopes are exactly `user`, `project`, `local`; anything else is dropped (surfaced as a `warn` by `/lazy-runtime.preflight`). An absent or empty `setting_sources`, or one that leaves no valid scope, resolves to the hermetic `project,local` default — the flag is always emitted, so every expert is hermetic out of the box with no per-expert config, exactly like `--strict-mcp-config`. The default does not touch authentication: OAuth login keeps working.
 
-**`bare` mode (opt-in).** An expert may set `bare: true` to spawn `claude -p --bare` — minimal mode that additionally skips hooks, LSP, plugin sync, attribution, auto-memory, background prefetches, keychain reads, and `CLAUDE.md` auto-discovery. Off by default. `--bare` forces Anthropic auth to be **strictly** `ANTHROPIC_API_KEY` or an `apiKeyHelper` supplied via `--settings` — OAuth and keychain are never read — so a bare spawn without one of those credentials cannot authenticate. `/lazy-runtime.preflight` warns when `bare: true` has no reachable credential.
-
-```
-experts:
-  <name>:
-    bare: true          # requires ANTHROPIC_API_KEY or apiKeyHelper
-```
-
 ---
 
 ## 12. Metrics
