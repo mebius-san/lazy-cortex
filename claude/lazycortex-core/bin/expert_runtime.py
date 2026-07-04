@@ -21,7 +21,7 @@ import uuid
 from pathlib import Path
 
 from constants import (
-  JobCollectKey, JobConfigKey, JobFile, JobIODir, JobMarker, JobOutcome, JobRequestKey,
+  HooksKey, JobCollectKey, JobConfigKey, JobFile, JobIODir, JobMarker, JobOutcome, JobRequestKey,
   JobResponseKey, JobStatus, RemoteTrackerKey, RepoDir, RoutineKey, SettingsFile, SettingsKey,
 )
 
@@ -203,6 +203,10 @@ def dispatch_job(
     # setting sources the spawn loads. None → pump applies the project,local
     # default, so operator user-scope plugins/hooks never load headless.
     JobConfigKey.SETTING_SOURCES:   expert_entry.get(JobConfigKey.SETTING_SOURCES),
+    # Per-expert hook allow-list (mirrors setting_sources sealing): the hook
+    # short names this expert opts back into. Absent / [] → the pump exports an
+    # empty allow-list, so every lazycortex hook no-ops in the spawn (hermetic).
+    JobConfigKey.HOOKS_ENABLED:     list((expert_entry.get(SettingsKey.HOOKS) or {}).get(HooksKey.ENABLED) or []),
     # `can_commit_in_repo` override (Bug 87): md-scan dispatches in-place
     # (the consumer edits the file where it lies — see routine_types
     # dispatch_md_scan) and pass True so the apply expert may write +

@@ -34,7 +34,7 @@ from reference_resolver import resolve, ReferenceError  # pylint: disable=redefi
 # means the lookup happens ONCE per process lifetime, not per job.
 from runtime_daemon import _check_working_tree
 from constants import (
-  HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase, IncidentState,
+  EnvVar, HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase, IncidentState,
   JobArtifact, JobConfigKey, JobErrorCategory, JobFile, JobMarker, JobOutcome, JobRequestKey, JobResponseKey,
   RuntimeFile, SettingsFile, SettingsKey,
 )
@@ -656,6 +656,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   model          = cfg.get(JobConfigKey.MODEL)
   mcp_config     = cfg.get(JobConfigKey.MCP_CONFIG)
   setting_sources = cfg.get(JobConfigKey.SETTING_SOURCES)
+  hooks_enabled   = cfg.get(JobConfigKey.HOOKS_ENABLED) or []
   # guard: agent reference must be present in config
   if not agent_ref:
     # waiver: one-off human-facing message
@@ -690,6 +691,11 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   env["GIT_AUTHOR_NAME"]  = git_author.get("name",  "")
   # waiver: environment-variable name, not a domain key
   env["GIT_AUTHOR_EMAIL"] = git_author.get("email", "")
+  # Always export the hook allow-list — its mere presence flips every lazycortex
+  # hook into allow-list mode inside the spawn, so an expert with no `hooks.enabled`
+  # runs none of them (the ~40s check-public + git-guard tax vanishes). A non-empty
+  # value opts the named hooks back in.
+  env[EnvVar.HOOKS_ALLOW_LIST] = ",".join(hooks_enabled)
 
   # Three parallel single-noun labels — protocols, aspects, arguments.
   # `- protocol:` replaces the legacy `- protocol contract:` for parallelism.

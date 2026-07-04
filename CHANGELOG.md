@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.8.2 — 2026-07-04 UTC
+
+- Expert spawns now skip the ~40s per-Bash-call overhead from core hooks (git-guard, model-router, check-public, settings-guard, commit-recorder) by default — opt individual hooks back in per expert via `hooks.enabled`. Interactive sessions can also silence any hook for themselves with a root `hooks.disabled` block-list.
+
 ### 5.8.1 — 2026-07-04 UTC
 
 - Removed the `--bare` minimal-mode option for expert spawns that shipped in 5.8.0; expert spawns now only use the hermetic `--setting-sources project,local` default (and its explicit per-expert opt-in). No change for the default spawn path.

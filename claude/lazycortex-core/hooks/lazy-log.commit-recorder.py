@@ -16,16 +16,28 @@ Notes:
 """
 
 from __future__ import annotations
+# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable=import-error,wrong-import-position
 
 import json
 import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+# Resolve the sibling bin/ dir so the enablement gate is importable.
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+import hook_gate  # noqa: E402
+# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+from constants import HookName  # noqa: E402
 
 
 def get_commit_info() -> dict | None:
@@ -161,6 +173,11 @@ def main() -> None:
   the commit metadata, and appends a single JSON line to `<repo-root>/.logs/commits.jsonl`. Every
   failure path returns silently so the hook never blocks the originating tool call.
   """
+  # Enablement gate — first action. An expert spawn short-circuits here via a pure env check.
+  # guard: hook disabled in the current context
+  if not hook_gate.is_enabled(HookName.COMMIT_RECORDER):
+    return
+
   try:
     payload = json.load(sys.stdin)
   except (json.JSONDecodeError, ValueError):

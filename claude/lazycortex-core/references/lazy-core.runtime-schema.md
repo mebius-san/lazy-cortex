@@ -495,6 +495,32 @@ experts:
 
 Valid scopes are exactly `user`, `project`, `local`; anything else is dropped (surfaced as a `warn` by `/lazy-runtime.preflight`). An absent or empty `setting_sources`, or one that leaves no valid scope, resolves to the hermetic `project,local` default — the flag is always emitted, so every expert is hermetic out of the box with no per-expert config, exactly like `--strict-mcp-config`. The default does not touch authentication: OAuth login keeps working.
 
+### Lazycortex hooks — hermetic by default
+
+`--setting-sources project,local` sheds *operator user-scope* hooks, but the project's own lazycortex hooks (`git-guard`, `check-public`, `model-router`, `settings-guard`, `commit-recorder`) still load at `project` scope — and each one runs on every `Bash` boundary of the spawn. For a headless expert that is pure tax: `check-public` and `git-guard` alone add tens of seconds per tool call and gate nothing the expert needs.
+
+So the pump exports `LAZYCORTEX_HOOKS_ALLOW_LIST` on every spawn, and each lazycortex hook consults it as its first action (`bin/hook_gate.py`). The variable is named for the action it exerts — "these hooks may run" — not for who set it: the pump sets it for experts, but an operator can export the same variable in a shell to the same effect. Its **presence** flips every hook into allow-list mode; only the named hooks run, so an expert with no config runs none of them.
+
+An expert opts specific hooks back in:
+
+```
+experts:
+  <name>:
+    hooks:
+      enabled: [git-guard]   # only git-guard runs in this expert's spawns; the rest no-op
+```
+
+Absent `hooks`, or `hooks.enabled: []`, exports an empty allow-list → every lazycortex hook no-ops in the spawn (the hermetic default, mirroring `setting_sources`). The effective allow-list per expert is surfaced by `/lazy-runtime.preflight`.
+
+The same gate powers the mirror-image interactive control. In a normal session (no `LAZYCORTEX_HOOKS_ALLOW_LIST`) every hook runs unless the operator silences it by short name in a root-level block-list:
+
+```
+hooks:
+  disabled: [model-router]   # this hook no-ops in interactive sessions; the rest run
+```
+
+`hooks.disabled` reads the tracked value with the local overlay merged on top, so a personal silence can live in the gitignored `lazy.settings.local.json`. The block-list read fails open — a missing or malformed settings file silences nothing. Third-party operator hooks (e.g. `warp`) do not read this variable; they are already shed by `--setting-sources` — a separate layer.
+
 ---
 
 ## 12. Metrics

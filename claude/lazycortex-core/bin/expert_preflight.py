@@ -33,7 +33,7 @@ from expert_pump import build_expert_argv, _normalize_mcp_config, _normalize_set
 from lazy_settings import load_section
 # waiver: ReferenceError is reference_resolver's domain exception, not the builtin
 from reference_resolver import resolve, ReferenceError  # pylint: disable=redefined-builtin
-from constants import JobConfigKey, RoutineKey, SettingsFile, SettingsKey
+from constants import HooksKey, JobConfigKey, RoutineKey, SettingsFile, SettingsKey
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -111,6 +111,7 @@ class RKey:
     STATIC: The static-check finding list.
     DYNAMIC: The dynamic-probe result block, or null when the probe was skipped.
     SETTING_SOURCES: The effective `--setting-sources` scopes the spawn will pass.
+    HOOKS_ENABLED: The effective allow-list of lazycortex hook short names the spawn opts into (empty = all off).
     VERDICT: The `ok` / `fail` verdict for the expert.
     FIXES: The proposed-fix list for a failing expert.
     LEVEL: The severity of a static finding.
@@ -132,6 +133,7 @@ class RKey:
   STATIC = "static"
   DYNAMIC = "dynamic"
   SETTING_SOURCES = "setting_sources"
+  HOOKS_ENABLED = "hooks_enabled"
   VERDICT = "verdict"
   FIXES = "fixes"
   LEVEL = "level"
@@ -879,6 +881,11 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
     raw_sources if isinstance(raw_sources, (str, list)) else None
   )
 
+  # Effective hook allow-list the pump would export — [] means every lazycortex
+  # hook no-ops in the spawn (the hermetic default).
+  raw_hooks = entry.get(SettingsKey.HOOKS) if entry is not None else None
+  hooks_enabled = list((raw_hooks or {}).get(HooksKey.ENABLED) or []) if isinstance(raw_hooks, dict) else []
+
   dynamic: dict | None = None
   # Only probe a registered expert whose agent statically resolves — a probe with
   # a missing agent would spuriously "pass" via the default-assistant fallback.
@@ -896,6 +903,7 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
     RKey.STATIC: static,
     RKey.DYNAMIC: dynamic,
     RKey.SETTING_SOURCES: effective_sources,
+    RKey.HOOKS_ENABLED: hooks_enabled,
     RKey.VERDICT: verdict,
     RKey.FIXES: fixes,
   }

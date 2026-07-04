@@ -84,8 +84,8 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 | `lazy-routine.offer-protocols` | Shared configurator helper: discover reference files flagged as routine-protocol candidates, judge which are relevant to a given routine's context from their frontmatter, offer the relevant optional ones to the operator, and union the chosen into the routine's existing protocols list. Invoked as a sub-step from a plugin's install/configure skill via Skill dispatch. The routine config and runtime are untouched apart from the flat protocols list. |
 | `lazy-routine.register` | Register a named routine in lazy.settings.json. Type-aware wizard (subprocess / inbox / schedule / git / md-scan). Wraps expert_runtime.register_routine with closed-set validation. Used by plugin install skills. |
 | `lazy-routine.unregister` | Remove a named routine from lazy.settings.json. Wraps expert_runtime.unregister_routine. Protects the built-in lazy-expert.pump routine. |
-| `lazy-runtime.recover` | Recover the lazycortex-core runtime daemon from a halt — either a working-tree halt (uncommitted_changes) or a remote-sync halt (git_pull_diverged, git_push_failed, git_remote_unavailable). Branches on the halt reason: walks the operator through dirt cleanup for tree halts, or through manual repair guidance for remote-sync halts. Atomically clears the daemon_halted block from state.json once the precondition holds. |
 | `lazy-runtime.preflight` | Validate that every routine-dispatched expert is actually launchable — its spawn config is well-formed, its agent / aspects / protocols resolve, and its optional per-expert MCP servers initialize without hanging. Emulates each expert launch with a trivial prompt (no real work), then for a broken config proposes a concrete fix and applies it only after the operator confirms. Run before wiring a new expert or MCP server into a live routine, or when a routine's expert spawns keep timing out. |
+| `lazy-runtime.recover` | Recover the lazycortex-core runtime daemon from a halt — either a working-tree halt (uncommitted_changes) or a remote-sync halt (git_pull_diverged, git_push_failed, git_remote_unavailable). Branches on the halt reason: walks the operator through dirt cleanup for tree halts, or through manual repair guidance for remote-sync halts. Atomically clears the daemon_halted block from state.json once the precondition holds. |
 
 ## Documentation
 
@@ -205,5 +205,6 @@ Invoke skills with slash commands:
 /lazy-routine.offer-protocols
 /lazy-routine.register
 /lazy-routine.unregister
+/lazy-runtime.preflight
 /lazy-runtime.recover
 ```
