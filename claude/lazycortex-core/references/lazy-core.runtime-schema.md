@@ -481,6 +481,28 @@ experts:
 
 Each path (relative to the repo root) is passed as `--mcp-config <path>`; under `--strict-mcp-config` the spawn loads **only** those servers. The referenced files use the standard MCP-config JSON shape. Only headless-safe servers work here (token/env auth, no interactive login, launcher on `PATH`); an interactive-auth server declared this way still blocks. Validate a config's launchability with `/lazy-runtime.preflight` before wiring it into a live routine.
 
+### Settings sources — hermetic by default
+
+Expert spawns always pass `claude -p --setting-sources project,local`, so **operator user-scope settings are never loaded** by default. This is the settings-file analogue of `--strict-mcp-config`: user-scope (`~/.claude/settings.json` and the plugins it enables) is where interactively-oriented operator plugins and their hooks live, and a headless spawn that inherits them can hang. For example a `PostToolUse [*]` hook that blocks on a terminal/OAuth round-trip stalls every tool call until the routine timeout kills the job. Dropping `user` scope keeps the project's own skills / agents / plugins (`project`, `local`) while shedding that ambient risk.
+
+An expert that genuinely needs user-scope settings opts back in explicitly:
+
+```
+experts:
+  <name>:
+    setting_sources: [user, project, local]   # or a comma string "user,project,local"
+```
+
+Valid scopes are exactly `user`, `project`, `local`; anything else is dropped (surfaced as a `warn` by `/lazy-runtime.preflight`). An absent or empty `setting_sources`, or one that leaves no valid scope, resolves to the hermetic `project,local` default — the flag is always emitted, so every expert is hermetic out of the box with no per-expert config, exactly like `--strict-mcp-config`. The default does not touch authentication: OAuth login keeps working.
+
+**`bare` mode (opt-in).** An expert may set `bare: true` to spawn `claude -p --bare` — minimal mode that additionally skips hooks, LSP, plugin sync, attribution, auto-memory, background prefetches, keychain reads, and `CLAUDE.md` auto-discovery. Off by default. `--bare` forces Anthropic auth to be **strictly** `ANTHROPIC_API_KEY` or an `apiKeyHelper` supplied via `--settings` — OAuth and keychain are never read — so a bare spawn without one of those credentials cannot authenticate. `/lazy-runtime.preflight` warns when `bare: true` has no reachable credential.
+
+```
+experts:
+  <name>:
+    bare: true          # requires ANTHROPIC_API_KEY or apiKeyHelper
+```
+
 ---
 
 ## 12. Metrics

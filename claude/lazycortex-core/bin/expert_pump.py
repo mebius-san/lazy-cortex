@@ -515,9 +515,55 @@ def _normalize_mcp_config(mcp_config: str | list[str] | None, repo: Path) -> lis
   return out
 
 
+# Valid `--setting-sources` scopes (claude rejects anything else with
+# "Invalid setting source: … Valid options are: user, project, local").
+_VALID_SETTING_SOURCES = ( "user", "project", "local" )
+# Hermetic default when an expert declares no `setting_sources`: drop `user`
+# scope so interactive operator plugins/hooks (e.g. a Warp PostToolUse hook that
+# blocks a headless spawn on every tool call) never load, while keeping the
+# project's own skills / agents / plugins. Mirrors always-on `--strict-mcp-config`.
+_DEFAULT_SETTING_SOURCES = ( "project", "local" )
+
+
+def _normalize_setting_sources(setting_sources: str | list[str] | None) -> list[str]:
+  """
+  Resolve a per-expert `setting_sources` setting into valid `--setting-sources` scopes.
+
+  Turns an expert's declared setting-source scopes into the value passed on the spawn's
+  command line, falling back to the hermetic `project`, `local` default so the flag is
+  always emitted and every expert is hermetic out of the box.
+
+  Args:
+    setting_sources: The `setting_sources` value from the job's `config.json`
+      (a scope string, a list of them, or None).
+
+  Returns:
+    The resolved scope names in declaration order, never empty.
+  """
+  # guard: no per-expert scopes declared — hermetic default (drop user scope)
+  if not setting_sources:
+    return list(_DEFAULT_SETTING_SOURCES)
+  raw = setting_sources.split(",") if isinstance(setting_sources, str) else list(setting_sources)
+  out: list[str] = []
+  for s in raw:
+    # guard: skip non-string / empty entries defensively
+    if not isinstance(s, str) or not s.strip():
+      continue
+    scope = s.strip().lower()
+    # guard: keep only recognized, de-duplicated scopes
+    if scope in _VALID_SETTING_SOURCES and scope not in out:
+      out.append(scope)
+  # guard: nothing valid survived filtering — fall back to the hermetic default
+  if not out:
+    return list(_DEFAULT_SETTING_SOURCES)
+  return out
+
+
 def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
                       model: str | None, mcp_config: str | list[str] | None,
-                      agent_ref: str, prompt: str) -> list[str]:
+                      agent_ref: str, prompt: str,
+                      setting_sources: str | list[str] | None = None,
+                      bare: bool = False) -> list[str]:
   """
   Assemble the `claude -p` command line for an expert spawn.
 
@@ -525,8 +571,15 @@ def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
   (`~/.claude.json`, project `.mcp.json`) are never inherited — a headless
   daemon spawn has no TTY and would otherwise block on an interactive-auth
   server's initialization until the job times out. MCP servers come only from
-  the per-expert `mcp_config` allow-list, if any. The pump and the launchability
-  preflight share this builder so the probed command line matches the real one.
+  the per-expert `mcp_config` allow-list, if any.
+
+  The spawn also always passes `--setting-sources`, defaulting to `project,local`
+  so operator user-scope settings — where interactive plugins and their hooks
+  live — never load in a headless spawn; an expert opts back into `user` scope
+  explicitly. When `bare` is set the spawn adds `--bare` (minimal mode: no hooks,
+  auto-memory, or keychain reads; auth becomes API-key-only), off by default so
+  an OAuth login keeps working. The pump and the launchability preflight share
+  this builder so the probed command line matches the real one.
 
   Args:
     repo: Repository root the spawn runs inside.
@@ -536,6 +589,8 @@ def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
     mcp_config: Per-expert MCP-config path(s), or None for a hermetic spawn.
     agent_ref: Scoped agent reference the spawn resolves.
     prompt: The user prompt passed to `claude -p`.
+    setting_sources: Per-expert setting scopes, or None for the hermetic `project,local` default.
+    bare: Whether to add `--bare` minimal mode; off by default to preserve OAuth auth.
 
   Returns:
     The full argv list ready for `subprocess.run`.
@@ -546,7 +601,13 @@ def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
   argv = [ "claude", "-p", "--permission-mode", "dontAsk",
            "--output-format", "stream-json", "--verbose",
            "--append-system-prompt-file", str(contract_path),
-           "--strict-mcp-config" ]
+           "--strict-mcp-config",
+           "--setting-sources", ",".join(_normalize_setting_sources(setting_sources)) ]
+  # `--bare` skips hooks / auto-memory / keychain and forces API-key-only auth;
+  # opt-in per expert so the default OAuth-backed spawn is untouched.
+  if bare:
+    # waiver: external Claude Code CLI flag, not an internal key
+    argv.append("--bare")
   for cfg_path in _normalize_mcp_config(mcp_config, repo):
     argv.extend([ "--mcp-config", cfg_path ])
   # Propagate plugin-dir flags so the spawn sees the same plugin tree as the
@@ -603,6 +664,8 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   arguments      = cfg.get(JobConfigKey.ARGUMENTS) or {}
   model          = cfg.get(JobConfigKey.MODEL)
   mcp_config     = cfg.get(JobConfigKey.MCP_CONFIG)
+  setting_sources = cfg.get(JobConfigKey.SETTING_SOURCES)
+  bare           = bool(cfg.get(JobConfigKey.BARE, False))
   # guard: agent reference must be present in config
   if not agent_ref:
     # waiver: one-off human-facing message
@@ -658,7 +721,8 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     n = 0
   attempts_file.write_text(f"{n + 1}\n")
   # The spawn command line — permission mode, hermetic `--strict-mcp-config` +
-  # any per-expert `--mcp-config`, plugin dirs, `--settings` sandbox, model, and
+  # any per-expert `--mcp-config`, hermetic `--setting-sources` + optional
+  # `--bare`, plugin dirs, `--settings` sandbox, model, and
   # `--agent` — is assembled by `build_expert_argv`, shared with the
   # `lazy-runtime.preflight` launchability probe so the probe matches the real spawn.
   # (`agent_path` is still resolved above and used for the read-only check below.)
@@ -666,6 +730,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     repo, env,
     contract_path = contract_path, model = model, mcp_config = mcp_config,
     agent_ref = agent_ref, prompt = prompt,
+    setting_sources = setting_sources, bare = bare,
   )
   proc = subprocess.run(
     claude_argv,

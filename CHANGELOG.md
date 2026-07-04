@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.8.0 — 2026-07-04 UTC
+
+- Expert spawns are now hermetic on settings scope too: by default only project/local settings load (`--setting-sources project,local`), so a stuck user-scope plugin hook can no longer hang a headless expert job the way an interactive-auth MCP server used to. An expert opts back into user-scope settings, or into fully minimal `--bare` mode, per entry under `lazy.settings.json[experts]`; `/lazy-runtime.preflight` reports each expert's effective settings scopes and warns when `bare` runs without an API-key credential.
+
 ### 5.7.0 — 2026-07-03 UTC
 
 - Expert spawns now run fully isolated from ambient MCP servers (`--strict-mcp-config`), fixing headless expert jobs that hung on an interactive-auth MCP server's initialization until they timed out. An expert that genuinely needs specific MCP servers declares them via a new per-expert `mcp_config` field under `lazy.settings.json[experts]`; ambient operator servers (`~/.claude.json`, project `.mcp.json`) are no longer inherited.
