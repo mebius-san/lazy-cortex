@@ -342,7 +342,8 @@ p = Path('<repo-root>/.claude/lazy.settings.json')
 sec = load_tracked_section(p, 'daemon')
 before = dict(sec)
 for k, v in {'git': None, 'polling_interval_sec': 5, 'cleanup_completed_after': '7d',
-             'cleanup_failed_after': '30d', 'cleanup_dead_after': '7d'}.items():
+             'cleanup_failed_after': '30d', 'cleanup_dead_after': '7d',
+             'stream_idle_timeout_sec': 90, 'stream_max_retries': 3}.items():
     sec.setdefault(k, v)
 save_section(p, 'daemon', sec)
 print('daemon: bootstrapped' if sec != before else 'daemon: already-present')

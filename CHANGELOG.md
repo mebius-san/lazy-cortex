@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.8.3 — 2026-07-05 UTC
+
+- New idle-stdout watchdog detects frozen expert-spawn (`claude -p`) runs and kills + retries them instead of hanging the job queue forever, with each stall recorded to the runtime log; retry limit and timeout are tunable via `daemon.stream_idle_timeout_sec` / `daemon.stream_max_retries` (sane defaults, no config required, and a negative retry count no longer breaks the retry loop).
+
 ### 5.8.2 — 2026-07-04 UTC
 
 - Expert spawns now skip the ~40s per-Bash-call overhead from core hooks (git-guard, model-router, check-public, settings-guard, commit-recorder) by default — opt individual hooks back in per expert via `hooks.enabled`. Interactive sessions can also silence any hook for themselves with a root `hooks.disabled` block-list.
