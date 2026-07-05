@@ -34,6 +34,8 @@ The `daemon` key is optional. When absent, no git ops are performed and `polling
 | `cleanup_completed_after` | duration string | `"7d"` | Age after which a completed job dir is deleted. |
 | `cleanup_failed_after` | duration string | `"30d"` | Age after which a failed job dir is deleted. |
 | `cleanup_dead_after` | duration string | `"7d"` | Age after which a DEAD-marked stuck job dir is deleted. DEAD jobs are marked by `expert_pump._detect_dead_jobs` when their PID file references a dead process; the forensic window before cleanup matches `cleanup_completed_after` by default. |
+| `stream_idle_timeout_sec` | int | `90` | Seconds of stdout silence from a `claude -p` expert spawn before it is treated as a frozen stream, its process group killed, and the spawn re-tried. |
+| `stream_max_retries` | int | `3` | Maximum number of in-memory re-spawns on stream-idle-stall before the job is left with a transient error for the next tick. Separate from the on-disk `attempts` counter. |
 | `cleanup_runtime_log_after` | duration string | `"30d"` | Age after which a per-day `.logs/lazy-core/runtime/<date>.jsonl` file is deleted. `tokens.jsonl` is append-only and not subject to this retention — operators rotate it manually. |
 | `loop_detect_window` | int | `threshold * 4` | Number of recent commits to inspect for the per-(author, file) loop-detection heuristic. Must be ≥ `loop_detect_threshold`. Larger values give better accuracy at the cost of a slightly slower `git log` query. |
 
@@ -100,7 +102,9 @@ The daemon reads two flat top-level sections — `daemon` and `routines`. Each c
     "polling_interval_sec": 5,
     "cleanup_completed_after": "7d",
     "cleanup_failed_after": "30d",
-    "cleanup_dead_after": "7d"
+    "cleanup_dead_after": "7d",
+    "stream_idle_timeout_sec": 90,
+    "stream_max_retries": 3
   },
   "routines": {
     "_version": 2,

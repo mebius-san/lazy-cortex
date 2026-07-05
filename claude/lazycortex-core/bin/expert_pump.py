@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,10 +44,22 @@ from constants import (
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from typing import IO
 
 
 JOBS_BASE = ".experts/.jobs"
+
+# Idle-watchdog defaults. A `claude -p` stream whose stdout is silent longer than
+# _STREAM_IDLE_TIMEOUT_DEFAULT seconds is treated as a transient freeze; the spawn's
+# process group is killed and re-spawned up to _STREAM_MAX_RETRIES_DEFAULT times.
+# Both are overridable via daemon.stream_idle_timeout_sec / daemon.stream_max_retries.
+_STREAM_IDLE_TIMEOUT_DEFAULT = 90
+_STREAM_MAX_RETRIES_DEFAULT  = 3
+# Watchdog read-loop poll cadence (seconds): how often the idle timer is re-checked while
+# stdout is silent. Small enough to react promptly, large enough to idle cheaply.
+_WATCHDOG_POLL_SEC = 1.0
+# Grace between SIGTERM and SIGKILL when tearing down a stalled spawn's process group.
+_KILL_GRACE_SEC = 5.0
 
 
 def _pid_alive(pid: int) -> bool:
@@ -621,10 +636,12 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   """
   Run one Claude spawn for a single READY job.
 
-  Exactly one attempt is made — transient failures such as a non-zero exit, a missing
-  response.json, or a SIGTERM from the daemon-level timeout leave the job in a
-  READY+ERROR state for the next pump tick to retry. A successful run that leaves the
-  working tree dirty raises `_ExpertLeftDirtyTree` so the pump halts the queue.
+  A stream-idle stall retries the spawn in-process, starting a fresh session for each
+  attempt, up to the configured stall-retry limit (`daemon.stream_max_retries`, default 3)
+  before the job is left in a READY+ERROR state for the next pump tick to retry. Any other
+  transient failure — a non-zero exit or a missing response.json — still gets exactly one
+  attempt per pump tick before the same READY+ERROR outcome. A successful run that leaves
+  the working tree dirty raises `_ExpertLeftDirtyTree` so the pump halts the queue.
 
   Args:
     repo: Repository root the spawn runs inside.
@@ -634,6 +651,13 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   Raises:
     _ExpertLeftDirtyTree: When the expert exited cleanly but left uncommitted changes.
   """
+  # Idle-watchdog config is read per-job (cheap single-file read) so _process_one keeps
+  # its 3-arg signature — pump()'s call site and the halt-test monkeypatch stay valid.
+  daemon = load_section(repo / SettingsFile.REL, SettingsKey.DAEMON)
+  # waiver: small internal subkey, not a reusable domain key
+  idle_timeout_sec = int(daemon.get("stream_idle_timeout_sec", _STREAM_IDLE_TIMEOUT_DEFAULT))
+  # waiver: small internal subkey, not a reusable domain key
+  max_stall_retries = max(0, int(daemon.get("stream_max_retries", _STREAM_MAX_RETRIES_DEFAULT)))
   # Per-job config.json carries everything the pump needs: agent ref,
   # protocols list (declared by the routine that created this job),
   # git_author for any commits the expert makes. Routine wrote it at
@@ -728,16 +752,41 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     agent_ref = agent_ref, prompt = prompt,
     setting_sources = setting_sources,
   )
-  proc = subprocess.run(
-    claude_argv,
-    env = env, cwd = repo, capture_output = True, text = True, check = False,
-  )
+  # Idle-watchdog + bounded re-spawn. A `claude -p` stream can freeze (no first token,
+  # or mid-response silence) while the API/network hiccups; a single blocking wait would
+  # burn the whole routine timeout on a transient. Each spawn runs under an idle-stdout
+  # watchdog: silence past idle_timeout_sec kills the spawn's process group and we
+  # re-spawn a fresh session (the job dir is untouched — the expert redoes the work
+  # idempotently). These in-memory stall retries are SEPARATE from the on-disk `attempts`
+  # counter the recovery routine reads for permanent-fail decisions.
+  returncode = -1
+  stdout = stderr = ""
+  stalled = False
+  for stall_attempt in range(max_stall_retries + 1):
+    returncode, stdout, stderr, stalled = _spawn_with_idle_watchdog(
+      claude_argv, env = env, cwd = repo, idle_timeout_sec = idle_timeout_sec,
+    )
+    # guard: stream produced output / exited on its own — hand off to the outcome path
+    if not stalled:
+      break
+    _append_stream_stall_log(repo, expert_name, jdir, stall_attempt + 1, idle_timeout_sec)
+    sys.stderr.write(
+      f"stream-idle-stall: {expert_name}/{jdir.name} "
+      f"attempt {stall_attempt + 1}/{max_stall_retries + 1}\n"
+    )
+  # guard: every re-spawn stalled — record a transient error; the next tick re-dispatches
+  if stalled:
+    _write_error(
+      jdir, JobErrorCategory.TRANSIENT,
+      f"stream-idle-stall after {max_stall_retries + 1} spawn(s); no stdout for >{idle_timeout_sec}s",
+    )
+    return
   # Persist the transcript — best-effort, never block DONE on a write failure.
   try:
-    (jdir / JobArtifact.TRANSCRIPT).write_text(proc.stdout or "")
+    (jdir / JobArtifact.TRANSCRIPT).write_text(stdout or "")
   except Exception as e:  # pragma: no cover — defensive
     sys.stderr.write(f"transcript write failed: {e}\n")
-  if proc.returncode == 0:
+  if returncode == 0:
     response_path = jdir / JobFile.RESPONSE
     # Bug 99 fallback: agent exited cleanly but didn't write response.json
     # — recover the JSON object from the final assistant text frame of
@@ -746,13 +795,13 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # gate fails, the pump records a transient error, and the dispatcher
     # re-dispatches until a roll of the dice lands a write-this-time run.
     if not response_path.exists():
-      recovered = _extract_response_from_stdout(proc.stdout or "")
+      recovered = _extract_response_from_stdout(stdout or "")
       if recovered is not None:
         response_path.write_text(json.dumps(recovered, indent = 2))
     if response_path.exists():
       # Token capture is best-effort — never block DONE.
       try:
-        usage = _extract_usage(proc.stdout)
+        usage = _extract_usage(stdout)
         if usage is not None:
           _append_tokens_log(repo, expert_name, usage)
       except Exception as e:  # pragma: no cover — defensive
@@ -763,7 +812,140 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
           raise _ExpertLeftDirtyTree(expert_name, jdir.name, [])
       (jdir / JobMarker.DONE).touch()
       return
-  _write_error(jdir, JobErrorCategory.TRANSIENT, f"exit={proc.returncode} stderr={proc.stderr[-500:]}")
+  _write_error(jdir, JobErrorCategory.TRANSIENT, f"exit={returncode} stderr={stderr[-500:]}")
+
+
+def _pipe_reader(stream: IO[str], tag: str, out_q: queue.Queue) -> None:
+  """
+  Drain one text pipe line-by-line into a shared queue, then post an EOF sentinel.
+
+  Args:
+    stream: Text-mode pipe supplying the lines to forward.
+    tag: Label attached to each queued line and to the EOF sentinel, identifying the source pipe.
+    out_q: Queue receiving `(tag, line)` pairs; a final `(tag, None)` pair marks pipe closure.
+  """
+  try:
+    # waiver: sentinel-terminated readline loop is the stdlib idiom for line streaming
+    for line in iter(stream.readline, ""):
+      out_q.put((tag, line))
+  finally:
+    out_q.put((tag, None))
+    # guard: best-effort close — the child owns the write end and may already be gone
+    try:
+      stream.close()
+    except OSError:
+      pass
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+  """
+  Terminate a spawned expert's process group, escalating SIGTERM to SIGKILL.
+
+  Args:
+    proc: Process handle for the spawned expert whose process group is being torn down.
+  """
+  # guard: process already reaped — nothing to signal
+  if proc.poll() is not None:
+    return
+  try:
+    pgid = os.getpgid(proc.pid)
+  except ProcessLookupError:
+    return
+  try:
+    os.killpg(pgid, signal.SIGTERM)
+  except ProcessLookupError:
+    return
+  try:
+    proc.wait(timeout = _KILL_GRACE_SEC)
+    return
+  except subprocess.TimeoutExpired:
+    pass
+  # guard: SIGTERM ignored within the grace window — force-kill the whole group
+  try:
+    os.killpg(pgid, signal.SIGKILL)
+  except ProcessLookupError:
+    pass
+
+
+def _spawn_with_idle_watchdog(
+  argv: list[str], *, env: dict, cwd: Path, idle_timeout_sec: float,
+) -> tuple[int, str, str, bool]:
+  """
+  Run a `claude -p` spawn under an idle-stdout watchdog.
+
+  Kills the spawn's process group and reports a stall instead of waiting indefinitely when
+  no stdout output arrives within the idle window.
+
+  Args:
+    argv: Full command line for the `claude -p` spawn.
+    env: Environment variables passed to the spawned process.
+    cwd: Working directory the spawn runs inside.
+    idle_timeout_sec: Seconds of stdout silence tolerated before the spawn is treated as stalled.
+
+  Returns:
+    Tuple of the process exit code, captured stdout, captured stderr, and whether the spawn
+    was killed for going idle on stdout past `idle_timeout_sec`.
+  """
+  # start_new_session gives the spawn its own process group, so a stall can be torn down
+  # with os.killpg without signalling the pump itself.
+  # waiver: the process must outlive this call's local scope while its pipes are polled
+  # from reader threads below — a `with` block would tie its lifetime to this statement
+  proc = subprocess.Popen(  # pylint: disable=consider-using-with
+    argv, env = env, cwd = str(cwd),
+    stdout = subprocess.PIPE, stderr = subprocess.PIPE,
+    text = True, start_new_session = True,
+  )
+  line_q: queue.Queue = queue.Queue()
+  # Both pipes are drained on daemon threads so a full OS buffer can never deadlock the
+  # read loop; the idle timer is measured on stdout only (the model's event stream).
+  readers = [
+    threading.Thread(target = _pipe_reader, args = (proc.stdout, "out", line_q), daemon = True),
+    threading.Thread(target = _pipe_reader, args = (proc.stderr, "err", line_q), daemon = True),
+  ]
+  for t in readers:
+    t.start()
+
+  out_parts: list[str] = []
+  err_parts: list[str] = []
+  eof = { "out": False, "err": False }
+  stalled = False
+  last_out = time.monotonic()
+  try:
+    # waiver: "out"/"err" are the two fixed pipe tags used as out_q/eof dict keys — an
+    # Enum would only indirect the same two literals already introduced above
+    while not (eof["out"] and eof["err"]):
+      now = time.monotonic()
+      idle = now - last_out
+      # guard: stdout silent past the idle window while still open — treat as a freeze
+      # waiver: see the "out"/"err" waiver above the enclosing while-loop
+      if not eof["out"] and idle >= idle_timeout_sec:
+        stalled = True
+        break
+      # waiver: 0.05s is a floor so the poll interval never rounds down to a busy-loop
+      poll = max(0.05, min(_WATCHDOG_POLL_SEC, idle_timeout_sec - idle))
+      try:
+        tag, line = line_q.get(timeout = poll)
+      except queue.Empty:
+        continue
+      # guard: EOF sentinel for one pipe
+      if line is None:
+        eof[tag] = True
+        continue
+      # waiver: see the "out"/"err" waiver above the enclosing while-loop
+      if tag == "out":
+        out_parts.append(line)
+        last_out = time.monotonic()
+      else:
+        err_parts.append(line)
+    # guard: a stall means the child is wedged — tear down its group before reaping
+    if stalled:
+      _kill_process_group(proc)
+  except BaseException:
+    # Any unexpected exit must not leave the spawn's group alive.
+    _kill_process_group(proc)
+    raise
+  returncode = proc.wait()
+  return returncode, "".join(out_parts), "".join(err_parts), stalled
 
 
 def _extract_response_from_stdout(stdout: str) -> dict | None:
@@ -953,6 +1135,35 @@ def _append_tokens_log(repo: Path, expert_name: str, usage: dict) -> None:
     "routine": "expert-pump",
     "expert": expert_name,
     **usage,
+  }
+  # waiver: stdlib idiom, not a domain constant
+  with log_path.open("a") as f:
+    f.write(json.dumps(record) + "\n")
+
+
+def _append_stream_stall_log(repo: Path, expert_name: str, jdir: Path, attempt: int, idle_sec: float) -> None:
+  """
+  Append a single stream-idle-stall record to the runtime log.
+
+  Args:
+    repo: Repository root whose log directory receives the record.
+    expert_name: Name of the expert whose spawn stalled.
+    jdir: Path to the job directory being processed when the stall occurred.
+    attempt: One-based count of the spawn attempt that stalled.
+    idle_sec: Seconds of stdout silence that triggered the stall.
+  """
+  # waiver: filesystem path idiom, not a domain constant
+  log_dir = repo / ".logs/lazy-core/runtime"
+  log_dir.mkdir(parents = True, exist_ok = True)
+  # waiver: filesystem path idiom, not a domain constant
+  log_path = log_dir / "stream-stalls.jsonl"
+  record = {
+    "ts": time.time(),
+    "routine": "expert-pump",
+    "expert": expert_name,
+    "job_id": jdir.name,
+    "attempt": attempt,
+    "idle_sec": idle_sec,
   }
   # waiver: stdlib idiom, not a domain constant
   with log_path.open("a") as f:
