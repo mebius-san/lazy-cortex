@@ -61,8 +61,14 @@ source "$script_dir/_ensure_venv.sh"
 # active and before pytest is exec'd, in this same shell so exports are inherited.
 source "$script_dir/_ensure_env.sh"
 
+# Make the re-export dedup plugin importable (it lives beside this script in bin/),
+# appended so the consumer's own PYTHONPATH entries keep precedence, then load it with
+# `-p _pytest_dedup`. It collapses tests collected twice via re-export shims (a test_all.py
+# aggregator + per-package shims) so each test runs once; a no-op in repos without shims.
+export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$script_dir"
+
 if [ -z "$mod" ]; then
-  exec pytest -q tests/
+  exec pytest -q -p _pytest_dedup tests/
 else
-  exec pytest -q "tests/${mod}/"
+  exec pytest -q -p _pytest_dedup "tests/${mod}/"
 fi

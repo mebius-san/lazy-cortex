@@ -83,6 +83,28 @@ Do not run tests before lint and type-check are clean — typing errors mask tes
   - Verbose / fail-fast:             `pytest -vv -x`
 - Use `pytest --collect-only` to verify test discovery before running anything heavy.
 
+## Re-export shim de-duplication (automatic)
+
+`tst-py <module>` scopes a run at the directory level (`pytest tests/<module>/`). In repositories that aggregate their suites through **re-export shims** — a `test_all.py` that star-imports every package, plus per-package shim files that re-export a package's own test classes — each test class is then collected **twice**: once through its own shim and once through the aggregator. Double collection doubles the reported test count and can produce false failures when the repeated instances share mutable state between runs.
+
+The runner loads a small pytest plugin (`bin/_pytest_dedup.py`, injected via `-p _pytest_dedup`) that removes these duplicates automatically — no setting to enable, nothing in `lazy.settings.json`.
+
+### How it works
+
+- On `pytest_collection_modifyitems` the plugin builds a key for each item from the test **function** — its defining module (`function.__module__`), qualified name (`function.__qualname__`), and parametrization id (`callspec.id` when present) — never from the node id. A duplicate's node id differs (it is reached through a different shim file), but `function.__module__` always points at the module where the test is *defined*, so both copies share one key.
+- The first item collected for each key survives; every later duplicate is de-selected (`pytest_deselected` + removal from the item list). The surviving instance is the first in collection order, so run order stays stable and predictable.
+- Non-function items (e.g. `DoctestItem`, which exposes no `function`) are skipped and never de-duplicated.
+
+### Seeing it in the output
+
+When at least one duplicate is removed, the plugin prints one summary line:
+
+```
+[lazy-python] deduplicated N re-exported test items
+```
+
+In a repository **without** re-export shims no key ever repeats, so the plugin is a no-op: the collected-test count is unchanged and the summary line is not printed. Parametrized tests are never collapsed — different parameters yield different keys.
+
 ## Performance / property-based tests
 
 - Use `hypothesis` for property-based testing when appropriate.
