@@ -666,6 +666,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 1.9.1 — 2026-07-06 UTC
+
+- `tst-py` now automatically deduplicates test items collected more than once through re-export shims (e.g. a `test_all.py` aggregator alongside per-package shims), so each test runs exactly once; double-collection order-dependent failures are eliminated with no configuration required.
+
 ### 1.9.0 — 2026-07-06 UTC
 
 - `chk-py`/`tst-py` now source an optional project-declared env script (`python.env_source`) before running checks/tests, so secrets or provider credentials bootstrapped by a project's own shell wrapper are available instead of leaving tests half-configured. `lazy-python.install` will prompt to configure this automatically.

@@ -1,6 +1,6 @@
 {
   "name": "lazycortex-python",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "Python coding discipline as a plugin: shared rules + reference guidelines + chk/tst checkers + PostToolUse hook + docstring-writer/test-writer agents + canonical file template. Installs once per repo via /lazy-python.install.",
   "dependencies": ["lazycortex-core"],
   "author": {
