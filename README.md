@@ -63,7 +63,7 @@ See [`claude/lazycortex-observe/`](claude/lazycortex-observe/) for details.
 
 Obsidian vault bootstrap and configuration management for Claude Code
 
-Ships 7 skills, 1 agent, 1 command, and 2 hooks.
+Ships 7 skills, 1 agent, 1 command, and 1 hook.
 
 Requires: lazycortex-core
 
