@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, and writer agents.
-last_regen: 2026-06-27
+last_regen: 2026-07-06
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Decision-tree routing install/audit/check-style/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, wrapper-cannot-locate-plugin-post-bump); audit branch splits on check number (check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
+  request: "Decision-tree routing install/audit/check-style/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-locate-plugin-post-bump); audit branch splits on check number (check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
   kind_hint: decision-tree
 source_skills:
   - lazy-python.install
@@ -82,6 +82,16 @@ source_skills:
 **Likely cause**: Phase 6 dispatches `lazy-core.scaffold-sync`. If `lazycortex-core` is not installed or its `scaffold-sync` skill is not reachable, the registry entry in `.claude/rules/lazy-core.scaffold.md` is never written.
 
 **Fix**: Verify `lazycortex-core` is installed and enabled, then re-run `/lazy-python.install`. Phase 6 will retry the `scaffold-sync` dispatch and upsert the `python-template.py` entry.
+
+---
+
+## `chk-py` / `tst-py` seem to run against the wrong Python or environment
+
+**Symptom**: Style, type, or test runs behave as though a different environment is active than expected — for example `mypy` / `pylint` report against packages that don't match what's installed in the repo's own `.venv`, or a secret / credential from an unrelated bootstrap script shows up during a run.
+
+**Likely cause**: Two resolvers run back-to-back before every `chk-py` / `tst-py` invocation. `_ensure_venv.sh` picks the Python venv first (active `$VIRTUAL_ENV`, then `<repo>/.venv`, then a `pyproject.toml`-configured path, then a fallback bootstrap). Immediately after, `_ensure_env.sh` sources whichever script is on record as `python.env_source`. `/lazy-python.install` Step 7 records that key automatically when it finds exactly one candidate bootstrap script (`cli/env`, `.env.sh`, `scripts/env.sh`) — but when a repo ships more than one candidate and nothing is recorded yet, the value stays unset until you disambiguate, and any checker run in the meantime sources none of them (or picks up stray state from your shell instead).
+
+**Fix**: Re-run `/lazy-python.install`. If `python.env_source` has not been recorded yet, Step 7 detects the multiple candidates and asks — via `AskUserQuestion`, naming each script — which one your project actually uses (with a `skip` option). Pick the correct script; the install records it, and every subsequent `chk-py` / `tst-py` run sources it automatically alongside the resolved venv. A value already on record is never silently replaced — the disambiguation only fires when nothing is recorded yet, so if the repo's bootstrap script layout changed since the last recorded choice, confirm which script your project intends before re-running.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, tests, and the checker stack.
-last_regen: 2026-06-27
+last_regen: 2026-07-06
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -41,6 +41,14 @@ Not for most of the checker stack. `pch.py` (the PyCharm inspection phase) requi
 ## `/lazy-python.audit` warns about the venv (Check 11). How do I fix it?
 
 Check 11 warns when no usable venv is found and bootstrapping one is not possible (e.g. `uv` is not on `$PATH`). Re-running `/lazy-python.install` re-probes the venv chain and attempts to bootstrap the plugin-local fallback venv under `${CLAUDE_PLUGIN_DATA}/venv`. If `uv` is available when you re-run, the venv is created automatically. If it is not, install `uv` first (`pip install uv` or the standalone installer), then re-run the install.
+
+---
+
+## How does `chk-py` decide which Python environment to use?
+
+Every `chk-py` and `tst-py` invocation resolves the venv chain first, in order: an already-activated `$VIRTUAL_ENV`, then `<repo>/.venv`, then a path configured under `[tool.lazy-python]` in `pyproject.toml`, then the plugin-local fallback venv created or augmented on first run. Once a venv is active, the wrappers separately check `python.env_source` in `.claude/lazy.settings.json` — if it names a repo-specific bootstrap script, that script is sourced in the same shell before any checker or `pytest` runs, so provider credentials or secret-path exports your project depends on are in place first.
+
+`python.env_source` is not something you set by hand: `/lazy-python.install` Step 7 detects a recognised bootstrap script (`cli/env`, `.env.sh`, or `scripts/env.sh`) in your repo and records it automatically. Zero or one candidate is handled silently; if more than one is found, install asks once which script to use. A value already on record is never re-asked or overwritten, and no audit check inspects it — recording `python.env_source` is an install-time convenience, not a verified invariant.
 
 ---
 

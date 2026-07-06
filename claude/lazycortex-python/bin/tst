@@ -1,8 +1,9 @@
 #!/usr/bin/env zsh
 # tst — Python test runner for the lazycortex-python plugin.
 #
-# Sources the shared venv (mypy/pylint/pytest), then runs pytest scoped to
-# the requested module under tests/<module>/, or all tests if no arg given.
+# Sources the shared venv (mypy/pylint/pytest), then the optional project-env
+# bootstrap (python.env_source in .claude/lazy.settings.json), then runs pytest
+# scoped to the requested module under tests/<module>/, or all tests if no arg given.
 #
 # Usage:
 #   tst                  # run pytest across all tests/ subdirs
@@ -56,6 +57,9 @@ while [ -n "${1-}" ]; do
 done
 
 source "$script_dir/_ensure_venv.sh"
+# Optional project-env bootstrap (python.env_source) — must run after the venv is
+# active and before pytest is exec'd, in this same shell so exports are inherited.
+source "$script_dir/_ensure_env.sh"
 
 if [ -z "$mod" ]; then
   exec pytest -q tests/

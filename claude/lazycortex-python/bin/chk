@@ -3,7 +3,9 @@
 #
 # Dispatches subcommands that run the shipped style/type checkers against
 # project source roots. Exclusions and project-specific paths come from the
-# consumer's pyproject.toml — the script itself is project-neutral.
+# consumer's pyproject.toml — the script itself is project-neutral. Before a
+# checker runs, ensure_venv also sources the optional project-env bootstrap
+# (python.env_source in .claude/lazy.settings.json) so import-time env reads work.
 #
 # Subcommands:
 #   all        run the canonical pipeline: pcf, toi, cmp, mypy, ruff, pylint
@@ -28,9 +30,19 @@ set -o pipefail
 # directory containing the script
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 
-# bootstrap (or reuse) the shared venv; exports PATH with venv/bin first
-ensure_venv() {
+# bootstrap (or reuse) the shared venv; exports PATH with venv/bin first.
+# _ensure_venv.sh early-returns on a probe hit — wrapping it in its own function
+# keeps that `return` scoped to the wrapper so the env-source hook below still runs.
+_activate_venv() {
   source "$script_dir/_ensure_venv.sh"
+}
+
+# activate the venv, then source the optional project-env bootstrap
+# (python.env_source) so checkers that import env-reading modules at import time
+# see the fully-configured environment.
+ensure_venv() {
+  _activate_venv
+  source "$script_dir/_ensure_env.sh"
 }
 
 function print_help()

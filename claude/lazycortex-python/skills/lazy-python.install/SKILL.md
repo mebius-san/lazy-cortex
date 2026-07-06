@@ -1,18 +1,18 @@
 ---
 name: lazy-python.install
-description: Quiet install that wires lazycortex-python into a consumer repo — mirrors rules, deploys chk-py / tst-py wrappers, bootstraps the pyproject.toml checker stack, scaffolds project overlay guidelines, and syncs the scaffold template. Asks the user nothing: install scope is derived, `pch` (PyCharm offline inspections) follows whether `inspect.sh` is present, and it never touches CLAUDE.md (the plugin rules load from `.claude/rules/` regardless). The PostToolUse check-style hook auto-registers from the plugin manifest — no install step writes to settings.json.
+description: Quiet install that wires lazycortex-python into a consumer repo — mirrors rules, deploys chk-py / tst-py wrappers, bootstraps the pyproject.toml checker stack, scaffolds project overlay guidelines, syncs the scaffold template, and records python.env_source when the repo ships an env-bootstrap script. Asks the user almost nothing: install scope is derived, `pch` (PyCharm offline inspections) follows whether `inspect.sh` is present, and it never touches CLAUDE.md (the plugin rules load from `.claude/rules/` regardless); the only prompt beyond a File-sync conflict is disambiguating multiple env_source candidates. The PostToolUse check-style hook auto-registers from the plugin manifest — no install step writes to settings.json.
 allowed-tools: Bash, Read, Edit, Write, Glob, Grep, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet
 user-invocable: true
 ---
 # Install lazycortex-python
 
-Idempotent and quiet install (plus a log write). Mirrors the three plugin rules into `.claude/rules/`, deploys the `chk-py` / `tst-py` wrappers into `cli/`, bootstraps the checker sections of `pyproject.toml` (including `[tool.pch]` when PyCharm is present), scaffolds project-overlay guideline stubs, and syncs the scaffold template. Every file it writes follows the File-sync policy below — silent on a clean write or merge, asking only on a genuine conflict. It asks the user nothing else: install scope and `pch` enablement are derived, and it never touches `CLAUDE.md`. The Python ≥ 3.12 floor is owned by `/lazy-core.install` and not re-probed here. Safe to re-run after every plugin update.
+Idempotent and quiet install (plus a log write). Mirrors the three plugin rules into `.claude/rules/`, deploys the `chk-py` / `tst-py` wrappers into `cli/`, bootstraps the checker sections of `pyproject.toml` (including `[tool.pch]` when PyCharm is present), scaffolds project-overlay guideline stubs, syncs the scaffold template, and records `python.env_source` when the repo ships an env-bootstrap script. Every file it writes follows the File-sync policy below — silent on a clean write or merge, asking only on a genuine conflict. It asks the user almost nothing: install scope and `pch` enablement are derived, and it never touches `CLAUDE.md`; the sole extra prompt is disambiguating multiple `env_source` candidates in Step 7. The Python ≥ 3.12 floor is owned by `/lazy-core.install` and not re-probed here. Safe to re-run after every plugin update.
 
 The PostToolUse check-style hook auto-registers from the plugin's `hooks/hooks.json` when the plugin is enabled — no install step writes to the consumer's settings.json.
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Mirror plugin rules into .claude/rules/`
@@ -21,7 +21,8 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 4 — Bootstrap pyproject.toml checker sections (pch gated on PyCharm presence)`
    - `Step 5 — Scaffold project overlay guidelines under docs/guidelines/`
    - `Step 6 — Sync scaffold templates via lazy-core.scaffold-sync`
-   - `Step 7 — Log the run`
+   - `Step 7 — Record python.env_source when a project env script is present`
+   - `Step 8 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`installed`, `unchanged`, `merged`, `wrappers-deployed-2`, `already-present`, …).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
@@ -32,7 +33,7 @@ This skill is **idempotent and quiet on re-run**. Every choice it makes is read 
 
 - **Plugin enabled = full functionality.** An enabled plugin installs its whole surface. There is no per-file "install this?" prompt and no per-artifact opt-in — wanting the plugin means wanting its rules, wrappers, checker stack, overlays, and template.
 - **Install scope is derived, not asked.** Read the `scope` field of the `lazycortex-python@lazycortex` entries in `~/.claude/plugins/installed_plugins.json`. If both `user` and `project` appear, default to `project` silently. Never ask user-vs-project.
-- **This skill asks the user nothing.** It does not touch `CLAUDE.md` (the plugin rules load from `.claude/rules/` regardless, so a pointer would be redundant). Everything is derived: install scope (above), and `pch` (PyCharm offline inspections) follows `inspect.sh` presence — Step 3 probes for PyCharm, Step 4 deploys `[tool.pch]` when it is found and omits it otherwise, with no prompt and no persisted flag. The only `AskUserQuestion` that can ever fire is a genuine File-sync case-3 conflict (below).
+- **This skill asks the user almost nothing.** It does not touch `CLAUDE.md` (the plugin rules load from `.claude/rules/` regardless, so a pointer would be redundant). Everything is derived: install scope (above), and `pch` (PyCharm offline inspections) follows `inspect.sh` presence — Step 3 probes for PyCharm, Step 4 deploys `[tool.pch]` when it is found and omits it otherwise, with no prompt and no persisted flag. Only two `AskUserQuestion`s can ever fire: a genuine File-sync case-3 conflict (below), and — in Step 7 only — the disambiguation prompt when **more than one** `python.env_source` candidate script is present. Zero or one candidate is handled silently; a recorded value is never re-asked.
 
 The Python ≥ 3.12 floor is owned by `/lazy-core.install` (its single Step 0 probe). This skill MUST NOT re-probe the floor — there is no Python-version question here.
 
@@ -138,7 +139,34 @@ The skill discovers `<installPath>/templates/python/scaffold.entries.json`, copi
 
 Outcome: the `scaffold-sync` report — per-template copy state (`installed` / `unchanged` / `merged` / `updated` / `kept-local`) plus the registry upsert status (`registered` / `unchanged` / `created-and-registered`).
 
-## Step 7: Log the run
+## Step 7: Record python.env_source when a project env script is present
+
+`python.env_source` (in `<consumer>/.claude/lazy.settings.json`) names a shell script that `chk-py` / `tst-py` source after the venv is active — so a repo that bootstraps its environment (secret paths, provider credentials) from its own wrapper keeps working under the plugin runners. This step records that key when the repo ships a recognised bootstrap script, and never overwrites a value already on record.
+
+Run phase6:
+
+```
+Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase6 ${CLAUDE_PROJECT_DIR})
+```
+
+The phase reads the current value and probes the candidate scripts (`cli/env`, `.env.sh`, `scripts/env.sh`), then emits one outcome:
+
+- `env-source-already-set` — a value is on record → nothing written (never overwritten).
+- `env-source-no-candidate` — no bootstrap script found → nothing written.
+- `env-source-recorded: <path>` — exactly one candidate found (or a disambiguated choice supplied) → recorded silently.
+- `env-source-multiple: <a>,<b>[,…]` — several candidates found → the phase wrote nothing. `AskUserQuestion` naming the file, listing each candidate plus a `skip` option. On a chosen candidate, re-run phase6 with it so the value is recorded:
+
+  ```
+  Bash(LAZY_PYTHON_ENV_SOURCE=<chosen> python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase6 ${CLAUDE_PROJECT_DIR})
+  ```
+
+  On `skip`, write nothing.
+
+The zero- and single-candidate paths are silent; the only prompt this step can raise is the multiple-candidate disambiguation.
+
+Outcome: `env-source-already-set` / `env-source-no-candidate` / `env-source-recorded:<path>` / `env-source-skipped-per-user-choice`.
+
+## Step 8: Log the run
 
 Log to `./.logs/claude/lazy-python.install/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha`, `git_branch`, `date`, `input` frontmatter).
 

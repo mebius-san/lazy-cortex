@@ -10,6 +10,7 @@ Phases:
   phase3 — bootstrap consumer pyproject.toml with checker sections
   phase4 — probe for PyCharm inspect.sh CLI (pch prereq)
   phase5 — scaffold project overlay guidelines under docs/guidelines/
+  phase6 — record python.env_source when the repo ships an env-bootstrap script
 
 Scaffold-template sync (formerly phase6) is no longer a phase here — the install
 skill's Step 6 dispatches `lazycortex-core:lazy-core.scaffold-sync`, which copies
@@ -24,6 +25,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+import json
 import os
 import shutil
 import stat
@@ -298,6 +300,106 @@ class Phase5Overlay:
     )
 
 
+# ----------------------------------------------------------------------------------------
+class Phase6EnvSource:
+  """
+  Install phase that records `python.env_source` in the consumer's `lazy.settings.json`
+  when the repo ships a recognised environment-bootstrap script.
+
+  `python.env_source` names a shell script that `chk-py` / `tst-py` source after the venv is
+  active, so a project that exports secret paths or provider credentials from its own wrapper
+  keeps working under the plugin runners. This phase never overwrites a value already on record.
+
+  Notes:
+    - A value already on record is left untouched and reported as `env-source-already-set`.
+    - When `LAZY_PYTHON_ENV_SOURCE` is set, its value is recorded as the skill's disambiguated choice.
+    - Exactly one detected candidate script is recorded silently.
+    - Multiple candidates are reported without recording so the caller can disambiguate.
+    - No candidates leaves the settings file unchanged.
+
+  Attributes:
+    consumer_dir: Root directory of the consumer repository being installed into.
+    settings: Path to the consumer's `.claude/lazy.settings.json` file.
+  """
+
+  CANDIDATES = ("cli/env", ".env.sh", "scripts/env.sh")
+  OVERRIDE_ENV = "LAZY_PYTHON_ENV_SOURCE"
+
+  def __init__(self, *, consumer_dir: Path) -> None:
+    self.consumer_dir: Path = consumer_dir
+    self.settings: Path = consumer_dir / ".claude/lazy.settings.json"
+
+  def run(self) -> int:
+    """
+    Record `python.env_source` per the phase's decision rule and emit an outcome word.
+
+    Returns:
+      0 always; a missing or unwritten value is a benign no-op, not a failure.
+    """
+    # guard: a recorded value is authoritative — never overwrite it
+    if self._already_set():
+      print("env-source-already-set")
+      return 0
+
+    override = os.environ.get(self.OVERRIDE_ENV)
+    # guard: the skill passes an explicit choice back when it disambiguated multiple candidates
+    if override:
+      self._record(override)
+      print(f"env-source-recorded: {override}")
+      return 0
+
+    found = [c for c in self.CANDIDATES if (self.consumer_dir / c).is_file()]
+    # guard: nothing to offer — leave settings untouched
+    if not found:
+      print("env-source-no-candidate")
+      return 0
+    if len(found) == 1:
+      self._record(found[0])
+      print(f"env-source-recorded: {found[0]}")
+      return 0
+    print("env-source-multiple: " + ",".join(found))
+    return 0
+
+  def _already_set(self) -> bool:
+    """
+    Report whether an `env_source` key is already present under the `python` section.
+
+    Returns:
+      True when the section carries an `env_source` key (any value), otherwise False.
+    """
+    section = self._load().get("python")
+    return isinstance(section, dict) and "env_source" in section
+
+  def _load(self) -> dict:
+    """
+    Read the consumer's tracked settings file, tolerating an absent or empty file.
+
+    Returns:
+      The parsed settings mapping, or an empty mapping when the file is missing or blank.
+    """
+    # guard: absent settings file → empty mapping (first-write path)
+    if not self.settings.exists():
+      return {}
+    return json.loads(self.settings.read_text(encoding = "utf-8") or "{}")
+
+  def _record(self, path: str) -> None:
+    """
+    Persist `path` as `python.env_source`, preserving every other section verbatim.
+
+    Args:
+      path: Repo-relative (or absolute) path to the environment-bootstrap script to record.
+    """
+    data = self._load()
+    section = data.get("python")
+    # guard: preserve a pre-existing python section that lacks env_source
+    if not isinstance(section, dict):
+      section = {}
+    section["env_source"] = path
+    data["python"] = section
+    self.settings.parent.mkdir(parents = True, exist_ok = True)
+    self.settings.write_text(json.dumps(data, indent = 2) + "\n", encoding = "utf-8")
+
+
 def main() -> int:
   """
   Dispatch a single named phase against a consumer repository directory.
@@ -317,6 +419,7 @@ def main() -> int:
     "phase3": Phase3Pyproject,
     "phase4": Phase4Pch,
     "phase5": Phase5Overlay,
+    "phase6": Phase6EnvSource,
   }
   handler = phases.get(phase)
   if handler is None:

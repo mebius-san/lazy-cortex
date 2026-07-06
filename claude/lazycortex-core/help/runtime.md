@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Register, unregister, preflight, and recover routines in the per-repo serial daemon — five routine types keep the async team running in order, with a validator that catches broken expert configs before they run live.
-last_regen: 2026-07-04
+last_regen: 2026-07-06
 diagram_spec:
   anchor: "Runtime lifecycle"
   request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers an uncommitted_changes halt; a failed remote sync triggers a git_pull_diverged / git_push_failed / git_remote_unavailable halt; /lazy-runtime.recover (commit/stash/discard/abort for tree halts; manual-fix + resume for remote-sync halts) cleans the precondition and resumes; unregister removes a routine from the loop."
@@ -62,6 +62,8 @@ For remote-sync halts (`git_pull_diverged`, `git_push_failed`, `git_remote_unava
 
 After you confirm, the skill clears the halt block. It runs no git commands itself — the next daemon tick re-evaluates the actual git state. If the halt re-fires immediately, the underlying issue was not fully resolved; reinspect and address the root cause before re-running `/lazy-runtime.recover`.
 
+Once the daemon is back on its feet and its next push actually advances `origin/<base_branch>` — whether that push is a plain fast-forward or the result of a post-rebase retry — an optional `daemon.git.post_push_hook` fires. Set it as a shell command in the `daemon.git` block of `lazy.settings.json` and the daemon runs it via `sh -c` from the repo root with `LAZY_PUSH_REPO`, `LAZY_PUSH_BRANCH`, `LAZY_PUSH_REMOTE`, `LAZY_PUSH_OLD_SHA`, and `LAZY_PUSH_NEW_SHA` in its environment — enough to trigger a deploy, ping a channel, or kick off any other post-push automation keyed to what just moved. The hook is crash-isolated from the daemon's own tick: a non-zero exit, a timeout past `post_push_timeout_sec` (30 seconds by default), or a spawn failure is journaled but never halts the daemon, retries the push, or fails the tick. It also never fires on a tick where nothing was actually pushed — an in-sync tick, the already-published fallthrough, and a discarded rebase-conflict retry all skip it.
+
 If a routine's expert keeps timing out after a halt, or you suspect the underlying config rather than a one-off dirty tree, run `/lazy-runtime.preflight` on that expert to confirm the launch actually succeeds before you re-enable the routine.
 
 ## Common adjustments
@@ -78,6 +80,7 @@ If a routine's expert keeps timing out after a halt, or you suspect the underlyi
 - **Narrow an `md-scan` to specific frontmatter states** — the `filter` field accepts a composite filter block; `null` in the `in` list matches files where the key is absent entirely, so `{"frontmatter": {"request_status": {"in": [null, "draft"], "not_in": []}}}` catches both new files and in-progress ones.
 - **Route a routine's jobs to a remote repo's expert** — use `<expert>@<repo>` in the `expert` field when registering. The target repo must be registered in `lazy.settings.json` and reachable from the daemon's working directory.
 - **Halt re-fires immediately after resume** — if a remote-sync halt returns on the very next daemon tick, the underlying condition was not fully resolved. Run `git fetch origin <branch>; git log --oneline HEAD origin/<branch>` and address the actual cause before re-running `/lazy-runtime.recover`.
+- **Run something after every daemon push** — set `daemon.git.post_push_hook` (and optionally `post_push_timeout_sec`) in the `daemon.git` block of `lazy.settings.json`. It only fires on a push that actually advances `origin/<base_branch>`; a failing or hanging hook is journaled and never affects the daemon's own tick, so it is safe to point at flaky external automation.
 
 ## Runtime lifecycle
 

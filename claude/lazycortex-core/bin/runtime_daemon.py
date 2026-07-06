@@ -39,6 +39,8 @@ if TYPE_CHECKING:
 # default per-routine subprocess timeout; overridable per-routine via routines[<name>].timeout_sec
 DEFAULT_TIMEOUT_SEC = 300
 POST_TICK_MAX_PUSH_ATTEMPTS = 3
+# default wall-clock cap for the operator's post-push hook; overridable via daemon.git.post_push_timeout_sec
+DEFAULT_POST_PUSH_TIMEOUT_SEC = 30
 # Hourly throttle for runtime-log + worktree cleanup (seconds).
 _CLEANUP_INTERVAL_SEC = 3600
 # A tick faster than this with no work done is treated as quiet (not log-worthy).
@@ -1221,6 +1223,53 @@ def _git_pre(repo_root: Path, git_cfg: dict | None) -> None:
   )
 
 
+def _run_post_push_hook(repo_root: Path, git_cfg: dict, branch: str, old_sha: str) -> None:
+  """
+  Run the operator's post-push hook after a push that advanced the remote, isolated from daemon health.
+
+  Executes the `daemon.git.post_push_hook` shell command with the push context exposed through
+  `LAZY_PUSH_*` environment variables. Every failure mode — non-zero exit, timeout, spawn error — is
+  caught and logged as a journal record; nothing propagates to the caller.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is driving.
+    git_cfg: Sub-section of `daemon.git` from `lazy.settings.json`.
+    branch: The branch that was just pushed.
+    old_sha: The `origin/<branch>` tip observed before the push.
+  """
+  cmd = git_cfg.get(GitConfigKey.POST_PUSH_HOOK)
+  # guard: hook not configured
+  if not cmd:
+    return
+  # waiver: blanket except is the isolation contract — the hook must never affect daemon health
+  try:
+    timeout = max(1, int(git_cfg.get(GitConfigKey.POST_PUSH_TIMEOUT_SEC, DEFAULT_POST_PUSH_TIMEOUT_SEC)))
+    new_sha = _run_git_capture(repo_root, [ "rev-parse", "HEAD" ])
+    env = {
+      **os.environ,
+      "LAZY_PUSH_REPO": str(repo_root),
+      "LAZY_PUSH_BRANCH": branch,
+      "LAZY_PUSH_REMOTE": "origin",
+      "LAZY_PUSH_OLD_SHA": old_sha,
+      "LAZY_PUSH_NEW_SHA": new_sha,
+    }
+    proc = subprocess.run(
+      [ "sh", "-c", cmd ], cwd = repo_root, env = env, timeout = timeout,
+      check = False, stdout = subprocess.DEVNULL, stderr = subprocess.DEVNULL,
+    )
+    # guard: hook failed — journal visibility only, no incident, no halt
+    if proc.returncode != 0:
+      _log_routine_result(repo_root, {
+        TickResultKey.NAME: "_post_push_hook", TickResultKey.EXIT: 0, TickResultKey.DURATION_SEC: 0.0,
+        TickResultKey.ERROR: f"post-push hook exited {proc.returncode}",
+      })
+  except Exception as exc:
+    _log_routine_result(repo_root, {
+      TickResultKey.NAME: "_post_push_hook", TickResultKey.EXIT: 0, TickResultKey.DURATION_SEC: 0.0,
+      TickResultKey.ERROR: f"post-push hook failed: {exc}",
+    })
+
+
 def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
   """
   Perform the daemon's post-iteration push, with conflict-aware retry.
@@ -1228,7 +1277,8 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
   Fetches, compares local against origin, and either fast-forwards a push or rebases on top of new
   origin commits and re-pushes. A rebase conflict with operator commits is resolved by discarding
   the current tick's work and resetting to origin — the next tick re-runs the routine on the fresh
-  operator state.
+  operator state. After a push that advances the remote, the operator's post-push hook runs (see
+  _run_post_push_hook).
 
   Args:
     repo_root: Absolute path to the repository the daemon is driving.
@@ -1264,10 +1314,11 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
       # local is strictly ahead of origin (no operator commits in the gap) → fast-forward push
       try:
         _run_git(repo_root, [ "push", "origin", branch ])
-        return
       except subprocess.CalledProcessError:
         # race: operator pushed between our fetch and our push; retry
         continue
+      _run_post_push_hook(repo_root, git_cfg, branch, old_sha = remote)
+      return
 
     if base == local:
       # origin moved forward but contains nothing of ours — our local HEAD became an ancestor of
@@ -1294,11 +1345,12 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
     # rebase clean — push the rebased commits
     try:
       _run_git(repo_root, [ "push", "origin", branch ])
-      return
     except subprocess.CalledProcessError:
       # race again: another operator push slid in between our rebase and our push; retry the whole
       # loop
       continue
+    _run_post_push_hook(repo_root, git_cfg, branch, old_sha = remote)
+    return
 
   raise GitPushFailed(
     f"push to origin/{branch} failed after {POST_TICK_MAX_PUSH_ATTEMPTS} attempts"

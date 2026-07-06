@@ -1,10 +1,10 @@
 ---
 chapter_type: walkthrough
 summary: Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation, and fix them in committed chunks.
-last_regen: 2026-06-27
+last_regen: 2026-07-06
 diagram_spec:
   anchor: "Migration flow"
-  request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install runs 7 ordered phases fully automatically (mirror rules, deploy wrappers, detect PyCharm, bootstrap pyproject.toml with [tool.pch] when PyCharm present, scaffold overlay, sync scaffold template, log) → user runs chk-py all -q → six-step gate surfaces existing violations → user fixes violations in chunks and commits iteratively until chk-py all exits clean"
+  request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install runs 8 ordered steps fully automatically (mirror rules, deploy wrappers, detect PyCharm, bootstrap pyproject.toml with [tool.pch] when PyCharm present, scaffold overlay, sync scaffold template, record python.env_source with a one-time disambiguation prompt only when multiple bootstrap-script candidates exist, log) → user runs chk-py all -q → six-step gate surfaces existing violations → user fixes violations in chunks and commits iteratively until chk-py all exits clean"
   kind_hint: sequence
 source_skills:
   - lazy-python.install
@@ -28,7 +28,7 @@ After this walkthrough you have:
 - `lazycortex-python@lazycortex` installed and enabled — `enabledPlugins` in your `~/.claude/settings.json`.
 - Python 3 reachable on `$PATH`.
 - Write access to the repo root (`pyproject.toml`, `.gitignore`, `cli/`, `docs/guidelines/`, `.claude/`).
-- A `pyproject.toml` at the repo root — even a minimal one. If the repo predates `pyproject.toml`, create a stub with `[project]` before running the install; Phase 4 merges checker sections into it without replacing consumer sections.
+- A `pyproject.toml` at the repo root — even a minimal one. If the repo predates `pyproject.toml`, create a stub with `[project]` before running the install; Step 4 merges checker sections into it without replacing consumer sections.
 
 ## The journey
 
@@ -40,11 +40,11 @@ In your Claude Code session, with the repo open, invoke:
 /lazy-python.install
 ```
 
-The install runs 7 ordered phases automatically and asks you nothing. Install scope is derived from your `installed_plugins.json` entry. PyCharm support (`pch`) is derived from whether `inspect.sh` is present on the machine — Phase 3 probes for it, Phase 4 deploys `[tool.pch]` in `pyproject.toml` only when PyCharm is actually available. The install never touches `CLAUDE.md` (the plugin rules load from `.claude/rules/` automatically once the plugin is enabled).
+The install runs 8 ordered steps automatically and asks you almost nothing. Install scope is derived from your `installed_plugins.json` entry. PyCharm support (`pch`) is derived from whether `inspect.sh` is present on the machine — Step 3 probes for it, Step 4 deploys `[tool.pch]` in `pyproject.toml` only when PyCharm is actually available. Step 7 records `python.env_source` in `.claude/lazy.settings.json` when your repo ships a recognised bootstrap script (`cli/env`, `.env.sh`, `scripts/env.sh`) — zero or one candidate is handled silently, and more than one triggers a one-time disambiguation prompt naming each candidate. That prompt, plus a genuine File-sync conflict, are the only two questions this install ever raises. The install never touches `CLAUDE.md` (the plugin rules load from `.claude/rules/` automatically once the plugin is enabled). The full per-step breakdown lives in the **install-and-audit** block chapter; this walkthrough only needs the outcome.
 
-Every phase is idempotent — safe to re-run if interrupted.
+Every step is idempotent — safe to re-run if interrupted.
 
-**Verification gate**: the install ends with a one-line-per-phase report. Confirm each phase shows an outcome word: `mirrored-3`, `wrappers-deployed-2 + gitignore-ensured`, `pch-ready` or `pch-missing-inspect-sh`, `pyproject-bootstrapped`, and so on. If any line shows `ERROR` or is missing, see the troubleshooting doc before proceeding.
+**Verification gate**: the install ends with a one-line-per-step report. Confirm each step shows an outcome word: `mirrored-3`, `wrappers-deployed-2 + gitignore-ensured`, `pch-ready` or `pch-missing-inspect-sh`, `pyproject-bootstrapped`, an `env-source-*` outcome, and so on. If any line shows `ERROR` or is missing, see the troubleshooting doc before proceeding.
 
 ### Step 2 — Take a full violation inventory
 
@@ -130,3 +130,35 @@ If you added project-specific conventions during remediation — naming patterns
 To verify the installation stays healthy over time, run `/lazy-python.audit` at any point — no writes, no prompts, 11 checks, one report.
 
 ## Migration flow
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
+sequenceDiagram
+  participant user as User
+  participant installer as lazy-python.install
+  participant repo as Repository
+  participant chkPy as chk-py Gate
+
+  user->>installer: invoke /lazy-python.install
+  installer->>repo: mirror rules
+  installer->>repo: deploy wrappers
+  Note over installer: detect PyCharm
+  alt PyCharm present
+    installer->>repo: bootstrap pyproject.toml with tool.pch section
+  end
+  installer->>repo: scaffold overlay
+  installer->>repo: sync scaffold template
+  alt multiple bootstrap-script candidates
+    installer->>user: one-time disambiguation prompt
+    user-->>installer: bootstrap script selection
+  end
+  installer->>repo: record python.env_source
+  installer->>repo: log install run
+  user->>chkPy: run chk-py all -q
+  chkPy-->>user: six-step gate surfaces existing violations
+  loop fix violations in chunks and commit iteratively
+    user->>repo: fix violations chunk and commit
+    user->>chkPy: re-run chk-py all -q
+  end
+  chkPy-->>user: chk-py all exits clean
+```

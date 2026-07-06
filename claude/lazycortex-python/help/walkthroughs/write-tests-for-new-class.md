@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all seven Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-06-27
+last_regen: 2026-07-06
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads); agent writes test file covering all 7 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module; agent logs the run. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -28,6 +28,7 @@ After completing this walkthrough you have:
 - A Python class whose public API has docstrings. The agent derives every testable claim from docstrings (Summary, Guarantees, Args, Returns, Raises) — a class without docstrings produces shallow tests. If the class has no docstrings yet, dispatch `lazy-python.docstring-writer` first.
 - Your source tree following the standard mirrored layout (`src/<module>/<file>.py` → `tests/<module>/<file>.py`). The agent uses this convention to place the generated test file. If your project uses a different layout, declare it in `docs/guidelines/testing_guidelines.md`.
 - `docs/guidelines/testing_guidelines.md` present (created by `/lazy-python.install` Phase 5). If it does not exist, re-run `/lazy-python.install` — Phase 5 is idempotent and creates the stub without touching other installation artifacts.
+- If your project bootstraps secrets or provider credentials from its own shell script before tests can run, make sure `/lazy-python.install` has recorded it — the skill's Step 7 detects a bootstrap script (`cli/env`, `.env.sh`, or `scripts/env.sh`) and records it as `python.env_source` automatically. With that in place, `chk-py` and `tst-py` source the script before running, so the agent's own verification step and your later `tst-py` runs never execute against a half-configured environment.
 
 ## The journey
 
@@ -129,6 +130,8 @@ tst-py mymodule -q
 ```bash
 tst-py mymodule.subpackage -q
 ```
+
+If your project declares `python.env_source` (see "What you need" above), `tst-py` sources that script automatically before running pytest — no extra step needed on your part.
 
 A green run with no `# FAILS:` comments means the class is fully covered and the implementation satisfies its contract. A run with `# FAILS:` comments means the agent found divergences between the docstring contract and the implementation — these need your attention before the tests can be considered passing.
 

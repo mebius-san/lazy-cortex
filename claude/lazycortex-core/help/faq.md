@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Answers to non-obvious questions about install vs setup, settings placement, plugin composition, agent routing, the expert runtime, memory subsystem, routine types, daemon recovery, job dispatch, and the public-repo guard scanner.
-last_regen: 2026-07-04
+summary: Answers to non-obvious questions about install vs setup, settings placement, plugin composition, agent routing, the expert runtime, memory subsystem, routine types, daemon recovery and push automation, job dispatch, and the public-repo guard scanner.
+last_regen: 2026-07-06
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -137,6 +137,14 @@ The daemon halts in two distinct situations. A **working-tree halt** (`uncommitt
 Run `/lazy-runtime.recover` to unblock it. For working-tree halts the skill walks you through four options: commit the dirty files (you supply the message), stash them, discard them, or abort and leave the halt in place. For remote-sync halts the skill surfaces reason-specific guidance (the exact git commands to inspect and fix the divergence or push failure) and waits for you to confirm you have resolved the situation before clearing the halt block. Once the halt block is cleared from `.runtime/state.json`, the daemon resumes on its next iteration.
 
 If the cleanup does not produce a clean tree, the skill reports "working tree still dirty; refusing to resume" and leaves the halt intact — inspect with `git status` and re-run the skill.
+
+---
+
+## Can I trigger my own automation when the daemon pushes?
+
+Yes. Set `daemon.git.post_push_hook` to a shell command in the `daemon.git` block of `lazy.settings.json`. It fires immediately after the daemon's post-iteration push actually advances `origin/<base_branch>` — whether that push was a plain fast-forward or the result of a post-rebase retry — with `LAZY_PUSH_REPO` (absolute repo path), `LAZY_PUSH_BRANCH`, `LAZY_PUSH_REMOTE`, `LAZY_PUSH_OLD_SHA`, and `LAZY_PUSH_NEW_SHA` set in the hook's environment. That is enough to trigger a deploy, post a notification, or kick off any other automation keyed to what the daemon just pushed.
+
+The hook is fully isolated from the daemon's own tick: a non-zero exit, a timeout past `post_push_timeout_sec` (30 seconds by default), or a spawn failure is journaled and never halts the daemon, retries the push, or fails the tick. It also never fires when nothing was actually pushed — an in-sync tick, the already-published fallthrough, and a discarded rebase-conflict retry all skip it. This only applies when `daemon.git.remote_sync` is `"pull_push"`; a `"pull"`-only daemon never pushes, so the hook never fires.
 
 ---
 

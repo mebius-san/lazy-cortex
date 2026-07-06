@@ -41,9 +41,9 @@ See [`claude/lazycortex-diagram/`](claude/lazycortex-diagram/) for details.
 
 ### lazycortex-experts
 
-Generic lifecycle experts (interpreter, designer, planner, implementer, debugger, reviewer) plus a starter set of domain aspects (claude-plugin, game-dev, dotfiles) and a cross-cutting discipline aspect. Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
+Generic lifecycle experts (interpreter, designer, planner, implementer, debugger, reviewer) plus a fiction-writer agent, a starter set of domain aspects (claude-plugin, game-dev, dotfiles, sci-fi, fantasy), and two cross-cutting aspects (discipline, tech-writing). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
 
-Ships 1 skill, 6 agents, and 1 command.
+Ships 1 skill, 7 agents, and 1 command.
 
 Requires: lazycortex-core
 

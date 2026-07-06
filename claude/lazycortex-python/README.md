@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fde68a"
 ---
 # lazycortex-python
 
@@ -54,7 +54,7 @@ Requires these plugins from the same marketplace:
 |---|---|
 | `lazy-python.audit` | Read-only health check across the 11 invariants the lazycortex-python plugin promises — rules mirror integrity, reference resolution, artifact presence, wrappers, pyproject sections (incl. [tool.ruff]), hook registration, venv state (mypy/pylint/pytest/ruff + pytest-clarity/pytest-sugar). |
 | `lazy-python.check-style` | Six-step Python code/style review — manually-invoked workflow that reads canon + overlay, identifies modified files, runs manual inspection categories, then dispatches chk-py + tst-py to gate. |
-| `lazy-python.install` | Quiet install that wires lazycortex-python into a consumer repo — mirrors rules, deploys chk-py / tst-py wrappers, bootstraps the pyproject.toml checker stack, scaffolds project overlay guidelines, and syncs the scaffold template. Asks the user nothing: install scope is derived, `pch` (PyCharm offline inspections) follows whether `inspect.sh` is present, and it never touches CLAUDE.md (the plugin rules load from `.claude/rules/` regardless). The PostToolUse check-style hook auto-registers from the plugin manifest — no install step writes to settings.json. |
+| `lazy-python.install` | Quiet install that wires lazycortex-python into a consumer repo — mirrors rules, deploys chk-py / tst-py wrappers, bootstraps the pyproject.toml checker stack, scaffolds project overlay guidelines, syncs the scaffold template, and records python.env_source when the repo ships an env-bootstrap script. Asks the user almost nothing: install scope is derived, `pch` (PyCharm offline inspections) follows whether `inspect.sh` is present, and it never touches CLAUDE.md (the plugin rules load from `.claude/rules/` regardless); the only prompt beyond a File-sync conflict is disambiguating multiple env_source candidates. The PostToolUse check-style hook auto-registers from the plugin manifest — no install step writes to settings.json. |
 
 ## Documentation
 
@@ -64,11 +64,11 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [checkers](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/checkers.md) — The `chk-py` and `tst-py` CLI wrappers that gate every Python change — style, type-only imports, syntax, mypy, ruff, pylint, and pytest — backed by a shared venv resolver that works from any terminal.
 - [discipline](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/discipline.md) — Three always-loaded rules shape every Python edit; five reference guidelines back the writer agents and chk-py/tst-py with the full canon.
 - [hook](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/hook.md) — The PostToolUse hook that runs `pcf.py` on every `.py` edit and surfaces style violations inline in the next turn — zero install steps, zero config writes.
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/install-and-audit.md) — Bootstrap lazycortex-python into your repo with a 7-phase install wizard and verify the installation with the 11-check read-only audit.
+- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/install-and-audit.md) — Bootstrap lazycortex-python into your repo with an 8-step install wizard (incl. python.env_source detection) and verify with the 11-check read-only audit.
 - [overlay](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/overlay.md) — Project-specific guideline files in docs/guidelines/ let you extend or override the lazycortex-python canon per repo without touching plugin-managed files.
 - [scaffold](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/scaffold.md) — Canonical Python file skeleton that seeds every new .py file Claude composes — installed once via /lazy-python.install Step 6.
 - [add-project-overlay](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/add-project-overlay.md) — Layer project-specific docstring rules on top of the canon guidelines so lazy-python.docstring-writer honours your project's conventions on every dispatch.
-- [install-and-first-check](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/install-and-first-check.md) — Run /lazy-python.install in a clean repo, confirm the checker stack is wired, and get zero violations on first chk-py all.
+- [install-and-first-check](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/install-and-first-check.md) — Install the plugin, then run your first /lazy-python.check-style pass to confirm the venv, gate, and hook are wired up.
 - [migrate-existing-repo](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/migrate-existing-repo.md) — Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation, and fix them in committed chunks.
 - [write-tests-for-new-class](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/write-tests-for-new-class.md) — Dispatch lazy-python.test-writer against a new class and get a test file that covers all seven Paranoid-Testing categories, verified by tst-py.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/troubleshooting.md) — Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, and writer agents.
@@ -83,6 +83,12 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-python/help/`.
 | `lazy-python.docstring-writer` | Use this agent when adding or fixing docstrings on classes, methods, or properties in a Python codebase that adopts the `lazy-python.*` documentation conventions. Reads canonical guidelines from the plugin plus the project overlay on every dispatch. |
 | `lazy-python.test-writer` | Use this agent when writing unit tests for a class or module in a Python codebase that adopts the `lazy-python.*` testing conventions. Reads canonical testing and checking guidelines from the plugin plus the project overlay on every dispatch. Never modifies production code — only writes test files. |
 
+## Commands
+
+| Command | Description |
+|---|---|
+| `lazy-python.help` | Show lazycortex-python purpose and a one-line summary of each skill, agent, rule, and hook it ships |
+
 ## Rules
 
 | Rule | Description |
@@ -90,12 +96,6 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-python/help/`.
 | `lazy-python.docstrings.md` | Python docstring discipline — use the lazy-python.docstring-writer agent. Triggers on **/*.py. |
 | `lazy-python.style.md` | Python style critical reminders + Verification Order. Triggers on **/*.py. |
 | `lazy-python.tests.md` | Python test placement, naming, and writing discipline — use the lazy-python.test-writer agent. Triggers on tests/**/*.py. |
-
-## Commands
-
-| Command | Description |
-|---|---|
-| `lazy-python.help` | Show lazycortex-python purpose and a one-line summary of each skill, agent, rule, and hook it ships |
 
 ## Hooks
 

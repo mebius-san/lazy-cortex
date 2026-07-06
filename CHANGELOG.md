@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.9.0 — 2026-07-06 UTC
+
+- New `daemon.git.post_push_hook` config lets the runtime daemon run a shell command after every successful push, passing repo/branch/SHA details via env vars; hook failures are isolated and never block a tick.
+- Default model-tier config now covers the new `fiction-writer` agent (lazycortex-experts), so tier resolution works out of the box once both plugins are installed.
+
 ### 5.8.3 — 2026-07-05 UTC
 
 - New idle-stdout watchdog detects frozen expert-spawn (`claude -p`) runs and kills + retries them instead of hanging the job queue forever, with each stall recorded to the runtime log; retry limit and timeout are tunable via `daemon.stream_idle_timeout_sec` / `daemon.stream_max_retries` (sane defaults, no config required, and a negative retry count no longer breaks the retry loop).
@@ -618,6 +623,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 0.5.0 — 2026-07-06 UTC
+
+- New `fiction-writer` expert agent for prose and story craft, with a matching default tier in lazycortex-core.
+- New sci-fi and fantasy genre aspects, layering genre-specific voice onto the fiction-writer expert.
+- New tech-writing discipline aspect for dry, terminology-consistent technical prose.
+- `lazy-experts.install` now auto-derives aspects by class — genre classes seed fiction-writer only, technical classes gain the tech-writing aspect — with a fix excluding cross-cutting aspects from that derivation and verifying agent references during install.
+
 ### 0.4.1 — 2026-06-28 UTC
 
 - The designer and interpreter agents no longer trim specs down to match the current state of the code. Existing gaps, partial paths, and TODOs are treated as evidence of work in progress — not as constraints to encode. Only an explicit operator decision can narrow scope.
@@ -653,6 +665,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 1.9.0 — 2026-07-06 UTC
+
+- `chk-py`/`tst-py` now source an optional project-declared env script (`python.env_source`) before running checks/tests, so secrets or provider credentials bootstrapped by a project's own shell wrapper are available instead of leaving tests half-configured. `lazy-python.install` will prompt to configure this automatically.
+- The Verification Order style rule now defers to a project's own declared test runner instead of overriding it.
 
 ### 1.8.1 — 2026-06-27 UTC
 
