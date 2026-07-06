@@ -91,9 +91,10 @@ The runner loads a small pytest plugin (`bin/_pytest_dedup.py`, injected via `-p
 
 ### How it works
 
-- On `pytest_collection_modifyitems` the plugin builds a key for each item from the test **function** — its defining module (`function.__module__`), qualified name (`function.__qualname__`), and parametrization id (`callspec.id` when present) — never from the node id. A duplicate's node id differs (it is reached through a different shim file), but `function.__module__` always points at the module where the test is *defined*, so both copies share one key.
+- On `pytest_collection_modifyitems` the plugin builds a key for each item from the **collected class** — its defining module (`cls.__module__`), qualified name (`cls.__qualname__`), and the item name (`item.name`, which already carries any parametrization suffix) — never from the node id. A duplicate's node id differs (it is reached through a different shim file), but the class object is shared by reference across every shim, so its `__module__` / `__qualname__` always point at the module where the class is *defined* and both copies share one key. Tests written as module-level functions (no class) fall back to a function-based key (`function.__module__` / `function.__qualname__` / `item.name`).
+- Keying on the **class**, not the test function, is essential: an inherited test method is a single function object shared by every subclass, so a function-based key would wrongly collapse distinct subclasses (e.g. `TestA(Base)` and `TestB(Base)` both inheriting `Base.test_x`) into one and drop all but the first. The collected class differs per subclass, so the class-based key keeps them apart.
 - The first item collected for each key survives; every later duplicate is de-selected (`pytest_deselected` + removal from the item list). The surviving instance is the first in collection order, so run order stays stable and predictable.
-- Non-function items (e.g. `DoctestItem`, which exposes no `function`) are skipped and never de-duplicated.
+- Items that are neither a class method nor a plain function (e.g. `DoctestItem`, which exposes no `cls` or `function`) are skipped and never de-duplicated.
 
 ### Seeing it in the output
 

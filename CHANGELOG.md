@@ -666,6 +666,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 1.9.2 — 2026-07-06 UTC
+
+- Fixed a bug in the re-export dedup logic where inherited test methods (e.g. `TestA(Base).test_x` and `TestB(Base).test_x`) collapsed to one entry and the rest were silently dropped, causing real tests and their coverage to be lost. Dedup now keys on the collected class rather than the function object, so each subclass is tracked separately while shim duplicates still collapse correctly. Parametrized variants remain distinct via the item name suffix.
+
 ### 1.9.1 — 2026-07-06 UTC
 
 - `tst-py` now automatically deduplicates test items collected more than once through re-export shims (e.g. a `test_all.py` aggregator alongside per-package shims), so each test runs exactly once; double-collection order-dependent failures are eliminated with no configuration required.
