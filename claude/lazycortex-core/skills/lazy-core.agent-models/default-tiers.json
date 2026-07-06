@@ -13,6 +13,7 @@
     "lazycortex-core:lazy-log.bullets": "sonnet",
     "lazycortex-experts:lazy-experts.debugger": "opus",
     "lazycortex-experts:lazy-experts.designer": "opus",
+    "lazycortex-experts:lazy-experts.fiction-writer": "opus",
     "lazycortex-experts:lazy-experts.implementer": "sonnet",
     "lazycortex-experts:lazy-experts.interpreter": "sonnet",
     "lazycortex-experts:lazy-experts.planner": "sonnet",

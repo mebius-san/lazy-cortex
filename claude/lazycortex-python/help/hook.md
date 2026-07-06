@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: The PostToolUse hook that runs `pcf.py` on every `.py` edit and surfaces style violations inline in the next turn — zero install steps, zero config writes.
-last_regen: 2026-06-27
+last_regen: 2026-07-06
 no_diagram: true
 source_skills:
   - lazy-python.check-style.sh
@@ -31,7 +31,7 @@ The violation format the hook surfaces is the same `file:line: note: message` fo
 
 **Silencing the hook for a directory.** Add the path to the `exclude` list under `[tool.pcf]` in `pyproject.toml`. `/lazy-python.install` Phase 3 seeds this section with `.venv`, `.claude`, `tests`, `~archive`, and `~sandbox`; extend it for any generated or third-party directories you do not want scanned.
 
-**Waiving a specific violation inline.** Add `# waiver: <reason>` on the flagged line, the line above it, or the line below it. `pcf.py` recognises the waiver and suppresses that finding. The waiver comment must carry a non-empty explanation — bare `# waiver:` is not accepted.
+**Waiving a specific violation inline.** Add `# waiver: <reason>` on the flagged line, the line above it, or the line below it (class-level waivers also cover an entire class body). `pcf.py` recognises the waiver and suppresses that finding. The waiver comment must carry a non-empty explanation — bare `# waiver:` is not accepted.
 
 **Disabling individual checks project-wide.** Set the relevant flag under `[tool.pcf]` in `pyproject.toml` — for example `check_assert = false` or `check_magic_literal = false`. `/lazy-python.install` Phase 3 seeds a `[tool.pcf]` section with defaults; edit the values there. No skill verb is needed; `pyproject.toml` is a plain project file, not a skill-managed config.
 

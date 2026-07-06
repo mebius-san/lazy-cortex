@@ -187,12 +187,16 @@ class GitConfigKey:
     WORKTREE_ROOT: The directory isolated task worktrees are created under.
     MAX_CONCURRENT_TASKS: The concurrency cap on isolated worktree tasks.
     REMOTE_SYNC: The remote-sync mode (`pull`, `pull_push`, or off).
+    POST_PUSH_HOOK: The operator shell command run after each push that advances origin.
+    POST_PUSH_TIMEOUT_SEC: The wall-clock cap on the post-push hook process, in seconds.
   """
 
   BASE_BRANCH = "base_branch"
   WORKTREE_ROOT = "worktree_root"
   MAX_CONCURRENT_TASKS = "max_concurrent_tasks"
   REMOTE_SYNC = "remote_sync"
+  POST_PUSH_HOOK = "post_push_hook"
+  POST_PUSH_TIMEOUT_SEC = "post_push_timeout_sec"
 
 
 # ----------------------------------------------------------------------------------------

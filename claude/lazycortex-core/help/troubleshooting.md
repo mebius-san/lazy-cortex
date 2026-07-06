@@ -1,21 +1,40 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-07-04
+last_regen: 2026-07-06
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed; audit-or-doctor → sub-branch on global-rules-empty / experts-json-invalid / ref-unresolvable / routine-path-stale / stall-mid-run; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed; audit-or-doctor → sub-branch on global-rules-empty / experts-json-invalid / ref-unresolvable / routine-path-stale / stall-mid-run; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
+  - lazy-core.audit
+  - lazy-core.doctor
+  - lazy-core.optimize
   - lazy-core.setup
+  - lazy-repo.mark-public
+  - lazy-guard.check-public
+  - lazy-guard.allow-mcp
+  - lazy-routine.register
+  - lazy-routine.unregister
   - lazy-runtime.recover
+  - lazy-runtime.preflight
   - lazy-expert.dispatch-job
   - lazy-expert.collect-job
-  - lazy-runtime.preflight
-  - lazy-core.git-unlock
-  - lazy-guard.check-public
+  - lazy-expert.cancel-job
+  - lazy-expert.list-jobs
   - lazy-memory.write
+  - lazy-memory.index
+  - lazy-memory.reflect
+  - lazy-memory.mark-persona
+  - lazy-core.agent-models
+  - lazy-core.git-status
+  - lazy-core.git-unlock
+  - lazy-log.clean
+  - lazy-log.distill
+  - lazy-log.recall
+  - lazy-log.timeline
+  - lazy-log.summary
 ---
 # Troubleshooting
 
@@ -478,6 +497,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: `/lazy-runtime.recover` on the manual-fix path only clears the halt block — it does not itself run any git commands. If the underlying network issue, divergence, or push rejection was not fully resolved before you confirmed, the daemon's next pre-tick remote sync re-detects the same failure and halts again.
 
 **Fix**: Re-inspect the actual git state from your terminal: run `git fetch origin <branch>` to test reachability, `git log --oneline HEAD origin/<branch>` to check for divergence, or `git push origin <branch>` to observe the push rejection message. Resolve the root cause first, then re-run `/lazy-runtime.recover` and confirm once the situation is genuinely clear.
+
+---
+
+## The daemon's post-push hook doesn't seem to fire, or fires but nothing happens
+
+**Symptom**: You configured `daemon.git.post_push_hook` in `lazy.settings.json`, but the automation it is meant to trigger (a deploy, a notification, anything downstream of a push) never appears to run — with no error surfaced anywhere in the daemon's normal output, and the daemon itself keeps ticking normally.
+
+**Likely cause**: The hook is deliberately isolated from the daemon's own health, by design. A non-zero exit, a timeout past `post_push_timeout_sec` (30 seconds by default), or a spawn failure is recorded as a `_post_push_hook` entry in the daemon's journal at `.logs/lazy-core/runtime/<date>.jsonl` — it never halts the daemon, retries the push, or fails the tick, so nothing about the daemon's visible behaviour signals a hook failure. It is also possible the hook simply never fired: it only runs immediately after a push that actually advances `origin/<base_branch>` — an in-sync tick, the already-published fallthrough, and a discarded rebase-conflict retry all skip it on purpose.
+
+**Fix**: Check today's journal file at `.logs/lazy-core/runtime/<date>.jsonl` for a `_post_push_hook` record — its error message names the exit code, "timeout", or the underlying spawn failure. Reproduce the command by hand with `sh -c "<your command>"`, exporting the same five environment variables the daemon sets — `LAZY_PUSH_REPO`, `LAZY_PUSH_BRANCH`, `LAZY_PUSH_REMOTE`, `LAZY_PUSH_OLD_SHA`, `LAZY_PUSH_NEW_SHA` — to see the actual failure. Fix the command, or raise `post_push_timeout_sec` in the `daemon.git` block of `lazy.settings.json` if it legitimately needs more than 30 seconds. If no `_post_push_hook` record appears for a tick where you expected one, confirm a push actually advanced `origin/<base_branch>` on that tick (`git log origin/<base_branch>`) before assuming the hook itself is broken.
 
 ---
 

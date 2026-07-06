@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
-last_regen: 2026-06-24
+last_regen: 2026-07-06
 diagram_spec:
   anchor: "How the flow works"
   request: "End-to-end participant exchange when /lazy-repo.mark-public runs: user invokes the skill, skill checks git and GitHub visibility (preflight), determines scope (whole-repo vs. subtree), dispatches four parallel security scans (secrets, PII, infra, local paths) via /lazy-guard.check-public, presents unified findings table, loops per FAIL for resolution (encrypt/template/redact) and per WARN for fix/waive/skip, writes .guard-waivers.json with public_author and accepted waivers activating the pre-commit hook, then in whole-repo mode flips visibility via gh repo edit. Five participants: User, /lazy-repo.mark-public, /lazy-guard.check-public, Security Scan Agents, GitHub."
@@ -57,7 +57,7 @@ Findings come back in three severities:
 
 - **FAIL** (secrets) — private keys, AWS access keys, API tokens, high-entropy base64 on secret-context lines, connection strings with credentials, bearer token literals. These block going public and must be resolved.
 - **WARN** (PII, infrastructure, local paths) — email addresses, internal hostnames, Tailscale or public IPs, hardcoded `/Users/…` paths, home-subdirectory refs like `~/Dropbox/`, author identity in manifests. You decide whether to fix or waive each one.
-- **INFO** — lower-confidence signals such as personal names in git config inside dotfiles. Show for awareness; auto-waive or skip as you prefer.
+- **INFO** — lower-confidence signals such as personal names in git config inside dotfiles. Shown for awareness; auto-waive or skip as you prefer.
 
 Verification gate: review the findings table before moving on. If a finding looks like a false positive, flag it — the skill can waive it in the next step.
 
@@ -122,47 +122,29 @@ Run `/lazy-guard.check-public` again after any major configuration change, after
 sequenceDiagram
   participant user as User
   participant markPublic as /lazy-repo.mark-public
-  participant checkPublic as /lazy-guard.check-public
+  participant guardCheck as /lazy-guard.check-public
   participant scanAgents as Security Scan Agents
   participant github as GitHub
 
-  user->>markPublic: invoke /lazy-repo.mark-public
-  markPublic->>github: GET repo visibility
-  github-->>markPublic: visibility status
-  markPublic->>markPublic: preflight — check git status + branch
-  Note over markPublic: Preflight passed
-  markPublic->>user: prompt — whole-repo or subtree scope?
-  user-->>markPublic: scope selection (whole-repo / subtree path)
-  Note over markPublic: Scope determined
-  markPublic->>checkPublic: dispatch parallel scans (secrets, PII, infra, local paths)
-  checkPublic->>scanAgents: run secrets scan
-  checkPublic->>scanAgents: run PII scan
-  checkPublic->>scanAgents: run infra scan
-  checkPublic->>scanAgents: run local-paths scan
-  scanAgents-->>checkPublic: secrets findings
-  scanAgents-->>checkPublic: PII findings
-  scanAgents-->>checkPublic: infra findings
-  scanAgents-->>checkPublic: local-paths findings
-  checkPublic-->>markPublic: unified findings table (FAILs + WARNs)
-  markPublic->>user: present unified findings table
-  loop per FAIL — must resolve
-    user->>markPublic: resolve FAIL (encrypt / template / redact)
-    markPublic->>checkPublic: re-scan affected file
-    checkPublic->>scanAgents: targeted re-scan
-    scanAgents-->>checkPublic: updated result
-    checkPublic-->>markPublic: FAIL cleared
+  user->>markPublic: Invoke /lazy-repo.mark-public
+  markPublic->>github: Check git and GitHub visibility preflight
+  github-->>markPublic: Return current visibility status
+  Note over markPublic: Determine scope, whole-repo or subtree
+  markPublic->>guardCheck: Dispatch /lazy-guard.check-public
+  guardCheck->>scanAgents: Dispatch four parallel scans - secrets, PII, infra, local paths
+  scanAgents-->>guardCheck: Return combined scan findings
+  guardCheck-->>markPublic: Present unified findings table
+  loop Per FAIL finding
+    markPublic->>markPublic: Resolve via encrypt, template, or redact
   end
-  loop per WARN — choose action
-    markPublic->>user: prompt — fix, waive, or skip WARN?
-    user-->>markPublic: decision (fix / waive / skip)
+  loop Per WARN finding
+    markPublic->>markPublic: Fix, waive, or skip
   end
-  markPublic->>markPublic: write .guard-waivers.json with public_author + accepted waivers
-  Note over markPublic: Pre-commit hook activated
-  alt whole-repo mode
-    markPublic->>github: gh repo edit --visibility public
-    github-->>markPublic: visibility updated
-    markPublic-->>user: repo is public — done
-  else subtree-public mode
-    markPublic-->>user: subtree scoped as public — done
+  markPublic->>markPublic: Write .guard-waivers.json with public_author and accepted waivers
+  alt Whole-repo mode
+    markPublic->>github: Run gh repo edit to flip visibility to public
+    github-->>markPublic: Return visibility updated confirmation
+  else Subtree-public mode
+    Note over markPublic: Skip GitHub visibility flip
   end
 ```

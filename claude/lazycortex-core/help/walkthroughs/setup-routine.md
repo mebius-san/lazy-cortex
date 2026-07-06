@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-last_regen: 2026-06-24
+last_regen: 2026-07-06
 diagram_spec:
   anchor: "How registration and pickup flow"
   request: "Sequence diagram showing the user running /lazy-routine.register, the skill writing lazy.settings.json, the daemon picking up the new routine on its next cycle without restart, and the user later running /lazy-routine.unregister to remove it. Include the built-in protection check for lazy-expert.pump."
@@ -39,7 +39,7 @@ Every type also takes one of two dispatch shapes:
 The validator enforces exactly-one of the two dispatch shapes. Choose the type, then you will be asked for the type-specific fields followed by the dispatch shape question.
 
 - **subprocess** — fire on a fixed interval (e.g. every 300 seconds). Required: `interval_sec`. Good for lint sweeps, data refreshes, and any periodic invocation.
-- **inbox** — watch a directory and fire once per file found. With `expert + request` the file is moved into job staging; with `command` it stays in the inbox until the consumer removes it. Required: `inbox_dir`, `interval_sec`.
+- **inbox** — watch a directory and fire once per file found. With `expert + request` the file's path is passed to the expert (`{file}` template + `dedup_key`) — the inbox stays the single source of truth. A succeeded job drains its input on the next tick; a failed job is left parked as a dead letter, and its dedup key blocks re-dispatch until you clear it. With `command`, the file stays in the inbox until the consumer command moves or deletes it. Required: `inbox_dir`, `interval_sec`.
 - **schedule** — fire once per cron boundary (5-field cron expression). Required: `cron`. Use when wall-clock timing matters more than a fixed cadence.
 - **git** — watch local HEAD for new commits, new files, changed files, deleted files, or renamed files; fire once per item. Required: `watch`, `interval_sec`. The `branch` and `remote` fields are vestigial — the watch always targets local HEAD regardless of their values, and remote sync is the daemon's own job. The wizard may surface them for schema compatibility; leave them blank or skip them.
 - **md-scan** — scan markdown files matching vault-relative globs, filter by frontmatter values, and fire once per match. Files are edited in place by the consumer — no move. Required: `paths` (list of globs), `interval_sec`. Optional: `filter` (composite filter block, e.g. `{"frontmatter": {"key": {"in": [...], "not_in": [...]}}}`) — a `null` value in the `in` list matches files where the key is absent or explicitly null, which is useful for picking up files that have never been processed; an absent `filter` matches all files.
@@ -57,7 +57,7 @@ Command:      ["python3", "bin/review_tick.py"]
 interval_sec: 300
 ```
 
-For an `inbox` routine the wizard additionally checks whether `inbox_dir` is gitignored. If it is not, it offers to append the path to `.gitignore` — accept this. Inbox routines move files between iterations; a tracked inbox directory dirties the working tree and triggers the daemon's halt protection.
+For an `inbox` routine the wizard additionally checks whether `inbox_dir` is gitignored. If it is not, it offers to append the path to `.gitignore` — accept this. Inbox routines remove a file from the directory once its dispatched job succeeds; a tracked inbox directory would then dirty the working tree and trip the daemon's halt protection.
 
 For an `md-scan` routine the wizard asks for the glob list, the optional frontmatter filter dict, and the dispatch shape. A `null` value in the filter's `in` list matches files where the key is absent — useful for picking up files that have never been processed (e.g. `{"frontmatter": {"request_status": {"in": [null, "draft"], "not_in": []}}}`).
 
@@ -106,3 +106,30 @@ The daemon picks up the removal on its next cycle — no restart needed.
 The routine is no longer in `routines` and the daemon skips it from the next cycle forward. To bring it back, call `/lazy-routine.register` again with the same name and configuration. Plugin install skills can re-register their routines automatically on the next install pass. Run `/lazy-core.doctor` at any time to verify the current routine registry and daemon state are consistent.
 
 ## How registration and pickup flow
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
+sequenceDiagram
+  participant user as User
+  participant registerSkill as lazy-routine.register
+  participant settingsFile as lazy.settings.json
+  participant daemon as Daemon
+  participant unregisterSkill as lazy-routine.unregister
+
+  user->>registerSkill: /lazy-routine.register
+  Note over registerSkill: built-in protection check for lazy-expert.pump
+  alt routine name is lazy-expert.pump
+    registerSkill-->>user: refuse protected routine
+  else routine allowed
+    registerSkill->>settingsFile: write routine entry
+    settingsFile-->>registerSkill: write confirmed
+    registerSkill-->>user: routine registered
+  end
+  loop next daemon cycle
+    daemon->>settingsFile: read lazy.settings.json
+    daemon->>daemon: pick up new routine without restart
+  end
+  user->>unregisterSkill: /lazy-routine.unregister
+  unregisterSkill->>settingsFile: remove routine entry
+  unregisterSkill-->>user: routine unregistered
+```

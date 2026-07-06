@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Canonical Python file skeleton that seeds every new .py file Claude composes — installed once via /lazy-python.install Step 6.
-last_regen: 2026-06-27
+last_regen: 2026-07-06
 diagram_spec:
   anchor: "How the template reaches your project"
   request: "Flow showing python-template.py and scaffold.entries.json shipping from the plugin, scaffold-sync copying the template into .claude/templates/python/ in the consumer project, and the lazy-core.scaffold rule matching any new *.py file against the consumer-local copy"
@@ -39,39 +39,36 @@ The `**/*.py` glob that the scaffold rule registers is intentionally broad. If y
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  pluginShipsTemplate[python-template.py ships in plugin]
-  pluginShipsEntries[scaffold.entries.json ships in plugin]
-  scaffoldSyncRuns{scaffold-sync invoked?}
-  copyTemplateToDotClaude[lazy-core.scaffold-sync copies template to .claude/templates/python/]
-  updateEntriesInConsumer[lazy-core.scaffold-sync registers entry in consumer scaffold registry]
-  newPyFileCreated{New *.py file created in consumer?}
-  ruleMatchesFile[lazy-core.scaffold rule matches file against consumer-local copy]
-  agentReadsTemplate[Agent reads .claude/templates/python/python-template.py]
-  scaffoldApplied[Scaffold applied to new file]
+  pluginShipsTemplate[Plugin ships python-template.py]
+  pluginShipsEntries[Plugin ships scaffold.entries.json]
+  scaffoldSyncCopies[scaffold-sync copies template]
+  consumerTemplatesDir[.claude/templates/python/ in consumer project]
+  newPyFileCreated[New *.py file created]
+  scaffoldRuleChecks{lazy-core.scaffold rule checks glob}
+  startFromCopy[Start from consumer-local copy]
+  composeFromMemory[No glob match - compose freely]
 
-  pluginShipsTemplate -->|provides| scaffoldSyncRuns
-  pluginShipsEntries -->|provides| scaffoldSyncRuns
-  scaffoldSyncRuns -->|yes| copyTemplateToDotClaude
-  scaffoldSyncRuns -->|no - skip| newPyFileCreated
-  copyTemplateToDotClaude -->|writes| updateEntriesInConsumer
-  updateEntriesInConsumer -->|ready| newPyFileCreated
-  newPyFileCreated -->|yes| ruleMatchesFile
-  newPyFileCreated -->|no - idle| agentReadsTemplate
-  ruleMatchesFile -->|resolves| agentReadsTemplate
-  agentReadsTemplate -->|loads| scaffoldApplied
+  pluginShipsTemplate -->|ships| scaffoldSyncCopies
+  pluginShipsEntries -->|ships| scaffoldSyncCopies
+  scaffoldSyncCopies -->|copies into| consumerTemplatesDir
+  newPyFileCreated -->|triggers| scaffoldRuleChecks
+  scaffoldRuleChecks -->|matches *.py| startFromCopy
+  scaffoldRuleChecks -->|no match| composeFromMemory
+  consumerTemplatesDir -->|supplies template for| startFromCopy
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
   class pluginShipsTemplate entry
   class pluginShipsEntries entry
-  class scaffoldSyncRuns guard
-  class newPyFileCreated guard
-  class copyTemplateToDotClaude action
-  class updateEntriesInConsumer action
-  class ruleMatchesFile action
-  class agentReadsTemplate action
-  class scaffoldApplied success
+  class scaffoldSyncCopies action
+  class consumerTemplatesDir store
+  class newPyFileCreated entry
+  class scaffoldRuleChecks guard
+  class startFromCopy success
+  class composeFromMemory error
 ```

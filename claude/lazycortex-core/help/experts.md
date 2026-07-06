@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Dispatch jobs to named expert workers, keep the main session free, and collect results when the daemon finishes them.
-last_regen: 2026-06-24
+last_regen: 2026-07-06
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing a user dispatching a job via dispatch-job, the runtime daemon draining the queue, and the user collecting results via collect-job. Include list-jobs and cancel-job as optional side paths. Use boxes for the four skills and a distinct shape for the daemon process."
@@ -68,39 +68,34 @@ When you see a job reach `done` status in the list, run `/lazy-expert.collect-jo
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  userDispatch[dispatch-job]
-  jobQueue[(Job Queue)]
-  runtimeDaemon{{Runtime Daemon}}
-  userListJobs[list-jobs]
-  userCancelJob[cancel-job]
-  userCollect[collect-job]
-  jobDone[Job Complete]
-  jobCancelled[Job Cancelled]
+  userDispatchesJob[User dispatches job via dispatch-job]
+  runtimeDaemon((Runtime daemon drains queue))
+  jobFinished{Job finished?}
+  userCollectsJob[User collects results via collect-job]
+  userChecksStatus[User checks status via list-jobs]
+  userCancelsJob[User cancels job via cancel-job]
+  jobCancelled[Job cancelled]
 
-  userDispatch -->|enqueue job| jobQueue
-  jobQueue -->|drain next| runtimeDaemon
-  runtimeDaemon -->|store result| jobQueue
-  jobQueue -->|fetch result| userCollect
-  userCollect -->|result ready| jobDone
-  userListJobs -->|query queue| jobQueue
-  jobQueue -->|return listing| userListJobs
-  userCancelJob -->|remove job| jobQueue
-  jobQueue -->|confirmed cancel| jobCancelled
+  userDispatchesJob -->|dispatch-job| runtimeDaemon
+  runtimeDaemon -->|drain queue| jobFinished
+  jobFinished -->|yes| userCollectsJob
+  jobFinished -->|no| runtimeDaemon
+  userDispatchesJob -.->|list-jobs| userChecksStatus
+  userChecksStatus -->|poll| runtimeDaemon
+  userDispatchesJob -.->|cancel-job| userCancelsJob
+  userCancelsJob -->|cancel| jobCancelled
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
-  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
-  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
-  classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
 
-  class userDispatch entry
-  class userCollect entry
-  class userListJobs action
-  class userCancelJob action
-  class runtimeDaemon service
-  class jobQueue store
-  class jobDone success
+  class userDispatchesJob entry
+  class runtimeDaemon action
+  class userChecksStatus action
+  class userCancelsJob action
+  class jobFinished guard
+  class userCollectsJob success
   class jobCancelled error
 ```

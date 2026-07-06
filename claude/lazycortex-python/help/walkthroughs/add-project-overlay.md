@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Layer project-specific docstring rules on top of the canon guidelines so lazy-python.docstring-writer honours your project's conventions on every dispatch.
-last_regen: 2026-06-27
+last_regen: 2026-07-06
 diagram_spec:
   anchor: "How the overlay layers stack"
   request: "Sequence diagram showing: user edits docs/guidelines/documenting_guidelines.md overlay; user dispatches lazy-python.docstring-writer; agent reads CLAUDE_PLUGIN_ROOT canon reference first, then reads project overlay at CLAUDE_PROJECT_DIR/docs/guidelines/documenting_guidelines.md (override-on-conflict), then reads CLAUDE_PROJECT_DIR/CLAUDE.md ## Documenting section if present (third overlay layer); agent applies merged ruleset to target file; agent runs chk-py verification. Show the three-layer read order and that overlay rules win on conflict with canon."
@@ -103,7 +103,7 @@ Run a quick sanity check before dispatching:
 /lazy-python.audit
 ```
 
-Check 10 in the audit output (`overlay-present`) confirms the overlay files exist at the expected paths. If the check reports `overlay-missing`, Phase 5 did not run — re-run `/lazy-python.install` to create the stubs.
+Check 7 in the audit output (`Overlay scaffolding headers`) confirms all four overlay files — including `documenting_guidelines.md` — carry the canonical `# Project additions to <topic>` header. A `PASS` means the stubs are all present and correctly headed; a `WARN` or `FAIL` means one or more stubs are missing or their header was altered — re-run `/lazy-python.install` to restore them.
 
 ### Step 4 — Dispatch lazy-python.docstring-writer against a target file
 
@@ -127,7 +127,7 @@ Look at the generated docstring and cross-check it against the rule you added:
 
 If the output does not reflect your overlay rule, check two things:
 
-1. The overlay file path matches what `/lazy-python.audit` reports for check 10.
+1. The overlay file has the correct header and content — re-run `/lazy-python.audit` and check the Check 7 result.
 2. The rule is written as prose the agent can interpret — not as a machine-readable schema or a blank section.
 
 ### Step 6 — Iterate and expand the overlay
@@ -140,8 +140,36 @@ The overlay file is a living document. As your project's conventions solidify or
 
 Track the overlay file in version control. When a teammate's dispatch of the agent produces a docstring that violates the project's style, the fix is a rule in the overlay, not a code review comment.
 
-To verify the full installation including all overlay files, run `/lazy-python.audit` at any time. Check 10 reports whether each overlay stub exists; the audit does not validate the content — that judgment belongs to you and your team.
+To verify the full installation including all overlay files, run `/lazy-python.audit` at any time. Check 7 reports whether each overlay stub carries the canonical header; the audit does not validate the content of your rules — that judgment belongs to you and your team.
 
 If the agent produces a docstring that contradicts one of your overlay rules, the most likely cause is ambiguous or conflicting wording in the overlay itself. Rewrite the rule to be explicit and re-dispatch; the agent will apply the updated version immediately.
 
 ## How the overlay layers stack
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
+sequenceDiagram
+  participant user as User
+  participant docstringWriter as lazy-python.docstring-writer
+  participant canonRef as CLAUDE_PLUGIN_ROOT canon reference
+  participant overlay as documenting_guidelines.md overlay
+  participant claudeMd as CLAUDE.md Documenting section
+  participant targetFile as Target file
+
+  user->>overlay: edit documenting_guidelines.md overlay
+  user->>docstringWriter: dispatch lazy-python.docstring-writer
+  docstringWriter->>canonRef: read canon docstring reference
+  canonRef-->>docstringWriter: canon docstring rules
+  docstringWriter->>overlay: read project overlay - override on conflict
+  overlay-->>docstringWriter: overlay docstring rules
+  alt Documenting section present in CLAUDE.md
+    docstringWriter->>claudeMd: read CLAUDE.md Documenting section
+    claudeMd-->>docstringWriter: third overlay layer rules
+  else Documenting section absent
+    Note over docstringWriter: no third overlay layer to merge
+  end
+  Note over docstringWriter: merge ruleset - overlay wins conflict with canon
+  docstringWriter->>targetFile: apply merged ruleset to target file
+  docstringWriter->>targetFile: run chk-py verification
+  targetFile-->>docstringWriter: chk-py verification result
+```

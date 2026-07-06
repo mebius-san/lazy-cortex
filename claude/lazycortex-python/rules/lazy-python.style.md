@@ -31,6 +31,8 @@ Full rules + rationale + examples: `${CLAUDE_PLUGIN_ROOT}/references/lazy-python
 
 Run after every batch of Python edits. The three steps escalate from per-file fast feedback to whole-project gating to test execution; do not skip ahead.
 
+**Project-runner precedence.** If a project rule or a `docs/guidelines/*.md` overlay declares its own test/check runner, that runner replaces `chk-py` / `tst-py` at every step below — invoke the project's runner instead of the plugin wrappers. The order and intent of the steps are unchanged; only the command differs.
+
 1. **`chk-py all <file>.py -q`** — per-file style/type sweep (pcf + toi + cmp + mypy + ruff + pylint). Run after editing one or two files; for a module-wide refactor (>3 files in the same dir) run `chk-py all <module-dir>/ -q` instead. This is your inner loop — fix every violation before moving on.
 2. **`chk-py all -q`** — whole-project sweep. Run after the per-file step is clean to catch cross-file regressions (broken imports, removed APIs, dangling type references). No further work until this is clean.
 3. **`tst-py <module> -q`** — pytest for the affected module(s). Run **only** after both checker steps are clean — running tests on a project with style/type breakage wastes time on noise. Pass the bare module name (e.g. `core`, `rpg`), not a path and not `.py`. Without an argument runs all modules.

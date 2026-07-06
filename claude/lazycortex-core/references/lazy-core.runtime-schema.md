@@ -57,6 +57,8 @@ The `errors` key (nested under the flat `daemon` section) is optional and tunes 
 | `remote_sync` | `"pull"` / `"pull_push"` | Optional. `"pull"` does pre-iteration fetch+ff-pull. `"pull_push"` additionally does fetch+rebase+push after routines run. Absent = no remote sync. |
 | `worktree_root` | string | Optional. Repo-relative directory that holds per-task worktrees for `isolate: true` routines (see § 13). Default `".worktrees"`. Listed in `.gitignore` so in-tree worktrees stay untracked. |
 | `max_concurrent_tasks` | int | Optional. Maximum number of live worktree tasks allowed at once (see § 13). Default `3`. When the cap is reached, an `isolate: true` routine is left due and retried on a later tick rather than erroring. |
+| `post_push_hook` | string | Optional. Shell command run via `sh -c` (cwd = repo root) after each post-iteration push that actually advances `origin/<base_branch>`. Absent or empty = disabled. Fully isolated: non-zero exit, timeout, or spawn failure is journaled and never affects the tick. |
+| `post_push_timeout_sec` | int | Optional. Wall-clock cap on the post-push hook process. Default `30`. On expiry the hook is killed and the timeout journaled. |
 
 **Pre-iteration ops** (when `daemon.git.remote_sync` is `"pull"` or `"pull_push"`):
 
@@ -77,6 +79,8 @@ A retry loop (max 3 attempts):
    - **Equal** → nothing to push; exit.
    - **Local-ahead** (origin is ancestor of HEAD) → fast-forward `git push origin <base_branch>`. On race (push refused because origin moved between our fetch and our push), retry.
    - **Diverged** → `git rebase origin/<base_branch>`. On conflict, `git rebase --abort && git reset --hard origin/<base_branch>` (this tick's work is discarded; the next tick re-runs the routine on top of the operator's commits) and exit cleanly (NO halt). On clean rebase, push; on race, retry.
+
+**Post-push hook** (when `daemon.git.post_push_hook` is set): immediately after either successful push above (fast-forward or post-rebase), the daemon runs the configured command via `sh -c` with cwd = repo root and five env overrides: `LAZY_PUSH_REPO` (absolute repo path), `LAZY_PUSH_BRANCH` (the pushed branch), `LAZY_PUSH_REMOTE` (`origin`), `LAZY_PUSH_OLD_SHA` (the `origin/<branch>` tip before the push), `LAZY_PUSH_NEW_SHA` (local HEAD after the push — re-read after any rebase). The hook does NOT fire when nothing was pushed: in-sync ticks, the already-published fallthrough, and the rebase-conflict discard all skip it. Hook failures (non-zero exit, timeout past `post_push_timeout_sec`, spawn errors) land in the runtime journal as a `_post_push_hook` record and never halt, retry, or fail the tick.
 
 After the third failed push attempt, halt with `reason: git_push_failed`.
 

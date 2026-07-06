@@ -87,3 +87,30 @@ Do not run tests before lint and type-check are clean — typing errors mask tes
 
 - Use `hypothesis` for property-based testing when appropriate.
 - Place performance tests under `tests/pf/` and run them on demand with `pytest tests/pf/<path>`.
+
+## Project environment bootstrap (`python.env_source`)
+
+Some projects must set up their environment before tests or checkers run — export a secret-store path, resolve provider credentials, extend `PYTHONPATH`. When that bootstrap lives in the project's own shell script, the plugin runners (`chk-py` / `tst-py`) source it automatically so pytest and the checkers see a fully-configured environment. Without it, a project whose tests read the environment (AI-provider clients, secret resolvers) runs half-configured — client constructors fail, provider tests error, and unrelated tests fail falsely.
+
+### How to set it
+
+Set `python.env_source` in the repo's `.claude/lazy.settings.json` to the bootstrap script's path, relative to the repo root:
+
+```json
+{
+  "python": {
+    "env_source": "cli/env"
+  }
+}
+```
+
+`lazy-python.install` records this automatically when the repo ships a recognised bootstrap script (`cli/env`, `.env.sh`, or `scripts/env.sh`) — and asks which to use when more than one is present. For any other path, or to add it later, set the key by hand: it is a plain string under a `python` section, and the runners pick it up on the next invocation.
+
+### Semantics
+
+- Resolved relative to the current working directory (the same cwd that scopes `tests/<module>/`), so run the runners from the repo root.
+- Sourced **after** the venv is active and **before** pytest / the checker is exec'd, in the same shell — the script's `export`s are inherited by the checker / test process.
+- Key absent, `null`, or empty → no bootstrap runs; behaviour is byte-identical to not setting it.
+- Key set but the file is missing → the runner aborts non-zero, naming the key and the resolved path, rather than running in a half-configured environment. Fix the path or remove the key.
+
+The script is a repo-declared file sourced into the runner's shell — the same trust boundary as running the repo's own tests and `conftest` code; it adds no new trust surface.

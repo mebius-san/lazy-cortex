@@ -1,28 +1,34 @@
 ---
 chapter_type: block
-summary: Assemble a named specialist by pairing one generic agent with one or more domain aspects in lazy.settings.json[experts].
-last_regen: 2026-06-01
+summary: Assemble a named specialist by pairing one generic agent with aspects in lazy.settings.json[experts], following the technical/fiction class map.
+last_regen: 2026-07-06
 no_diagram: true
 source_skills: []
 ---
 # Assembling a specialist from agents and aspects
 
-A specialist is a named expert entry you declare in `lazy.settings.json[experts]`. It pairs one generic agent (the persona) with one or more domain aspects (the knowledge layer) so the expert runtime can produce a fully-qualified specialist system prompt at dispatch time — without you authoring a fresh agent for each domain or use-case.
+A specialist is a named expert entry you declare in `lazy.settings.json[experts]`. It pairs one generic agent (the persona) with one or more aspects (the knowledge and discipline layers) so the expert runtime can produce a fully-qualified specialist system prompt at dispatch time — without you authoring a fresh agent for each domain or use-case.
 
-The composition pattern has two moving parts. The **agent** supplies the output discipline: the interpreter knows how to structure a gap-free brief, the designer knows how to write a declarative spec, the planner knows how to produce a file-level task list. The **aspect** supplies the domain obligations: what counts as a complete brief for a LazyCortex plugin change, what a game-design document must contain, what a dotfiles migration plan must never do. Neither layer changes the other's responsibilities; the expert runtime merges them at dispatch time in the order you declare them.
+The composition pattern has two moving parts. The **agent** supplies the output discipline: the interpreter knows how to structure a gap-free brief, the designer knows how to write a declarative spec, the planner knows how to produce a file-level task list, the implementer/debugger/reviewer know their execution-stage disciplines, and the fiction-writer knows the craft of narrative prose. The **aspect** supplies the knowledge layer on top: a domain aspect adds what counts as a complete brief for a LazyCortex plugin change, what a game-design document must contain, or what a science-fiction premise owes the reader; a cross-cutting aspect adds working discipline that applies no matter the domain. Neither layer changes the other's responsibilities; the expert runtime merges them at dispatch time in the order you declare them.
 
 ## When you'd use this
 
-- You want a specialist that does not exist in the nine built-in entries seeded by `/lazy-experts.install` — for example a `game-planner-strict` variant with a custom aspect, or a `my-domain-interpreter` for a domain aspect your own plugin ships.
+- You want a specialist that does not exist in the entries `/lazy-experts.install` seeds by default — for example a `game-planner-strict` variant with a custom aspect, or a `my-domain-interpreter` for a domain aspect your own plugin ships.
 - You want to combine two aspects in one specialist — for instance, a designer that knows both LazyCortex plugin conventions and dotfiles structure because your target project is a plugin that also manages machine config.
+- You want to pair the fiction-writer agent with a genre aspect (`sci-fi` or `fantasy`) to get a specialist for a particular kind of literary work, rather than accepting whichever class `/lazy-experts.install` already seeded.
 - You want to give a specialist a different model tier than the built-in default.
-- You received an aspect from a third-party plugin and want to wire it onto one of the three generic agents.
+- You received an aspect from a third-party plugin and want to wire it onto one of the generic agents.
 
 ## How it fits together
 
-Start by deciding which generic agent fits the job. If the job is to clarify a request and produce a structured brief, choose `lazy-experts.interpreter`. If the job is to take a resolved brief and write a declarative design, choose `lazy-experts.designer`. If the job is to take a design and produce an ordered implementation plan, choose `lazy-experts.planner`. Each agent is independently dispatchable — you do not need all three to build a specialist.
+Start by deciding which generic agent fits the job. Three agents are design-time: `lazy-experts.interpreter` clarifies a request into a structured brief, `lazy-experts.designer` turns a brief into a declarative design, `lazy-experts.planner` turns a design into an ordered implementation plan. Three are execution-stage: `lazy-experts.implementer` executes a plan test-first, `lazy-experts.debugger` investigates a bug to its root cause, `lazy-experts.reviewer` returns ranked findings against a change. One is literary: `lazy-experts.fiction-writer` takes a brief or outline and produces narrative prose, dialogue, or lyrical fragments — dispatch it for fiction deliverables, never for technical documents. Each agent is independently dispatchable — you do not need the whole set to build a specialist.
 
-Next, pick the aspects that add the knowledge your specialist needs. The three built-in aspects shipped by this plugin are `lazy-experts.claude-plugin-aspect`, `lazy-experts.game-dev-aspect`, and `lazy-experts.dotfiles-aspect`. If another plugin in your project ships an aspect, reference it by its plugin-namespace prefix the same way.
+Next, pick the aspects that add the knowledge and discipline your specialist needs. Aspects fall into two groups:
+
+- **Domain aspects** name the subject matter. Three are technical — `lazy-experts.claude-plugin-aspect`, `lazy-experts.game-dev-aspect`, `lazy-experts.dotfiles-aspect` — and pair with any of the six technical-lifecycle agents. Two are fiction genre aspects — `lazy-experts.sci-fi-aspect`, `lazy-experts.fantasy-aspect` — and pair with `lazy-experts.fiction-writer`. If another plugin in your project ships a domain aspect, reference it by its plugin-namespace prefix the same way.
+- **Cross-cutting aspects** apply regardless of domain. `lazy-experts.discipline-aspect` carries the iron laws (verify before completion, never guess past a gap, no performative agreement) and belongs on every specialist you build, technical or fiction. `lazy-experts.tech-writing-aspect` bans literary devices and enforces a single-term-per-concept dictionary — it belongs on every **technical** specialist, but never on a fiction specialist: its bans on metaphor and figurative imagery directly contradict what `lazy-experts.fiction-writer`'s own persona requires.
+
+This technical/fiction split is the same class map `/lazy-experts.install` applies when it seeds specialists automatically: technical classes (`claude-plugin`, `game-dev`, `dotfiles`) compose `discipline-aspect` and `tech-writing-aspect` onto all six technical-lifecycle roles; fiction classes (`sci-fi`, `fantasy`) compose `discipline-aspect` only onto `fiction-writer`. When you hand-compose a specialist outside the wizard, follow the same split — a technical specialist without `tech-writing-aspect` loses terminology discipline it should have, and a fiction specialist carrying `tech-writing-aspect` gets crippled prose instructions that fight its own agent persona.
 
 Declare the entry in `<repo>/.claude/lazy.settings.json` under the `experts` key:
 
@@ -31,27 +37,46 @@ Declare the entry in `<repo>/.claude/lazy.settings.json` under the `experts` key
   "_version": 1,
   "game-designer": {
     "agent": "lazycortex-experts:lazy-experts.designer",
-    "aspects": ["lazycortex-experts:lazy-experts.game-dev-aspect"]
+    "aspects": [
+      "lazycortex-experts:lazy-experts.game-dev-aspect",
+      "lazycortex-experts:lazy-experts.discipline-aspect",
+      "lazycortex-experts:lazy-experts.tech-writing-aspect"
+    ]
+  },
+  "sci-fi-writer": {
+    "agent": "lazycortex-experts:lazy-experts.fiction-writer",
+    "aspects": [
+      "lazycortex-experts:lazy-experts.sci-fi-aspect",
+      "lazycortex-experts:lazy-experts.discipline-aspect"
+    ]
   },
   "config-plugin-interpreter": {
     "agent": "lazycortex-experts:lazy-experts.interpreter",
     "aspects": [
       "lazycortex-experts:lazy-experts.claude-plugin-aspect",
-      "lazycortex-experts:lazy-experts.dotfiles-aspect"
+      "lazycortex-experts:lazy-experts.dotfiles-aspect",
+      "lazycortex-experts:lazy-experts.discipline-aspect",
+      "lazycortex-experts:lazy-experts.tech-writing-aspect"
     ]
   }
 }
 ```
 
-The entry key (`"game-designer"`, `"config-plugin-interpreter"`) becomes the specialist's identity — the name a dispatching routine uses to look up which agent and aspects to load. Keep names lowercase, hyphenated, and descriptive: `<domain>-<role>` is the convention the built-in entries follow.
+Note that `sci-fi-writer` omits `tech-writing-aspect` for the reason above, while both technical entries carry it alongside `discipline-aspect`.
 
-When you list more than one aspect, the expert runtime merges them in declaration order. Earlier aspects take precedence when obligations conflict. In the example above, `claude-plugin-aspect` obligations run first, and `dotfiles-aspect` obligations supplement them.
+The entry key (`"game-designer"`, `"sci-fi-writer"`, `"config-plugin-interpreter"`) becomes the specialist's identity — the name a dispatching routine uses to look up which agent and aspects to load. Keep names lowercase, hyphenated, and descriptive: `<domain>-<role>` is the convention the built-in entries follow.
+
+When you list more than one aspect, the expert runtime merges them in declaration order. Earlier aspects take precedence when obligations conflict. In the `config-plugin-interpreter` example above, `claude-plugin-aspect` obligations run first, and `dotfiles-aspect` obligations supplement them.
 
 ## Common adjustments
 
 **Register a model tier.** Every specialist entry should have a model tier so the expert runtime knows which capability class to request. Run `/lazy-core.agent-models` — the skill presents a wizard that writes the `lazy.settings.json[agent_models]` entry for you. Do not edit the `agent_models` section by hand; the skill owns that schema.
 
-**Use `/lazy-experts.install` as a baseline.** If you are building a specialist that is close to one of the nine built-in entries, run `/lazy-experts.install` first to seed the nearest base entry, then add your custom entry alongside it. The install skill never overwrites existing entries, so your custom work is safe.
+**Use `/lazy-experts.install` as a baseline.** If you are building a specialist that is close to one already seeded by the class map, run `/lazy-experts.install` first to register the nearest base class, then add your custom entry alongside it. The install skill never overwrites existing entries, so your custom work is safe.
+
+**Building a technical specialist by hand.** Mirror the class map: pair one of the six technical-lifecycle agents with a technical domain aspect, then append `lazy-experts.discipline-aspect` and `lazy-experts.tech-writing-aspect` in that order, same as `/lazy-experts.install` would.
+
+**Building a fiction specialist by hand.** Pair `lazy-experts.fiction-writer` with a genre aspect (`sci-fi` or `fantasy`), then append `lazy-experts.discipline-aspect` only. Never add `lazy-experts.tech-writing-aspect` to a fiction specialist.
 
 **Bring an aspect from another plugin.** The `aspects` array accepts any qualified `<plugin-namespace>:<skill-name>` reference. If a plugin you have installed ships an aspect, check its block documentation for the correct reference string to use here.
 
@@ -59,6 +84,6 @@ When you list more than one aspect, the expert runtime merges them in declaratio
 
 ## See also
 
-- The **agents** block (`agents.md`) — describes the three generic agents and how they function as a linear pipeline.
-- The **aspects** block (`aspects.md`) — describes the three built-in domain aspect files and shows what each one obliges the composing agent to do.
-- The **install-and-audit** block (`install-and-audit.md`) — bootstraps the plugin and seeds the nine built-in specialist entries into `lazy.settings.json[experts]`.
+- The **agents** block (`agents.md`) — describes the seven generic agents, the design-time / execution-stage / literary groupings, and how the six technical-lifecycle agents function as a linear pipeline.
+- The **aspects** block (`aspects.md`) — describes the domain aspect files (technical and fiction) and the two cross-cutting aspects, and shows what each one obliges the composing agent to do.
+- The **install-and-audit** block (`install-and-audit.md`) — bootstraps the plugin and seeds specialist entries per the class map, technical classes vs fiction classes.
