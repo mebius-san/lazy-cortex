@@ -42,7 +42,7 @@ This skill is **idempotent and quiet on re-run**. Every choice it makes is persi
 - **Two daemon gates, asked once each:**
   - `daemon.enabled` (tracked `lazy.settings.json`) — does *this project* use the background daemon at all? Set false → the daemon-only steps (routines, supervisor, sandbox, runtime plumbing) are skipped for the project and never re-raised. Experts, `agent_models` tiers, rules, skills, and manual commands still install — they are not daemon-bound.
   - `daemon.run_here` (this checkout's gitignored `lazy.settings.local.json`) — run the daemon for *this checkout* (this working copy)? Per-checkout, NOT per-machine: each clone of the project has its own overlay, so several checkouts on one machine each decide independently. Set false → the supervisor + sandbox are skipped for this checkout and never re-raised, even though the project keeps `daemon.enabled = true`.
-- **Everything derivable is derived, not asked:** install scope (from `installed_plugins.json`), supervisor kind (from platform), dev-mode (from whether this repo ships plugin sources), expert git identity (a deterministic bot id).
+- **Everything derivable is derived, not asked:** install scope (from where the plugin is *enabled* — see Step 1), supervisor kind (from platform), dev-mode (from whether this repo ships plugin sources), expert git identity (a deterministic bot id).
 
 ## File-sync policy (applies to every file this skill writes)
 
@@ -70,17 +70,29 @@ When raising the floor in the future, bump this step's numeric threshold in the 
 
 ## Step 1: Detect install scope
 
-Read `~/.claude/plugins/installed_plugins.json`. The `lazycortex-core@lazycortex` key holds an **array of entries** — one per project where `/plugin install` was last run. The plugin **cache is shared globally across all projects**, so any non-empty array proves the plugin is installed and usable in the current cwd.
+Scope = **where the plugin is actually enabled**, not where `/plugin install` last ran. The `scope` field in `installed_plugins.json` records the install command's origin (a shared-cache download registration), which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`. Enablement is the source of truth for where config belongs.
+
+Resolve it with the shared helper, which reads `enabledPlugins` from the project settings first, then the global settings, and falls back to the install record's own `scope` only when neither settings file enables the plugin:
+
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+import subprocess
+from lazy_install_phases import detect_install_scope
+root = subprocess.run(['git', 'rev-parse', '--show-toplevel'], capture_output=True, text=True).stdout.strip() or '.'
+print(detect_install_scope('lazycortex-core@lazycortex', project_root=root))
+")
+```
+
+The helper prints exactly one word:
+- `project` — enabled in `<repo-root>/.claude/settings.json` (project wins even when the install record's scope is `user`, and when both scopes enable it); Steps 3–6 target `<repo-root>/.claude/`.
+- `user` — enabled only in `~/.claude/settings.json` (or the fallback resolved there); Steps 3–6 target `~/.claude/`.
+- `not-installed` — `lazycortex-core@lazycortex` is absent / has an empty array in `~/.claude/plugins/installed_plugins.json`; the plugin has never been installed on this machine.
+
+The scope is derived — do NOT ask.
 
 **Do NOT compare an entry's `projectPath` against the current working directory.** `projectPath` records where the install command was last run, not where the plugin "belongs" — Step 2 of this skill targets `<repo-root>` (i.e. `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
 
-Look at the `scope` field of the entries in the array:
-- `"user"` — plugin enabled globally in `~/.claude/settings.json`
-- `"project"` — plugin enabled per-project in `.claude/settings.json`
-
-The scope is already recorded — derive it, do not ask. Use the entry's `scope`. If both scopes appear in the array, default to `project` silently.
-
-Abort **only** if the `lazycortex-core@lazycortex` key is absent or its array is empty — i.e. the plugin has never been installed on this machine. In that case tell the user to install it first:
+Abort **only** on `not-installed` — the shared plugin cache is the sole proof of installation, and enablement cannot substitute for missing sources. In that case tell the user to install it first:
 ```json
 "enabledPlugins": { "lazycortex-core@lazycortex": true }
 ```

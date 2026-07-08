@@ -289,6 +289,129 @@ def bootstrap_lazyignore(repo: Path | str, template: Path | str) -> str:
   return "seeded"
 
 
+# waiver: external Claude Code filesystem locations, not reusable domain keys
+_INSTALLED_PLUGINS_REL = ".claude/plugins/installed_plugins.json"
+# waiver: external Claude Code filesystem location, not a reusable domain key
+_SETTINGS_JSON_REL = ".claude/settings.json"
+# waiver: external Claude Code filesystem location, not a reusable domain key
+_SETTINGS_LOCAL_JSON_REL = ".claude/settings.local.json"
+
+
+def _installed_entries(installed_plugins: Path, plugin_key: str) -> list:
+  """
+  Read the install-record entries for one plugin key from an `installed_plugins.json` manifest.
+
+  Gives install-phase callers the per-project install history recorded for a plugin key, so
+  they can determine where the plugin was previously installed.
+
+  Args:
+    installed_plugins: Path to the `installed_plugins.json` manifest.
+    plugin_key: The `<plugin>@<marketplace>` key to look up.
+
+  Returns:
+    The install-record entries for `plugin_key`, or an empty list when the manifest is
+    absent or the key is unknown or empty.
+  """
+  # guard: no manifest on disk — plugin was never installed on this machine
+  if not installed_plugins.exists():
+    return []
+  # waiver: stdlib encoding idiom
+  data = json.loads(installed_plugins.read_text(encoding = "utf-8"))
+  # waiver: external Claude Code manifest field name, not an internal key
+  plugins = data.get("plugins", data)
+  return plugins.get(plugin_key) or []
+
+
+def _plugin_enabled(plugin_key: str, *settings_paths: Path) -> bool:
+  """
+  Report whether a plugin key is activated across a precedence-ordered set of settings files.
+
+  Used by install-phase callers to check plugin activation across the project and user
+  settings scopes without parsing each file separately.
+
+  Notes:
+    - Settings files that are absent or contain invalid JSON are skipped without raising.
+
+  Args:
+    plugin_key: The `<plugin>@<marketplace>` key to test.
+    settings_paths: Settings files in increasing-precedence order; a later file's entry
+      overrides an earlier file's entry for the same key.
+
+  Returns:
+    `True` when the merged `enabledPlugins` view activates `plugin_key`, `False` otherwise.
+  """
+  merged: dict = {}
+  for path in settings_paths:
+    # guard: skip a settings file that is absent
+    if not path.exists():
+      continue
+    try:
+      # waiver: stdlib encoding idiom
+      data = json.loads(path.read_text(encoding = "utf-8"))
+    except json.JSONDecodeError:
+      # guard: an unparseable settings file contributes no signal
+      continue
+    # waiver: external Claude Code settings field name, not an internal key
+    merged.update(data.get("enabledPlugins") or {})
+  return bool(merged.get(plugin_key))
+
+
+def detect_install_scope(
+    plugin_key: str, project_root: Path | str = ".", home: Path | str | None = None
+) -> str:
+  """
+  Resolve which scope a plugin's config should target.
+
+  Used by install-phase callers to route generated config into the project checkout or the
+  user's global settings, following wherever the plugin is actually enabled rather than
+  where it was originally installed.
+
+  Args:
+    plugin_key: The `<plugin>@<marketplace>` key to detect.
+    project_root: Path whose `.claude/` holds the project settings and is the project scope.
+    home: Home directory holding the global `.claude/`; defaults to the current user's home.
+
+  Returns:
+    `"project"` when the plugin is enabled at the project scope, `"user"` when it is enabled
+    only at the user scope or the install record's own scope resolves there, and
+    `"not-installed"` when the plugin has no install record at all, regardless of enablement.
+  """
+  home = Path.home() if home is None else Path(home)
+  project_root = Path(project_root)
+
+  # guard: the shared cache is the sole proof the plugin is installed — its absence aborts
+  # regardless of any enablement flag, since there are no sources to sync
+  entries = _installed_entries(home / _INSTALLED_PLUGINS_REL, plugin_key)
+  if not entries:
+    # waiver: install-scope detection signal, not a reusable domain key
+    return "not-installed"
+
+  # project activation is the strongest signal — it wins even when the install record's own
+  # scope says "user" (install-scope records where /plugin install ran, not where it is active)
+  if _plugin_enabled(
+      plugin_key,
+      project_root / _SETTINGS_JSON_REL,
+      project_root / _SETTINGS_LOCAL_JSON_REL,
+  ):
+    # waiver: external Claude Code install scope value
+    return "project"
+
+  # enabled only in the global settings → target the user scope
+  if _plugin_enabled(
+      plugin_key,
+      home / _SETTINGS_JSON_REL,
+      home / _SETTINGS_LOCAL_JSON_REL,
+  ):
+    # waiver: external Claude Code install scope value
+    return "user"
+
+  # neither settings file activates the plugin — fall back to the install record's own scope,
+  # preferring project when both scopes appear in the array
+  scopes = { entry.get("scope") for entry in entries }
+  # waiver: external Claude Code install scope value
+  return "project" if "project" in scopes else "user"
+
+
 def bootstrap_memory_dir(repo: Path | str) -> str:
   """
   Create `.memory/` at the repository root and strip any legacy `!.memory/` gitignore line.

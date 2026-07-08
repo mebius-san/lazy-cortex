@@ -1,7 +1,7 @@
 ---
 name: lazy-diagram.install
 description: "Bootstrap the lazycortex-diagram plugin for the current project (or globally). Syncs the authoring rule shipped by the plugin into the consumer's rules directory and seeds agent model tiers for the per-format drawer agents. Idempotent and quiet on re-run — an enabled plugin installs its whole surface, decisions are derived not asked, and orphaned rules are left in place. Detects install scope automatically."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(date *), Bash(diff *), AskUserQuestion
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(date *), Bash(diff *), Bash(lazycortex-core *), AskUserQuestion
 ---
 # Install lazycortex-diagram
 
@@ -27,7 +27,7 @@ This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
 This skill is **idempotent and quiet on re-run**. Every choice it makes is persisted (in `lazy.settings.json` or `installed_plugins.json`), and on the next run the persisted value is read first and honoured silently — the user is asked again only when nothing is on record yet.
 
 - **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-rule "install this rule?" prompt and no per-artifact opt-in — wanting the plugin means wanting its surface.
-- **Everything derivable is derived, not asked:** install scope (from `installed_plugins.json`), agent tiers (from `lazycortex-core`'s `default-tiers.json`).
+- **Everything derivable is derived, not asked:** install scope (from where the plugin is *enabled* — see Step 1), agent tiers (from `lazycortex-core`'s `default-tiers.json`).
 - This skill collects no genuine project config of its own; every action is mechanical file-sync or tier-seeding.
 
 ## File-sync policy (applies to every file this skill writes)
@@ -42,17 +42,24 @@ Every file this skill creates or updates follows three cases — no per-file "in
 
 ## Step 1: Detect install scope
 
-Read `~/.claude/plugins/installed_plugins.json`. The `lazycortex-diagram@lazycortex` key holds an **array of entries** — one per project where `/plugin install` was last run. The plugin **cache is shared globally across all projects**, so any non-empty array proves the plugin is installed and usable in the current cwd.
+Scope = **where the plugin is actually enabled**, not where `/plugin install` last ran. The `scope` field in `installed_plugins.json` records the install command's origin, which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`. Enablement is the source of truth for where config belongs.
 
-**Do NOT compare an entry's `projectPath` against the current working directory.** `projectPath` records where the install command was last run, not where the plugin "belongs" — Step 2 targets `<repo-root>` (i.e. `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
+Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, and falls back to the install record's own `scope` only when neither settings file enables the plugin:
 
-Look at the `scope` field of the entries in the array:
-- `"user"` — plugin enabled globally in `~/.claude/settings.json`
-- `"project"` — plugin enabled per-project in `.claude/settings.json`
+```
+Bash(lazycortex-core detect-scope lazycortex-diagram@lazycortex)
+```
 
-The scope is already recorded — derive it, do not ask. Use the entry's `scope`. If both scopes appear in the array, default to `project` silently.
+The command prints exactly one word:
+- `project` — enabled in `<repo-root>/.claude/settings.json` (project wins even when the install record's scope is `user`, and when both scopes enable it); Steps 3–4 target `<repo-root>/.claude/`.
+- `user` — enabled only in `~/.claude/settings.json` (or the fallback resolved there); Steps 3–4 target `~/.claude/`.
+- `not-installed` — `lazycortex-diagram@lazycortex` is absent / has an empty array in `~/.claude/plugins/installed_plugins.json`; the plugin has never been installed on this machine.
 
-Abort **only** if the `lazycortex-diagram@lazycortex` key is absent or its array is empty. In that case tell the user to install it first:
+The scope is derived — do NOT ask.
+
+**Do NOT compare an entry's `projectPath` against the current working directory.** Step 2 targets `<repo-root>` (i.e. `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
+
+Abort **only** on `not-installed` — the shared plugin cache is the sole proof of installation, and enablement cannot substitute for missing sources. In that case tell the user to install it first:
 ```json
 "enabledPlugins": { "lazycortex-diagram@lazycortex": true }
 ```

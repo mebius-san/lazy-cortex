@@ -11,7 +11,7 @@ Bootstrap the plugin in the right scope: ensure the consumer dir exists where pe
 
 - **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-part "wire this?" opt-in — wanting the plugin means wanting its surface. The only questions this skill asks collect GENUINE project config that cannot be derived (the repo authoring language; the first product) and are read-first (Read-first / never re-ask).
 - **Daemon gate.** Every step that registers a daemon routine first reads the tracked `daemon.enabled` flag; if the project has opted out of the daemon, that registration is skipped silently (see § Daemon gate). `lazy-core.install` owns the first-time daemon question — this skill never re-asks it.
-- **Scope is derived, never asked.** Install scope comes from `installed_plugins.json`'s `scope` field; both present → `project` silently. Python floor is owned by `lazy-core.install`'s first phase — this skill never re-probes it.
+- **Scope is derived, never asked.** Install scope comes from where the plugin is *enabled* (see Step 1); a project-scope enablement wins even when the install record's `scope` is `user`. Python floor is owned by `lazy-core.install`'s first phase — this skill never re-probes it.
 
 ## File-sync policy (applies to every file this skill writes)
 
@@ -54,17 +54,24 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
 
 ## Step 1: Detect install scope
 
-Read `~/.claude/plugins/installed_plugins.json`. The `lazycortex-specs@lazycortex` key holds an **array of entries** — one per project where `/plugin install` was last run. The plugin **cache is shared globally across all projects**, so any non-empty array proves the plugin is installed and usable in the current cwd.
+Scope = **where the plugin is actually enabled**, not where `/plugin install` last ran. The `scope` field in `installed_plugins.json` records the install command's origin, which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`. Enablement is the source of truth for where config belongs.
 
-**Do NOT compare an entry's `projectPath` against the current working directory.** `projectPath` records where the install command was last run, not where the plugin "belongs" — Step 2 targets `<repo-root>` (i.e. `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
+Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, and falls back to the install record's own `scope` only when neither settings file enables the plugin:
 
-Look at the `scope` field of the entries in the array:
-- `"user"` — plugin enabled globally in `~/.claude/settings.json`
-- `"project"` — plugin enabled per-project in `.claude/settings.json`
+```
+Bash(lazycortex-core detect-scope lazycortex-specs@lazycortex)
+```
 
-If both scopes appear in the array, target `project` silently — never ask user-vs-project (scope is derived, per § Install philosophy).
+The command prints exactly one word:
+- `project` — enabled in `<repo-root>/.claude/settings.json` (project wins even when the install record's scope is `user`, and when both scopes enable it); Step 2 targets `<repo-root>/.claude/`.
+- `user` — enabled only in `~/.claude/settings.json` (or the fallback resolved there); Step 2 targets `~/.claude/` (and the project-scope-only request wiring in Step 6 is skipped).
+- `not-installed` — `lazycortex-specs@lazycortex` is absent / has an empty array in `~/.claude/plugins/installed_plugins.json`; the plugin has never been installed on this machine.
 
-Abort **only** if the `lazycortex-specs@lazycortex` key is absent or its array is empty. In that case tell the user to install it first:
+The scope is derived — do NOT ask.
+
+**Do NOT compare an entry's `projectPath` against the current working directory.** Step 2 targets `<repo-root>` (i.e. `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
+
+Abort **only** on `not-installed` — the shared plugin cache is the sole proof of installation, and enablement cannot substitute for missing sources. In that case tell the user to install it first:
 ```json
 "enabledPlugins": { "lazycortex-specs@lazycortex": true }
 ```

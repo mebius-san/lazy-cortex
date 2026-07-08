@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.install
 description: "Bootstrap the lazycortex-obsidian plugin for the current project (or globally). Syncs rule templates shipped by the plugin (currently none) and scaffolds the tag-page template used by the `lazy-obsidian.gen-tag-pages` agent (project scope only) via quiet file-sync — writes/merges silently, asks only on a genuine conflict, leaves orphans in place. At project scope it is the root entry point for the plugin family: installs the Dataview Obsidian plugin into `<repo-root>/.obsidian/` via `/lazy-obsidian.update-plugin` (Dataview renders the `Index` section of tag pages) and runs `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install` so the full vault setup completes in one pass (no per-chain opt-in — plugin enabled means full functionality). Idempotent — safe to re-run. Detects install scope automatically."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), AskUserQuestion
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(lazycortex-core *), AskUserQuestion
 ---
 # Install lazycortex-obsidian
 
@@ -30,17 +30,24 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
 
 ## Step 1: Detect install scope
 
-Read `~/.claude/plugins/installed_plugins.json`. The `lazycortex-obsidian@lazycortex` key holds an **array of entries** — one per project where `/plugin install` was last run. The plugin **cache is shared globally across all projects**, so any non-empty array proves the plugin is installed and usable in the current cwd.
+Scope = **where the plugin is actually enabled**, not where `/plugin install` last ran. The `scope` field in `installed_plugins.json` records the install command's origin, which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`. Enablement is the source of truth for where config belongs.
 
-**Do NOT compare an entry's `projectPath` against the current working directory.** `projectPath` records where the install command was last run, not where the plugin "belongs" — Step 2 targets `<repo-root>` (i.e. `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
+Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, and falls back to the install record's own `scope` only when neither settings file enables the plugin:
 
-Look at the `scope` field of the entries in the array:
-- `"user"` — plugin enabled globally in `~/.claude/settings.json`
-- `"project"` — plugin enabled per-project in `.claude/settings.json`
+```
+Bash(lazycortex-core detect-scope lazycortex-obsidian@lazycortex)
+```
 
-If both scopes appear in the array, ask the user which to target. Default: `project`.
+The command prints exactly one word:
+- `project` — enabled in `<repo-root>/.claude/settings.json` (project wins even when the install record's scope is `user`, and when both scopes enable it); Steps 3–4 target `<repo-root>/.claude/`, and the project-scope-only Steps 5–6.5 run.
+- `user` — enabled only in `~/.claude/settings.json` (or the fallback resolved there); Steps 3–4 target `~/.claude/`, and the project-scope-only steps skip.
+- `not-installed` — `lazycortex-obsidian@lazycortex` is absent / has an empty array in `~/.claude/plugins/installed_plugins.json`; the plugin has never been installed on this machine.
 
-Abort **only** if the `lazycortex-obsidian@lazycortex` key is absent or its array is empty. In that case tell the user to install it first:
+The scope is derived — do NOT ask.
+
+**Do NOT compare an entry's `projectPath` against the current working directory.** Step 2 targets `<repo-root>` (i.e. `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
+
+Abort **only** on `not-installed` — the shared plugin cache is the sole proof of installation, and enablement cannot substitute for missing sources. In that case tell the user to install it first:
 ```json
 "enabledPlugins": { "lazycortex-obsidian@lazycortex": true }
 ```

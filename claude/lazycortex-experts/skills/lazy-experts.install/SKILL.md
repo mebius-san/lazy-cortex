@@ -1,7 +1,7 @@
 ---
 name: lazy-experts.install
 description: "Bootstrap the lazycortex-experts plugin for the current project (or globally). Seeds two things into `lazy.settings.json`: (1) agent-model tiers for the generic agents from `lazycortex-core`'s `default-tiers.json` into `agent_models.lazycortex`; (2) composed expert entries per the class map (technical classes seed six roles; fiction classes `sci-fi`/`fantasy` seed only `fiction-writer`) into `experts` — every entry also carries `lazycortex-experts:lazy-experts.discipline-aspect` (plus `lazy-experts.tech-writing-aspect` on technical classes), `lazycortex-core:lazy-memory.persona-aspect`, and a deterministic bot `git_author`. Asks which expert classes to register ONLY when the experts list is empty; on a populated list it derives the classes already present and completes them without asking. Experts and tiers are dispatch-routing config used by interactive flows AND the daemon — never gated on `daemon.enabled`. Idempotent and quiet on re-run; existing entries are never overwritten. Detects install scope automatically."
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *)
+allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *), Bash(lazycortex-core *)
 ---
 # Install lazycortex-experts
 
@@ -28,24 +28,27 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
 This skill is **idempotent and quiet on re-run**. It asks exactly one thing, and only on a fresh project:
 
 - **Expert classes** — which domain aspects to register (e.g. `claude-plugin`, `game-dev`, `dotfiles`, `sci-fi`, `fantasy`). Asked ONLY when the `experts` section is empty (a fresh project). When `experts` already holds entries, the skill derives the classes already present from their `aspects` and completes those — never re-asking, never silently dragging in classes you didn't choose.
-- **Install scope** is derived from `installed_plugins.json` (`scope` field); when both `user` and `project` appear, it silently targets `project`.
+- **Install scope** is derived from where the plugin is *enabled* (see Step 1); a project-scope enablement wins even when the install record's `scope` is `user`.
 - **Expert git identity** is a deterministic bot id (`{name: <title-cased expert>, email: <expert-key>@lazycortex.local}`), never the operator's `git config`.
 - **Existing entries are never overwritten**, including hand-customized composed experts.
 - **No daemon gate.** Experts and `agent_models` tiers are dispatch-routing config used outside the daemon too (interactive `Agent` dispatch, spec / review writers), so this skill seeds them regardless of `daemon.enabled`. Only the runtime *routines / supervisor* (owned by `lazy-core.install` and the routine-registering plugins) are daemon-gated.
 
 ## Step 1: Detect install scope
 
-Read `~/.claude/plugins/installed_plugins.json`. The `lazycortex-experts@lazycortex` key holds an array — non-empty proves the plugin is installed and usable in the current cwd.
+Scope = **where the plugin is actually enabled**, not where `/plugin install` last ran. The `scope` field in `installed_plugins.json` records the install command's origin, which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`. Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, falling back to the install record's own `scope` only when neither enables the plugin:
+
+```
+Bash(lazycortex-core detect-scope lazycortex-experts@lazycortex)
+```
+
+The command prints exactly one word:
+- `project` → target `<repo-root>/.claude/lazy.settings.json` (project wins even when the install record's scope is `user`, and when both scopes enable it).
+- `user` → target `~/.claude/lazy.settings.json` (enabled only globally, or the fallback resolved there).
+- `not-installed` → `lazycortex-experts@lazycortex` is absent / has an empty array in `installed_plugins.json`; the plugin has never been installed on this machine.
 
 **Do NOT compare `projectPath` against the current working directory.** Step 2 targets `<repo-root>` regardless.
 
-Inspect the `scope` field of the entries:
-- `"user"` → global, target `~/.claude/lazy.settings.json`.
-- `"project"` → per-project, target `<repo-root>/.claude/lazy.settings.json`.
-
-If both scopes appear, silently target `project` — do NOT ask. The scope is already recorded; derive it, never prompt.
-
-Abort **only** if `lazycortex-experts@lazycortex` is absent or its array is empty. Message: `lazycortex-experts not enabled — add "lazycortex-experts@lazycortex": true to enabledPlugins in your settings.json and run /plugin install lazycortex/lazycortex-experts.`
+The scope is derived — do NOT ask. Abort **only** on `not-installed` (the shared plugin cache is the sole proof of installation, and enablement cannot substitute for missing sources). Message: `lazycortex-experts not enabled — add "lazycortex-experts@lazycortex": true to enabledPlugins in your settings.json and run /plugin install lazycortex/lazycortex-experts.`
 
 Outcome: `scope-detected: <user|project>`.
 

@@ -28,7 +28,7 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
 This skill is **idempotent and quiet on re-run**. Every choice is derived or read-first; the user is asked again only when nothing is on record.
 
 - **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-artifact opt-in.
-- **Scope is derived, not asked.** The plugin's `scope` field in `~/.claude/plugins/installed_plugins.json` decides the target; lazy-review is per-repo, so all runtime artifacts land under the cwd's git root regardless. If both scopes appear, target `project` silently — never ask user-vs-project.
+- **Scope is not asked.** lazy-review is per-repo — all runtime artifacts land under the cwd's git root regardless of where the plugin is enabled, so there is no user-vs-project branch to resolve here. (Scope detection for plugins that DO branch their target lives in `lazy-core.install` Step 1, keyed on enablement rather than the install record's `scope`.)
 - **Daemon gate is read-first.** Step 2 reads the tracked `daemon.enabled` flag and never re-raises Gate 1 (that gate belongs to `lazy-core.install`).
 - **No Python re-probe.** The Python ≥ 3.12 floor is enforced once by `lazy-core.install`; this skill does NOT re-probe it.
 
