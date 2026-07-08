@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, doctor-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, lookup-expert, scaffold, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols")
+         "Subcommands: expert-pump-once, doctor-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, lookup-expert, scaffold, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols, detect-scope")
 
 
 def _cmd_consume_job(argv: list[str]) -> int:
@@ -333,6 +333,29 @@ def _cmd_error_list(argv: list[str]) -> int:
     return 0
 
 
+def _cmd_detect_scope(argv: list[str]) -> int:
+    """Print the install scope (``project`` / ``user`` / ``not-installed``) for a plugin key.
+
+    Resolves the scope from where the plugin is actually *enabled* (``enabledPlugins``
+    in the project then the user ``settings.json`` / ``settings.local.json``), falling
+    back to the install record's own ``scope`` in ``installed_plugins.json`` only when
+    neither settings file enables it. ``project_root`` defaults to the git toplevel of
+    the cwd, so a call from any subdirectory resolves the same scope.
+
+    This is the boundary-legal path (dev.plugin-boundaries § 1c) for sibling install
+    skills to detect their own scope without importing lazycortex-core Python.
+    """
+    import argparse, subprocess
+    from lazy_install_phases import detect_install_scope
+    p = argparse.ArgumentParser(prog="lazycortex-core detect-scope")
+    p.add_argument("plugin_key", help="e.g. lazycortex-diagram@lazycortex")
+    a = p.parse_args(argv)
+    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                              capture_output=True, text=True).stdout.strip()
+    print(detect_install_scope(a.plugin_key, project_root=toplevel or os.getcwd()))
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print(USAGE, file=sys.stderr); return 2
@@ -383,6 +406,8 @@ def main() -> int:
     elif sub == "add-protocols":
         from protocol_attach import cmd_add_protocols
         return cmd_add_protocols(sys.argv[2:])
+    elif sub == "detect-scope":
+        return _cmd_detect_scope(sys.argv[2:])
     else:
         print(f"unknown subcommand: {sub}\n{USAGE}", file=sys.stderr); return 2
 

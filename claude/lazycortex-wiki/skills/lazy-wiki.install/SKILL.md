@@ -31,7 +31,7 @@ This skill is **idempotent and quiet on re-run**. Every choice it makes is persi
 
 - **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-rule "install this rule?" prompt and no per-artifact opt-in.
 - **Daemon gate applies to routines only.** The `wiki.curator` expert is dispatch-routing config and is registered unconditionally; only the two curator *routines* depend on the background daemon. This skill reads the tracked `daemon.enabled` flag and gates the routine registration on it silently — it never asks the daemon question itself (Gate 1 belongs to `lazy-core.install`).
-- **Everything derivable is derived, not asked:** install scope (from `installed_plugins.json` — both scopes → `project` silently), curator git identity (a deterministic bot id), the watched branch.
+- **Everything derivable is derived, not asked:** install scope (from where the plugin is *enabled* — see Step 1), curator git identity (a deterministic bot id), the watched branch.
 
 ## File-sync policy (applies to every file this skill writes)
 
@@ -45,17 +45,20 @@ Every file this skill creates or updates follows three cases — no per-file "in
 
 ## Step 1: Detect install scope
 
-Read `~/.claude/plugins/installed_plugins.json`. The `lazycortex-wiki@lazycortex` key holds an array of entries. A non-empty array proves the plugin is installed and usable.
+Scope = **where the plugin is actually enabled**, not where `/plugin install` last ran. The `scope` field in `installed_plugins.json` records the install command's origin, which drifts from the activation scope — a plugin enabled per-project in `.claude/settings.json` can carry an install record of `scope: "user"`. Resolve it via the core CLI, which reads `enabledPlugins` from the project settings first, then the global settings, falling back to the install record's own `scope` only when neither enables the plugin:
+
+```
+Bash(lazycortex-core detect-scope lazycortex-wiki@lazycortex)
+```
+
+The command prints exactly one word:
+- `project` → target `<repo-root>/.claude/` (project wins even when the install record's scope is `user`, and when both scopes enable it).
+- `user` → target `~/.claude/` (enabled only globally, or the fallback resolved there).
+- `not-installed` → `lazycortex-wiki@lazycortex` is absent / has an empty array in `installed_plugins.json`; the plugin has never been installed on this machine.
 
 **Do NOT compare `projectPath` against the current working directory.** Step 2 targets `<repo-root>` regardless of any entry's `projectPath`.
 
-Inspect the `scope` field of the entries:
-- `"user"` → globally enabled, target `~/.claude/`
-- `"project"` → per-project, target `<repo-root>/.claude/`
-
-The scope is already recorded — derive it, do not ask. Use the entry's `scope`. If both scopes appear in the array, default to `project` silently.
-
-Abort **only** if `lazycortex-wiki@lazycortex` is absent or its array is empty. Message: *"lazycortex-wiki not enabled — add `"lazycortex-wiki@lazycortex": true` to `enabledPlugins` in your `settings.json` and run `/plugin install lazycortex/lazycortex-wiki`."*
+The scope is derived — do NOT ask. Abort **only** on `not-installed` (the shared plugin cache is the sole proof of installation, and enablement cannot substitute for missing sources). Message: *"lazycortex-wiki not enabled — add `"lazycortex-wiki@lazycortex": true` to `enabledPlugins` in your `settings.json` and run `/plugin install lazycortex/lazycortex-wiki`."*
 
 Outcome: `scope-detected: <user|project>`.
 

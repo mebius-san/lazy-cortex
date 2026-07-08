@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.10.0 — 2026-07-08 UTC
+
+- New `lazycortex-core detect-scope <plugin@marketplace>` subcommand resolves a plugin's install target from where it is actually *enabled* — the project's `enabledPlugins` first, then the user's — falling back to the install record's own `scope` only when neither settings file enables it. Sibling plugin install skills use it so their generated config lands where the plugin is active, not wherever `/plugin install` last ran.
+
 ### 5.9.0 — 2026-07-06 UTC
 
 - New `daemon.git.post_push_hook` config lets the runtime daemon run a shell command after every successful push, passing repo/branch/SHA details via env vars; hook failures are isolated and never block a tick.
@@ -376,6 +380,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.0.2 — 2026-07-08 UTC
+
+- The install skill now derives its target scope from where the plugin is actually enabled (via `lazycortex-core detect-scope`) instead of the install record's `scope` field, so its config lands at the correct project-vs-user scope even when the two have drifted.
+
 ### 3.0.1 — 2026-06-28 UTC
 
 - Spec designs now describe intended behavior, not current code state — `spec.create-asset` and the feature/change design templates forbid writing existing gaps or unimplemented branches in as limitations unless an explicit operator decision narrows scope.
@@ -432,6 +440,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 2.2.1 — 2026-07-08 UTC
+
+- The install skill now derives its target scope from where the plugin is actually enabled (via `lazycortex-core detect-scope`) instead of the install record's `scope` field, so its config lands at the correct project-vs-user scope even when the two have drifted.
 
 ### 2.2.0 — 2026-06-10 UTC
 
@@ -539,6 +551,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.1.3 — 2026-07-08 UTC
+
+- The install skill now derives its target scope from where the plugin is actually enabled (via `lazycortex-core detect-scope`) instead of the install record's `scope` field, so its config lands at the correct project-vs-user scope even when the two have drifted.
+
 ### 1.1.2 — 2026-06-14 UTC
 
 - Added the `lazy-diagram.authoring` and `lazy-diagram.writer-guide` reference material the per-format drawer agents read while composing a diagram. No change to how diagrams are requested or generated — the guidance sharpens the agents' output.
@@ -622,6 +638,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 0.5.1 — 2026-07-08 UTC
+
+- The install skill now derives its target scope from where the plugin is actually enabled (via `lazycortex-core detect-scope`) instead of the install record's `scope` field, so its config lands at the correct project-vs-user scope even when the two have drifted.
 
 ### 0.5.0 — 2026-07-06 UTC
 
@@ -717,6 +737,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 1.5.2 — 2026-07-08 UTC
+
+- The install skill now derives its target scope from where the plugin is actually enabled (via `lazycortex-core detect-scope`) instead of the install record's `scope` field, so its config lands at the correct project-vs-user scope even when the two have drifted.
 
 ### 1.5.1 — 2026-06-15 UTC
 
