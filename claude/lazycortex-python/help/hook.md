@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: The PostToolUse hook that runs `pcf.py` on every `.py` edit and surfaces style violations inline in the next turn — zero install steps, zero config writes.
-last_regen: 2026-07-06
+last_regen: 2026-07-10
 no_diagram: true
 source_skills:
   - lazy-python.check-style.sh
@@ -27,6 +27,8 @@ Every time you save a `.py` file — via `Edit` or `Write` — the plugin's Post
 
 The violation format the hook surfaces is the same `file:line: note: message` format that `chk-py pcf` emits, so findings look identical whether they come from the hook or from a manual checker run.
 
+`/lazy-python.install` never writes to the hook registration itself — it stays out of the hook's own path entirely, since the manifest-based registration needs no consumer-side setup. Install's job is the checker stack the hook depends on: it bootstraps `[tool.pcf]` (and the rest of the checker sections) in `pyproject.toml`, so the hook has exclude rules and check flags to read from the moment it first fires.
+
 ## Common adjustments
 
 **Silencing the hook for a directory.** Add the path to the `exclude` list under `[tool.pcf]` in `pyproject.toml`. `/lazy-python.install` Phase 3 seeds this section with `.venv`, `.claude`, `tests`, `~archive`, and `~sandbox`; extend it for any generated or third-party directories you do not want scanned.
@@ -43,3 +45,4 @@ The violation format the hook surfaces is the same `file:line: note: message` fo
 
 - [checkers](checkers.md) — the `chk-py` CLI aggregator that runs `pcf.py` (and four other checks) on demand
 - [install-and-audit](install-and-audit.md) — installs the plugin and enables the manifest-based hook registration
+</content>

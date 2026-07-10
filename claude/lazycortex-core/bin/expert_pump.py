@@ -60,6 +60,12 @@ _STREAM_MAX_RETRIES_DEFAULT  = 3
 _WATCHDOG_POLL_SEC = 1.0
 # Grace between SIGTERM and SIGKILL when tearing down a stalled spawn's process group.
 _KILL_GRACE_SEC = 5.0
+# Dead-scan grace window (seconds): a claimed job whose claimant PID is gone but which has
+# no response.json yet is first tagged with a DEAD_CANDIDATE marker; DEAD lands only when a
+# later scan still finds no response.json after this window. The PID file holds the pump's
+# own pid, so a pump killed by the routine timeout looks dead while the spawned Claude
+# subprocess may still be seconds away from writing response.json — the window covers that.
+_DEAD_GRACE_SEC = 60.0
 
 
 def _pid_alive(pid: int) -> bool:
@@ -88,7 +94,8 @@ def _pid_alive(pid: int) -> bool:
 
 
 _DEAD_JSON_INTERNAL_FILES = {
-  JobMarker.READY, JobMarker.PID, JobFile.REQUEST, JobMarker.DEAD, JobArtifact.DEAD_JSON,
+  JobMarker.READY, JobMarker.PID, JobFile.REQUEST, JobMarker.DEAD, JobMarker.DEAD_CANDIDATE,
+  JobArtifact.DEAD_JSON,
 }
 # Job-liveness classification thresholds (seconds): a job that died faster than
 # _STARTUP_CRASH_SEC with no output likely crashed at startup; one alive longer
@@ -161,16 +168,44 @@ def _build_dead_json(jdir: Path, expert: str, job_id: str, marked_at: float) -> 
   }
 
 
-def _detect_dead_jobs(repo: Path) -> int:
+def _finalize_orphaned_job(jdir: Path) -> None:
   """
-  Scan all job directories and mark stuck jobs as dead.
+  Finalize a claimed job whose claimant died after the expert produced its response.
 
-  A job is considered stuck when it has been claimed (READY + PID present), has no
-  response.json or DONE marker, is not already marked DEAD, and its recorded PID is
-  no longer alive. Each newly-stuck job receives a DEAD marker and a dead.json payload.
+  Applies when the job's response was already written before its claimant process
+  disappeared, so downstream status still resolves from the response's outcome exactly
+  as it would for a job that finished normally.
+
+  Notes:
+    - Touches the job directory's `DONE` marker and clears any `DEAD_CANDIDATE` marker.
+    - Writes a diagnostic line to stderr describing the finalized job.
+
+  Args:
+    jdir: Path to the job directory holding an existing `response.json`.
+  """
+  (jdir / JobMarker.DEAD_CANDIDATE).unlink(missing_ok = True)
+  (jdir / JobMarker.DONE).touch()
+  sys.stderr.write(
+    f"dead-scan: finalized orphaned job {jdir.parent.name}/{jdir.name} "
+    "(claimant dead, response present)\n"
+  )
+
+
+def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
+  """
+  Reconcile claimed jobs across the queue whose claimant process is no longer alive.
+
+  Treats a claimed job that already has a response as finished rather than dead, and
+  applies a grace window before declaring a truly unresponsive job dead so a slow
+  response has time to land.
+
+  Notes:
+    - Records a `job_dead` incident in the error ledger for each job newly marked dead.
 
   Args:
     repo: Repository root containing the expert job tree.
+    grace_sec: Minimum flagged time before a stuck job is declared dead; zero applies
+      the dead verdict on first sighting.
 
   Returns:
     The number of jobs newly marked dead in this scan.
@@ -192,9 +227,6 @@ def _detect_dead_jobs(repo: Path) -> int:
       # guard: job never reached READY — still being assembled
       if not (jdir / JobMarker.READY).exists():
         continue
-      # guard: job already produced a response — nothing to mark
-      if (jdir / JobFile.RESPONSE).exists():
-        continue
       # guard: job already DONE — terminal state reached
       if (jdir / JobMarker.DONE).exists():
         continue
@@ -212,11 +244,31 @@ def _detect_dead_jobs(repo: Path) -> int:
       except (OSError, ValueError):
         alive = False
 
+      candidate = jdir / JobMarker.DEAD_CANDIDATE
       # guard: claimant process is still running — leave the job alone
       if alive:
+        # A live claimant means the job was re-claimed after the earlier sighting;
+        # a stale marker must not shortcut the grace window on a later scan.
+        candidate.unlink(missing_ok = True)
+        continue
+      # guard: claimant died after the expert finished — finalize instead of marking dead
+      if (jdir / JobFile.RESPONSE).exists():
+        _finalize_orphaned_job(jdir)
+        continue
+      # guard: first sighting — open the grace window instead of marking dead
+      if grace_sec > 0 and not candidate.exists():
+        candidate.touch()
+        continue
+      # guard: grace window still open — give a surviving subprocess time to respond
+      if grace_sec > 0 and time.time() - candidate.stat().st_mtime < grace_sec:
         continue
 
       blob = _build_dead_json(jdir, edir.name, jdir.name, time.time())
+      # guard: response landed during this scan — finalize instead of marking dead
+      if (jdir / JobFile.RESPONSE).exists():
+        _finalize_orphaned_job(jdir)
+        continue
+      candidate.unlink(missing_ok = True)
       (jdir / JobArtifact.DEAD_JSON).write_text(json.dumps(blob, indent = 2))
       (jdir / JobMarker.DEAD).touch()
       # waiver: small internal subkey, not a reusable domain key
@@ -380,7 +432,7 @@ def pump(repo: Path) -> dict:
   cleanup_fail_after  = _parse_duration(daemon.get("cleanup_failed_after",   "30d"))
   # waiver: small internal subkey, not a reusable domain key
   cleanup_dead_after  = _parse_duration(daemon.get("cleanup_dead_after",     "7d"))
-  detected_dead = _detect_dead_jobs(repo)
+  detected_dead = _detect_dead_jobs(repo, grace_sec = _DEAD_GRACE_SEC)
 
   jobs_root = repo / JOBS_BASE
   # guard: no jobs tree on disk yet — return early summary

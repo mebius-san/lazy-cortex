@@ -232,16 +232,25 @@ def doctor_tick(repo: Path) -> dict:
   Returns:
     A stats dict the calling routine logs. When no trigger condition is met, the dict reports
     `triggered=False` with no dispatch. When a trigger fires, the dict additionally carries the
-    halt and dead-job counts and the dispatch result returned by `expert_runtime.dispatch_job`.
+    halt and dead-job counts, the ids of finished doctor bundles retired before the fresh
+    dispatch, and the dispatch result returned by `expert_runtime.dispatch_job`.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from expert_runtime import dispatch_job
+  from expert_runtime import dispatch_job, retire_completed_jobs
   repo = Path(repo)
   halt = _stuck_halt(repo)
   dead_jobs = _dead_jobs_needing_doctor(repo)
   # guard: no trigger condition met — leave the queue untouched
   if not halt and not dead_jobs:
     return { "triggered": False, "halt": None, "dead_jobs": 0 }
+  # Recycle finished doctor bundles before re-dispatch: the doctor is fire-and-
+  # forget (nobody consumes its response), so a DONE bundle — success or error —
+  # holds the dedup slot and silently disables the doctor until the cleanup TTL.
+  # The errored bundle's failure is already folded into the error ledger by the
+  # pump; recycling here lets the next triggered tick retry instead of blocking
+  # for days. In-flight bundles (READY without DONE) still deduplicate.
+  # waiver: one-off expert name / dedup key for the doctor dispatch, not reusable domain constants
+  retired = retire_completed_jobs(repo, "lazy-runtime.doctor", "doctor", dispatched_from = repo)
   context = _build_context(repo, halt, dead_jobs)
   source = { "context.json": json.dumps(context, indent = 2) }
   payload = {
@@ -260,5 +269,6 @@ def doctor_tick(repo: Path) -> dict:
     "triggered": True,
     "halt": halt is not None,
     "dead_jobs": len(dead_jobs),
+    "retired": retired,
     "dispatch": result,
   }

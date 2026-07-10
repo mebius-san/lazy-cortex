@@ -1,10 +1,10 @@
 ---
 chapter_type: block
 summary: The `chk-py` and `tst-py` CLI wrappers that gate every Python change — style, type-only imports, syntax, mypy, ruff, pylint, and pytest — backed by a shared venv resolver that works from any terminal.
-last_regen: 2026-07-06
+last_regen: 2026-07-10
 diagram_spec:
   anchor: "How the pieces connect"
-  request: "Flow diagram showing chk-py and tst-py as entry points; chk-py fans out to six subcommands in the all gate (pcf, toi, cmp, mypy, rf, pylint) plus pch as a separate standalone subcommand outside the all gate; tst-py calls pytest; both wrappers source _ensure_venv.sh which probes four venv locations in order (VIRTUAL_ENV env var, project .venv, pyproject.toml config path, fallback create/augment project .venv), then source _ensure_env.sh which optionally sources a repo-declared env-bootstrap script named by python.env_source; pcf is also invoked by the PostToolUse hook on every .py edit; all tools read pyproject.toml for configuration."
+  request: "Flow diagram showing chk-py and tst-py as entry points; chk-py fans out to six subcommands in the all gate (pcf, toi, cmp, mypy, rf, pylint) plus pch as a separate standalone subcommand outside the all gate; tst-py calls pytest with the _pytest_dedup plugin loaded via -p; both wrappers source _ensure_venv.sh which probes four venv locations in order (VIRTUAL_ENV env var, project .venv, pyproject.toml config path, fallback create/augment project .venv), then source _ensure_env.sh which optionally sources a repo-declared env-bootstrap script named by python.env_source; pcf is also invoked by the PostToolUse hook on every .py edit; all tools read pyproject.toml for configuration."
 source_skills:
   - chk
   - tst
@@ -13,6 +13,7 @@ source_skills:
   - pch.py
   - _ensure_venv.sh
   - _ensure_env.sh
+  - _pytest_dedup.py
 ---
 # Python checkers
 
@@ -30,7 +31,9 @@ Behind both commands sits `_ensure_venv.sh`, a shared venv resolver that finds m
 
 **`pch.py`** is the PyCharm offline inspection runner. It is opt-in per repo: `chk-py pch` only runs when `[tool.pch]` is present in `pyproject.toml`; without that section it prints a skip diagnostic and exits zero. When enabled, it locates `inspect.sh` (via `PYCHARM_HOME`, then known macOS paths), builds a sandbox config directory that symlinks your real PyCharm SDK and stubs while skipping exclusively-locked files, runs the inspection scoped to the path you supply, parses the XML results, filters them through `[tool.pch]` exclusions in `pyproject.toml`, and prints findings in the same `file:line: severity: description [inspection]` format as `pcf.py` and mypy. When PyCharm is not installed, the command prints a diagnostic and exits non-zero. Because `pch` is slow and depends on an optional external IDE, it is invoked manually rather than being part of the `all` gate. The install adds `[tool.pch]` to `pyproject.toml` automatically when PyCharm is present on the machine (and omits it otherwise — no prompt); if you install PyCharm later, add the section by hand to enable `pch` for the repo.
 
-**`tst`** is the test runner aggregator wrapper. You call it as `tst-py [module]`. With no argument it runs `pytest -q tests/`; with a module name it runs `pytest -q tests/<module>/`. The `-q` flag is accepted as a no-op for compatibility. Pytest configuration lives under `[tool.pytest.ini_options]` in `pyproject.toml`.
+**`tst`** is the test runner aggregator wrapper. You call it as `tst-py [module]`. With no argument it runs `pytest -q tests/`; with a module name it runs `pytest -q tests/<module>/`. The `-q` flag is accepted as a no-op for compatibility. Pytest configuration lives under `[tool.pytest.ini_options]` in `pyproject.toml`. `tst-py` also always loads `_pytest_dedup.py` (via `pytest -p _pytest_dedup`) — see below.
+
+**`_pytest_dedup.py`** is a pytest plugin `tst-py` loads on every run to de-duplicate tests collected twice through re-export shims. If your repo aggregates its suite through a `test_all.py` that star-imports every package plus per-package shim modules, a test class defined in one package gets collected once through its own shim and again through the aggregator; without dedup that means every test in it runs twice, and any state shared between the two runs can cause order-dependent failures. The plugin keeps the first occurrence of each test — keyed by the defining class's module and qualified name (falling back to the function's module and qualified name for module-level tests with no class) plus the item name, so inherited test methods on distinct subclasses are kept separate rather than collapsed — and de-selects the rest. It is fully automatic: no setting to turn it on, and in a repo with no re-export shims it never finds a duplicate, so it is a silent no-op. When it does remove duplicates, `tst-py` prints one summary line naming the count.
 
 **`_ensure_venv.sh`** is sourced by both `chk` and `tst` before invoking any tool. It resolves the project root via `git rev-parse --show-toplevel` (falling back to `$PWD` when git is unavailable), then tries four probes in order: (1) `$VIRTUAL_ENV` if it is set and contains mypy, pylint, pytest, ruff, pytest-clarity, and pytest-sugar; (2) `<project>/.venv/` if present and equipped with those tools; (3) the path in `[tool.lazy-python] venv` in `pyproject.toml`; (4) a fallback that creates or augments `.venv/` in the repo root using `uv`. The fallback never wipes an existing `.venv/` — if a project `.venv/` already exists but lacks the checker tools, `uv pip install` adds them in place without touching project dependencies. Once probe 4 creates `.venv/`, subsequent runs hit probe 2 and skip the fallback entirely. Using the git-derived root means the fallback always places `.venv/` at the repo root, even when you run `chk-py` from a subdirectory.
 
@@ -43,6 +46,8 @@ Behind both commands sits `_ensure_venv.sh`, a shared venv resolver that finds m
 `chk-py pch` is a separate, slower flow. Because PyCharm's offline inspection requires `inspect.sh` from a PyCharm installation and takes noticeably longer than the other checks, it is invoked on demand rather than as part of the `all` gate. It also requires an explicit `[tool.pch]` section in `pyproject.toml` to activate for your repo — without it the command skips cleanly. Run it when you want the depth of PyCharm's cross-file and semantic analysis, particularly for inspections that mypy and pylint do not cover.
 
 Both `chk-py` and `tst-py` source `_ensure_venv.sh` before doing anything else, so they always run against the same Python environment. The resolver's probe order means an activated shell venv takes priority, the project `.venv/` is second, a `pyproject.toml`-configured path is third, and the fallback bootstrap is last — making the commands safe to call from any terminal, CI runner, or Claude skill without pre-activating an environment. Right after the venv resolves, both wrappers source `_ensure_env.sh` in the same shell — so if your project records `python.env_source`, every checker subcommand and every pytest run picks up that environment automatically, with no extra flag or manual sourcing on your part.
+
+`tst-py` additionally loads `_pytest_dedup.py` on every run, so the dedup pass happens automatically alongside the venv and env resolution — you don't call it separately, and in a repo without re-export shims it makes no difference to the output.
 
 The PostToolUse hook slots into this block at the `pcf` level: on every `.py` edit it runs `pcf.py` against the touched file (honoring the `[tool.pcf] exclude` list, so excluded paths are no-ops) and returns violations as `additionalContext`. This gives you format feedback inline after each write rather than only at the end of a session.
 

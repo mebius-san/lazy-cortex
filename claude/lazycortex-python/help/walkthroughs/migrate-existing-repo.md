@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation, and fix them in committed chunks.
-last_regen: 2026-07-06
+last_regen: 2026-07-10
 diagram_spec:
   anchor: "Migration flow"
   request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install runs 8 ordered steps fully automatically (mirror rules, deploy wrappers, detect PyCharm, bootstrap pyproject.toml with [tool.pch] when PyCharm present, scaffold overlay, sync scaffold template, record python.env_source with a one-time disambiguation prompt only when multiple bootstrap-script candidates exist, log) → user runs chk-py all -q → six-step gate surfaces existing violations → user fixes violations in chunks and commits iteratively until chk-py all exits clean"
@@ -40,7 +40,7 @@ In your Claude Code session, with the repo open, invoke:
 /lazy-python.install
 ```
 
-The install runs 8 ordered steps automatically and asks you almost nothing. Install scope is derived from your `installed_plugins.json` entry. PyCharm support (`pch`) is derived from whether `inspect.sh` is present on the machine — Step 3 probes for it, Step 4 deploys `[tool.pch]` in `pyproject.toml` only when PyCharm is actually available. Step 7 records `python.env_source` in `.claude/lazy.settings.json` when your repo ships a recognised bootstrap script (`cli/env`, `.env.sh`, `scripts/env.sh`) — zero or one candidate is handled silently, and more than one triggers a one-time disambiguation prompt naming each candidate. That prompt, plus a genuine File-sync conflict, are the only two questions this install ever raises. The install never touches `CLAUDE.md` (the plugin rules load from `.claude/rules/` automatically once the plugin is enabled). The full per-step breakdown lives in the **install-and-audit** block chapter; this walkthrough only needs the outcome.
+The install runs 8 ordered steps automatically and asks you almost nothing. Install scope doesn't need resolving — lazycortex-python always targets your project's `${CLAUDE_PROJECT_DIR}`, regardless of where the plugin is enabled. PyCharm support (`pch`) is derived from whether `inspect.sh` is present on the machine — Step 3 probes for it, Step 4 deploys `[tool.pch]` in `pyproject.toml` only when PyCharm is actually available. Step 7 records `python.env_source` in `.claude/lazy.settings.json` when your repo ships a recognised bootstrap script (`cli/env`, `.env.sh`, `scripts/env.sh`) — zero or one candidate is handled silently, and more than one triggers a one-time disambiguation prompt naming each candidate. That prompt, plus a genuine File-sync conflict, are the only two questions this install ever raises. The install never touches `CLAUDE.md` (the plugin rules load from `.claude/rules/` automatically once the plugin is enabled). The full per-step breakdown lives in the **install-and-audit** block chapter; this walkthrough only needs the outcome.
 
 Every step is idempotent — safe to re-run if interrupted.
 

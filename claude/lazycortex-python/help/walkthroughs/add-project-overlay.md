@@ -1,11 +1,12 @@
 ---
 chapter_type: walkthrough
 summary: Layer project-specific docstring rules on top of the canon guidelines so lazy-python.docstring-writer honours your project's conventions on every dispatch.
-last_regen: 2026-07-06
+last_regen: 2026-07-10
 diagram_spec:
   anchor: "How the overlay layers stack"
   request: "Sequence diagram showing: user edits docs/guidelines/documenting_guidelines.md overlay; user dispatches lazy-python.docstring-writer; agent reads CLAUDE_PLUGIN_ROOT canon reference first, then reads project overlay at CLAUDE_PROJECT_DIR/docs/guidelines/documenting_guidelines.md (override-on-conflict), then reads CLAUDE_PROJECT_DIR/CLAUDE.md ## Documenting section if present (third overlay layer); agent applies merged ruleset to target file; agent runs chk-py verification. Show the three-layer read order and that overlay rules win on conflict with canon."
 source_skills:
+  - lazy-python.install
   - lazy-python.docstring-writer
 ---
 # Add project-specific docstring rules that the writer agent always honours

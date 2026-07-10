@@ -21,8 +21,9 @@ import uuid
 from pathlib import Path
 
 from constants import (
-  HooksKey, JobCollectKey, JobConfigKey, JobFile, JobIODir, JobMarker, JobOutcome, JobRequestKey,
-  JobResponseKey, JobStatus, RemoteTrackerKey, RepoDir, RoutineKey, SettingsFile, SettingsKey,
+  HooksKey, IncidentActor, IncidentKey, IncidentKind, IncidentPhase, JobCollectKey, JobConfigKey, JobFile,
+  JobIODir, JobMarker, JobOutcome, JobRequestKey, JobResponseKey, JobStatus, RemoteTrackerKey, RepoDir,
+  RoutineKey, SettingsFile, SettingsKey,
 )
 
 from typing import TYPE_CHECKING
@@ -100,6 +101,10 @@ def dispatch_job(
   `<dispatched_from>/.experts/.remote-jobs/<label>/<expert>/<job_id>.json`
   so the originating repo can observe in-flight remote jobs. Callers
   that do not appear in the registry naturally skip the tracker step.
+
+  Notes:
+    - Records a best-effort `unpinned_model` incident on the error ledger when the model
+      resolution chain yields no pin, without blocking or altering the rest of the dispatch.
 
   Args:
     repo: Absolute path to the repository that hosts the job queue.
@@ -180,15 +185,21 @@ def dispatch_job(
     for fname in result:
       (d / JobIODir.RESULT / fname).touch()
 
-  # model: an explicit per-expert override wins verbatim; otherwise fall back
-  # to the agent's tier from agent_models (same settings file), or None to let
-  # the expert subprocess inherit the CLI default
-  model = expert_entry.get(JobConfigKey.MODEL) or _resolve_agent_model(repo, expert_entry.get(JobConfigKey.AGENT))
+  # agent: solely the expert entry — every dispatchable agent, built-ins like
+  # the doctor included, is registered in settings by the installer
+  agent_ref = expert_entry.get(JobConfigKey.AGENT)
+
+  # model: an explicit per-expert override wins verbatim; otherwise the agent's
+  # tier from agent_models (same settings file). None is allowed to proceed but
+  # is recorded loudly.
+  model = expert_entry.get(JobConfigKey.MODEL) or resolve_agent_model(repo, agent_ref)
+  if model is None:
+    _record_unpinned_model(repo, expert, agent_ref, d)
 
   # config.json derived purely from settings.experts[<expert>] plus the
   # caller-supplied protocols list; pump reads this at spawn time
   cfg_blob = {
-    JobConfigKey.AGENT:             expert_entry.get(JobConfigKey.AGENT),
+    JobConfigKey.AGENT:             agent_ref,
     JobConfigKey.PROTOCOLS:         list(protocols or []),
     JobConfigKey.ASPECTS:           list(expert_entry.get(JobConfigKey.ASPECTS) or []),
     JobConfigKey.ARGUMENTS:         dict(expert_entry.get(JobConfigKey.ARGUMENTS) or {}),
@@ -282,15 +293,16 @@ def _resolve_expert_entry(repo: Path, expert_name: str) -> dict:
   return entry if isinstance(entry, dict) else {}
 
 
-def _resolve_agent_model(repo: Path, agent_ref: str | None) -> str | None:
+def resolve_agent_model(repo: Path, agent_ref: str | None) -> str | None:
   """
-  Return the model tier configured for an agent under `agent_models`, or None.
+  Resolve the agent's model tier from the repository's project-scope settings only.
 
-  Reads `agent_models` from the same settings file as the expert block, so the
-  agent tier and expert entry always resolve from one scope. A tier outside the
-  recognized set — including the `default` sentinel and any unknown string —
-  resolves to None so the expert subprocess inherits the CLI default rather than
-  a bogus pin.
+  Reads `agent_models` from `<repo>/.claude/lazy.settings.json` — the same file the
+  expert block is read from, so the agent tier and expert entry always resolve from
+  one scope — and is deliberately not merged with any global or user-scope settings.
+  A tier outside the recognized set — including the `default` sentinel and any
+  unknown string — resolves to None so the expert subprocess inherits the CLI
+  default rather than a bogus pin.
 
   Args:
     repo: Absolute path to the repository whose settings file is consulted.
@@ -319,6 +331,38 @@ def _resolve_agent_model(repo: Path, agent_ref: str | None) -> str | None:
   if tier not in _MODEL_TIERS:
     return None
   return tier
+
+
+def _record_unpinned_model(repo: Path, expert: str, agent_ref: str | None, jdir: Path) -> None:
+  """
+  Record a best-effort `unpinned_model` incident when a dispatch resolves to no model pin.
+
+  Folds repeated occurrences for the same expert into one open incident on the shared error
+  ledger, surfacing the configuration gap without failing or blocking the dispatch itself.
+
+  Args:
+    repo: Absolute path to the repository whose error ledger receives the incident.
+    expert: Expert name the incident is folded under.
+    agent_ref: The expert's resolved agent dispatch string, or None when unset.
+    jdir: Path to the job bundle the incident references.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import error_ledger
+  error_ledger.record(Path(repo), {
+    IncidentKey.INCIDENT: f"unpinned:{expert}",
+    IncidentKey.PHASE: IncidentPhase.OPENED,
+    IncidentKey.KIND: IncidentKind.UNPINNED_MODEL,
+    # waiver: closed-set cause literal shared with the routine-error classifier, not a reusable domain key
+    IncidentKey.CAUSE: "config_violation",
+    IncidentKey.ACTOR: IncidentActor.DISPATCHER,
+    # waiver: severity literal from the error-ledger CLI vocabulary (error|warn), not a domain constant
+    IncidentKey.SEVERITY: "warn",
+    IncidentKey.EXPERT: expert,
+    IncidentKey.DETAIL: (
+      f"dispatch without model pin: expert '{expert}' (agent {agent_ref!r}) inherits the CLI default model"
+    ),
+    IncidentKey.REFS: { "jdir": str(jdir) },
+  })
 
 
 def lookup_expert(target_repo: Path, name: str) -> dict | None:

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, tests, and the checker stack.
-last_regen: 2026-07-06
+last_regen: 2026-07-10
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -73,6 +73,14 @@ Always use the `lazy-python.docstring-writer` agent. The canon enforces section 
 ## The docstring-writer agent left a section blank. Is that a bug?
 
 No. The agent omits sections that would be empty — that is correct behaviour per the style rules. For example, if a method has no documented exceptions, there is no `Raises:` section; if a class has no public instance fields, there is no `Attributes:` section. Do not add empty section headers to fill the gap.
+
+---
+
+## My new module has no module docstring. Is that a bug?
+
+No. Module docstrings belong to `__init__.py` files only — regular source files carry no module docstring by canon. A regular `.py` file scaffolds from `python-template.py`, which has no docstring block, and `lazy-python.docstring-writer` will not add one to a non-`__init__.py` file. Only `**/__init__.py` files get a module-level docstring, scaffolded from the dedicated `init-template.py` (the more specific glob wins over the general `**/*.py` template) and describing the package per the canon's `__init__.py` File Patterns.
+
+If a new `__init__.py` in your project is not picking up the dedicated template, re-run `/lazy-python.install` — Step 6 syncs both scaffold templates and registers the `**/__init__.py` entry alongside the general one. An older module that still carries a leftover module docstring is left as-is; the agent does not retroactively strip it.
 
 ---
 

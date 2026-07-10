@@ -30,6 +30,7 @@ import time
 from pathlib import Path
 
 from expert_pump import build_expert_argv, _normalize_mcp_config, _normalize_setting_sources, _VALID_SETTING_SOURCES
+from expert_runtime import resolve_agent_model
 from lazy_settings import load_section
 # waiver: ReferenceError is reference_resolver's domain exception, not the builtin
 from reference_resolver import resolve, ReferenceError  # pylint: disable=redefined-builtin
@@ -174,15 +175,19 @@ class FixKind:
     DROP_MCP_SERVER: Remove an offending server from the expert's mcp_config.
     MCP_LOGIN: Authenticate a server manually (cannot be auto-fixed).
     FIX_PATH: Correct or remove a bad mcp_config path.
+    PIN_MODEL: Pin a model tier for an expert that resolves no explicit model.
   """
 
   DROP_MCP_SERVER = "drop-mcp-server"
   MCP_LOGIN = "mcp-login"
   FIX_PATH = "fix-path"
+  PIN_MODEL = "pin-model"
 
 
 # Substrings that fingerprint a static finding as a bad mcp_config path (drives fix-path).
 _BAD_PATH_MARKERS = ("mcp_config path does not exist", "mcp_config path does not parse as JSON")
+# The finding message emitted when no explicit model resolves for the expert (drives pin-model).
+_MSG_UNPINNED_MODEL = "no explicit model resolves (spawn would inherit the CLI default)"
 # The finding message emitted when the agent reference is missing entirely.
 _MSG_MISSING_AGENT = "missing 'agent' reference (spawn would fall back to the default assistant)"
 # Prefix of the finding message emitted when the agent reference does not resolve.
@@ -333,9 +338,10 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
 
   Verifies the expert is registered, its agent reference resolves, each declared
   aspect and each dispatching-routine protocol resolves, each `mcp_config` path
-  exists and parses as JSON, and any pinned model is a recognized tier. Missing
-  or unresolvable required references are `fail`; an unknown model tier is a
-  soft `warn`.
+  exists and parses as JSON, any pinned model is a recognized tier, and an explicit
+  model resolves for the expert either via a pinned model or an `agent_models` entry
+  for its agent. Missing or unresolvable required references and an unresolved model
+  are `fail`; an unknown model tier is a soft `warn`.
 
   Args:
     repo: Repository root whose references and settings are consulted.
@@ -385,6 +391,22 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
   model = entry.get(JobConfigKey.MODEL)
   if model and isinstance(model, str) and not _model_is_known(repo, model):
     findings.append(_finding(Level.WARN, f"model '{model}' is not a known tier nor present in agent_models"))
+
+  # guard: a missing / unresolvable agent is the actionable defect — a model
+  # invariant on top of it would double-fail with a misleading pin-model fix
+  agent_broken = any(
+    any(marker in f.get(RKey.MESSAGE, "") for marker in _AGENT_UNRESOLVED_MARKERS) for f in findings
+  )
+
+  # mandatory-model invariant (CR: every dispatchable agent resolves an explicit
+  # model): a spawn without one silently inherits the operator's CLI default
+  if not agent_broken and not (model and isinstance(model, str)):
+    ref = agent_ref if isinstance(agent_ref, str) else None
+    if resolve_agent_model(repo, ref) is None:
+      findings.append(_finding(
+        Level.FAIL,
+        f"{_MSG_UNPINNED_MODEL}: set experts.{expert}.model or add an agent_models entry for '{agent_ref}'",
+      ))
 
   return findings
 
@@ -778,10 +800,10 @@ def _fixes_for(expert: str, static: list[dict], dynamic: dict | None) -> list[di
   """
   Propose concrete fixes for one failing expert.
 
-  Translates bad-path static findings into `fix-path` proposals and each bad
-  per-server dynamic status into a `drop-mcp-server` (timed-out / spawn-failed)
-  or `mcp-login` (auth-required / pending-approval) proposal. The skill applies
-  each only after the operator confirms.
+  Translates bad-path static findings into `fix-path` proposals, an unpinned-model
+  static finding into a `pin-model` proposal, and each bad per-server dynamic status
+  into a `drop-mcp-server` (timed-out / spawn-failed) or `mcp-login` (auth-required /
+  pending-approval) proposal. The skill applies each only after the operator confirms.
 
   Args:
     expert: Bare local expert name the fixes target.
@@ -800,6 +822,16 @@ def _fixes_for(expert: str, static: list[dict], dynamic: dict | None) -> list[di
         RKey.KIND: FixKind.FIX_PATH,
         RKey.TARGET: f"{expert}.mcp_config",
         RKey.ACTION: "correct or remove the bad mcp_config path in lazy.settings.json",
+        RKey.DETAIL: msg,
+      })
+    if _MSG_UNPINNED_MODEL in msg:
+      fixes.append({
+        RKey.KIND: FixKind.PIN_MODEL,
+        RKey.TARGET: f"{expert}.model",
+        RKey.ACTION: (
+          f"pin a model tier for expert '{expert}' in .claude/lazy.settings.json "
+          f"(agent_models entry for its agent, or experts.{expert}.model)"
+        ),
         RKey.DETAIL: msg,
       })
   # guard: no probe ran — only static-derived fixes are available

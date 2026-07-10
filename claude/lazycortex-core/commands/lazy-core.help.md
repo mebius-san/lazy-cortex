@@ -36,6 +36,8 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 **Agents** (dispatched via `Agent(subagent_type: "lazycortex-core:<name>")`):
 
+- `lazy-core.autosetup` — non-interactive install-chain executor for one repo (`repo=<path>`): applies derivable/recorded install steps, skips question-gated ones with a `needs-interactive` report, commits its changes. Built for cross-project rollout loops.
+- `lazy-core.autocheckup` — non-interactive checkup for one repo (`repo=<path>`): runs the checkup passes read-only, applies only mechanically derivable fixes, reports everything operator-owned, commits its fixes.
 - `lazy-log.bullets` — drafts user-facing changelog bullet blocks from recent distilled entries.
 - `lazy-log.distill` — rolls commits in `.logs/commits.jsonl` into themed changelog entries in `.logs/changelog.md`.
 - `lazy-log.recall` — searches change history across `.logs/changelog.md`, per-run log files, `.logs/commits.jsonl`, and git log; returns ranked results with git SHAs.
@@ -61,9 +63,9 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - [make-repo-public](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/make-repo-public.md) — Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
 - [setup-expert](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-expert.md) — Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
 - [setup-routine](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-routine.md) — Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-- [setup-runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-runtime.md) — Bootstrap the per-repo runtime daemon, validate expert configs before trusting it, and recover it with /lazy-runtime.recover if the working tree or a remote sync halts.
+- [setup-runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-runtime.md) — Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover if the working tree or a remote sync halts it.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/troubleshooting.md) — Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Answers to non-obvious questions about install vs setup, settings placement, plugin composition, agent routing, the expert runtime, memory subsystem, routine types, daemon recovery and push automation, job dispatch, and the public-repo guard scanner.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Answers to non-obvious questions about install vs setup, settings placement, plugin composition, agent routing, the expert runtime and job lifecycle, the memory subsystem, routine types, daemon recovery and push automation, git staging coordination, MCP tool permissions, change-history tooling, and the public-repo guard scanner.
 
 Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-core/help/`.
 <!-- help-block:end -->

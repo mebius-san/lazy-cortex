@@ -100,11 +100,23 @@ Ask via `AskUserQuestion`:
 
 On **correct**: ask one follow-up for the replacement path, then `Edit` `experts.<expert>.mcp_config` in `.claude/lazy.settings.json`. On **remove**: `Edit` out the bad entry (clear the field entirely if it becomes empty). On **leave**: outcome `kept-per-user-choice`. Otherwise outcome `path-fixed`.
 
+### `pin-model` — expert resolves no explicit model
+
+Ask via `AskUserQuestion`:
+
+> Expert `<expert>` resolves no explicit model — its headless spawns would inherit whatever the operator's interactive CLI default happens to be. Pin a tier?
+> - **pin sonnet** (Recommended) — balanced default for routine experts.
+> - **pin opus** — for heavyweight reasoning experts.
+> - **pin haiku** — for mechanical/formatting experts.
+> - **leave** — no change; the expert stays failing.
+
+On any **pin**: write the tier as an `agent_models` entry for the expert's `agent` dispatch string into the project `.claude/lazy.settings.json` (group = the agent's plugin domain — plugin name up to the first `-`, e.g. `lazycortex`; `_project` for project-local agents) via `lazy_settings.load_section` + `save_section` (same Bash/python pattern as `lazy-core.agent-models` Step 8). Commit per this step's settings-write rules. Outcome `model-pinned`. On **leave**: outcome `kept-per-user-choice`.
+
 **Settings writes.** All mutations go through a careful `Edit` on the exact JSON file — never a blind overwrite. This repo ships no dedicated settings-writer CLI for surgical `experts.<expert>.mcp_config` edits (the `settings-set` CLI replaces a whole section, which would clobber sibling experts), so a scoped `Edit` on the JSON is the correct tool. NEVER mutate any settings file without a confirmed `yes` from the fix's `AskUserQuestion`.
 
 Because a settings edit dirties a tracked file, commit it in the same execution: `git add .claude/lazy.settings.json` (plus any edited MCP-config file) and `git commit -m "fix(runtime): preflight drop/repair <expert> mcp_config"` — see `lazy-core.skill-writing § 6`. If the tree cannot be committed cleanly (transactional git state), do not write — report the finding and let the operator apply the fix.
 
-Outcome: `dropped`, `path-fixed`, `login-instructed`, `kept-per-user-choice`, or `all-ok`.
+Outcome: `dropped`, `path-fixed`, `login-instructed`, `model-pinned`, `kept-per-user-choice`, or `all-ok`.
 
 ## Step 4 — Report
 
@@ -136,7 +148,7 @@ input: "<--expert <name> | --no-probe | none>"
 `## Actions`
 - Ran preflight (`<N>` experts, `<static-only|static+probe>`)
 - Rendered verdict table (`<failing>` failing)
-- Applied fixes (`<dropped|path-fixed|login-instructed|kept-per-user-choice|all-ok>` per expert)
+- Applied fixes (`<dropped|path-fixed|login-instructed|model-pinned|kept-per-user-choice|all-ok>` per expert)
 
 `## Result` `<all-ok | fixes-applied | still-failing | no-targets>` + one-line summary.
 

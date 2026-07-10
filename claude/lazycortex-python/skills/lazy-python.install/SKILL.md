@@ -127,7 +127,7 @@ Outcome: `overlay-created-N` (where `N` is the count of newly-created stubs) whe
 
 ## Step 6: Sync scaffold templates via lazy-core.scaffold-sync
 
-Copies the plugin's authoring templates into the consumer's `.claude/templates/python/` and upserts the matching scaffold-registry entry — so `lazy-core.scaffold` matches new `*.py` files against the consumer-local copy of the Python template. The registry value is the consumer-local path `.claude/templates/python/python-template.py`, never `${CLAUDE_PLUGIN_ROOT}/...` (rule bodies do not expand `${CLAUDE_PLUGIN_ROOT}`). No user prompt unless template drift is detected.
+Copies the plugin's authoring templates into the consumer's `.claude/templates/python/` and upserts the matching scaffold-registry entries — so `lazy-core.scaffold` matches new `*.py` files against the consumer-local copies of the Python templates (`python-template.py` for regular files, `init-template.py` for `**/__init__.py` — most-specific glob wins). The registry values are the consumer-local paths under `.claude/templates/python/`, never `${CLAUDE_PLUGIN_ROOT}/...` (rule bodies do not expand `${CLAUDE_PLUGIN_ROOT}`). No user prompt unless template drift is detected.
 
 Resolve this plugin's own `<installPath>` (the `installPath` field of `lazycortex-python@lazycortex` in `~/.claude/plugins/installed_plugins.json`) and the detected `<scope>` (`project` / `user`), then dispatch:
 

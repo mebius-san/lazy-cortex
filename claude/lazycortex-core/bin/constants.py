@@ -50,6 +50,12 @@ class JobMarker:
     READY: Atomic activation marker — the bundle is complete and may be spawned.
     DONE: Producer-side terminal marker — the pump finished processing the job.
     DEAD: Marker for a job whose claimant process died before producing output.
+
+    DEAD_CANDIDATE:
+      Timestamped marker recording that a claimed job's claimant process appears dead.
+      The dead-scan promotes it to `DEAD` only once it outlives a grace window with
+      still no `response.json`.
+
     CONSUMED: Consumer-side marker — whoever read the response is finished with it.
     PID: Holds the OS process id of the pump worker that claimed the job.
   """
@@ -57,6 +63,7 @@ class JobMarker:
   READY = "READY"
   DONE = "DONE"
   DEAD = "DEAD"
+  DEAD_CANDIDATE = "DEAD_CANDIDATE"
   CONSUMED = "CONSUMED"
   PID = "PID"
 
@@ -435,6 +442,7 @@ class IncidentKind:
     DAEMON_HALT: A daemon-wide halt block.
     DAEMON_ERROR: An unexpected daemon-loop exception.
     WORKTREE_TASK_ERROR: A worktree-task lifecycle failure.
+    UNPINNED_MODEL: A dispatch whose model resolved to nothing and fell back to the CLI default.
   """
 
   JOB_DEAD = "job_dead"
@@ -443,6 +451,7 @@ class IncidentKind:
   DAEMON_HALT = "daemon_halt"
   DAEMON_ERROR = "daemon_error"
   WORKTREE_TASK_ERROR = "worktree_task_error"
+  UNPINNED_MODEL = "unpinned_model"
 
 
 # ----------------------------------------------------------------------------------------
@@ -455,12 +464,14 @@ class IncidentActor:
     PUMP: The expert-job pump.
     DOCTOR: The recovery doctor primitives.
     RECOVER: The halt-recovery primitives.
+    DISPATCHER: The job-dispatch primitive in the expert runtime.
   """
 
   DAEMON = "daemon"
   PUMP = "pump"
   DOCTOR = "doctor"
   RECOVER = "recover"
+  DISPATCHER = "dispatcher"
 
 
 # ----------------------------------------------------------------------------------------
