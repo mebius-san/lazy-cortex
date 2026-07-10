@@ -36,7 +36,7 @@ For each discovered SKILL.md, in order: `Read` it and execute its steps yourself
 
 Apply each step under exactly one of these rules:
 
-- **Derivable or recorded → execute.** Persisted gates (`daemon.enabled`, `daemon.run_here`, recorded languages, existing sections), conflict-free file-sync writes/merges, registry upserts, directory bootstraps — run them exactly as the skill prescribes, including its stated read-first / never-overwrite semantics.
+- **Derivable or recorded → execute.** Persisted gates (`daemon.enabled`, `daemon.run_here`, recorded languages, existing sections), conflict-free file-sync writes/merges, registry upserts, directory bootstraps — run them exactly as the skill prescribes, including its stated read-first / never-overwrite semantics. A plugin-shipped defaults table is a record too: when a skill declares its own non-interactive resolution for a step (e.g. `lazy-core.agent-models` § Non-interactive execution auto-accepts curated tiers from `default-tiers.json`), follow that resolution instead of skipping the step.
 - **Question-gated with nothing on record → skip.** Any step the skill resolves via `AskUserQuestion` (first-time gates, genuine file conflicts, multi-candidate disambiguation) is skipped and recorded as `needs-interactive: <skill> / <step>`. Never substitute a guessed default for an operator decision.
 - **Failed step → record and continue.** `failed: <skill> / <step> — <reason>`; never abort the whole run for one child.
 
