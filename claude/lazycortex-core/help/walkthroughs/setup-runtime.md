@@ -1,22 +1,22 @@
 ---
 chapter_type: walkthrough
-summary: Bootstrap the per-repo runtime daemon, validate expert configs before trusting it, and recover it with /lazy-runtime.recover if the working tree or a remote sync halts.
-last_regen: 2026-07-06
+summary: Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover if the working tree or a remote sync halts it.
+last_regen: 2026-07-10
 diagram_spec:
   anchor: "How setup and recovery connect"
-  request: "Sequence diagram showing four phases: (1) User runs /lazy-core.install, answers yes to the runtime-daemon wizard, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh, daemon starts and polls .experts/.jobs/ on interval; (3) Before trusting the daemon with live jobs, user runs /lazy-runtime.preflight, which emulates each expert's launch and reports a per-expert verdict table, applying any confirmed fixes; (4) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks a cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
+  request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, answers yes to the runtime-daemon wizard, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh, daemon starts and polls .experts/.jobs/ on interval, user checks .runtime/state.json for a recent last_run; (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks a cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
   kind_hint: sequence
 source_skills:
+  - lazy-core.install
   - lazy-runtime.recover
-  - lazy-runtime.preflight
 ---
-# How do I bootstrap the runtime daemon, trust it, and recover it if it halts?
+# How do I bootstrap the runtime daemon and recover it if it halts?
 
-The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines. Getting from zero to a daemon you trust with live work is a short journey: install and start it, confirm every expert it might dispatch is actually launchable, then know how to unblock it if a job or routine leaves the working tree dirty or a remote-sync operation fails.
+The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines. Getting from zero to a daemon that runs in the background is a short journey: install and start it, confirm it is actually polling, then know how to unblock it if a job or routine leaves the working tree dirty or a remote-sync operation fails.
 
 ## Outcome
 
-After completing this walkthrough you have a running runtime daemon that polls for expert jobs and registered routines on a regular interval, a verdict that every expert-shape routine it will dispatch to is launchable, and a working recovery path if the daemon ever halts — either from a dirty working tree or a failed remote sync.
+After completing this walkthrough you have a running runtime daemon that polls for expert jobs and registered routines on a regular interval, and a working recovery path if the daemon ever halts — either from a dirty working tree or a failed remote sync.
 
 ## What you need
 
@@ -42,19 +42,7 @@ The daemon reads the flat `daemon` and `routines` sections of `lazy.settings.jso
 
 After one polling interval, open `.runtime/state.json` and confirm the `last_run` timestamp is recent. If the timestamp is absent or stale, check that the shim is executable (`ls -l .claude/bin/lazy.runtime.sh`) and that Python 3.12+ is on your `$PATH`.
 
-### Step 3 — Validate every expert before you trust the daemon with live jobs
-
-A daemon that is polling correctly can still fail every job it dispatches if an expert's spawn config is broken — an unresolvable agent, a missing aspect or protocol, a bad `mcp_config` path, or an MCP server that hangs or needs interactive auth. Those failures are silent at runtime: the job just eats the routine's wall timeout and dies. Before you register the first `expert`-shape routine (or whenever spawns start timing out), run:
-
-```
-/lazy-runtime.preflight
-```
-
-The skill enumerates every local expert your routines target, runs static config checks, then emulates the real launch with a trivial prompt that does no real work — the same command line the daemon's pump uses. It renders a verdict table (per expert: pass/fail, static issues, per-server status, active hooks) and, for anything failing, walks you through one confirmable fix at a time: drop an offending MCP server, correct or remove a bad `mcp_config` path, or print the exact `claude mcp login` instruction for a server that needs interactive auth. No mutation happens without your explicit confirmation.
-
-If you only want a fast structural sweep with no spawn (useful before a slow first pass, or in a hurry), run it with `--no-probe` — static checks only, no dynamic launch emulation.
-
-### Step 4 — Recover if the daemon halts
+### Step 3 — Recover if the daemon halts
 
 The daemon halts in two situations and writes a `daemon_halted` block to `.runtime/state.json` in both cases. If you notice jobs stop processing, run:
 
@@ -81,8 +69,6 @@ If the tree is still dirty after cleanup (e.g., a submodule left additional chan
 
 The daemon runs continuously, draining jobs and firing registered routines. The built-in `lazy-expert.pump` routine processes them serially per expert so there is never contention. An autonomous `lazy-runtime.doctor` routine runs hourly and handles DEAD expert jobs automatically — retrying recoverable failures and permanently failing jobs the daemon can no longer make progress on — without requiring operator action.
 
-If you register a new expert-shape routine later, re-run `/lazy-runtime.preflight` first — a freshly-registered expert has never been validated, and the routine will start dispatching to it on the next daemon tick whether or not the config is sound.
-
 If your `daemon.git` block sets `remote_sync: "pull_push"` and you also want automation to fire the moment the daemon's work actually lands on `origin` — a deploy hook, a notification, waking a device to pull — set `daemon.git.post_push_hook` to a shell command. It runs after every push that advances the branch (fast-forward or post-rebase), with the push context available in `LAZY_PUSH_REPO`, `LAZY_PUSH_BRANCH`, `LAZY_PUSH_REMOTE`, `LAZY_PUSH_OLD_SHA`, and `LAZY_PUSH_NEW_SHA` environment variables. The hook is crash-isolated: a non-zero exit, a timeout past `post_push_timeout_sec` (30 seconds by default), or a spawn failure is journaled but never halts the daemon, retries the push, or fails the tick — it also never fires on a tick where nothing was actually pushed.
 
 The `daemon_halted` recovery path is an expected operational event, not an error in the daemon itself. When it fires often from a particular routine, that routine's output logic is leaving dirt behind — investigate there, not in the daemon.
@@ -93,28 +79,31 @@ The `daemon_halted` recovery path is an expected operational event, not an error
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant installSkill as /lazy-core.install
-  participant runtimeDaemon as lazy.runtime.sh
-  participant preflightSkill as /lazy-runtime.preflight
+  participant installWizard as Install Wizard
+  participant settingsFile as lazy.settings.json
+  participant daemon as Runtime Daemon
+  participant runtimeState as .runtime/state.json
   participant recoverSkill as /lazy-runtime.recover
 
-  user->>installSkill: Run /lazy-core.install
-  installSkill-->>user: Prompt runtime-daemon wizard
-  user->>installSkill: Answer yes to wizard
-  installSkill-->>user: Confirm .claude/bin/lazy.runtime.sh + lazy.settings.json experts + daemon + routines written
-  user->>runtimeDaemon: Run .claude/bin/lazy.runtime.sh
-  loop Poll interval
-    runtimeDaemon->>runtimeDaemon: Poll .experts/.jobs/
+  user->>installWizard: run /lazy-core.install
+  Note over user,installWizard: user answers yes to runtime-daemon wizard
+  installWizard->>settingsFile: write experts, flat daemon and routines sections
+  installWizard->>daemon: write .claude/bin/lazy.runtime.sh
+  installWizard-->>user: install complete
+  user->>daemon: run .claude/bin/lazy.runtime.sh
+  loop poll interval
+    Note over daemon: poll .experts/.jobs/
+    daemon->>runtimeState: write last_run
   end
-  user->>preflightSkill: Run /lazy-runtime.preflight
-  preflightSkill-->>user: Report per-expert verdict table
-  user->>preflightSkill: Confirm fixes
-  preflightSkill-->>user: Apply confirmed fixes
-  Note over runtimeDaemon: Working tree goes dirty
-  runtimeDaemon->>runtimeDaemon: Write daemon_halted to .runtime/state.json
-  user->>recoverSkill: Run /lazy-runtime.recover
-  recoverSkill-->>user: Show halt context
-  user->>recoverSkill: Pick cleanup mode - commit, stash, or discard
-  recoverSkill-->>runtimeDaemon: Clear daemon_halted in .runtime/state.json
-  Note over runtimeDaemon: Daemon resumes on next poll iteration
+  user->>runtimeState: check last_run
+  runtimeState-->>user: last_run recent
+  Note over daemon: working tree goes dirty
+  daemon->>runtimeState: write daemon_halted
+  user->>recoverSkill: run /lazy-runtime.recover
+  recoverSkill->>runtimeState: read halt context
+  runtimeState-->>recoverSkill: daemon_halted plus reason
+  recoverSkill-->>user: show halt context
+  user-->>recoverSkill: pick cleanup mode (commit/stash/discard)
+  recoverSkill->>runtimeState: clear daemon_halted
+  Note over daemon: resumes on next iteration
 ```

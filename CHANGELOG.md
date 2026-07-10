@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.11.0 — 2026-07-10 UTC
+
+- New `lazy-core.autosetup` and `lazy-core.autocheckup` agents enable non-interactive, cross-project rollout — autosetup runs every applicable `<ns>.install` skill under a no-questions discipline, and autocheckup applies only mechanically safe fixes (mirrors, missing registrations, drifted derived files, unpinned models) after a read-only checkup pass.
+- **Breaking:** Daemon-dispatchable agents (the runtime doctor, dispatched experts) must now resolve an explicit model — preflight FAILs with a proposed pin-model fix instead of silently falling back to the operator's CLI default, and unpinned dispatches are logged as an `unpinned_model` incident. The doctor now pulls its model from installer-seeded config (repair via re-running install), the agent-models wizard routes these agents to project scope, and finished doctor bundles no longer block the dedup slot behind errored jobs.
+- Fixed a race where a routine timeout killing a job mid-spawn could make the dead-scan mark it DEAD moments before its response landed, leaving it stuck reporting active forever — job classification now uses a grace window before marking DEAD and finalizes orphaned jobs whose response already arrived.
+
 ### 5.10.0 — 2026-07-08 UTC
 
 - New `lazycortex-core detect-scope <plugin@marketplace>` subcommand resolves a plugin's install target from where it is actually *enabled* — the project's `enabledPlugins` first, then the user's — falling back to the install record's own `scope` only when neither settings file enables it. Sibling plugin install skills use it so their generated config lands where the plugin is active, not wherever `/plugin install` last ran.
@@ -616,6 +622,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 0.3.0 — 2026-07-10 UTC
+
+- Runtime dashboard reworked into a list-centric layout: compact status strip (daemon alive, halt, failed/dead jobs, errors, tokens), a routine-health table (last tick, ticks, errors, busy time), error and halt tables, a per-kind token table with expert/model/repo/kind donuts, and split open-vs-problem queue charts — percentile/rate panels and the time-picker/datasource controls are gone, and the routine-health table's Last tick column no longer color-codes by threshold.
+
 ### 0.2.0 — 2026-06-10 UTC
 
 - `lazy-observe.install` reuses persisted operator config (agent kind, remote-write URL, auth) instead of re-asking and renders its configs under the file-sync policy. `lazy-observe.uninstall` keeps its destructive confirmations but is now a silent no-op when the targets are already gone.
@@ -685,6 +695,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 1.10.0 — 2026-07-10 UTC
+
+- Module docstrings now belong only in each package's `__init__.py` — scaffolding gets a dedicated `__init__.py` template, and the audit check no longer expects (or requires) a docstring block at the top of every other `.py` file.
 
 ### 1.9.2 — 2026-07-06 UTC
 

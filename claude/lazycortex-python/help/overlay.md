@@ -1,11 +1,10 @@
 ---
 chapter_type: block
 summary: Project-specific guideline files in docs/guidelines/ let you extend or override the lazycortex-python canon per repo without touching plugin-managed files.
-last_regen: 2026-06-27
+last_regen: 2026-07-10
 no_diagram: true
 source_skills:
-  - lazy-python.docstring-writer
-  - lazy-python.test-writer
+  - lazy-python.install
 ---
 # Per-repo overlay guidelines
 
@@ -46,6 +45,8 @@ The overlay lives in four files, one per topic, each matching a plugin reference
 - `docs/guidelines/checking_guidelines.md` extends `lazy-python.checking-guidelines.md`
 
 After `/lazy-python.install` Phase 5 runs, each file exists as a stub with the header `# Project additions to <topic>`. You add content below that header. The stubs are left untouched on re-runs — the installer never overwrites existing overlay content.
+
+This follows the same File-sync policy `/lazy-python.install` applies to every artifact it manages, but the overlay gets the friendliest treatment in it: `pyproject.toml` and the `docs/guidelines/*.md` overlays are both consumer-owned config, so a missing stub is a clean, non-contradictory write and an existing stub — however you've edited it — is left alone. A stub versus your edited content is never treated as a conflict; Phase 5 never interrupts you with a merge question over these files.
 
 **How `lazy-python.docstring-writer` uses the overlay.** Step 1 of the agent always reads `lazy-python.documenting-guidelines.md` from the plugin, then attempts to read `${CLAUDE_PROJECT_DIR}/docs/guidelines/documenting_guidelines.md`. If the overlay file exists, its rules are merged with the canon; overlay rules win on conflict. The agent also reads the `## Documenting` section of `CLAUDE.md` as a third overlay layer for project-wide notes. If none of these optional files exist the agent proceeds with the canon alone.
 

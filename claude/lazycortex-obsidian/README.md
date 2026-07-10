@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#93c5fd"
+iconize_color: "#86efac"
 ---
 # lazycortex-obsidian
 
@@ -106,7 +106,7 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-obsidian/help/`.
 
 | Hook | Trigger | Description |
 |---|---|---|
-| `iconize_sync` | `Write\|Edit`, `Stop` | PostToolUse (Write\|Edit): after a Markdown file is written or edited, invoke `bin/iconize_sync.py sync` so Obsidian Iconize `data.json` stays in sync with the local icon-map. Stop: at turn end, reconcile icon entries for dirty Markdown prefixes via `bin/iconize_sync.py reconcile-dirty` so bypassed edits (Bash-driven writes, bulk renames) still land in Iconize's data.json. |
+| `iconize_sync` | `Stop`, `Write\|Edit` | Generic iconize-sync worker for the lazycortex-obsidian plugin. |
 
 ## Installation
 

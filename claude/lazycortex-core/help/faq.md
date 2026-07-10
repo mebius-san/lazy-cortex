@@ -1,19 +1,38 @@
 ---
 chapter_type: faq
-summary: Answers to non-obvious questions about install vs setup, settings placement, plugin composition, agent routing, the expert runtime, memory subsystem, routine types, daemon recovery and push automation, job dispatch, and the public-repo guard scanner.
-last_regen: 2026-07-06
+summary: Answers to non-obvious questions about install vs setup, settings placement, plugin composition, agent routing, the expert runtime and job lifecycle, the memory subsystem, routine types, daemon recovery and push automation, git staging coordination, MCP tool permissions, change-history tooling, and the public-repo guard scanner.
+last_regen: 2026-07-10
 no_diagram: true
 source_skills:
   - lazy-core.install
+  - lazy-core.audit
+  - lazy-core.doctor
+  - lazy-core.optimize
   - lazy-core.setup
+  - lazy-repo.mark-public
+  - lazy-guard.check-public
+  - lazy-guard.allow-mcp
   - lazy-routine.register
+  - lazy-routine.unregister
   - lazy-runtime.recover
   - lazy-runtime.preflight
   - lazy-expert.dispatch-job
+  - lazy-expert.collect-job
+  - lazy-expert.cancel-job
+  - lazy-expert.list-jobs
   - lazy-memory.write
   - lazy-memory.index
+  - lazy-memory.reflect
+  - lazy-memory.mark-persona
   - lazy-core.agent-models
-  - lazy-guard.check-public
+  - lazy-core.git-status
+  - lazy-core.git-unlock
+  - lazy-log.clean
+  - lazy-log.distill
+  - lazy-log.recall
+  - lazy-log.timeline
+  - lazy-log.summary
+  - lazy-log.bullets
 ---
 # FAQ
 
@@ -42,6 +61,18 @@ Yes. `/plugin update` refreshes the plugin cache but does not re-sync rule files
 ## Which bump level requires what action from me?
 
 A **patch bump** (e.g. `1.0.0` → `1.0.1`) is safe to drop in with no action — the plugin cache updates automatically when `autoUpdate: true` and the change is backward-compatible. A **minor bump** (e.g. `1.0.0` → `1.1.0`) means new rules, settings keys, or templates were added; re-run `/lazy-core.install` (or `/lazy-core.setup`) to pick them up. A **major bump** (e.g. `1.0.0` → `2.0.0`) means user-data migration is required — read `CHANGELOG.public.md` for the migration steps before re-installing. The README banner at the top of each plugin describes this same contract.
+
+---
+
+## What's the difference between `/lazy-core.audit`, `/lazy-core.doctor`, and `/lazy-core.optimize`?
+
+`/lazy-core.audit` is a read-only startup-context and compliance scan: it shows what actually loads into context (rule sizes, loading behavior), checks skill/agent/rule authoring compliance (Execution-Discipline preamble, no-Optional headings, narrative padding), and reports the expert-runtime config. It makes no changes.
+
+`/lazy-core.doctor` is the broader health check: it verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, confirms every installed plugin is at the latest marketplace version, and delegates to sibling audit skills (`lazy-guard.check-public`, `lazy-log.audit`) when they apply. Unlike audit, it offers targeted fixes you can accept interactively.
+
+`/lazy-core.optimize` is action-oriented: it slims oversized rule files (moving reference material into agent definitions) and audits global `settings.json` for project-specific entries that should move to local settings. Run it when startup feels slow or after adding new rules/agents — audit and doctor tell you something is off, optimize is one of the skills that fixes it.
+
+Run `/lazy-core.audit` for a quick read on context footprint, `/lazy-core.doctor` when something in the config feels broken and you want fixes offered, and `/lazy-core.optimize` specifically to shrink startup context.
 
 ---
 
@@ -75,6 +106,14 @@ Run a plugin's install skill directly only when you want to re-sync exactly one 
 
 ---
 
+## How does `/lazy-guard.allow-mcp` decide which MCP tools to auto-allow?
+
+It uses a 3-bucket classifier applied per tool, not per server. Read-shaped verbs (`get_*`, `list_*`, `search*`, `status*`, and similar) and low-risk writes that create easily-undone content go to `permissions.allow` — no prompt. Irreversible or hard-to-recover verbs (`delete_*`, `remove_*`, `reset`, `checkout`, force-pushes) go to `permissions.ask` — always prompt. Everything else — medium-risk tools like `git_commit` — is skipped entirely: neither list, so Claude Code's built-in per-call prompt still applies and you decide in the moment. A tool you've already pinned to a bucket yourself is never re-classified or moved by a later run.
+
+By default the skill writes to the gitignored `settings.local.json` at the appropriate scope (global for servers defined in `~/.mcp.json`, project for servers defined in `./.mcp.json`) rather than the tracked `settings.json`, because permission choices are personal and shouldn't leak into commits teammates inherit. It always shows the planned diff — allow adds, ask adds, skipped tools — before writing.
+
+---
+
 ## Do I need to enable the expert runtime, or is it on by default?
 
 The expert runtime is opt-in per repo. When you run `/lazy-core.install`, a wizard phase asks whether to bootstrap runtime and experts for the current repo. If you answer yes, the skill writes the flat `daemon` and `routines` sections into `.claude/lazy.settings.json`, creates `lazy.settings.json[experts]`, copies the `lazy.runtime.sh` shim to `.claude/bin/`, and adds `.experts/` to `.gitignore`. It also offers to install a daemon supervisor (macOS launchd or Linux systemd) and registers the `lazy-expert.pump` routine automatically once you add at least one expert. If you skip that phase or answer no, none of those files are created and the `/lazy-expert.*` skills will abort at Step 2 with "`.experts/` not initialised — run `/lazy-core.install` first."
@@ -94,6 +133,18 @@ Optional fields — `source` (array of input file paths), `context` (array of co
 ## What happens if I dispatch a job for an expert that is not registered?
 
 `/lazy-expert.dispatch-job` loads `lazy.settings.json[experts]` and looks up the expert name you provided. If the key is absent, the skill aborts with "`<expert_name>` is not registered in `lazy.settings.json[experts]`" — no job directory is created. Register the expert first via `/lazy-core.install` (expert wizard, Step 11) or, if the expert was recently added by enabling a plugin, re-run `/lazy-core.setup` to pick it up, then re-dispatch.
+
+---
+
+## How do I check on a job I dispatched, and get its result?
+
+Run `/lazy-expert.list-jobs` to see every job in the queue, optionally filtered by `expert` or `status` (`queued`, `active`, `dead`, `done`, `failed`), sorted oldest-first with an age in seconds. Once a job's status is `done`, run `/lazy-expert.collect-job <expert> <job_id>` — it returns `{status, response}` and, on success, lists the paths of the result files so you can `Read` them directly. If the job is still `pending`, `collect-job` reports that and you try again later; there is no blocking wait built in.
+
+---
+
+## Can I cancel a dispatched job?
+
+Yes, with `/lazy-expert.cancel-job <expert> <job_id>`. It deletes the job's directory, but always confirms first — for a `done` job it warns you're discarding a completed result, and for a `pending` job it warns the runtime daemon may already be processing it. Answering no leaves the job untouched. If the job_id doesn't exist (already collected, cancelled, or never dispatched), the skill reports "not found" instead of erroring.
 
 ---
 
@@ -162,6 +213,12 @@ All five require a dot-namespaced `name` (e.g. `acme-lint.tick`). The wizard in 
 
 ---
 
+## How do I remove a routine I registered?
+
+Run `/lazy-routine.unregister <name>`. It is idempotent — unregistering a routine that isn't there is a no-op, reported as "nothing to unregister" rather than an error. The built-in `lazy-expert.pump` routine (the one that drains the expert job queue) is protected: unregistering it requires an explicit `--force` flag, with a warning that expert jobs will stop being processed until the routine is re-registered or `/lazy-core.install` is re-run.
+
+---
+
 ## What happens if I register a routine whose `inbox_dir` is not gitignored?
 
 `/lazy-routine.register` checks this for `inbox`-type routines using `git check-ignore`. If the directory is tracked rather than gitignored, the skill warns you: an inbox routine moves files between iterations, which dirties the working tree and triggers the daemon's halt protection on every cycle. You get three options — add the directory to `.gitignore` now (recommended), continue anyway and commit moves manually, or abort the registration. If you choose to add it, the skill appends the entry to `.gitignore` but does not auto-commit; you commit when you are ready to coordinate with other in-flight changes.
@@ -177,6 +234,14 @@ Run `/lazy-memory.mark-persona <expert>` to opt the expert into the memory subsy
 - Periodic consolidation runs via `/lazy-memory.reflect <expert>` (or the daemon's `memory-reflect-all` routine if enabled).
 
 Memory notes are markdown files with frontmatter (`title`, `tags`, `type`, `summary`) and live in `.memory/<expert>/`. They are tracked in git — the directory is un-ignored explicitly so consolidated learnings travel with the repo.
+
+---
+
+## What's the difference between `/lazy-memory.write` and `/lazy-memory.reflect`?
+
+`/lazy-memory.write` is the atomic per-note writer — it's how an expert commits a single new memory note to `.memory/<expert>/` during or after a job. `/lazy-memory.reflect <expert>` is a consolidation pass: it dispatches a `kind=reflect` job that hands the expert its own recent run logs (default: last 30 days) plus its current memory notes, and asks it to distill patterns worth retaining — calling `/lazy-memory.write` itself if it finds anything, or returning `outcome=empty` if there is nothing new to consolidate. Both require the expert to be persona-marked first (`/lazy-memory.mark-persona`); `reflect` refuses non-persona-marked experts outright.
+
+Run `reflect` periodically (or via the daemon's `memory-reflect-all` routine, if you enable it) rather than expecting memory to accumulate automatically — dispatching jobs alone only produces run logs, and reflect is what turns those logs into durable notes.
 
 ---
 
@@ -252,3 +317,25 @@ Each plugin installs its own rule templates and may seed its own section of `laz
 A **protocol** is routine-side config that defines the request/response contract for the jobs a routine dispatches — the `kind` enum, `role` vocabulary, field shapes, and outcome enum. Different routines can dispatch jobs against the same protocol.
 
 An **aspect** is expert-side config that shapes how the expert acts on top of its protocol. The same protocol can be paired with different aspects across experts. For example, two experts could share the doc-review protocol but only one carries `lazy-memory.persona-aspect` to keep notes between runs. Protocols and aspects are listed in parallel in the expert's user-message prompt — the expert reads both before acting.
+
+---
+
+## What is the git staging lock, and when do I need to touch it?
+
+Multiple Claude Code sessions can share one checkout, and without coordination one session's `git commit` could sweep up another session's staged files. A hook enforces a per-repo mutex on the staging window — from the first `git add` that makes the index non-empty to the `git commit` that empties it again — so only one session stages at a time. Most of the time you never see this: the hook auto-breaks the lock when the holding process is dead, on a different host, or has gone idle for a while.
+
+Run `/lazy-core.git-status` to inspect the lock (holder, age, liveness, whether it's currently breakable) without changing anything. Only reach for `/lazy-core.git-unlock` — which asks for confirmation before deleting the lock file — when status shows a lock that the automatic heuristics won't break on their own, for example a holder that is alive but you know has abandoned its staging window.
+
+---
+
+## `/lazy-log.recall`, `/lazy-log.timeline`, and `/lazy-log.summary` all search change history — which one do I use?
+
+They read the same sources (the changelog, run logs, raw commits, git log, and memory) but answer different shapes of question. `/lazy-log.recall "<query>"` is for "why was X changed?" or "when did we change Y?" — it returns a ranked table of matches with git SHAs so you can jump straight to a commit. `/lazy-log.timeline` is for "what happened when" — it produces a chronological list within a date range or topic filter, newest-first by default. `/lazy-log.summary "<topic>"` is for "tell me the whole story" — it clusters everything related to a topic by sub-theme and writes a narrative, not a list.
+
+Two more agents round out this block but aren't for asking questions: `/lazy-log.distill` runs automatically after commits (or on demand) to turn raw commit entries into the theme-first prose that `.logs/changelog.md` holds — it is throttled to once per 4 hours. `/lazy-log.bullets` is release-drafting tooling that turns one plugin's commit range into outcome-led CHANGELOG bullets.
+
+---
+
+## What does `/lazy-log.clean` do with old run-log folders?
+
+It classifies every subdirectory under `./.logs/claude/` against the live set of skill/agent/command names. Folders matching a canonical name are left alone; folders that look like a renamed or typo'd canonical name are offered for merge; folders matching a known anonymous pattern (`task-N`, `plan-execute-N`, and similar) are batched into one prompt per pattern instead of one prompt per folder; everything else is reviewed individually. For each orphan you choose per-folder: leave it, delete it, or distill its substantive content into memory first and then delete it. Nothing on disk changes until every prompt has been answered — the skill is read-first and applies all approved actions in one final pass.

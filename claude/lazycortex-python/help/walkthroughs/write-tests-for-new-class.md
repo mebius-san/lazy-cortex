@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all seven Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-07-06
+last_regen: 2026-07-10
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads); agent writes test file covering all 7 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module; agent logs the run. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -133,6 +133,14 @@ tst-py mymodule.subpackage -q
 
 If your project declares `python.env_source` (see "What you need" above), `tst-py` sources that script automatically before running pytest — no extra step needed on your part.
 
+If your project aggregates its suites through re-export shims (a `test_all.py` that star-imports every package, plus per-package shim files re-exporting a package's own test classes), the new test class the agent just wrote may get collected twice — once through its own module, once through the aggregator. `tst-py` deduplicates this automatically: no setting to enable, nothing to configure. When it removes at least one duplicate you'll see a one-line summary in the output:
+
+```
+[lazy-python] deduplicated N re-exported test items
+```
+
+If your project has no such shims, no key ever repeats and the line never prints — the run behaves exactly as before.
+
 A green run with no `# FAILS:` comments means the class is fully covered and the implementation satisfies its contract. A run with `# FAILS:` comments means the agent found divergences between the docstring contract and the implementation — these need your attention before the tests can be considered passing.
 
 ### Step 7 — Iterate as the class evolves
@@ -153,7 +161,7 @@ Run `/lazy-python.audit` at any time to confirm the full installation is intact.
 
 If a future dispatch produces tests that contradict your project's conventions, the fix is a more explicit rule in `docs/guidelines/testing_guidelines.md`, not a hand-edit to the test file. The overlay is re-read on every dispatch; updating it takes effect immediately.
 
-If your project uses an aggregate test file pattern (one file that validates many sibling classes via auto-discovery rather than individual per-class files), declare that pattern in your testing overlay. The agent reads the overlay before deciding whether to create a new file or skip a class it detects is already covered.
+If your project uses an aggregate test file pattern (one file that validates many sibling classes via auto-discovery rather than individual per-class files), declare that pattern in your testing overlay. The agent reads the overlay before deciding whether to create a new file or skip a class it detects is already covered. Separately, `tst-py`'s automatic dedup (Step 6 above) handles the double-collection this pattern causes at run time — the two mechanisms address different problems: the overlay controls whether the agent writes a new file at all, dedup controls whether an already-written class gets counted twice when the suite runs.
 
 Track `docs/guidelines/testing_guidelines.md` in version control. When a teammate dispatches the agent and gets tests that violate your project's base-class mapping, the shared overlay is the single place to fix it.
 

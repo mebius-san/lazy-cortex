@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fde68a"
 ---
 # lazycortex-python
 
@@ -26,7 +26,7 @@ Python codebases drift fast. Style conventions vary per author. Docstrings rot o
 - **checkers** — `chk-py` (style + type) and `tst-py` (pytest) aggregator wrappers installed into `cli/` per repo from the shipped `chk` / `tst` aggregators, layered over the three shipped binaries (`pcf` style critical-fail, `toi` test-of-intent, `pch` PyCharm inspect) plus a shared venv resolver. `chk-py all` runs the canonical six-step gate `pcf → toi → cmp → mypy → ruff → pylint` (`cmp` = py_compile syntax check, `rf` = ruff); `pch` is a separate, slower manual subcommand (`chk-py pch <file>`, needs PyCharm's `inspect.sh`) and is NOT in the `all` gate. The resolver reuses an existing venv (`$VIRTUAL_ENV` / `<repo>/.venv` / configured path); when none exists it creates/augments a project-local `.venv` in the repo root — never wiping it, only adding the missing tools (`mypy`/`pylint`/`pytest`/`ruff` + the `pytest-clarity`/`pytest-sugar` plugins; install ensures `.venv/` is gitignored). Callable from the terminal, from skills, and from the PostToolUse hook. Members: chk, tst, pcf.py, toi.py, pch.py, _ensure_venv.sh.
 - **agents** — Manual-invoke skill that runs `chk-py` and reports findings, plus two dispatched writer agents that consult canon references + the project overlay before writing docstrings or tests. Members: lazy-python.check-style, lazy-python.docstring-writer, lazy-python.test-writer.
 - **hook** — PostToolUse hook fired on every `.py` edit. Auto-registers from the plugin's `hooks/hooks.json` manifest when the plugin is enabled (no consumer settings.json write; no install step). Runs `pcf.py` against the touched file — honoring the `[tool.pcf] exclude` list in `pyproject.toml`, so excluded paths are a no-op — and returns any violations as `additionalContext` so the next turn sees them inline. Members: lazy-python.check-style.sh, hooks.json.
-- **scaffold** — Canonical Python file skeleton. `/lazy-python.install` Step 6 dispatches `lazy-core.scaffold-sync`, which copies the template into `.claude/templates/python/python-template.py` and registers that consumer-local path in `lazy-core.scaffold.md`, so any new `**/*.py` Claude composes starts from the template rather than from memory. Members: python/python-template.py, python/scaffold.entries.json.
+- **scaffold** — Canonical Python file skeletons. `/lazy-python.install` Step 6 dispatches `lazy-core.scaffold-sync`, which copies both templates into `.claude/templates/python/` and registers the consumer-local paths in `lazy-core.scaffold.md`, so any new `.py` file Claude composes starts from a template rather than from memory: `python-template.py` for regular `**/*.py` files (no module docstring — those belong to `__init__.py` only) and `init-template.py` for `**/__init__.py` (package docstring per the canon's `__init__.py` File Patterns; the more specific glob wins). Members: python/python-template.py, python/init-template.py, python/scaffold.entries.json.
 - **overlay** — Per-repo overlay convention: `docs/guidelines/<topic>_guidelines.md` files (scaffolded as stubs by `/lazy-python.install` Phase 5) hold project-specific additions to the canon. Writer agents read canon first, then overlay; overlay rules override on conflict. Documentation-only — no shipped files.
 
 ## Walkthroughs
@@ -101,7 +101,7 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-python/help/`.
 
 | Hook | Trigger | Description |
 |---|---|---|
-| `lazy-python.check-style` | `Edit\|Write` | PostToolUse hook fired on every .py edit — runs pcf.py against the touched file and returns violations as additionalContext. |
+| `lazy-python.check-style` | `Edit\|Write` | PostToolUse hook for lazy-python. |
 
 ## Installation
 

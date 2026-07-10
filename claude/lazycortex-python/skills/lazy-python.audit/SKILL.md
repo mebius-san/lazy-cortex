@@ -55,7 +55,7 @@ Outcome: `PASS` / `WARN` (no consumer rules to scan) / `FAIL` (any cited path mi
 
 ## Check 3: Artifacts present
 
-Verify the plugin tree at `${CLAUDE_PLUGIN_ROOT}` carries every required artifact — manifest + overview, 3 rules, 5 references, 6 binaries, the PostToolUse hook script + its `hooks.json` manifest, the check-style skill, both authoring agents, and the 4 templates. Missing artifact means the plugin install is incomplete on this machine.
+Verify the plugin tree at `${CLAUDE_PLUGIN_ROOT}` carries every required artifact — manifest + overview, 3 rules, 5 references, 6 binaries, the PostToolUse hook script + its `hooks.json` manifest, the check-style skill, both authoring agents, and the 5 templates. Missing artifact means the plugin install is incomplete on this machine.
 
 Run:
 

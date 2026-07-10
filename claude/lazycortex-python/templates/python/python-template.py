@@ -1,12 +1,8 @@
-"""
-<MODULE_SUMMARY_ONE_SENTENCE>
+# This template encodes coding_guidelines.md § Module Structure + § Import Organization.
+# Regular source files carry NO module docstring — module docstrings belong to __init__.py
+# only (scaffolded from init-template.py). Replace placeholders, delete this authoring
+# comment block, and start filling in real content.
 
-<MODULE_EXTENDED_DESCRIPTION_OPTIONAL>
-
-This template encodes coding_guidelines.md § Module Structure +
-§ Import Organization. Replace placeholders, remove this scaffolding
-docstring's authoring block, and start filling in real content.
-"""
 from __future__ import annotations
 
 # typing imports (block 3)

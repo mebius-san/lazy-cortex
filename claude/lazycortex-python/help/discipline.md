@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Three always-loaded rules shape every Python edit; five reference guidelines back the writer agents and chk-py/tst-py with the full canon.
-last_regen: 2026-07-06
+last_regen: 2026-07-10
 diagram_spec:
   anchor: "How rules and guidelines connect"
   request: "Architecture diagram showing three path-scoped rules (lazy-python.style on **/*.py, lazy-python.docstrings on **/*.py, lazy-python.tests on tests/**/*.py) feeding into Claude's edit loop, and five reference guidelines (coding, documenting, testing, checking, guidelines-index) being read by the docstring-writer agent, test-writer agent, and the chk-py/tst-py checker scripts"
@@ -38,7 +38,7 @@ The split between rules and guidelines is deliberate. Rules are short and always
 
 **`lazy-python.tests`** loads only on `tests/**/*.py` — narrower scope because test discipline is only relevant when Claude is actually working inside the test tree. Its core mandate mirrors the docstrings rule: never write tests manually — dispatch the `lazy-python.test-writer` agent. It also carries the placement rules (test tree mirrors source tree), naming rules (`test_init`, `test_prop__<name>`, `test_feature__<variation>`, max 35 characters), and the ban on `setUp` / `tearDown` (pytest fixtures only). The base test class is intentionally not hardcoded in the plugin canon — the correct base class for each test type lives in your project's `docs/guidelines/testing_guidelines.md` overlay, and the `lazy-python.test-writer` agent reads that overlay on every dispatch. The rule also hard-prohibits modifying an existing test to fix a failing assertion — that is a code fix, not a test fix. The full canon lives in `lazy-python.testing-guidelines.md`.
 
-**`lazy-python.coding-guidelines`** is the main reference, covering code formatting, blank-line rules, function signature wrapping, import ordering, naming conventions (classes, methods, variables, enums, TypeVars, TypeAliases), type annotations, class design, method and parameter design, error handling, magic literals, and the waiver comment system. Claude reads this before making non-trivial code changes; `chk-py` enforces many of the same rules mechanically.
+**`lazy-python.coding-guidelines`** is the main reference, covering code formatting, blank-line rules, function signature wrapping, import ordering, naming conventions (classes, methods, variables, enums, TypeVars, TypeAliases), type annotations, class design, method and parameter design, error handling, magic literals, and the waiver comment system. Its Module Structure section reserves the module docstring for `__init__.py` files only — a regular `.py` file carries no module docstring at all; the canonical module order goes copyright header straight into imports. Claude reads this before making non-trivial code changes; `chk-py` enforces many of the same rules mechanically.
 
 **`lazy-python.documenting-guidelines`** is the docstring canon: Zero-Tolerance Blockers (what must never appear), Preservation Rules (what must survive edits), section ordering and style for class, method, and property docstrings, DOC comments, Contract comments, and Marker comments. No LaTeX in docstrings — formulas go in `DOC(…)` line comments only, where Obsidian renders them. The `lazy-python.docstring-writer` agent reads this on every dispatch.
 
@@ -62,11 +62,7 @@ The split between rules and guidelines is deliberate. Rules are short and always
 
 **Using a project-declared runner instead of `chk-py`/`tst-py`.** When a project rule or a `docs/guidelines/*.md` overlay declares its own test/check runner, that runner takes precedence over `chk-py` / `tst-py` at every step of the Verification Order — Claude invokes the project's runner instead of the plugin wrappers. This is a stronger override than the wrapper-rename case above: the command itself changes, not just its name, but the three-step escalation (per-file → whole-project → tests) still applies in the same order.
 
-## See also
-
-- [checkers](../checkers.md) — the `chk-py` and `tst-py` wrappers that implement the verification order this block describes
-- [agents](../agents.md) — the `lazy-python.docstring-writer` and `lazy-python.test-writer` agents that this block's rules dispatch
-- [overlay](../overlay.md) — how to extend or override the reference guidelines per-repo
+**Where a module docstring belongs.** Only `__init__.py` files carry a module docstring — package summary, extended description, subpackage list, dependencies/dependents. A regular source file (anything the scaffold seeds from `python-template.py`) never gets one; the canon's Module Structure order starts with the copyright header and goes straight into imports. If you're touching a Python file that already has a stray module docstring at the top and it isn't `__init__.py`, that's drift from an earlier canon revision — the docstring belongs on the package's `__init__.py` instead, or should be removed if the content doesn't apply at the package level.
 
 ## How rules and guidelines connect
 
@@ -133,3 +129,10 @@ flowchart LR
   class chkPy action
   class tstPy action
 ```
+
+## See also
+
+- [checkers](../checkers.md) — the `chk-py` and `tst-py` wrappers that implement the verification order this block describes
+- [agents](../agents.md) — the `lazy-python.docstring-writer` and `lazy-python.test-writer` agents that this block's rules dispatch
+- [overlay](../overlay.md) — how to extend or override the reference guidelines per-repo
+- [scaffold](../scaffold.md) — the `python-template.py` / `init-template.py` skeletons that put the Module Structure rule (including the `__init__.py`-only docstring placement) into practice for every new file

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
-last_regen: 2026-06-01
+last_regen: 2026-07-10
 no_diagram: true
 source_skills:
   - lazy-observe.install
@@ -19,13 +19,26 @@ Three things must be in place. First, `lazycortex-core` version 1.2.0 or later m
 
 ## Which agent should I pick — Alloy or otelcol?
 
-Pick **Grafana Alloy** if you're already on the Grafana / Mimir stack. Pick **OpenTelemetry Collector** (`otelcol`) for everything else. Both agents scrape the same loopback endpoint and emit identical metric series shapes, so dashboards and alert rules work unchanged with either. You can switch later without losing continuity — re-run `/lazy-observe.install` and choose the other agent; the skill rewrites the rendered config and reloads the service.
+Pick **Grafana Alloy** if you're already on the Grafana / Mimir stack. Pick **OpenTelemetry Collector** (`otelcol`) for everything else. Both agents scrape the same loopback endpoint and emit identical metric series shapes, so dashboards and alert rules work unchanged with either. Your choice is genuine config — it's collected once, persisted, and reused silently on every later `/lazy-observe.install` run (you won't be asked again). To switch agents later, see "How do I change my agent kind, remote_write URL, or auth after the first install?" below.
+
+---
+
+## How do I change my agent kind, remote_write URL, or auth after the first install?
+
+Agent kind, remote_write URL, and auth kind are all **read-first**: once `/lazy-observe.install` has collected and persisted a value, every later run reuses it silently — the wizard does not re-ask, and it does not offer a keep-or-overwrite choice either.
+
+To change any of them, run `/lazy-observe.uninstall` first. At the "wipe answer file + token" step, choose **wipe** instead of the default `keep`. That clears `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` and `observe.token`. Then re-run `/lazy-observe.install` — with nothing on record, the wizard asks every question fresh (agent kind, remote_write URL, auth kind, and a new token if applicable), and the two agents emit identical metric series shapes so dashboards and alerts continue working across the switch.
 
 ---
 
 ## How do I rotate the bearer token?
 
-Run `/lazy-observe.install` and when the wizard reaches the auth step, choose the same auth kind you used originally, then supply the new token. If you selected `file` storage, the skill overwrites the 0600 token file and reloads the service. If you selected `env` storage, update the environment variable in your shell profile or secret manager — the agent picks it up on its next restart. The token is never written into `observe.toml` or any tracked file; it lives only in the token file or your environment.
+Depends on how the token is sourced, which you chose during install:
+
+- **`env` source**: nothing to do in the plugin. Update `LAZYCORTEX_OBSERVE_TOKEN` in your shell profile or secret manager and restart the agent process — it reads the token fresh at startup. `/lazy-observe.install` isn't involved.
+- **`file` source (0600 file)**: because `auth_kind` is read-first (see above), simply re-running `/lazy-observe.install` will NOT prompt for a new token — it reuses the existing auth config silently. To rotate, run `/lazy-observe.uninstall`, choose to wipe the answer file and token at Step 5, then re-run `/lazy-observe.install`. The fresh wizard asks for auth kind and token again and writes the new 0600 token file.
+
+The token is never written into `observe.toml` or any tracked file; it lives only in the token file or your environment.
 
 ---
 
@@ -49,7 +62,13 @@ Yes. When the installer asks for auth kind and token source, choose `env`. The a
 
 ## Does uninstalling delete my observer URL and token?
 
-No, not by default. `/lazy-observe.uninstall` removes the running service, the rendered agent config, and the service unit file. It asks whether to also delete the WAL and log directories (default: keep). It then asks separately whether to delete the answer file (`observe.toml`) and the token file — the default there is also keep. If you answer keep, a future `/lazy-observe.install` picks up your existing URL, auth choice, and username automatically and only asks for confirmation. Choose wipe only if you want a completely clean slate.
+No, not by default. `/lazy-observe.uninstall` removes the running service, the rendered agent config, and the service unit file. It asks whether to also delete the WAL and log directories (default: keep). It then asks separately whether to delete the answer file (`observe.toml`) and the token file — the default there is also keep. If you answer keep, a future `/lazy-observe.install` picks up your existing URL, auth choice, and username automatically and silently — no confirmation question, no re-asking. Choose wipe only if you want a completely clean slate or need to change a previously-recorded value (see "How do I change my agent kind, remote_write URL, or auth after the first install?" above).
+
+---
+
+## What happens if I run `/lazy-observe.uninstall` on a host where the shipper was never installed?
+
+Nothing breaks. Every step treats an already-absent target as a silent no-op, never an error — the service unload step reports `absent`, the config-removal step reports `absent`, and the WAL/log/answer-file steps skip their confirmation questions entirely because there's nothing to delete. It's safe to run `/lazy-observe.uninstall` speculatively, e.g. before a fresh install, without first checking whether anything is there.
 
 ---
 

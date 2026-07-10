@@ -456,7 +456,24 @@ print(resolved)
 
 If `resolve_reference` raises an exception or returns `None`, skip that candidate and record it in the report as `protocol-unresolvable`.
 
-If no candidates are found after scanning all three scopes, state **no-candidates** and proceed to Step 12.
+If no candidates are found after scanning all three scopes, state **no-scanned-candidates** — the built-in candidate below still registers, so proceed to § 1b, not to Step 12.
+
+### 1b. Built-in candidate: the runtime doctor
+
+`lazycortex-core` ships one dispatchable agent that carries no `expert_protocol:` frontmatter and is therefore invisible to the scan: the runtime doctor. Its dispatch config still lives in settings like every other expert's — the daemon's doctor tick resolves agent and model from the expert entry and `agent_models`, never from code defaults.
+
+Append it to the candidate list unconditionally:
+
+- `agent_name`: `lazy-runtime.doctor`
+- `plugin`: `lazycortex-core`
+- no protocol (the doctor routine supplies its context bundle directly; there is nothing to resolve)
+
+It then flows through §§ 2–4 exactly like a scanned candidate (skipped if already registered, bot `git_author`, entry `{agent, git_author}`).
+
+Additionally, ensure the doctor's model tier exists in the **project** `agent_models` (the expert runtime resolves models from `<repo-root>/.claude/lazy.settings.json` only). Pull the tier for key `lazycortex-core:lazy-runtime.doctor` from `${CLAUDE_PLUGIN_ROOT}/skills/lazy-core.agent-models/default-tiers.json` (same SOT and same missing-file FAIL as Step 6), then merge it under the `lazycortex` group via `load_tracked_section` / `save_section`:
+
+- **absent** → add `agent_models.lazycortex["lazycortex-core:lazy-runtime.doctor"] = <tier from JSON>`. State **tier-added**.
+- **present** (any value) → leave the user's value untouched. State **tier-kept-local**.
 
 ### 2. Filter already-registered candidates
 

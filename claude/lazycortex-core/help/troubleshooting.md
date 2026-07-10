@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-07-06
+last_regen: 2026-07-10
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed; audit-or-doctor → sub-branch on global-rules-empty / experts-json-invalid / ref-unresolvable / routine-path-stale / stall-mid-run; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed; audit-or-doctor → sub-branch on global-rules-empty / experts-json-invalid / ref-unresolvable / routine-path-stale / stall-mid-run; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
@@ -244,6 +244,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## An agent pinned via `/lazy-core.agent-models` doesn't route on daemon dispatches
+
+**Symptom**: You pinned a tier for an expert's agent through `/lazy-core.agent-models`, confirmed the entry landed in `agent_models` in `lazy.settings.json`, but jobs dispatched to that expert by a routine still resolve to no explicit model, or a different tier than you expected.
+
+**Likely cause**: The expert runtime resolves `agent_models` from the **project-scope** `lazy.settings.json` only — a headless daemon dispatch never sees the global file (`~/.claude/lazy.settings.json`), even though the interactive `lazy-core.model-router` hook does merge global under project. If the entry landed in the global file — because the owning plugin's install scope was global, or because a scope flag routed it there — the daemon-facing resolver never reads it.
+
+**Fix**: Re-run `/lazy-core.agent-models`. The wizard now detects when a dispatch string matches an `experts.<name>.agent` entry (or the built-in doctor dispatch, `lazycortex-core:lazy-runtime.doctor`) in the current repo, and routes that entry to the project-scope file automatically regardless of its group — re-running moves any existing global-only pin into scope. If you hand-edited `lazy.settings.json`, move the entry from the global file into the project's `.claude/lazy.settings.json[agent_models]` yourself.
+
+---
+
 ## MCP tools keep prompting for permission after running `/lazy-guard.allow-mcp`
 
 **Symptom**: You ran `/lazy-guard.allow-mcp` for a server but Claude Code still asks for permission every time a tool from that server is called.
@@ -309,6 +319,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: Expert spawns run headless and hermetic (`claude -p ... --strict-mcp-config`) — by default an expert loads no MCP servers at all, only the ones declared per-expert via `mcp_config` in `lazy.settings.json[experts]`. If one of those declared servers hangs on initialization (a stdio server waiting on a socket that never connects, a remote server that needs interactive auth) or fails to spawn, the whole `claude -p` invocation stalls until the routine's timeout kills it. The expert never gets to write a response, so the job looks like it silently died.
 
 **Fix**: Run `/lazy-runtime.preflight` (optionally `/lazy-runtime.preflight <expert-name>` to target one expert). It emulates the same spawn the pump uses, with a trivial prompt that does no real work, and reports each declared MCP server's status — `connected`, `timed-out`, `auth-required`, or `spawn-failed`. For a timed-out or failing server it offers to drop the server from that expert's `mcp_config` (the expert then spawns hermetically without it) or, for a server that needs interactive login, prints the exact `claude mcp login <name>` command to run by hand before re-running. Re-run `/lazy-runtime.preflight` after applying a fix to confirm the expert is launchable, then re-dispatch the routine.
+
+---
+
+## An expert (or the built-in doctor) runs on an unexpected, unpinned model
+
+**Symptom**: A dispatched job — including the daemon's own built-in health-check routine — appears to run on whatever model your interactive CLI happens to default to on that machine, rather than the tier you configured. There is no error; the daemon's spend or behaviour just looks inconsistent across machines or over time.
+
+**Likely cause**: The dispatch resolved to no explicit model pin — no per-expert `model` override and no matching entry for the agent's dispatch string in `agent_models`. Every dispatchable agent, including the daemon's built-in doctor, is expected to resolve an explicit tier; when it can't, the spawn silently inherits the CLI's ambient default instead of failing loudly. The runtime records a best-effort `unpinned_model` incident on the repo's error ledger the first time this happens for a given expert, but nothing on the surface blocks the dispatch itself.
+
+**Fix**: Run `/lazy-runtime.preflight` — it emulates the same spawn and reports a FAIL with a `pin-model` fix offer for any expert that resolves no model; accept the fix to pin a tier directly into the project's `agent_models`. For the built-in doctor routine specifically, re-run `/lazy-core.install` — its install step seeds the doctor's own expert entry (agent reference plus a `sonnet` default tier) into the project scope, which is what the runtime reads for that dispatch.
 
 ---
 

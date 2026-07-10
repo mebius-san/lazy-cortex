@@ -1,19 +1,21 @@
 ---
 chapter_type: block
 summary: Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-last_regen: 2026-07-06
+last_regen: 2026-07-10
 source_skills:
   - lazy-core.install
   - lazy-core.audit
   - lazy-core.doctor
   - lazy-core.optimize
   - lazy-core.setup
+  - lazy-core.autosetup
+  - lazy-core.autocheckup
 ---
 # Install, audit, and maintain lazycortex-core
 
 Every lazycortex plugin ships lifecycle skills — install, audit, doctor, optimize, and setup. For most plugins those skills are scoped to their own rules and config. For `lazycortex-core` the stakes are higher: core ships the shared scaffolding every other plugin assumes is already in place — the rule authoring templates, the `lazy.settings.json` runtime structure, the agent-model routing layer, and the expert runtime daemon. Bootstrapping core is bootstrapping the whole lazycortex baseline.
 
-This block covers all five of core's lifecycle skills. The order they run in and the way they build on each other is what matters.
+This block covers all five of core's interactive lifecycle skills, plus two non-interactive maintenance agents — `lazy-core.autosetup` and `lazy-core.autocheckup` — for driving the same install and checkup logic across many repos without stopping for questions. The order the interactive skills run in and the way they build on each other is what matters; the two agents are a separate, unattended path for repos that already have their first-run decisions on record.
 
 **Prerequisite:** all lazycortex plugins require Python 3.12 or later. `/lazy-core.install` verifies this at Step 0 and aborts with install instructions if the floor is not met — nothing else in this block runs until Python 3.12+ is available.
 
@@ -29,9 +31,13 @@ This block covers all five of core's lifecycle skills. The order they run in and
 
 **`/lazy-core.setup`** is the shortcut for a fresh project bootstrap when you have multiple lazycortex plugins enabled. Step 0 migrates `.claude/lazy.settings.json` through the current per-section version ladder before any installer reads or writes it — if migration fails, the run aborts immediately. Then it scans every enabled plugin for `<namespace>.install` skills and any skill opting in via `lazy_setup_phase:` frontmatter, builds a dependency-ordered execution plan with `lazy-core.install` always first, shows a preview, and runs each child in sequence without a top-level confirmation prompt. Children that fail are logged but don't abort the loop; you get one coherent summary at the end. Pass `--dry-run` to see the plan without executing.
 
+**`lazy-core.autosetup`** is the non-interactive twin of `/lazy-core.setup`, built for rolling an install-chain update out across many repos at once instead of running the wizard in each one by hand. You dispatch it (directly, or from your own cross-project rollout loop) with a `repo=<absolute path>` argument; it never asks a question. It refuses to touch a repo with a dirty working tree or an unusable git identity, then walks every applicable `<namespace>.install` skill against the target repo the same way `/lazy-core.setup` would — but any step that skill would normally resolve via `AskUserQuestion` is skipped and reported as `needs-interactive` instead of guessed. Steps that are derivable or already on record (a persisted `daemon.enabled` gate, a conflict-free file sync, a registry upsert) apply exactly as the skill prescribes. It commits its own changes in the target repo under that repo's local identity, with no push. Because it only ever executes decisions that are already recorded, it is not a substitute for the first-time `/lazy-core.install` or `/lazy-core.setup` run — a repo with nothing on record mostly comes back reporting `needs-interactive`.
+
+**`lazy-core.autocheckup`** is the non-interactive twin of the checks `/lazy-core.checkup` orchestrates. Dispatched the same way, with `repo=<absolute path>`, it runs the full read-only audit/doctor sweep against the target repo and collects findings in the usual `PASS` / `WARN` / `FAIL` vocabulary. It then applies a fix only when the fix is mechanically derivable with no operator preference involved — regenerating an install-managed mirror from its plugin source, creating a directory or registry entry an install skill would create silently, resyncing a derived file from its source of truth, or pinning an unpinned agent model whose dispatch string already has a tier in the default-tiers table. Anything content-shaped, destructive, preference-shaped, or normally resolved via `AskUserQuestion` is left as a reported finding, never applied. Like autosetup, it refuses a dirty tree, commits only the files it touched under the repo's local identity, and never pushes.
+
 ## How they work together
 
-The five skills form a directed pipeline. `/lazy-core.install` (or `/lazy-core.setup`) lands first and lays the foundation every other skill assumes: rules in the right directory, `lazy.settings.json` seeded, `.logs/` and `.runtime/` bootstrapped, experts registered. If any rules were created or updated, restart Claude Code before proceeding — rules load only at session start.
+The five interactive skills form a directed pipeline. `/lazy-core.install` (or `/lazy-core.setup`) lands first and lays the foundation every other skill assumes: rules in the right directory, `lazy.settings.json` seeded, `.logs/` and `.runtime/` bootstrapped, experts registered. If any rules were created or updated, restart Claude Code before proceeding — rules load only at session start.
 
 Once the installation is complete, `/lazy-core.audit` gives you a read-only snapshot of what is actually loaded. Run it right after install to confirm the rules landed, measure your startup context weight, and see the merged model-routing view. The audit's Agent D sub-checks are the first indication of whether your expert runtime config is structurally sound; its Agent C sub-checks tell you whether help-doc coverage is current for all your plugins. Because audit makes no changes, you can run it at any time — after adding a rule, after enabling a new MCP server, before a release.
 
@@ -40,6 +46,8 @@ Once the installation is complete, `/lazy-core.audit` gives you a read-only snap
 `/lazy-core.optimize` acts on the cost side. When audit or doctor reports oversized rules or settings leakage, optimize is the remediation path: it slims the rules, moves reference material to the right place, patches settings hygiene, and ensures every agent in your vault has a model-routing tier. Because it rewrites files, always run it after — not before — an audit or doctor pass so you know what you're trimming.
 
 The full journey for a new project: install → restart → audit → doctor if anything looks off → optimize if context is heavy. For an existing project after `/plugin update`: re-run install (or setup) to pick up new rule templates, restart, then audit to confirm the new rules landed cleanly.
+
+`lazy-core.autosetup` and `lazy-core.autocheckup` sit outside that per-project pipeline — they exist for the moment you have many repos that already went through the interactive path once and just need the same update or checkup applied everywhere without repeating the wizard in each one. Point a cross-project rollout loop at each repo path and dispatch the matching agent per repo; anything that would require a first-time decision comes back as `needs-interactive` for you to resolve the normal way, in that one repo, with the interactive skill.
 
 ## Common adjustments
 
@@ -70,6 +78,12 @@ The full journey for a new project: install → restart → audit → doctor if 
 **Dev-mode supervisor** — if this repo is a plugin-authoring vault, re-run `/lazy-core.install` and the dev-mode flag is derived automatically (detected by the presence of `plugin.json` files under `claude/`). The supervisor passes `--dev-mode` to `lazy.runtime.sh`, which prefers in-repo plugin sources over the plugin cache. For all other repos the flag is False.
 
 **Settings file auto-migration** — if `/lazy-core.doctor` or `/lazy-core.audit` warns that `lazy.settings.json` has a root `version` key, run any lazy-core skill (such as `/lazy-core.audit`) to trigger the one-time automatic migration: the settings loader rewrites the file to the current per-section `_version` format on its first read and removes the legacy root key.
+
+**Rolling an update out across many repos** — dispatch `lazy-core.autosetup` once per repo path from a cross-project rollout loop rather than running `/lazy-core.setup` interactively in each checkout. It is meant for repos that have already been through a first-time install — it will not make the first-time decisions for you.
+
+**A repo comes back `needs-interactive` from autosetup or autocheckup** — this means the step it hit is genuinely a first-time or preference decision (a daemon gate never answered, a file conflict, a model tier not in the default-tiers table). Open that repo and run the equivalent interactive skill (`/lazy-core.install`, `/lazy-core.setup`, or `/lazy-core.doctor`) once to put the decision on record; subsequent autosetup/autocheckup passes on that repo will apply it silently from then on.
+
+**Autosetup or autocheckup reports `skipped-dirty` or `skipped-identity`** — the target repo had uncommitted changes, or the recorded git identity looked wrong for the repo's remote (e.g. a private-persona email against a public GitHub remote). Neither agent will touch a repo in that state. Commit or stash the working tree, or fix `git config user.email` in that repo, then re-dispatch.
 
 ## Where this fits
 

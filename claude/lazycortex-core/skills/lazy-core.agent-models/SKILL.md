@@ -102,6 +102,8 @@ Every entry → `~/.claude/lazy.settings.json`. No ambiguity.
 
 ### `scopeMode = auto` (default)
 
+**Daemon-dispatchable override — applies before the group table.** If the dispatch string appears as `experts.<name>.agent` in the current repo's `.claude/lazy.settings.json` (tracked or local overlay), or is the built-in doctor dispatch `lazycortex-core:lazy-runtime.doctor`, route the entry to `./.claude/lazy.settings.json` regardless of its group. The expert runtime resolves `agent_models` from the project scope only — a globally-routed entry would be invisible to every daemon dispatch, and per-machine global config must not steer headless spend. Note the override in the Step 6 question body (`(→ project — daemon-dispatchable)`).
+
 Per-group routing:
 
 | Group | Destination |
@@ -243,3 +245,4 @@ Log the run to `./.logs/claude/lazy-core.agent-models/YYYY-MM-DD_HH-MM-SS.md` pe
 - **Scope auto-routing is structural**, not cosmetic. `_user.*` lives in the global file by definition (the agents themselves live in `~/.claude/agents/`); `_project.*` in the project file for the same reason. Writing them elsewhere creates split-brain configs that `lazy-core.audit` will flag.
 - **Override scope deliberately**: use `--scope=project` when you want a project-specific override of a globally-set tier, or `--scope=global` when bulk-promoting decisions. These are intentional deviations from the structural default; document the reason in your run log.
 - **Relationship to `lazy-core.install`**: `install` seeds `_builtin` defaults at the install scope (non-interactive). This skill fills *missing* per-agent entries across all discovered sources (interactive wizard). They do not overlap.
+- **Daemon-dispatchable agents always land in the project file** (see Step 5). The interactive `lazy-core.model-router` hook merges global under project, but the headless expert runtime reads the project file only — that asymmetry is deliberate (per-repo reproducibility of daemon spend), so the wizard writes where the stricter resolver reads.

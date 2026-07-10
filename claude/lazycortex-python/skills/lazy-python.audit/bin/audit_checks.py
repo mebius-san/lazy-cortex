@@ -171,6 +171,7 @@ class Check3ArtifactsPresent:
     ("templates/chk-wrapper.sh", "chk-py wrapper template"),
     ("templates/tst-wrapper.sh", "tst-py wrapper template"),
     ("templates/python/python-template.py", "python file template"),
+    ("templates/python/init-template.py", "__init__.py file template"),
     ("templates/python/scaffold.entries.json", "scaffold manifest"),
   )
 

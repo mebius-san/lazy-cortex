@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: From a clean checkout to your first dashboard panel — bring up the runtime daemon, install the shipper, produce traffic, verify the pipeline.
-last_regen: 2026-06-01
+last_regen: 2026-07-10
 diagram_spec:
   anchor: "How it flows"
   request: "Sequence diagram: operator → lazy-core.install installs the runtime daemon and creates expert-pump routine; operator edits lazy.settings.json to enable daemon.metrics.enabled=true and restarts the daemon; daemon now exposes /metrics on 127.0.0.1:9464; operator dispatches an expert job via /lazy-expert.dispatch-job; daemon picks up the job, runs the expert, records a tick → metrics counter increments; operator runs /lazy-observe.install (Alloy or otelcol) which renders agent config + service unit, loads the supervised service; agent scrapes /metrics and remote_writes to operator's Prometheus; operator runs /lazy-observe.doctor; doctor verifies service active + local /metrics reachable + agent self-metrics show successful remote_write + observer URL reachable + WAL bounded; final state: charts populated in operator's Grafana."
@@ -82,7 +82,7 @@ Expected output: all `PASS`, with `Step 5 — Agent self-metrics show successful
 
 ## After you're done
 
-Open your observer's UI (Grafana, Mimir Explore, etc.) and query `lazycortex_runtime_routine_ticks_total` — at least one series should show data. Import `claude/lazycortex-observe/dashboards/lazycortex-runtime.json` into Grafana for the prebuilt panel set (tick rate, error rate, p50/p95/p99 tick duration, queue depth, tokens/hour, halt status). Add `claude/lazycortex-observe/alerts/lazycortex-runtime.rules.yml` to your Prometheus `rule_files` glob to enable the four shipped alerts (`StaleNoTick`, `ErrorRateHigh`, `DaemonHalted`, `NoMetricsScraped`).
+Open your observer's UI (Grafana, Mimir Explore, etc.) and query `lazycortex_runtime_routine_ticks_total` — at least one series should show data. Import `claude/lazycortex-observe/dashboards/lazycortex-runtime.json` into Grafana for the shipped list-centric dashboard: a compact status strip (daemon liveness, halt state, failed/dead jobs, error and token totals), a routine-health table with per-routine last-tick / ticks / errors / busy-time columns, error and halt tables, a per-kind token breakdown table with expert/model/repo/kind donuts, and split open-vs-problem queue charts — all driven by a single `period` selector instead of the time picker. Add `claude/lazycortex-observe/alerts/lazycortex-runtime.rules.yml` to your Prometheus `rule_files` glob to enable the four shipped alerts (`StaleNoTick`, `ErrorRateHigh`, `DaemonHalted`, `NoMetricsScraped`).
 
 Re-run `/lazy-observe.doctor` periodically (e.g. weekly) to catch slow drift — token rotation gone wrong, WAL accumulation past the configured `max_age`, observer endpoint changes. The skill is read-only, so it's safe to run as often as you want.
 

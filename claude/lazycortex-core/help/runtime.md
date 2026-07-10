@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Register, unregister, preflight, and recover routines in the per-repo serial daemon — five routine types keep the async team running in order, with a validator that catches broken expert configs before they run live.
-last_regen: 2026-07-06
+last_regen: 2026-07-10
 diagram_spec:
   anchor: "Runtime lifecycle"
   request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers an uncommitted_changes halt; a failed remote sync triggers a git_pull_diverged / git_push_failed / git_remote_unavailable halt; /lazy-runtime.recover (commit/stash/discard/abort for tree halts; manual-fix + resume for remote-sync halts) cleans the precondition and resumes; unregister removes a routine from the loop."
@@ -31,7 +31,7 @@ Every type accepts the same two dispatch shapes: either a `command` list (spawn 
 
 **`/lazy-routine.unregister`** removes a named routine from the registry and is idempotent — calling it on a name that does not exist is an INFO, not an error. One routine is protected: `lazy-expert.pump`, the built-in job that drains the expert queue. Removing it requires `--force` and surfaces a warning that expert jobs will stop processing until the routine is re-registered or `/lazy-core.install` is re-run.
 
-**`/lazy-runtime.preflight`** validates that every expert-shape routine's target expert is actually launchable — before a broken config fails silently at runtime and eats the routine's wall timeout. It runs static config checks (does the agent / aspects / protocols resolve, is `mcp_config` a valid path) and then, unless you pass `--no-probe`, emulates the real launch with a trivial prompt that does no real work, catching MCP servers that hang or need interactive auth. On a failing expert it proposes a concrete fix and applies it only after you confirm. Every expert spawns hermetically by default — none of the lazycortex hooks (`git-guard`, `check-public`, `model-router`, `settings-guard`, `commit-recorder`) run inside it unless you opt specific ones back in via that expert's `hooks.enabled` list — and the verdict table's active-hooks column shows exactly which ones are wired in for each expert.
+**`/lazy-runtime.preflight`** validates that every expert-shape routine's target expert is actually launchable — before a broken config fails silently at runtime and eats the routine's wall timeout. It runs static config checks (does the agent / aspects / protocols resolve, is `mcp_config` a valid path, does the expert resolve an explicit model — pinned or via `agent_models` — rather than silently inheriting the operator's CLI default) and then, unless you pass `--no-probe`, emulates the real launch with a trivial prompt that does no real work, catching MCP servers that hang or need interactive auth. On a failing expert it proposes a concrete fix and applies it only after you confirm. Every expert spawns hermetically by default — none of the lazycortex hooks (`git-guard`, `check-public`, `model-router`, `settings-guard`, `commit-recorder`) run inside it unless you opt specific ones back in via that expert's `hooks.enabled` list — and the verdict table's active-hooks column shows exactly which ones are wired in for each expert.
 
 **`/lazy-runtime.recover`** handles daemon halts. The daemon halts in two distinct families: a dirty working tree (a routine or expert left uncommitted changes) and a failed remote sync (the daemon's pre- or post-tick git pull or push hit an unrecoverable state). The skill reads the halt context from `.runtime/state.json`, surfaces which routine triggered the halt — a routine name, `_git_pre` or `_git_post` for daemon-side remote-sync halts, or `lazy-expert.pump` for pump-internal halts — and for dirty-tree halts, which paths are dirty. It then guides you through the appropriate fix and clears the halt atomically once the precondition holds.
 
@@ -41,7 +41,7 @@ Routine management follows a natural lifecycle. You run `/lazy-routine.register`
 
 Switching dispatch shapes or routine types is a single step: run `/lazy-routine.register <name> --force` to overwrite in place, or run `/lazy-routine.unregister <name>` and re-register with the new parameters. When you no longer need a routine, run `/lazy-routine.unregister <name>` and the daemon drops it from the schedule immediately.
 
-Before you let a new expert-shape routine run live, reach for `/lazy-runtime.preflight`. It targets every registered routine whose `expert` key points at a local expert, enumerates them, runs the static config checks, and — for the full probe — spawns each expert with a throwaway prompt using the same command line the daemon's pump would use. A malformed agent reference, a missing aspect or protocol, a bad `mcp_config` path, or an MCP server that hangs at startup shows up in a verdict table instead of silently eating your routine's timeout the first time it fires for real. When an expert fails, the skill offers to drop the offending MCP server, fix a bad config path, or print manual login instructions for a server that needs interactive auth — never mutating settings without your explicit confirmation. The same table doubles as a quick way to confirm which lazycortex hooks are actually active in an expert's spawns, which matters if you've just added a `hooks.enabled` entry and want proof it took effect before the routine fires unattended.
+Before you let a new expert-shape routine run live, reach for `/lazy-runtime.preflight`. It targets every registered routine whose `expert` key points at a local expert, enumerates them, runs the static config checks, and — for the full probe — spawns each expert with a throwaway prompt using the same command line the daemon's pump would use. A malformed agent reference, a missing aspect or protocol, a bad `mcp_config` path, or an MCP server that hangs at startup shows up in a verdict table instead of silently eating your routine's timeout the first time it fires for real. When an expert fails, the skill offers to drop the offending MCP server, fix a bad config path, pin a model tier for an expert that resolves none, or print manual login instructions for a server that needs interactive auth — never mutating settings without your explicit confirmation. The same table doubles as a quick way to confirm which lazycortex hooks are actually active in an expert's spawns, which matters if you've just added a `hooks.enabled` entry and want proof it took effect before the routine fires unattended.
 
 The halt-and-recover path is a separate concern. When the daemon halts, `/lazy-runtime.recover` reads `.runtime/state.json` and surfaces the context: which routine triggered the halt (`triggered_by`), which expert and job were involved if applicable, the halt reason, and for dirty-tree halts the list of dirty paths.
 
@@ -72,6 +72,7 @@ If a routine's expert keeps timing out after a halt, or you suspect the underlyi
 - **Remove `lazy-expert.pump`** — only do this if you are intentionally disabling expert job processing. Pass `--force` to `/lazy-routine.unregister lazy-expert.pump`. Run `/lazy-core.install` to restore it.
 - **Validate an expert before wiring it into a live routine** — run `/lazy-runtime.preflight <expert>` after registering an expert-shape routine but before you rely on it firing unattended. A quick structural sweep with `--no-probe` catches config typos instantly; the full probe also catches MCP servers that hang or need auth.
 - **A routine's expert spawns keep timing out** — run `/lazy-runtime.preflight <expert>` to reproduce the failure with a trivial prompt and a verdict table instead of digging through job logs. Apply the proposed fix (drop the offending MCP server, correct a bad `mcp_config` path, or run the printed `claude mcp login` command by hand) and re-run to confirm.
+- **An expert has no explicit model and fails preflight** — run `/lazy-runtime.preflight <expert>` and pick a tier (sonnet, opus, or haiku) when prompted; the skill pins it as an `agent_models` entry so the expert's headless spawns never silently inherit the operator's CLI default.
 - **Check which lazycortex hooks actually run in an expert's spawns** — run `/lazy-runtime.preflight <expert>` and read the verdict table's active-hooks column. Every expert spawns hermetically by default (no lazycortex hooks run); only the hooks named in that expert's `hooks.enabled` list are active.
 - **Recover without losing changes** — pick `stash` in the `/lazy-runtime.recover` wizard. Your dirty changes land in a git stash you can restore later with `git stash pop`. Pick `commit` if you want to keep them permanently.
 - **Recover with a commit** — pick `commit` in the `/lazy-runtime.recover` wizard and supply a non-empty commit message when prompted. The skill captures every dirty path with `git add -A` and commits under your message.
@@ -87,40 +88,23 @@ If a routine's expert keeps timing out after a halt, or you suspect the underlyi
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','transitionColor':'#000','transitionLabelColor':'#000','labelBackgroundColor':'#fff','edgeLabelBackground':'#fff','stateLabelColor':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','state':{'diagramPadding':5,'useMaxWidth':true}}}%%
 stateDiagram-v2
-  [*] --> idle
+  [*] --> registered
+  registered --> running : intervalSecOrCronDue
+  running --> registered : iterationComplete
+  running --> treeHalted : uncommittedChanges
+  running --> remoteHalted : gitPullDiverged
+  running --> remoteHalted : gitPushFailed
+  running --> remoteHalted : gitRemoteUnavailable
+  treeHalted --> registered : recoverCommitStashDiscardAbort
+  remoteHalted --> registered : recoverManualFixResume
+  registered --> unregistered : unregister
+  unregistered --> [*]
 
-  idle --> running : routine registered
-
-  running --> running : interval_sec or cron tick - execute next routine
-
-  running --> uncommittedChangesHalt : dirty working tree detected
-
-  running --> gitPullDivergedHalt : remote sync diverged
-
-  running --> gitPushFailedHalt : push rejected
-
-  running --> gitRemoteUnavailableHalt : remote unreachable
-
-  uncommittedChangesHalt --> running : lazy-runtime.recover - commit or stash or discard
-
-  uncommittedChangesHalt --> idle : lazy-runtime.recover - abort
-
-  gitPullDivergedHalt --> running : lazy-runtime.recover - manual-fix then resume
-
-  gitPushFailedHalt --> running : lazy-runtime.recover - manual-fix then resume
-
-  gitRemoteUnavailableHalt --> running : lazy-runtime.recover - manual-fix then resume
-
-  running --> idle : routine unregistered - loop empty
-
-  idle --> [*]
-
-  style idle fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  style registered fill:#1e3a5f,stroke:#4a90e2,color:#fff
   style running fill:#1e5f3a,stroke:#4ae290,color:#fff
-  style uncommittedChangesHalt fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
-  style gitPullDivergedHalt fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
-  style gitPushFailedHalt fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
-  style gitRemoteUnavailableHalt fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  style treeHalted fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  style remoteHalted fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  style unregistered fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 ```
 
 
