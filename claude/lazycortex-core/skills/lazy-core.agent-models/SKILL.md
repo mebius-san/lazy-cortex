@@ -1,6 +1,6 @@
 ---
 name: lazy-core.agent-models
-description: "Interactively assign model tiers (haiku/sonnet/opus/default) to every dispatchable subagent missing from `lazy.settings.json`. Auto-routes each entry to its structurally-correct scope: `_user.*` → global file, `_project.*` → project file, `_builtin.*` → global (override with `--scope=project|global`). Cheap, standalone, idempotent — safe to re-run. Invoked directly or by `lazy-core.optimize` Phase 7."
+description: "Interactively assign model tiers (haiku/sonnet/opus/default) to every dispatchable subagent missing from `lazy.settings.json`. Auto-routes each entry to its structurally-correct scope: `_user.*` → global file, `_project.*` → project file, `_builtin.*` → global (override with `--scope=project|global`). Non-interactive executors (`lazy-core.autosetup`) auto-apply the curated tiers from `default-tiers.json` and report the rest as needs-interactive. Cheap, standalone, idempotent — safe to re-run. Invoked directly or by `lazy-core.optimize` Phase 7."
 allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(date *), Bash(test *), Bash(python3 *)
 lazy_setup_phase: post-install
 ---
@@ -151,6 +151,15 @@ On answer:
 - `skip this batch` → record **skipped** for every entry. Remove from missing list.
 
 Process batches strictly in order (1 → 2 → 3). Wait for the answer to each before showing the next.
+
+### Non-interactive execution (no user channel)
+
+When this skill is executed by an agent without a user channel (`lazy-core.autosetup` executing the setup chain), the batches resolve without prompting:
+
+- **Batch 1 (curated defaults)** — auto-accept: record every entry as **planned** at its `default-tiers.json` tier. A curated template tier is a plugin-shipped recorded decision, not a guess — the same table `lazy-core.autocheckup` applies when pinning unpinned models.
+- **Batches 2 and 3** — no recorded tier exists: report every entry as `needs-interactive` and leave it missing. The next interactive run re-prompts.
+
+Step 7 is interactive-only — a non-interactive run never enters it. Steps 8–9 run unchanged (writes, report, log).
 
 ## Step 7: Per-agent wizard loop (only for `review each individually` entries)
 

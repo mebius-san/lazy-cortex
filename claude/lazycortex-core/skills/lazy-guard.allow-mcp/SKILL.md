@@ -14,7 +14,7 @@ Register `mcp__<server>__<tool>` entries for one or more MCP servers using a **3
 
 **Default target: `settings.local.json` (gitignored), not `settings.json` (tracked).** Permission choices are personal and machine-local — they must not leak into commits that teammates inherit. The skill writes to `settings.json` only when the user explicitly opts in (rare).
 
-**Never write silently** — always show the planned diff (allow adds, ask adds, skipped tools, cross-scope cleanup) and get confirmation first.
+**Never write silently** — always show the planned diff (allow adds, ask adds, skipped tools, cross-scope cleanup) and get confirmation first. The only exception is § Non-interactive execution: an executor with no user channel writes mechanical extensions of recorded decisions and routes the diff into the run report instead.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -395,6 +395,17 @@ Include warnings for:
 - servers the user asked for but weren't discovered
 - target files skipped because everything was already allowed (idempotent no-op)
 
+## Non-interactive execution (no user channel)
+
+When this skill is executed by an agent without a user channel (`lazy-core.autosetup` executing the setup chain), every interactive point resolves by inference-or-skip — recorded state applies, nothing preference-shaped is guessed:
+
+- **Server set (Phase 1)** — all discovered servers (the empty-input form).
+- **Scope (Phase 4b)** — inferred from existing `mcp__<server>__*` entries exactly per the 4b table. The `Neither` and `Both` rows, and the duplicate-definition prompt, resolve to `needs-interactive: <server> — scope` — that server's writes are skipped entirely.
+- **Additions (Phases 5–6)** — `to_allow_new` / `to_ask_new` entries at an inferred scope are a mechanical extension of a recorded trust decision (the operator registered this server's tools at this scope through a previous interactive run; the classifier is deterministic) — write them without the bundled confirmation. The Phase 5 preview renders into the run report and log instead of a confirmation prompt.
+- **Reversals (Phase 5 step 5)** — `to_move_to_ask` promotions undo a prior operator choice: never applied; each reports `needs-interactive: <tool> — allow→ask`.
+- **Leak cleanup (Phase 6.5)** — removals are per-entry operator decisions: never applied; each found leak reports `needs-interactive`.
+- **Preload hook (Phase 7)** — hook already present at exactly one scope → merge the preload set into its `select:` list (union-only growth of a recorded decision, no confirmation). The `Neither` (install at all?) and `Both` (ambiguous) rows → `needs-interactive: preload-hook`.
+
 ## Failure modes
 
 - **`/lazy-guard.allow-mcp` stops: "server not found — discovered servers are: …"** — the server name passed as input is not defined in `~/.mcp.json` or `./.mcp.json` → check the server name against the list shown, correct the typo or add the server to `.mcp.json`, then re-run.
@@ -424,6 +435,6 @@ Body sections: `## Actions` (bullet list: files read, servers resolved, scope ch
 - **Never silently reverses a user's prior trust choice.** Every `allow`→`ask` promotion requires an explicit per-tool `AskUserQuestion` in Phase 5. Bundling these into a single "approve the whole diff" confirmation is forbidden — a user's prior `allow` entry is a durable choice and must be unmade deliberately, one tool at a time. Skip-bucket pins are stronger still: the skill never even asks about them — a user who pinned a skip-classified tool gets to keep it pinned silently.
 - **Phase 6.5 may only remove** `mcp__*` entries, and only after a per-entry `AskUserQuestion`. It cleans two kinds of leak: (6.5a) the paired tracked `settings.json`, and (6.5b) the opposite-scope `settings.local.json`. Never silently flag-and-continue on a leak — ask, then remove or record as user-kept.
 - **Never adds non-`mcp__` entries.** **Never removes non-`mcp__` entries.**
-- **Confirmation required before every write.** Per-tool confirmations in Phase 5 (allow→ask promotions only) + per-entry confirmations in Phase 6.5 (paired tracked leaks, opposite-scope leaks) + one bundled confirmation for the remaining additions. Phase 7 (SessionStart preload hook) requires its own separate confirmation.
+- **Confirmation required before every write.** Per-tool confirmations in Phase 5 (allow→ask promotions only) + per-entry confirmations in Phase 6.5 (paired tracked leaks, opposite-scope leaks) + one bundled confirmation for the remaining additions. Phase 7 (SessionStart preload hook) requires its own separate confirmation. Exception: § Non-interactive execution waives the bundled-additions and preload-merge confirmations only — reversals and removals stay operator-gated there too.
 - **Phase 7 writes gitignored `settings.local.json`, never tracked `settings.json`.** The preload hook is a personal optimization — ≈1.1k tokens/session cost that each user weighs differently — not universal enablement. Personal-optimization hooks follow the same personal/local rule as permissions.
 - **Idempotent.** Re-running adds nothing new when everything is already registered, and removes nothing when no cross-scope leaks remain.

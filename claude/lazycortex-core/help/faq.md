@@ -96,6 +96,8 @@ Always use `/lazy-core.agent-models`. The skill enforces structural routing rule
 
 The only time hand-editing `lazy.settings.json` is appropriate is when you are deliberately overriding a tier for a single project (using `/lazy-core.agent-models --scope=project`) and you want to inspect or revert the exact entry afterward. Even then, use the skill for the write and only read the file to verify.
 
+When `/lazy-core.agent-models` runs as part of `/lazy-core.autosetup`'s non-interactive chain (no wizard, no user channel), only the curated batch behaves the same as an interactive run: entries whose dispatch string is a key in `default-tiers.json` still auto-apply at their template tier, because a plugin-shipped default is a recorded decision, not a guess. Everything else — agents with no curated default — is left missing and reported `needs-interactive`; a normal interactive run of the skill picks those up afterward.
+
 ---
 
 ## When does `/lazy-core.setup` help versus running each plugin's install skill manually?
@@ -109,6 +111,8 @@ Run a plugin's install skill directly only when you want to re-sync exactly one 
 ## How does `/lazy-guard.allow-mcp` decide which MCP tools to auto-allow?
 
 It uses a 3-bucket classifier applied per tool, not per server. Read-shaped verbs (`get_*`, `list_*`, `search*`, `status*`, and similar) and low-risk writes that create easily-undone content go to `permissions.allow` — no prompt. Irreversible or hard-to-recover verbs (`delete_*`, `remove_*`, `reset`, `checkout`, force-pushes) go to `permissions.ask` — always prompt. Everything else — medium-risk tools like `git_commit` — is skipped entirely: neither list, so Claude Code's built-in per-call prompt still applies and you decide in the moment. A tool you've already pinned to a bucket yourself is never re-classified or moved by a later run.
+
+When `/lazy-guard.allow-mcp` runs inside `/lazy-core.autosetup`'s non-interactive chain, it never guesses at a preference. Additions at a scope that's already inferable from existing entries apply silently — that's a mechanical extension of a trust decision you already made interactively. Anything that would reverse a prior `allow` choice, resolve an ambiguous or undetermined scope, or decide whether to install the SessionStart preload hook at all is left untouched and reported `needs-interactive`, waiting for you to run the skill yourself.
 
 By default the skill writes to the gitignored `settings.local.json` at the appropriate scope (global for servers defined in `~/.mcp.json`, project for servers defined in `./.mcp.json`) rather than the tracked `settings.json`, because permission choices are personal and shouldn't leak into commits teammates inherit. It always shows the planned diff — allow adds, ask adds, skipped tools — before writing.
 

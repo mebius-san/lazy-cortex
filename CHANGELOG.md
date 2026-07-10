@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.11.1 — 2026-07-10 UTC
+
+- Non-interactive runs (`lazy-core.autosetup`) now auto-apply the curated default model tiers in `lazy-core.agent-models` instead of skipping them as needs-interactive; agents outside the curated defaults table still come back needs-interactive.
+- `lazy-guard.allow-mcp` now resolves inferred-scope tool additions and preload-hook list growth non-interactively, as mechanical extensions of prior recorded decisions — reversals, leak removals, and first-time choices still require operator confirmation.
+
 ### 5.11.0 — 2026-07-10 UTC
 
 - New `lazy-core.autosetup` and `lazy-core.autocheckup` agents enable non-interactive, cross-project rollout — autosetup runs every applicable `<ns>.install` skill under a no-questions discipline, and autocheckup applies only mechanically safe fixes (mirrors, missing registrations, drifted derived files, unpinned models) after a read-only checkup pass.

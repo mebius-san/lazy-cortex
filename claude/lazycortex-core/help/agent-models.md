@@ -20,6 +20,7 @@ This block gives you two things: an interactive wizard that assigns each agent a
 - When you want a project-specific model tier that overrides your global default for a particular agent.
 - When previewing what routing entries would be written before committing to them.
 - When running `/lazy-core.optimize` end-to-end — Phase 7 of that skill delegates to this wizard automatically.
+- After an automated rollout leaves some agents unrouted — a run driven by `lazy-core.autosetup` only fills in curated defaults and reports the rest as needing your attention; run this wizard yourself to finish them.
 
 ## How it fits together
 
@@ -35,6 +36,8 @@ One override cuts across all of that: if an agent is dispatchable by the runtime
 
 The `lazy-core.model-router` PreToolUse hook is the runtime counterpart. It fires before every `Agent` dispatch, reads the `agent_models` section, matches the dispatch string, and injects the configured tier silently. Agents with no entry, or entries set to `default`, fall through to Claude Code's built-in model default. No restart is needed after the wizard writes new entries — the hook picks them up on the next dispatch.
 
+When this wizard runs without you at the keyboard — for example when `lazy-core.autosetup` is bringing a repo's whole install chain current across a cross-project rollout — only the first batch gets applied. Its curated tiers come from a plugin-shipped table, not a guess, so they are written immediately without a prompt. The second and third batches have no curated tier to fall back on, so nothing is written for them; they are reported as needing interactive attention and reappear the next time you run `/lazy-core.agent-models` yourself, exactly as if the automated run had never touched them.
+
 ## Common adjustments
 
 **Preview before writing.** Run `/lazy-core.agent-models --dry-run` to see exactly which entries would be written and to which file, without making any changes.
@@ -47,6 +50,8 @@ The `lazy-core.model-router` PreToolUse hook is the runtime counterpart. It fire
 
 **Relationship to install.** `/lazy-core.install` seeds `_builtin` defaults at install time non-interactively. `/lazy-core.agent-models` fills the remaining per-agent entries across all discovered sources interactively. They do not overlap — install handles the bootstrap, this wizard handles everything discovered afterwards.
 
+**After an automated rollout.** If a repo was brought current by `lazy-core.autosetup` rather than by you running the install chain by hand, expect only the curated-default agents to already have tiers. Run `/lazy-core.agent-models` yourself afterward to finish routing the rest — it picks up exactly where the automated run left off.
+
 ## Failure modes
 
 **`/lazy-core.agent-models` fails immediately: "invalid --scope value".** An unrecognised flag or token was passed. Only `--scope=auto`, `--scope=project`, `--scope=global`, and `--dry-run` are accepted. Re-run with a valid flag.
@@ -54,4 +59,3 @@ The `lazy-core.model-router` PreToolUse hook is the runtime counterpart. It fire
 ## See also
 
 - [install-and-audit](install-and-audit.md) — bootstrap lazycortex-core and verify your configuration baseline before setting up model routing.
-</content>
