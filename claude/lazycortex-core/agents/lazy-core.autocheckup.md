@@ -20,7 +20,7 @@ Outcome: `guarded` / `skipped-dirty` / `skipped-identity` / `failed: <reason>`.
 
 ## Phase 2 — Check (read-only)
 
-Run the checks `lazy-core.checkup` orchestrates, resolved against the target repo: `Read` the checkup SKILL.md from the installed `lazycortex-core` plugin, enumerate the audit/doctor passes it dispatches, and execute each pass's checks yourself, read-only, with every `<repo-root>` reference resolved to `repo=`. Skip passes whose plugin is not enabled or whose run-condition probe fails, exactly as checkup does.
+Run the checks `lazy-core.checkup` orchestrates, resolved against the target repo: `Read` the checkup SKILL.md from the installed `lazycortex-core` plugin, enumerate the audit/doctor passes it dispatches, and execute each pass's checks yourself, read-only, with every `<repo-root>` reference resolved to `repo=`. Skip passes whose plugin is not enabled **in the target repo** — enabled-set resolved per `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md § Resolving a repo's enabled plugin set` (union of `enabledPlugins==true` from `<repo>/.claude/settings.json` + `settings.local.json`, never `installed_plugins.json`) — or whose run-condition probe fails, exactly as checkup does.
 
 Collect findings in checkup's vocabulary (`PASS` / `WARN` / `FAIL` + proposed fix where the source pass proposes one).
 

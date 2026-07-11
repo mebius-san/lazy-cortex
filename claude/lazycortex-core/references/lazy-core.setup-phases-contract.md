@@ -1,5 +1,5 @@
 ---
-description: Contract for the `lazy_setup_phase:` frontmatter key — allowed values, ordering inside `lazy-core.setup`, and the chained-from-inside-another-install anti-pattern.
+description: Contract for the `lazy_setup_phase:` frontmatter key — allowed values, ordering inside `lazy-core.setup`, the chained-from-inside-another-install anti-pattern, and the canonical resolution of a repo's enabled plugin set.
 ---
 # `lazy_setup_phase` frontmatter contract
 
@@ -18,6 +18,16 @@ Any other value is a `WARN` finding from `lazy-core.audit`.
 1. All `pre-install` skills, alphabetical.
 2. All `per-plugin` skills (any directory matching `*.install`), with `lazy-core.install` first, then alphabetical.
 3. All `post-install` skills, alphabetical.
+
+## Resolving a repo's enabled plugin set
+
+The plugins "enabled in a repo" are the union of the `enabledPlugins` maps in `<repo>/.claude/settings.json` and `<repo>/.claude/settings.local.json` — every key whose value is `true`. Each key has the form `<plugin>@<marketplace>`; strip the `@<marketplace>` suffix to get the plugin name.
+
+This union is the **only** authority for which install chains apply to a repo. The machine-wide registry `~/.claude/plugins/installed_plugins.json` is a union of every project's plugins on the host (entries carry `scope: project` + `projectPath`) and MUST NOT be read as an enablement signal — it is consulted solely to resolve a plugin's `installPath` (any entry for that plugin will do; the cache path is per-plugin-version, not per-project).
+
+A plugin enabled in the repo but absent from the machine registry/cache is reported as `skipped: plugin not installed on this machine`, never a hard failure.
+
+The interactive `lazy-core.setup` runs inside the project's own session, where the enabled set is naturally the project's. The cross-repo agents `lazy-core.autosetup` and `lazy-core.autocheckup` have no such session context — they resolve the enabled set explicitly against `repo=` per this section, so a dispatching session's machine-wide view never leaks foreign install chains into the target repo.
 
 ## Anti-pattern: chained-from-inside-another-install
 
