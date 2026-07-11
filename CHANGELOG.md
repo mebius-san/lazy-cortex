@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.11.2 — 2026-07-11 UTC
+
+- Fixed `autosetup`/`autocheckup` reading enabled plugins from the machine-wide registry instead of the target repo's settings — commands run against one project no longer see or install plugins that are only enabled in other projects.
+- Fixed the `daemon_halted` Prometheus gauge staying stuck at 1 after a halt cleared — it's now reconciled against on-disk daemon state every iteration, so recovery shows up in Grafana without a manual daemon restart.
+
 ### 5.11.1 — 2026-07-10 UTC
 
 - Non-interactive runs (`lazy-core.autosetup`) now auto-apply the curated default model tiers in `lazy-core.agent-models` instead of skipping them as needs-interactive; agents outside the curated defaults table still come back needs-interactive.

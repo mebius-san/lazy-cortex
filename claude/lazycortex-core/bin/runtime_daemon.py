@@ -499,6 +499,32 @@ def _emit_halt_metric_if_available(reason: str, triggered_by: str) -> None:
     pass
 
 
+def _reconcile_halt_metric(state: dict) -> None:
+  """
+  Reconcile the daemon-halted gauge with the persisted halt block when metrics are available.
+
+  Self-heals a stale gauge reading left over from an external recover or an auto-cleared halt,
+  without touching the cumulative halt counter.
+
+  Notes:
+    - The metrics module is an optional dependency; an import failure is silently absorbed so the
+      observability subsystem and the halt path stay independent.
+
+  Args:
+    state: In-memory copy of the daemon's persisted state; carries the halt block when halted.
+  """
+  halt = state.get(StateKey.DAEMON_HALTED)
+  reason = halt.get(HaltKey.REASON) if halt else None
+  triggered_by = halt.get(HaltKey.TRIGGERED_BY) if halt else None
+  try:
+    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+    import metrics
+    if metrics.is_enabled():
+      metrics.set_halt_gauge(reason = reason, triggered_by = triggered_by)
+  except ImportError:
+    pass
+
+
 def _classify_routine_error(err: str) -> str:
   """
   Map a failed routine tick's error text to a closed-set cause string.
@@ -604,6 +630,11 @@ def _run_iteration(repo_root: Path) -> None:
     # do not early-return on halt — routines with `ignore_halt: true` (typically the autonomous
     # doctor) still need to run so they can triage and fix whatever caused the halt; `due_routines`
     # filters out non-ignore_halt routines based on the `system_stuck` flag
+
+  # reconcile the in-memory halt gauge with the on-disk block on every iteration: the gauge is a
+  # set-only signal on the halt path, so a cleared halt (auto-recover above, external recover, or a
+  # halt cleared before this reconcile shipped) otherwise stays pinned in Grafana until a restart.
+  _reconcile_halt_metric(state)
 
   settings_path = repo_root / SettingsFile.REL
   daemon = load_section(settings_path, SettingsKey.DAEMON)

@@ -22,9 +22,9 @@ Outcome: `guarded` / `skipped-dirty` / `skipped-identity` / `failed: <reason>`.
 
 ## Phase 2 — Discover
 
-Mirror `lazy-core.setup` Step 1, read-only, against the machine's plugin state (not the target repo):
+Mirror `lazy-core.setup` Step 1, read-only, resolved against the **target repo** — never the machine's union of all projects. `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md § Resolving a repo's enabled plugin set` is the authority for the next two bullets:
 
-- Enabled plugins from `~/.claude/plugins/installed_plugins.json` (resolve `installPath` per entry).
+- Enabled-plugin set := union of `enabledPlugins` (keys whose value is `true`, `@<marketplace>` suffix stripped) from `<repo>/.claude/settings.json` and `<repo>/.claude/settings.local.json`. This — not `installed_plugins.json` — decides which install chains run. Consult `~/.claude/plugins/installed_plugins.json` only to resolve each such plugin's `installPath` (any entry for the plugin will do). A plugin enabled in the repo but absent from the machine registry/cache → report its skill line as `skipped: plugin not installed on this machine`, never a hard fail.
 - Candidates: any `*.install` skill directory in an enabled plugin, plus any skill with `lazy_setup_phase:` frontmatter.
 - Order per `lazy-core.setup` Step 2: pre-install → per-plugin (`lazy-core.install` first, then alphabetical) → post-install.
 

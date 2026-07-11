@@ -561,6 +561,39 @@ def clear_daemon_halt() -> None:
     _state[MetricStateKey.DAEMON_HALTED].clear()
 
 
+def set_halt_gauge(reason: str | None, triggered_by: str | None) -> None:
+  """
+  Reconcile the daemon-halted gauge with the caller's view of the on-disk halt state.
+
+  Unlike `record_daemon_halt`, this touches only the live gauge and never the cumulative
+  `halt_count` counter, so it is safe to call on every daemon iteration without inflating
+  the halt total. The gauge always reflects only the current halt state: a stale label set
+  from an earlier halt never persists once the reason or trigger changes, and the gauge is
+  left empty when the caller reports no active halt.
+
+  Notes:
+    - No-op when the metrics module has not been initialized.
+
+  Args:
+    reason: Closed-set halt-reason for the active halt, or None when no halt is in effect.
+    triggered_by: Closed-set trigger for the active halt, or None when no halt is in effect.
+
+  Raises:
+    ValueError: If `reason` or `triggered_by` fails the closed-vocabulary label check.
+  """
+  # guard: metrics are off — recording is a no-op
+  if not is_enabled():
+    return
+  with _state[MetricStateKey.LOCK]:
+    _state[MetricStateKey.DAEMON_HALTED].clear()
+    # guard: no active halt block — leave the gauge empty after clearing
+    if reason is None or triggered_by is None:
+      return
+    repo = _state[MetricStateKey.REPO]
+    labels = { MetricLabel.REPO: repo, MetricLabel.REASON: reason, "triggered_by": triggered_by }
+    _state[MetricStateKey.DAEMON_HALTED].set(labels, 1)
+
+
 # --- Read API for tests ------------------------------------------------------
 
 def _registry_for(name: str) -> _Counter | _Gauge | _Histogram | None:
