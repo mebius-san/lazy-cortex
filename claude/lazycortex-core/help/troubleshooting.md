@@ -4,16 +4,12 @@ summary: Common failure modes across lazycortex-core skills — symptoms, likely
 last_regen: 2026-07-12
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed / scaffold-registry-missing / scaffold-manifest-collision / metrics-port-conflict; audit-or-doctor → sub-branch on global-rules-empty / experts-json-invalid / ref-unresolvable / routine-path-stale / stall-mid-run / stale-job-permission-denied / routine-reappears-after-fix; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed / metrics-port-conflict; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
-  - lazy-core.audit
-  - lazy-core.doctor
-  - lazy-core.optimize
   - lazy-core.setup
-  - lazy-core.scaffold-local
-  - lazy-core.scaffold-sync
+  - lazy-core.agent-models
   - lazy-repo.mark-public
   - lazy-guard.check-public
   - lazy-guard.allow-mcp
@@ -29,7 +25,6 @@ source_skills:
   - lazy-memory.index
   - lazy-memory.reflect
   - lazy-memory.mark-persona
-  - lazy-core.agent-models
   - lazy-core.git-status
   - lazy-core.git-unlock
   - lazy-log.clean
@@ -37,6 +32,7 @@ source_skills:
   - lazy-log.recall
   - lazy-log.timeline
   - lazy-log.summary
+  - lazy-log.bullets
 ---
 # Troubleshooting
 
@@ -163,96 +159,6 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: A child skill (such as `/lazy-core.install`, `/lazy-guard.allow-mcp`, or `/lazy-core.agent-models`) encountered a failure that appears in its own report. `/lazy-core.setup` never aborts the chain on a child failure — it collects all results and surfaces them together.
 
 **Fix**: Read the reason listed per failed child in the setup report. Address the root cause for each (the other entries in this guide cover the most common child failure modes). Then re-run `/lazy-core.setup` — it is idempotent, so children that already succeeded will complete cleanly again and previously-failed ones will be retried.
-
----
-
-## `/lazy-core.scaffold-local` can't find the scaffold registry or the core CLI
-
-**Symptom**: Running `/lazy-core.scaffold-local` fails immediately with "registry not found" or "cannot resolve core CLI — lazycortex-core not installed".
-
-**Likely cause**: The scaffold registry lives at `.claude/rules/lazy-core.scaffold.md`, seeded by `/lazy-core.install` — if install was never run in this repo, the file doesn't exist. The "cannot resolve core CLI" variant means `lazycortex-core@lazycortex` has no entry in your plugin cache's install record.
-
-**Fix**: Run `/lazy-core.install` first to seed the registry and register the plugin, then re-run `/lazy-core.scaffold-local`. If the CLI path is stale (points to a directory that no longer exists), run `/plugin update lazycortex-core@lazycortex` to refresh the cache first.
-
----
-
-## A plugin install fails partway through template sync
-
-**Symptom**: Installing or updating a plugin fails with "collision — template path declared by …", or aborts on a scaffold-registry write error during its install step.
-
-**Likely cause**: Two of the plugin's own template manifests declare the same template path under different globs, and the sync step refuses to guess which one wins. A registry-write error instead usually means `lazycortex-core@lazycortex` is missing or its cache is stale — every plugin's install step routes its template sync through the core plugin's CLI.
-
-**Fix**: A manifest collision is a bug in the plugin you were installing — report it; the fix is on the plugin author's side (the manifests need non-overlapping globs). For a missing or stale core CLI, run `/plugin update lazycortex-core@lazycortex`, then re-run the failing plugin's install skill — template sync is idempotent and safe to retry.
-
----
-
-## `/lazy-core.audit` shows empty results for global rules
-
-**Symptom**: The audit reports zero files found under `~/.claude/rules/` even though files exist there.
-
-**Likely cause**: The `Glob` and `Read` tools do not shell-expand `~` or `$HOME`. The audit dispatches subagents that must expand `$HOME` first with a `Bash(echo $HOME)` call before using the resulting absolute path. If the session was started in an unusual environment the expansion may have failed silently.
-
-**Fix**: This is typically transient. Restart the Claude Code session and re-run `/lazy-core.audit`. If it persists, run `/lazy-core.doctor` — it performs the same expansion check and reports the resolved paths, making the failure visible.
-
----
-
-## `/lazy-core.audit` exits with "lazy.settings.json[experts] is not valid JSON"
-
-**Symptom**: Running `/lazy-core.audit` produces an error reporting that `lazy.settings.json[experts]` is not valid JSON.
-
-**Likely cause**: The file was hand-edited and broke its JSON syntax, or a partial write left it in a truncated state.
-
-**Fix**: Run `/lazy-core.install`. The install skill's expert-add wizard re-scaffolds `lazy.settings.json[experts]` by merging a fresh `{"_version": 1}` base with any previously accepted expert entries. If you want to correct the file manually, inspect it at `.claude/lazy.settings.json` and fix the syntax, then re-run `/lazy-core.audit` to confirm.
-
----
-
-## `/lazy-core.audit` reports an expert agent reference "did not resolve"
-
-**Symptom**: The expert-runtime section of the `/lazy-core.audit` report contains a FAIL like "expert `<key>`: agent reference `<value>` did not resolve".
-
-**Likely cause**: The `agent` field in `lazy.settings.json[experts]` uses an unrecognised format, or the artifact it points to is no longer installed. Valid formats are `<plugin-name>:<agent-stem>`, `user:<stem>`, or bare `<stem>`.
-
-**Fix**: Run `/lazy-core.install` to re-register the affected expert — the wizard re-resolves the agent reference and writes only the fields that pass validation. If the referenced plugin has been removed, install it first or update the expert entry to point to a valid replacement.
-
----
-
-## `/lazy-core.audit` reports a routine command path does not exist
-
-**Symptom**: The expert-runtime section of `/lazy-core.audit` emits a FAIL like "routine `<name>` command path does not exist: `<path>`" even though the owning plugin appears to be installed and working.
-
-**Likely cause**: The plugin cache uses a four-level layout (`<registry>/<plugin>/<version>/bin/<plugin>`). An older install recorded a three-level path in `lazy.settings.json`, which no longer resolves after the cache was reorganised or the plugin was updated.
-
-**Fix**: Re-run `/lazy-core.install` for the owning plugin to refresh the `command` path in `routines` to the current four-level layout. Alternatively, accept the "Unregister" offer in `/lazy-core.doctor`'s Fix L3 prompt, then re-run the plugin's install to re-register the routine with the correct path.
-
----
-
-## `/lazy-core.audit` or `/lazy-core.doctor` stalls mid-run
-
-**Symptom**: One of the multi-phase skills appears to stop making progress after completing a few phases.
-
-**Likely cause**: These skills use `TaskCreate` to track each phase. A still-`pending` task is treated as a bug by the skill's execution discipline — it will refuse to proceed to the report step until every prior task is either `completed` or explicitly `skipped`. A context compaction between turns can occasionally leave the task list in an inconsistent state.
-
-**Fix**: Start a fresh session and re-run the skill. Both `/lazy-core.doctor` and `/lazy-core.audit` are idempotent — re-running is safe. If the stall is consistent, run `/lazy-core.audit` first (it is the lighter read-only scan) to confirm the project context loads correctly before re-running the doctor.
-
----
-
-## `/lazy-core.doctor` offers to clean up a stale job directory but the fix fails
-
-**Symptom**: `/lazy-core.doctor` offers to remove a stale expert job directory and the fix fails with "Permission denied".
-
-**Likely cause**: The job directory was created under different file permissions — often by a different user or process than the one currently running `/lazy-core.doctor`.
-
-**Fix**: Remove the directory by hand from your terminal (the doctor's report names the path), correcting ownership or permissions first if needed, then re-run `/lazy-core.doctor` to confirm the stale entry is gone.
-
----
-
-## `/lazy-core.doctor` removes a routine but it reappears on the next run
-
-**Symptom**: `/lazy-core.doctor` offers to unregister a routine with a stale command path, the fix reports success, but a later `/lazy-core.doctor` run flags the same routine again.
-
-**Likely cause**: The owning plugin's install skill re-registers its default routines every time it runs. If something re-triggers that plugin's install between doctor runs — a `/lazy-core.setup` chain, a manual re-run — the routine comes back with the same stale path.
-
-**Fix**: Re-run the owning plugin's install skill directly (for example `/lazy-core.install`) instead of relying on the doctor's removal alone — a fresh install writes the current command path, so the routine is no longer stale rather than removed and silently re-added.
 
 ---
 
@@ -708,49 +614,3 @@ New sessions pick up the consolidated hook from `lazycortex-core` cleanly.
 ---
 
 ## Diagnostic flowchart
-
-```mermaid
-%%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
-flowchart TD
-  whatWereYouDoing{What were you doing when it failed?}
-
-  installOrSetupEntries[Read install-or-setup entries]
-  auditOrDoctorEntries[Read audit-or-doctor entries]
-  agentModelsEntries[Read agent-models entries]
-  mcpOrSecurityEntries[Read mcp-or-security entries]
-  hookNotFiringEntry[Read hook-not-firing entry]
-  expertRuntimeEntries[Read expert-runtime entries]
-  routinesEntries[Read routines entries]
-  daemonOrRuntimeEntries[Read daemon-or-runtime entries]
-  gitCoordinationEntries[Read git-coordination entries]
-  memoryEntries[Read memory entries]
-  logCleanEntries[Read log-clean entries]
-
-  whatWereYouDoing -->|installing or running setup| installOrSetupEntries
-  whatWereYouDoing -->|running audit or doctor| auditOrDoctorEntries
-  whatWereYouDoing -->|assigning model tiers| agentModelsEntries
-  whatWereYouDoing -->|MCP registration or public-repo scan| mcpOrSecurityEntries
-  whatWereYouDoing -->|a hook did not fire| hookNotFiringEntry
-  whatWereYouDoing -->|dispatching or collecting expert jobs| expertRuntimeEntries
-  whatWereYouDoing -->|registering or removing routines| routinesEntries
-  whatWereYouDoing -->|daemon halted or stale| daemonOrRuntimeEntries
-  whatWereYouDoing -->|git staging lock issues| gitCoordinationEntries
-  whatWereYouDoing -->|expert memory issues| memoryEntries
-  whatWereYouDoing -->|run-log cleanup issues| logCleanEntries
-
-  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
-  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-
-  class whatWereYouDoing guard
-  class installOrSetupEntries success
-  class auditOrDoctorEntries success
-  class agentModelsEntries success
-  class mcpOrSecurityEntries success
-  class hookNotFiringEntry success
-  class expertRuntimeEntries success
-  class routinesEntries success
-  class daemonOrRuntimeEntries success
-  class gitCoordinationEntries success
-  class memoryEntries success
-  class logCleanEntries success
-```

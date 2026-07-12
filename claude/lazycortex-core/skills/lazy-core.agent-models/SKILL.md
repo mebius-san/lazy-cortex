@@ -241,7 +241,7 @@ Plus one line per *added* entry: `<group>.<dispatch> = <tier> → <destination>`
 
 If `dryRun = true`, wrap the whole table with `[DRY RUN — no files modified]`.
 
-If the missing list was empty in Step 4, render: `nothing to do — all agents have routing entries`.
+If both Step 4 lists were empty, render: `nothing to do — all agents have routing entries, none stale`.
 
 ### Log
 
@@ -254,7 +254,7 @@ Log the run to `./.logs/claude/lazy-core.agent-models/YYYY-MM-DD_HH-MM-SS.md` pe
 ## Notes
 
 - **Idempotent**: a second run on a fully-configured vault shows "nothing to do".
-- **No destructive writes**: never overwrites existing entries; only adds missing ones.
+- **No destructive writes to decided tiers**: never overwrites existing entries; only adds missing ones. The single exception is the Step 8 prune, which removes entries whose plugin agent file provably no longer exists — a tier for a deleted agent is dead config, not a decision.
 - **Scope auto-routing is structural**, not cosmetic. `_user.*` lives in the global file by definition (the agents themselves live in `~/.claude/agents/`); `_project.*` in the project file for the same reason. Writing them elsewhere creates split-brain configs that `lazy-core.audit` will flag.
 - **Override scope deliberately**: use `--scope=project` when you want a project-specific override of a globally-set tier, or `--scope=global` when bulk-promoting decisions. These are intentional deviations from the structural default; document the reason in your run log.
 - **Relationship to `lazy-core.install`**: `install` seeds `_builtin` defaults at the install scope (non-interactive). This skill fills *missing* per-agent entries across all discovered sources (interactive wizard). They do not overlap.

@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.13.0 — 2026-07-12 UTC
+
+- `lazy-core.agent-models` wizard now automatically prunes stale tier entries left behind by deleted agents, in both interactive and non-interactive runs; `lazy-core.autocheckup` treats the prune as a safe auto-fix, while an expert still referencing a deleted agent is still surfaced as a warning, never auto-edited.
+- Default `agent_models` tiers updated: planner now defaults to the opus tier, and stale `lazy-review` agent tier entries were removed from the shipped defaults.
+
 ### 5.12.0 — 2026-07-12 UTC
 
 - Planner-tier agents now default to Opus instead of the previous lighter tier; stale tier overrides for removed `lazy-review` roles were cleaned up.
@@ -606,6 +611,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 5.2.2 — 2026-07-12 UTC
+
+- _no user-visible changes_ (internal install-skill documentation alignment)
 
 ### 5.2.1 — 2026-06-15 UTC
 

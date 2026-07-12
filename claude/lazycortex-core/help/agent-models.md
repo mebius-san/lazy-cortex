@@ -1,7 +1,7 @@
 ---
 chapter_type: block
-summary: Assign haiku/sonnet/opus tiers to every agent in your vault and let the model-router hook route each dispatch automatically.
-last_regen: 2026-07-12
+summary: Assign model tiers to every agent in your vault, prune dead entries for deleted agents, and route dispatches automatically.
+last_regen: 2026-07-13
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
@@ -21,6 +21,7 @@ This block gives you two things: an interactive wizard that assigns each agent a
 - When previewing what routing entries would be written before committing to them.
 - When running `/lazy-core.optimize` end-to-end — Phase 7 of that skill delegates to this wizard automatically.
 - After an automated rollout leaves some agents unrouted — a run driven by `lazy-core.autosetup` only fills in curated defaults and reports the rest as needing your attention; run this wizard yourself to finish them.
+- After removing a plugin or an agent it shipped — the next run cleans up that agent's now-dead tier for you.
 
 ## How it fits together
 
@@ -34,9 +35,11 @@ After the prompts, the skill writes each entry to its structurally correct file.
 
 One override cuts across all of that: if an agent is dispatchable by the runtime daemon — it is wired as an expert's `agent` in `lazy.settings.json`, or it is the built-in doctor dispatch — its entry always lands in the project settings file, regardless of group or `--scope`. The daemon reads `agent_models` from project scope only, so a globally-routed entry would be invisible to headless dispatches; the wizard writes where the stricter resolver actually looks, and flags the affected entries in the batch prompt so you know why they are routed that way.
 
+Before writing anything new, the wizard also prunes stale tiers. If a plugin-namespaced entry (`<plugin>:<agent>`) still sits in either settings file but the plugin no longer ships that agent — you updated the plugin and it dropped an agent, or removed one yourself — the wizard deletes the dead entry automatically, in both interactive and unattended runs. No prompt, no confirmation: a tier for an agent that provably doesn't exist anymore is dead config, not a decision you made. The only thing the wizard won't touch on its own is an expert in `lazy.settings.json` still pointing its `agent` field at that removed dispatch — that comes back as a warning in the report instead, so you can fix the expert config yourself.
+
 The `lazy-core.model-router` PreToolUse hook is the runtime counterpart. It fires before every `Agent` dispatch, reads the `agent_models` section, matches the dispatch string, and injects the configured tier silently. Agents with no entry, or entries set to `default`, fall through to Claude Code's built-in model default. No restart is needed after the wizard writes new entries — the hook picks them up on the next dispatch.
 
-When this wizard runs without you at the keyboard — for example when `lazy-core.autosetup` is bringing a repo's whole install chain current across a cross-project rollout — only the first batch gets applied. Its curated tiers come from a plugin-shipped table, not a guess, so they are written immediately without a prompt. The second and third batches have no curated tier to fall back on, so nothing is written for them; they are reported as needing interactive attention and reappear the next time you run `/lazy-core.agent-models` yourself, exactly as if the automated run had never touched them.
+When this wizard runs without you at the keyboard — for example when `lazy-core.autosetup` is bringing a repo's whole install chain current across a cross-project rollout — only the first batch gets applied. Its curated tiers come from a plugin-shipped table, not a guess, so they are written immediately without a prompt. The second and third batches have no curated tier to fall back on, so nothing is written for them; they are reported as needing interactive attention and reappear the next time you run `/lazy-core.agent-models` yourself, exactly as if the automated run had never touched them. The stale-tier prune runs regardless of who is driving — it is mechanical either way.
 
 ## Common adjustments
 
@@ -52,6 +55,8 @@ When this wizard runs without you at the keyboard — for example when `lazy-cor
 
 **After an automated rollout.** If a repo was brought current by `lazy-core.autosetup` rather than by you running the install chain by hand, expect only the curated-default agents to already have tiers. Run `/lazy-core.agent-models` yourself afterward to finish routing the rest — it picks up exactly where the automated run left off.
 
+**After removing a plugin agent.** Nothing to do by hand — the next run of `/lazy-core.agent-models` prunes that agent's now-dead tier automatically and lists it in the report as pruned. If the report also warns that an expert still references the removed agent, update that expert's `agent` field yourself; the wizard reports the warning but will not edit your expert config.
+
 ## Failure modes
 
 **`/lazy-core.agent-models` fails immediately: "invalid --scope value".** An unrecognised flag or token was passed. Only `--scope=auto`, `--scope=project`, `--scope=global`, and `--dry-run` are accepted. Re-run with a valid flag.
@@ -59,4 +64,3 @@ When this wizard runs without you at the keyboard — for example when `lazy-cor
 ## See also
 
 - [install-and-audit](install-and-audit.md) — bootstrap lazycortex-core and verify your configuration baseline before setting up model routing.
-</content>
