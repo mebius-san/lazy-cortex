@@ -1,6 +1,6 @@
 ---
 name: spec.product-config
-description: Use when creating a new product in the spec system OR editing an existing product's registration — unified wizard that collects answers via AskUserQuestion, writes the product record into lazy.settings.json[products][<compound-key>], scaffolds the on-disk folder tree + operator-zone folder-notes with iconize icons, generates the built-in design/tech/feature/change/bug review classes, and auto-detects code dependencies. Edit mode adds source to a design-only product, extends dependencies, or switches language/icon without clobbering asset_categories.
+description: Use when creating a new product in the spec system OR editing an existing product's registration — unified wizard that collects answers via AskUserQuestion, writes the product record into lazy.settings.json[products][<compound-key>], scaffolds the on-disk folder tree + operator-zone folder-notes with iconize icons, generates the built-in behavior-keyed review classes (one per doc-kind, wildcard globs spanning all asset categories), and auto-detects code dependencies. Edit mode adds source to a design-only product, extends dependencies, or switches language/icon without clobbering asset_categories.
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Task, Skill, AskUserQuestion, TaskCreate, TaskUpdate, TaskList
 ---
 # Configure Product
@@ -170,7 +170,7 @@ The built-in review classes generated in Step 10 are driven by three roles — `
 lazycortex-core settings-get experts
 ```
 
-The keys of the printed object are the registered expert names. Then, for EACH of the three roles in order (`designer`, then `developer`, then `tester`), issue a SEPARATE `AskUserQuestion` (one per role) offering those expert names as options. Stem for each: name the role and where it lands in the built-in classes (Step 10) — `designer` is the main writer of the design classes (`spec.design`, `features.design`, `changes.design`) ONLY and is never a validation writer; `developer` is the main writer of the plan/tech classes (`spec.tech`, `features.plan`, `changes.plan`, `bugs.plan`) and a section validator on the design and bug classes; `tester` is the main writer of `bugs.bug` and the sole section validator on the plan classes (plus a section validator on the design classes). Why-it-matters: the chosen expert's persona is what actually reviews/writes the product's design / tech / plan / bug docs in the review loop. Each question MUST offer an "other — define a new persona" path whose per-option copy points the operator at `lazycortex-experts` to compose a new expert, then re-run this skill (do NOT invent an expert name — only names present in `settings-get experts` are valid). See: `${CLAUDE_PLUGIN_ROOT}/references/spec.config-protocol.md`.
+The keys of the printed object are the registered expert names. Then, for EACH of the three roles in order (`designer`, then `developer`, then `tester`), issue a SEPARATE `AskUserQuestion` (one per role) offering those expert names as options. Stem for each: name the role and where it lands in the built-in classes (Step 10) — `designer` is the main writer of the `design@` class ONLY and is never a validation writer; `developer` is the main writer of the `plan@` and `tech@` classes and a section validator on the design and bug classes; `tester` is the main writer of `bug@` and the sole section validator on the plan class (plus a section validator on the design class). Why-it-matters: the chosen expert's persona is what actually reviews/writes the product's design / tech / plan / bug docs in the review loop. Each question MUST offer an "other — define a new persona" path whose per-option copy points the operator at `lazycortex-experts` to compose a new expert, then re-run this skill (do NOT invent an expert name — only names present in `settings-get experts` are valid). See: `${CLAUDE_PLUGIN_ROOT}/references/spec.config-protocol.md`.
 
 Then `AskUserQuestion` for the historian — single-select from the expert names, default `review.historian`. Stem: the historian writes the `# History` section of every reviewed doc across all built-in classes. Why-it-matters: it is the `experts.history` writer; it must be an expert registered with commit permission in the local repo.
 
@@ -180,7 +180,7 @@ Outcome: `assigned` (or abort `expert-undefined`).
 
 ## Step 8 — Asset categories (delegate)
 
-`AskUserQuestion` whether to register any operator-defined asset categories (beyond the built-in feature / change / bug set) now. Stem: an asset category is an operator-defined kind (characters / scenes / chapters / …) registered under `products[<key>].asset_categories`; each gets its own folder, folder-note, and design + plan review classes. Why-it-matters: the built-in feature / change / bug categories are always created in Step 9 — extra categories are added by a dedicated skill, not inline here. Options: `add categories now` and `none (built-in only)`. See: `${CLAUDE_PLUGIN_ROOT}/references/spec.layout-protocol.md`.
+`AskUserQuestion` whether to register any operator-defined asset categories (beyond the built-in feature / change / bug set) now. Stem: an asset category is an operator-defined kind (characters / scenes / chapters / …) registered under `products[<key>].asset_categories`; each gets its own folder and folder-note — its design/plan docs are covered automatically by the product's behavior-keyed review classes (Step 10's wildcard globs), no per-category class exists. Why-it-matters: the built-in feature / change / bug categories are always created in Step 9 — extra categories are added by a dedicated skill, not inline here. Options: `add categories now` and `none (built-in only)`. See: `${CLAUDE_PLUGIN_ROOT}/references/spec.layout-protocol.md`.
 
 - **add categories now** → after this skill finishes (Step 11 done), the operator runs `/spec.add-asset-category <compound-key>` once per category. Do NOT inline-duplicate that flow — surface the instruction in the Report (outcome `delegated`). Do NOT call `spec.add-asset-category` from here; the product must be fully written and audited first.
 - **none** → outcome `built-in-only`.
@@ -261,14 +261,14 @@ Append the built-in review classes to `review.classes`. Read the section, append
 lazycortex-core settings-get review
 ```
 
-In the parsed object, append the classes below to `review.classes` (create the list if absent), preserving every existing class. **The review-class schema is owned by `lazycortex-review`** — match it exactly (this is the same schema `spec.add-asset-category` writes):
+In the parsed object, write the classes below into `review.classes` (create the list if absent) per the reconcile rule further down. **The review-class schema is owned by `lazycortex-review`** — match it exactly:
 
 - Each class is an object with a `class` string label (human-readable identity; there is NO `id` field — the daemon matches files to classes purely by `paths` globs), a `paths` non-empty list of glob strings, and an `experts` object.
 - `experts.main` — a LIST of `{ "name": <expert> }` writer objects (the opening-writer chain).
 - `experts.validation` and `experts.terminal` — a DICT keyed by stable `section-id` (`^[a-z][a-z0-9_-]*$`), each value a writer object `{ "name": <expert>, "section": "<H1 title>", "position": "top" | "bottom" }`. These author named post-approve H1 sections; `validation` sections block finalize and trigger revert-to-main on concerns. There is NO flat "list of reviewers" bucket — a reviewer is expressed as one named validation section.
 - `experts.history` — a single `{ "name": <historian> }` object (no `repo`, no `@<repo>` syntax).
 
-Generate the classes below (substituting `<spec_path>`, `<key>` = compound-key, `<designer>`, `<developer>`, `<tester>`, `<historian>`). Three reusable validation dicts plus a no-validation case. **`designer` is never a validation writer in any class** — it appears only as a `main` writer; plan validation is tester-only; `tech` carries no validation bucket at all:
+Generate the classes below (substituting `<spec_path>`, `<key>` = compound-key, `<designer>`, `<developer>`, `<tester>`, `<historian>`). Classes are keyed by **behavior**, not by asset category: one class per doc-kind, with globs spanning the product root and every category folder (built-in AND operator-defined) — so `spec.add-asset-category` never touches `review.classes` and a new category needs no new class. Three reusable validation dicts plus a no-validation case. **`designer` is never a validation writer in any class** — it appears only as a `main` writer; plan validation is tester-only; `tech` carries no validation bucket at all:
 
 - **D = developer + tester review** — `{ "developer_review": { "name": "<developer>", "section": "Developer review", "position": "bottom" }, "tester_review": { "name": "<tester>", "section": "Tester review", "position": "bottom" } }`.
 - **T = tester review** — `{ "tester_review": { "name": "<tester>", "section": "Tester review", "position": "bottom" } }`.
@@ -279,22 +279,26 @@ Every class also carries `experts.history: { "name": "<historian>" }`.
 
 | `class` label | `paths` | `experts.main` | `experts.validation` |
 |---|---|---|---|
-| `spec.design@<key>` | `["<spec_path>/design.md"]` | `[{ "name": "<designer>" }]` | D |
-| `spec.tech@<key>` | `["<spec_path>/tech.md"]` | `[{ "name": "<developer>" }]` | NONE |
-| `features.design@<key>` | `["<spec_path>/features/**/design.md"]` | `[{ "name": "<designer>" }]` | D |
-| `features.plan@<key>` | `["<spec_path>/features/**/plan.md"]` | `[{ "name": "<developer>" }]` | T |
-| `changes.design@<key>` | `["<spec_path>/changes/**/design.md"]` | `[{ "name": "<designer>" }]` | D |
-| `changes.plan@<key>` | `["<spec_path>/changes/**/plan.md"]` | `[{ "name": "<developer>" }]` | T |
-| `bugs.bug@<key>` | `["<spec_path>/bugs/**/bug.md"]` | `[{ "name": "<tester>" }]` | DV |
-| `bugs.plan@<key>` | `["<spec_path>/bugs/**/plan.md"]` | `[{ "name": "<developer>" }]` | T |
+| `design@<key>` | `["<spec_path>/design.md", "<spec_path>/*/*/design.md"]` | `[{ "name": "<designer>" }]` | D |
+| `plan@<key>` | `["<spec_path>/*/*/plan.md"]` | `[{ "name": "<developer>" }]` | T |
+| `tech@<key>` | `["<spec_path>/tech.md"]` | `[{ "name": "<developer>" }]` | NONE |
+| `bug@<key>` | `["<spec_path>/bugs/*/bug.md"]` | `[{ "name": "<tester>" }]` | DV |
 
-The `class` label carries the `<scope>.<doc>@<key>` value because the schema has a `class` field (not `id`) — its only identity slot. Write the edited review object back:
+The `class` label carries the `<doc-kind>@<key>` value because the schema has a `class` field (not `id`) — its only identity slot.
+
+**Glob semantics.** Both the review dispatcher's file→class matcher and the daemon's md-scan match via `PurePath.match`, where `**` acts as a SINGLE path segment — never write `**` expecting recursion. `<spec_path>/*/*/design.md` matches `<category>/<slug>/design.md` for every category folder; asset docs live at exactly that depth (`spec.create-asset` scaffolds `<category>/<slug>/`). The four doc-kind filenames are disjoint, so the classes never overlap and first-match-wins ordering inside `review.classes` is irrelevant. Bug plans (`bugs/<slug>/plan.md`) intentionally fall into `plan@<key>` — same tester-validated plan behavior; there is no separate bugs-plan class.
+
+**Reconcile, not append.** Before writing, remove from `review.classes` every existing class whose `class` label ends in `@<key>` and whose prefix names a built-in doc-kind (`design`, `plan`, `tech`, `bug`) or a legacy per-category label (`spec.design`, `spec.tech`, `bugs.bug`, `bugs.plan`, `<category>.design`, `<category>.plan` — any dotted prefix), then append the four classes above. If a removed class's `experts` block differs from the behavior class replacing it, `AskUserQuestion` first (keep the operator's variant untouched vs collapse it). Classes whose label does not end in `@<key>` are never touched. This makes Step 10 idempotent across create and edit mode — re-running `/spec.product-config` in edit mode on a product generated under the old per-category scheme IS the migration to the collapsed set.
+
+**Expert re-verification (MANDATORY, before the write).** Collect every expert name the classes are about to carry — each `main[].name`, each `validation.<section-id>.name`, each `history.name` — and re-check every one against the keys of `lazycortex-core settings-get experts`. Any name missing → abort WITHOUT calling `settings-set review`, naming the dangling expert and pointing at `lazycortex-experts` (same abort as Step 7's `expert-undefined`). Step 7's earlier validation does not guard this write — a dangling reference (e.g. an unregistered tester) must be impossible to persist.
+
+Write the edited review object back:
 
 ```bash
 printf '%s' '<edited-review-json>' | lazycortex-core settings-set review
 ```
 
-Then sync the `lazy-review.scan` routine's `paths:` list to include every new glob so the daemon's md-scan routine sees the product's docs (the routine's `paths:` must be the union of every `review.classes[].paths` glob — read the routine config, add any absent globs, write back) — exactly as `spec.add-asset-category` does. Finally, verify the generated classes by invoking `/lazy-review.audit` via the `Skill` tool (`skill: "lazycortex-review:lazy-review.audit"`) and surface its findings — report the `audit: <LEVEL> (<N> findings)` line and any FAIL/WARN detail. If the audit reports FAIL, report it; do not silently leave broken classes.
+Then recompute the `lazy-review.scan` routine's `paths:` list as the union of every `review.classes[].paths` glob after the write — add absent globs AND drop globs no longer present in any class (the collapsed set retires the old per-category globs). Finally, verify the generated classes by invoking `/lazy-review.audit` via the `Skill` tool (`skill: "lazycortex-review:lazy-review.audit"`) and surface its findings — report the `audit: <LEVEL> (<N> findings)` line and any FAIL/WARN detail. If the audit reports FAIL, report it; do not silently leave broken classes.
 
 Outcome: `wired` (carry the audit level into the report).
 

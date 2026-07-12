@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover if the working tree or a remote sync halts it.
-last_regen: 2026-07-10
+last_regen: 2026-07-12
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, answers yes to the runtime-daemon wizard, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh, daemon starts and polls .experts/.jobs/ on interval, user checks .runtime/state.json for a recent last_run; (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks a cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
@@ -28,7 +28,7 @@ After completing this walkthrough you have a running runtime daemon that polls f
 
 ### Step 1 — Install and start the daemon
 
-Run `/lazy-core.install` inside the repo and answer **Yes** to the runtime-daemon wizard. The wizard's full sequence — what it writes to `lazy.settings.json`, the expert-discovery scan, the daemon-supervisor offer, the expert-spawn sandbox question — is covered in the **Install, audit, and maintain lazycortex-core** block chapter; work through Steps there before continuing here. Come back once the wizard has finished.
+Run `/lazy-core.install` inside the repo and answer **Yes** to the runtime-daemon wizard. The wizard's full sequence — what it writes to `lazy.settings.json`, the expert-discovery scan, the daemon-supervisor offer, the expert-spawn sandbox question, and the optional Prometheus metrics endpoint — is covered in the **Install, audit, and maintain lazycortex-core** block chapter; work through Steps there before continuing here. Come back once the wizard has finished.
 
 If you chose a supervisor during install, the daemon is already running — skip to Step 2. Otherwise start it by hand from the repo root:
 
@@ -71,6 +71,8 @@ The daemon runs continuously, draining jobs and firing registered routines. The 
 
 If your `daemon.git` block sets `remote_sync: "pull_push"` and you also want automation to fire the moment the daemon's work actually lands on `origin` — a deploy hook, a notification, waking a device to pull — set `daemon.git.post_push_hook` to a shell command. It runs after every push that advances the branch (fast-forward or post-rebase), with the push context available in `LAZY_PUSH_REPO`, `LAZY_PUSH_BRANCH`, `LAZY_PUSH_REMOTE`, `LAZY_PUSH_OLD_SHA`, and `LAZY_PUSH_NEW_SHA` environment variables. The hook is crash-isolated: a non-zero exit, a timeout past `post_push_timeout_sec` (30 seconds by default), or a spawn failure is journaled but never halts the daemon, retries the push, or fails the tick — it also never fires on a tick where nothing was actually pushed.
 
+If you opted into the metrics endpoint during install, the daemon exposes runtime health (routine ticks, errors, tokens, queue depth) on the allocated loopback port for a Prometheus-compatible scraper — nothing further to do here, it runs alongside job draining with no separate startup step.
+
 The `daemon_halted` recovery path is an expected operational event, not an error in the daemon itself. When it fires often from a particular routine, that routine's output logic is leaving dirt behind — investigate there, not in the daemon.
 
 ## How setup and recovery connect
@@ -79,31 +81,22 @@ The `daemon_halted` recovery path is an expected operational event, not an error
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant installWizard as Install Wizard
-  participant settingsFile as lazy.settings.json
-  participant daemon as Runtime Daemon
-  participant runtimeState as .runtime/state.json
-  participant recoverSkill as /lazy-runtime.recover
+  participant claudeSession as Claude Session
+  participant jobsQueue as .experts/.jobs/ Queue
+  participant daemon as Daemon Runner
+  participant expertAgent as Expert Agent
 
-  user->>installWizard: run /lazy-core.install
-  Note over user,installWizard: user answers yes to runtime-daemon wizard
-  installWizard->>settingsFile: write experts, flat daemon and routines sections
-  installWizard->>daemon: write .claude/bin/lazy.runtime.sh
-  installWizard-->>user: install complete
-  user->>daemon: run .claude/bin/lazy.runtime.sh
+  user->>claudeSession: /lazy-expert.dispatch-job
+  claudeSession->>jobsQueue: write job config + READY marker
   loop poll interval
-    Note over daemon: poll .experts/.jobs/
-    daemon->>runtimeState: write last_run
+    daemon->>jobsQueue: scan for READY jobs
   end
-  user->>runtimeState: check last_run
-  runtimeState-->>user: last_run recent
-  Note over daemon: working tree goes dirty
-  daemon->>runtimeState: write daemon_halted
-  user->>recoverSkill: run /lazy-runtime.recover
-  recoverSkill->>runtimeState: read halt context
-  runtimeState-->>recoverSkill: daemon_halted plus reason
-  recoverSkill-->>user: show halt context
-  user-->>recoverSkill: pick cleanup mode (commit/stash/discard)
-  recoverSkill->>runtimeState: clear daemon_halted
-  Note over daemon: resumes on next iteration
+  jobsQueue-->>daemon: job picked up
+  daemon->>expertAgent: invoke expert agent
+  expertAgent->>jobsQueue: write response.json
+  expertAgent->>jobsQueue: write DONE marker
+  user->>claudeSession: /lazy-expert.collect-job
+  claudeSession->>jobsQueue: check for DONE marker
+  jobsQueue-->>claudeSession: response.json + DONE
+  claudeSession-->>user: job result
 ```

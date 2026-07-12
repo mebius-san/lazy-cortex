@@ -1,14 +1,14 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-experts by seeding agent-model tiers and class-mapped composed expert entries into lazy.settings.json.
-last_regen: 2026-07-06
+last_regen: 2026-07-12
 no_diagram: true
 source_skills:
   - lazy-experts.install
 ---
 # Installing lazycortex-experts
 
-`lazycortex-experts` ships seven generic agents spanning the full development lifecycle plus fiction — interpreter, designer, planner, implementer, debugger, reviewer, and fiction-writer — plus a set of domain aspects and two cross-cutting aspects (discipline, tech-writing) that compose expertise onto those agents. Before the expert runtime in `lazycortex-core` can route jobs to them, two things must land in your `lazy.settings.json`: the agent-model tier for each generic agent (so dispatch knows which Claude tier to use), and a composed expert entry for every class × role pair the class map prescribes (so each specialist is addressable by name with the right aspect stack). `/lazy-experts.install` handles both in a single idempotent run.
+`lazycortex-experts` ships eight generic agents spanning the full development lifecycle plus fiction — interpreter, designer, planner, implementer, debugger, reviewer, tester, and fiction-writer — plus a set of domain aspects and two cross-cutting aspects (discipline, tech-writing) that compose expertise onto those agents. Before the expert runtime in `lazycortex-core` can route jobs to them, two things must land in your `lazy.settings.json`: the agent-model tier for each generic agent (so dispatch knows which Claude tier to use), and a composed expert entry for every class × role pair the class map prescribes (so each specialist is addressable by name with the right aspect stack). `/lazy-experts.install` handles both in a single idempotent run.
 
 Health checks after install route through `/lazy-core.doctor`, not through a plugin-local audit skill.
 
@@ -25,7 +25,7 @@ Run `/lazy-experts.install`. The skill first checks that `lazycortex-experts@laz
 
 Next, it detects whether the plugin is installed at project scope or user (global) scope, then targets the matching `lazy.settings.json` — `<repo-root>/.claude/lazy.settings.json` for project-scoped installs, `~/.claude/lazy.settings.json` for global. If both scopes appear, it targets project scope without asking.
 
-**Seeding agent-model tiers.** The skill locates the `default-tiers.json` file that `lazycortex-core` caches locally and selects every entry whose key starts with `lazycortex-experts:` — one entry per generic agent (interpreter, designer, planner, implementer, debugger, reviewer, fiction-writer). For each one it compares what's already in your `lazy.settings.json`:
+**Seeding agent-model tiers.** The skill locates the `default-tiers.json` file that `lazycortex-core` caches locally and selects every entry whose key starts with `lazycortex-experts:` — one entry per generic agent (interpreter, designer, planner, implementer, debugger, reviewer, tester, fiction-writer). For each one it compares what's already in your `lazy.settings.json`:
 
 - If the entry is **absent**, it adds it.
 - If the entry is **already there and identical**, it leaves it untouched.
@@ -35,7 +35,7 @@ If `lazycortex-core` isn't installed at all — meaning the defaults file can't 
 
 **Seeding composed experts follows a class map.** On a fresh project with an empty `experts` section, the skill asks which domain classes to register — the options are the domain aspects the plugin ships: `claude-plugin`, `game-dev`, `dotfiles`, `sci-fi`, `fantasy`. What each class seeds depends on its kind:
 
-- **Technical classes** (`claude-plugin`, `game-dev`, `dotfiles`) seed all six engineering roles — interpreter, designer, planner, implementer, debugger, reviewer. Each entry stacks the domain aspect plus two cross-cutting aspects: `lazycortex-experts:lazy-experts.discipline-aspect` (execution discipline) and `lazycortex-experts:lazy-experts.tech-writing-aspect` (documentation rigor).
+- **Technical classes** (`claude-plugin`, `game-dev`, `dotfiles`) seed all seven engineering roles — interpreter, designer, planner, implementer, debugger, reviewer, tester. Each entry stacks the domain aspect plus two cross-cutting aspects: `lazycortex-experts:lazy-experts.discipline-aspect` (execution discipline) and `lazycortex-experts:lazy-experts.tech-writing-aspect` (documentation rigor).
 - **Fiction classes** (`sci-fi`, `fantasy`) seed only `fiction-writer`. Each entry stacks the domain aspect plus `lazycortex-experts:lazy-experts.discipline-aspect` only — the tech-writing aspect is never added to a fiction expert, since its rules would contradict literary craft.
 
 Every seeded entry, technical or fiction, also carries `lazycortex-core:lazy-memory.persona-aspect` so the expert accumulates private memory across runs under `.memory/<expert-key>/`. Example technical entry:
@@ -81,7 +81,7 @@ After both seeding passes, the skill reads the file back to confirm every entry 
 
 **Re-running after a plugin update.** `/plugin update` refreshes the plugin cache but does not re-sync settings. If a new release of `lazycortex-experts` ships additional domain aspects, revised `lazycortex-experts:*` tier entries in `default-tiers.json`, or a new role agent, re-run `/lazy-experts.install` to pick them up. The class map re-runs and adds any new (class × role) pairs it prescribes for your existing classes; existing entries are left alone.
 
-**Adding a new class to an existing project.** Because the skill derives its class set from your current `experts` entries, it won't add a class you haven't registered yet. To introduce a new domain, add one expert of the new class by hand (for a technical class, any of the six roles will do; for a fiction class it must be `fiction-writer` — that's the only role the class map seeds), then re-run `/lazy-experts.install`. The skill derives the expanded class set and fills in the remaining entries the class map prescribes for the new class.
+**Adding a new class to an existing project.** Because the skill derives its class set from your current `experts` entries, it won't add a class you haven't registered yet. To introduce a new domain, add one expert of the new class by hand (for a technical class, any of the seven roles will do; for a fiction class it must be `fiction-writer` — that's the only role the class map seeds), then re-run `/lazy-experts.install`. The skill derives the expanded class set and fills in the remaining entries the class map prescribes for the new class.
 
 **Changing a tier after install.** If you want a different Claude tier for one of the agents than the default provides, run `/lazy-core.agent-models` — that skill owns the `agent_models` section of `lazy.settings.json`. `/lazy-experts.install` will then report `kept-local` on subsequent runs so your customisation is visible.
 

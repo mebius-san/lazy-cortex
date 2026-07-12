@@ -1,18 +1,27 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-observe install, uninstall, and doctor — symptoms, likely causes, and fixes.
-last_regen: 2026-06-01
+last_regen: 2026-07-12
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Decision tree rooted at the operator's situation: top-level branch on whether the shipper is installed at all (answer file present?); if not-installed routes to install guidance; if installed, branch on whether the service is active; active branch then splits on whether local /metrics is reachable, whether agent self-metrics show successful remote_write (token vs observer-reachability vs WAL-recovery sub-branches), and whether WAL is oversized. Separate top-level branch for uninstall failures (launchctl error 5 vs systemctl unit-not-found). Each leaf cites the troubleshooting entry that resolves it."
+  request: "Decision tree rooted at the operator's situation: top-level branch on whether the shipper is installed at all (answer file present?); if not-installed, branch further on whether the Step 0 pre-flight found an already-covered host (routes to --integrate-only or --force-standalone guidance) versus a genuinely clear host (routes to plain install); if installed, branch on whether the host runs in integrate mode (scrape-targets file present and current vs missing/stale) or standalone mode — standalone then branches on whether the service is active, whether local /metrics is reachable, whether agent self-metrics show successful remote_write (token vs observer-reachability vs WAL-recovery sub-branches), and whether WAL is oversized. Separate top-level branch for uninstall failures (launchctl error 5 vs systemctl unit-not-found). Each leaf cites the troubleshooting entry that resolves it."
   kind_hint: decision-tree
 source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
   - lazy-observe.doctor
-  - lazy-observe.audit
 ---
 # Troubleshooting
+
+## Install stops immediately: "collection is already covered on this host"
+
+**Symptom**: `/lazy-observe.install` prints a list of detected signals (an existing lazycortex-observe service unit, a running scraper process such as Prometheus/otelcol/Alloy/grafana-agent, or an active scrape connection to a daemon's metrics port) and aborts without asking a single question.
+
+**Likely cause**: The Step 0 pre-flight found a metrics-collection stack already working on this host. Installing a second shipper would be redundant, so the skill refuses by default.
+
+**Fix**: This is the intended behavior on a host that's already covered — don't fight it. If the existing stack should also scrape this host, re-run `/lazy-observe.install --integrate-only`; it publishes a Prometheus file_sd scrape-targets file for your existing stack and installs no shipper of its own. If you genuinely want a dedicated lazycortex-observe shipper anyway, re-run with `/lazy-observe.install --force-standalone`.
+
+---
 
 ## Doctor reports "not-installed"
 
@@ -21,6 +30,16 @@ source_skills:
 **Likely cause**: The answer file at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` is absent. The shipper has never been installed on this host, or the file was deleted during a previous uninstall.
 
 **Fix**: Run `/lazy-observe.install`. It walks through all setup steps and writes the answer file before loading the service.
+
+---
+
+## Doctor reports a missing or stale scrape-targets file (integrate mode)
+
+**Symptom**: On a host installed with `/lazy-observe.install --integrate-only`, `/lazy-observe.doctor` reports `FAIL scrape-file-missing` or `WARN scrape-file-stale` on Step 5.
+
+**Likely cause**: In integrate mode there is no local shipper — instead the operator's existing Prometheus reads a file_sd scrape-targets file at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/scrape-targets.json`. That file is either missing, or its entry count no longer matches the daemons currently registered on this host (one was added or removed since the file was last generated).
+
+**Fix**: Re-run `/lazy-observe.install --integrate-only`. It regenerates the scrape-targets file from the current daemon registry and prints the `file_sd_configs` snippet again — no other setting changes.
 
 ---
 
@@ -46,11 +65,11 @@ source_skills:
 
 ## Local /metrics endpoint is unreachable
 
-**Symptom**: `/lazy-observe.doctor` reports `FAIL endpoint-down` on the local-metrics check (Step 4). `curl http://127.0.0.1:9464/metrics` hangs or returns a connection-refused error.
+**Symptom**: `/lazy-observe.doctor` reports `FAIL endpoint-down` on the local-metrics check (Step 4). `curl http://127.0.0.1:9464/metrics` (or whichever port this host's daemon was allocated) hangs or returns a connection-refused error.
 
-**Likely cause**: The lazycortex-core daemon is not running, or runtime metrics are disabled (`metrics.enabled: false` in `lazy.settings.json`).
+**Likely cause**: The lazycortex-core daemon for that checkout is not running, or runtime metrics are disabled for it. On a host running several lazycortex-core daemons, each gets its own port allocated sequentially from 9464 — check which `repo_label` the doctor report flags before restarting the wrong daemon.
 
-**Fix**: Enable runtime metrics via `lazy-core.runtime` settings (see `references/lazy-core.runtime-schema.md § 12`), then restart the daemon supervisor. On macOS: `launchctl kickstart -k gui/$UID com.lazycortex.runtime`. On Linux: `systemctl --user restart lazycortex-runtime.service`.
+**Fix**: Run `/lazy-core.install` for the affected checkout and answer "Yes" at its metrics prompt if you haven't already (see `references/lazy-core.runtime-schema.md § 12` for what the setting controls) — then restart that checkout's daemon supervisor. On macOS: `launchctl kickstart -k gui/$UID com.lazycortex.runtime`. On Linux: `systemctl --user restart lazycortex-runtime.service`.
 
 ---
 
@@ -114,13 +133,13 @@ source_skills:
 
 ---
 
-## Install fails because the lazycortex-core daemon is not exporting metrics
+## Install fails because no daemon on this host has metrics enabled
 
-**Symptom**: `/lazy-observe.install` aborts at Step 2 with outcome `core-metrics-disabled`, even after you have added `metrics.enabled: true` to `lazy.settings.json`.
+**Symptom**: `/lazy-observe.install` aborts at Step 2 with outcome `core-metrics-disabled`.
 
-**Likely cause**: The lazycortex-core daemon was not restarted after the settings change. The daemon reads settings on startup and does not hot-reload.
+**Likely cause**: No lazycortex-core daemon on this host has runtime metrics turned on yet, or one was turned on but its daemon hasn't been restarted since.
 
-**Fix**: Restart the daemon supervisor — on macOS: `launchctl kickstart -k gui/$UID com.lazycortex.runtime`, on Linux: `systemctl --user restart lazycortex-runtime.service`. Then re-run `/lazy-observe.install`.
+**Fix**: Run `/lazy-core.install` for the checkout you want scraped and answer "Yes" at its metrics prompt — it enables the endpoint and provisions a port automatically. If you already answered "Yes" previously, restart that checkout's daemon supervisor to pick up the change: `launchctl kickstart -k gui/$UID com.lazycortex.runtime` (macOS) or `systemctl --user restart lazycortex-runtime.service` (Linux). Then re-run `/lazy-observe.install`.
 
 ---
 
@@ -159,61 +178,30 @@ source_skills:
 ```mermaid
 %%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart TD
-  isInstalled{observe.toml present?}
-  isActive{Service active?}
-  isReachable{/metrics reachable?}
-  hasRemoteWrite{remote_write rate > 0?}
-  walSized{WAL oversized?}
-  zeroRateCause{Root cause?}
-  uninstallFail{Uninstall failure type?}
+  whatIsYourSituation{What is your situation?}
+  preFlightCoverage{Pre-flight found existing coverage?}
 
-  fixInstall[Run /lazy-observe.install]
-  fixRestart[Kickstart / restart the service]
-  fixMetrics[Enable daemon.metrics in lazy.settings.json]
-  fixToken[Re-run /lazy-observe.install Step 5 to rotate token]
-  fixNetwork[Resolve operator network - observer unreachable]
-  fixWAL[WAL recovering from outage - wait then re-check]
-  walDrain[Observer was offline - WAL will drain automatically]
-  healthy[Healthy - remote_write succeeding and WAL bounded]
-  fixLaunchctl[Run launchctl remove com.lazycortex.observe then rerun uninstall]
-  fixSystemd[Run systemctl --user daemon-reload then rerun uninstall]
+  integrateOrForceEntries[Read --integrate-only / --force-standalone entries]
+  plainInstallEntry[Read plain install entry]
+  integrateModeEntry[Check scrape-targets file, stale or missing - read the integrate-mode entry]
+  standaloneEntries[Read standalone entries in order: service-active, /metrics reachable, remote_write, WAL]
+  uninstallEntries[Read launchctl / systemctl uninstall entries]
 
-  isInstalled -->|not present| fixInstall
-  isInstalled -->|present| isActive
-  isInstalled -->|uninstall failure| uninstallFail
-  isActive -->|inactive| fixRestart
-  isActive -->|active| isReachable
-  isReachable -->|down| fixMetrics
-  isReachable -->|reachable| hasRemoteWrite
-  hasRemoteWrite -->|rate > 0| walSized
-  hasRemoteWrite -->|rate = 0| zeroRateCause
-  zeroRateCause -->|token expired| fixToken
-  zeroRateCause -->|observer unreachable| fixNetwork
-  zeroRateCause -->|WAL recovering| fixWAL
-  walSized -->|oversized| walDrain
-  walSized -->|bounded| healthy
-  uninstallFail -->|launchctl bootout error 5| fixLaunchctl
-  uninstallFail -->|systemctl unit-not-found| fixSystemd
+  whatIsYourSituation -->|not installed| preFlightCoverage
+  whatIsYourSituation -->|installed, integrate mode| integrateModeEntry
+  whatIsYourSituation -->|installed standalone, problems| standaloneEntries
+  whatIsYourSituation -->|uninstall failed| uninstallEntries
+  preFlightCoverage -->|yes| integrateOrForceEntries
+  preFlightCoverage -->|no| plainInstallEntry
 
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class isInstalled guard
-  class isActive guard
-  class isReachable guard
-  class hasRemoteWrite guard
-  class walSized guard
-  class zeroRateCause guard
-  class uninstallFail guard
-  class healthy success
-  class fixInstall error
-  class fixRestart error
-  class fixMetrics error
-  class fixToken error
-  class fixNetwork error
-  class fixWAL error
-  class walDrain error
-  class fixLaunchctl error
-  class fixSystemd error
+  class whatIsYourSituation guard
+  class preFlightCoverage guard
+  class integrateOrForceEntries success
+  class plainInstallEntry success
+  class integrateModeEntry success
+  class standaloneEntries success
+  class uninstallEntries success
 ```

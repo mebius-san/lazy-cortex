@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Assign haiku/sonnet/opus tiers to every agent in your vault and let the model-router hook route each dispatch automatically.
-last_regen: 2026-07-10
+last_regen: 2026-07-12
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
@@ -59,3 +59,4 @@ When this wizard runs without you at the keyboard — for example when `lazy-cor
 ## See also
 
 - [install-and-audit](install-and-audit.md) — bootstrap lazycortex-core and verify your configuration baseline before setting up model routing.
+</content>

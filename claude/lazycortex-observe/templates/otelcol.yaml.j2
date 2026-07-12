@@ -1,8 +1,9 @@
 # Rendered by lazy-observe.install. DO NOT edit by hand.
 #
-# OpenTelemetry Collector config — scrapes the local lazycortex-core
-# /metrics endpoint and forwards via Prometheus remote_write to the
-# operator's observer. Vendor-neutral alternative to Grafana Alloy.
+# OpenTelemetry Collector config — scrapes every local lazycortex-core
+# /metrics endpoint (one target per runtime daemon on this host; each
+# daemon's series carry their own `repo` label) and forwards via
+# Prometheus remote_write to the operator's observer.
 
 receivers:
   prometheus:
@@ -13,7 +14,7 @@ receivers:
           scrape_timeout: {{ scrape_timeout | default('10s') }}
           static_configs:
             - targets:
-                - "{{ scrape_target }}"
+{{ scrape_targets_block }}
 
 processors:
   batch:

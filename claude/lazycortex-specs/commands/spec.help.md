@@ -15,7 +15,7 @@ Authors product / feature / change / bug (and operator-defined) specs as Markdow
 
 - `spec.install` — Ensure consumer spec dirs exist, register the `spec.gate-tick` routine, optionally chain into `spec.product-config`. Idempotent.
 - `spec.product-config` — Wizard to create or edit a product record in `lazy.settings.json[products]`; scaffolds folder-notes with icons and built-in review classes; auto-detects deps.
-- `spec.add-asset-category` — Register an operator-defined asset category on a product (icon + folder-note + two review classes), then audit the generated classes.
+- `spec.add-asset-category` — Register an operator-defined asset category on a product (icon + folder-note); review coverage is inherited from the product's behavior-keyed classes.
 - `spec.create-from-code` — Generate product- or feature-level spec from an existing codebase via parallel Explore agents (code-bound products only).
 
 ## Authoring

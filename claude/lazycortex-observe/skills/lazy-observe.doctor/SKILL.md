@@ -32,24 +32,43 @@ Outcome: `PASS` (with the relevant fields echoed) / `FAIL not-installed`.
 
 ## Step 2 — Service unit loaded
 
+In integrate mode (`mode = "integrate"` in the answer file) no shipper unit is expected — state `n/a integrate-mode` and continue.
+
 - **darwin**: `launchctl print gui/$UID/com.lazycortex.observe`. Check `state = running` (or equivalent) in the output.
 - **linux**: `systemctl --user is-active lazycortex-observe.service`. Expect `active`.
 
-Outcome: `PASS active` / `FAIL inactive` / `WARN unknown`.
+Outcome: `PASS active` / `FAIL inactive` / `WARN unknown` / `n/a integrate-mode`.
 
 ## Step 3 — Agent process up
 
+In integrate mode — `n/a integrate-mode`, continue.
+
 `ps -o pid,comm -p <PID>` after extracting PID from the unit's status. Verify the binary path matches what the answer file declared.
 
-Outcome: `PASS <pid>` / `FAIL no-pid`.
+Outcome: `PASS <pid>` / `FAIL no-pid` / `n/a integrate-mode`.
 
-## Step 4 — Local /metrics reachable
+## Step 4 — Local /metrics reachable (every daemon)
 
-`curl -fsS http://<scrape_target>/metrics`. Body must contain at least one `lazycortex_runtime_*` series. Sample one tick metric (`lazycortex_runtime_routine_ticks_total`) and report its current value.
+List the host's metrics-enabled daemons and probe each endpoint:
 
-Outcome: `PASS <sample value>` / `FAIL endpoint-down` / `FAIL no-lazycortex-series`.
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+import install
+for t in install.local_scrape_targets():
+    addr = ('127.0.0.1' if t['bind'] in ('0.0.0.0', '::') else t['bind']) + ':' + str(t['port'])
+    print(t['repo_label'], addr, install.smoke_test_local_metrics(addr))
+"
+```
+
+One report line per daemon (`<repo_label> <addr> PASS/FAIL`). Every body must contain at least one `lazycortex_runtime_*` series; sample `lazycortex_runtime_routine_ticks_total` where reachable.
+
+Outcome: `PASS <N>-of-<M>` / `FAIL endpoint-down (<repo_label> ...)` / `FAIL no-daemons-registered`.
 
 ## Step 5 — Agent self-metrics show successful remote_write
+
+In integrate mode (`mode = "integrate"` in the answer file) there is no local shipper — instead verify the scrape-targets file exists at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/scrape-targets.json`, parses as JSON, and its entry count matches Step 4's daemon count. Outcome: `PASS file-sd <count> targets` / `FAIL scrape-file-missing` / `WARN scrape-file-stale`.
+
+Otherwise (standalone shipper):
 
 - **Alloy**: scrape `http://127.0.0.1:12345/metrics` (or whatever the operator configured). Check `prometheus_remote_storage_succeeded_samples_total` rate over the last minute > 0.
 - **otelcol**: scrape `http://127.0.0.1:8888/metrics`. Check `otelcol_exporter_sent_metric_points` rate > 0.

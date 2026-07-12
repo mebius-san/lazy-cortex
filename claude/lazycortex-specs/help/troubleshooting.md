@@ -1,22 +1,26 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-06-23
+last_regen: 2026-07-12
+no_diagram: true
 source_skills:
-  - spec.install
-  - spec.product-config
-  - spec.doctor
   - spec.create-asset
-  - spec.create-from-code
-  - spec.flip-gate
-  - spec.gate-tick
-  - spec.set-stage
-  - spec.sync-with-code
-  - spec.finalize-branch
-  - spec.request-attach
-  - spec.request-spawn
   - spec.add-asset-category
+  - spec.create-request
+  - spec.create-from-code
+  - spec.finalize-branch
+  - spec.flip-gate
+  - spec.request-attach
+  - spec.install
+  - spec.refresh-sources
+  - spec.product-config
   - spec.resolve-dependency
+  - spec.request-classify
+  - spec.request-spawn
+  - spec.request-find-candidates
+  - spec.resolve-repo
+  - spec.sync-with-code
+  - spec.set-stage
 ---
 # Troubleshooting
 
@@ -70,13 +74,23 @@ source_skills:
 
 ---
 
-## `/spec.product-config` or `/spec.add-asset-category` audit reports FAIL after writing review classes
+## `/spec.product-config` aborts at Step 10 before writing review classes
 
-**Symptom**: The skill's final report includes an `audit: FAIL` line from `lazy-review.audit`, naming unregistered experts or schema violations.
+**Symptom**: After finishing the wizard — icon, experts, categories all answered — the skill aborts right before the review-class write, naming a dangling expert. No `products` or `review` settings are written.
 
-**Likely cause**: One or more of the designer, developer, tester, or historian names you chose in the wizard are not registered as experts, or the generated review-class schema is inconsistent (for example, a validation section references a missing expert).
+**Likely cause**: Immediately before the write, the skill re-checks every expert name the generated classes are about to carry (every `main` writer, every `validation`/`terminal` writer, the historian) against the registered experts one more time. This catches a case the earlier per-role questions don't — for example an expert removed from the registry between answering the wizard and reaching this step, or a reconciled legacy class carrying an expert name that is no longer registered.
 
-**Fix**: Identify the failing expert from the audit output, compose that persona via `lazycortex-experts`, then re-run `/spec.product-config` (or `/spec.add-asset-category`) to regenerate the review classes with valid expert assignments.
+**Fix**: Compose the missing persona via `lazycortex-experts`, then re-run `/spec.product-config`. Nothing was written on the abort, so there is no partial state to clean up.
+
+---
+
+## `/lazy-review.audit` reports FAIL after `/spec.product-config` writes review classes
+
+**Symptom**: The final report includes an `audit: FAIL` line from `lazy-review.audit`, naming a schema violation in the generated classes.
+
+**Likely cause**: The expert re-verification immediately before the write (above) already rules out dangling expert names, so a post-write audit FAIL points at something else — a section-writer schema violation in the generated `experts.validation` / `experts.terminal` structure.
+
+**Fix**: Read the audit output for the offending class and field, then re-run `/spec.product-config` — Step 10 regenerates the four behavior-keyed classes fresh each time, so fixing the upstream cause (e.g. correcting a role assignment) resolves it on the next pass.
 
 ---
 
@@ -100,6 +114,16 @@ source_skills:
 
 ---
 
+## `/spec.add-asset-category` refuses naming an unknown product
+
+**Symptom**: The skill prints a refusal naming the product key and suggesting `/spec.product-config`.
+
+**Likely cause**: The product compound-key you passed has no record in `lazy.settings.json[products]`. The product was never registered, or the key was mistyped.
+
+**Fix**: Run `/spec.product-config` to register the product, then re-invoke `/spec.add-asset-category <product> <category-name>`. Verify the compound-key matches exactly what the wizard wrote into config. A new category is covered automatically by the product's existing review classes — this skill never writes its own.
+
+---
+
 ## `/spec.create-asset` refuses naming an unknown product
 
 **Symptom**: The skill prints a refusal naming the product key and suggesting `/spec.product-config`.
@@ -117,6 +141,16 @@ source_skills:
 **Likely cause**: You passed a category that does not exist in `products[<key>].asset_categories`. The built-in set is `feature`, `change`, `bug`; anything else must be declared first.
 
 **Fix**: Run `/spec.add-asset-category <product> <category-name>` to register the new category, then re-invoke `/spec.create-asset`.
+
+---
+
+## `/spec.create-request` aborts with no content to save
+
+**Symptom**: The wizard stops right after the first question with a message that no idea was provided.
+
+**Likely cause**: The raw idea text was empty — the operator declined the "What is the request?" question with no input. The skill will not write an empty request file.
+
+**Fix**: Re-invoke `/spec.create-request` and provide at least a short sentence describing the idea; the 3–5 question wizard refines it into a fuller body from there.
 
 ---
 
@@ -156,7 +190,7 @@ source_skills:
 
 **Likely cause**: The path or slug you passed is ambiguous — it could map to multiple products or categories — or it does not match any asset folder.
 
-**Fix**: Pass the unambiguous asset directory path (e.g. `Server/products/api/features/csv-export`). If you are unsure of the exact path, run `/spec.doctor <product>` to list assets under the product.
+**Fix**: Pass the unambiguous asset directory path (e.g. `Server/products/api/features/csv-export`).
 
 ---
 
@@ -250,6 +284,26 @@ source_skills:
 
 ---
 
+## `/spec.refresh-sources` refuses naming a non-authored doc
+
+**Symptom**: The skill rejects the target file, saying its `spec_role` is not an authored-doc role.
+
+**Likely cause**: You ran `/spec.refresh-sources` on a status folder-note or another file that doesn't carry `spec_source_docs` / `spec_source_requests`. Source projection only applies to authored docs.
+
+**Fix**: Re-invoke on the authored doc itself (`design.md`, `plan.md`, `bug.md`, or the product-level `tech.md`), not on the folder-note.
+
+---
+
+## `/spec.refresh-sources` skips the stats refresh
+
+**Symptom**: The output reports a `skipped-unavailable` stats outcome for a category or product-root note, even though the précis was written.
+
+**Likely cause**: The `render-container-stats` CLI is not on `PATH` — the plugin's tooling isn't fully installed in this shell environment.
+
+**Fix**: Re-run `/spec.install` to restore the CLI, then re-invoke `/spec.refresh-sources <doc>` — the précis it already wrote stays in place; only the stats region needs the follow-up run.
+
+---
+
 ## `/spec.request-attach` refuses because the target doc is in a terminal stage
 
 **Symptom**: The skill aborts with a refusal naming the target doc's stage (`rejected` or `cancelled`), saying the operator must revive the doc before attaching.
@@ -270,6 +324,46 @@ source_skills:
 
 ---
 
+## `/spec.request-classify` aborts naming a missing file
+
+**Symptom**: The skill aborts with an error naming the path you passed, instead of falling back to an empty body.
+
+**Likely cause**: The file path given does not exist on disk — a typo, or the request file was moved or deleted between listing it and classifying it.
+
+**Fix**: Confirm the request's actual path (it lives under `<vault-root>/requests/`) and re-invoke with the corrected path.
+
+---
+
+## `/spec.request-classify` returns `unknown` for a request
+
+**Symptom**: The classifier returns the token `unknown` instead of a real class.
+
+**Likely cause**: The request body is empty after stripping frontmatter — there is no content to classify against the closed meta classes or the product's asset categories.
+
+**Fix**: Flesh out the request body (via `/spec.create-request` or a manual edit) before classifying again. An `unknown` result is the signal to gather more content, not a bug.
+
+---
+
+## `/spec.request-find-candidates` refuses a class of `unknown`
+
+**Symptom**: The skill refuses to search, saying `unknown` class means classify-first is incomplete.
+
+**Likely cause**: Candidate search was invoked before the request was classified, or classification itself returned `unknown` because the body was empty.
+
+**Fix**: Classify the request first — give it real content and re-run `/spec.request-classify`, then re-invoke `/spec.request-find-candidates` with the resolved class.
+
+---
+
+## `/spec.request-find-candidates` refuses an unregistered product
+
+**Symptom**: The skill refuses, listing the configured products, when a `<product>` filter was passed.
+
+**Likely cause**: The product key you passed has no record in `lazy.settings.json[products]`.
+
+**Fix**: Register the product via `/spec.product-config`, or drop the `<product>` filter to search the whole vault, then re-invoke.
+
+---
+
 ## `/spec.resolve-dependency` refuses a malformed entry or missing product/repo
 
 **Symptom**: The skill aborts with "malformed dep entry", "product not found", or "repo not found".
@@ -280,20 +374,51 @@ source_skills:
 
 ---
 
-## `/spec.doctor` reports gate-precedence violations
+## `/spec.resolve-repo` aborts: repo key not registered
 
-**Symptom**: The doctor report contains FAIL lines naming gate-precedence violations, e.g. "`spec_tests_passing: true` but `spec_develop_done: false`".
+**Symptom**: The primitive aborts, naming `<key>` as not present in `lazy.settings.json[repos]`.
 
-**Likely cause**: A later gate was set `true` while an earlier gate in the strict S0..S5 ladder was still `false`. This can happen if gates were edited outside the `/spec.flip-gate` primitive or imported from an older format.
+**Likely cause**: The repo key was never registered, or was mistyped.
 
-**Fix**: Run `/spec.doctor <product> --apply`. The fix loop offers to turn each orphaned later gate off via `/spec.flip-gate <asset> <gate> --off`, which enforces the ladder from above. Confirm each proposal; do not manually edit frontmatter.
+**Fix**: Register the repo via `/spec.product-config` — its inline repo wizard writes the `repos[<key>]` record — then re-invoke `/spec.resolve-repo <key>`.
 
 ---
 
-## `/spec.doctor` reports that `spec_stage` and `spec/<stage>` tag are out of sync
+## `/spec.resolve-repo` aborts: missing `local_path` or `branch`
 
-**Symptom**: The doctor report contains FAIL lines for stage/tag mirror drift, e.g. "`design.md` `spec_stage: approved` but `tags:` has `spec/draft`".
+**Symptom**: The primitive aborts saying the `repos[<key>]` record is incomplete.
 
-**Likely cause**: The `spec_stage` frontmatter and the mirrored `spec/<stage>` tag diverged — this happens when frontmatter was edited by hand without going through `/spec.set-stage`, which keeps both fields in lock-step.
+**Likely cause**: The repo record is missing `local_path` and/or `branch` — an incomplete manual edit, or a partially-completed inline repo wizard run.
 
-**Fix**: Run `/spec.set-stage <doc> <current-stage>` — even when the stage value is not changing, the skill re-syncs the tag. For bulk drift after a migration, run `/spec.doctor <product> --apply` and accept each re-sync proposal.
+**Fix**: Re-run `/spec.product-config` and complete the repo wizard for `<key>`, supplying both `local_path` and `branch`, then re-invoke.
+
+---
+
+## `/spec.resolve-repo` aborts: no git remotes configured
+
+**Symptom**: The primitive aborts with "no git remotes configured" for the checkout at `local_path`.
+
+**Likely cause**: `git remote` returns nothing for that checkout — the repo was cloned without a remote, or the remote was removed.
+
+**Fix**: Add a remote inside the checkout (`git remote add origin <url>`), then re-invoke `/spec.resolve-repo <key>`.
+
+---
+
+## `/spec.resolve-repo` aborts: nested GitLab subgroup path
+
+**Symptom**: The primitive aborts saying the remote URL path has more than two segments.
+
+**Likely cause**: The repo lives in a nested GitLab subgroup (`owner/group/repo`) — nested subgroups aren't supported by the automatic path parser yet.
+
+**Fix**: Set an explicit `forge:` override on the repo record via `/spec.product-config` and use a flattened two-segment owner/repo reference, or wait for subgroup support.
+
+---
+
+## `/spec.resolve-repo` aborts: unknown forge
+
+**Symptom**: The primitive aborts saying the remote's hostname is not in the known-forges table.
+
+**Likely cause**: The repo is hosted on a forge instance (self-hosted GitLab, Gitea, Forgejo, …) whose hostname the plugin can't classify automatically, and no explicit override is set on the record.
+
+**Fix**: Add `forge: <key>` (one of `github`, `gitlab`, `bitbucket`, `gitea`, `forgejo`, `sourcehut`) to the repo's record via `/spec.product-config`, then re-invoke.
+</content>

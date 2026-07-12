@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
-last_regen: 2026-06-24
+last_regen: 2026-07-12
 diagram_spec:
   anchor: "How memory grows over time"
   request: "Sequence diagram showing user invoking mark-persona, then dispatching jobs (accumulating run logs), then invoking reflect which reads run logs + existing memory notes and calls lazy-memory.write to produce .memory/<expert>/<slug>.md, committing atomically under the memory-bot identity."
@@ -100,7 +100,7 @@ If the skill reports `<expert>` is unknown (not found in `lazy.settings.json[exp
 Wait for the daemon to drain the reflect job, then collect it:
 
 ```
-/lazy-expert.collect-job expert=<expert> job_id=<job_id>
+/lazy-expert.collect-job expert_name=<expert> job_id=<job_id>
 ```
 
 Expected `status` values:
@@ -108,10 +108,10 @@ Expected `status` values:
 | Status | Meaning |
 |---|---|
 | `pending` | The daemon has not yet picked it up — wait a moment and retry. |
-| `running` | The reflect job is in flight — wait for it to complete. |
 | `done`, `outcome=edited` | The expert wrote at least one note. `result[]` lists the new `.memory/<expert>/<slug>.md` paths. |
 | `done`, `outcome=empty` | Nothing was worth consolidating yet. Dispatch more jobs covering the kind of work you want the expert to remember and re-run `/lazy-memory.reflect`. |
-| `error` | Something went wrong — check `error_detail` in the collect output and the run log at `.logs/claude/<expert>/<timestamp>.md`. |
+| `failed` | Something went wrong — check `response.error` (or `response.message`) in the collect output and the run log at `.logs/claude/<expert>/<timestamp>.md`. |
+| `missing` | The job directory was never created or was already collected/cancelled — verify the `job_id` and expert name from Step 3. |
 
 ### Step 5 — Verify the memory tree
 

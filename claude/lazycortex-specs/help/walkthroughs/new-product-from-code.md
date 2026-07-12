@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to an existing codebase, generate its design and tech docs from source, then scaffold the first feature.
-last_regen: 2026-06-23
+last_regen: 2026-07-12
 diagram_spec:
   anchor: "## How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs spec.product-config to register the product and write settings, then runs spec.create-from-code to scan source and produce design + tech docs, then runs spec.create-feature to scaffold the first feature asset; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -48,7 +48,7 @@ The key decisions you will make:
 - **Dependencies** — the skill dispatches a read-only scan of your source paths and presents each detected dependency (internal products, cross-repo, or external packages) for you to accept or skip, one at a time.
 - **Expert assignments** — the designer, developer, and tester personas that will review this product's docs. Pick from your registered experts.
 
-When the wizard finishes, the skill writes the product record into settings, creates the on-disk folder tree with its operator-zone folder-notes (each carrying a `# Summary` skeleton with a précis and stats markers), and generates the built-in review classes (`spec.design`, `spec.tech`, `features.design`, `features.plan`, and so on). It then runs `/spec.doctor` automatically and reports any issues.
+When the wizard finishes, the skill writes the product record into settings, creates the on-disk folder tree with its operator-zone folder-notes (each carrying a `# Summary` skeleton with a précis and stats markers), and generates the built-in review classes — one per doc-kind (design, plan, tech, bug), each with wildcard globs spanning every asset category so a later category you add is covered automatically. It then runs `/spec.doctor` automatically and reports any issues.
 
 If `/spec.product-config` points you at `lazycortex-experts` before finishing, it means a chosen expert name is not registered. Compose the persona via `lazycortex-experts`, then re-run `/spec.product-config`.
 
@@ -148,3 +148,4 @@ sequenceDiagram
   specVault-->>createFeature: feature asset written
   createFeature-->>operator: first feature asset ready
 ```
+</content>

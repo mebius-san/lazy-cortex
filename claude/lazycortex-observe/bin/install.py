@@ -367,6 +367,221 @@ def smoke_test_local_metrics(scrape_target: str, timeout: float = 5.0) -> bool:
     return False
 
 
+# --- Multi-daemon support (core-CLI boundary + coverage pre-flight) ----------
+
+# waiver: sibling plugin CLI binary name — the § 1c boundary contract, not an internal key
+_CORE_CLI_NAME = "lazycortex-core"
+# waiver: subprocess wall-clock cap in seconds for the registry call
+_CORE_CLI_TIMEOUT_SEC = 30
+# waiver: external scraper process names probed by the coverage pre-flight, not internal keys
+_SCRAPER_PROCESS_NAMES = ("prometheus", "otelcol", "alloy", "grafana-agent")
+
+
+def resolve_core_cli() -> Path:
+  """
+  Locate the `lazycortex-core` CLI binary across the blessed discovery order.
+
+  Order: every entry of `$LAZYCORTEX_PLUGIN_DIRS` (the daemon exports it for routine
+  subprocesses), then `$PATH`, then the dev-vault sibling layout (this plugin's checkout
+  living next to lazycortex-core under `claude/`).
+
+  Returns:
+    Absolute path to the CLI binary.
+
+  Raises:
+    RuntimeError: If the binary is not found anywhere.
+  """
+  # waiver: external env-var name of the plugin-dirs boundary contract
+  for entry in os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "").split(os.pathsep):
+    # guard: empty path-list entries are skipped
+    if not entry:
+      continue
+    # waiver: plugin-tree layout directory name, not an internal key
+    candidate = Path(entry) / "bin" / _CORE_CLI_NAME
+    if candidate.is_file():
+      return candidate
+  on_path = shutil.which(_CORE_CLI_NAME)
+  # guard: PATH lookup succeeds in installed environments that expose plugin bins
+  if on_path:
+    return Path(on_path)
+  # waiver: plugin-tree layout directory name, not an internal key
+  sibling = Path(__file__).resolve().parents[2] / _CORE_CLI_NAME / "bin" / _CORE_CLI_NAME
+  # guard: dev-vault fallback — plugin sources checked out side by side under claude/
+  if sibling.is_file():
+    return sibling
+  raise RuntimeError(
+    "lazycortex-core CLI not found — LAZYCORTEX_PLUGIN_DIRS empty, not on PATH, no dev-vault sibling"
+  )
+
+
+def local_scrape_targets() -> list[dict]:
+  """
+  Return the host's metrics-enabled daemons as scrape-target rows.
+
+  Shells the core CLI (`daemon-list`) across the plugin boundary — the daemon registry
+  and its settings semantics stay owned by lazycortex-core.
+
+  Returns:
+    The `daemons` rows from the core CLI with `metrics_enabled` true; each carries
+    `repo_id`, `repo_root`, `repo_label`, `bind`, and `port`.
+
+  Raises:
+    RuntimeError: If the CLI cannot be found, exits non-zero, or prints unparseable JSON.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import json
+  cli = resolve_core_cli()
+  # waiver: external core-CLI subcommand and flag, not internal keys
+  proc = subprocess.run(
+    [str(cli), "daemon-list", "--json"],
+    capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC,
+  )
+  # guard: a failing registry call must abort loudly, not render an empty shipper config
+  if proc.returncode != 0:
+    raise RuntimeError(f"lazycortex-core daemon-list failed: {proc.stderr.strip()[:300]}")
+  try:
+    # waiver: external JSON contract field name of the core daemon-list CLI
+    rows = json.loads(proc.stdout).get("daemons", [])
+  except json.JSONDecodeError as e:
+    raise RuntimeError(f"lazycortex-core daemon-list printed unparseable JSON: {e}") from e
+  # waiver: external JSON contract field name of the core daemon-list CLI
+  return [row for row in rows if row.get("metrics_enabled")]
+
+
+def render_scrape_targets_block(targets: list[dict], agent_kind: str) -> str:
+  """
+  Pre-render the multi-target lines injected into a shipper template's scrape section.
+
+  The daemon's exposition already labels every series with `repo`, so the block carries
+  addresses only — one line per daemon, indented for its template's surrounding context.
+
+  Args:
+    targets: Rows from `local_scrape_targets()`.
+    agent_kind: `alloy` or `otelcol` — selects the target-line syntax and indentation.
+
+  Returns:
+    The newline-joined target lines (no trailing newline).
+  """
+  lines = []
+  for row in targets:
+    # a wildcard bind is scraped over loopback; anything else is scraped at its bind address
+    # waiver: inline network literals, not domain constants
+    bind = row.get("bind", "127.0.0.1")
+    # waiver: inline network literals, not domain constants
+    address = "127.0.0.1" if bind in ("0.0.0.0", "::") else bind
+    # waiver: external JSON contract field name of the core daemon-list CLI
+    endpoint = f"{address}:{row['port']}"
+    # waiver: agent-kind token of the observe.toml contract
+    if agent_kind == "alloy":
+      lines.append(f'    {{ __address__ = "{endpoint}" }},')
+    else:
+      lines.append(f'                - "{endpoint}"')
+  return "\n".join(lines)
+
+
+def detect_existing_coverage(targets: list[dict] | None = None) -> dict:
+  """
+  Read-only pre-flight: is something on this host already collecting the daemons' metrics?
+
+  Probes three local signal classes — an installed lazycortex-observe service unit,
+  running scraper processes (prometheus / otelcol / alloy / grafana-agent), and live
+  established TCP connections to the daemons' metrics ports. The verdict is conservative
+  about process evidence: a lone scraper process does not flip the verdict (it may serve
+  something unrelated), but an observe unit or an active scrape connection does.
+
+  Args:
+    targets: Optional pre-computed `local_scrape_targets()` rows; computed when omitted.
+
+  Returns:
+    `{"covered": bool, "verdict": "already-covered"|"clear", "signals": [<str>, ...]}` —
+    every detected signal is listed so the operator sees exactly what was found.
+  """
+  signals: list[str] = []
+  strong = 0
+
+  # signal class 1: our own service unit already installed
+  if detect_host() == "darwin":
+    # waiver: external launchctl invocation and unit label, not internal keys
+    unit_probe = subprocess.run(
+      ["launchctl", "print", f"gui/{os.getuid()}/com.lazycortex.observe"],
+      capture_output = True, text = True, check = False,
+    )
+    unit_present = unit_probe.returncode == 0
+  else:
+    # waiver: external systemctl invocation and unit name, not internal keys
+    unit_probe = subprocess.run(
+      ["systemctl", "--user", "is-active", "lazycortex-observe.service"],
+      capture_output = True, text = True, check = False,
+    )
+    unit_present = unit_probe.returncode == 0
+  if unit_present:
+    # waiver: human-facing signal token
+    signals.append("observe-service-unit-installed")
+    strong += 1
+
+  # signal class 2: scraper-shaped processes running on this host
+  process_hits = 0
+  for name in _SCRAPER_PROCESS_NAMES:
+    # waiver: external pgrep invocation, not internal keys
+    probe = subprocess.run(["pgrep", "-f", name], capture_output = True, text = True, check = False)
+    if probe.returncode == 0:
+      # waiver: human-facing signal token
+      signals.append(f"scraper-process-running:{name}")
+      process_hits += 1
+
+  # signal class 3: something holds live connections to a daemon's metrics port
+  if targets is None:
+    try:
+      targets = local_scrape_targets()
+    except RuntimeError:
+      # the pre-flight stays read-only and best-effort — no registry, no port probes
+      targets = []
+  for row in targets:
+    port = row["port"]
+    # waiver: external lsof invocation, not internal keys
+    probe = subprocess.run(
+      ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:ESTABLISHED"],
+      capture_output = True, text = True, check = False,
+    )
+    if probe.returncode == 0 and probe.stdout.strip():
+      # waiver: human-facing signal token
+      signals.append(f"active-scrape-connection:{port}")
+      strong += 1
+
+  # verdict: any strong signal, or two independent process signals, means covered
+  covered = strong > 0 or process_hits >= 2
+  # waiver: verdict tokens of the Step 0 contract
+  return { "covered": covered, "verdict": "already-covered" if covered else "clear", "signals": signals }
+
+
+def write_scrape_file_via_core(out: Path | None = None) -> dict:
+  """
+  Regenerate the host's Prometheus file_sd scrape-targets file through the core CLI.
+
+  Args:
+    out: Optional output-path override forwarded to the CLI.
+
+  Returns:
+    The CLI's parsed JSON result (`path`, `count`, `targets`).
+
+  Raises:
+    RuntimeError: If the CLI cannot be found, exits non-zero, or prints unparseable JSON.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import json
+  cli = resolve_core_cli()
+  # waiver: external core-CLI subcommand and flag, not internal keys
+  argv = [str(cli), "metrics-scrape-file"] + (["--out", str(out)] if out else [])
+  proc = subprocess.run(argv, capture_output = True, text = True, check = False, timeout = _CORE_CLI_TIMEOUT_SEC)
+  # guard: a failing scrape-file write must surface, not pass silently
+  if proc.returncode != 0:
+    raise RuntimeError(f"lazycortex-core metrics-scrape-file failed: {proc.stderr.strip()[:300]}")
+  try:
+    return json.loads(proc.stdout)
+  except json.JSONDecodeError as e:
+    raise RuntimeError(f"lazycortex-core metrics-scrape-file printed unparseable JSON: {e}") from e
+
+
 # --- Tiny template engine --------------------------------------------------
 
 class _Template:

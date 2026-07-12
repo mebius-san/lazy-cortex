@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Resolve repos, dependencies, and build forge-correct source URLs so every spec link stays accurate regardless of where code is hosted.
-last_regen: 2026-06-23
+last_regen: 2026-07-12
 diagram_spec:
   anchor: "How the three skills compose"
   request: "Show how spec.resolve-repo, spec.resolve-dependency, and spec.source-url call each other: spec.source-url calls spec.resolve-repo to get RepoInfo; spec.resolve-dependency calls spec.resolve-repo internally for internal-product and internal-repo entries; spec.resolve-repo reads lazy.settings.json[repos] and inspects the git remote. Output is a URL or a dep record."
@@ -92,3 +92,4 @@ flowchart LR
 - [install-and-audit](install-and-audit.md) — register products and repos via `/spec.product-config`, which is the only writer for the settings this block reads.
 - [code-sync](code-sync.md) — `/spec.sync-with-code` and `/spec.finalize-branch` are the primary callers of `/spec.source-url` in normal operation.
 - [asset-to-release](walkthroughs/asset-to-release.md) — walkthrough that exercises source-link generation as part of the full gate journey.
+</content>

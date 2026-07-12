@@ -1,12 +1,13 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-07-06
+last_regen: 2026-07-12
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
   kind_hint: sequence
 source_skills:
+  - lazy-core.install
   - lazy-expert.dispatch-job
   - lazy-expert.list-jobs
   - lazy-expert.collect-job
@@ -35,7 +36,7 @@ After this walkthrough you have:
 
 Before dispatching, confirm two things are already in place:
 
-- **At least one expert is registered.** Check `lazy.settings.json[experts]` for a key besides `_version`. If it's empty, work through the *install-and-audit* chapter's expert-registration step — the install wizard scans installed plugins for expert candidates and registers them automatically.
+- **At least one expert is registered.** Check `lazy.settings.json[experts]` for a key besides `_version`. If it's empty, work through the *install-and-audit* chapter's expert-registration step — `/lazy-core.install` scans installed plugins for expert candidates (agents carrying `expert_protocol:` frontmatter) and registers them automatically, no per-candidate prompt.
 - **The daemon is running.** If you installed a supervisor during install, it's already running — skip to Step 2. Otherwise, in a terminal outside Claude Code run the shim:
 
 ```

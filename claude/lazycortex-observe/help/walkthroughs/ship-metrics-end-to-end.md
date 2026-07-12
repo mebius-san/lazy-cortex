@@ -1,10 +1,10 @@
 ---
 chapter_type: walkthrough
-summary: From a clean checkout to your first dashboard panel — bring up the runtime daemon, install the shipper, produce traffic, verify the pipeline.
-last_regen: 2026-07-10
+summary: From a clean checkout to your first dashboard panel — install the runtime daemon with metrics enabled, produce traffic, install the shipper, verify the pipeline.
+last_regen: 2026-07-12
 diagram_spec:
   anchor: "How it flows"
-  request: "Sequence diagram: operator → lazy-core.install installs the runtime daemon and creates expert-pump routine; operator edits lazy.settings.json to enable daemon.metrics.enabled=true and restarts the daemon; daemon now exposes /metrics on 127.0.0.1:9464; operator dispatches an expert job via /lazy-expert.dispatch-job; daemon picks up the job, runs the expert, records a tick → metrics counter increments; operator runs /lazy-observe.install (Alloy or otelcol) which renders agent config + service unit, loads the supervised service; agent scrapes /metrics and remote_writes to operator's Prometheus; operator runs /lazy-observe.doctor; doctor verifies service active + local /metrics reachable + agent self-metrics show successful remote_write + observer URL reachable + WAL bounded; final state: charts populated in operator's Grafana."
+  request: "Sequence diagram: operator → lazy-core.install installs the runtime daemon and creates the expert-pump routine; near the end of the same run the install wizard asks whether to enable the Prometheus metrics endpoint for this checkout, operator says yes, the skill allocates a free port sequentially from 9464, writes enabled+repo_label into the tracked lazy.settings.json and the allocated port into this checkout's gitignored local overlay, then the operator restarts the daemon supervisor so the one-shot metrics.init() picks up the new setting and the daemon now exposes /metrics on the allocated loopback port; operator dispatches an expert job via /lazy-expert.dispatch-job; daemon picks up the job, runs the expert, records a tick → metrics counter increments; operator runs /lazy-observe.install which pre-flight-checks for an already-covered host, finds none, walks the agent-kind/URL/auth wizard, renders agent config + service unit covering every metrics-enabled daemon on the host, loads the supervised service; agent scrapes /metrics and remote_writes to operator's Prometheus; operator runs /lazy-observe.doctor; doctor verifies service active + local /metrics reachable for every daemon + agent self-metrics show successful remote_write + observer URL reachable + WAL bounded; final state: charts populated in operator's Grafana."
   kind_hint: sequence
 source_skills:
   - lazy-core.install
@@ -23,35 +23,19 @@ You have a fresh checkout. You want runtime metrics from this repo flowing into 
 - **`grafana-alloy` or `otelcol-contrib`** on your `$PATH`. Install via `brew install grafana/grafana/alloy` (macOS) or your distro's package (Linux). The install skill prints the right command if missing.
 - **A bearer token or basic-auth credential** for your observer's `remote_write` endpoint, ready to paste into the install wizard.
 
-## The flow
+## The journey
 
-### Step 1 — Install lazycortex-core
+### Step 1 — Install lazycortex-core with metrics enabled
 
-Run `/lazy-core.install`. The skill bootstraps the runtime daemon: copies rule templates into `.claude/rules/`, syncs authoring templates, seeds `lazy.settings.json` with sensible defaults, and offers to register `lazy-expert.pump` as the default routine consuming `.experts/.jobs/`. Say yes when it asks about the expert-runtime wizard — that's what produces traffic for the metrics you're about to ship.
+Run `/lazy-core.install`. Answer yes to "does this project use the background daemon" (Gate 1) and yes to "run it for this checkout" (Gate 2) — that installs the daemon supervisor. Say yes when the expert wizard asks about registering an expert too — that expert produces the traffic you ship in Step 2.
 
-After this step you have: a runnable daemon, an experts directory, the pump routine in the registry. No metrics endpoint yet.
+Near the end of the same run, the wizard asks one more question: *"Enable the Prometheus `/metrics` endpoint for this checkout's daemon?"* Answer yes. The skill allocates a free port sequentially from `9464` (reusing this checkout's already-recorded port on any later re-run), writes `enabled` and a human-readable `repo_label` (default `local-<folder name>`) into the tracked `lazy.settings.json`, and stores the actual allocated port only in this checkout's gitignored local overlay — a port free on one machine can be taken on another, so it never travels through git. The install report's final line for this step reads `metrics-enabled port=<port> label=<label> scrape-targets=<count>` — note the port, you need it next.
 
-### Step 2 — Enable the metrics endpoint
+The daemon supervisor was loaded earlier in this same run, before the metrics question was answered, and `metrics.init()` only runs once at process start — so restart the supervisor now to pick up the setting: `launchctl kickstart -k gui/$UID <label from the plist path the report named>` on macOS, or `systemctl --user restart <unit name from the report>` on Linux.
 
-The daemon exposes a Prometheus-format `/metrics` endpoint, but it's off by default. Add a `metrics` block to the flat `daemon` section of `.claude/lazy.settings.json` (the same section `/lazy-core.install` Step 9c seeds — you're extending it with a sub-key the install skill leaves for you to opt into):
+Verify locally: `curl -fsS http://127.0.0.1:<port>/metrics | head` should show lines starting with `lazycortex_runtime_`. If you see nothing, re-check the install report for the metrics step's outcome and the supervisor logs.
 
-```json
-{
-  "daemon": {
-    "metrics": {
-      "enabled": true,
-      "bind": "127.0.0.1",
-      "port": 9464
-    }
-  }
-}
-```
-
-Restart the daemon supervisor (`launchctl kickstart -k gui/$UID com.lazycortex.runtime` on macOS, `systemctl --user restart lazycortex-runtime.service` on Linux). The daemon re-reads settings on each iteration but `metrics.init` is one-shot at process start — restart is mandatory.
-
-Verify locally: `curl -fsS http://127.0.0.1:9464/metrics | head` should show lines starting with `lazycortex_runtime_`. If you see nothing, re-check the settings JSON and the supervisor logs.
-
-### Step 3 — Produce some traffic
+### Step 2 — Produce some traffic
 
 The metrics endpoint is up but every counter is zero — nothing has ticked yet. Dispatch a single expert job to produce one tick:
 
@@ -59,26 +43,28 @@ The metrics endpoint is up but every counter is zero — nothing has ticked yet.
 /lazy-expert.dispatch-job <expert-name>
 ```
 
-Where `<expert-name>` is whatever you registered in Step 1's wizard. The pump routine picks up the READY job within `polling_interval_sec` (default 5), runs the expert, records a `lazycortex_runtime_routine_ticks_total{routine="expert-pump",status="ok"}` increment, and writes a tokens record under `.logs/lazy-core/runtime/tokens.jsonl`.
+Where `<expert-name>` is whatever you registered in Step 1's expert wizard. The pump routine picks up the READY job within `polling_interval_sec` (default 5), runs the expert, records a `lazycortex_runtime_routine_ticks_total{routine="expert-pump",status="ok"}` increment, and writes a tokens record under `.logs/lazy-core/runtime/tokens.jsonl`.
 
-Re-run `curl http://127.0.0.1:9464/metrics | grep ticks_total` — the counter should now read `1` (or higher).
+Re-run `curl http://127.0.0.1:<port>/metrics | grep ticks_total` — the counter should now read `1` (or higher).
 
-### Step 4 — Install the shipper
+### Step 3 — Install the shipper
 
-Run `/lazy-observe.install`. The wizard asks four things in sequence (one `AskUserQuestion` each, in operator-driven order):
+Run `/lazy-observe.install`. The skill first checks, read-only, whether metric collection is already covered on this host — an installed lazycortex-observe service, a running scraper process, or a live connection to a daemon's metrics port. On a clean host this reports clear and the wizard proceeds; if you already run a Prometheus/collector stack it aborts untouched instead, and names two deliberate ways forward: re-run with `--integrate-only` (feed your existing stack a target list, install no shipper) or `--force-standalone` (install anyway).
+
+Assuming a clean host, the wizard asks four things in sequence (one `AskUserQuestion` each, in operator-driven order):
 
 1. **Agent kind** — pick **Grafana Alloy** if your stack is Grafana-centric, **OpenTelemetry Collector** otherwise. Both emit identical Prometheus series, so the choice is reversible.
 2. **`remote_write` URL** — paste your observer's endpoint (e.g. `https://prometheus-prod-XX-prod-eu-west-X.grafana.net/api/prom/push`).
 3. **Auth kind** — bearer token, basic auth, or none.
 4. **Token source** — write to a 0600 file at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.token` OR source from the `LAZYCORTEX_OBSERVE_TOKEN` env var. File is the default; env is for containers / secret-manager-injected setups.
 
-After answering, the skill renders the agent config + the platform-appropriate service unit (launchd plist on macOS, systemd user unit on Linux), loads it via `launchctl bootstrap` / `systemctl --user enable --now`, and runs a smoke test. If everything passes you'll see `outcome=up` in the report.
+After answering, the skill renders the agent config covering every metrics-enabled daemon on this host — if you later run several checkouts on the same machine, one shipper instance ships all of them, no re-install needed — plus the platform-appropriate service unit (launchd plist on macOS, systemd user unit on Linux), loads it via `launchctl bootstrap` / `systemctl --user enable --now`, and runs a smoke test. If everything passes you'll see `up` in the report.
 
-### Step 5 — Verify end to end
+### Step 4 — Verify end to end
 
-Run `/lazy-observe.doctor`. The skill walks 8 checks read-only — service unit loaded, agent process up, local `/metrics` reachable, agent's self-metrics show successful `remote_write`, observer URL reachable, WAL bounded — and reports each as `PASS` / `WARN` / `FAIL` with a one-line fix on failure.
+Run `/lazy-observe.doctor`. The skill walks 7 checks read-only — service unit loaded, agent process up, local `/metrics` reachable for every daemon on this host, agent's self-metrics show successful `remote_write`, observer URL reachable, WAL bounded — and reports each as `PASS` / `WARN` / `FAIL` with a one-line fix on failure.
 
-Expected output: all `PASS`, with `Step 5 — Agent self-metrics show successful remote_write` at `rate=N samples/min` (N > 0). If `Step 5` is `WARN zero-rate` your agent is up but not delivering — the doctor will name the likely cause (token expired / observer unreachable / WAL recovering).
+Expected output: all `PASS`, with `Step 5 — Agent self-metrics show successful remote_write` at `rate=N/min` (N > 0). If `Step 5` is `WARN zero-rate` your agent is up but not delivering — the doctor will name the likely cause (token expired / observer unreachable / WAL recovering).
 
 ## After you're done
 
@@ -93,53 +79,23 @@ To tear down: `/lazy-observe.uninstall` unloads the service and removes the rend
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
-  participant op as Operator
-  participant install as lazy-core.install
-  participant daemon as Runtime Daemon
-  participant settings as lazy.settings.json
-  participant expertDispatch as lazy-expert.dispatch-job
-  participant observeInstall as lazy-observe.install
-  participant agent as Alloy / otelcol Agent
-  participant prometheus as Prometheus
-  participant doctor as lazy-observe.doctor
-  participant grafana as Grafana
+  participant operator as Operator
+  participant lazyCoreDaemon as lazy-core daemon
+  participant shipperAgent as Shipper Agent
+  participant prometheusObserver as Prometheus Observer
 
-  op->>install: run /lazy-core.install
-  install-->>daemon: install runtime daemon binary
-  install-->>daemon: create expert-pump routine
-  install-->>op: install complete
-
-  op->>settings: set daemon.metrics.enabled=true
-  op->>daemon: restart daemon
-  daemon-->>op: daemon ready
-  Note over daemon: exposes /metrics on 127.0.0.1:9464
-
-  op->>expertDispatch: run /lazy-expert.dispatch-job
-  expertDispatch->>daemon: enqueue expert job
-  daemon->>daemon: pick up job, run expert
-  daemon-->>daemon: record tick - metrics counter increments
-  daemon-->>op: job complete
-
-  op->>observeInstall: run /lazy-observe.install
-  observeInstall-->>agent: render agent config
-  observeInstall-->>agent: render service unit, load supervised service
-  observeInstall-->>op: observer installed
-
-  agent->>daemon: scrape /metrics
-  daemon-->>agent: metrics payload
-  agent->>prometheus: remote_write metrics
-
-  op->>doctor: run /lazy-observe.doctor
-  doctor->>daemon: verify /metrics reachable on 127.0.0.1:9464
-  daemon-->>doctor: 200 OK - metrics endpoint live
-  doctor->>agent: verify agent self-metrics - successful remote_write
-  agent-->>doctor: remote_write confirmed
-  doctor->>prometheus: verify observer URL reachable + WAL bounded
-  prometheus-->>doctor: URL reachable - WAL within bounds
-  doctor-->>op: all checks passed
-
-  op->>grafana: view dashboards
-  grafana->>prometheus: query metrics
-  prometheus-->>grafana: time-series data
-  grafana-->>op: charts populated
+  operator->>lazyCoreDaemon: lazy-core.install wizard enables metrics endpoint
+  Note over lazyCoreDaemon: port allocated, settings written
+  operator->>lazyCoreDaemon: restart daemon supervisor
+  lazyCoreDaemon-->>lazyCoreDaemon: expose /metrics on loopback port
+  operator->>lazyCoreDaemon: dispatch expert job
+  lazyCoreDaemon-->>lazyCoreDaemon: increment counters
+  operator->>shipperAgent: lazy-observe.install renders config and service unit
+  lazyCoreDaemon-->>shipperAgent: load supervised shipper
+  loop scrape interval
+    shipperAgent->>lazyCoreDaemon: scrape /metrics
+    shipperAgent->>prometheusObserver: remote_write samples
+  end
+  operator->>shipperAgent: lazy-observe.doctor verifies service, endpoint, remote_write, WAL
+  prometheusObserver-->>operator: charts populated
 ```

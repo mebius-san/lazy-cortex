@@ -9,7 +9,7 @@ Bootstrap the plugin in the right scope: copy every rule template shipped by the
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 16 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 17 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 0 — Verify Python ≥ 3.12 (floor)`
@@ -28,6 +28,7 @@ This skill has 16 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 12 — Bootstrap expert-pump routine`
    - `Step 13 — Gate 2 (run_here) + daemon supervisor install`
    - `Step 13.5 — Configure expert-spawn sandbox in .runtime/sandbox.settings.json`
+   - `Step 13.6 — Provision metrics (port + repo label + scrape-targets file)`
    - `Step 14 — Report`
    - `Step 15 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
@@ -709,6 +710,72 @@ Never replace an entire key with the recommended value. The consumer's existing 
 
 One line combining the sandbox-file state, the permissions-file state, and the migration state — e.g. `sandbox-created · perms-merged · no-legacy-sandbox`, or `skipped-not-run-here`.
 
+## Step 13.6: Provision metrics (port + repo label + scrape-targets file)
+
+If Step 13 ended in `run-here-declined` (or was skipped), inherit the outcome and state **skipped-not-run-here** — metrics are provisioned only for checkouts that actually run the daemon on this machine.
+
+Read-first, like every gate in this skill:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_tracked_section
+from pathlib import Path
+sec = load_tracked_section(Path('<repo-root>/.claude/lazy.settings.json'), 'daemon')
+print((sec.get('metrics') or {}).get('enabled', 'unset'))
+"
+```
+
+- Output `True` or `False` → the decision is on record; do NOT ask. When `True`, still run the port/scrape sub-steps below (they are idempotent: a recorded port is reused, the scrape file is regenerated). When `False`, state **metrics-declined**.
+- Output `unset` → ask once:
+
+```
+AskUserQuestion:
+  header: "Metrics?"
+  question: "Enable the Prometheus /metrics endpoint for this checkout's daemon?"
+  description: "Exposes runtime health (routine ticks, errors, tokens, queue depth) on a loopback HTTP port for a Prometheus-compatible scraper. A free port is picked automatically and recorded per-machine; the repo label defaults to `local-<folder name>`. 'No' is recorded and never re-asked."
+  options: ["Yes — enable metrics", "No — this checkout stays unscraped"]
+```
+
+  - `No` → persist `metrics.enabled = false` into the tracked `daemon` section (`save_section`); state **metrics-declined**.
+  - `Yes` → run the three sub-steps:
+
+1. **Allocate the port** (sequential from 9464; the repo's own recorded port is reused):
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" metrics-alloc-port --repo-root <repo-root>
+```
+
+2. **Persist the split**: design intent (shared across machines) into the tracked file, the per-host port into this checkout's gitignored overlay — a port chosen on one machine may be taken on another, so it must never travel through git/Dropbox:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_tracked_section, load_local_only_section, save_section, save_local_section
+from pathlib import Path
+p = Path('<repo-root>/.claude/lazy.settings.json')
+tracked = load_tracked_section(p, 'daemon')
+m = tracked.setdefault('metrics', {})
+m['enabled'] = True
+m.setdefault('repo_label', '<repo_label>')  # default: local-<basename>; keep an existing value
+m.setdefault('bind', '127.0.0.1')
+save_section(p, 'daemon', tracked)
+local = load_local_only_section(p, 'daemon')
+local.setdefault('metrics', {})['port'] = <allocated port>
+save_local_section(p, 'daemon', local)
+"
+```
+
+  A pre-existing tracked `metrics.port` (older installs wrote it there) is left in place — the local overlay wins on merged reads, no migration is performed.
+
+3. **Regenerate the host scrape-targets file** so an external Prometheus with a `file_sd_configs` pointer picks the daemon up with zero manual edits:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" metrics-scrape-file
+```
+
+### Outcome
+
+`metrics-enabled port=<port> label=<label> scrape-targets=<count>` / `metrics-declined` / `skipped-not-run-here`.
+
 ## Step 14: Report
 
 Report to the user:
@@ -727,6 +794,7 @@ Report to the user:
 - Expert-pump routine registration outcome (Step 12)
 - Daemon supervisor install outcome (Step 13)
 - Sandbox/permissions merge outcome (Step 13.5)
+- Metrics provisioning outcome (Step 13.6)
 
 ## Step 15: Log the run
 

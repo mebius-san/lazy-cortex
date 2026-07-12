@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
-last_regen: 2026-07-10
+last_regen: 2026-07-12
 diagram_spec:
   anchor: "How the flow works"
   request: "End-to-end participant exchange when /lazy-repo.mark-public runs: user invokes the skill, skill checks git and GitHub visibility (preflight), determines scope (whole-repo vs. subtree), dispatches four parallel security scans (secrets, PII, infra, local paths) via /lazy-guard.check-public, presents unified findings table, loops per FAIL for resolution (encrypt/template/redact) and per WARN for fix/waive/skip, writes .guard-waivers.json with public_author and accepted waivers activating the pre-commit hook, then in whole-repo mode flips visibility via gh repo edit. Five participants: User, /lazy-repo.mark-public, /lazy-guard.check-public, Security Scan Agents, GitHub."
@@ -121,31 +121,30 @@ Run `/lazy-guard.check-public` again after any major configuration change, after
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant markPublic as /lazy-repo.mark-public
-  participant checkPublic as /lazy-guard.check-public
-  participant scanAgents as Security Scan Agents
+  participant markPublicSkill as mark-public Skill
+  participant checkPublicSkill as check-public Skill
+  participant securityScanAgents as Security Scan Agents
   participant github as GitHub
 
-  user->>markPublic: invoke /lazy-repo.mark-public
-  markPublic->>github: preflight check current visibility
-  github-->>markPublic: visibility status
-  Note over markPublic: determine scope - whole-repo vs subtree
-  markPublic->>checkPublic: dispatch /lazy-guard.check-public
-  checkPublic->>scanAgents: dispatch four parallel scans - secrets, PII, infra, local paths
-  scanAgents-->>checkPublic: findings per category
-  checkPublic-->>markPublic: unified findings table
-  alt FAIL findings
-    markPublic->>user: present FAIL findings for resolution
-    user-->>markPublic: encrypt, template, or redact
-  else WARN findings
-    markPublic->>user: present WARN findings for fix, waive, or skip
-    user-->>markPublic: fix, waive, or skip decision
+  user->>markPublicSkill: invoke lazy-repo.mark-public
+  markPublicSkill->>github: preflight - check git and GitHub visibility
+  github-->>markPublicSkill: current visibility status
+  Note over markPublicSkill: determine scope - whole-repo vs subtree
+  markPublicSkill->>checkPublicSkill: dispatch lazy-guard.check-public
+  checkPublicSkill->>securityScanAgents: run four parallel scans - secrets, PII, infra, local paths
+  securityScanAgents-->>checkPublicSkill: scan findings
+  checkPublicSkill-->>markPublicSkill: unified findings table
+  markPublicSkill->>user: present unified findings table
+  loop per FAIL
+    user->>markPublicSkill: resolve - encrypt, template, or redact
   end
-  markPublic->>markPublic: write .guard-waivers.json with public_author and accepted waivers
+  loop per WARN
+    user->>markPublicSkill: fix, waive, or skip
+  end
+  markPublicSkill->>markPublicSkill: write .guard-waivers.json with public_author and accepted waivers
+  Note over markPublicSkill: waivers activate the pre-commit hook
   alt whole-repo mode
-    markPublic->>github: gh repo edit to flip visibility
-    github-->>markPublic: visibility flipped
-  else subtree-public mode
-    Note over markPublic: skip GitHub visibility flip
+    markPublicSkill->>github: flip visibility via gh repo edit
+    github-->>markPublicSkill: visibility updated
   end
 ```
