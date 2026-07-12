@@ -541,8 +541,8 @@ The daemon can serve a Prometheus-format `/metrics` HTTP endpoint covering routi
 |---|---|---|---|
 | `enabled` | bool | `false` | Master switch. When false the metrics module is dormant — `import metrics` is free, no HTTP server runs. |
 | `bind` | string | `"127.0.0.1"` | Listening address. **Default is loopback** — never expose off-host without an explicit operator decision. |
-| `port` | int | `9464` | TCP port. `0` lets the OS pick (used in tests). |
-| `repo_label` | string or null | `null` | Override for the `repo` label. Default derives a 12-char SHA1 prefix of `git remote get-url origin`, or `local-<basename>` if no origin. |
+| `port` | int | `9464` | TCP port. `0` lets the OS pick (used in tests). On multi-daemon hosts the install skill allocates ports sequentially from 9464 and records each checkout's port in the **local overlay** (`lazy.settings.local.json`) — a port is a per-host operational fact and must not travel to other machines through the tracked file. |
+| `repo_label` | string or null | `null` | Override for the `repo` label. Default is the human-readable `local-<basename>` (this is the key operators tell daemons apart by on dashboards); when the directory name falls outside the label charset `[A-Za-z0-9._-]`, a 12-char SHA1 prefix of `git remote get-url origin` is used instead. |
 | `daemon_name` | string or null | `null` | Override for the `daemon_name` label. Default constant `"lazycortex-runtime"`. **The daemon never reads `os.uname()`** — operator hostname must not leak into the metric stream. |
 
 ### Example
@@ -560,6 +560,15 @@ The daemon can serve a Prometheus-format `/metrics` HTTP endpoint covering routi
 ```
 
 Restart the daemon to flip enablement on or off. Settings are reloaded inside the loop for routine hot-reload, but `metrics.init()` runs once at startup.
+
+### Multi-daemon on one host
+
+Several checkouts can each run their own daemon on one machine; every metrics-enabled daemon needs its own port. The pieces that make this hands-off:
+
+- **Registry** — the supervisor units themselves (`com.lazycortex.runtime.<REPO_ID>.plist` / `lazy-core-runtime-<REPO_ID>.service`) are the source of truth for "all daemons on this host". `lazycortex-core daemon-list` prints them joined with each repo's `daemon.metrics` settings.
+- **Port allocation** — `lazycortex-core metrics-alloc-port --repo-root <path>` hands out the first free port from 9464 upward, skipping ports recorded by other daemons and ports that fail a live bind probe; a repo's already-recorded port is reused. The install skill runs this when enabling metrics.
+- **Scrape targets file** — `lazycortex-core metrics-scrape-file` writes `${XDG_CONFIG_HOME:-~/.config}/lazycortex/scrape-targets.json` in Prometheus `file_sd` format: one `{"targets": ["127.0.0.1:<port>"], "labels": {"repo": "<label>"}}` entry per metrics-enabled daemon, nothing else (no paths, no hostnames). Point an existing Prometheus at it once with `file_sd_configs` and new daemons appear without further edits.
+- **Port conflict at startup** — when the configured port is already bound, the daemon records a `daemon_error` incident with cause `metrics_port_conflict` (naming the holder: pid, command, and the owning repo when it is another registered daemon) and **keeps running without metrics**. A taken port never restart-loops the dispatch engine; the fix is re-running the install's metrics step (or editing the local-overlay port) and restarting the daemon.
 
 ### Metric shape
 

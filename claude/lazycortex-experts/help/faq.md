@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Common questions about installing lazycortex-experts, the technical/fiction class map, composing specialists, and runtime questions.
-last_regen: 2026-07-06
+last_regen: 2026-07-12
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -10,7 +10,7 @@ source_skills:
 
 ## Does /lazy-experts.install create my expert entries automatically?
 
-Yes, but the shape follows the class map, not a flat product. The plugin ships five domain aspects split into two families — three technical (`claude-plugin`, `game-dev`, `dotfiles`) and two fiction genre aspects (`sci-fi`, `fantasy`). Choosing a technical class seeds all six engineering roles for that class (`interpreter`, `designer`, `planner`, `implementer`, `debugger`, `reviewer`) — for example choosing `claude-plugin` gives you `claude-plugin-interpreter` through `claude-plugin-reviewer`, six entries. Choosing a fiction class seeds only one entry: `fiction-writer` named for that class, e.g. `sci-fi-writer`. Every seeded entry also carries `lazycortex-core:lazy-memory.persona-aspect` so the expert accumulates private memory across runs, plus `lazycortex-experts:lazy-experts.discipline-aspect`; technical entries additionally carry `lazycortex-experts:lazy-experts.tech-writing-aspect`, fiction entries never do.
+Yes, but the shape follows the class map, not a flat product. The plugin ships five domain aspects split into two families — three technical (`claude-plugin`, `game-dev`, `dotfiles`) and two fiction genre aspects (`sci-fi`, `fantasy`). Choosing a technical class seeds all seven engineering roles for that class (`interpreter`, `designer`, `planner`, `implementer`, `debugger`, `reviewer`, `tester`) — for example choosing `claude-plugin` gives you `claude-plugin.interpreter` through `claude-plugin.tester`, seven entries. Choosing a fiction class seeds only one entry: `fiction-writer` named for that class, e.g. `sci-fi.fiction-writer`. Every seeded entry also carries `lazycortex-core:lazy-memory.persona-aspect` so the expert accumulates private memory across runs, plus `lazycortex-experts:lazy-experts.discipline-aspect`; technical entries additionally carry `lazycortex-experts:lazy-experts.tech-writing-aspect`, fiction entries never do.
 
 Each seeded entry also includes a `git_author` block — a `name` (the expert key with hyphens and dots replaced by spaces, title-cased, e.g. `Game Interpreter`) and an `email` using the `@lazycortex.local` domain.
 
@@ -18,9 +18,9 @@ If you need a specialist that doesn't match the class map — say, a custom aspe
 
 ---
 
-## Why did choosing a fiction class only seed one entry instead of six?
+## Why did choosing a fiction class only seed one entry instead of seven?
 
-Because fiction and technical classes seed a different set of roles by design. Technical classes (`claude-plugin`, `game-dev`, `dotfiles`) pair with all six engineering agents — interpreter through reviewer — because a plugin design, a game design, or a dotfiles migration all move through the same interpret-design-plan-implement-debug-review lifecycle. Fiction classes (`sci-fi`, `fantasy`) pair with exactly one agent, `lazy-experts.fiction-writer`, because there's no equivalent lifecycle for narrative prose — the fiction writer takes a brief or outline and produces prose directly. This is not a partial install; a single `fiction-writer`-only entry is the complete, correct result for a fiction class.
+Because fiction and technical classes seed a different set of roles by design. Technical classes (`claude-plugin`, `game-dev`, `dotfiles`) pair with all seven engineering agents — interpreter through tester — because a plugin design, a game design, or a dotfiles migration all move through the same interpret-design-plan-implement-debug-review-test lifecycle. Fiction classes (`sci-fi`, `fantasy`) pair with exactly one agent, `lazy-experts.fiction-writer`, because there's no equivalent lifecycle for narrative prose — the fiction writer takes a brief or outline and produces prose directly. This is not a partial install; a single `fiction-writer`-only entry is the complete, correct result for a fiction class.
 
 ---
 
@@ -32,7 +32,7 @@ Because `lazy-experts.tech-writing-aspect` bans metaphor, figurative imagery, at
 
 ## Do I need to re-run /lazy-experts.install after a plugin update?
 
-Yes, if the update ships new agent-model tier entries, a new role agent, or a new domain aspect. `/plugin update` refreshes the plugin cache but does not re-sync your `lazy.settings.json`. Re-run `/lazy-experts.install` to pick up any new `lazycortex-experts:*` entries from `lazycortex-core`'s `default-tiers.json`, and to fill in any role the class map now prescribes for a class you've already registered. The skill is idempotent — re-running it is always safe; it only adds absent entries and leaves your customised values in place. It never adds a class you haven't already registered, and it never re-asks which classes to register once your `experts` list is non-empty.
+Yes, if the update ships new agent-model tier entries, a new role agent, or a new domain aspect. `/plugin update` refreshes the plugin cache but does not re-sync your `lazy.settings.json`. Re-run `/lazy-experts.install` to pick up any new `lazycortex-experts:*` entries from `lazycortex-core`'s `default-tiers.json`, and to fill in any role the class map now prescribes for a class you've already registered — for example, a project that registered a technical class before the `tester` role shipped picks up the missing `<domain>.tester` entry on re-run. The skill is idempotent — re-running it is always safe; it only adds absent entries and leaves your customised values in place. It never adds a class you haven't already registered, and it never re-asks which classes to register once your `experts` list is non-empty.
 
 ---
 
@@ -52,13 +52,13 @@ If you remove the persona aspect from a seeded entry, the expert stops growing m
 
 ## The agents don't seem to do anything when I invoke them directly. Why?
 
-All seven generic agents — the six technical-lifecycle agents plus the fiction writer — are persona-only: they have no inline I/O contract and wait for a dispatching routine to hand them a protocol document. Without a protocol, an agent returns an error naming the missing contract. You need a routine on your side (consumer-authored, or via a future `lazycortex-specs` integration) that dispatches jobs to these agents along with the appropriate protocol. The agents themselves are building blocks, not standalone commands.
+All eight generic agents — the seven technical-lifecycle agents plus the fiction writer — are persona-only: they have no inline I/O contract and wait for a dispatching routine to hand them a protocol document. Without a protocol, an agent returns an error naming the missing contract. You need a routine on your side (consumer-authored, or via a future `lazycortex-specs` integration) that dispatches jobs to these agents along with the appropriate protocol. The agents themselves are building blocks, not standalone commands.
 
 ---
 
 ## Can I skip the interpreter and dispatch the designer directly?
 
-Yes. Each of the six technical-lifecycle agents is independently dispatchable. If you already have a well-formed, gap-free brief, you can dispatch the designer directly without running the interpreter first. The interpreter-designer-planner sequence is a convention that produces the best results starting from a vague idea, but it is not enforced — any agent can be dispatched at any point given the right input and a protocol. The same independence applies to the fiction writer: it never sits downstream of the other six, so you dispatch it directly against whatever brief or outline your own workflow produces.
+Yes. Each of the seven technical-lifecycle agents is independently dispatchable. If you already have a well-formed, gap-free brief, you can dispatch the designer directly without running the interpreter first. The interpreter-designer-planner sequence is a convention that produces the best results starting from a vague idea, but it is not enforced — any agent can be dispatched at any point given the right input and a protocol. The same independence applies to the fiction writer: it never sits downstream of the other seven, so you dispatch it directly against whatever brief or outline your own workflow produces.
 
 ---
 

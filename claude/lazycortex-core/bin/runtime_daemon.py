@@ -176,6 +176,9 @@ def _init_metrics_if_enabled(repo_root: Path) -> None:
     - When metrics are disabled in settings, the call returns without side effects.
     - When enabled, the metrics module is loaded, initialized with the resolved labels, and exposed
       on the configured bind address and port.
+    - When the configured port is already bound, the daemon records a `metrics_port_conflict`
+      incident naming the current holder and keeps running without metrics — a taken port must
+      never restart-loop the dispatch engine.
 
   Args:
     repo_root: Absolute path to the repository the daemon is driving.
@@ -188,18 +191,22 @@ def _init_metrics_if_enabled(repo_root: Path) -> None:
     return
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import metrics
-  repo_label = metrics.resolve_repo_label(repo_root, metrics_cfg.get("repo_label"))
+  repo_label = metrics.resolve_repo_label(repo_root, metrics_cfg.get(DaemonKey.REPO_LABEL))
   metrics.init(
     repo_label = repo_label,
     version = _read_plugin_version(),
     daemon_name = metrics_cfg.get(DaemonKey.DAEMON_NAME) or "lazycortex-runtime",
   )
-  metrics.expose(
-    # waiver: inline numeric/default literal, not a domain constant
-    bind = metrics_cfg.get(DaemonKey.BIND, "127.0.0.1"),
-    # waiver: inline numeric/default literal, not a domain constant
-    port = int(metrics_cfg.get(DaemonKey.PORT, 9464)),
-  )
+  # waiver: inline numeric/default literal, not a domain constant
+  port = int(metrics_cfg.get(DaemonKey.PORT, 9464))
+  try:
+    metrics.expose(
+      # waiver: inline numeric/default literal, not a domain constant
+      bind = metrics_cfg.get(DaemonKey.BIND, "127.0.0.1"),
+      port = port,
+    )
+  except OSError as e:
+    _record_metrics_port_conflict(repo_root, port, e)
 
 
 def compute_sleep(time_until_next: float, polling_interval_sec: float) -> float:
@@ -978,6 +985,43 @@ def _restart_in_place() -> None:
     raise SystemExit(0)
   # unsupervised — replace the process image with a fresh interpreter
   os.execv(sys.executable, [ sys.executable, *sys.argv ])
+
+
+def _record_metrics_port_conflict(repo_root: Path, port: int, e: OSError) -> None:
+  """
+  Record a loud, named incident for a metrics port that is already bound.
+
+  Identifies the current holder of the port (best-effort, via the daemon registry) so the
+  incident tells the operator who to look at, then returns — the caller keeps the daemon
+  running without metrics.
+
+  Args:
+    repo_root: Repository root the daemon is driving.
+    port: The metrics port that failed to bind.
+    e: The bind error raised by `metrics.expose`.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import daemon_registry
+  holder = None
+  try:
+    holder = daemon_registry.identify_holder(port)
+  # waiver: broad except — holder identification is best-effort; a probe failure must not mask the conflict record
+  except Exception:  # pylint: disable=broad-except
+    holder = None
+  # waiver: human-readable fallback token for an unidentified port holder
+  holder_text = json.dumps(holder) if holder else "unknown"
+  error_ledger.record(repo_root, {
+    IncidentKey.INCIDENT: f"daemon:{repo_root.name}", IncidentKey.PHASE: IncidentPhase.OPENED,
+    IncidentKey.KIND: IncidentKind.DAEMON_ERROR,
+    # waiver: closed-set cause token documented in lazy-core.errors functional spec
+    IncidentKey.CAUSE: "metrics_port_conflict",
+    IncidentKey.ACTOR: IncidentActor.DAEMON,
+    # waiver: severity token of the error-ledger contract
+    IncidentKey.SEVERITY: "warn",
+    IncidentKey.DETAIL: f"metrics port {port} already bound (holder: {holder_text}); daemon runs without metrics",
+    # waiver: refs sub-key names of the error-ledger contract, not internal keys
+    IncidentKey.REFS: { "port": port, "holder": holder, "error": f"{type(e).__name__}: {e}" },
+  })
 
 
 def _record_daemon_error(repo_root: Path, cause: str, e: Exception) -> None:

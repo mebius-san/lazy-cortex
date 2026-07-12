@@ -1,6 +1,6 @@
 ---
 name: lazy-core.agent-models
-description: "Interactively assign model tiers (haiku/sonnet/opus/default) to every dispatchable subagent missing from `lazy.settings.json`. Auto-routes each entry to its structurally-correct scope: `_user.*` → global file, `_project.*` → project file, `_builtin.*` → global (override with `--scope=project|global`). Non-interactive executors (`lazy-core.autosetup`) auto-apply the curated tiers from `default-tiers.json` and report the rest as needs-interactive. Cheap, standalone, idempotent — safe to re-run. Invoked directly or by `lazy-core.optimize` Phase 7."
+description: "Interactively assign model tiers (haiku/sonnet/opus/default) to every dispatchable subagent missing from `lazy.settings.json`, and prune entries whose plugin agent no longer exists. Auto-routes each entry to its structurally-correct scope: `_user.*` → global file, `_project.*` → project file, `_builtin.*` → global (override with `--scope=project|global`). Non-interactive executors (`lazy-core.autosetup`) auto-apply the curated tiers from `default-tiers.json`, apply the prune, and report the rest as needs-interactive. Cheap, standalone, idempotent — safe to re-run. Invoked directly or by `lazy-core.optimize` Phase 7."
 allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(date *), Bash(test *), Bash(python3 *)
 lazy_setup_phase: post-install
 ---
@@ -31,7 +31,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 1 — Parse arguments`
    - `Step 2 — Load or initialize configs`
    - `Step 3 — Discover agents`
-   - `Step 4 — Build missing-entries list`
+   - `Step 4 — Build missing- and stale-entries lists`
    - `Step 5 — Resolve scope per entry`
    - `Step 6 — Offer entries in three ordered batches`
    - `Step 7 — Per-agent wizard loop (review-bound only)`
@@ -82,11 +82,13 @@ Shared enumeration (same as `lazy-core.audit` / `lazy-core.doctor` Phase), dedup
 
 For each, record: dispatch string, target group, plugin name (if applicable), source path, and whether a merged-config entry exists.
 
-## Step 4: Build missing-entries list
+## Step 4: Build missing- and stale-entries lists
 
-For each discovered agent, if its dispatch string is absent from the flat map from Step 2, add it to the missing list. Entries explicitly set to `"default"` in either scope count as decided — exclude them.
+**Missing.** For each discovered agent, if its dispatch string is absent from the flat map from Step 2, add it to the missing list. Entries explicitly set to `"default"` in either scope count as decided — exclude them.
 
-If the missing list is empty → skip Steps 5–8, go to Step 9 with outcome `nothing to do`.
+**Stale.** Walk every configured entry (both scope files, every group) whose key is plugin-namespaced (`<plugin>:<stem>`). The entry is stale iff the plugin is present in `~/.claude/plugins/installed_plugins.json` AND its newest cache dir has no `agents/<stem>.md` — i.e. the agent provably existed under that plugin's dispatch convention and was deleted. Record `(source file, group, dispatch)` in the stale list. Keys that are not plugin-namespaced (built-ins, `_user`/`_project` stems, skill-shaped dispatches) and keys of plugins that are not installed locally are never flagged — absence can't be proven for them.
+
+If both lists are empty → skip Steps 5–8, go to Step 9 with outcome `nothing to do`.
 
 ## Step 5: Resolve scope per entry
 
@@ -197,7 +199,9 @@ One `AskUserQuestion` at a time. Wait for each answer before the next prompt.
 
 ## Step 8: Write back
 
-Group the planned writes from Steps 6 and 7 by destination file. For each destination that has at least one planned entry:
+**Prune first.** For each stale entry from Step 4, load the section from the file that holds it, delete the key (drop a group sub-dict that becomes empty, except the `_version` metadata), and persist via `save_section`. Pruning is mechanical — the agent file's absence is objective — so it applies in interactive AND non-interactive runs without a prompt; every removal is reported in Step 9. If a pruned dispatch is still referenced as `experts.<name>.agent`, do NOT touch the expert entry — report it as `WARN: expert <name> references deleted agent <dispatch>`.
+
+Then group the planned writes from Steps 6 and 7 by destination file. For each destination that has at least one planned entry:
 
 1. Load the current section from the destination file via `load_section` (handles missing file transparently — no separate existence check needed).
 2. Apply all planned entries for this destination to the loaded section dict (creating missing group sub-keys on demand, preserving all existing keys — never overwrite; this loop only writes *missing* entries).
@@ -233,7 +237,7 @@ destination                         | added | skipped | via-scope
 ~/.claude/lazy.settings.json        |   N   |    S    | <mode>
 ```
 
-Plus one line per *added* entry: `<group>.<dispatch> = <tier> → <destination>`.
+Plus one line per *added* entry: `<group>.<dispatch> = <tier> → <destination>`, and one line per *pruned* entry: `pruned <group>.<dispatch> (agent deleted) ← <source file>`.
 
 If `dryRun = true`, wrap the whole table with `[DRY RUN — no files modified]`.
 

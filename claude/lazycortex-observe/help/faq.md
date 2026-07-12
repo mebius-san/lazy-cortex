@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
-last_regen: 2026-07-10
+last_regen: 2026-07-12
 no_diagram: true
 source_skills:
   - lazy-observe.install
@@ -17,9 +17,21 @@ Three things must be in place. First, `lazycortex-core` version 1.2.0 or later m
 
 ---
 
+## Why did the installer stop and say collection is already covered on this host?
+
+`/lazy-observe.install` checks for an already-working collection stack — a running `prometheus`, `otelcol`, `alloy`, or `grafana-agent` scraping your daemons, or a live connection into one of their metrics ports — before asking a single question. If it finds one, it prints the detected signals and aborts without installing anything or reading any config: the default on a host that's already covered is to leave it alone. You have two deliberate ways to override this: `/lazy-observe.install --integrate-only` regenerates a Prometheus `file_sd` scrape-targets file so your existing stack picks up every local lazycortex-core daemon, with no shipper installed at all; `/lazy-observe.install --force-standalone` installs the shipper anyway, alongside whatever is already running.
+
+---
+
+## I run lazycortex-core in more than one repo on this host. Does one install cover all of them?
+
+Yes. `/lazy-observe.install` renders the agent config with scrape targets for every metrics-enabled lazycortex-core daemon it finds on the host, not just the one in the repo you ran it from — a single shipper service covers all of them. Enable metrics for a new repo's daemon later via that repo's `/lazy-core.install`, then a plain `/lazy-observe.install` re-run (or a `/lazy-observe.doctor` check) picks it up automatically — no per-repo reinstall.
+
+---
+
 ## Which agent should I pick — Alloy or otelcol?
 
-Pick **Grafana Alloy** if you're already on the Grafana / Mimir stack. Pick **OpenTelemetry Collector** (`otelcol`) for everything else. Both agents scrape the same loopback endpoint and emit identical metric series shapes, so dashboards and alert rules work unchanged with either. Your choice is genuine config — it's collected once, persisted, and reused silently on every later `/lazy-observe.install` run (you won't be asked again). To switch agents later, see "How do I change my agent kind, remote_write URL, or auth after the first install?" below.
+Pick **Grafana Alloy** if you're already on the Grafana / Mimir stack. Pick **OpenTelemetry Collector** (`otelcol`) for everything else. Both agents scrape the same loopback endpoints and emit identical metric series shapes, so dashboards and alert rules work unchanged with either. Your choice is genuine config — it's collected once, persisted, and reused silently on every later `/lazy-observe.install` run (you won't be asked again). To switch agents later, see "How do I change my agent kind, remote_write URL, or auth after the first install?" below.
 
 ---
 
@@ -74,7 +86,7 @@ Nothing breaks. Every step treats an already-absent target as a silent no-op, ne
 
 ## How do I check whether the pipeline is working end-to-end?
 
-Run `/lazy-observe.doctor`. It performs seven checks in sequence without touching any file or service state: reads your answer file, confirms the service unit is loaded and the agent process is up, verifies the local `/metrics` endpoint contains `lazycortex_runtime_*` series, checks the agent's own self-metrics for a non-zero remote_write success rate, reaches out to your observer URL to confirm it's reachable, and reports the WAL directory size. Each check resolves to `PASS`, `WARN`, or `FAIL` with a one-line suggested fix. It is safe to run at any time.
+Run `/lazy-observe.doctor`. It performs eight checks in sequence without touching any file or service state: reads your answer file, confirms the service unit is loaded and the agent process is up, verifies every local lazycortex-core daemon's `/metrics` endpoint contains `lazycortex_runtime_*` series, checks the agent's own self-metrics for a non-zero remote_write success rate, reaches out to your observer URL to confirm it's reachable, and reports the WAL directory size. Each check resolves to `PASS`, `WARN`, or `FAIL` with a one-line suggested fix. It is safe to run at any time.
 
 ---
 

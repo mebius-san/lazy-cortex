@@ -41,9 +41,9 @@ See [`claude/lazycortex-diagram/`](claude/lazycortex-diagram/) for details.
 
 ### lazycortex-experts
 
-Generic lifecycle experts (interpreter, designer, planner, implementer, debugger, reviewer) plus a fiction-writer agent, a starter set of domain aspects (claude-plugin, game-dev, dotfiles, sci-fi, fantasy), and two cross-cutting aspects (discipline, tech-writing). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
+Generic lifecycle experts (interpreter, designer, planner, implementer, debugger, reviewer, tester) plus a fiction-writer agent, a starter set of domain aspects (claude-plugin, game-dev, dotfiles, sci-fi, fantasy), and two cross-cutting aspects (discipline, tech-writing). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
 
-Ships 1 skill, 7 agents, and 1 command.
+Ships 1 skill, 8 agents, and 1 command.
 
 Requires: lazycortex-core
 
@@ -113,7 +113,7 @@ See [`claude/lazycortex-wiki/`](claude/lazycortex-wiki/) for details.
 
 - **Claude Code** — the plugins use skills, agents, hooks, and the plugin marketplace system.
 - **git** — hooks and logging depend on git repos. Installing in a non-git directory degrades gracefully but loses most value.
-- **Python 3** — for hook scripts bundled with plugins that install hooks (e.g. `lazycortex-core`, `lazycortex-obsidian`).
+- **Python 3** — for hook scripts bundled with plugins that install hooks (e.g. `lazycortex-core`, `lazycortex-obsidian`, `lazycortex-python`).
 
 ## Quick start
 

@@ -1,9 +1,12 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about products, gates, assets, requests, code sync, source links, and the request pipeline in lazycortex-specs.
-last_regen: 2026-06-23
+last_regen: 2026-07-12
 no_diagram: true
 source_skills:
+  - spec.install
+  - spec.product-config
+  - spec.doctor
   - spec.create-asset
   - spec.create-feature
   - spec.create-change
@@ -19,12 +22,11 @@ source_skills:
   - spec.resolve-repo
   - spec.resolve-dependency
   - spec.source-url
-  - spec.request-router
+  - spec.refresh-sources
+  - spec.request-classify
+  - spec.request-find-candidates
   - spec.request-attach
   - spec.request-spawn
-  - spec.install
-  - spec.product-config
-  - spec.doctor
 ---
 # Frequently asked questions
 
@@ -46,9 +48,9 @@ The document layout differs too. Features and changes get `design.md` + `plan.md
 
 ## I want to track characters, scenes, or chapters — can the plugin handle non-software work?
 
-Yes. Run `/spec.add-asset-category` on your product to declare an operator-defined category (e.g. `characters`, `scenes`, `chapters`). The skill writes the category into the product's settings record, scaffolds the category folder and its folder-note, seeds local template files so you can customise the design and plan structure for that category, and wires the design and plan review classes so the review daemon picks up docs of that type automatically.
+Yes. Run `/spec.add-asset-category` on your product to declare an operator-defined category (e.g. `characters`, `scenes`, `chapters`). The skill writes the category into the product's settings record, scaffolds the category folder and its folder-note, and seeds local template files so you can customise the design and plan structure for that category.
 
-Once registered, `/spec.create-asset <product> characters <slug>` works the same way as `/spec.create-feature`. The request pipeline also recognises operator-defined categories on the next run without any rubric update.
+Review coverage needs no extra wiring. `/spec.product-config` already writes four behavior-keyed review classes per product — one each for design, plan, tech, and bug docs — and each class's glob spans every category folder, built-in and operator-defined alike. Adding a category therefore never touches the review classes; the review daemon and `/spec.request-classify` both recognise the new category on their very next run, with no rubric or class update needed. Once registered, `/spec.create-asset <product> characters <slug>` works the same way as `/spec.create-feature`.
 
 ---
 
@@ -107,7 +109,7 @@ For squash-merges where the ancestor check returns false, pass `--force-merged` 
 
 The `requests/` folder at the vault root is the intake inbox. Run `/spec.create-request` with a raw idea; the skill asks three to five wizard questions to clarify scope, outcome, and constraints, then writes a body-only Markdown file at `requests/<slug>.md`. Frontmatter is added automatically by the `spec.request-open` daemon routine on the next tick.
 
-Once the request is in the review loop the `spec.request-router` agent classifies it, searches for existing entities it might belong to, and surfaces a routing decision for you to confirm. If the request should attach to an existing feature or change, `spec.request-attach` distributes the body across that entity's docs and opens a fresh review cycle. If it spawns new work, `spec.request-spawn` scaffolds an empty entity and then delegates to `spec.request-attach` to populate it. The whole pipeline runs without you hand-editing any frontmatter.
+Once the request is in the review loop, the `spec.request-router` agent classifies the request body (via `spec.request-classify`), searches for existing entities it might belong to (via `spec.request-find-candidates`), and surfaces a routing decision for you to confirm. If the request should attach to an existing feature or change, `spec.request-attach` distributes the body across that entity's docs and opens a fresh review cycle. If it spawns new work, `spec.request-spawn` scaffolds an empty entity and then delegates to `spec.request-attach` to populate it. The whole pipeline runs without you hand-editing any frontmatter.
 
 ---
 
@@ -144,3 +146,11 @@ Re-run `/spec.doctor <product> --apply` — the fix loop will offer to strip the
 ## A dependency in my product record points at a product or repo key that no longer exists. What do I do?
 
 `spec.resolve-dependency` refuses with a clear error naming the missing key. Run `/spec.product-config` in edit mode to correct or remove the stale dependency entry from the product's `dependencies` list. The skill shows you the current record and lets you extend or modify it; it never drops entries you do not explicitly remove.
+
+---
+
+## I hand-edited a doc's `spec_source_docs` or `spec_source_requests` frontmatter — why doesn't the body's `# Sources` section reflect it?
+
+Frontmatter and body are two different projections, and only `/spec.refresh-sources` reconciles them. Run it on the doc after a manual frontmatter edit: it re-projects the `## Requests` and `## Docs` sub-sections of `# Sources` from `spec_source_requests` and `spec_source_docs` respectively, while preserving any operator-authored gloss you already added on an existing wikilink line. It then regenerates the asset's one-line `# Summary` précis and refreshes the container stats on the category and product folder-notes above it.
+
+You normally never need to run this by hand — the request pipeline and code-sync skills call it after they touch source frontmatter. It matters only when you edited `spec_source_docs` / `spec_source_requests` directly instead of going through those skills.

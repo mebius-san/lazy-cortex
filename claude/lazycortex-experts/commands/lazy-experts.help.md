@@ -7,7 +7,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 ---
 
-**lazycortex-experts** — generic lifecycle experts plus a starter set of domain aspects. Seven persona-only agents (interpreter / designer / planner / implementer / debugger / reviewer / fiction-writer) combine with composable aspect files (claude-plugin / game-dev / dotfiles / sci-fi / fantasy) and two cross-cutting aspects (discipline, tech-writing) to form specialists you assemble in `lazy.settings.json[experts]`. No protocols, routines, or dispatcher ship from this plugin — the dispatching routine supplies the protocol and the agent follows it.
+**lazycortex-experts** — generic lifecycle experts plus a starter set of domain aspects. Eight persona-only agents (interpreter / designer / planner / implementer / debugger / reviewer / tester / fiction-writer) combine with composable aspect files (claude-plugin / game-dev / dotfiles / sci-fi / fantasy) and two cross-cutting aspects (discipline, tech-writing) to form specialists you assemble in `lazy.settings.json[experts]`. No protocols, routines, or dispatcher ship from this plugin — the dispatching routine supplies the protocol and the agent follows it.
 
 **Agents** (invoke via Agent tool, normally only via a routine that dispatches expert jobs):
 
@@ -17,6 +17,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-experts.implementer` — takes an ordered plan, executes it task by task against a working journal, test-first (RED→GREEN→REFACTOR), one task at a time. Writes code as a side-effect; surfaces blockers in the journal rather than guessing. Models its discipline on `superpowers:test-driven-development` + `executing-plans`.
 - `lazy-experts.debugger` — investigates a bug to its root cause before any fix, one hypothesis at a time, four phases (investigate / pattern / hypothesis / fix). After repeated failed fixes, surfaces the architecture itself as the open question. Models its discipline on `superpowers:systematic-debugging`.
 - `lazy-experts.reviewer` — reviews a change for correctness and quality, returns ranked findings (location + cause + severity) with evidence, verifying each against the codebase before asserting it. Stays out of the implementer's lane. Models its discipline on `superpowers:requesting-code-review` + `receiving-code-review`.
+- `lazy-experts.tester` — discovers the testing mechanisms the repository actually ships (runners, fixtures, harnesses, Makefile / CI targets) and works only through them: writes risk-to-coverage test plans, executes plans step by step recording actual vs expected, writes evidence-grade bug reports, minimizes failures to the shortest deterministic steps-to-reproduce. Finds and documents defects; never fixes them.
 - `lazy-experts.fiction-writer` — takes a brief or story outline, produces literary text: narrative prose, dialogue, lyrical fragments. Owns POV/psychic distance, show-don't-tell, dialogue subtext, rhythm; story architecture comes from upstream documents. Never dispatched for technical documents.
 
 **Aspects** (compose into any agent via `lazy.settings.json[experts][<expert>].aspects[]`):
@@ -31,7 +32,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 **Skills** (invoke as `/<name>` or via Skill tool):
 
-- `lazy-experts.install` — bootstrap the plugin for the current project (or globally). Seeds agent-model tiers from `lazycortex-core`'s defaults into `lazy.settings.json[agent_models].lazycortex` and composes expert entries per the class map (technical classes: six roles, discipline + tech-writing; sci-fi/fantasy: fiction-writer, discipline only). Idempotent.
+- `lazy-experts.install` — bootstrap the plugin for the current project (or globally). Seeds agent-model tiers from `lazycortex-core`'s defaults into `lazy.settings.json[agent_models].lazycortex` and composes expert entries per the class map (technical classes: seven roles, discipline + tech-writing; sci-fi/fantasy: fiction-writer, discipline only). Idempotent.
 
 **Commands**:
 
@@ -58,7 +59,7 @@ The expert never runs until a routine elsewhere dispatches a job to it — by de
 <!-- help-block:start -->
 **Documentation:**
 
-- [agents](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/agents.md) — Seven persona-only agents — three design-time, three execution-stage, and one literary agent for fiction deliverables.
+- [agents](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/agents.md) — Eight persona-only agents — three design-time, four execution-stage, and one literary agent for fiction deliverables.
 - [aspects](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/aspects.md) — Seven aspect files (five domain, two cross-cutting) that layer knowledge and working rigor onto any generic expert via lazy.settings.json composition.
 - [composition](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/composition.md) — Assemble a named specialist by pairing one generic agent with aspects in lazy.settings.json[experts], following the technical/fiction class map.
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/install-and-audit.md) — Bootstrap lazycortex-experts by seeding agent-model tiers and class-mapped composed expert entries into lazy.settings.json.

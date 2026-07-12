@@ -163,6 +163,7 @@ class DaemonKey:
     DAEMON_NAME: The daemon-identifier label for metrics.
     BIND: The metrics endpoint bind address.
     PORT: The metrics endpoint TCP port.
+    REPO_LABEL: The override for the `repo` metric label.
     LOOP_DETECT_THRESHOLD: The repeated-identical-tick halt threshold.
     ERRORS: The error-ledger sub-configuration block.
     RETENTION_DAYS: The journal-retention window in days.
@@ -176,12 +177,30 @@ class DaemonKey:
   DAEMON_NAME = "daemon_name"
   BIND = "bind"
   PORT = "port"
+  REPO_LABEL = "repo_label"
   LOOP_DETECT_THRESHOLD = "loop_detect_threshold"
   ERRORS = "errors"
   RETENTION_DAYS = "retention_days"
   GIT = "git"
   CLEANUP_RUNTIME_LOG_AFTER = "cleanup_runtime_log_after"
   POLLING_INTERVAL_SEC = "polling_interval_sec"
+
+
+# ----------------------------------------------------------------------------------------
+class MetricsNet:
+  """
+  Network-level constants for the daemon's Prometheus metrics endpoint.
+
+  Attributes:
+    PORT_BASE: The first port considered when allocating a metrics port for a daemon.
+    PORT_CEIL: The last port considered; the allocation range is `PORT_BASE..PORT_CEIL` inclusive.
+    SCRAPE_TARGETS_REL: The scrape-targets file location relative to the XDG config home.
+  """
+
+  PORT_BASE = 9464
+  PORT_CEIL = 9563
+  # waiver: filesystem path idiom relative to XDG config home, not an internal key
+  SCRAPE_TARGETS_REL = "lazycortex/scrape-targets.json"
 
 
 # ----------------------------------------------------------------------------------------

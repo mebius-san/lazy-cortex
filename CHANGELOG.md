@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.12.0 — 2026-07-12 UTC
+
+- Planner-tier agents now default to Opus instead of the previous lighter tier; stale tier overrides for removed `lazy-review` roles were cleaned up.
+- `lazy-core.install` gained a new step to opt a checkout into `/metrics`: allocates a port, writes the setting, and regenerates the host's scrape-targets file.
+- Multiple runtime daemons on one host can now expose metrics side by side — sequential port allocation avoids conflicts, and a taken port no longer crash-loops a daemon (it just runs without metrics). New CLI: `daemon-list`, `metrics-alloc-port`, `metrics-scrape-file`.
+
 ### 5.11.2 — 2026-07-11 UTC
 
 - Fixed `autosetup`/`autocheckup` reading enabled plugins from the machine-wide registry instead of the target repo's settings — commands run against one project no longer see or install plugins that are only enabled in other projects.
@@ -396,6 +402,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.1.0 — 2026-07-12 UTC
+
+- `spec.product-config` review-class generation now produces four behavior-keyed classes (design/plan/tech/bug) with wildcard globs covering every asset category, migrates legacy per-category classes automatically, and verifies expert names before saving — closing a gap that could leave testers unregistered.
+
 ### 3.0.2 — 2026-07-08 UTC
 
 - The install skill now derives its target scope from where the plugin is actually enabled (via `lazycortex-core detect-scope`) instead of the install record's `scope` field, so its config lands at the correct project-vs-user scope even when the two have drifted.
@@ -632,6 +642,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 0.4.0 — 2026-07-12 UTC
+
+- `lazy-observe.install` now pre-flights the host for existing metrics collection and skips all prompts when nothing needs to change; new `--integrate-only` flag publishes scrape targets without installing a shipper, and `--force-standalone` overrides auto-detection.
+- `lazy-observe.doctor` now probes every configured daemon endpoint, and in integrate mode checks the shared scrape-targets file instead of a local shipper.
+
 ### 0.3.0 — 2026-07-10 UTC
 
 - Runtime dashboard reworked into a list-centric layout: compact status strip (daemon alive, halt, failed/dead jobs, errors, tokens), a routine-health table (last tick, ticks, errors, busy time), error and halt tables, a per-kind token table with expert/model/repo/kind donuts, and split open-vs-problem queue charts — percentile/rate panels and the time-picker/datasource controls are gone, and the routine-health table's Last tick column no longer color-codes by threshold.
@@ -658,6 +673,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 0.6.0 — 2026-07-13 UTC
+
+- New `lazy-experts.tester` agent — a persona-only tester role that writes test plans, executes them, files bug reports, and minimizes steps-to-reproduce, after first discovering how the repo actually tests things.
 
 ### 0.5.1 — 2026-07-08 UTC
 

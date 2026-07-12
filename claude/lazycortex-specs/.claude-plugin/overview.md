@@ -27,7 +27,7 @@ The plugin manages *structure* and *lifecycle*, not the prose — authoring stay
 
 - **Claude Code** with plugin support.
 - **lazycortex-core** — provides the `products` / `spec` settings sections, the `settings-get` / `settings-set` CLI, and the runtime daemon that drives the `spec.gate-tick` md-scan routine.
-- **lazycortex-review** (v4) — the review classes that `spec.product-config` and `spec.add-asset-category` generate for each authored-doc type.
+- **lazycortex-review** (v4) — the behavior-keyed review classes that `spec.product-config` generates per product (one class per doc-kind, wildcard globs spanning every asset category).
 - **lazycortex-diagram** — draws the behavioral / architecture diagrams that creation skills request.
 - **lazycortex-experts** *(optional)* — supplies the designer / developer / tester personas wired into review classes.
 

@@ -1,12 +1,13 @@
 // Rendered by lazy-observe.install. DO NOT edit by hand.
 //
-// Grafana Alloy config — scrapes the local lazycortex-core /metrics endpoint
-// and forwards via Prometheus remote_write to the operator's observer.
+// Grafana Alloy config — scrapes every local lazycortex-core /metrics endpoint
+// (one target per runtime daemon on this host; each daemon's series carry their
+// own `repo` label) and forwards via Prometheus remote_write to the observer.
 
 prometheus.scrape "lazycortex_runtime" {
-  targets = [{
-    __address__ = "{{ scrape_target }}",
-  }]
+  targets = [
+{{ scrape_targets_block }}
+  ]
   forward_to      = [prometheus.remote_write.observer.receiver]
   scrape_interval = "{{ scrape_interval | default('15s') }}"
   scrape_timeout  = "{{ scrape_timeout | default('10s') }}"

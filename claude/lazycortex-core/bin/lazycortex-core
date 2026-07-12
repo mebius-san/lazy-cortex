@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, doctor-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, lookup-expert, scaffold, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols, detect-scope")
+         "Subcommands: expert-pump-once, doctor-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, lookup-expert, scaffold, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols, detect-scope, daemon-list, metrics-alloc-port, metrics-scrape-file")
 
 
 def _cmd_consume_job(argv: list[str]) -> int:
@@ -356,6 +356,66 @@ def _cmd_detect_scope(argv: list[str]) -> int:
     return 0
 
 
+def _cmd_daemon_list(argv: list[str]) -> int:
+    """Print every lazycortex runtime daemon installed on this host as JSON.
+
+    Enumerates supervisor units (launchd plists / systemd user units), joins each
+    with its repo's ``daemon.metrics`` settings, and prints
+    ``{"daemons": [{"repo_id", "repo_root", "repo_label", "metrics_enabled",
+    "bind", "port"}, ...]}``.
+
+    This is the boundary-legal path (dev.plugin-boundaries § 1c) for sibling
+    plugins (lazycortex-observe) to learn the host's scrape-target set without
+    importing lazycortex-core Python.
+    """
+    import argparse, json
+    from daemon_registry import enumerate_local_daemons
+    p = argparse.ArgumentParser(prog="lazycortex-core daemon-list")
+    p.add_argument("--json", action="store_true", default=True,
+                   help="accepted for call-site clarity; output is always JSON")
+    p.parse_args(argv)
+    print(json.dumps({"daemons": enumerate_local_daemons()}, ensure_ascii=False))
+    return 0
+
+
+def _cmd_metrics_alloc_port(argv: list[str]) -> int:
+    """Allocate a metrics port for a repo and print ``{"port": N, "reused": bool}``.
+
+    Sequential allocation from 9464: the repo's already-recorded port is reused
+    verbatim; otherwise the first port that is neither recorded by another local
+    daemon nor currently bindable-blocked is returned. Exits 1 with an ``error``
+    JSON when the whole range is exhausted.
+    """
+    import argparse, json
+    from port_alloc import allocate_port
+    p = argparse.ArgumentParser(prog="lazycortex-core metrics-alloc-port")
+    p.add_argument("--repo-root", required=True, help="absolute path of the repo the port is for")
+    a = p.parse_args(argv)
+    try:
+        print(json.dumps(allocate_port(Path(a.repo_root))))
+    except RuntimeError as e:
+        print(json.dumps({"error": str(e)})); return 1
+    return 0
+
+
+def _cmd_metrics_scrape_file(argv: list[str]) -> int:
+    """Write the Prometheus file_sd scrape-targets file and print ``{"path", "count", "targets"}``.
+
+    Covers every metrics-enabled daemon on this host, one file_sd entry per daemon
+    (``{"targets": ["127.0.0.1:<port>"], "labels": {"repo": "<label>"}}``). The file
+    is server-blind — no repo paths, hostnames, or credentials. Default location:
+    ``${XDG_CONFIG_HOME:-~/.config}/lazycortex/scrape-targets.json``.
+    """
+    import argparse, json
+    from daemon_registry import write_scrape_targets_file
+    p = argparse.ArgumentParser(prog="lazycortex-core metrics-scrape-file")
+    p.add_argument("--out", default=None, help="override the output path")
+    a = p.parse_args(argv)
+    out = Path(a.out) if a.out else None
+    print(json.dumps(write_scrape_targets_file(out), ensure_ascii=False))
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print(USAGE, file=sys.stderr); return 2
@@ -408,6 +468,12 @@ def main() -> int:
         return cmd_add_protocols(sys.argv[2:])
     elif sub == "detect-scope":
         return _cmd_detect_scope(sys.argv[2:])
+    elif sub == "daemon-list":
+        return _cmd_daemon_list(sys.argv[2:])
+    elif sub == "metrics-alloc-port":
+        return _cmd_metrics_alloc_port(sys.argv[2:])
+    elif sub == "metrics-scrape-file":
+        return _cmd_metrics_scrape_file(sys.argv[2:])
     else:
         print(f"unknown subcommand: {sub}\n{USAGE}", file=sys.stderr); return 2
 
