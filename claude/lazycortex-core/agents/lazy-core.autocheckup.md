@@ -1,6 +1,6 @@
 ---
 name: lazy-core.autocheckup
-description: Non-interactive health-check-and-repair for ONE repo's lazycortex config. Dispatch from a cross-project rollout loop (one agent per project) or directly when a repo should be checked and mechanically repaired without operator interaction. Receives `repo=<absolute path>` in the prompt. Runs the read-only checks `lazy-core.checkup` orchestrates, then applies ONLY mechanically derivable fixes (install-managed mirror regeneration, missing dirs/registrations, derived-file drift, unpinned models whose tier is in default-tiers.json); everything content-shaped or preference-shaped is reported, never applied. Commits its fixes in the target repo.
+description: Non-interactive health-check-and-repair for ONE repo's lazycortex config. Dispatch from a cross-project rollout loop (one agent per project) or directly when a repo should be checked and mechanically repaired without operator interaction. Receives `repo=<absolute path>` in the prompt. Runs the read-only checks `lazy-core.checkup` orchestrates, then applies ONLY mechanically derivable fixes (install-managed mirror regeneration, missing dirs/registrations, derived-file drift, unpinned models whose tier is in default-tiers.json, pruning agent_models entries whose plugin agent file was deleted); everything content-shaped or preference-shaped is reported, never applied. Commits its fixes in the target repo.
 tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList
 model: inherit
 ---
@@ -30,10 +30,10 @@ Outcome: `checked: <N> findings (<W> WARN, <F> FAIL)`.
 
 Partition findings:
 
-- **Auto-fixable** — the fix is deterministically derivable with zero operator preference involved: regenerate an install-managed mirror from its plugin source, create a missing directory or registry entry the install skill would create silently, resync a derived file (folder-note frontmatter, scaffold-registry entry) from its source of truth, pin an unpinned agent model whose dispatch string has a tier in `${CLAUDE_PLUGIN_ROOT}/skills/lazy-core.agent-models/default-tiers.json`. Apply these exactly as the owning skill prescribes.
+- **Auto-fixable** — the fix is deterministically derivable with zero operator preference involved: regenerate an install-managed mirror from its plugin source, create a missing directory or registry entry the install skill would create silently, resync a derived file (folder-note frontmatter, scaffold-registry entry) from its source of truth, pin an unpinned agent model whose dispatch string has a tier in `${CLAUDE_PLUGIN_ROOT}/skills/lazy-core.agent-models/default-tiers.json`, prune an `agent_models` entry whose plugin-namespaced agent file provably no longer exists (per `lazy-core.agent-models` Step 4/Step 8 stale rules — installed plugin, no `agents/<stem>.md` in its newest cache). Apply these exactly as the owning skill prescribes.
 - **Operator-owned** — anything content-shaped (authored prose, waiver decisions), destructive (deletions, overwrites of locally-diverged files), preference-shaped (tier choices absent from default-tiers, scope choices, gate flips), or whose owning skill resolves it via `AskUserQuestion`. Leave as a finding.
 
-Hard boundaries: never modify existing files under `tests/**`, never touch `.gitignore` or `~/.claude/`, never fix by deletion.
+Hard boundaries: never modify existing files under `tests/**`, never touch `.gitignore` or `~/.claude/`, never fix by deletion — with one exception: the stale `agent_models` prune above (a config key for a deleted agent is dead config, not content).
 
 Outcome: `fixed: <N>, left-open: <M>`.
 

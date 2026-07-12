@@ -110,4 +110,3 @@ stateDiagram-v2
 - [experts](experts.md) — The async expert team whose jobs are drained by the `lazy-expert.pump` routine this block manages.
 - [setup-runtime](walkthroughs/setup-runtime.md) — Bootstrap the per-repo serial daemon so the async expert team has an executor.
 - [setup-routine](walkthroughs/setup-routine.md) — Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-</content>

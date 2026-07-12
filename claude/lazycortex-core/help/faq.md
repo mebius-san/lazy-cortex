@@ -100,6 +100,8 @@ The only time hand-editing `lazy.settings.json` is appropriate is when you are d
 
 When `/lazy-core.agent-models` runs as part of `/lazy-core.autosetup`'s non-interactive chain (no wizard, no user channel), only the curated batch behaves the same as an interactive run: entries whose dispatch string is a key in `default-tiers.json` still auto-apply at their template tier, because a plugin-shipped default is a recorded decision, not a guess. Everything else — agents with no curated default — is left missing and reported `needs-interactive`; a normal interactive run of the skill picks those up afterward.
 
+The skill also prunes automatically: any configured entry whose plugin agent file has since been deleted (the plugin is still installed, but its cache no longer has that agent stem) is removed with no prompt, in both interactive and non-interactive runs — a tier for a deleted agent is dead config, not a decision. If a pruned dispatch string is still referenced by an expert's `agent` field, the skill leaves that expert entry alone and reports a warning instead of guessing; you decide whether to repoint or remove it.
+
 ---
 
 ## When does `/lazy-core.setup` help versus running each plugin's install skill manually?

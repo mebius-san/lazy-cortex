@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-07-12
+last_regen: 2026-07-13
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -153,27 +153,25 @@ If `/lazy-expert.list-jobs` shows the job as `dead` but `/lazy-expert.collect-jo
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant claudeSession as Claude Session
-  participant jobsQueue as .experts/.jobs/ queue
+  participant session as Claude session
+  participant queue as .experts/.jobs/ queue
   participant daemon as Daemon (runner)
-  participant expertAgent as Expert Agent
+  participant expert as Expert agent
 
-  user->>claudeSession: /lazy-expert.dispatch-job with job spec
-  claudeSession->>jobsQueue: write job.json to queue dir
-  claudeSession-->>user: job ID returned
-
-  daemon->>jobsQueue: poll for new job files
-  jobsQueue-->>daemon: job.json discovered
-  Note over daemon,expertAgent: daemon spawns expert agent for job
-  daemon->>expertAgent: launch with job.json as input
-
-  expertAgent->>expertAgent: execute job task
-  expertAgent->>jobsQueue: write response.json to job dir
-  expertAgent->>jobsQueue: write DONE marker to job dir
-  expertAgent-->>daemon: agent process exits
-
-  user->>claudeSession: /lazy-expert.collect-job with job ID
-  claudeSession->>jobsQueue: read response.json from job dir
-  jobsQueue-->>claudeSession: response.json contents
-  claudeSession-->>user: job result delivered
+  user->>session: /lazy-expert.dispatch-job
+  session->>queue: write job payload + READY marker
+  daemon->>queue: poll for READY jobs
+  queue-->>daemon: job payload
+  daemon->>expert: spawn expert agent
+  expert->>expert: process job payload
+  expert->>queue: write response.json
+  expert->>queue: write DONE marker
+  loop poll for DONE
+    user->>session: /lazy-expert.collect-job
+    session->>queue: check DONE marker
+    queue-->>session: not ready
+  end
+  session->>queue: read response.json
+  queue-->>session: response.json
+  session-->>user: job result
 ```

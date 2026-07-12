@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-06-10
+last_regen: 2026-07-12
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -24,6 +24,12 @@ source_skills:
 ## I ran `/lazy-review.install` but the `lazy-review.scan` routine was not registered. Why?
 
 The scan routine only works when `lazycortex-core`'s runtime daemon is enabled. If the `daemon.enabled` flag in `lazy.settings.json` is `false`, the install step removes the routine to avoid leaving dead config. The rest of the plugin — settings sections, directories, the CLI allow-pattern — is still installed. Enable the daemon via `/lazy-core.install` (or the relevant core configure skill), then re-run `/lazy-review.install` to register the routine.
+
+---
+
+## During install I was asked to pick optional protocols for `lazy-review.scan`. What are these?
+
+`lazy-review.scan` always carries two mandatory protocols — `lazy-review.doc-review-protocol` and `lazy-core.markdown-style` — that ship attached and are never asked about. Other plugins can ship references that are useful to a writer working on reviewed documents but aren't required (for example, a diagram-writing guide), and those self-flag as optional candidates. `/lazy-review.install` discovers them and lets you pick which ones to attach; declining just means the scan routine doesn't get that extra guidance. Nothing you pick changes the review state machine itself, only what the writer expert reads before drafting. If you skip one and change your mind later, re-run `/lazy-review.install` — anything not yet attached is offered again.
 
 ---
 

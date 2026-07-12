@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Dispatch jobs to named expert workers, keep the main session free, and collect results when the daemon finishes them.
-last_regen: 2026-07-10
+last_regen: 2026-07-12
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing a user dispatching a job via dispatch-job, the runtime daemon draining the queue, and the user collecting results via collect-job. Include list-jobs and cancel-job as optional side paths. Use boxes for the four skills and a distinct shape for the daemon process."
@@ -68,41 +68,36 @@ When you see a job reach `done` status in the list, run `/lazy-expert.collect-jo
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  userInitiatesWorkflow[User initiates workflow]
-  userChoosesAction{User chooses action}
-  dispatchJobSkill[dispatch-job]
-  listJobsSkill[list-jobs]
-  cancelJobSkill[cancel-job]
+  userDispatchesJob[User dispatches job]
+  dispatchJob[dispatch-job]
   runtimeDaemon((Runtime daemon))
-  collectJobSkill[collect-job]
-  jobResultsCollected[Job results collected]
-  jobListDisplayed[Job list displayed]
-  jobCancelled[Job cancelled]
+  drainQueue[Drain queue]
+  collectJob[collect-job]
+  userCollectsResults[User collects results]
+  listJobs[list-jobs]
+  cancelJob[cancel-job]
 
-  userInitiatesWorkflow -->|selects action| userChoosesAction
-  userChoosesAction -->|dispatch job| dispatchJobSkill
-  userChoosesAction -->|list jobs| listJobsSkill
-  userChoosesAction -->|cancel job| cancelJobSkill
-  dispatchJobSkill -->|enqueues job| runtimeDaemon
-  runtimeDaemon -->|drains queue| collectJobSkill
-  collectJobSkill -->|returns results| jobResultsCollected
-  listJobsSkill -->|shows queue| jobListDisplayed
-  cancelJobSkill -->|removes job| jobCancelled
+  userDispatchesJob -->|call| dispatchJob
+  dispatchJob -->|enqueue| runtimeDaemon
+  runtimeDaemon -->|process| drainQueue
+  drainQueue -->|complete| collectJob
+  collectJob -->|call| userCollectsResults
+  dispatchJob -.->|optional check| listJobs
+  listJobs -.->|call| dispatchJob
+  dispatchJob -.->|optional abort| cancelJob
+  cancelJob -.->|abort| runtimeDaemon
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
-  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
-  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
+  classDef sub fill:#2e2240,stroke:#7e63a8,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
-  class userInitiatesWorkflow entry
-  class userChoosesAction guard
-  class dispatchJobSkill action
-  class listJobsSkill action
-  class cancelJobSkill action
-  class runtimeDaemon service
-  class collectJobSkill action
-  class jobResultsCollected success
-  class jobListDisplayed success
-  class jobCancelled success
+  class userDispatchesJob entry
+  class dispatchJob action
+  class collectJob action
+  class listJobs action
+  class cancelJob action
+  class runtimeDaemon sub
+  class drainQueue action
+  class userCollectsResults success
 ```
