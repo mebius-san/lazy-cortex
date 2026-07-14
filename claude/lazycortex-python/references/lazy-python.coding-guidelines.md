@@ -586,7 +586,7 @@ if TYPE_CHECKING:
   - Arguments to any call whose method name is `indent_by`, `pretty_view`, `pretty_class`, or `pretty_format` (project-wide pretty-print convention — the literal is a layout parameter or display fragment, regardless of receiver type).
   - Literals inside `Literal[…]`, `Annotated[…]`, `match`/`case` patterns, enum class bodies, f-string format parts, and docstrings.
   - RHS of an assignment whose target is an ALL_CAPS `Name` — that *is* the constant definition itself.
-  - RHS of any assignment at **class body scope** (including non-ALL_CAPS names like `_protected_fields = { ... }`, `_field_filters = { ... }`) — class-body attributes ARE the class's complex constants.
+  - RHS of any assignment at **class body scope** (including non-ALL_CAPS names like `_protected_fields = { ... }`, `_lookup_tables = { ... }`) — class-body attributes ARE the class's complex constants.
 - **TMP exemption**: a `# TMP` marker covers literals inside scratch/debug code:
   - Inline on the same line: `print('debug', x) # TMP`.
   - As a standalone comment on the line immediately above an enclosing statement or block — it covers every statement inside that block.

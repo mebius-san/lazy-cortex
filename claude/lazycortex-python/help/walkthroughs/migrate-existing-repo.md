@@ -1,13 +1,14 @@
 ---
 chapter_type: walkthrough
 summary: Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation, and fix them in committed chunks.
-last_regen: 2026-07-10
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "Migration flow"
   request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install runs 8 ordered steps fully automatically (mirror rules, deploy wrappers, detect PyCharm, bootstrap pyproject.toml with [tool.pch] when PyCharm present, scaffold overlay, sync scaffold template, record python.env_source with a one-time disambiguation prompt only when multiple bootstrap-script candidates exist, log) → user runs chk-py all -q → six-step gate surfaces existing violations → user fixes violations in chunks and commits iteratively until chk-py all exits clean"
   kind_hint: sequence
 source_skills:
   - lazy-python.install
+  - chk
 ---
 # Adopt the plugin in a repo with pre-existing Python that drifted from the canon
 
@@ -44,6 +45,8 @@ The install runs 8 ordered steps automatically and asks you almost nothing. Inst
 
 Every step is idempotent — safe to re-run if interrupted.
 
+**Migrating from a pre-2.0 install.** If this repo adopted `lazycortex-python` before the 2.0.0 release, its docstrings may depend on things `pcf` used to ship built-in: `Generation Rules` / `Value Ranges` docstring sections and a hardcoded `_field_filters` private-name escape hatch. As of 2.0, none of that is baked in — every project declares its own via `[tool.pcf]` in `pyproject.toml`. Step 4 of this install only appends checker sections that are missing; it never touches a `[tool.pcf]` block you already have, so re-running `/lazy-python.install` on an existing repo is safe. If your repo relied on the old built-ins, open `pyproject.toml` after this step and find the commented-out `extra_docstring_sections`, `d2_exempt_marker_attrs`, and `private_name_allowlist` examples under `[tool.pcf]` — uncomment and adapt them to your project's actual section names and field names before Step 2's inventory run, or `chk-py` will flag every class that used the old built-in sections as missing them.
+
 **Verification gate**: the install ends with a one-line-per-step report. Confirm each step shows an outcome word: `mirrored-3`, `wrappers-deployed-2 + gitignore-ensured`, `pch-ready` or `pch-missing-inspect-sh`, `pyproject-bootstrapped`, an `env-source-*` outcome, and so on. If any line shows `ERROR` or is missing, see the troubleshooting doc before proceeding.
 
 ### Step 2 — Take a full violation inventory
@@ -60,7 +63,7 @@ On first run the venv resolver creates `.venv/` at the repo root and installs `m
 
 Save the full output — it is your remediation queue. Do not start fixing yet; complete the inventory first so you know the scope before touching any file.
 
-**What to expect in a drifted repo**: `pcf` and `ruff` typically surface the most findings — missing or malformed docstrings, import-block ordering, line-length overruns, and bare `except` clauses. `mypy` surfaces type annotation gaps. `pylint` adds naming and complexity findings. A repo with a few dozen Python files may produce hundreds of lines of output; that is normal and expected.
+**What to expect in a drifted repo**: `pcf` and `ruff` typically surface the most findings — missing or malformed docstrings, import-block ordering, line-length overruns, and bare `except` clauses. If Step 1's migration note applies to your repo and you skipped uncommenting the `[tool.pcf]` examples, expect `pcf` to also flag every class that used the old `Generation Rules` / `Value Ranges` sections or the old `_field_filters` escape hatch — go back to Step 1 and declare them before continuing. `mypy` surfaces type annotation gaps. `pylint` adds naming and complexity findings. A repo with a few dozen Python files may produce hundreds of lines of output; that is normal and expected.
 
 ### Step 3 — Audit the install (optional but recommended)
 

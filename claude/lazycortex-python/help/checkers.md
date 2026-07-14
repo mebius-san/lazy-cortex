@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: The `chk-py` and `tst-py` CLI wrappers that gate every Python change — style, type-only imports, syntax, mypy, ruff, pylint, and pytest — backed by a shared venv resolver that works from any terminal.
-last_regen: 2026-07-10
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "How the pieces connect"
   request: "Flow diagram showing chk-py and tst-py as entry points; chk-py fans out to six subcommands in the all gate (pcf, toi, cmp, mypy, rf, pylint) plus pch as a separate standalone subcommand outside the all gate; tst-py calls pytest with the _pytest_dedup plugin loaded via -p; both wrappers source _ensure_venv.sh which probes four venv locations in order (VIRTUAL_ENV env var, project .venv, pyproject.toml config path, fallback create/augment project .venv), then source _ensure_env.sh which optionally sources a repo-declared env-bootstrap script named by python.env_source; pcf is also invoked by the PostToolUse hook on every .py edit; all tools read pyproject.toml for configuration."
@@ -26,6 +26,8 @@ Behind both commands sits `_ensure_venv.sh`, a shared venv resolver that finds m
 **`chk`** is the style and type aggregator wrapper. You call it as `chk-py <subcommand> [path ...]`. The `all` subcommand runs six checks in sequence — `pcf`, `toi`, `cmp`, `mypy`, `rf`, `pylint` — across every path you supply (defaulting to `.`). Each subcommand is also callable on its own, so `chk-py mypy src/` runs only mypy. The `-q` flag is accepted as a no-op for compatibility with the `lazy-python.style.md` verification-order mandate. `pch` is a separate standalone subcommand (`chk-py pch <file>`) that is NOT part of the `all` gate; it is also opt-in per repo via a `[tool.pch]` section in `pyproject.toml` — when that section is absent, `chk-py pch` prints a diagnostic and exits cleanly without affecting any other check.
 
 **`pcf.py`** is the Python Code Format checker. It parses each `.py` file with the `ast` module and checks import block ordering (future → typing → stdlib → third-party → project → local → TYPE_CHECKING), blank-line rules between import blocks, required `from __future__ import annotations` and `if TYPE_CHECKING:` guards, docstring structure and banned phrases, line length, and code-level rules such as bare `assert` statements and magic literals. Configuration lives under `[tool.pcf]` in `pyproject.toml`; per-path overrides go in `[tool.pcf.overrides]`. `pcf.py` is also the tool the PostToolUse hook invokes on every `.py` edit — the hook passes the just-written file through `pcf.py` and surfaces any violations as `additionalContext` in the next turn so style errors appear inline rather than at commit time.
+
+As of the 2.0.0 release, three `[tool.pcf]` keys let your project register its own docstring conventions instead of only accepting the built-ins (`Responsibilities`, `Guarantees`, `Args`, `Attributes`, and the rest): `extra_docstring_sections` lets you declare a project-specific section by name, list style (`bulleted`, `definition`, or `plain`), and an `after`/`before` anchor that positions it relative to an existing section — add `ref_exempt = true` to shield the section's own `# REF:` lines from the phrasing and private-name checks, and a `definition`-style section is skipped by the private-name narrative scan the same way built-in definition sections (`Attributes`, `Args`, `Raises`) already are. `d2_exempt_marker_attrs` names class attributes whose declaration exempts that class from the private-label-in-`Attributes:` rule. `private_name_allowlist` names specific private identifiers (like `_my_filters`) that are allowed to appear in docstring narrative even outside an exempted section. All three default to empty — pcf ships with no built-in Generation Rules / Value Ranges / project-specific field-filter sections baked in, so a fresh install accepts only the stock sections until you register your own. Commented examples for all three live in the `[tool.pcf]` block of the shipped `pyproject.toml` template.
 
 **`toi.py`** is the type-only import analyzer. It walks the AST and distinguishes names used at runtime from names used only in type annotations. For each import that is annotation-only, it emits a `file:line: note:` suggestion to move it into the `if TYPE_CHECKING:` block. This keeps the runtime import footprint lean and avoids circular-import problems caused by type-only dependencies. Configuration is under `[tool.toi]` in `pyproject.toml`.
 
@@ -61,6 +63,10 @@ The `install-and-audit` block is what puts `chk-py` and `tst-py` in your project
 
 **Per-path pcf overrides.** Add entries to `[tool.pcf.overrides]` for subdirectories that need relaxed rules, for example `"tools" = { check_magic_literal = false }` or `"tests" = { check_assert = false }`. The last matching prefix wins.
 
+**Registering a project-specific docstring section.** Add a `[[tool.pcf.extra_docstring_sections]]` table to `pyproject.toml` naming the section, its list style, and an `after`/`before` anchor, for example a `Field Semantics` bulleted section placed after `Guarantees`. Set `ref_exempt = true` if the section cites code via `# REF:` lines that should not trip the banned-phrase or private-name checks.
+
+**Allowing a private name in docstring narrative.** Add the identifier to `private_name_allowlist` under `[tool.pcf]` in `pyproject.toml` (or name the class attribute that should exempt a whole class's `Attributes:` section in `d2_exempt_marker_attrs`). Both default to empty, so nothing is allowlisted until your project opts in.
+
 **Banned docstring phrases.** The `banned_docstring_phrases` list under `[tool.pcf]` rejects any phrase appearing anywhere in a docstring body. Add project-specific phrases to the list directly in `pyproject.toml`.
 
 **Enabling PyCharm inspections.** Ask the install wizard to add `[tool.pch]` during `/lazy-python.install`, or add the section to `pyproject.toml` manually. To suppress noisy inspections such as `"Spelling"`, `"Grammar"`, or `"Duplicated code fragment"`, add their names to the `ignore` list under `[tool.pch]`.
@@ -72,3 +78,38 @@ The `install-and-audit` block is what puts `chk-py` and `tst-py` in your project
 **Bootstrapping a repo-specific environment for checks and tests.** If your repo has its own environment script (`cli/env`, `.env.sh`, or `scripts/env.sh`) that exports secret paths or provider credentials, re-run `/lazy-python.install` — it detects the script and records it as `python.env_source`, so `chk-py` and `tst-py` source it automatically on every run. If more than one candidate script is present, the install skill asks you which one to use.
 
 ## How the pieces connect
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  chkPyEntry["chk-py entry point"]
+  tstPyEntry["tst-py entry point"]
+  postToolUseHook["PostToolUse hook on .py edit"]
+  ensureVenvEnv["_ensure_venv.sh + _ensure_env.sh (venv probe order: $VIRTUAL_ENV → .venv → configured → create)"]
+  allGate["all gate: pcf → toi → cmp → mypy → ruff → pylint"]
+  pchManual["pch (manual, outside gate)"]
+  pytestDedup["pytest + _pytest_dedup plugin"]
+  pyprojectConfig["pyproject.toml config"]
+
+  chkPyEntry -->|bootstrap| ensureVenvEnv
+  tstPyEntry -->|bootstrap| ensureVenvEnv
+  ensureVenvEnv -->|run gate| allGate
+  ensureVenvEnv -->|run tests| pytestDedup
+  chkPyEntry -->|run manual| pchManual
+  postToolUseHook -->|trigger gate| allGate
+  pyprojectConfig -->|configure| allGate
+  pyprojectConfig -->|configure| pytestDedup
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
+
+  class chkPyEntry entry
+  class tstPyEntry entry
+  class postToolUseHook entry
+  class ensureVenvEnv action
+  class allGate action
+  class pchManual action
+  class pytestDedup action
+  class pyprojectConfig store
+```

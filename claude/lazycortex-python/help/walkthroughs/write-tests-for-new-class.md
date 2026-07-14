@@ -1,12 +1,13 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all seven Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-07-10
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads); agent writes test file covering all 7 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module; agent logs the run. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
 source_skills:
   - lazy-python.test-writer
+  - tst
 ---
 # Generate tests that cover all seven Paranoid-Testing categories for a new class
 
@@ -125,7 +126,7 @@ The agent ran `tst-py <module> -q` in Step 7. Run it again to confirm the suite 
 tst-py mymodule -q
 ```
 
-`tst-py` is the project-local wrapper deployed into `cli/` by `/lazy-python.install`. It uses bare module names, not file paths and not `.py` extensions. If the module path is nested, use the dotted path:
+`tst-py` is the project-local wrapper deployed into `cli/` by `/lazy-python.install`, layered over the plugin's shipped `tst` runner. It uses bare module names, not file paths and not `.py` extensions. If the module path is nested, use the dotted path:
 
 ```bash
 tst-py mymodule.subpackage -q
@@ -133,7 +134,7 @@ tst-py mymodule.subpackage -q
 
 If your project declares `python.env_source` (see "What you need" above), `tst-py` sources that script automatically before running pytest — no extra step needed on your part.
 
-If your project aggregates its suites through re-export shims (a `test_all.py` that star-imports every package, plus per-package shim files re-exporting a package's own test classes), the new test class the agent just wrote may get collected twice — once through its own module, once through the aggregator. `tst-py` deduplicates this automatically: no setting to enable, nothing to configure. When it removes at least one duplicate you'll see a one-line summary in the output:
+If your project aggregates its suites through re-export shims (a `test_all.py` that star-imports every package, plus per-package shim files re-exporting a package's own test classes), the new test class the agent just wrote may get collected twice — once through its own module, once through the aggregator. `tst-py` deduplicates this automatically via its bundled pytest plugin: no setting to enable, nothing to configure. When it removes at least one duplicate you'll see a one-line summary in the output:
 
 ```
 [lazy-python] deduplicated N re-exported test items
@@ -171,46 +172,29 @@ Track `docs/guidelines/testing_guidelines.md` in version control. When a teammat
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant agent as lazy-python.test-writer
-  participant canon as Plugin Canon (lazycortex-python)
+  participant testWriter as Test Writer Agent
+  participant canon as Plugin Canon
   participant overlay as Project Overlay
-  participant fs as File System
+  participant targetClass as Target Class
+  participant toolchain as Toolchain
 
-  user->>agent: invoke for target class
-
-  Note over agent,canon: Phase 1 — Guideline ingestion (canon first)
-  agent->>canon: read testing-guidelines.md
-  canon-->>agent: Paranoid-Testing categories + test discipline
-  agent->>canon: read checking-guidelines.md
-  canon-->>agent: chk-py rules + lint/type discipline
-
-  Note over agent,overlay: Phase 2 — Project overlay (second)
-  agent->>overlay: read docs/guidelines/testing_guidelines.md
-  overlay-->>agent: project-specific test overrides
-  agent->>overlay: read docs/guidelines/checking_guidelines.md
-  overlay-->>agent: project-specific check overrides
-  agent->>overlay: read .claude/CLAUDE.md — Testing section
-  overlay-->>agent: repo-level test constraints
-
-  Note over agent: Phase 3 — Target identification
-  agent->>fs: read target class source
-  fs-->>agent: class AST — init paths, public methods, properties
-  Note over agent: identifies: init paths, public methods, properties, documented guarantees, exceptions, operator overloads, edge cases
-
-  Note over agent,fs: Phase 4 — Test file authoring
-  agent->>fs: write test_<TargetClass>.py covering all 7 Paranoid-Testing categories
-  fs-->>agent: file written
-
-  Note over agent,fs: Phase 5 — Three-step toolchain verification
-  agent->>fs: chk-py test_<TargetClass>.py (per-file lint + type)
-  fs-->>agent: per-file check result
-  agent->>fs: chk-py all (full-project lint + type)
-  fs-->>agent: full-project check result
-  agent->>fs: tst-py <module> (module tests)
-  fs-->>agent: test suite result
-
-  Note over agent: Phase 6 — Run logging
-  agent->>fs: write .logs/claude/lazy-python.test-writer/YYYY-MM-DD_HH-MM-SS.md
-  fs-->>agent: log written
-  agent-->>user: test file path + verification summary
+  user->>testWriter: invoke lazy-python.test-writer for target class
+  testWriter->>canon: read testing-guidelines and checking-guidelines
+  canon-->>testWriter: canon rules returned
+  testWriter->>overlay: read testing_guidelines.md and checking_guidelines.md
+  overlay-->>testWriter: overlay rules returned
+  testWriter->>overlay: read CLAUDE.md Testing section
+  overlay-->>testWriter: CLAUDE.md testing rules returned
+  testWriter->>targetClass: identify test targets
+  targetClass-->>testWriter: init paths, public methods, properties, guarantees, exceptions, operator overloads
+  Note over testWriter: writes test file covering all 7 Paranoid-Testing categories
+  loop per test file
+    testWriter->>toolchain: chk-py file
+    toolchain-->>testWriter: file check result
+  end
+  testWriter->>toolchain: chk-py all
+  toolchain-->>testWriter: all-files check result
+  testWriter->>toolchain: tst-py module
+  toolchain-->>testWriter: module test result
+  Note over testWriter: logs the run
 ```

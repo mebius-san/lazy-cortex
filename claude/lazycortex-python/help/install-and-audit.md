@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-python into your repo with an 8-step install wizard (incl. python.env_source detection) and verify with the 11-check read-only audit.
-last_regen: 2026-07-10
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "How install and audit relate"
   request: "Show the two-skill lifecycle: /lazy-python.install runs its install steps (mirror rules → deploy wrappers → detect PyCharm → bootstrap pyproject (pch auto when PyCharm present) → scaffold overlays → sync scaffold templates, python-template.py for regular files and init-template.py for __init__.py → record python.env_source, disambiguating if multiple candidate bootstrap scripts exist) producing a verified install state, then /lazy-python.audit walks its read-only checks against that state and emits PASS/WARN/FAIL/INFO per check. Depict the flow from user invocation through install steps to installed-state artifacts, then through audit checks to the audit report. Highlight that re-running install is the fix for any FAIL."
@@ -22,6 +22,7 @@ Both skills operate against the current working directory, so run them once per 
 - You've updated the plugin from the marketplace and want to refresh the rule mirrors and wrapper scripts in a consumer repo.
 - Something feels off — checks aren't running, `chk-py` is missing, or a rule file looks wrong — and you want a read-only diagnosis before you fix anything.
 - You're onboarding a new machine or a new team member to a repo that already has the plugin and need to confirm all 11 invariants hold.
+- You're upgrading from a pre-2.0 install and need to know what changed in the `pyproject.toml` checker defaults.
 
 ## How it fits together
 
@@ -34,6 +35,8 @@ The connection between them is intentionally simple: the fix for any `FAIL` or `
 ## Common adjustments
 
 **Updating after a plugin version bump.** Re-run `/lazy-python.install` in each repo. The rule mirrors, wrapper scripts, and scaffold templates are overwritten with the new plugin versions. A bare `/plugin update lazycortex-python@lazycortex` refreshes the plugin templates on disk but does not redeploy the `cli/` wrappers — only `/lazy-python.install` does that. Your `pyproject.toml` custom sections are preserved — consumer wins on the merge.
+
+**Docstring sections and field names are now project-neutral (2.0 migration).** Earlier versions of `pcf` shipped built-in "Generation Rules" / "Value Ranges" docstring sections and a hardcoded `_field_filters` escape hatch for private-name tolerance. As of 2.0, `pcf` ships with no project-specific sections or names baked in — every project declares its own via `[tool.pcf]` in `pyproject.toml`: `extra_docstring_sections` (a repeatable `[[tool.pcf.extra_docstring_sections]]` table with `name`, `style`, `after`/`before` anchor, and optional `ref_exempt`) for custom docstring sections, `d2_exempt_marker_attrs` for the D2 private-attribute escape hatch, and `private_name_allowlist` for the D9 private-identifier allowlist. If your repo relied on the old built-in sections or `_field_filters`, re-run `/lazy-python.install` to get the current `pyproject-defaults.toml` template — it ships all three fields as commented-out examples in `[tool.pcf]` — then uncomment and adapt them to your project's own section names and field names. Step 4's merge only appends missing sections; it never removes a section you've already customised, so this migration is opt-in per repo.
 
 **PyCharm inspections (pch).** The install probes for PyCharm's `inspect.sh` and adds `[tool.pch]` to `pyproject.toml` automatically when PyCharm is present — no prompt. On a machine without PyCharm the section is omitted (pch is meaningless there); the rest of the checker stack runs regardless. If you install PyCharm later, re-run `/lazy-python.install` — it skips sections already present and adds the missing `[tool.pch]` now that PyCharm is detected.
 
@@ -108,3 +111,4 @@ flowchart LR
 - **discipline** — the three rules and five reference guidelines that install puts in place and audit verifies.
 - **checkers** — the `chk-py` and `tst-py` wrappers that Step 2 deploys, and the `python.env_source` script they source after the venv activates.
 - **hook** — the PostToolUse hook that auto-registers from the plugin manifest; audit Check 10 verifies its manifest is well-formed.
+</content>

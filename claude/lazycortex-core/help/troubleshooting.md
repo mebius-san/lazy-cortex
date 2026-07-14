@@ -1,13 +1,16 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-07-12
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed / metrics-port-conflict; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.install
+  - lazy-core.audit
+  - lazy-core.doctor
+  - lazy-core.optimize
   - lazy-core.setup
   - lazy-core.agent-models
   - lazy-repo.mark-public
@@ -32,7 +35,6 @@ source_skills:
   - lazy-log.recall
   - lazy-log.timeline
   - lazy-log.summary
-  - lazy-log.bullets
 ---
 # Troubleshooting
 
@@ -159,6 +161,70 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: A child skill (such as `/lazy-core.install`, `/lazy-guard.allow-mcp`, or `/lazy-core.agent-models`) encountered a failure that appears in its own report. `/lazy-core.setup` never aborts the chain on a child failure — it collects all results and surfaces them together.
 
 **Fix**: Read the reason listed per failed child in the setup report. Address the root cause for each (the other entries in this guide cover the most common child failure modes). Then re-run `/lazy-core.setup` — it is idempotent, so children that already succeeded will complete cleanly again and previously-failed ones will be retried.
+
+---
+
+## `/lazy-core.audit` fails: "lazy.settings.json is not valid JSON"
+
+**Symptom**: Running `/lazy-core.audit` aborts immediately with an error like "lazy.settings.json is not valid JSON".
+
+**Likely cause**: `.claude/lazy.settings.json` was hand-edited and the edit broke JSON syntax — a trailing comma, an unclosed brace, a stray character.
+
+**Fix**: Open the file and fix the syntax error directly, or re-scaffold it from scratch by running `/lazy-core.install` (idempotent — it fills in missing structure without touching anything already valid). Then re-run `/lazy-core.audit`.
+
+---
+
+## `/lazy-core.audit` reports an expert reference that "did not resolve"
+
+**Symptom**: `/lazy-core.audit` flags one of your registered experts with a message like "reference did not resolve" for its `agent` field.
+
+**Likely cause**: The `agent` value in `lazy.settings.json[experts]` uses a format the audit doesn't recognise, or points at an agent that no longer exists — a typo, a plugin that was removed, or an agent file that was deleted.
+
+**Fix**: Check the `agent` field against one of the three recognised formats — `<plugin>:<name>`, `user:<name>`, or a bare `<name>`. If the target agent genuinely no longer exists, re-run `/lazy-core.install` to re-register the expert against a valid agent.
+
+---
+
+## `/lazy-core.audit` flags a routine command as failing even though the plugin is installed
+
+**Symptom**: `/lazy-core.audit` reports a routine's `command:` entry as failing, but you can confirm the named plugin is installed and working.
+
+**Likely cause**: The routine's recorded command path points at an older plugin-cache layout. Plugin binaries live under a versioned path; if the routine was registered against an earlier install, the path in `lazy.settings.json` can go stale after a plugin update.
+
+**Fix**: Re-install the plugin that owns the routine (`/plugin update <plugin>@lazycortex`), then re-run `/lazy-core.install` for that plugin so the routine's command path is refreshed. Re-run `/lazy-core.audit` to confirm.
+
+---
+
+## `/lazy-core.doctor` Fix L1 fails: systemd unit not found
+
+**Symptom**: `/lazy-core.doctor` offers to restart the daemon via `systemctl --user restart`, but the fix fails with "Unit not found".
+
+**Likely cause**: The systemd user unit was never installed for this checkout — this happens on a first-time daemon setup where the unit-install step of `/lazy-core.install` was skipped or interrupted.
+
+**Fix**: Run `/lazy-core.install` to install the unit file and register it (`systemctl --user daemon-reload`), then re-run `/lazy-core.doctor` to confirm the daemon restarts cleanly.
+
+---
+
+## `/lazy-core.doctor` can't clean up a dead job: Permission denied
+
+**Symptom**: `/lazy-core.doctor` identifies a dead expert job and offers to remove its directory, but the fix fails with "Permission denied".
+
+**Likely cause**: The job directory was created by a different user or process and the current user lacks write permission to remove it.
+
+**Fix**: Remove the job directory by hand from your terminal with the appropriate permissions (`sudo rm -rf` or `chown` first, depending on your setup), then re-run `/lazy-core.doctor` to confirm the job no longer shows as dead.
+
+---
+
+## `/lazy-core.doctor` can't remove a stray routine, or the routine keeps coming back
+
+**Symptom**: `/lazy-core.doctor` offers to remove a routine it considers stray, but the fix fails with "settings file not writable" — or the fix succeeds, but the same routine reappears the next time you run `/lazy-core.doctor`.
+
+**Likely cause (not writable)**: `.claude/lazy.settings.json` is read-only or the current process lacks write permission.
+
+**Likely cause (reappears)**: The routine is one a plugin re-adds automatically on every install — running `/lazy-core.install` again after the removal restores it because the plugin's default-routines bootstrap doesn't know it was deliberately removed.
+
+**Fix (not writable)**: Fix the file's permissions, then re-run `/lazy-core.doctor`.
+
+**Fix (reappears)**: If you don't want the routine at all, re-run `/lazy-core.install` and decline the relevant routine at the prompt (where the install flow offers one), rather than removing it after the fact via `/lazy-core.doctor`.
 
 ---
 
@@ -614,3 +680,38 @@ New sessions pick up the consolidated hook from `lazycortex-core` cleanly.
 ---
 
 ## Diagnostic flowchart
+
+```mermaid
+%%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart TD
+  symptomObserved{Which symptom group?}
+
+  installSetupLeaf[Look at install-or-setup - python floor, plugin cache, agent_models seeding, settings-daemon-supervisor writes, dir-vs-file collisions, setup migration-child failures, metrics port]
+  agentModelsLeaf[Look at agent-models - invalid scope, tier ignored, floor env, duplicate keys]
+  mcpSecurityLeaf[Look at mcp-or-security - server not found-loaded, permission loops, mark-public failures]
+  hookNotFiringLeaf[Look at hook-not-firing]
+  expertRuntimeLeaf[Look at expert-runtime - experts not init, payload-registration, collect-cancel, spawn hangs, unpinned model, preflight]
+  routinesLeaf[Look at routines - name format, conflicts, unknown type, settings unwritable]
+  daemonRuntimeLeaf[Look at daemon-or-runtime - daemon stale-never starts, recover flows, state unparseable, post-push hook]
+  gitCoordinationLeaf[Look at git-coordination - lock stuck, no lock]
+  memoryLeaf[Look at memory - not persona, frontmatter, reflect]
+  logCleanLeaf[Look at log-clean - dir absent, resolver failed]
+
+  symptomObserved -->|install or setup| installSetupLeaf
+  symptomObserved -->|agent models| agentModelsLeaf
+  symptomObserved -->|mcp or security| mcpSecurityLeaf
+  symptomObserved -->|hook not firing| hookNotFiringLeaf
+  symptomObserved -->|expert runtime| expertRuntimeLeaf
+  symptomObserved -->|routines| routinesLeaf
+  symptomObserved -->|daemon or runtime| daemonRuntimeLeaf
+  symptomObserved -->|git coordination| gitCoordinationLeaf
+  symptomObserved -->|memory| memoryLeaf
+  symptomObserved -->|log clean| logCleanLeaf
+
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+
+  class symptomObserved guard
+  class installSetupLeaf,agentModelsLeaf,mcpSecurityLeaf,hookNotFiringLeaf,expertRuntimeLeaf,routinesLeaf,daemonRuntimeLeaf,gitCoordinationLeaf,memoryLeaf,logCleanLeaf success
+```
+</content>

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to non-obvious questions about install vs setup, settings placement, plugin composition, agent routing, the expert runtime and job lifecycle, the memory subsystem, routine types, daemon recovery, metrics provisioning, and push automation, git staging coordination, MCP tool permissions, change-history tooling, and the public-repo guard scanner.
-last_regen: 2026-07-12
+last_regen: 2026-07-14
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -55,6 +55,12 @@ No. `/lazy-core.setup` runs a settings migration as its first step (Step 0) befo
 ## Do I need to re-run `/lazy-core.install` after a plugin update?
 
 Yes. `/plugin update` refreshes the plugin cache but does not re-sync rule files into `.claude/rules/`. Your project keeps running the old rule content until you explicitly re-run `/lazy-core.install` (or `/lazy-core.setup`, which includes it). This is intentional: syncing can overwrite local edits, so the install skill walks you through each changed file one at a time — overwrite, keep-local, or delete if the file was removed upstream — before touching anything.
+
+---
+
+## My runtime daemon still behaves like an old version after I updated the plugin — why?
+
+The daemon isn't started directly; a small shim at `.claude/bin/lazy.runtime.sh` resolves the newest `lazycortex-core` build in the plugin cache each time it starts, then execs that version's runner. If the shim script itself is stale — content-drifted from the version the plugin currently ships — it can carry an outdated resolution rule and keep pointing at an old cached version even after `/plugin update` pulls the fix down. `/lazy-core.install` re-syncs the shim on content drift (state **refreshed** in its report) whenever the shipped template changed, so re-running it after a plugin update is what actually gets a supervised daemon onto the new build; `/plugin update` alone only refreshes the cache the shim reads from.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Per-expert long-term memory tracked in git — experts consult notes before primary work, write new notes as a side-effect of jobs, and consolidate via reflect passes.
-last_regen: 2026-07-12
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "How the four skills compose"
   request: "Flow diagram showing the four memory skills and how they compose: mark-persona opts an expert in (writes lazy.settings.json experts entry); write is the only blessed note writer (writes .memory/<expert>/ notes, regenerates .tags/); reflect dispatches a kind=reflect job that feeds run logs and existing notes to the expert, which then calls write; index rebuilds .tags/ from note frontmatter as a recovery path. Show .memory/<expert>/ and .memory/.tags/ as shared state that write maintains and reflect reads."
@@ -31,7 +31,7 @@ Four skills make this possible: one to opt an expert in, one to write notes atom
 
 **Start with opt-in.** Run `/lazy-memory.mark-persona <expert>`. The skill modifies `lazy.settings.json` to attach the persona aspect — from this point on the expert is memory-capable. You run this once per expert; it is safe to re-run on an expert that is already opted in.
 
-**Let notes accumulate naturally.** As the expert runs ordinary jobs it calls `/lazy-memory.write` whenever it identifies a pattern worth retaining — a code-style rule derived from reviewing diffs, a project-specific convention discovered in a failing test, a warning about a dependency that breaks silently. You do not need to prompt the expert to write notes; the persona aspect includes that obligation in the expert's runtime context. Each write lands a committed note and updated tag files without any extra git step from you.
+**Let notes accumulate naturally.** As the expert runs ordinary jobs it calls `/lazy-memory.write` whenever it identifies something worth keeping about itself — a reviewing technique it wants to keep consistent, a persona adjustment you gave it (e.g. "stop dressing recommendations as questions"), a recurring mistake in its own craft that it now checks for. Memory is scoped to the expert, not the project: facts about your codebase, schemas, or domain data belong in specs, the wiki, or source — never in an expert's notebook. You do not need to prompt the expert to write notes; the persona aspect includes that obligation in the expert's runtime context. Each write lands a committed note and updated tag files without any extra git step from you.
 
 **Discover what peers know.** Every write regenerates two tag files: the expert-local `.memory/<expert>/.tags/<topic>.md` pointing to that expert's notes on the topic, and the global `.memory/.tags/<topic>.md` aggregating pointers across every expert that has notes there. When one expert wants to know what a peer has learned about a subject, it reads the global tag file to find who has relevant notes, reads the peer's local tag file to find the specific note paths, then reads those notes directly. No expert can write to a peer's notebook — the write skill enforces single-expert ownership.
 
@@ -64,34 +64,40 @@ Four skills make this possible: one to opt an expert in, one to write notes atom
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  markPersona[mark-persona opts expert in]
-  expertSettings[(lazy.settings.json experts entry)]
-  reflectSkill[reflect dispatches reflect job]
-  expertProcess[expert processes run logs and notes]
+  markPersonaSkill[mark-persona opts expert in]
+  settingsEntry[lazy.settings.json experts entry]
   writeSkill[write - blessed note writer]
-  expertNotes[(.memory/expert/ notes)]
-  tagsDir[(.memory/.tags/)]
-  indexSkill[index rebuilds .tags from frontmatter]
+  memoryNotes[.memory/expert/ notes]
+  tagsIndex[.tags/ index]
+  reflectSkill[reflect dispatches reflect job]
+  reflectJob[kind=reflect job]
+  runLogs[run logs]
+  expertProcess[expert processes logs and notes]
+  indexSkill[index rebuilds .tags/]
 
-  markPersona -->|writes| expertSettings
-  reflectSkill -->|dispatches job| expertProcess
-  expertProcess -->|reads existing notes| expertNotes
+  markPersonaSkill -->|writes| settingsEntry
+  reflectSkill -->|dispatches| reflectJob
+  reflectJob -->|feeds| expertProcess
+  runLogs -->|feeds| expertProcess
+  memoryNotes -->|feeds| expertProcess
   expertProcess -->|calls| writeSkill
-  writeSkill -->|writes notes| expertNotes
-  writeSkill -->|regenerates| tagsDir
-  indexSkill -->|rebuilds from| expertNotes
-  indexSkill -->|rebuilds| tagsDir
+  writeSkill -->|writes notes| memoryNotes
+  writeSkill -->|regenerates| tagsIndex
+  indexSkill -->|reads| memoryNotes
+  indexSkill -->|rebuilds| tagsIndex
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
-  classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
-  class markPersona entry
-  class reflectSkill action
-  class expertProcess action
+  class markPersonaSkill entry
+  class reflectSkill entry
+  class indexSkill entry
   class writeSkill action
-  class indexSkill action
-  class expertSettings store
-  class expertNotes store
-  class tagsDir store
+  class memoryNotes action
+  class tagsIndex action
+  class reflectJob action
+  class runLogs action
+  class expertProcess action
+  class settingsEntry success
 ```

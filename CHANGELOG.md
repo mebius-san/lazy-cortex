@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.14.0 — 2026-07-14 UTC
+
+- Fixed the daemon-runner version lookup in `lazy.runtime.sh`: a lexicographic (not version-aware) sort meant any daemon on 5.10+ still resolved back to the stale 5.9.0 cache dir. Run `/lazy-core.install` to re-render the shim and pick up the fix.
+
 ### 5.13.0 — 2026-07-12 UTC
 
 - `lazy-core.agent-models` wizard now automatically prunes stale tier entries left behind by deleted agents, in both interactive and non-interactive runs; `lazy-core.autocheckup` treats the prune as a safe auto-fix, while an expert still referencing a deleted agent is still surfaced as a warning, never auto-edited.
@@ -651,6 +655,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 0.5.0 — 2026-07-14 UTC
+
+- Runtime dashboard reworked: a new Daemons table (one row per repo, showing liveness, halt state, failed/dead job counts, and errors with gradient bars) replaces the old top stat strip; a Tokens-by-repo donut chart replaces the per-daemon token tiles/column; Open/Problem jobs charts moved above the queue table; model labels no longer show the `claude-` prefix.
+
 ### 0.4.0 — 2026-07-12 UTC
 
 - `lazy-observe.install` now pre-flights the host for existing metrics collection and skips all prompts when nothing needs to change; new `--integrate-only` flag publishes scrape targets without installing a shipper, and `--force-standalone` overrides auto-detection.
@@ -733,6 +741,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 2.0.0 — 2026-07-14 UTC
+
+- **Breaking:** `pcf` docstring-section checks (D2/D9) are now project-neutral — the built-in `Generation Rules` / `Value Ranges` sections and the `_field_filters` D2 escape hatch are gone. Declare `extra_docstring_sections`, `d2_exempt_marker_attrs`, and `private_name_allowlist` under `[tool.pcf]` in your own `pyproject.toml` (commented examples in the shipped template) to keep custom sections and private-name exemptions working.
+- Fixed: consumer-registered `style = "definition"` docstring sections are now skipped by the D9 narrative scan, matching the built-in definition sections (Attributes, Args, Raises, Type Parameters) — plain-style sections still get scanned.
 
 ### 1.10.0 — 2026-07-10 UTC
 

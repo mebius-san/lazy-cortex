@@ -42,6 +42,15 @@ DEFAULT_CONFIG = {
   # extra docstring-content patterns rejected as banned (substring match, any section).
   # populated from pyproject.toml [tool.pcf] banned_docstring_phrases.
   'banned_docstring_phrases': [],
+  # consumer-registered docstring sections, each {name, style, after|before, ref_exempt}.
+  # populated from pyproject.toml [tool.pcf] extra_docstring_sections.
+  'extra_docstring_sections': [],
+  # class attribute names whose declaration exempts a class from D2 (private labels in Attributes:).
+  # populated from pyproject.toml [tool.pcf] d2_exempt_marker_attrs.
+  'd2_exempt_marker_attrs': [],
+  # private identifiers tolerated in docstring narrative by D9.
+  # populated from pyproject.toml [tool.pcf] private_name_allowlist.
+  'private_name_allowlist': [],
 }
 
 
@@ -2504,8 +2513,6 @@ class CodeFormatAnalyzer:
 DOCSTRING_SECTIONS_ORDER = [
   'Responsibilities',
   'Guarantees',
-  'Generation Rules',
-  'Value Ranges',
   'Subclassing',
   'Overriding',
   'Methods',
@@ -2520,8 +2527,7 @@ DOCSTRING_SECTIONS_ORDER = [
 
 # sections that must use bulleted lists
 BULLETED_SECTIONS = {
-  'Responsibilities', 'Guarantees', 'Generation Rules', 'Value Ranges',
-  'Subclassing', 'Overriding', 'Methods', 'Notes',
+  'Responsibilities', 'Guarantees', 'Subclassing', 'Overriding', 'Methods', 'Notes',
 }
 
 # sections that must use definition lists (name: description)
@@ -2545,17 +2551,13 @@ _COMMA_CHAINED_SUMMARY_RE = re.compile(
 # excludes dunders like __init__ and standalone underscore.
 _PRIVATE_NAME_RE = re.compile(r'(?<![\w_])(_[a-z]\w*)\b')
 
-# Class-level attribute names recognized as field-filter declarations (D2 escape hatch).
-# Both the parent attribute name and the canonical subclass declaration name are accepted.
-_FIELD_FILTERS_NAMES = frozenset({ '_field_filters', '_class_field_filters' })
-
 # Sections where private-name narrative references (D9) are tolerated:
 # Subclassing/Overriding target subclass authors who legitimately need private hooks;
-# Notes/Type Parameters/Generation Rules/Args/Returns/Raises/Attributes either describe
+# Notes/Type Parameters/Args/Returns/Raises/Attributes either describe
 # advanced detail or are checked by other rules (D2).
 _D9_SKIP_SECTIONS = frozenset({
   'Subclassing', 'Overriding', 'Notes', 'Type Parameters',
-  'Generation Rules', 'Args', 'Raises', 'Attributes',
+  'Args', 'Raises', 'Attributes',
 })
 
 # Connecting prepositions that turn a comma-list into criteria/scope rather than steps (D6).
@@ -2563,9 +2565,6 @@ _D6_LIST_PREPOSITIONS = frozenset({
   'for', 'by', 'with', 'using', 'from', 'to', 'over',
   'as', 'into', 'across', 'on', 'against', 'about', 'of',
 })
-
-# private names that are acceptable to mention in narrative (canonical project tokens).
-_PRIVATE_NAME_ALLOWLIST = frozenset({ '_field_filters' })
 
 
 # ----------------------------------------------------------------------------------------
@@ -2585,7 +2584,10 @@ class DocstringAnalyzer(ast.NodeVisitor):
                max_line_length: int = 117,
                check_line_length: bool = True,
                check_docstring_content: bool = True,
-               banned_docstring_phrases: list[str] | None = None):
+               banned_docstring_phrases: list[str] | None = None,
+               extra_docstring_sections: list[dict] | None = None,
+               d2_exempt_marker_attrs: list[str] | None = None,
+               private_name_allowlist: list[str] | None = None):
     """
     Initialize the DocstringAnalyzer.
 
@@ -2595,19 +2597,83 @@ class DocstringAnalyzer(ast.NodeVisitor):
       check_line_length: whether to check docstring line length.
       check_docstring_content: whether to run extended docstring-content checks (D1-D9).
       banned_docstring_phrases: substrings rejected anywhere in a docstring body (D5 input).
+      extra_docstring_sections: consumer-registered docstring sections from `[tool.pcf]`.
+      d2_exempt_marker_attrs: class attribute names whose declaration exempts a class from D2.
+      private_name_allowlist: private identifiers tolerated in docstring narrative by D9.
     """
     self.source_lines = source_lines
     self.max_line_length = max_line_length
     self.check_line_length = check_line_length
     self.check_docstring_content = check_docstring_content
     self.banned_docstring_phrases = list(banned_docstring_phrases or [])
+    self.d2_exempt_marker_attrs = frozenset(d2_exempt_marker_attrs or [])
+    self.private_name_allowlist = frozenset(private_name_allowlist or [])
     self.issues: list[tuple[int, str]] = []
     self._visited_nodes: set[int] = set()
-    # stack of per-class context for D2: each entry is (has_field_filters, class_constants).
-    # `has_field_filters` is True when the enclosing class declares or mutates a
-    # field-filters mapping; `class_constants` is the set of names assigned at class-body
-    # scope -- both grant exemption from D2 for private labels in `Attributes:`.
+    # stack of per-class context for D2: each entry is (has_d2_exempt_marker, class_constants).
+    # `has_d2_exempt_marker` is True when the enclosing class declares or mutates a
+    # configured D2-exempt marker attribute; `class_constants` is the set of names assigned
+    # at class-body scope -- both grant exemption from D2 for private labels in `Attributes:`.
     self._class_ctx_stack: list[tuple[bool, set[str]]] = []
+    self.sections_order = list(DOCSTRING_SECTIONS_ORDER)
+    self.bulleted_sections = set(BULLETED_SECTIONS)
+    self.definition_sections = set(DEFINITION_SECTIONS)
+    self.plain_sections = set(PLAIN_SECTIONS)
+    self.d9_skip_sections = set(_D9_SKIP_SECTIONS)
+    self.ref_exempt_sections: set[str] = set()
+    self._merge_extra_sections(extra_docstring_sections or [])
+
+
+  def _merge_extra_sections(self, entries: list[dict]) -> None:
+    """
+    Merge consumer-declared docstring sections into the section machinery.
+
+    Each entry names a section, its list style, an optional order anchor
+    (`after` / `before` an existing section), and an optional `ref_exempt`
+    flag that shields the section's body from D5/D7/D9. Definition-style
+    sections are skipped by the D9 narrative scan like the built-in
+    definition sections. Malformed entries are skipped -- a checker must
+    not crash on a config typo.
+
+    Args:
+      entries: raw `extra_docstring_sections` entries from `[tool.pcf]`.
+    """
+    style_sets = {
+      'bulleted': self.bulleted_sections,
+      'definition': self.definition_sections,
+      'plain': self.plain_sections,
+    }
+    for entry in entries:
+      # guard: malformed entry shape
+      if not isinstance(entry, dict):
+        continue
+      name = entry.get('name')
+      style = entry.get('style')
+      # guard: unusable or duplicate section name
+      if not isinstance(name, str) or not name or name in self.sections_order:
+        continue
+      # guard: unknown list style
+      if style not in style_sets:
+        continue
+      after = entry.get('after')
+      before = entry.get('before')
+      # resolve insertion position: after/before an existing section, else append
+      if isinstance(after, str) and after in self.sections_order:
+        pos = self.sections_order.index(after) + 1
+      elif isinstance(before, str) and before in self.sections_order:
+        pos = self.sections_order.index(before)
+      else:
+        pos = len(self.sections_order)
+      self.sections_order.insert(pos, name)
+      style_sets[style].add(name)
+      # guard: definition sections are name/description label lists -- D9 skips them
+      # like the built-in definition sections (Attributes, Args, Raises, Type Parameters)
+      if style == 'definition':
+        self.d9_skip_sections.add(name)
+      # ref-exempt sections are skipped by D5/D7 (line scan) and D9 (section scan)
+      if entry.get('ref_exempt'):
+        self.ref_exempt_sections.add(name)
+        self.d9_skip_sections.add(name)
 
 
   def _get_docstring_info(self, 
@@ -2688,7 +2754,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
 
       # check if this is a section header
       is_section = False
-      for section_name in DOCSTRING_SECTIONS_ORDER:
+      for section_name in self.sections_order:
         if stripped == f'{section_name}:':
           is_section = True
           # save previous section if exists
@@ -2725,8 +2791,8 @@ class DocstringAnalyzer(ast.NodeVisitor):
     expected_indices = []
 
     for sec_name in section_names:
-      if sec_name in DOCSTRING_SECTIONS_ORDER:
-        expected_indices.append(DOCSTRING_SECTIONS_ORDER.index(sec_name))
+      if sec_name in self.sections_order:
+        expected_indices.append(self.sections_order.index(sec_name))
 
     # check if indices are in ascending order
     for idx in range(1, len(expected_indices)):
@@ -2841,9 +2907,9 @@ class DocstringAnalyzer(ast.NodeVisitor):
       node_name: name of the node for error messages.
     """
     for section_name, rel_line, content in sections:
-      if section_name in BULLETED_SECTIONS:
+      if section_name in self.bulleted_sections:
         self._check_bulleted_section(section_name, content, start_line, rel_line, node_name)
-      elif section_name in DEFINITION_SECTIONS:
+      elif section_name in self.definition_sections:
         self._check_definition_section(section_name, content, start_line, rel_line, node_name)
 
 
@@ -2862,7 +2928,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
     lines = docstring.split('\n')
     for idx, line in enumerate(lines):
       stripped = line.strip()
-      for section_name in DOCSTRING_SECTIONS_ORDER:
+      for section_name in self.sections_order:
         if stripped == f'{section_name}:':
           # check if the previous non-empty line exists and there's no blank before
           if idx > 0:
@@ -2951,38 +3017,39 @@ class DocstringAnalyzer(ast.NodeVisitor):
         ))
 
 
-  def _class_has_field_filters_decl(self, node: ast.ClassDef) -> bool:
+  def _class_has_d2_exempt_marker(self, node: ast.ClassDef) -> bool:
     """
-    Detect whether the class body declares a field-filters mapping at the top level.
+    Detect whether the class body declares a configured D2-exempt marker attribute.
 
-    The declaration is a standing exemption for D2: classes that maintain a
-    field-filters mapping are allowed to surface their private fields in the
-    `Attributes:` section. Both `_field_filters` (parent attribute name) and
-    `_class_field_filters` (canonical subclass declaration name) are accepted;
-    so are dynamic mutations of either name from inside `__init_subclass__`
-    or other class-body methods.
+    The declaration is a standing exemption for D2: classes that declare or mutate
+    one of the configured marker attribute names are allowed to surface their private
+    fields in the `Attributes:` section. Dynamic mutation of a marker name from inside
+    `__init_subclass__` or other class-body methods is also accepted.
 
     Args:
       node: class definition AST node.
 
     Returns:
-      True if the class body declares or mutates a field-filters name anywhere.
+      True if the class body declares or mutates a configured marker attribute anywhere.
     """
+    # guard: no marker attributes configured -- the escape hatch is disabled
+    if not self.d2_exempt_marker_attrs:
+      return False
     for item in node.body:
       # match: <name> = {...}
       if isinstance(item, ast.Assign):
         for target in item.targets:
-          if isinstance(target, ast.Name) and target.id in _FIELD_FILTERS_NAMES:
+          if isinstance(target, ast.Name) and target.id in self.d2_exempt_marker_attrs:
             return True
       # match: <name>: ClassVar[...] = {...}
       elif isinstance(item, ast.AnnAssign):
         target = item.target
-        if isinstance(target, ast.Name) and target.id in _FIELD_FILTERS_NAMES:
+        if isinstance(target, ast.Name) and target.id in self.d2_exempt_marker_attrs:
           return True
     # walk the entire class body (including nested methods like `__init_subclass__`)
-    # to detect dynamic mutation of the inherited filter via `cls._field_filters[...]`
+    # to detect dynamic mutation of a configured marker via `cls._marker_attr[...]`
     return any(
-      isinstance(sub, ast.Attribute) and sub.attr in _FIELD_FILTERS_NAMES
+      isinstance(sub, ast.Attribute) and sub.attr in self.d2_exempt_marker_attrs
       for sub in ast.walk(node)
     )
 
@@ -3053,20 +3120,21 @@ class DocstringAnalyzer(ast.NodeVisitor):
     D2: reject private-name labels in the `Attributes:` section.
 
     Private names are permitted in two cases: the enclosing class declares or
-    mutates a field-filters mapping (the project's escape hatch), or the label
-    matches a class-level constant declared in the class body (the project's
-    metadata-documentation pattern, e.g. `_cls_data_ver`).
+    mutates a configured D2-exempt marker attribute (the project's escape hatch,
+    see `[tool.pcf] d2_exempt_marker_attrs`), or the label matches a class-level
+    constant declared in the class body (the project's metadata-documentation
+    pattern, e.g. `_cls_data_ver`).
 
     Args:
       sections: parsed docstring sections.
       start_line: source line of the docstring opening `\"\"\"`.
       node_name: enclosing class/function name for the message.
     """
-    has_ff, class_consts = (
+    has_marker, class_consts = (
       self._class_ctx_stack[-1] if self._class_ctx_stack else (False, set())
     )
-    # guard: enclosing class permits private attributes via field-filters declaration
-    if has_ff:
+    # guard: enclosing class permits private attributes via a configured D2-exempt marker
+    if has_marker:
       return
     for section_name, rel_line, content in sections:
       # guard: only inspect Attributes
@@ -3085,7 +3153,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
           self.issues.append((
             actual_line,
             f"D2 private attribute '{full_name}' in Attributes of '{node_name}' "
-            f"(allowed only if listed in `_field_filters` or declared as a class constant)"
+            f"(allowed only for class constants or when the class declares a configured D2-exempt marker)"
           ))
 
 
@@ -3147,13 +3215,14 @@ class DocstringAnalyzer(ast.NodeVisitor):
     ))
 
 
-  def _gen_rules_line_indices(self, docstring: str) -> set[int]:
+  def _ref_exempt_line_indices(self, docstring: str) -> set[int]:
     """
-    Return line indices that fall inside the `Generation Rules:` section.
+    Return line indices that fall inside ref-exempt sections.
 
-    This section is owned by the `tiv-gen.check-rules` skill; D-checks must
-    not flag its content (it carries `# REF:` lines and proto-class language
-    that would otherwise trip D5/D7/D9).
+    Ref-exempt sections are registered by the consumer via `[tool.pcf]
+    extra_docstring_sections` with `ref_exempt = true`; their bodies carry
+    `# REF:` lines and generator-owned content that project tooling consumes,
+    so D5/D7/D9 must not flag them.
 
     Args:
       docstring: the cleaned docstring text.
@@ -3162,22 +3231,25 @@ class DocstringAnalyzer(ast.NodeVisitor):
       Set of line indices (0-based, into `docstring.split('\\n')`) that the
       caller should skip.
     """
+    # guard: no ref-exempt sections registered
+    if not self.ref_exempt_sections:
+      return set()
     lines = docstring.split('\n')
     skip: set[int] = set()
-    in_gen_rules = False
+    in_exempt = False
     for idx, line in enumerate(lines):
       stripped = line.strip()
-      # guard: enter Generation Rules section
-      if stripped == 'Generation Rules:':
-        in_gen_rules = True
+      # guard: enter a ref-exempt section
+      if stripped.endswith(':') and stripped[:-1] in self.ref_exempt_sections:
+        in_exempt = True
         skip.add(idx)
         continue
-      # any other top-level section header ends the Generation Rules scope
-      if stripped.endswith(':') and stripped[:-1] in DOCSTRING_SECTIONS_ORDER:
-        in_gen_rules = False
+      # any other top-level section header ends the ref-exempt scope
+      if stripped.endswith(':') and stripped[:-1] in self.sections_order:
+        in_exempt = False
         continue
-      # guard: line is inside Generation Rules
-      if in_gen_rules:
+      # guard: line is inside a ref-exempt section
+      if in_exempt:
         skip.add(idx)
     return skip
 
@@ -3191,8 +3263,8 @@ class DocstringAnalyzer(ast.NodeVisitor):
 
     Banned phrases are loaded from `pyproject.toml` `[tool.pcf]
     banned_docstring_phrases`. Substring match is case-sensitive and applies
-    to all sections, including Summary. The `Generation Rules:` section is
-    skipped -- it is owned by the `tiv-gen.check-rules` skill.
+    to all sections, including Summary. Ref-exempt sections registered via
+    `[tool.pcf]` are skipped.
 
     Args:
       docstring: the cleaned docstring text.
@@ -3203,13 +3275,13 @@ class DocstringAnalyzer(ast.NodeVisitor):
     if not self.banned_docstring_phrases:
       return
     lines = docstring.split('\n')
-    skip_idx = self._gen_rules_line_indices(docstring)
+    skip_idx = self._ref_exempt_line_indices(docstring)
     for phrase in self.banned_docstring_phrases:
       # guard: skip empty phrases (defensive against config typos)
       if not phrase:
         continue
       for idx, line in enumerate(lines):
-        # guard: Generation Rules section is owned by tiv-gen.check-rules
+        # guard: ref-exempt section content is owned by consumer tooling
         if idx in skip_idx:
           continue
         if phrase in line:
@@ -3275,9 +3347,9 @@ class DocstringAnalyzer(ast.NodeVisitor):
     `DOC(...)` tag) belong in code comments, never in docstring bodies (per
     `documenting_guidelines.md` line 19 zero-tolerance blocker).
 
-    Skips the `Generation Rules:` section entirely -- the project's
-    `tiv-gen.generation-rules.md` rule mandates `# REF:` lines there as source
-    references that the generator strips at runtime.
+    Skips ref-exempt sections entirely -- sections registered via
+    `[tool.pcf]` with `ref_exempt = true` carry `# REF:` lines as source
+    references that consumer tooling strips at runtime.
 
     Args:
       docstring: the cleaned docstring text.
@@ -3285,9 +3357,9 @@ class DocstringAnalyzer(ast.NodeVisitor):
       node_name: enclosing class/function name for the message.
     """
     lines = docstring.split('\n')
-    skip_idx = self._gen_rules_line_indices(docstring)
+    skip_idx = self._ref_exempt_line_indices(docstring)
     for idx, line in enumerate(lines):
-      # guard: Generation Rules section is owned by tiv-gen.check-rules
+      # guard: ref-exempt section content is owned by consumer tooling
       if idx in skip_idx:
         continue
       m = _DOCSTRING_MARKERS_RE.search(line)
@@ -3325,7 +3397,8 @@ class DocstringAnalyzer(ast.NodeVisitor):
     `Subclassing:` / `Overriding:` document hooks subclass authors must use;
     `Notes:` carries advanced-usage detail; `Attributes:` / `Args:` / `Raises:`
     are definition lists checked by other rules; `Type Parameters:` describes
-    type variables; `Generation Rules:` cites code via `# REF:` lines.
+    type variables; ref-exempt sections registered via `[tool.pcf]` cite code
+    via `# REF:` lines.
 
     Args:
       docstring: the cleaned docstring text.
@@ -3338,7 +3411,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
       stripped = line.strip()
       # detect section header transitions
       header_hit = False
-      for sec_name in DOCSTRING_SECTIONS_ORDER:
+      for sec_name in self.sections_order:
         if stripped == f'{sec_name}:':
           current_section = sec_name
           header_hit = True
@@ -3347,13 +3420,13 @@ class DocstringAnalyzer(ast.NodeVisitor):
       if header_hit:
         continue
       # guard: skip sections that legitimately reference private names
-      if current_section in _D9_SKIP_SECTIONS:
+      if current_section in self.d9_skip_sections:
         continue
       # scan for private-name tokens in caller-facing narrative
       for m in _PRIVATE_NAME_RE.finditer(line):
         name = m.group(1)
         # guard: skip allowlisted tokens
-        if name in _PRIVATE_NAME_ALLOWLIST:
+        if name in self.private_name_allowlist:
           continue
         # detect string-literal or template-placeholder context: '_name' and
         # {_effects.gen_rules} are literal values, not code references.
@@ -3448,8 +3521,8 @@ class DocstringAnalyzer(ast.NodeVisitor):
     Args:
       node: class definition AST node.
     """
-    # track per-class D2 exemption context: field-filters presence + class constants
-    ctx = (self._class_has_field_filters_decl(node), self._class_constant_names(node))
+    # track per-class D2 exemption context: configured marker presence + class constants
+    ctx = (self._class_has_d2_exempt_marker(node), self._class_constant_names(node))
     self._class_ctx_stack.append(ctx)
     try:
       self._analyze_docstring(node)
@@ -4709,7 +4782,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
     Return True if `assign` is a constant-definition: ALL_CAPS/dunder target, or at class-body scope.
 
     Class-body assignments (even with non-ALL_CAPS targets) are treated as the class's
-    complex constants (e.g., `_protected_fields = { ... }`, `_class_field_filters = { ... }`).
+    complex constants (e.g., `_protected_fields = { ... }`, `_cls_data_ver = { ... }`).
 
     Args:
       assign: the Assign or AnnAssign AST node.
@@ -4831,12 +4904,30 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
       [ p for p in banned_phrases_raw if isinstance(p, str) ]
       if isinstance(banned_phrases_raw, list) else []
     )
+    extra_sections_raw = config.get('extra_docstring_sections', []) or []
+    extra_sections = (
+      [ e for e in extra_sections_raw if isinstance(e, dict) ]
+      if isinstance(extra_sections_raw, list) else []
+    )
+    d2_markers_raw = config.get('d2_exempt_marker_attrs', []) or []
+    d2_markers = (
+      [ n for n in d2_markers_raw if isinstance(n, str) ]
+      if isinstance(d2_markers_raw, list) else []
+    )
+    private_allowlist_raw = config.get('private_name_allowlist', []) or []
+    private_allowlist = (
+      [ n for n in private_allowlist_raw if isinstance(n, str) ]
+      if isinstance(private_allowlist_raw, list) else []
+    )
     docstring_analyzer = DocstringAnalyzer(
       source_lines,
       max_line_length = max_line_length,
       check_line_length = check_docstring_line_length,
       check_docstring_content = check_docstring_content,
-      banned_docstring_phrases = banned_phrases
+      banned_docstring_phrases = banned_phrases,
+      extra_docstring_sections = extra_sections,
+      d2_exempt_marker_attrs = d2_markers,
+      private_name_allowlist = private_allowlist
     )
     docstring_analyzer.visit(tree)
     all_issues.extend(docstring_analyzer.analyze())

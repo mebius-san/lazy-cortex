@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, tests, and the checker stack.
-last_regen: 2026-07-10
+last_regen: 2026-07-14
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -9,6 +9,8 @@ source_skills:
   - lazy-python.check-style
   - lazy-python.docstring-writer
   - lazy-python.test-writer
+  - chk
+  - tst
 ---
 # Frequently asked questions
 
@@ -61,6 +63,20 @@ The PostToolUse hook runs `pcf.py` automatically on every `.py` edit and surface
 ## Can I run `mypy`, `pylint`, or `ruff` directly instead of `chk-py`?
 
 No. The plugin enforces running all style and type validation through `chk-py`. The aggregator runs `pcf`, `toi`, `cmp`, `mypy`, `ruff`, and `pylint` in the correct order with shared config from `pyproject.toml`; calling any one tool directly skips earlier phases and can produce misleading results. Similarly, use `tst-py` rather than raw `pytest` — the wrapper applies project-wide pytest args and uses the correct venv.
+
+---
+
+## How do I add my own docstring section?
+
+Declare it in `pyproject.toml` under a `[[tool.pcf.extra_docstring_sections]]` table — the section's `name`, its list `style` (`bulleted`, `definition`, or `plain`), and an `after`/`before` anchor naming a built-in or previously declared section to position it relative to. Add `ref_exempt = true` if the section's body carries `# REF:` lines that should be shielded from the phrasing and private-name checks. The shipped `pyproject-defaults.toml` template ships all three `[tool.pcf]` keys as commented-out examples, ready to uncomment and adapt.
+
+Registering the section only tells `chk-py` where it belongs, its list style, and its exemptions — it does not tell anyone what to write inside it. Add the section's actual content rules to `docs/guidelines/documenting_guidelines.md` (the overlay). `lazy-python.docstring-writer` reads both the registration and the overlay on every dispatch and never invents a section your project hasn't declared.
+
+---
+
+## My classes used to get "Generation Rules" / "Value Ranges" docstring sections automatically. Now `chk-py` flags them as missing. What happened?
+
+As of the 2.0.0 release, `pcf`'s docstring-section and field-name defaults are project-neutral: those two sections, and the hardcoded `_field_filters` private-name escape hatch, no longer ship built in. If your repo relied on them, re-run `/lazy-python.install` to pick up the current `pyproject-defaults.toml` template, then find the commented-out `extra_docstring_sections`, `d2_exempt_marker_attrs`, and `private_name_allowlist` examples under `[tool.pcf]` in your `pyproject.toml` — uncomment and adapt them to your project's actual section names and field names. The install's merge step only appends checker sections that are missing; it never overwrites or removes a `[tool.pcf]` block you've already customised, so this migration is opt-in per repo and safe to run at any time.
 
 ---
 
