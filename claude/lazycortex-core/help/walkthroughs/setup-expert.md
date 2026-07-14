@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-07-13
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -26,7 +26,7 @@ After this walkthrough you have:
 ## What you need
 
 - `lazycortex-core` installed and restarted in Claude Code.
-- The expert runtime already bootstrapped for this repo — `.experts/` exists, `lazy.settings.json[experts]` has at least one registered expert besides `_version`, and the expert-spawn sandbox is configured in `.claude/settings.local.json`. If any of that is missing, work through the *install-and-audit* chapter first, then come back here.
+- The expert runtime already bootstrapped for this repo — `.experts/` exists, `lazy.settings.json[experts]` has at least one registered expert besides `_version`, and the expert-spawn sandbox is configured in `.runtime/sandbox.settings.json`. If any of that is missing, work through the *install-and-audit* chapter first, then come back here.
 - The daemon running (a supervisor unit, or the `.claude/bin/lazy.runtime.sh` shim started manually) — see Step 1 below if you're not sure.
 - A git repo to run async jobs in (the runtime is always per-repo).
 
@@ -153,25 +153,21 @@ If `/lazy-expert.list-jobs` shows the job as `dead` but `/lazy-expert.collect-jo
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant session as Claude session
-  participant queue as .experts/.jobs/ queue
-  participant daemon as Daemon (runner)
-  participant expert as Expert agent
+  participant session as Claude Session
+  participant queue as .experts/.jobs/ Queue
+  participant daemon as Daemon Runner
+  participant expert as Expert Agent
 
-  user->>session: /lazy-expert.dispatch-job
-  session->>queue: write job payload + READY marker
-  daemon->>queue: poll for READY jobs
-  queue-->>daemon: job payload
+  user->>session: run /lazy-expert.dispatch-job
+  session->>queue: write job payload
+  daemon->>queue: poll for new jobs
+  queue-->>daemon: deliver queued job
   daemon->>expert: spawn expert agent
-  expert->>expert: process job payload
+  expert->>expert: process job
   expert->>queue: write response.json
-  expert->>queue: write DONE marker
-  loop poll for DONE
-    user->>session: /lazy-expert.collect-job
-    session->>queue: check DONE marker
-    queue-->>session: not ready
-  end
-  session->>queue: read response.json
-  queue-->>session: response.json
-  session-->>user: job result
+  expert->>queue: touch DONE marker
+  user->>session: run /lazy-expert.collect-job
+  session->>queue: check for DONE marker
+  queue-->>session: DONE marker present
+  session-->>user: return response.json result
 ```

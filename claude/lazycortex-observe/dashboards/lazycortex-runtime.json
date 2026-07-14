@@ -10,32 +10,72 @@
     }
   ],
   "__requires": [
-    {"type": "panel",      "id": "timeseries",     "name": "Time series",  "version": ""},
-    {"type": "panel",      "id": "stat",           "name": "Stat",         "version": ""},
-    {"type": "panel",      "id": "table",          "name": "Table",        "version": ""},
-    {"type": "panel",      "id": "piechart",       "name": "Pie chart",    "version": ""},
-    {"type": "datasource", "id": "prometheus",     "name": "Prometheus",   "version": "1.0.0"}
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "table",
+      "name": "Table",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "piechart",
+      "name": "Pie chart",
+      "version": ""
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    }
   ],
-  "annotations": {"list": []},
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "graphTooltip": 1,
   "id": null,
   "title": "LazyCortex Runtime",
   "uid": "lazycortex-runtime",
-  "tags": ["lazycortex", "runtime", "observability"],
+  "tags": [
+    "lazycortex",
+    "runtime",
+    "observability"
+  ],
   "timezone": "browser",
   "schemaVersion": 38,
   "version": 1,
   "refresh": "30s",
-  "time": {"from": "now-24h", "to": "now"},
-  "timepicker": {"hidden": true},
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {
+    "hidden": true
+  },
   "templating": {
     "list": [
       {
         "name": "datasource",
         "type": "datasource",
         "query": "prometheus",
-        "current": {"selected": false, "text": "Prometheus", "value": "${DS_PROMETHEUS}"},
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "${DS_PROMETHEUS}"
+        },
         "hide": 2
       },
       {
@@ -44,209 +84,304 @@
         "label": "period",
         "query": "1h, 6h, 12h, 24h, 7d, 30d",
         "options": [
-          {"selected": false, "text": "1h",  "value": "1h"},
-          {"selected": false, "text": "6h",  "value": "6h"},
-          {"selected": false, "text": "12h", "value": "12h"},
-          {"selected": true,  "text": "24h", "value": "24h"},
-          {"selected": false, "text": "7d",  "value": "7d"},
-          {"selected": false, "text": "30d", "value": "30d"}
+          {
+            "selected": false,
+            "text": "1h",
+            "value": "1h"
+          },
+          {
+            "selected": false,
+            "text": "6h",
+            "value": "6h"
+          },
+          {
+            "selected": false,
+            "text": "12h",
+            "value": "12h"
+          },
+          {
+            "selected": true,
+            "text": "24h",
+            "value": "24h"
+          },
+          {
+            "selected": false,
+            "text": "7d",
+            "value": "7d"
+          },
+          {
+            "selected": false,
+            "text": "30d",
+            "value": "30d"
+          }
         ],
-        "current": {"selected": true, "text": "24h", "value": "24h"}
+        "current": {
+          "selected": true,
+          "text": "24h",
+          "value": "24h"
+        }
       },
       {
         "name": "repo",
         "type": "query",
-        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
         "query": "label_values(lazycortex_runtime_routine_ticks_total, repo)",
         "refresh": 2,
         "includeAll": true,
         "multi": true,
-        "current": {"selected": true, "text": ["All"], "value": ["$__all"]}
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
       }
     ]
   },
   "panels": [
     {
-      "type": "stat",
-      "title": "Daemon alive (since any tick)",
-      "description": "Seconds since the daemon ticked any routine, per repo. Red = daemon silent for 5+ minutes (pump ticks every 5s, so silence means the daemon is down).",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 4, "w": 5, "x": 0, "y": 0},
+      "type": "table",
+      "title": "Daemons ($period)",
+      "description": "One row per runtime daemon: liveness, halt state, problem jobs now, errors and tokens over the selected period.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
         {
           "expr": "time() - max by (repo) (lazycortex_runtime_routine_last_tick_timestamp{repo=~\"$repo\"})",
-          "legendFormat": "{{repo}}",
+          "legendFormat": "",
           "refId": "A",
-          "instant": true
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "max by (repo) (lazycortex_runtime_daemon_halted{repo=~\"$repo\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "legendFormat": "",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (repo) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=\"failed\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "legendFormat": "",
+          "refId": "C",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (repo) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=\"dead\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "legendFormat": "",
+          "refId": "D",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (repo) (increase(lazycortex_runtime_routine_errors_total{repo=~\"$repo\"}[$period])) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "legendFormat": "",
+          "refId": "E",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "repo": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5
+            },
+            "renameByName": {
+              "repo": "Daemon",
+              "Value #A": "Last activity",
+              "Value #B": "Halted",
+              "Value #C": "Failed jobs",
+              "Value #D": "Dead jobs",
+              "Value #E": "Errors"
+            }
+          }
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "short",
           "decimals": 0,
-          "color": {"mode": "thresholds"},
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {"color": "green", "value": null},
-              {"color": "red",   "value": 300}
-            ]
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
           }
         },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
-        "textMode": "value_and_name", "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto"
-      }
-    },
-    {
-      "type": "stat",
-      "title": "Halted",
-      "description": "Dirty-tree / other halt state per repo. 0 = running, HALTED = daemon refuses to run routines.",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 4, "w": 4, "x": 5, "y": 0},
-      "targets": [
-        {
-          "expr": "max by (repo) (lazycortex_runtime_daemon_halted{repo=~\"$repo\"}) or (0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"}))",
-          "legendFormat": "{{repo}}",
-          "refId": "A",
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "color": {"mode": "thresholds"},
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {"color": "green", "value": null},
-              {"color": "red",   "value": 1}
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Last activity"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 300
+                    }
+                  ]
+                }
+              }
             ]
           },
-          "mappings": [
-            {"type": "value", "options": {"0": {"text": "OK"}, "1": {"text": "HALTED"}}}
-          ]
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
-        "textMode": "value_and_name", "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto"
-      }
-    },
-    {
-      "type": "stat",
-      "title": "Jobs failed / dead now",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 4, "w": 5, "x": 9, "y": 0},
-      "targets": [
-        {
-          "expr": "sum(lazycortex_runtime_queue_depth{repo=~\"$repo\",state=\"failed\"}) or vector(0)",
-          "legendFormat": "failed",
-          "refId": "A",
-          "instant": true
-        },
-        {
-          "expr": "sum(lazycortex_runtime_queue_depth{repo=~\"$repo\",state=\"dead\"}) or vector(0)",
-          "legendFormat": "dead",
-          "refId": "B",
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "color": {"mode": "thresholds"},
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {"color": "green",  "value": null},
-              {"color": "orange", "value": 1},
-              {"color": "red",    "value": 5}
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Halted"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "1": {
+                        "text": "HALTED",
+                        "color": "red"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(Failed jobs|Dead jobs|Errors)$"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 5
+                    }
+                  ]
+                }
+              }
             ]
           }
-        },
-        "overrides": []
+        ]
       },
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
-        "textMode": "value_and_name", "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto"
-      }
-    },
-    {
-      "type": "stat",
-      "title": "Errors ($period)",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 4, "w": 5, "x": 14, "y": 0},
-      "targets": [
-        {
-          "expr": "sum(increase(lazycortex_runtime_routine_errors_total{repo=~\"$repo\"}[$period])) or vector(0)",
-          "legendFormat": "errors",
-          "refId": "A",
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "color": {"mode": "thresholds"},
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {"color": "green",  "value": null},
-              {"color": "orange", "value": 1},
-              {"color": "red",    "value": 5}
-            ]
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [],
+          "countRows": false,
+          "enablePagination": false
+        },
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Last activity"
           }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
-        "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto"
-      }
-    },
-    {
-      "type": "stat",
-      "title": "Tokens ($period)",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 4, "w": 5, "x": 19, "y": 0},
-      "targets": [
-        {
-          "expr": "sum(increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period])) or vector(0)",
-          "legendFormat": "tokens",
-          "refId": "A",
-          "instant": true
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 1,
-          "color": {"mode": "thresholds"},
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {"color": "blue", "value": null}
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
-        "textMode": "auto", "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto"
+        ]
       }
     },
     {
       "type": "table",
       "title": "Routine health ($period)",
       "description": "One row per routine × repo: how long since the last tick, tick and error counts over the selected period.",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 4},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
       "targets": [
         {
           "expr": "time() - lazycortex_runtime_routine_last_tick_timestamp{repo=~\"$repo\"}",
@@ -278,12 +413,27 @@
         }
       ],
       "transformations": [
-        {"id": "merge", "options": {}},
+        {
+          "id": "merge",
+          "options": {}
+        },
         {
           "id": "organize",
           "options": {
-            "excludeByName": {"Time": true, "__name__": true, "instance": true, "job": true},
-            "indexByName": {"routine": 0, "repo": 1, "Value #A": 2, "Value #B": 3, "Value #C": 4, "Value #D": 5},
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "indexByName": {
+              "routine": 0,
+              "repo": 1,
+              "Value #A": 2,
+              "Value #B": 3,
+              "Value #C": 4,
+              "Value #D": 5
+            },
             "renameByName": {
               "routine": "Routine",
               "repo": "Repo",
@@ -299,41 +449,92 @@
         "defaults": {
           "unit": "short",
           "decimals": 0,
-          "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "filterable": false, "inspect": false}
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          }
         },
         "overrides": [
           {
-            "matcher": {"id": "byName", "options": "Last tick"},
+            "matcher": {
+              "id": "byName",
+              "options": "Last tick"
+            },
             "properties": [
-              {"id": "unit", "value": "s"}
+              {
+                "id": "unit",
+                "value": "s"
+              }
             ]
           },
           {
-            "matcher": {"id": "byName", "options": "Ticks"},
+            "matcher": {
+              "id": "byName",
+              "options": "Ticks"
+            },
             "properties": [
-              {"id": "custom.cellOptions", "value": {"type": "gauge", "mode": "gradient"}},
-              {"id": "min", "value": 0}
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
             ]
           },
           {
-            "matcher": {"id": "byName", "options": "Busy time"},
+            "matcher": {
+              "id": "byName",
+              "options": "Busy time"
+            },
             "properties": [
-              {"id": "unit", "value": "s"},
-              {"id": "decimals", "value": 1}
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
             ]
           },
           {
-            "matcher": {"id": "byName", "options": "Errors"},
+            "matcher": {
+              "id": "byName",
+              "options": "Errors"
+            },
             "properties": [
-              {"id": "custom.cellOptions", "value": {"type": "color-text"}},
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
               {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",
                   "steps": [
-                    {"color": "text",   "value": null},
-                    {"color": "orange", "value": 1},
-                    {"color": "red",    "value": 5}
+                    {
+                      "color": "text",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 5
+                    }
                   ]
                 }
               }
@@ -344,16 +545,37 @@
       "options": {
         "showHeader": true,
         "cellHeight": "sm",
-        "footer": {"show": false, "reducer": ["sum"], "fields": [], "countRows": false, "enablePagination": false},
-        "sortBy": [{"desc": true, "displayName": "Last tick"}]
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [],
+          "countRows": false,
+          "enablePagination": false
+        },
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Last tick"
+          }
+        ]
       }
     },
     {
       "type": "table",
       "title": "Errors by routine × reason ($period)",
       "description": "Empty table = no errors in the selected period.",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 10, "w": 8, "x": 0, "y": 14},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
       "targets": [
         {
           "expr": "sum by (routine, repo, reason) (increase(lazycortex_runtime_routine_errors_total{repo=~\"$repo\"}[$period])) > 0",
@@ -367,9 +589,21 @@
         {
           "id": "organize",
           "options": {
-            "excludeByName": {"Time": true},
-            "indexByName": {"routine": 0, "repo": 1, "reason": 2, "Value": 3},
-            "renameByName": {"routine": "Routine", "repo": "Repo", "reason": "Reason", "Value": "Errors"}
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "routine": 0,
+              "repo": 1,
+              "reason": 2,
+              "Value": 3
+            },
+            "renameByName": {
+              "routine": "Routine",
+              "repo": "Repo",
+              "reason": "Reason",
+              "Value": "Errors"
+            }
           }
         }
       ],
@@ -377,23 +611,51 @@
         "defaults": {
           "unit": "short",
           "decimals": 0,
-          "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "filterable": false, "inspect": false}
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          }
         },
         "overrides": []
       },
       "options": {
         "showHeader": true,
         "cellHeight": "sm",
-        "footer": {"show": false, "reducer": ["sum"], "fields": [], "countRows": false, "enablePagination": false},
-        "sortBy": [{"desc": true, "displayName": "Errors"}]
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [],
+          "countRows": false,
+          "enablePagination": false
+        },
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Errors"
+          }
+        ]
       }
     },
     {
       "type": "table",
       "title": "Halt events ($period)",
       "description": "Empty table = no halts in the selected period.",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 10, "w": 8, "x": 8, "y": 14},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 8,
+        "y": 16
+      },
       "targets": [
         {
           "expr": "sum by (repo, reason, triggered_by) (increase(lazycortex_runtime_daemon_halts_total{repo=~\"$repo\"}[$period])) > 0",
@@ -407,9 +669,21 @@
         {
           "id": "organize",
           "options": {
-            "excludeByName": {"Time": true},
-            "indexByName": {"repo": 0, "reason": 1, "triggered_by": 2, "Value": 3},
-            "renameByName": {"repo": "Repo", "reason": "Reason", "triggered_by": "Triggered by", "Value": "Halts"}
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "repo": 0,
+              "reason": 1,
+              "triggered_by": 2,
+              "Value": 3
+            },
+            "renameByName": {
+              "repo": "Repo",
+              "reason": "Reason",
+              "triggered_by": "Triggered by",
+              "Value": "Halts"
+            }
           }
         }
       ],
@@ -417,22 +691,50 @@
         "defaults": {
           "unit": "short",
           "decimals": 0,
-          "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "filterable": false, "inspect": false}
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          }
         },
         "overrides": []
       },
       "options": {
         "showHeader": true,
         "cellHeight": "sm",
-        "footer": {"show": false, "reducer": ["sum"], "fields": [], "countRows": false, "enablePagination": false},
-        "sortBy": [{"desc": true, "displayName": "Halts"}]
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [],
+          "countRows": false,
+          "enablePagination": false
+        },
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Halts"
+          }
+        ]
       }
     },
     {
       "type": "table",
       "title": "Queue by expert × state (now)",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 10, "w": 8, "x": 16, "y": 14},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 16,
+        "y": 16
+      },
       "targets": [
         {
           "expr": "sum by (expert, repo, state) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state!=\"done\"}) > 0",
@@ -446,9 +748,21 @@
         {
           "id": "organize",
           "options": {
-            "excludeByName": {"Time": true},
-            "indexByName": {"expert": 0, "repo": 1, "state": 2, "Value": 3},
-            "renameByName": {"expert": "Expert", "repo": "Repo", "state": "State", "Value": "Jobs"}
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "expert": 0,
+              "repo": 1,
+              "state": 2,
+              "Value": 3
+            },
+            "renameByName": {
+              "expert": "Expert",
+              "repo": "Repo",
+              "state": "State",
+              "Value": "Jobs"
+            }
           }
         }
       ],
@@ -456,11 +770,21 @@
         "defaults": {
           "unit": "short",
           "decimals": 0,
-          "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "filterable": false, "inspect": false}
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          }
         },
         "overrides": [
           {
-            "matcher": {"id": "byName", "options": "State"},
+            "matcher": {
+              "id": "byName",
+              "options": "State"
+            },
             "properties": [
               {
                 "id": "mappings",
@@ -468,15 +792,32 @@
                   {
                     "type": "value",
                     "options": {
-                      "failed": {"color": "orange", "index": 0},
-                      "dead":   {"color": "red",    "index": 1},
-                      "active": {"color": "green",  "index": 2},
-                      "queued": {"color": "blue",   "index": 3}
+                      "failed": {
+                        "color": "orange",
+                        "index": 0
+                      },
+                      "dead": {
+                        "color": "red",
+                        "index": 1
+                      },
+                      "active": {
+                        "color": "green",
+                        "index": 2
+                      },
+                      "queued": {
+                        "color": "blue",
+                        "index": 3
+                      }
                     }
                   }
                 ]
               },
-              {"id": "custom.cellOptions", "value": {"type": "color-text"}}
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
             ]
           }
         ]
@@ -484,46 +825,172 @@
       "options": {
         "showHeader": true,
         "cellHeight": "sm",
-        "footer": {"show": false, "reducer": ["sum"], "fields": [], "countRows": false, "enablePagination": false},
-        "sortBy": [{"desc": true, "displayName": "Jobs"}]
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [],
+          "countRows": false,
+          "enablePagination": false
+        },
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Jobs"
+          }
+        ]
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Open jobs (queued / active, $period)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "timeFrom": "$period",
+      "targets": [
+        {
+          "expr": "sum by (expert, repo, state) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=~\"queued|active\"})",
+          "legendFormat": "{{expert}} / {{repo}} · {{state}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Problem jobs (failed / dead, $period)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "timeFrom": "$period",
+      "targets": [
+        {
+          "expr": "sum by (expert, repo, state) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=~\"failed|dead\"})",
+          "legendFormat": "{{expert}} / {{repo}} · {{state}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*dead.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".*failed.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
       }
     },
     {
       "type": "table",
       "title": "Tokens by routine × model × expert ($period)",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 24},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
       "targets": [
         {
-          "expr": "sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"input\"}[$period]))",
+          "expr": "label_replace(sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"input\"}[$period])), \"model\", \"$1\", \"model\", \"claude-(.+)\")",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"output\"}[$period]))",
+          "expr": "label_replace(sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"output\"}[$period])), \"model\", \"$1\", \"model\", \"claude-(.+)\")",
           "legendFormat": "",
           "refId": "B",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_read\"}[$period]))",
+          "expr": "label_replace(sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_read\"}[$period])), \"model\", \"$1\", \"model\", \"claude-(.+)\")",
           "legendFormat": "",
           "refId": "C",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_write\"}[$period]))",
+          "expr": "label_replace(sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_write\"}[$period])), \"model\", \"$1\", \"model\", \"claude-(.+)\")",
           "legendFormat": "",
           "refId": "D",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period])) > 0",
+          "expr": "label_replace(sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period])) > 0, \"model\", \"$1\", \"model\", \"claude-(.+)\")",
           "legendFormat": "",
           "refId": "E",
           "instant": true,
@@ -531,12 +998,27 @@
         }
       ],
       "transformations": [
-        {"id": "merge", "options": {}},
+        {
+          "id": "merge",
+          "options": {}
+        },
         {
           "id": "organize",
           "options": {
-            "excludeByName": {"Time": true},
-            "indexByName": {"routine": 0, "repo": 1, "model": 2, "expert": 3, "Value #A": 4, "Value #B": 5, "Value #C": 6, "Value #D": 7, "Value #E": 8},
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "routine": 0,
+              "repo": 1,
+              "model": 2,
+              "expert": 3,
+              "Value #A": 4,
+              "Value #B": 5,
+              "Value #C": 6,
+              "Value #D": 7,
+              "Value #E": 8
+            },
             "renameByName": {
               "routine": "Routine",
               "repo": "Repo",
@@ -555,14 +1037,34 @@
         "defaults": {
           "unit": "short",
           "decimals": 0,
-          "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "filterable": false, "inspect": false}
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false,
+            "inspect": false
+          }
         },
         "overrides": [
           {
-            "matcher": {"id": "byName", "options": "Total"},
+            "matcher": {
+              "id": "byName",
+              "options": "Total"
+            },
             "properties": [
-              {"id": "custom.cellOptions", "value": {"type": "gauge", "mode": "gradient", "valueDisplayMode": "text"}},
-              {"id": "min", "value": 0}
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              }
             ]
           }
         ]
@@ -570,16 +1072,43 @@
       "options": {
         "showHeader": true,
         "cellHeight": "sm",
-        "footer": {"show": true, "reducer": ["sum"], "fields": ["Input", "Output", "Cache read", "Cache write", "Total"], "countRows": false, "enablePagination": false},
-        "sortBy": [{"desc": true, "displayName": "Total"}]
+        "footer": {
+          "show": true,
+          "reducer": [
+            "sum"
+          ],
+          "fields": [
+            "Input",
+            "Output",
+            "Cache read",
+            "Cache write",
+            "Total"
+          ],
+          "countRows": false,
+          "enablePagination": false
+        },
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Total"
+          }
+        ]
       }
     },
     {
       "type": "piechart",
       "title": "Tokens by expert ($period)",
       "description": "Requires the metrics.py fix that exports the expert label on lazycortex_runtime_tokens_total; shows No data until then.",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 34},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 44
+      },
       "targets": [
         {
           "expr": "sum by (expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period]))",
@@ -589,43 +1118,91 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {"unit": "short", "decimals": 0},
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
         "overrides": []
       },
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "pieType": "donut",
-        "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]}
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
       }
     },
     {
       "type": "piechart",
       "title": "Tokens by model ($period)",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 34},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 44
+      },
       "targets": [
         {
-          "expr": "sum by (model) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period]))",
+          "expr": "label_replace(sum by (model) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period])), \"model\", \"$1\", \"model\", \"claude-(.+)\")",
           "legendFormat": "{{model}}",
           "refId": "A",
           "instant": true
         }
       ],
       "fieldConfig": {
-        "defaults": {"unit": "short", "decimals": 0},
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
         "overrides": []
       },
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "pieType": "donut",
-        "legend": {"displayMode": "table", "placement": "bottom", "values": ["value", "percent"]}
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
       }
     },
     {
       "type": "piechart",
       "title": "Tokens by repo ($period)",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 34},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 44
+      },
       "targets": [
         {
           "expr": "sum by (repo) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period]))",
@@ -635,20 +1212,44 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {"unit": "short", "decimals": 0},
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
         "overrides": []
       },
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "pieType": "donut",
-        "legend": {"displayMode": "table", "placement": "bottom", "values": ["value", "percent"]}
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
       }
     },
     {
       "type": "piechart",
       "title": "Tokens by kind ($period)",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 34},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 44
+      },
       "targets": [
         {
           "expr": "sum by (kind) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period]))",
@@ -658,58 +1259,30 @@
         }
       ],
       "fieldConfig": {
-        "defaults": {"unit": "short", "decimals": 0},
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
         "overrides": []
       },
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "pieType": "donut",
-        "legend": {"displayMode": "table", "placement": "right", "values": ["value", "percent"]}
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
       }
-    },
-    {
-      "type": "timeseries",
-      "title": "Open jobs (queued / active, $period)",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 42},
-      "timeFrom": "$period",
-      "targets": [
-        {
-          "expr": "sum by (expert, repo, state) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=~\"queued|active\"})",
-          "legendFormat": "{{expert}} / {{repo}} · {{state}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
-      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"]}}
-    },
-    {
-      "type": "timeseries",
-      "title": "Problem jobs (failed / dead, $period)",
-      "datasource": {"type": "prometheus", "uid": "${datasource}"},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 42},
-      "timeFrom": "$period",
-      "targets": [
-        {
-          "expr": "sum by (expert, repo, state) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=~\"failed|dead\"})",
-          "legendFormat": "{{expert}} / {{repo}} · {{state}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {"unit": "short"},
-        "overrides": [
-          {
-            "matcher": {"id": "byRegexp", "options": ".*dead.*"},
-            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]
-          },
-          {
-            "matcher": {"id": "byRegexp", "options": ".*failed.*"},
-            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "orange"}}]
-          }
-        ]
-      },
-      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"]}}
     }
   ]
 }

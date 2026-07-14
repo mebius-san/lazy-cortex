@@ -101,6 +101,7 @@ if [ "$DEV_MODE" = "1" ] && [ -n "$REPO" ] && [ -d "$REPO/claude" ]; then
   fi
 fi
 
-RUNNER=$(ls -d ~/.claude/plugins/cache/*/lazycortex-core/*/bin/runner 2>/dev/null | sort -r | head -1)
+# sort -rV: version sort, not lexicographic — plain sort -r picks 5.9.0 over 5.13.0 ("9" > "1")
+RUNNER=$(ls -d ~/.claude/plugins/cache/*/lazycortex-core/*/bin/runner 2>/dev/null | sort -rV | head -1)
 [ -z "$RUNNER" ] && { echo "lazycortex-core/bin/runner not found in plugin cache" >&2; exit 1; }
 exec "$RUNNER" "${ARGS[@]}"

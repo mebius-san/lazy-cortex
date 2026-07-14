@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: The PostToolUse hook that runs `pcf.py` on every `.py` edit and surfaces style violations inline in the next turn — zero install steps, zero config writes.
-last_regen: 2026-07-10
+last_regen: 2026-07-14
 no_diagram: true
 source_skills:
   - lazy-python.check-style.sh
@@ -45,4 +45,3 @@ The violation format the hook surfaces is the same `file:line: note: message` fo
 
 - [checkers](checkers.md) — the `chk-py` CLI aggregator that runs `pcf.py` (and four other checks) on demand
 - [install-and-audit](install-and-audit.md) — installs the plugin and enables the manifest-based hook registration
-</content>

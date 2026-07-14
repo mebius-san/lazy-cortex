@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover if the working tree or a remote sync halts it.
-last_regen: 2026-07-12
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, answers yes to the runtime-daemon wizard, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh, daemon starts and polls .experts/.jobs/ on interval, user checks .runtime/state.json for a recent last_run; (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks a cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
@@ -81,22 +81,31 @@ The `daemon_halted` recovery path is an expected operational event, not an error
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant claudeSession as Claude Session
-  participant jobsQueue as .experts/.jobs/ Queue
-  participant daemon as Daemon Runner
-  participant expertAgent as Expert Agent
+  participant installWizard as /lazy-core.install
+  participant runtimeDaemon as lazy.runtime.sh Daemon
+  participant stateFile as .runtime/state.json
+  participant recoverSkill as /lazy-runtime.recover
 
-  user->>claudeSession: /lazy-expert.dispatch-job
-  claudeSession->>jobsQueue: write job config + READY marker
-  loop poll interval
-    daemon->>jobsQueue: scan for READY jobs
+  user->>installWizard: /lazy-core.install
+  installWizard->>user: prompt enable runtime daemon?
+  user-->>installWizard: yes
+  Note over installWizard: writes .claude/bin/lazy.runtime.sh, lazy.settings.json[experts], daemon and routines sections
+
+  user->>runtimeDaemon: run .claude/bin/lazy.runtime.sh
+  loop poll .experts/.jobs/ on interval
+    runtimeDaemon->>stateFile: write last_run timestamp
   end
-  jobsQueue-->>daemon: job picked up
-  daemon->>expertAgent: invoke expert agent
-  expertAgent->>jobsQueue: write response.json
-  expertAgent->>jobsQueue: write DONE marker
-  user->>claudeSession: /lazy-expert.collect-job
-  claudeSession->>jobsQueue: check for DONE marker
-  jobsQueue-->>claudeSession: response.json + DONE
-  claudeSession-->>user: job result
+  user->>stateFile: check .runtime/state.json
+  stateFile-->>user: last_run recent
+
+  Note over runtimeDaemon: working tree goes dirty
+  runtimeDaemon->>stateFile: write daemon_halted
+  user->>recoverSkill: /lazy-runtime.recover
+  recoverSkill->>stateFile: read halt context
+  stateFile-->>recoverSkill: daemon_halted reason
+  recoverSkill-->>user: show halt context
+  user-->>recoverSkill: pick cleanup mode commit stash discard
+  recoverSkill->>stateFile: clear daemon_halted
+  runtimeDaemon->>stateFile: poll next iteration
+  stateFile-->>runtimeDaemon: daemon_halted cleared, resume
 ```

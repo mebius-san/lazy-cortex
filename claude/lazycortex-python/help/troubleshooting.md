@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, and writer agents.
-last_regen: 2026-07-10
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Decision-tree routing install/audit/check-style/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-locate-plugin-post-bump); audit branch splits on check number (check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
+  request: "Decision-tree routing install/audit/check-style/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-locate-plugin-post-bump); audit branch splits on check number (check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-major-upgrade (D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions) needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
   kind_hint: decision-tree
 source_skills:
   - lazy-python.install
@@ -62,6 +62,22 @@ source_skills:
 **Likely cause**: The project has no `pyproject.toml` at the repo root. Phase 3 merges into the existing file; it does not create one from scratch.
 
 **Fix**: Create a minimal `pyproject.toml` at the repo root (a `[build-system]` section is enough to start), then re-run `/lazy-python.install`. Phase 3 will append all missing sections.
+
+---
+
+## After upgrading to lazycortex-python 2.x, `pcf` flags docstring sections that used to pass
+
+**Symptom**: A repo that was clean under `chk-py` before the upgrade now reports new `D2`, `D5`, `D7`, or `D9` violations on docstrings nobody touched — private-attribute labels in `Attributes:` sections, unrecognized custom sections, or private-name references in prose that were previously tolerated.
+
+**Likely cause**: `pcf`'s docstring rules used to bake in one project's own conventions (custom section names like Generation Rules / Value Ranges, an implicit private-attribute escape hatch for `_field_filters`-style markers) as hardcoded defaults. As of 2.0.0, those defaults are gone — `pcf` ships project-neutral, and any project that relied on the old built-in behavior sees it as a fresh set of violations until the project declares its own equivalents.
+
+**Fix**: Add the missing declarations under `[tool.pcf]` in `pyproject.toml` (this section is consumer-owned config — `/lazy-python.install` only merges in missing keys, it never overwrites values you set):
+
+- `extra_docstring_sections` — register any custom docstring section your project used to rely on (name, list style, and an `after`/`before` order anchor).
+- `d2_exempt_marker_attrs` — class attribute names whose presence exempts a class from the private-attribute check in `Attributes:` (`D2`).
+- `private_name_allowlist` — private identifiers your project's docstrings are allowed to reference by name in prose (`D9`).
+
+Re-run `chk-py all -q` after saving; the newly-declared config keys restore the previous pass/fail boundary for your project without reintroducing project-specific behavior into the plugin's shipped defaults.
 
 ---
 
@@ -206,4 +222,34 @@ source_skills:
 ---
 
 ## Diagnostic flowchart
-</content>
+
+```mermaid
+%%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart TD
+  whichSkillFailed{Which skill failed?}
+
+  installLeaf[Phase failures: source-not-found, read-only rules, wrapper template, pyproject absent, pch inspect.sh, scaffold-sync, env-source candidates - see install entries]
+  auditLeaf[Check findings: drift, broken pointers, missing artifacts, placeholders, invalid JSON, degraded venv - see audit entries]
+  checkStyleLeaf[Step failures: manual-vs-chk mismatch, test gate, persisting violations - see check-style entries]
+  pcfUpgradeLeaf[New D2/D5/D7/D9 violations on previously-passing docstrings - declare tool.pcf extra_docstring_sections, d2_exempt_marker_attrs, private_name_allowlist - see upgrade entry]
+  docstringWriterLeaf[chk violations at step 6 - see writer entries]
+  testWriterLeaf[FAILS-flag or tst-py failures - see test-writer entries]
+
+  whichSkillFailed -->|install| installLeaf
+  whichSkillFailed -->|audit| auditLeaf
+  whichSkillFailed -->|check-style| checkStyleLeaf
+  whichSkillFailed -->|pcf after 2.x upgrade| pcfUpgradeLeaf
+  whichSkillFailed -->|docstring-writer| docstringWriterLeaf
+  whichSkillFailed -->|test-writer| testWriterLeaf
+
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+
+  class whichSkillFailed guard
+  class installLeaf success
+  class auditLeaf success
+  class checkStyleLeaf success
+  class pcfUpgradeLeaf success
+  class docstringWriterLeaf success
+  class testWriterLeaf success
+```

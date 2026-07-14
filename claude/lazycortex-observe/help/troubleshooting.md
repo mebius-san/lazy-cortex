@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-observe install, uninstall, and doctor — symptoms, likely causes, and fixes.
-last_regen: 2026-07-12
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree rooted at the operator's situation: top-level branch on whether the shipper is installed at all (answer file present?); if not-installed, branch further on whether the Step 0 pre-flight found an already-covered host (routes to --integrate-only or --force-standalone guidance) versus a genuinely clear host (routes to plain install); if installed, branch on whether the host runs in integrate mode (scrape-targets file present and current vs missing/stale) or standalone mode — standalone then branches on whether the service is active, whether local /metrics is reachable, whether agent self-metrics show successful remote_write (token vs observer-reachability vs WAL-recovery sub-branches), and whether WAL is oversized. Separate top-level branch for uninstall failures (launchctl error 5 vs systemctl unit-not-found). Each leaf cites the troubleshooting entry that resolves it."
@@ -10,6 +10,7 @@ source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
   - lazy-observe.doctor
+  - lazy-observe.audit
 ---
 # Troubleshooting
 
@@ -178,30 +179,42 @@ source_skills:
 ```mermaid
 %%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart TD
-  whatIsYourSituation{What is your situation?}
-  preFlightCoverage{Pre-flight found existing coverage?}
+  whatIsSituation{What is your situation?}
+  preflightCovered{Pre-flight found already-covered host?}
+  integrateOrStandalone{Integrate or standalone mode?}
+  wherePipelineBreak{Where does the pipeline break?}
 
-  integrateOrForceEntries[Read --integrate-only / --force-standalone entries]
-  plainInstallEntry[Read plain install entry]
-  integrateModeEntry[Check scrape-targets file, stale or missing - read the integrate-mode entry]
-  standaloneEntries[Read standalone entries in order: service-active, /metrics reachable, remote_write, WAL]
-  uninstallEntries[Read launchctl / systemctl uninstall entries]
+  useIntegrateOrForce[Use --integrate-only or --force-standalone, see install entries]
+  plainInstallPath[Plain install path]
+  checkScrapeTargets[Check scrape-targets file present and current, see integrate entries]
+  serviceNotActive[Service not active or /metrics unreachable, see service entries]
+  remoteWriteFailing[remote_write failing - token, observer reachability, WAL recovery, see remote_write entries]
+  walOversized[WAL oversized, see WAL entry]
+  uninstallError[launchctl error 5 vs systemctl unit-not-found, see uninstall entries]
 
-  whatIsYourSituation -->|not installed| preFlightCoverage
-  whatIsYourSituation -->|installed, integrate mode| integrateModeEntry
-  whatIsYourSituation -->|installed standalone, problems| standaloneEntries
-  whatIsYourSituation -->|uninstall failed| uninstallEntries
-  preFlightCoverage -->|yes| integrateOrForceEntries
-  preFlightCoverage -->|no| plainInstallEntry
+  whatIsSituation -->|Installing| preflightCovered
+  whatIsSituation -->|Installed but unhealthy| integrateOrStandalone
+  whatIsSituation -->|Uninstalling fails| uninstallError
+  preflightCovered -->|yes| useIntegrateOrForce
+  preflightCovered -->|no| plainInstallPath
+  integrateOrStandalone -->|integrate| checkScrapeTargets
+  integrateOrStandalone -->|standalone| wherePipelineBreak
+  wherePipelineBreak -->|service| serviceNotActive
+  wherePipelineBreak -->|remote_write| remoteWriteFailing
+  wherePipelineBreak -->|WAL| walOversized
 
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
-  class whatIsYourSituation guard
-  class preFlightCoverage guard
-  class integrateOrForceEntries success
-  class plainInstallEntry success
-  class integrateModeEntry success
-  class standaloneEntries success
-  class uninstallEntries success
+  class whatIsSituation guard
+  class preflightCovered guard
+  class integrateOrStandalone guard
+  class wherePipelineBreak guard
+  class useIntegrateOrForce success
+  class plainInstallPath success
+  class checkScrapeTargets success
+  class serviceNotActive success
+  class remoteWriteFailing success
+  class walOversized success
+  class uninstallError success
 ```

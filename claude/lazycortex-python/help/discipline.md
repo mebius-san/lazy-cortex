@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Three always-loaded rules shape every Python edit; five reference guidelines back the writer agents and chk-py/tst-py with the full canon.
-last_regen: 2026-07-10
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "How rules and guidelines connect"
   request: "Architecture diagram showing three path-scoped rules (lazy-python.style on **/*.py, lazy-python.docstrings on **/*.py, lazy-python.tests on tests/**/*.py) feeding into Claude's edit loop, and five reference guidelines (coding, documenting, testing, checking, guidelines-index) being read by the docstring-writer agent, test-writer agent, and the chk-py/tst-py checker scripts"
@@ -29,6 +29,7 @@ The split between rules and guidelines is deliberate. Rules are short and always
 - You want tests produced by an agent that has read the full testing canon (Paranoid Testing Strategy, base-class selection per the project overlay, assertion conventions) rather than guessing the project's shape.
 - You want `chk-py` and `tst-py` to enforce the same rules that Claude used when writing the code, so checker runs are non-surprising.
 - You want the verification order (per-file check → full-project check → tests) enforced automatically rather than having to remind Claude each time — including in projects that run their own test/check runner instead of the plugin wrappers.
+- You want the docstring canon itself to stay project-neutral — no built-in assumptions about what extra sections or private-field exceptions your project needs — while still being able to add them through your own `pyproject.toml` declarations.
 
 ## How it fits together
 
@@ -40,7 +41,7 @@ The split between rules and guidelines is deliberate. Rules are short and always
 
 **`lazy-python.coding-guidelines`** is the main reference, covering code formatting, blank-line rules, function signature wrapping, import ordering, naming conventions (classes, methods, variables, enums, TypeVars, TypeAliases), type annotations, class design, method and parameter design, error handling, magic literals, and the waiver comment system. Its Module Structure section reserves the module docstring for `__init__.py` files only — a regular `.py` file carries no module docstring at all; the canonical module order goes copyright header straight into imports. Claude reads this before making non-trivial code changes; `chk-py` enforces many of the same rules mechanically.
 
-**`lazy-python.documenting-guidelines`** is the docstring canon: Zero-Tolerance Blockers (what must never appear), Preservation Rules (what must survive edits), section ordering and style for class, method, and property docstrings, DOC comments, Contract comments, and Marker comments. No LaTeX in docstrings — formulas go in `DOC(…)` line comments only, where Obsidian renders them. The `lazy-python.docstring-writer` agent reads this on every dispatch.
+**`lazy-python.documenting-guidelines`** is the docstring canon: Zero-Tolerance Blockers (what must never appear), Preservation Rules (what must survive edits), section ordering and style for class, method, and property docstrings, DOC comments, Contract comments, and Marker comments. No LaTeX in docstrings — formulas go in `DOC(…)` line comments only, where Obsidian renders them. The canon is deliberately project-neutral: it does not ship any built-in project-specific docstring sections or private-field exceptions. Instead, the class-docstring section order carries a generic "Project-registered sections" clause — your project registers additional sections through `[tool.pcf] extra_docstring_sections` in its own `pyproject.toml` (section name, list style, and an order anchor naming a built-in or previously declared section, plus an optional `ref_exempt` flag for sections whose body carries `# REF:` lines), and the content rules for those sections live in your project overlay, not in the canon. The same project-neutral shape applies to the Attributes section's escape hatch for private fields or properties — shown only when your project declares `[tool.pcf] d2_exempt_marker_attrs` (and, for narrative mentions elsewhere in the docstring, `private_name_allowlist`). Without those declarations, private fields and properties never appear in Attributes and no extra sections are recognized. The `lazy-python.docstring-writer` agent reads this canon on every dispatch, plus your project overlay for the content of any registered sections and the exact names covered by the escape hatch.
 
 **`lazy-python.testing-guidelines`** covers test directory structure, class inheritance (base class selected from the project overlay), test-class and test-method naming, the Paranoid Testing Strategy (7-category coverage), assert conventions, fixture patterns, and logging suppression in tests. The `lazy-python.test-writer` agent reads this on every dispatch.
 
@@ -51,6 +52,10 @@ The split between rules and guidelines is deliberate. Rules are short and always
 ## Common adjustments
 
 **Adding project-specific style rules.** The canon in `lazy-python.coding-guidelines.md` is the floor. Project-specific additions go in `docs/guidelines/coding_guidelines.md`. The writer agents and checkers read the overlay after the canon; overlay rules override on conflict. You create and maintain that file directly — it is not managed by a plugin skill.
+
+**Registering a project-specific docstring section.** The canon doesn't assume your project needs any extra class-docstring sections. To add one — say a "Field Semantics" section your project wants on every configuration class — declare it under `[[tool.pcf.extra_docstring_sections]]` in `pyproject.toml` (the shipped template carries a commented-out example) with the section's `name`, `style` (`bulleted` / `definition` / `plain`), and an `after` / `before` order anchor naming a built-in or previously declared section. Then write the section's content rules into `docs/guidelines/documenting_guidelines.md` — the checker enforces only order, list style, and the optional `ref_exempt` shield, while `lazy-python.docstring-writer` follows your overlay's content rules for what actually goes inside it.
+
+**Exempting a private field from the Attributes check.** By default, the canon excludes every private field and every `@property` from a class's Attributes section. If your project has a documented reason to show one anyway — for example, a well-known internal mapping that callers are expected to reference by name — declare it under `[tool.pcf] d2_exempt_marker_attrs` in `pyproject.toml` (and add it to `private_name_allowlist` if it should also be tolerated in narrative prose elsewhere in the docstring). Without that declaration the escape hatch stays disabled and private or property fields never appear in Attributes.
 
 **Changing the base test class.** `lazy-python.testing-guidelines.md` deliberately does not hardcode a base test class name — it uses `<YourBaseTest>` as a placeholder. The project-specific base class convention lives in your `docs/guidelines/testing_guidelines.md` overlay. Dispatch `lazy-python.test-writer` after setting up that overlay and it will pick the correct base class for each test type.
 
@@ -69,65 +74,42 @@ The split between rules and guidelines is deliberate. Rules are short and always
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  subgraph rules [Path-Scoped Rules]
-    styleRule[lazy-python.style\n**/*.py]
-    docstringRule[lazy-python.docstrings\n**/*.py]
-    testsRule[lazy-python.tests\ntests/**/*.py]
+  subgraph pathRules [Path-scoped rules]
+    styleRule[lazy-python.style - **/*.py]
+    docstringRule[lazy-python.docstrings - **/*.py]
+    testsRule[lazy-python.tests - tests/**/*.py]
   end
 
-  subgraph references [Reference Guidelines]
-    codingRef[coding guideline]
-    documentingRef[documenting guideline]
-    testingRef[testing guideline]
-    checkingRef[checking guideline]
-    guidelinesIndex[guidelines-index]
+  editLoop[Claude edit loop]
+
+  canonGuidelines[(Canon guidelines - coding, documenting, testing, checking, index)]
+
+  subgraph consumers [Consumers]
+    docstringWriter[docstring-writer agent]
+    testWriter[test-writer agent]
+    checkers[chk-py / tst-py checkers]
   end
 
-  subgraph agents [Agents and Checkers]
-    editLoop[Claude edit loop]
-    docstringAgent[docstring-writer agent]
-    testAgent[test-writer agent]
-    chkPy[chk-py checker script]
-    tstPy[tst-py checker script]
-  end
-
-  styleRule -->|governs edits via| editLoop
-  docstringRule -->|governs edits via| editLoop
-  testsRule -->|governs edits via| editLoop
-
-  codingRef -->|read by| docstringAgent
-  documentingRef -->|read by| docstringAgent
-  testingRef -->|read by| docstringAgent
-  guidelinesIndex -->|read by| docstringAgent
-
-  codingRef -->|read by| testAgent
-  testingRef -->|read by| testAgent
-  checkingRef -->|read by| testAgent
-  guidelinesIndex -->|read by| testAgent
-
-  checkingRef -->|consulted by| chkPy
-  checkingRef -->|consulted by| tstPy
-  guidelinesIndex -->|consulted by| chkPy
-  guidelinesIndex -->|consulted by| tstPy
+  styleRule -->|feeds| editLoop
+  docstringRule -->|feeds| editLoop
+  testsRule -->|feeds| editLoop
+  canonGuidelines -->|read by| docstringWriter
+  canonGuidelines -->|read by| testWriter
+  canonGuidelines -->|read by| checkers
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
-  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
   classDef store fill:#5f3a1e,stroke:#e2904a,color:#fff
+  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
 
   class styleRule entry
   class docstringRule entry
   class testsRule entry
-  class codingRef store
-  class documentingRef store
-  class testingRef store
-  class checkingRef store
-  class guidelinesIndex store
   class editLoop action
-  class docstringAgent service
-  class testAgent service
-  class chkPy action
-  class tstPy action
+  class canonGuidelines store
+  class docstringWriter action
+  class testWriter action
+  class checkers service
 ```
 
 ## See also

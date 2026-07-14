@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-last_regen: 2026-07-12
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "Bootstrap order"
   request: "Flowchart of the single-plugin vs multi-plugin bootstrap path — install/setup, optional restart, audit, and the optional optimize+doctor branch — ending at bootstrap complete."
@@ -30,13 +30,13 @@ This block covers all five of core's interactive lifecycle skills, plus two non-
 
 **`/lazy-core.doctor`** is the deeper, interactive health check. It dispatches three parallel scan agents to check artifact integrity, config and memory health, and path hygiene across all config files. After collecting findings it checks plugin version currency against the live marketplace manifest, then applies release-mode suppression — if an installed plugin is outdated, content-level findings on its synced rule files are suppressed until you upgrade, so the version-outdated warning is the only thing you see. It then reconciles findings against your stored per-warning waivers and delegates to sibling audit skills (`lazy-guard.check-public`, `lazy-log.audit`, and plugin-specific audits when those plugins are enabled). It re-runs the full D1–D10 expert runtime checks inline. Then it offers targeted fixes — applying them only after your explicit confirmation — and a per-warning waive loop where each remaining warning can be permanently suppressed with a waiver file.
 
-**`/lazy-core.optimize`** addresses the two most common sources of bloat. For each rule file over 3 KB it classifies every section as a constraint (a prohibition or one-liner fact needed every turn) or reference material (layouts, tables, procedures, API details), shows the classification, and on confirmation rewrites the rule to constraints only and moves reference material into the agent definition. Phase 2.5 runs an LLM-readability audit across all rules, skills, agents, and commands — flagging decision-logic tables, abstract-header tables, narrative preambles, restated cross-references, decorative markers, and long explanatory paragraphs — and offers rewrites with a diff preview per finding. Phase 5.5 adds expert memory hygiene: orphan notes and near-duplicate note pairs within the same expert's `.memory/` directory are surfaced for interactive resolution. On the settings side it audits global `~/.claude/settings.json` for project-specific entries and migrates them to `settings.local.json`. It closes by running `/lazy-core.agent-models` to fill any missing model-routing entries.
+**`/lazy-core.optimize`** addresses the two most common sources of bloat. For each rule file over 3 KB it classifies every section as a constraint (a prohibition or one-liner fact needed every turn) or reference material (layouts, tables, procedures, API details), shows the classification, and on confirmation rewrites the rule to constraints only and moves reference material into the agent definition. Phase 2.5 runs an LLM-readability audit across all rules, skills, agents, and commands — flagging decision-logic tables, abstract-header tables, narrative preambles, restated cross-references, decorative markers, and long explanatory paragraphs — and offers rewrites with a diff preview per finding. Phase 5.5 adds expert memory hygiene: orphan notes and near-duplicate note pairs within the same expert's `.memory/` directory are surfaced for interactive resolution. On the settings side it audits global `~/.claude/settings.json` for project-specific entries and migrates them to `settings.local.json`. It closes by running `/lazy-core.agent-models` to fill any missing model-routing entries and prune tiers left behind by agents that have since been deleted.
 
 **`/lazy-core.setup`** is the shortcut for a fresh project bootstrap when you have multiple lazycortex plugins enabled. Step 0 migrates `.claude/lazy.settings.json` through the current per-section version ladder before any installer reads or writes it — if migration fails, the run aborts immediately. Then it scans every enabled plugin for `<namespace>.install` skills and any skill opting in via `lazy_setup_phase:` frontmatter, builds a dependency-ordered execution plan with `lazy-core.install` always first, shows a preview, and runs each child in sequence without a top-level confirmation prompt. Children that fail are logged but don't abort the loop; you get one coherent summary at the end. Pass `--dry-run` to see the plan without executing.
 
 **`lazy-core.autosetup`** is the non-interactive twin of `/lazy-core.setup`, built for rolling an install-chain update out across many repos at once instead of running the wizard in each one by hand. You dispatch it (directly, or from your own cross-project rollout loop) with a `repo=<absolute path>` argument; it never asks a question. It refuses to touch a repo with a dirty working tree or an unusable git identity, then walks every applicable `<namespace>.install` skill against the target repo the same way `/lazy-core.setup` would — "applicable" is resolved from the target repo's own enabled plugins (its `settings.json` / `settings.local.json`), never the machine-wide plugin cache, so a repo that enables only two plugins never receives the install chains of plugins enabled elsewhere on the host. Any step that skill would normally resolve via `AskUserQuestion` is skipped and reported as `needs-interactive` instead of guessed. Steps that are derivable or already on record (a persisted `daemon.enabled` gate, a conflict-free file sync, a registry upsert) apply exactly as the skill prescribes — and a plugin-shipped defaults table counts as a recorded decision too: when a step's own skill declares a non-interactive resolution for it, autosetup follows that resolution instead of skipping the step. `/lazy-core.agent-models`, for instance, auto-accepts curated tiers from its `default-tiers.json` table for newly discovered agents — autosetup applies those tiers silently rather than reporting them as `needs-interactive`. Only genuine first-time or preference decisions (a daemon gate never answered, a model tier that isn't in the curated table) still come back `needs-interactive`. It commits its own changes in the target repo under that repo's local identity, with no push. Because it only ever executes decisions that are already recorded or resolvable from a plugin-shipped defaults table, it is not a substitute for the first-time `/lazy-core.install` or `/lazy-core.setup` run — a repo with nothing on record mostly comes back reporting `needs-interactive`.
 
-**`lazy-core.autocheckup`** is the non-interactive twin of the checks `/lazy-core.checkup` orchestrates. Dispatched the same way, with `repo=<absolute path>`, it runs the full read-only audit/doctor sweep against the target repo and collects findings in the usual `PASS` / `WARN` / `FAIL` vocabulary — scoped, like autosetup, to whichever plugins that repo itself has enabled, not every plugin present anywhere on the host machine. It then applies a fix only when the fix is mechanically derivable with no operator preference involved — regenerating an install-managed mirror from its plugin source, creating a directory or registry entry an install skill would create silently, resyncing a derived file from its source of truth, or pinning an unpinned agent model whose dispatch string already has a tier in the default-tiers table. Anything content-shaped, destructive, preference-shaped, or normally resolved via `AskUserQuestion` is left as a reported finding, never applied. Like autosetup, it refuses a dirty tree, commits only the files it touched under the repo's local identity, and never pushes.
+**`lazy-core.autocheckup`** is the non-interactive twin of the checks `/lazy-core.checkup` orchestrates. Dispatched the same way, with `repo=<absolute path>`, it runs the full read-only audit/doctor sweep against the target repo and collects findings in the usual `PASS` / `WARN` / `FAIL` vocabulary — scoped, like autosetup, to whichever plugins that repo itself has enabled, not every plugin present anywhere on the host machine. It then applies a fix only when the fix is mechanically derivable with no operator preference involved — regenerating an install-managed mirror from its plugin source, creating a directory or registry entry an install skill would create silently, resyncing a derived file from its source of truth, pinning an unpinned agent model whose dispatch string already has a tier in the default-tiers table, or pruning an `agent_models` entry whose plugin-namespaced agent file has provably been deleted (a config key for an agent that no longer exists is dead config, not a preference — the one deliberate exception to its usual never-fix-by-deletion boundary). If a pruned dispatch is still referenced by an expert's `agent` field, that comes back as a WARN finding instead of being edited. Anything else content-shaped, destructive, preference-shaped, or normally resolved via `AskUserQuestion` is left as a reported finding, never applied. Like autosetup, it refuses a dirty tree, commits only the files it touched under the repo's local identity, and never pushes.
 
 ## How they work together
 
@@ -46,7 +46,7 @@ Once the installation is complete, `/lazy-core.audit` gives you a read-only snap
 
 `/lazy-core.doctor` goes deeper when something feels off. It reads everything the audit reads and more — config consistency across all four settings files, always-loaded context budget (WARN at 20 KB, FAIL at 40 KB), hook registration hygiene, MCP permission wildcard detection, cross-reference integrity, and the full D1–D10 expert runtime sweep. It also checks whether your installed plugins are current against the marketplace manifest and applies release-mode suppression so stale plugin findings don't crowd out the root cause. It offers to restart a stalled daemon, delete orphan job directories, or unregister routines whose plugin bin path has gone missing. Run doctor periodically or whenever the audit surfaces a pattern you want to investigate interactively.
 
-`/lazy-core.optimize` acts on the cost side. When audit or doctor reports oversized rules or settings leakage, optimize is the remediation path: it slims the rules, moves reference material to the right place, patches settings hygiene, and ensures every agent in your vault has a model-routing tier. Because it rewrites files, always run it after — not before — an audit or doctor pass so you know what you're trimming.
+`/lazy-core.optimize` acts on the cost side. When audit or doctor reports oversized rules or settings leakage, optimize is the remediation path: it slims the rules, moves reference material to the right place, patches settings hygiene, and ensures every agent in your vault has a model-routing tier — pruning any tier left behind for an agent that's since been deleted along the way. Because it rewrites files, always run it after — not before — an audit or doctor pass so you know what you're trimming.
 
 The full journey for a new project: install → restart → audit → doctor if anything looks off → optimize if context is heavy. For an existing project after `/plugin update`: re-run install (or setup) to pick up new rule templates, restart, then audit to confirm the new rules landed cleanly.
 
@@ -68,7 +68,7 @@ The full journey for a new project: install → restart → audit → doctor if 
 
 **Previewing the setup chain** — run `/lazy-core.setup --dry-run` to see the ordered list of install skills that would run, grouped by phase, with no changes applied.
 
-**Filling missing model-routing entries** — run `/lazy-core.agent-models` directly (or let `/lazy-core.optimize` Phase 7 do it) to assign haiku/sonnet/opus tiers to newly discovered agents without running the full optimize pipeline.
+**Filling missing model-routing entries and pruning stale ones** — run `/lazy-core.agent-models` directly (or let `/lazy-core.optimize` Phase 7 do it) to assign haiku/sonnet/opus tiers to newly discovered agents and remove tiers whose plugin-namespaced agent file has since been deleted, without running the full optimize pipeline. If a deleted agent's dispatch is still referenced by an expert's `agent` field, the wizard reports it as a warning rather than pruning it silently.
 
 **Checking aspect and arguments health** — run `/lazy-core.audit` and look at the Expert runtime section. D8 reports any unresolvable aspect references; D9 flags argument keys that don't match `^[a-z][a-z0-9_]*$` or payloads over 4 KB. D10 reports `.memory/` orphans, persona-mark mismatches, and tag-file drift.
 
@@ -105,53 +105,42 @@ For public-repo safety, see the **guardian** block: `/lazy-repo.mark-public` cre
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  enablePlugin[Enable plugin and restart]
-  installPath{Single or multi-plugin?}
-  singleInstall[/lazy-core.install]
-  multiSetup[/lazy-core.setup]
-  rulesChanged{Rules changed?}
-  secondRestart[Restart Claude Code]
+  chooseBootstrapPath{Single or multi-plugin?}
+  runInstall[/lazy-core.install]
+  runSetup[/lazy-core.setup]
+  hooksRegistered{New hooks registered?}
+  restartClaudeCode[Restart Claude Code]
   runAudit[/lazy-core.audit]
-  auditResult{Audit passed?}
-  resolveIssues[Resolve issues]
-  optimizeGuard{Run optimize and doctor?}
+  deeperCheckWanted{Run deeper check?}
   runOptimize[/lazy-core.optimize]
   runDoctor[/lazy-core.doctor]
   bootstrapComplete[Bootstrap complete]
 
-  enablePlugin -->|trigger| installPath
-  installPath -->|single-plugin| singleInstall
-  installPath -->|multi-plugin| multiSetup
-  singleInstall -->|done| rulesChanged
-  multiSetup -->|done| rulesChanged
-  rulesChanged -->|yes| secondRestart
-  rulesChanged -->|no| runAudit
-  secondRestart -->|restarted| runAudit
-  runAudit -->|results| auditResult
-  auditResult -->|fail| resolveIssues
-  resolveIssues -->|re-audit| runAudit
-  auditResult -->|pass| optimizeGuard
-  optimizeGuard -->|yes| runOptimize
-  runOptimize -->|next| runDoctor
-  runDoctor -->|done| bootstrapComplete
-  optimizeGuard -->|no| bootstrapComplete
+  chooseBootstrapPath -->|single-plugin| runInstall
+  chooseBootstrapPath -->|multi-plugin| runSetup
+  runInstall -->|installed| hooksRegistered
+  runSetup -->|chained installs done| hooksRegistered
+  hooksRegistered -->|yes| restartClaudeCode
+  hooksRegistered -->|no| runAudit
+  restartClaudeCode -->|resumed| runAudit
+  runAudit -->|verified| deeperCheckWanted
+  deeperCheckWanted -->|yes| runOptimize
+  deeperCheckWanted -->|no| bootstrapComplete
+  runOptimize -->|optimized| runDoctor
+  runDoctor -->|diagnosed| bootstrapComplete
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class enablePlugin entry
-  class installPath guard
-  class rulesChanged guard
-  class auditResult guard
-  class optimizeGuard guard
-  class singleInstall action
-  class multiSetup action
-  class secondRestart action
+  class chooseBootstrapPath guard
+  class runInstall action
+  class runSetup action
+  class hooksRegistered guard
+  class restartClaudeCode action
   class runAudit action
-  class resolveIssues error
+  class deeperCheckWanted guard
   class runOptimize action
   class runDoctor action
   class bootstrapComplete success

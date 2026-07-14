@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Canonical Python file skeletons — python-template.py for regular files, init-template.py for __init__.py — installed once via /lazy-python.install Step 6.
-last_regen: 2026-07-10
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "How the templates reach your project"
   request: "Flow showing python-template.py, init-template.py, and scaffold.entries.json shipping from the plugin, scaffold-sync copying both templates into .claude/templates/python/ in the consumer project, and the lazy-core.scaffold rule matching a new *.py file against python-template.py or, when the file is an __init__.py, against init-template.py instead (the more specific glob wins)"
@@ -18,7 +18,7 @@ Every Python file Claude composes starts from the same canonical skeleton rather
 
 **`python-template.py`** is the canonical module skeleton for regular source files. It encodes the conventions from `lazy-python.coding-guidelines.md` sections "Module Structure" and "Import Organization" directly into a starting shape: a `from __future__ import annotations` declaration, the import blocks in canonical order (typing, stdlib, third-party, local project, and the `TYPE_CHECKING`-guarded block for deferred annotations), a comment slot for module-level constants and TypeVars, and a separator-commented example class stub. It carries no module-level docstring — per the canon, module docstrings belong to `__init__.py` only. The authoring note at the top of the template instructs Claude to replace all placeholder markers and strip the scaffolding comment before adding real content.
 
-**`init-template.py`** is the dedicated skeleton for `__init__.py` files. It encodes the canon's `__init__.py` File Patterns section: a module-level package docstring with a one-sentence summary, an optional extended description, a `Subpackages:` list, and `Dependencies:` / `Dependents:` sections — each omitted entirely when empty — followed by `from __future__ import annotations` and the `from .submodule import *` wildcard-export pattern that must lead the import block. This template is new in this release; before it existed, every new `.py` file (including `__init__.py`) scaffolded from `python-template.py`, which never carried a docstring slot.
+**`init-template.py`** is the dedicated skeleton for `__init__.py` files. It encodes the canon's `__init__.py` File Patterns section: a module-level package docstring with a one-sentence summary, an optional extended description, a `Subpackages:` list, and `Dependencies:` / `Dependents:` sections — each omitted entirely when empty — followed by `from __future__ import annotations` and the `from .submodule import *` wildcard-export pattern that must lead the import block.
 
 **`scaffold.entries.json`** is the manifest that tells `lazy-core.scaffold-sync` exactly what to install and how. It declares two entries under a `templates` key: `.claude/templates/python/python-template.py` mapped to the glob `**/*.py`, and `.claude/templates/python/init-template.py` mapped to the more specific glob `**/__init__.py`. When `/lazy-python.install` Step 6 dispatches `lazy-core.scaffold-sync`, the sync skill reads this manifest, copies both templates to their consumer-local paths, and upserts a `lazycortex-python` registry key in the project's `lazy-core.scaffold.md` rule — so the scaffold rule fires on every new `.py` file you compose and resolves to the right template.
 

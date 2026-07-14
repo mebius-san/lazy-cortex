@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
-last_regen: 2026-07-12
+last_regen: 2026-07-14
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing how lazy-guard.check-public feeds findings into lazy-repo.mark-public (which creates .guard-waivers.json and activates the pre-commit hook), and how lazy-guard.allow-mcp independently classifies MCP server tools into allow/ask/skip buckets and writes them to settings.local.json"
@@ -60,31 +60,31 @@ Optionally, `/lazy-guard.allow-mcp` can also install a SessionStart preload hook
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  runCheckPublic[Run lazy-guard.check-public]
-  findingType{Secret or PII/path WARN finding?}
-  blockSecrets[Secrets found FAIL - always blocks]
-  waivePii{Waive PII/path finding?}
-  writeWaiver[Write waiver to .guard-waivers.json]
-  resolveFinding[Resolve or redact finding]
-  runMarkPublic[Run lazy-repo.mark-public]
-  activateHook[Create .guard-waivers.json, activate pre-commit hook]
-  runAllowMcp[Run lazy-guard.allow-mcp]
-  classifyTool{Classify MCP tool bucket?}
-  settingsWritten[settings.local.json updated]
-  fallbackPrompt[Fall back to built-in per-call prompt]
+  checkPublicScan[lazy-guard.check-public scans repo]
+  findingsFound{Findings found?}
+  markPublicWorkflow[lazy-repo.mark-public runs]
+  writeWaiversFile[Creates .guard-waivers.json]
+  activatePreCommitHook[Activates pre-commit hook]
+  repoStaysPrivate[Repo stays private]
+  allowMcpScan[lazy-guard.allow-mcp scans MCP server tools]
+  classifyToolBuckets{Classify tool}
+  addToAllowBucket[Add to allow bucket]
+  addToAskBucket[Add to ask bucket]
+  addToSkipBucket[Add to skip bucket]
+  writeSettingsLocal[Writes settings.local.json]
 
-  runCheckPublic -->|scan| findingType
-  findingType -->|secret| blockSecrets
-  findingType -->|PII or path| waivePii
-  waivePii -->|yes| writeWaiver
-  waivePii -->|no| resolveFinding
-  writeWaiver -->|proceed| runMarkPublic
-  resolveFinding -->|proceed| runMarkPublic
-  runMarkPublic -->|finalize| activateHook
-  runAllowMcp -->|classify| classifyTool
-  classifyTool -->|allow bucket| settingsWritten
-  classifyTool -->|ask bucket| settingsWritten
-  classifyTool -->|skip bucket| fallbackPrompt
+  checkPublicScan -->|report| findingsFound
+  findingsFound -->|clear| markPublicWorkflow
+  findingsFound -->|blocking| repoStaysPrivate
+  markPublicWorkflow -->|create| writeWaiversFile
+  markPublicWorkflow -->|activate| activatePreCommitHook
+  allowMcpScan -->|inspect| classifyToolBuckets
+  classifyToolBuckets -->|safe| addToAllowBucket
+  classifyToolBuckets -->|sensitive| addToAskBucket
+  classifyToolBuckets -->|irrelevant| addToSkipBucket
+  addToAllowBucket -->|persist| writeSettingsLocal
+  addToAskBucket -->|persist| writeSettingsLocal
+  addToSkipBucket -->|persist| writeSettingsLocal
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
@@ -92,17 +92,16 @@ flowchart LR
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class runCheckPublic entry
-  class findingType guard
-  class blockSecrets error
-  class waivePii guard
-  class writeWaiver action
-  class resolveFinding action
-  class runMarkPublic action
-  class activateHook success
-  class runAllowMcp entry
-  class classifyTool guard
-  class settingsWritten success
-  class fallbackPrompt success
+  class checkPublicScan entry
+  class allowMcpScan entry
+  class findingsFound guard
+  class classifyToolBuckets guard
+  class markPublicWorkflow action
+  class writeWaiversFile action
+  class activatePreCommitHook action
+  class addToAllowBucket action
+  class addToAskBucket action
+  class addToSkipBucket action
+  class writeSettingsLocal success
+  class repoStaysPrivate error
 ```
-</content>

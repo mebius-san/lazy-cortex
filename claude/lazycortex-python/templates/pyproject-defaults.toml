@@ -267,6 +267,23 @@ banned_docstring_phrases = [
   "internally",
 ]
 
+# Class attribute names whose declaration exempts a class from D2
+# (private labels allowed in its Attributes: section). Empty = escape hatch disabled.
+# d2_exempt_marker_attrs = ["_my_filters"]
+
+# Private identifiers tolerated in docstring narrative by D9.
+# private_name_allowlist = ["_my_filters"]
+
+# Project-registered docstring sections merged into the section machinery.
+# style: "bulleted" | "definition" | "plain". Order anchor: after/before must
+# name a built-in section or a previously declared entry (else appended last).
+# ref_exempt = true shields the section's body (# REF: lines) from D5/D7/D9.
+# [[tool.pcf.extra_docstring_sections]]
+# name = "Field Semantics"
+# style = "bulleted"
+# after = "Guarantees"
+# ref_exempt = true
+
 [tool.pcf.overrides]
 # <add per-path overrides as needed, e.g.>
 # "tests"          = { check_assert = false }
