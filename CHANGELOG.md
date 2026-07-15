@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.15.0 — 2026-07-15 UTC
+
+- Install and scaffold-sync steps now detect current vs. diverged mirrored files via deterministic byte-comparison instead of agent judgment, catching drift more reliably.
+- Runtime dashboard gains a dirty-tree gauge (surfaces when the daemon silently pauses on uncommitted changes) and per-expert labels on token-spend metrics.
+- Fixed: autosetup no longer fails on skills requiring a live session — they're now correctly skipped as live-session-only.
+
 ### 5.14.0 — 2026-07-14 UTC
 
 - Fixed the daemon-runner version lookup in `lazy.runtime.sh`: a lexicographic (not version-aware) sort meant any daemon on 5.10+ still resolved back to the stale 5.9.0 cache dir. Run `/lazy-core.install` to re-render the shim and pick up the fix.
@@ -655,6 +661,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 0.6.0 — 2026-07-15 UTC
+
+- Daemons table gains a Work column (OK / PAUSED — dirty tree); the Last activity column is retired.
+- Routine health table drops the Last tick column and excludes exported repos everywhere.
+- Token dashboards add an expert dimension (lights up once core >= 5.15.0) and strip the `claude-` prefix from model names.
+- Dashboard layout tightened: middle table row condensed, donuts arranged two-by-two, legends unified (bottom on line charts, right on donuts).
+
 ### 0.5.0 — 2026-07-14 UTC
 
 - Runtime dashboard reworked: a new Daemons table (one row per repo, showing liveness, halt state, failed/dead job counts, and errors with gradient bars) replaces the old top stat strip; a Tokens-by-repo donut chart replaces the per-daemon token tiles/column; Open/Problem jobs charts moved above the queue table; model labels no longer show the `claude-` prefix.
@@ -741,6 +754,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 2.0.1 — 2026-07-15 UTC
+
+- Fixed the `D9` docstring check incorrectly flagging consumer-registered definition-style sections (e.g. custom Args/Attributes-style sections) as narrative text — plain-style sections are still checked.
 
 ### 2.0.0 — 2026-07-14 UTC
 

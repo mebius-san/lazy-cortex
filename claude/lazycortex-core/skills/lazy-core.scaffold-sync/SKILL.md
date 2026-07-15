@@ -63,16 +63,18 @@ Otherwise state outcome `discovered-N` where N is the number of manifests found.
 
 ## Step 3 — Copy templates per group
 
-For each `<group>` discovered in Step 2, copy the template files from `<installPath>/templates/<group>/` into the consumer's `.claude/templates/<group>/` directory (where "consumer" scope = `~/.claude/` for `user`, `<repo-root>/.claude/` for `project`). **Exclude `scaffold.entries.json`** — that file is plugin-internal and must not land in the consumer tree.
+For each `<group>` discovered in Step 2, sync the template files from `<installPath>/templates/<group>/` into the consumer's `.claude/templates/<group>/` directory (where "consumer" scope = `~/.claude/` for `user`, `<repo-root>/.claude/` for `project`) with the deterministic triage script — the current/not-current verdict comes from the receipt, never from impression:
 
-Ensure the target directory exists with `mkdir -p <consumerScope>/.claude/templates/<group>/`.
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py --src <installPath>/templates/<group> --dst <consumerScope>/.claude/templates/<group> --exclude scaffold.entries.json
+```
 
-An enabled plugin installs its whole template surface — no per-template "install this?" prompt. For each source file (every file in `<installPath>/templates/<group>/` except `scaffold.entries.json`), apply these four cases:
+`scaffold.entries.json` is plugin-internal and must not land in the consumer tree. The script creates the target directory, copies absent targets (state **installed**), byte-compares the rest (**unchanged**), and lists every genuinely differing file in the receipt's `diverged` array without touching it. Subdirectories are ignored — template groups are flat.
 
-1. **New** — target file missing → copy source to target silently. State **installed**.
-2. **Unchanged** — both present, byte-identical (`diff -q`) → no action. State **unchanged**.
-3. **Drift, cleanly mergeable** — both present, differ, the shipped delta applies without contradicting local edits (new headings / list items / registry entries added; every local-only chunk preserved) → merge silently via `Edit`. Uncontroversial additions (new entries in a registry group that already exists locally with the same key) just land. State **merged**.
-4. **Conflict** — the same region (a heading body, a block, an entry value) was changed both in shipped and local in ways that cannot be reconciled automatically → the ONLY case that asks. `AskUserQuestion` quoting the conflicting region with a unified diff, options **merge-shipped** / **keep-local**. State **merged** or **kept-local**.
+An enabled plugin installs its whole template surface — no per-template "install this?" prompt. Apply judgment ONLY to the `diverged` list:
+
+1. **Drift, cleanly mergeable** — the shipped delta applies without contradicting local edits (new headings / list items / registry entries added; every local-only chunk preserved) → merge silently via `Edit`. Uncontroversial additions (new entries in a registry group that already exists locally with the same key) just land. State **merged**.
+2. **Conflict** — the same region (a heading body, a block, an entry value) was changed both in shipped and local in ways that cannot be reconciled automatically → the ONLY case that asks. `AskUserQuestion` quoting the conflicting region with a unified diff, options **merge-shipped** / **keep-local**. State **merged** or **kept-local**.
 
 "Conflict" means you cannot determine what should survive — not merely "the files differ". No contradiction → no question.
 

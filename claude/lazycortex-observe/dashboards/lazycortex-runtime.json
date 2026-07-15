@@ -161,13 +161,6 @@
       },
       "targets": [
         {
-          "expr": "time() - max by (repo) (lazycortex_runtime_routine_last_tick_timestamp{repo=~\"$repo\"})",
-          "legendFormat": "",
-          "refId": "A",
-          "instant": true,
-          "format": "table"
-        },
-        {
           "expr": "max by (repo) (lazycortex_runtime_daemon_halted{repo=~\"$repo\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
           "legendFormat": "",
           "refId": "B",
@@ -194,6 +187,13 @@
           "refId": "E",
           "instant": true,
           "format": "table"
+        },
+        {
+          "expr": "max by (repo) (lazycortex_runtime_dirty_tree{repo=~\"$repo\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "legendFormat": "",
+          "refId": "G",
+          "instant": true,
+          "format": "table"
         }
       ],
       "transformations": [
@@ -205,23 +205,24 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "Time": true
+              "Time": true,
+              "exported_repo": true
             },
             "indexByName": {
               "repo": 0,
-              "Value #A": 1,
               "Value #B": 2,
-              "Value #C": 3,
-              "Value #D": 4,
-              "Value #E": 5
+              "Value #C": 4,
+              "Value #D": 5,
+              "Value #E": 6,
+              "Value #G": 3
             },
             "renameByName": {
               "repo": "Daemon",
-              "Value #A": "Last activity",
               "Value #B": "Halted",
               "Value #C": "Failed jobs",
               "Value #D": "Dead jobs",
-              "Value #E": "Errors"
+              "Value #E": "Errors",
+              "Value #G": "Work"
             }
           }
         }
@@ -240,40 +241,6 @@
           }
         },
         "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Last activity"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "s"
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-text"
-                }
-              },
-              {
-                "id": "thresholds",
-                "value": {
-                  "mode": "absolute",
-                  "steps": [
-                    {
-                      "color": "green",
-                      "value": null
-                    },
-                    {
-                      "color": "red",
-                      "value": 300
-                    }
-                  ]
-                }
-              }
-            ]
-          },
           {
             "matcher": {
               "id": "byName",
@@ -345,6 +312,38 @@
                 }
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Work"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "OK",
+                        "color": "green"
+                      },
+                      "1": {
+                        "text": "PAUSED — dirty tree",
+                        "color": "orange"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
           }
         ]
       },
@@ -363,7 +362,7 @@
         "sortBy": [
           {
             "desc": true,
-            "displayName": "Last activity"
+            "displayName": "Errors"
           }
         ]
       }
@@ -383,13 +382,6 @@
         "y": 6
       },
       "targets": [
-        {
-          "expr": "time() - lazycortex_runtime_routine_last_tick_timestamp{repo=~\"$repo\"}",
-          "legendFormat": "",
-          "refId": "A",
-          "instant": true,
-          "format": "table"
-        },
         {
           "expr": "sum by (routine, repo) (increase(lazycortex_runtime_routine_ticks_total{repo=~\"$repo\"}[$period]))",
           "legendFormat": "",
@@ -424,12 +416,12 @@
               "Time": true,
               "__name__": true,
               "instance": true,
-              "job": true
+              "job": true,
+              "exported_repo": true
             },
             "indexByName": {
               "routine": 0,
               "repo": 1,
-              "Value #A": 2,
               "Value #B": 3,
               "Value #C": 4,
               "Value #D": 5
@@ -437,7 +429,6 @@
             "renameByName": {
               "routine": "Routine",
               "repo": "Repo",
-              "Value #A": "Last tick",
               "Value #B": "Ticks",
               "Value #C": "Errors",
               "Value #D": "Busy time"
@@ -459,18 +450,6 @@
           }
         },
         "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Last tick"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "s"
-              }
-            ]
-          },
           {
             "matcher": {
               "id": "byName",
@@ -557,7 +536,7 @@
         "sortBy": [
           {
             "desc": true,
-            "displayName": "Last tick"
+            "displayName": "Ticks"
           }
         ]
       }
@@ -571,7 +550,7 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 10,
+        "h": 8,
         "w": 8,
         "x": 0,
         "y": 16
@@ -590,7 +569,8 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "Time": true
+              "Time": true,
+              "exported_repo": true
             },
             "indexByName": {
               "routine": 0,
@@ -651,7 +631,7 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 10,
+        "h": 8,
         "w": 8,
         "x": 8,
         "y": 16
@@ -670,7 +650,8 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "Time": true
+              "Time": true,
+              "exported_repo": true
             },
             "indexByName": {
               "repo": 0,
@@ -730,7 +711,7 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 10,
+        "h": 8,
         "w": 8,
         "x": 16,
         "y": 16
@@ -749,7 +730,8 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "Time": true
+              "Time": true,
+              "exported_repo": true
             },
             "indexByName": {
               "expert": 0,
@@ -853,7 +835,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 26
+        "y": 24
       },
       "timeFrom": "$period",
       "targets": [
@@ -890,7 +872,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 26
+        "y": 24
       },
       "timeFrom": "$period",
       "targets": [
@@ -958,7 +940,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 34
+        "y": 32
       },
       "targets": [
         {
@@ -1006,7 +988,8 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "Time": true
+              "Time": true,
+              "exported_repo": true
             },
             "indexByName": {
               "routine": 0,
@@ -1105,9 +1088,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 6,
+        "w": 12,
         "x": 0,
-        "y": 44
+        "y": 42
       },
       "targets": [
         {
@@ -1152,9 +1135,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 6,
-        "y": 44
+        "w": 12,
+        "x": 12,
+        "y": 42
       },
       "targets": [
         {
@@ -1182,7 +1165,7 @@
         "pieType": "donut",
         "legend": {
           "displayMode": "table",
-          "placement": "bottom",
+          "placement": "right",
           "values": [
             "value",
             "percent"
@@ -1199,9 +1182,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 12,
-        "y": 44
+        "w": 12,
+        "x": 0,
+        "y": 50
       },
       "targets": [
         {
@@ -1229,7 +1212,7 @@
         "pieType": "donut",
         "legend": {
           "displayMode": "table",
-          "placement": "bottom",
+          "placement": "right",
           "values": [
             "value",
             "percent"
@@ -1246,9 +1229,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 18,
-        "y": 44
+        "w": 12,
+        "x": 12,
+        "y": 50
       },
       "targets": [
         {

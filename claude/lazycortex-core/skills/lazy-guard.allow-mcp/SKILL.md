@@ -3,6 +3,7 @@ name: lazy-guard.allow-mcp
 description: "Register tools of one or more MCP servers in Claude Code settings using a 3-bucket classifier — safe/reversible tools into permissions.allow (no prompt), truly destructive tools into permissions.ask (always prompt), and medium-risk tools skipped entirely so Claude Code prompts once per call and the user decides. Writes to settings.local.json (gitignored) by default to keep personal permissions out of tracked settings shared with teammates. For globally defined servers, asks whether to register at the global scope (~/.claude/settings.local.json) or per-project (./.claude/settings.local.json). Also strips redundant mcp__ entries from paired tracked settings.json after promotion. Optionally installs a SessionStart preload hook (in gitignored settings.local.json — a personal optimization, not universal enablement) that tells the agent to resolve the server's tool schemas via ToolSearch at session start — eliminates the deferred-loading round-trip that otherwise causes drift to Bash equivalents. Use when the user says 'allow context7 mcp', 'allow all mcp tools', 'trust the brave-search MCP server', or similar."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(date -u *), Bash(git rev-parse *)
 lazy_setup_phase: post-install
+requires_live_session: true
 ---
 # Register MCP Server Tools
 
@@ -397,7 +398,7 @@ Include warnings for:
 
 ## Non-interactive execution (no user channel)
 
-When this skill is executed by an agent without a user channel (`lazy-core.autosetup` executing the setup chain), every interactive point resolves by inference-or-skip — recorded state applies, nothing preference-shaped is guessed:
+The setup chain never reaches here headless — `requires_live_session: true` in frontmatter makes `lazy-core.autosetup` skip this skill at discovery (subagents have no live `mcp__*` tools). If some other executor without a user channel runs this skill anyway, every interactive point resolves by inference-or-skip — recorded state applies, nothing preference-shaped is guessed:
 
 - **Server set (Phase 1)** — all discovered servers (the empty-input form).
 - **Scope (Phase 4b)** — inferred from existing `mcp__<server>__*` entries exactly per the 4b table. The `Neither` and `Both` rows, and the duplicate-definition prompt, resolve to `needs-interactive: <server> — scope` — that server's writes are skipped entirely.

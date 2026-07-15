@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Answers to non-obvious questions about install vs setup, settings placement, plugin composition, agent routing, the expert runtime and job lifecycle, the memory subsystem, routine types, daemon recovery, metrics provisioning, and push automation, git staging coordination, MCP tool permissions, change-history tooling, and the public-repo guard scanner.
-last_regen: 2026-07-14
+summary: Answers to non-obvious questions about install vs setup, checkup vs audit/doctor/optimize, settings placement, scaffold templates, plugin composition, agent routing, the expert runtime and job lifecycle, the memory subsystem, routine types, daemon recovery, metrics provisioning, and push automation, git staging coordination, MCP tool permissions, change-history tooling, and the public-repo guard scanner.
+last_regen: 2026-07-15
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -9,11 +9,18 @@ source_skills:
   - lazy-core.doctor
   - lazy-core.optimize
   - lazy-core.setup
+  - lazy-core.checkup
+  - lazy-core.agent-models
+  - lazy-core.scaffold-local
+  - lazy-core.scaffold-sync
+  - lazy-core.git-status
+  - lazy-core.git-unlock
   - lazy-repo.mark-public
   - lazy-guard.check-public
   - lazy-guard.allow-mcp
   - lazy-routine.register
   - lazy-routine.unregister
+  - lazy-routine.offer-protocols
   - lazy-runtime.recover
   - lazy-runtime.preflight
   - lazy-expert.dispatch-job
@@ -24,9 +31,6 @@ source_skills:
   - lazy-memory.index
   - lazy-memory.reflect
   - lazy-memory.mark-persona
-  - lazy-core.agent-models
-  - lazy-core.git-status
-  - lazy-core.git-unlock
   - lazy-log.clean
   - lazy-log.distill
   - lazy-log.recall
@@ -79,6 +83,14 @@ A **patch bump** (e.g. `1.0.0` → `1.0.1`) is safe to drop in with no action �
 `/lazy-core.optimize` is action-oriented: it slims oversized rule files (moving reference material into agent definitions) and audits global `settings.json` for project-specific entries that should move to local settings. Run it when startup feels slow or after adding new rules/agents — audit and doctor tell you something is off, optimize is one of the skills that fixes it.
 
 Run `/lazy-core.audit` for a quick read on context footprint, `/lazy-core.doctor` when something in the config feels broken and you want fixes offered, and `/lazy-core.optimize` specifically to shrink startup context.
+
+---
+
+## Where does `/lazy-core.checkup` fit alongside audit, doctor, and optimize?
+
+`/lazy-core.checkup` is the single entry point when you want one read-only pass across everything the plugin can check, without running the other three separately and reconciling their reports yourself. It runs `/lazy-core.audit` and `/lazy-core.doctor` in report-only mode, merges their findings with any other installed plugin's own audit into one table grouped by plugin and sorted `FAIL` → `WARN` → `INFO`, and presents that table verbatim.
+
+It makes no changes on its own. After the table, it asks once — via a multi-select prompt — whether to run `/lazy-core.optimize`, the doctor's interactive fix loop, both, or nothing. Only your choice at that prompt triggers any mutation. Reach for `/lazy-core.checkup` as your default "is everything okay?" command; reach for `/lazy-core.audit` or `/lazy-core.doctor` directly only when you already know which specific report you want.
 
 ---
 
@@ -322,6 +334,14 @@ The reason templates are mandatory rather than optional is that every artifact c
 
 ---
 
+## What's the difference between `/lazy-core.scaffold-local` and `/lazy-core.scaffold-sync`?
+
+`/lazy-core.scaffold-sync` is install-time plumbing, not something you run directly. A plugin's own install skill invokes it as a sub-step to copy that plugin's shipped authoring templates into your `.claude/templates/<group>/` directories and register the matching globs in the scaffold registry — it's what makes `/lazy-core.install` (and every other plugin's install skill) populate your template directories in the first place.
+
+`/lazy-core.scaffold-local` is the one you run yourself, for templates that are specific to your own repo rather than shipped by any plugin — the reserved `_local` key in the registry. It adds or removes one `_local` entry at a time (template group + kind + matching globs), seeding a starter template file under `.claude/templates/<group>/` if none exists yet, and validates the registry afterward so a typo'd glob doesn't silently shadow a sibling plugin's entry. Use it instead of hand-editing `.claude/rules/lazy-core.scaffold.md` directly — the registry is fragile enough that a raw edit risks breaking another plugin's entries.
+
+---
+
 ## Why does Claude refuse to write to `~/.claude/` by default?
 
 The `lazy-core.hygiene` rule (always-loaded) sets project-local scope as the default for every artifact — skills, agents, hooks, rules, and config. Writing to `~/.claude/` without an explicit request violates this rule because global artifacts affect every project on the machine: a rule added globally loads into every session, a permission entry allowed globally persists after the project context is gone, and MCP server configs placed globally expose that server everywhere.
@@ -341,6 +361,8 @@ Each plugin installs its own rule templates and may seed its own section of `laz
 A **protocol** is routine-side config that defines the request/response contract for the jobs a routine dispatches — the `kind` enum, `role` vocabulary, field shapes, and outcome enum. Different routines can dispatch jobs against the same protocol.
 
 An **aspect** is expert-side config that shapes how the expert acts on top of its protocol. The same protocol can be paired with different aspects across experts. For example, two experts could share the doc-review protocol but only one carries `lazy-memory.persona-aspect` to keep notes between runs. Protocols and aspects are listed in parallel in the expert's user-message prompt — the expert reads both before acting.
+
+You don't attach a protocol to a routine directly. A plugin's own install or configure skill invokes `/lazy-routine.offer-protocols` as a sub-step, which discovers protocol candidates relevant to that routine's context and offers you the optional ones — accepted choices are unioned into the routine's protocols list.
 
 ---
 

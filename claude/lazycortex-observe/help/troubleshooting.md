@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-observe install, uninstall, and doctor — symptoms, likely causes, and fixes.
-last_regen: 2026-07-14
+last_regen: 2026-07-15
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree rooted at the operator's situation: top-level branch on whether the shipper is installed at all (answer file present?); if not-installed, branch further on whether the Step 0 pre-flight found an already-covered host (routes to --integrate-only or --force-standalone guidance) versus a genuinely clear host (routes to plain install); if installed, branch on whether the host runs in integrate mode (scrape-targets file present and current vs missing/stale) or standalone mode — standalone then branches on whether the service is active, whether local /metrics is reachable, whether agent self-metrics show successful remote_write (token vs observer-reachability vs WAL-recovery sub-branches), and whether WAL is oversized. Separate top-level branch for uninstall failures (launchctl error 5 vs systemctl unit-not-found). Each leaf cites the troubleshooting entry that resolves it."
@@ -10,7 +10,6 @@ source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
   - lazy-observe.doctor
-  - lazy-observe.audit
 ---
 # Troubleshooting
 
@@ -179,42 +178,68 @@ source_skills:
 ```mermaid
 %%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart TD
-  whatIsSituation{What is your situation?}
-  preflightCovered{Pre-flight found already-covered host?}
-  integrateOrStandalone{Integrate or standalone mode?}
-  wherePipelineBreak{Where does the pipeline break?}
+  shipperInstalled{Shipper installed - answer file present?}
+  preflightCoveredHost{Step 0 pre-flight found already-covered host?}
+  coveredHostGuidance[Guidance: use --integrate-only or --force-standalone]
+  plainInstall[Guidance: run plain install]
+  hostMode{Host runs in integrate mode?}
+  scrapeTargetsCurrent{Scrape-targets file present and current?}
+  integrateModeHealthy[Integrate mode healthy]
+  integrateModeStaleOrMissing[Missing or stale scrape-targets - see troubleshooting: scrape-targets]
+  serviceActive{Service active?}
+  serviceInactive[Service not active - see troubleshooting: service]
+  metricsReachable{Local /metrics reachable?}
+  metricsUnreachable[Local /metrics unreachable - see troubleshooting: metrics endpoint]
+  remoteWriteOk{Agent self-metrics show successful remote_write?}
+  remoteWriteFailure[remote_write failing - check token, observer reachability, WAL recovery]
+  walOversized{WAL oversized?}
+  walOversizedLeaf[WAL oversized - see troubleshooting: WAL size]
+  standaloneHealthy[Standalone mode healthy]
+  uninstallFailureType{Uninstall failure type?}
+  launchctlError5[launchctl error 5 - see troubleshooting: launchctl error 5]
+  systemctlUnitNotFound[systemctl unit not found - see troubleshooting: systemctl unit-not-found]
 
-  useIntegrateOrForce[Use --integrate-only or --force-standalone, see install entries]
-  plainInstallPath[Plain install path]
-  checkScrapeTargets[Check scrape-targets file present and current, see integrate entries]
-  serviceNotActive[Service not active or /metrics unreachable, see service entries]
-  remoteWriteFailing[remote_write failing - token, observer reachability, WAL recovery, see remote_write entries]
-  walOversized[WAL oversized, see WAL entry]
-  uninstallError[launchctl error 5 vs systemctl unit-not-found, see uninstall entries]
-
-  whatIsSituation -->|Installing| preflightCovered
-  whatIsSituation -->|Installed but unhealthy| integrateOrStandalone
-  whatIsSituation -->|Uninstalling fails| uninstallError
-  preflightCovered -->|yes| useIntegrateOrForce
-  preflightCovered -->|no| plainInstallPath
-  integrateOrStandalone -->|integrate| checkScrapeTargets
-  integrateOrStandalone -->|standalone| wherePipelineBreak
-  wherePipelineBreak -->|service| serviceNotActive
-  wherePipelineBreak -->|remote_write| remoteWriteFailing
-  wherePipelineBreak -->|WAL| walOversized
+  shipperInstalled -->|no| preflightCoveredHost
+  shipperInstalled -->|yes| hostMode
+  preflightCoveredHost -->|covered host found| coveredHostGuidance
+  preflightCoveredHost -->|clear host| plainInstall
+  hostMode -->|integrate mode| scrapeTargetsCurrent
+  hostMode -->|standalone mode| serviceActive
+  scrapeTargetsCurrent -->|present and current| integrateModeHealthy
+  scrapeTargetsCurrent -->|missing or stale| integrateModeStaleOrMissing
+  serviceActive -->|no| serviceInactive
+  serviceActive -->|yes| metricsReachable
+  metricsReachable -->|no| metricsUnreachable
+  metricsReachable -->|yes| remoteWriteOk
+  remoteWriteOk -->|no| remoteWriteFailure
+  remoteWriteOk -->|yes| walOversized
+  walOversized -->|yes| walOversizedLeaf
+  walOversized -->|no| standaloneHealthy
+  uninstallFailureType -->|launchctl error 5| launchctlError5
+  uninstallFailureType -->|systemctl unit not found| systemctlUnitNotFound
 
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class whatIsSituation guard
-  class preflightCovered guard
-  class integrateOrStandalone guard
-  class wherePipelineBreak guard
-  class useIntegrateOrForce success
-  class plainInstallPath success
-  class checkScrapeTargets success
-  class serviceNotActive success
-  class remoteWriteFailing success
-  class walOversized success
-  class uninstallError success
+  class shipperInstalled guard
+  class preflightCoveredHost guard
+  class hostMode guard
+  class scrapeTargetsCurrent guard
+  class serviceActive guard
+  class metricsReachable guard
+  class remoteWriteOk guard
+  class walOversized guard
+  class uninstallFailureType guard
+  class coveredHostGuidance success
+  class plainInstall success
+  class integrateModeHealthy success
+  class standaloneHealthy success
+  class integrateModeStaleOrMissing error
+  class serviceInactive error
+  class metricsUnreachable error
+  class remoteWriteFailure error
+  class walOversizedLeaf error
+  class launchctlError5 error
+  class systemctlUnitNotFound error
 ```

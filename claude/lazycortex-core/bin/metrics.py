@@ -398,7 +398,7 @@ def init(repo_label: str, version: str, daemon_name: str) -> None:
     "lazycortex_runtime_tokens_total",
     # waiver: external Prometheus HELP text, not a domain constant
     "Anthropic API tokens consumed by routine subprocesses.",
-    ("repo", "routine", "model", "kind"),
+    ("repo", "routine", "expert", "model", "kind"),
   )
   _state[MetricStateKey.DURATION] = _Histogram(
     # waiver: external Prometheus metric name, not a domain constant
@@ -448,6 +448,13 @@ def init(repo_label: str, version: str, daemon_name: str) -> None:
     # waiver: external Prometheus HELP text, not a domain constant
     "Cumulative number of times the daemon has halted.",
     ("repo", "reason", "triggered_by"),
+  )
+  _state[MetricStateKey.DIRTY_TREE] = _Gauge(
+    # waiver: external Prometheus metric name, not a domain constant
+    "lazycortex_runtime_dirty_tree",
+    # waiver: external Prometheus HELP text, not a domain constant
+    "1 while the daemon skips routine dispatch because the working tree has uncommitted changes.",
+    ("repo",),
   )
 
   _state[MetricStateKey.UP].set(None, 1)
@@ -594,6 +601,28 @@ def set_halt_gauge(reason: str | None, triggered_by: str | None) -> None:
     _state[MetricStateKey.DAEMON_HALTED].set(labels, 1)
 
 
+def set_dirty_tree_gauge(dirty: bool) -> None:
+  """
+  Reflect whether the daemon is currently skipping routine dispatch over a dirty working tree.
+
+  Safe to call on every daemon iteration: the gauge simply tracks the caller's latest
+  pre-iteration tree check, so scrapes see 1 for exactly as long as the silent-skip
+  condition holds and 0 once the tree settles.
+
+  Notes:
+    - No-op when the metrics module has not been initialized.
+
+  Args:
+    dirty: True when the pre-iteration working-tree check found uncommitted changes.
+  """
+  # guard: metrics are off — recording is a no-op
+  if not is_enabled():
+    return
+  with _state[MetricStateKey.LOCK]:
+    repo = _state[MetricStateKey.REPO]
+    _state[MetricStateKey.DIRTY_TREE].set({ MetricLabel.REPO: repo }, 1 if dirty else 0)
+
+
 # --- Read API for tests ------------------------------------------------------
 
 def _registry_for(name: str) -> _Counter | _Gauge | _Histogram | None:
@@ -613,7 +642,7 @@ def _registry_for(name: str) -> _Counter | _Gauge | _Histogram | None:
     return None
   for key in (
     "ticks", "errors", "tokens", "duration", "last_tick",
-    "queue_depth", "up", "daemon_halted", "build_info", "halt_count",
+    "queue_depth", "up", "daemon_halted", "build_info", "halt_count", "dirty_tree",
   ):
     metric = _state.get(key)
     if metric is not None and metric.name == name:
@@ -697,7 +726,7 @@ def render() -> bytes:
   for key in (
     "up", "build_info", "ticks", "errors", "tokens",
     "duration", "last_tick", "queue_depth",
-    "daemon_halted", "halt_count",
+    "daemon_halted", "halt_count", "dirty_tree",
   ):
     metric = _state.get(key)
     # guard: metric not yet registered — skip silently
@@ -937,8 +966,11 @@ def aggregate_tokens_from_log(repo_root: Path) -> None:
       routine = rec.get("routine") or "expert-pump"
       # waiver: external token-log JSON field name and default, not internal keys
       model = rec.get("model") or "unknown"
+      # the log's `expert` field names the actual consumer; older lines predate the field
+      # waiver: external token-log JSON field name and default, not internal keys
+      expert = rec.get("expert") or "unknown"
       # guard: closed-vocabulary check rejects entries with unsafe label values
-      if not _LABEL_VALUE_RE.match(routine) or not _LABEL_VALUE_RE.match(model):
+      if not _LABEL_VALUE_RE.match(routine) or not _LABEL_VALUE_RE.match(model) or not _LABEL_VALUE_RE.match(expert):
         continue
       for kind, key in (
         ("input", "input_tokens"),
@@ -950,7 +982,7 @@ def aggregate_tokens_from_log(repo_root: Path) -> None:
         if num:
           _state[MetricStateKey.TOKENS].inc(
             {
-              MetricLabel.REPO: repo, MetricLabel.ROUTINE: routine,
+              MetricLabel.REPO: repo, MetricLabel.ROUTINE: routine, MetricLabel.EXPERT: expert,
               MetricLabel.MODEL: model, MetricLabel.KIND: kind,
             },
             amount = float(num),

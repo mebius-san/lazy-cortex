@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Inspect and manually break the per-repo staging lock that prevents concurrent Claude Code sessions from corrupting each other's git index changes.
-last_regen: 2026-06-24
+last_regen: 2026-07-15
 diagram_spec:
   anchor: "Lock lifecycle"
   request: "State diagram of the lazy-core.git staging lock lifecycle: NO_LOCK → HELD (a hook or skill acquires the lock before touching the git index) → auto-released when the staging window closes OR auto-broken by heuristics (dead PID / stale-and-idle / different host) → NO_LOCK. Show the manual break path via /lazy-core.git-unlock as an alternative exit from HELD, guarded by /lazy-core.git-status inspection first."
@@ -55,30 +55,15 @@ The staging lock is an infrastructure layer that the rest of the lazycortex-core
 %%{init: {'themeVariables':{'background':'transparent','transitionColor':'#000','transitionLabelColor':'#000','labelBackgroundColor':'#fff','edgeLabelBackground':'#fff','stateLabelColor':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','state':{'diagramPadding':5,'useMaxWidth':true}}}%%
 stateDiagram-v2
   [*] --> noLock
-
-  noLock --> held : hook or skill acquires lock before git index touch
-
-  state held {
-    [*] --> stagingOpen
-    stagingOpen --> stagingOpen : git add / rm / mv accumulates index
-    stagingOpen --> committed : git commit empties index
-    committed --> [*]
-  }
-
-  held --> noLock : auto-release on commit or reset empties index
-  held --> noLock : auto-break dead PID detected
-  held --> noLock : auto-break stale-and-idle timeout
-  held --> noLock : auto-break different host mismatch
-
-  held --> inspecting : operator runs /lazy-core.git-status
-  inspecting --> noLock : operator confirms via /lazy-core.git-unlock
-  inspecting --> held : operator cancels unlock
-
+  noLock --> held : hook or skill acquires lock before touching index
+  held --> noLock : staging window closes, auto-release
+  held --> noLock : heuristic auto-break - dead PID, stale-and-idle, or different host
+  held --> statusInspected : inspect via /lazy-core.git-status
+  statusInspected --> noLock : manual break via /lazy-core.git-unlock
   noLock --> [*]
 
   style noLock fill:#1e3a5f,stroke:#4a90e2,color:#fff
   style held fill:#1e5f3a,stroke:#4ae290,color:#fff
-  style inspecting fill:#5f4a1e,stroke:#e2a14a,color:#fff
-  style committed fill:#0d4d2a,stroke:#4ae290,stroke-width:2px,color:#fff
-  style stagingOpen fill:#1e5f3a,stroke:#4ae290,color:#fff
+  style statusInspected fill:#5f4a1e,stroke:#e2a14a,color:#fff
 ```
+</content>

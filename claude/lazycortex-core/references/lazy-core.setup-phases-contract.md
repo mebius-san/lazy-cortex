@@ -1,5 +1,5 @@
 ---
-description: Contract for the `lazy_setup_phase:` frontmatter key — allowed values, ordering inside `lazy-core.setup`, the chained-from-inside-another-install anti-pattern, and the canonical resolution of a repo's enabled plugin set.
+description: Contract for the `lazy_setup_phase:` frontmatter key — allowed values, ordering inside `lazy-core.setup`, the companion `requires_live_session:` key, the chained-from-inside-another-install anti-pattern, and the canonical resolution of a repo's enabled plugin set.
 ---
 # `lazy_setup_phase` frontmatter contract
 
@@ -28,6 +28,19 @@ This union is the **only** authority for which install chains apply to a repo. T
 A plugin enabled in the repo but absent from the machine registry/cache is reported as `skipped: plugin not installed on this machine`, never a hard failure.
 
 The interactive `lazy-core.setup` runs inside the project's own session, where the enabled set is naturally the project's. The cross-repo agents `lazy-core.autosetup` and `lazy-core.autocheckup` have no such session context — they resolve the enabled set explicitly against `repo=` per this section, so a dispatching session's machine-wide view never leaks foreign install chains into the target repo.
+
+## Companion key: `requires_live_session`
+
+A participating skill whose execution depends on live-session resources that exist only in an interactive Claude Code session (e.g. loaded `mcp__<server>__*` tools) declares:
+
+```yaml
+requires_live_session: true
+```
+
+- **Interactive `lazy-core.setup`** ignores the key — the skill runs normally in its phase.
+- **Non-interactive executors** (`lazy-core.autosetup`) exclude the skill at discovery and report its line as `skipped: live-session-only` — never `failed`, never `needs-interactive`. A headless subagent structurally cannot satisfy the dependency, so executing (or retrying) it is pure noise.
+
+Concrete example: `lazy-guard.allow-mcp` enumerates live `mcp__*` tool schemas in its classify phase; subagents have no MCP tools, so it carries the key.
 
 ## Anti-pattern: chained-from-inside-another-install
 
