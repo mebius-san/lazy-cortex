@@ -854,6 +854,7 @@ class MetricStateKey:
     DAEMON_HALTED: The daemon-halted gauge instrument.
     BUILD_INFO: The build-info gauge instrument.
     HALT_COUNT: The cumulative-halt counter instrument.
+    DIRTY_TREE: The dirty-working-tree silent-skip gauge instrument.
     TOKEN_OFFSET: The byte offset into the token log read so far.
     SERVER: The WSGI server object.
     SERVER_THREAD: The server's background thread.
@@ -874,6 +875,7 @@ class MetricStateKey:
   DAEMON_HALTED = "daemon_halted"
   BUILD_INFO = "build_info"
   HALT_COUNT = "halt_count"
+  DIRTY_TREE = "dirty_tree"
   TOKEN_OFFSET = "token_offset"
   SERVER = "server"
   SERVER_THREAD = "server_thread"
@@ -892,6 +894,7 @@ class MetricLabel:
     ROUTINE: The routine-name label.
     STATUS: The tick-status label.
     REASON: The error-reason label.
+    EXPERT: The expert-name label.
     MODEL: The model-tier label.
     KIND: The token-kind label.
     VERSION: The plugin-version label.
@@ -902,6 +905,7 @@ class MetricLabel:
   ROUTINE = "routine"
   STATUS = "status"
   REASON = "reason"
+  EXPERT = "expert"
   MODEL = "model"
   KIND = "kind"
   VERSION = "version"

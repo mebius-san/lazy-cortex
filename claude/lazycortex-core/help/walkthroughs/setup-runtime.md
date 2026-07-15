@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover if the working tree or a remote sync halts it.
-last_regen: 2026-07-14
+last_regen: 2026-07-15
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, answers yes to the runtime-daemon wizard, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh, daemon starts and polls .experts/.jobs/ on interval, user checks .runtime/state.json for a recent last_run; (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks a cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
@@ -83,29 +83,26 @@ sequenceDiagram
   participant user as User
   participant installWizard as /lazy-core.install
   participant runtimeDaemon as lazy.runtime.sh Daemon
-  participant stateFile as .runtime/state.json
   participant recoverSkill as /lazy-runtime.recover
 
-  user->>installWizard: /lazy-core.install
-  installWizard->>user: prompt enable runtime daemon?
-  user-->>installWizard: yes
-  Note over installWizard: writes .claude/bin/lazy.runtime.sh, lazy.settings.json[experts], daemon and routines sections
+  user->>installWizard: run /lazy-core.install
+  installWizard-->>user: prompt runtime-daemon wizard
+  user->>installWizard: answer yes
+  installWizard-->>user: write lazy.runtime.sh, lazy.settings.json experts, daemon and routines sections
 
-  user->>runtimeDaemon: run .claude/bin/lazy.runtime.sh
-  loop poll .experts/.jobs/ on interval
-    runtimeDaemon->>stateFile: write last_run timestamp
+  user->>runtimeDaemon: run lazy.runtime.sh
+  loop poll interval
+    runtimeDaemon->>runtimeDaemon: poll .experts/.jobs/
   end
-  user->>stateFile: check .runtime/state.json
-  stateFile-->>user: last_run recent
+  runtimeDaemon-->>runtimeDaemon: write last_run to .runtime/state.json
+  user->>runtimeDaemon: check .runtime/state.json
+  runtimeDaemon-->>user: last_run is recent
 
   Note over runtimeDaemon: working tree goes dirty
-  runtimeDaemon->>stateFile: write daemon_halted
-  user->>recoverSkill: /lazy-runtime.recover
-  recoverSkill->>stateFile: read halt context
-  stateFile-->>recoverSkill: daemon_halted reason
+  runtimeDaemon->>runtimeDaemon: write daemon_halted to .runtime/state.json
+  user->>recoverSkill: run /lazy-runtime.recover
   recoverSkill-->>user: show halt context
-  user-->>recoverSkill: pick cleanup mode commit stash discard
-  recoverSkill->>stateFile: clear daemon_halted
-  runtimeDaemon->>stateFile: poll next iteration
-  stateFile-->>runtimeDaemon: daemon_halted cleared, resume
+  user->>recoverSkill: pick cleanup mode - commit, stash, or discard
+  recoverSkill->>runtimeDaemon: clear daemon_halted in .runtime/state.json
+  runtimeDaemon-->>runtimeDaemon: resume on next iteration
 ```

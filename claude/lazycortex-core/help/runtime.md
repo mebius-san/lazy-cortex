@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Register, unregister, preflight, and recover routines in the per-repo serial daemon — five routine types keep the async team running in order, with a validator that catches broken expert configs before they run live.
-last_regen: 2026-07-12
+last_regen: 2026-07-15
 diagram_spec:
   anchor: "Runtime lifecycle"
   request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers an uncommitted_changes halt; a failed remote sync triggers a git_pull_diverged / git_push_failed / git_remote_unavailable halt; /lazy-runtime.recover (commit/stash/discard/abort for tree halts; manual-fix + resume for remote-sync halts) cleans the precondition and resumes; unregister removes a routine from the loop."
@@ -88,19 +88,24 @@ If a routine's expert keeps timing out after a halt, or you suspect the underlyi
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','transitionColor':'#000','transitionLabelColor':'#000','labelBackgroundColor':'#fff','edgeLabelBackground':'#fff','stateLabelColor':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','state':{'diagramPadding':5,'useMaxWidth':true}}}%%
 stateDiagram-v2
-  [*] --> registered : register routine in lazy.settings.json
-  registered --> running : daemon loop starts
-  running --> running : run next routine per interval_sec or cron
-  running --> uncommittedChangesHalt : dirty working tree detected
-  running --> remoteSyncHalt : git_pull_diverged, git_push_failed, or git_remote_unavailable
-  uncommittedChangesHalt --> running : lazy-runtime.recover commit, stash, or discard
-  uncommittedChangesHalt --> [*] : lazy-runtime.recover abort
-  remoteSyncHalt --> running : lazy-runtime.recover manual-fix then resume
-  registered --> [*] : unregister
+  [*] --> registered
+  registered --> running : schedule due
+  running --> running : run next routine
+  running --> haltedUncommittedChanges : uncommitted_changes
+  running --> haltedRemoteSync : git_pull_diverged
+  running --> haltedRemoteSync : git_push_failed
+  running --> haltedRemoteSync : git_remote_unavailable
+  haltedUncommittedChanges --> running : recover - commit, stash, discard, or abort
+  haltedRemoteSync --> running : recover - manual fix and resume
+  registered --> unregistered : unregister
+  running --> unregistered : unregister
+  unregistered --> [*] : done
+
   style registered fill:#1e3a5f,stroke:#4a90e2,color:#fff
   style running fill:#1e5f3a,stroke:#4ae290,color:#fff
-  style uncommittedChangesHalt fill:#5f4a1e,stroke:#e2a14a,color:#fff
-  style remoteSyncHalt fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  style haltedUncommittedChanges fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  style haltedRemoteSync fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  style unregistered fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 ```
 
 
@@ -110,3 +115,4 @@ stateDiagram-v2
 - [experts](experts.md) — The async expert team whose jobs are drained by the `lazy-expert.pump` routine this block manages.
 - [setup-runtime](walkthroughs/setup-runtime.md) — Bootstrap the per-repo serial daemon so the async expert team has an executor.
 - [setup-routine](walkthroughs/setup-routine.md) — Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
+</content>

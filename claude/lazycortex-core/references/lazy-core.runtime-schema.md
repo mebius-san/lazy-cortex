@@ -588,11 +588,14 @@ lazycortex_runtime_routine_tick_duration_seconds{routine,repo}
 lazycortex_runtime_routine_last_tick_timestamp{routine,repo}
 lazycortex_runtime_queue_depth{expert,repo,state}
 lazycortex_runtime_daemon_halted{repo,reason,triggered_by}
+lazycortex_runtime_dirty_tree{repo}
 lazycortex_runtime_up
 lazycortex_runtime_build_info{version,daemon_name,repo}
 ```
 
 `status` ∈ `{ok, error, timeout, crash}`. `state` ∈ `{ready, running, done}`. `kind` ∈ `{input, output, cache_read, cache_write}`.
+
+`dirty_tree` is 1 while the daemon's pre-iteration check finds uncommitted changes and routine dispatch is silently paused (the operator may be mid-edit); it drops back to 0 on the first iteration after the tree settles. This is the only externally visible trace of the silent skip — it is not a halt and records no incident.
 
 The `reason` label is metric-specific:
 

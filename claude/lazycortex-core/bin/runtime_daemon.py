@@ -696,6 +696,14 @@ def _run_iteration(repo_root: Path) -> None:
   # triage stuck state and run anyway.
   pre_dirty = _check_working_tree(repo_root) is not None
   system_stuck = pre_dirty or (halt is not None)
+  # surface the silent skip: without this gauge a dirty-tree pause is invisible on the dashboard
+  try:
+    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+    import metrics
+    if metrics.is_enabled():
+      metrics.set_dirty_tree_gauge(pre_dirty)
+  except ImportError:
+    pass
 
   # poll in-flight worktree tasks BEFORE dispatching new work — a task whose dispatched job has
   # finished is integrated (merge / PR) and its worktree torn down, which frees a concurrency slot

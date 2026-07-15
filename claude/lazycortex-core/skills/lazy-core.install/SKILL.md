@@ -118,24 +118,26 @@ If the glob returns zero files, abort and tell the user the plugin cache is empt
 
 An enabled plugin installs its whole rule surface — apply the **File-sync policy** per rule, no per-rule "install?" prompt.
 
-### Enumerate source and target
+### Enumerate owned namespaces
 
-- Source rules: `Glob <installPath>/rules/*.md`.
-- Owned namespaces: the plugin name minus the `lazycortex-` prefix (so `lazycortex-core` → `lazy-core`), plus every unique `<ns>.` prefix appearing in source rule filenames (for this plugin that includes both `lazy-core` and `lazy-guard`).
-- Target candidates: `Glob <targetRulesDir>/<ns>.*.md` for each owned namespace. Union them.
-- Ensure the destination directory exists with `mkdir -p`.
+Owned namespaces: the plugin name minus the `lazycortex-` prefix (so `lazycortex-core` → `lazy-core`), plus every unique `<ns>.` prefix appearing in source rule filenames under `<installPath>/rules/` (for this plugin that includes both `lazy-core` and `lazy-guard`).
 
-### Apply the File-sync policy per rule
+### Run the script triage, then judge only the diverged list
 
-For every rule name in (source ∪ target):
+Triage is script-driven — the current/not-current verdict comes from the receipt, never from impression. Run (one `--owned-glob` per owned namespace):
 
-- **New** (target missing) → copy source to target silently. State **installed**.
-- **Unchanged** (byte-identical) → no action. State **unchanged**.
-- **Drift, cleanly mergeable** (both present, differ, the shipped delta applies without contradicting local edits — new headings / list items / registry entries added, every local-only chunk preserved) → merge silently via `Edit`. State **merged**.
+```
+Bash(python3 ${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py --src <installPath>/rules --dst <targetRulesDir> --owned-glob 'lazy-core.*.md' --owned-glob 'lazy-guard.*.md')
+```
+
+The script creates the destination directory, copies absent targets (state **installed**), byte-compares the rest (**unchanged**), reports owned targets with no source as **kept-orphan** (left in place), and lists every genuinely differing file in the receipt's `diverged` array without touching it.
+
+Apply the File-sync policy ONLY to the `diverged` list:
+
+- **Drift, cleanly mergeable** (the shipped delta applies without contradicting local edits — new headings / list items / registry entries added, every local-only chunk preserved) → merge silently via `Edit`. State **merged**.
 - **Conflict** (the same region changed incompatibly in both) → the only case that asks, per File-sync policy case 3. State **merged** or **kept-local** by the user's choice.
-- **Orphan** (target present, source gone, within an owned namespace) → leave in place silently. State **kept-orphan**.
 
-Target files outside this plugin's owned namespaces (other plugins, user-authored rules) are never touched and never reported as orphans.
+Target files outside this plugin's owned namespaces (other plugins, user-authored rules) are never touched and never reported as orphans. An "already-current" verdict for this step is valid only as a receipt showing every file `unchanged` — quote the receipt's `counts` line in the report.
 
 ### `lazy-core.scaffold.md` — registry-block exemption (§5a)
 
@@ -381,16 +383,13 @@ Otherwise, perform the following three idempotent operations:
 
 The shim is content-tracked so consumers pick up new shim features (e.g. the `--dev-mode` flag added in lazy-core 0.18) on re-install without manual cleanup.
 
-1. `Bash(mkdir -p <repo-root>/.claude/bin/)`
-2. If `<repo-root>/.claude/bin/lazy.runtime.sh` is absent → copy + chmod, state **created**.
-3. If present and `Bash(diff -q ${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy.runtime.sh <repo-root>/.claude/bin/lazy.runtime.sh)` reports differences → copy + chmod, state **refreshed**.
-4. Otherwise → state **already-present** (no action).
+The shim is install-managed (never locally edited) — sync it with the deterministic triage script, which copies on absence, refreshes on any byte difference, sets the executable bit, and reports the state:
 
-Copy command in cases 2 and 3:
 ```
-Bash(cp ${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy.runtime.sh <repo-root>/.claude/bin/lazy.runtime.sh)
-Bash(chmod +x <repo-root>/.claude/bin/lazy.runtime.sh)
+Bash(python3 ${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py --src ${CLAUDE_PLUGIN_ROOT}/templates/runtime/lazy.runtime.sh --dst <repo-root>/.claude/bin/lazy.runtime.sh --copy-diverged --chmod-x)
 ```
+
+State = the receipt's state verbatim: **installed** (was absent), **refreshed** (differed, overwritten), or **unchanged**.
 
 The shim resolves the latest `lazycortex-core/bin/runner` from the plugin cache at exec time, so supervisor units don't need re-rendering after `/plugin update`. Re-copying on content drift is safe — the shim's interface is stable (positional repo-root + repeatable `--plugin-dir`; the `--dev-mode`, `--login-shell`, and repeatable `--env-file <path>` flags are additive and stripped by the shim before the runner exec).
 

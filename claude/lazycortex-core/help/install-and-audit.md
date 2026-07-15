@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-last_regen: 2026-07-14
+last_regen: 2026-07-15
 diagram_spec:
   anchor: "Bootstrap order"
   request: "Flowchart of the single-plugin vs multi-plugin bootstrap path — install/setup, optional restart, audit, and the optional optimize+doctor branch — ending at bootstrap complete."
@@ -34,7 +34,7 @@ This block covers all five of core's interactive lifecycle skills, plus two non-
 
 **`/lazy-core.setup`** is the shortcut for a fresh project bootstrap when you have multiple lazycortex plugins enabled. Step 0 migrates `.claude/lazy.settings.json` through the current per-section version ladder before any installer reads or writes it — if migration fails, the run aborts immediately. Then it scans every enabled plugin for `<namespace>.install` skills and any skill opting in via `lazy_setup_phase:` frontmatter, builds a dependency-ordered execution plan with `lazy-core.install` always first, shows a preview, and runs each child in sequence without a top-level confirmation prompt. Children that fail are logged but don't abort the loop; you get one coherent summary at the end. Pass `--dry-run` to see the plan without executing.
 
-**`lazy-core.autosetup`** is the non-interactive twin of `/lazy-core.setup`, built for rolling an install-chain update out across many repos at once instead of running the wizard in each one by hand. You dispatch it (directly, or from your own cross-project rollout loop) with a `repo=<absolute path>` argument; it never asks a question. It refuses to touch a repo with a dirty working tree or an unusable git identity, then walks every applicable `<namespace>.install` skill against the target repo the same way `/lazy-core.setup` would — "applicable" is resolved from the target repo's own enabled plugins (its `settings.json` / `settings.local.json`), never the machine-wide plugin cache, so a repo that enables only two plugins never receives the install chains of plugins enabled elsewhere on the host. Any step that skill would normally resolve via `AskUserQuestion` is skipped and reported as `needs-interactive` instead of guessed. Steps that are derivable or already on record (a persisted `daemon.enabled` gate, a conflict-free file sync, a registry upsert) apply exactly as the skill prescribes — and a plugin-shipped defaults table counts as a recorded decision too: when a step's own skill declares a non-interactive resolution for it, autosetup follows that resolution instead of skipping the step. `/lazy-core.agent-models`, for instance, auto-accepts curated tiers from its `default-tiers.json` table for newly discovered agents — autosetup applies those tiers silently rather than reporting them as `needs-interactive`. Only genuine first-time or preference decisions (a daemon gate never answered, a model tier that isn't in the curated table) still come back `needs-interactive`. It commits its own changes in the target repo under that repo's local identity, with no push. Because it only ever executes decisions that are already recorded or resolvable from a plugin-shipped defaults table, it is not a substitute for the first-time `/lazy-core.install` or `/lazy-core.setup` run — a repo with nothing on record mostly comes back reporting `needs-interactive`.
+**`lazy-core.autosetup`** is the non-interactive twin of `/lazy-core.setup`, built for rolling an install-chain update out across many repos at once instead of running the wizard in each one by hand. You dispatch it (directly, or from your own cross-project rollout loop) with a `repo=<absolute path>` argument; it never asks a question. It refuses to touch a repo with a dirty working tree or an unusable git identity, then walks every applicable `<namespace>.install` skill against the target repo the same way `/lazy-core.setup` would — "applicable" is resolved from the target repo's own enabled plugins (its `settings.json` / `settings.local.json`), never the machine-wide plugin cache, so a repo that enables only two plugins never receives the install chains of plugins enabled elsewhere on the host. A candidate install skill that declares itself `requires_live_session` (it needs loaded MCP tools or another resource only an interactive session has) is skipped and reported as `skipped: live-session-only` rather than executed or failed — a headless agent has no live session to borrow. Any remaining step that skill would normally resolve via `AskUserQuestion` is skipped and reported as `needs-interactive` instead of guessed. Steps that are derivable or already on record (a persisted `daemon.enabled` gate, a conflict-free file sync, a registry upsert) apply exactly as the skill prescribes — and a plugin-shipped defaults table counts as a recorded decision too: when a step's own skill declares a non-interactive resolution for it, autosetup follows that resolution instead of skipping the step. `/lazy-core.agent-models`, for instance, auto-accepts curated tiers from its `default-tiers.json` table for newly discovered agents — autosetup applies those tiers silently rather than reporting them as `needs-interactive`. Only genuine first-time or preference decisions (a daemon gate never answered, a model tier that isn't in the curated table) still come back `needs-interactive`. It commits its own changes in the target repo under that repo's local identity, with no push. Because it only ever executes decisions that are already recorded or resolvable from a plugin-shipped defaults table, it is not a substitute for the first-time `/lazy-core.install` or `/lazy-core.setup` run — a repo with nothing on record mostly comes back reporting `needs-interactive`.
 
 **`lazy-core.autocheckup`** is the non-interactive twin of the checks `/lazy-core.checkup` orchestrates. Dispatched the same way, with `repo=<absolute path>`, it runs the full read-only audit/doctor sweep against the target repo and collects findings in the usual `PASS` / `WARN` / `FAIL` vocabulary — scoped, like autosetup, to whichever plugins that repo itself has enabled, not every plugin present anywhere on the host machine. It then applies a fix only when the fix is mechanically derivable with no operator preference involved — regenerating an install-managed mirror from its plugin source, creating a directory or registry entry an install skill would create silently, resyncing a derived file from its source of truth, pinning an unpinned agent model whose dispatch string already has a tier in the default-tiers table, or pruning an `agent_models` entry whose plugin-namespaced agent file has provably been deleted (a config key for an agent that no longer exists is dead config, not a preference — the one deliberate exception to its usual never-fix-by-deletion boundary). If a pruned dispatch is still referenced by an expert's `agent` field, that comes back as a WARN finding instead of being edited. Anything else content-shaped, destructive, preference-shaped, or normally resolved via `AskUserQuestion` is left as a reported finding, never applied. Like autosetup, it refuses a dirty tree, commits only the files it touched under the repo's local identity, and never pushes.
 
@@ -105,43 +105,43 @@ For public-repo safety, see the **guardian** block: `/lazy-repo.mark-public` cre
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  chooseBootstrapPath{Single or multi-plugin?}
-  runInstall[/lazy-core.install]
-  runSetup[/lazy-core.setup]
-  hooksRegistered{New hooks registered?}
-  restartClaudeCode[Restart Claude Code]
-  runAudit[/lazy-core.audit]
-  deeperCheckWanted{Run deeper check?}
-  runOptimize[/lazy-core.optimize]
-  runDoctor[/lazy-core.doctor]
+  userStartsBootstrap[User starts bootstrap]
+  singleOrMultiPlugin{Single or multi-plugin?}
+  installSetupSingle[Install/setup single plugin]
+  installSetupMulti[Install/setup multi-plugin]
+  restartNeeded{Restart needed?}
+  restartClaude[Restart Claude Code]
+  runAudit[Run audit]
+  optimizeDoctor{Optimize and doctor?}
+  runOptimizeDoctor[Run optimize and doctor]
   bootstrapComplete[Bootstrap complete]
 
-  chooseBootstrapPath -->|single-plugin| runInstall
-  chooseBootstrapPath -->|multi-plugin| runSetup
-  runInstall -->|installed| hooksRegistered
-  runSetup -->|chained installs done| hooksRegistered
-  hooksRegistered -->|yes| restartClaudeCode
-  hooksRegistered -->|no| runAudit
-  restartClaudeCode -->|resumed| runAudit
-  runAudit -->|verified| deeperCheckWanted
-  deeperCheckWanted -->|yes| runOptimize
-  deeperCheckWanted -->|no| bootstrapComplete
-  runOptimize -->|optimized| runDoctor
-  runDoctor -->|diagnosed| bootstrapComplete
+  userStartsBootstrap -->|choose scope| singleOrMultiPlugin
+  singleOrMultiPlugin -->|single plugin| installSetupSingle
+  singleOrMultiPlugin -->|multi-plugin| installSetupMulti
+  installSetupSingle -->|installed| restartNeeded
+  installSetupMulti -->|installed| restartNeeded
+  restartNeeded -->|yes| restartClaude
+  restartNeeded -->|no| runAudit
+  restartClaude -->|restarted| runAudit
+  runAudit -->|audited| optimizeDoctor
+  optimizeDoctor -->|yes| runOptimizeDoctor
+  optimizeDoctor -->|no| bootstrapComplete
+  runOptimizeDoctor -->|done| bootstrapComplete
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
-  class chooseBootstrapPath guard
-  class runInstall action
-  class runSetup action
-  class hooksRegistered guard
-  class restartClaudeCode action
+  class userStartsBootstrap entry
+  class singleOrMultiPlugin guard
+  class restartNeeded guard
+  class optimizeDoctor guard
+  class installSetupSingle action
+  class installSetupMulti action
+  class restartClaude action
   class runAudit action
-  class deeperCheckWanted guard
-  class runOptimize action
-  class runDoctor action
+  class runOptimizeDoctor action
   class bootstrapComplete success
 ```

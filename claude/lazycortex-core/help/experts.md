@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Dispatch jobs to named expert workers, keep the main session free, and collect results when the daemon finishes them.
-last_regen: 2026-07-12
+last_regen: 2026-07-15
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing a user dispatching a job via dispatch-job, the runtime daemon draining the queue, and the user collecting results via collect-job. Include list-jobs and cancel-job as optional side paths. Use boxes for the four skills and a distinct shape for the daemon process."
@@ -69,35 +69,34 @@ When you see a job reach `done` status in the list, run `/lazy-expert.collect-jo
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
   userDispatchesJob[User dispatches job]
-  dispatchJob[dispatch-job]
+  dispatchJobSkill[dispatch-job]
   runtimeDaemon((Runtime daemon))
-  drainQueue[Drain queue]
-  collectJob[collect-job]
+  collectJobSkill[collect-job]
   userCollectsResults[User collects results]
-  listJobs[list-jobs]
-  cancelJob[cancel-job]
+  listJobsSkill[list-jobs]
+  cancelJobSkill[cancel-job]
 
-  userDispatchesJob -->|call| dispatchJob
-  dispatchJob -->|enqueue| runtimeDaemon
-  runtimeDaemon -->|process| drainQueue
-  drainQueue -->|complete| collectJob
-  collectJob -->|call| userCollectsResults
-  dispatchJob -.->|optional check| listJobs
-  listJobs -.->|call| dispatchJob
-  dispatchJob -.->|optional abort| cancelJob
-  cancelJob -.->|abort| runtimeDaemon
+  userDispatchesJob -->|runs| dispatchJobSkill
+  dispatchJobSkill -->|enqueues job| runtimeDaemon
+  runtimeDaemon -->|drains queue| collectJobSkill
+  collectJobSkill -->|returns results| userCollectsResults
+  userDispatchesJob -->|optionally runs| listJobsSkill
+  listJobsSkill -->|queries| runtimeDaemon
+  userDispatchesJob -->|optionally runs| cancelJobSkill
+  cancelJobSkill -->|cancels| runtimeDaemon
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
-  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef sub fill:#2e2240,stroke:#7e63a8,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
 
   class userDispatchesJob entry
-  class dispatchJob action
-  class collectJob action
-  class listJobs action
-  class cancelJob action
-  class runtimeDaemon sub
-  class drainQueue action
+  class dispatchJobSkill action
+  class collectJobSkill action
+  class runtimeDaemon service
   class userCollectsResults success
+  class listJobsSkill sub
+  class cancelJobSkill sub
 ```
+</content>

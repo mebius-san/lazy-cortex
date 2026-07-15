@@ -1,40 +1,35 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-07-14
+last_regen: 2026-07-15
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; git-coordination → sub-branch on git-lock-stuck / git-no-lock; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; scaffold → sub-branch on registry-not-found / core-cli-unresolved / core-cli-path-stale / entry-not-found-or-manifest-collision / upsert-remove-error-or-validate-fail; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected / offer-protocols-routine-absent; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
   kind_hint: decision-tree
 source_skills:
-  - lazy-core.install
+  - lazy-core.agent-models
   - lazy-core.audit
   - lazy-core.doctor
-  - lazy-core.optimize
+  - lazy-core.install
+  - lazy-core.scaffold-local
+  - lazy-core.scaffold-sync
   - lazy-core.setup
-  - lazy-core.agent-models
-  - lazy-repo.mark-public
-  - lazy-guard.check-public
+  - lazy-expert.cancel-job
+  - lazy-expert.collect-job
+  - lazy-expert.dispatch-job
+  - lazy-expert.list-jobs
   - lazy-guard.allow-mcp
+  - lazy-log.clean
+  - lazy-memory.index
+  - lazy-memory.mark-persona
+  - lazy-memory.reflect
+  - lazy-memory.write
+  - lazy-repo.mark-public
+  - lazy-routine.offer-protocols
   - lazy-routine.register
   - lazy-routine.unregister
-  - lazy-runtime.recover
   - lazy-runtime.preflight
-  - lazy-expert.dispatch-job
-  - lazy-expert.collect-job
-  - lazy-expert.cancel-job
-  - lazy-expert.list-jobs
-  - lazy-memory.write
-  - lazy-memory.index
-  - lazy-memory.reflect
-  - lazy-memory.mark-persona
-  - lazy-core.git-status
-  - lazy-core.git-unlock
-  - lazy-log.clean
-  - lazy-log.distill
-  - lazy-log.recall
-  - lazy-log.timeline
-  - lazy-log.summary
+  - lazy-runtime.recover
 ---
 # Troubleshooting
 
@@ -161,6 +156,36 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: A child skill (such as `/lazy-core.install`, `/lazy-guard.allow-mcp`, or `/lazy-core.agent-models`) encountered a failure that appears in its own report. `/lazy-core.setup` never aborts the chain on a child failure — it collects all results and surfaces them together.
 
 **Fix**: Read the reason listed per failed child in the setup report. Address the root cause for each (the other entries in this guide cover the most common child failure modes). Then re-run `/lazy-core.setup` — it is idempotent, so children that already succeeded will complete cleanly again and previously-failed ones will be retried.
+
+---
+
+## `/lazy-core.scaffold-local` fails: registry missing, or the core CLI can't be resolved
+
+**Symptom**: Running `/lazy-core.scaffold-local` (or the install-time `/lazy-core.scaffold-sync`) fails with "registry not found at `<path>`", "cannot resolve core CLI — lazycortex-core not installed", or "core CLI not found at `<path>`".
+
+**Likely cause (registry missing)**: `.claude/rules/lazy-core.scaffold.md` — the registry the `_local` scaffold entries live in — has never been initialised in this project.
+
+**Likely cause (core CLI unresolved)**: `installed_plugins.json` has no `lazycortex-core@lazycortex` entry, so the skill has nothing to dispatch the underlying `scaffold` subcommand through.
+
+**Likely cause (core CLI path stale)**: The `installPath` recorded in `installed_plugins.json` points at a plugin-cache path that no longer exists — typical after a version bump left an old cache directory behind.
+
+**Fix (registry missing)**: Run `/lazy-core.install` to initialise the scaffold registry, then re-run.
+
+**Fix (core CLI unresolved or stale)**: Install `lazycortex-core` if it isn't yet (`/lazy-core.install`), or refresh a stale cache path with `/plugin update lazycortex-core@lazycortex`. Then re-run `/lazy-core.scaffold-local` or `/lazy-core.scaffold-sync`.
+
+---
+
+## `/lazy-core.scaffold-local` can't find the entry to remove, or `/lazy-core.scaffold-sync` reports a template-path collision
+
+**Symptom**: `/lazy-core.scaffold-local` fails removing an entry with "entry … not found in the `_local` registry map"; or `/lazy-core.scaffold-sync` fails with "collision — template path `<key>` declared by …".
+
+**Likely cause (entry not found)**: The entry name passed for removal does not match anything currently registered — a typo, or the entry was already removed.
+
+**Likely cause (collision)**: Two template groups in the plugin's `scaffold.entries.json` manifests declare the same template path with overlapping globs, which the sync step refuses to merge silently.
+
+**Fix (entry not found)**: List the current `_local` entries first (`scaffold list --registry <regPath>`) to confirm the exact name, then retry the removal.
+
+**Fix (collision)**: This surfaces during a plugin's own install-time sync, not from hand-editing — re-run `/plugin update` for the plugin reporting the collision (a fixed manifest ships in the update), then re-run its install skill so `/lazy-core.scaffold-sync` re-dispatches cleanly.
 
 ---
 
@@ -506,6 +531,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## A plugin's install/configure wizard reports `routine_absent` while offering optional protocols
+
+**Symptom**: While setting up a routine, a plugin's install or configure flow surfaces `routine_absent` from its optional-protocols step and stops offering anything.
+
+**Likely cause**: `lazy-routine.offer-protocols` — the shared helper every plugin's configurator calls to offer relevant optional protocols for a routine — requires the routine to already be registered in `.claude/lazy.settings.json` before it can attach protocols to it. If the routine's own registration step was skipped or declined earlier in the same wizard, there is nothing to attach protocols to.
+
+**Fix**: Re-run the plugin's install/configure flow from the start so the routine registration step (`/lazy-routine.register`, invoked internally by the wizard) completes before the protocols offer runs. If you intentionally declined the routine, the protocols offer is expected to be skipped — no action needed.
+
+---
+
 ## The runtime daemon appears stale after install
 
 **Symptom**: `/lazy-core.doctor` reports "runtime daemon appears stale" even after running `/lazy-core.install` and setting up the supervisor. Re-running the doctor immediately after install still shows the same warning.
@@ -564,26 +599,6 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
-## `/lazy-core.git-status` shows no lock but commits are serialising unexpectedly
-
-**Symptom**: `/lazy-core.git-status` reports "Lock: NONE (no staging in progress)" but commits from Claude Code sessions are still queuing or failing with lock-related errors.
-
-**Likely cause**: The lock file at `.git/lazy-git.lock` was deleted or was never created, but the session that holds the staging window has not yet released its in-memory staging state. This can happen if the session restarted mid-staging.
-
-**Fix**: Re-run `/lazy-core.git-status` to confirm the current state. If the lock is truly absent and commits still fail, restart the Claude Code session — the hook's staging state resets on session start. If a different session is genuinely holding the lock but the file was lost, the next commit attempt from that session will recreate it and the normal heuristics (dead PID / stale-and-idle) will apply.
-
----
-
-## `/lazy-core.git-unlock` finds no lock to break
-
-**Symptom**: Running `/lazy-core.git-unlock` reports "no lock to break" even though you can see a `.git/lazy-git.lock` file in the repo.
-
-**Likely cause**: The lock file exists on disk but the staging-lock inspect helper could not read it — this usually means the file is empty (a partial write left it zero bytes) or its JSON is malformed. The helper treats unreadable lock files as absent.
-
-**Fix**: Delete the file manually from your terminal (`rm .git/lazy-git.lock`). A zero-byte or malformed lock file is safe to delete — the next staging operation will recreate it from scratch.
-
----
-
 ## `/lazy-memory.write` or `/lazy-memory.reflect` rejects the expert as not marked persona
 
 **Symptom**: Running `/lazy-memory.write` or `/lazy-memory.reflect` aborts with "`<expert>` is not marked persona; run `/lazy-memory.mark-persona <expert>` first."
@@ -614,7 +629,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause**: A pre-commit hook rejected the staged change, or another Claude Code session holds the staging lock (`lazy-core.git-guard`) and the write couldn't acquire it. The skill leaves the staged index intact for inspection.
 
-**Fix**: Run `/lazy-core.git-status` to check whether another session holds the staging lock. If a lock is present and stale, run `/lazy-core.git-unlock` to break it. Then re-run `/lazy-memory.write` — the write is idempotent when the note body is unchanged, so it will complete cleanly on retry.
+**Fix**: Wait for the other session to finish staging, or check the `.git/lazy-git.lock` timestamp to gauge how long it has been held. Then re-run `/lazy-memory.write` — the write is idempotent when the note body is unchanged, so it will complete cleanly on retry.
 
 ---
 
@@ -684,34 +699,42 @@ New sessions pick up the consolidated hook from `lazycortex-core` cleanly.
 ```mermaid
 %%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart TD
-  symptomObserved{Which symptom group?}
+  observedSymptom{Observed symptom?}
 
-  installSetupLeaf[Look at install-or-setup - python floor, plugin cache, agent_models seeding, settings-daemon-supervisor writes, dir-vs-file collisions, setup migration-child failures, metrics port]
-  agentModelsLeaf[Look at agent-models - invalid scope, tier ignored, floor env, duplicate keys]
-  mcpSecurityLeaf[Look at mcp-or-security - server not found-loaded, permission loops, mark-public failures]
-  hookNotFiringLeaf[Look at hook-not-firing]
-  expertRuntimeLeaf[Look at expert-runtime - experts not init, payload-registration, collect-cancel, spawn hangs, unpinned model, preflight]
-  routinesLeaf[Look at routines - name format, conflicts, unknown type, settings unwritable]
-  daemonRuntimeLeaf[Look at daemon-or-runtime - daemon stale-never starts, recover flows, state unparseable, post-push hook]
-  gitCoordinationLeaf[Look at git-coordination - lock stuck, no lock]
-  memoryLeaf[Look at memory - not persona, frontmatter, reflect]
-  logCleanLeaf[Look at log-clean - dir absent, resolver failed]
+  installOrSetup[install-or-setup: python floor, plugin cache, settings writability, supervisor/unit errors, metrics port, audit findings]
+  scaffold[scaffold: registry glob match, template not found, specificity tie resolution, contract violation]
+  agentModels[agent-models: model resolution order, subagent_type routing miss, model override rejected]
+  mcpOrSecurity[mcp-or-security: server config missing, guard scan FAIL, credential leak, waiver file absent]
+  hookNotFiring[hook-not-firing: matcher glob mismatch, hooks block missing in settings.json, PreToolUse-PostToolUse wiring]
+  expertRuntime[expert-runtime: init, payload, registration, collect-cancel, spawn hangs, preflight]
+  routines[routines: command resolution, daemon registry walk miss, cadence-schedule config, blocking subprocess order]
+  daemonOrRuntime[daemon-or-runtime: stale daemon, never starts, recover loops, state unparseable, remote halt refires]
+  memory[memory: Hindsight MCP connectivity, bank routing, recall-retain failure, auto-memory file conflict]
+  logClean[log-clean: distill cadence gate, waiver frontmatter reason, log dir naming, audit listing]
 
-  symptomObserved -->|install or setup| installSetupLeaf
-  symptomObserved -->|agent models| agentModelsLeaf
-  symptomObserved -->|mcp or security| mcpSecurityLeaf
-  symptomObserved -->|hook not firing| hookNotFiringLeaf
-  symptomObserved -->|expert runtime| expertRuntimeLeaf
-  symptomObserved -->|routines| routinesLeaf
-  symptomObserved -->|daemon or runtime| daemonRuntimeLeaf
-  symptomObserved -->|git coordination| gitCoordinationLeaf
-  symptomObserved -->|memory| memoryLeaf
-  symptomObserved -->|log clean| logCleanLeaf
+  observedSymptom -->|install-or-setup| installOrSetup
+  observedSymptom -->|scaffold| scaffold
+  observedSymptom -->|agent-models| agentModels
+  observedSymptom -->|mcp-or-security| mcpOrSecurity
+  observedSymptom -->|hook-not-firing| hookNotFiring
+  observedSymptom -->|expert-runtime| expertRuntime
+  observedSymptom -->|routines| routines
+  observedSymptom -->|daemon-or-runtime| daemonOrRuntime
+  observedSymptom -->|memory| memory
+  observedSymptom -->|log-clean| logClean
 
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
-  class symptomObserved guard
-  class installSetupLeaf,agentModelsLeaf,mcpSecurityLeaf,hookNotFiringLeaf,expertRuntimeLeaf,routinesLeaf,daemonRuntimeLeaf,gitCoordinationLeaf,memoryLeaf,logCleanLeaf success
+  class observedSymptom guard
+  class installOrSetup success
+  class scaffold success
+  class agentModels success
+  class mcpOrSecurity success
+  class hookNotFiring success
+  class expertRuntime success
+  class routines success
+  class daemonOrRuntime success
+  class memory success
+  class logClean success
 ```
-</content>
