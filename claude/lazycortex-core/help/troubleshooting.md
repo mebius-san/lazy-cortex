@@ -4,7 +4,7 @@ summary: Common failure modes across lazycortex-core skills — symptoms, likely
 last_regen: 2026-07-15
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; scaffold → sub-branch on registry-not-found / core-cli-unresolved / core-cli-path-stale / entry-not-found-or-manifest-collision / upsert-remove-error-or-validate-fail; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-settings-unwritable / pump-protected / offer-protocols-routine-absent; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; scaffold → sub-branch on registry-not-found / core-cli-unresolved / core-cli-path-stale / entry-not-found-or-manifest-collision / upsert-remove-error-or-validate-fail; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-inbox-not-gitignored / routine-settings-unwritable / pump-protected / offer-protocols-routine-absent; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.agent-models
@@ -186,6 +186,20 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Fix (entry not found)**: List the current `_local` entries first (`scaffold list --registry <regPath>`) to confirm the exact name, then retry the removal.
 
 **Fix (collision)**: This surfaces during a plugin's own install-time sync, not from hand-editing — re-run `/plugin update` for the plugin reporting the collision (a fixed manifest ships in the update), then re-run its install skill so `/lazy-core.scaffold-sync` re-dispatches cleanly.
+
+---
+
+## `/lazy-core.scaffold-local` upsert or remove is rejected, or validation reports FAIL findings
+
+**Symptom**: `/lazy-core.scaffold-local` (or `/lazy-core.scaffold-sync`) reports `scaffold upsert` or `scaffold remove` returning `error`, or a follow-up `scaffold validate` call reports FAIL-level findings after the write.
+
+**Likely cause (upsert/remove error)**: The core CLI rejected the operation outright — malformed JSON in the entry being written, a schema mismatch against the registry contract, or a registry-file write failure (permissions, disk).
+
+**Likely cause (validate FAIL)**: The write itself succeeded but left the registry in a structurally invalid state — an unresolved template-path reference, a duplicate key, or a glob that doesn't parse.
+
+**Fix (upsert/remove error)**: Inspect the full error output the skill returns, fix the input (entry name, globs, template path), then re-run.
+
+**Fix (validate FAIL)**: Inspect the validation output. This is one of the documented cases where hand-editing is expected — open `.claude/rules/lazy-core.scaffold.md` directly, correct the flagged entry, and re-run `scaffold validate` to confirm the registry is clean again.
 
 ---
 
@@ -497,7 +511,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## `/lazy-routine.register` fails: name format, already registered, or unknown type
 
-**Symptom**: Running `/lazy-routine.register` fails with "routine names must be `<plugin>.<verb>` format", "routine `<name>` already registered. Use `--force` to overwrite", "unknown type 'X'", "missing required field(s)", or "`.claude/lazy.settings.json` unwritable".
+**Symptom**: Running `/lazy-routine.register` fails with "routine names must be `<plugin>.<verb>` format", "routine `<name>` already registered. Use `--force` to overwrite", "unknown type 'X'", "missing required field(s)", "`<inbox_dir>` is not gitignored", or "`.claude/lazy.settings.json` unwritable".
 
 **Likely cause (name format)**: The `name` argument does not contain exactly one dot, or one of the two parts is empty.
 
@@ -506,6 +520,8 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause (unknown type)**: The `type` field is not one of `subprocess`, `inbox`, `schedule`, `git`, or `md-scan`.
 
 **Likely cause (missing fields)**: The configuration dict is missing one or more fields required by the routine type's schema.
+
+**Likely cause (inbox not gitignored)**: An `inbox`-type routine's working directory is tracked by git rather than gitignored. The wizard refuses to register a routine whose scratch area would otherwise pollute your commits.
 
 **Likely cause (unwritable)**: `.claude/lazy.settings.json` does not exist (the expert runtime was never bootstrapped) or the file has permissions that prevent writing.
 
@@ -516,6 +532,8 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Fix (unknown type)**: Correct the `type` to one of the five supported values.
 
 **Fix (missing fields)**: Add the missing fields; run `/lazy-routine.register` in wizard mode (without a pre-built `cfg` dict) to be prompted for each required field in order.
+
+**Fix (inbox not gitignored)**: Add the inbox directory to `.gitignore` — the wizard offers to do this for you at the prompt — or point the routine at a directory that already lives outside version control.
 
 **Fix (unwritable)**: Run `/lazy-core.install` to bootstrap the file. If the file exists but is read-only, fix its permissions, then re-run `/lazy-routine.register`.
 

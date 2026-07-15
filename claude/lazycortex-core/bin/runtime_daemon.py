@@ -1691,11 +1691,13 @@ def _emit_tick_metrics_if_available(repo_root: Path, result: dict) -> None:
   # guard: metrics disabled
   if not metrics.is_enabled():
     return
+  raw_dispatched = result.get(TickResultKey.DISPATCHED_COUNT)
   metrics.record_tick(
     routine = result.get(TickResultKey.NAME) or "unknown",
     exit_code = int(result.get(TickResultKey.EXIT, 0)),
     duration_sec = float(result.get(TickResultKey.DURATION_SEC, 0.0)),
     error = result.get(TickResultKey.ERROR),
+    dispatched = int(raw_dispatched) if raw_dispatched is not None else None,
   )
   metrics.set_queue_depth_from_filesystem(repo_root)
   metrics.aggregate_tokens_from_log(repo_root)

@@ -19,6 +19,7 @@ from constants import JobCollectKey, JobConfigKey, JobStatus, RoutineKey, StateK
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
+  import re
   from pathlib import Path
 
 
@@ -1151,6 +1152,38 @@ def _last_change_sha(work_dir: Path, path: str, rng: str, status: str) -> str:
     return "unknown"
 
 
+def _compile_recursive_glob(pat: str) -> re.Pattern[str]:
+  """
+  Compile a `**`-bearing glob into an anchored regex matcher.
+
+  `**` as a whole segment matches any number of path segments, including
+  zero; a trailing bare `**` matches any descendant. Within a segment `*`
+  matches any run of non-`/` characters and `?` exactly one. The result is
+  anchored at both ends — unlike `PurePath.match`, which is right-anchored.
+
+  Args:
+    pat: Glob pattern containing at least one `**` segment.
+
+  Returns:
+    The compiled pattern; use `.match(rel_posix_path)`.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import re
+  segs = pat.split("/")
+  parts = [ "^" ]
+  for i, seg in enumerate(segs):
+    last = i == len(segs) - 1
+    if seg == "**":
+      parts.append(".*" if last else "(?:[^/]+/)*")
+      continue
+    piece = "".join(
+      "[^/]*" if ch == "*" else "[^/]" if ch == "?" else re.escape(ch)
+      for ch in seg
+    )
+    parts.append(piece if last else piece + "/")
+  return re.compile("".join(parts) + r"\Z")
+
+
 def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   """
   Glob `cfg["paths"]`, apply the composite filter, dispatch one job per surviving file.
@@ -1176,7 +1209,10 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   Args:
     repo: Path-like reference to the repository.
     name: Routine name.
-    cfg: Routine configuration dict.
+    cfg: Routine configuration dict. Each entry in `cfg["paths"]` containing `**`
+      is matched full-path-anchored, with `**` spanning any number of segments
+      (including zero); an entry without `**` keeps `PurePath.match` semantics —
+      right-anchored, shell-glob, `*` never crosses `/`.
 
   Returns:
     The standard tick result dict — `exit = 0` on a pass (possibly with
@@ -1197,21 +1233,29 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
   flt = cfg.get("filter", {})
 
-  # RepoWalk + PurePath.match — stdlib `glob` and `Path.glob`/`rglob` are avoided
-  # here because `**` semantics shifted between Python 3.12 / 3.13 / 3.14.
-  # `PurePath.match` honors shell-glob semantics where `*` does NOT cross `/`, so
-  # `requests/*.md` matches only direct children — unlike `fnmatch.fnmatch`, which
-  # treats `*` as "any character including /" and silently recurses into nested
-  # dirs. RepoWalk excludes `.git`, every `.gitignore`-ignored path, and the
-  # repo's `.lazyignore` extra-excludes (venvs, node_modules, `.logs/`, worktrees)
-  # via git's own ignore engine. Dedupe by resolved abs path.
+  # Dual matching semantics, compiled once per tick:
+  #   - patterns containing `**` → anchored regex where `**` spans any number
+  #     of segments (incl. zero) — enables coarse scope-root sieves
+  #     (`<root>/**/*.md`); precision lives in the consumer's routing config
+  #     and the frontmatter filter, not here.
+  #   - plain patterns → PurePath.match, unchanged: right-anchored shell-glob
+  #     semantics where `*` does NOT cross `/` (so `requests/*.md` matches
+  #     only direct children).
+  # RepoWalk (not stdlib glob — `**` semantics shifted across 3.12/3.13/3.14)
+  # excludes `.git`, every `.gitignore`-ignored path, and `.lazyignore`
+  # extra-excludes via git's own ignore engine. Dedupe by resolved abs path.
+  compiled = [
+    ( pat, _compile_recursive_glob(pat) if "**" in pat else None )
+    for pat in paths_globs
+  ]
   seen_abs = set()
   candidates = []
   for full in RepoWalk(repo).iter_files():
     rel = full.relative_to(repo).as_posix()
-    for pat in paths_globs:
+    for pat, rx in compiled:
+      matched = rx.match(rel) is not None if rx is not None else PurePath(rel).match(pat)
       # guard: pattern does not match this file
-      if not PurePath(rel).match(pat):
+      if not matched:
         continue
       ap = full.resolve()
       # guard: already collected under a different glob — skip duplicate

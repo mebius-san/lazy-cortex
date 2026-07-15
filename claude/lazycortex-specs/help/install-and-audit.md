@@ -1,10 +1,10 @@
 ---
 chapter_type: block
 summary: Bootstrap the plugin, register products, audit spec health, and discover all available skills — the starting point before any authoring work begins.
-last_regen: 2026-07-12
+last_regen: 2026-07-15
 diagram_spec:
   anchor: "How the pieces fit together"
-  request: "Flow diagram showing the install-and-audit lifecycle: spec.install as the first step (creates consumer template dirs, registers spec.gate-tick routine, wires request-handler runtime across channels 6a–6g), leading to spec.product-config (product creation wizard: writes product record to lazy.settings.json[products], scaffolds folder tree with # Summary protected sections and précis+stats markers, generates four behavior-keyed review classes — one per doc-kind (design@, plan@, tech@, bug@) with wildcard globs spanning every asset category — and syncs lazy-review.scan paths), with spec.doctor as a recurring health-check loop that dispatches four parallel agents (A: link health, B: source staleness, C: role/header/stage, D: status gates/folders/intake) plus an inline Check 8 cross-reference, and spec.help as an always-available discovery entry point at the side. Show spec.install feeding into spec.product-config, spec.product-config completing to a registered product, and spec.doctor pointing back at the registered product as a recurring validation pass. Keep spec.help separate."
+  request: "Flow diagram showing the install-and-audit lifecycle: spec.install as the first step (creates consumer template dirs, registers spec.gate-tick routine, wires request-handler runtime across channels 6a–6g), leading to spec.product-config (product creation wizard: writes product record to lazy.settings.json[products], scaffolds folder tree with # Summary protected sections and précis+stats markers, generates four behavior-keyed review classes — one per doc-kind (design@, plan@, tech@, bug@) with wildcard globs spanning every asset category — and normalizes the lazy-review.scan coarse discovery masks), with spec.doctor as a recurring health-check loop that dispatches four parallel agents (A: link health, B: source staleness, C: role/header/stage, D: status gates/folders/intake) plus an inline Check 8 cross-reference, and spec.help as an always-available discovery entry point at the side. Show spec.install feeding into spec.product-config, spec.product-config completing to a registered product, and spec.doctor pointing back at the registered product as a recurring validation pass. Keep spec.help separate."
 source_skills:
   - spec.install
   - spec.product-config
@@ -20,16 +20,16 @@ Running these four in order is the fastest path from "just installed the plugin"
 ## When you'd use this
 
 - Setting up the plugin for the first time in a project: run `/spec.install` to create the per-category template override directories, register the `spec.gate-tick` daemon routine, and wire the full request-handler runtime (the open and apply channels plus the `spec.request-router` expert, the review class for `requests/*.md`, and the spawned-doc review classes), then chain into `/spec.product-config` when prompted to register your first product.
-- Registering a new product (code-bound or design-only): run `/spec.product-config` to walk through source repo attachment, language, icon, review experts, and built-in asset categories — the skill writes the product record, scaffolds the entire folder tree (including protected `# Summary` container sections with précis and stats markers on every folder-note), generates four behavior-keyed review classes (one per doc-kind — `design@`, `plan@`, `tech@`, `bug@` — each with wildcard globs spanning every asset category, built-in and operator-defined alike), and syncs the `lazy-review.scan` path list in one pass.
+- Registering a new product (code-bound or design-only): run `/spec.product-config` to walk through source repo attachment, language, icon, review experts, and built-in asset categories — the skill writes the product record, scaffolds the entire folder tree (including protected `# Summary` container sections with précis and stats markers on every folder-note), generates four behavior-keyed review classes (one per doc-kind — `design@`, `plan@`, `tech@`, `bug@` — each with wildcard globs spanning every asset category, built-in and operator-defined alike), and normalizes the `lazy-review.scan` discovery masks in one pass.
 - Adding a source repo to a design-only product you previously registered: run `/spec.product-config` in edit mode — it detects the existing record and lets you attach the source binding without touching other fields.
 - Checking spec health after a sprint, a branch merge, or a period of active coding: run `/spec.doctor <product>` to dispatch four parallel scan agents — link health, source staleness (code-bound products only), role and stage violations, and gate/folder/intake integrity — then surface findings grouped by severity. Re-run with `--apply` to walk targeted fixes interactively after reviewing the report.
 - Recalling which skill to use for a task you have not done in a while: run `/spec.help` for a one-screen capability map of every skill the plugin ships, grouped by area.
 
 ## What's in this block
 
-**`/spec.install`** bootstraps the plugin in your project and leaves it ready for product creation. It creates the per-category template override directories (`.claude/templates/spec.feature/`, `spec.change/`, `spec.bug/`, `spec.product/`, `spec.request/`) so you can customize scaffold templates per product later. It reads or seeds the repo's default authoring language into the `spec` settings section, registers the `spec.gate-tick` md-scan routine so the daemon automatically advances asset gates, and wires the request-handler runtime across five channels: the mechanical open routine (`spec.request-open`, fires on naked request files), the mechanical apply routine (`spec.request-apply`, fires post-finalize on approved requests), the `spec.request-router` expert entry, the review class for `requests/*.md` (with a `terminal.routing` writer), and the spawned-doc review classes for `design.md` / `plan.md` paths under every registered product. It also syncs `lazy-review.scan`'s `paths:` list to include every newly wired glob (Step 6f), and offers optional protocols for the spec writer routine (Step 6g). Every write follows a silent-merge policy — absent targets are created, cleanly mergeable targets are merged, only genuine conflicts ask a question. The skill is fully idempotent: re-running after a plugin update surfaces any new wiring requirements without overwriting anything you have customized.
+**`/spec.install`** bootstraps the plugin in your project and leaves it ready for product creation. It creates the per-category template override directories (`.claude/templates/spec.feature/`, `spec.change/`, `spec.bug/`, `spec.product/`, `spec.request/`) so you can customize scaffold templates per product later. It reads or seeds the repo's default authoring language into the `spec` settings section, registers the `spec.gate-tick` md-scan routine so the daemon automatically advances asset gates, and wires the request-handler runtime across five channels: the mechanical open routine (`spec.request-open`, fires on naked request files), the mechanical apply routine (`spec.request-apply`, fires post-finalize on approved requests), the `spec.request-router` expert entry, the review class for `requests/*.md` (with a `terminal.routing` writer), and the spawned-doc review classes for `design.md` / `plan.md` paths under every registered product. It also normalizes the `lazy-review.scan` discovery routine (Step 6f): the routine's path sieve is deliberately coarse — two scope-root masks (the requests inbox and the products tree, each prefixed with the vault root) rather than one glob per doc kind — so the skill ensures those masks are present, removes any legacy filename-suffixed masks they subsume, and tightens the routine's frontmatter filter; precise routing lives in the review classes, not the sieve. It then offers optional protocols for the spec writer routine (Step 6g). Every write follows a silent-merge policy — absent targets are created, cleanly mergeable targets are merged, only genuine conflicts ask a question. The skill is fully idempotent: re-running after a plugin update surfaces any new wiring requirements without overwriting anything you have customized.
 
-**`/spec.product-config`** is the product-registration wizard. In create mode it walks you through the compound-key (subsystem, optional namespace, leaf), the vault-relative `spec_path`, an optional source binding (`repo` key + covered paths), dependency detection via a parallel source scan, language, icon, and the four review expert roles (designer, developer, tester, historian). On save it writes the product record into `lazy.settings.json[products]`, scaffolds the product folder tree (`features/`, `changes/`, `bugs/`, the product folder-note, and per-category folder-notes), and writes the protected `# Summary` container section on each folder-note — including a précis placeholder between `<!-- spec:precis:* -->` markers and a stats block between `<!-- spec:stats:* -->` markers that the plugin keeps fresh as assets change. It then generates four behavior-keyed review classes — one per doc-kind (`design@<key>`, `plan@<key>`, `tech@<key>`, `bug@<key>`), each with wildcard globs spanning the product root and every asset category folder so a new category never needs its own class — reconciling any legacy per-category classes from an older install when re-run in edit mode, and refusing to persist a class that would reference an unregistered expert. It syncs the `lazy-review.scan` routine's path list to match, then closes by running `/spec.doctor` to confirm everything is consistent. It also ensures the vault-root `requests/` inbox exists (shared by all products) and carries its own protected `# Summary` folder-note. In edit mode it reads the existing record first and lets you add a source binding, extend dependencies, or switch language and icon — without touching asset categories or other fields you do not explicitly change.
+**`/spec.product-config`** is the product-registration wizard. In create mode it walks you through the compound-key (subsystem, optional namespace, leaf), the vault-relative `spec_path`, an optional source binding (`repo` key + covered paths), dependency detection via a parallel source scan, language, icon, and the four review expert roles (designer, developer, tester, historian). On save it writes the product record into `lazy.settings.json[products]`, scaffolds the product folder tree (`features/`, `changes/`, `bugs/`, the product folder-note, and per-category folder-notes), and writes the protected `# Summary` container section on each folder-note — including a précis placeholder between `<!-- spec:precis:* -->` markers and a stats block between `<!-- spec:stats:* -->` markers that the plugin keeps fresh as assets change. It then generates four behavior-keyed review classes — one per doc-kind (`design@<key>`, `plan@<key>`, `tech@<key>`, `bug@<key>`), each with wildcard globs spanning the product root and every asset category folder so a new category never needs its own class — reconciling any legacy per-category classes from an older install when re-run in edit mode, and refusing to persist a class that would reference an unregistered expert. It normalizes the `lazy-review.scan` discovery routine — ensuring one coarse mask covering the new product's whole subtree and removing any legacy per-doc masks it subsumes — then closes by running `/spec.doctor` to confirm everything is consistent. It also ensures the vault-root `requests/` inbox exists (shared by all products) and carries its own protected `# Summary` folder-note. In edit mode it reads the existing record first and lets you add a source binding, extend dependencies, or switch language and icon — without touching asset categories or other fields you do not explicitly change.
 
 **`/spec.doctor`** audits a product spec for validity and drift. It dispatches four parallel Explore agents in a single pass: Agent A checks wikilink health and source URL consistency (bare wikilinks, broken targets, branch-pin drift); Agent B diffs the tech-doc surface against current code for code-bound products (missing routes, removed functions, changed constants, new files); Agent C validates `spec_role` against its closed set, header section shape (H1 title and breadcrumb), `spec_stage` against its closed set, and the tag mirror between `spec_stage` and `spec/<stage>` — it also enforces that every asset status folder-note carries exactly the three protected H1 sections (`# Summary`, `# Gates`, `# History`) and that every container folder-note carries a `# Summary` section with both a précis marker and a stats marker; Agent D checks gate booleans, the strict five-gate ladder, gate-to-stage coupling, top-level folder validity, operator-zone folder-note shape, and request intake schema. An inline Check 8 runs cross-product — it verifies the vault-root `requests/requests.md` inbox note's protected `# Summary` section and flags any loose `changelog.md` files. Without `--apply` the skill is fully read-only — it surfaces what is wrong and stops. With `--apply` it walks each finding and offers a targeted fix per item, asking one question per fix before writing anything. Fixes that require a stage or gate change delegate to the canonical skills (`spec.set-stage`, `spec.flip-gate`) rather than raw-editing values.
 
@@ -39,7 +39,7 @@ Running these four in order is the fastest path from "just installed the plugin"
 
 The first time you work in a project, run `/spec.install`. It checks that the plugin is enabled, creates the consumer template directories, seeds the authoring language if needed, and registers the daemon routines and full request-handler wiring. At the end it offers to chain directly into `/spec.product-config` — accepting that offer is the fastest path to a working product. You can also skip and run `/spec.product-config` manually once install finishes.
 
-`/spec.product-config` is the heavier step. It collects the information install cannot derive: what the product is called, where its spec lives, whether it has source code, which experts review its docs. When you attach a source repo, it runs a dependency scan in the background. On save, the skill writes the product folder-note and all three category folder-notes, each with a protected `# Summary` section carrying a précis placeholder (which it fills immediately) and stats markers (which the daemon keeps current as assets are added and gates flip). Four behavior-keyed review classes are generated — one per doc-kind, with wildcard globs covering every asset category — and the `lazy-review.scan` path list is extended to match, so the daemon immediately starts watching the new product's files. Re-running `/spec.product-config` in edit mode on a product from an older install reconciles any legacy per-category classes into the collapsed set automatically. The skill ends with a `/spec.doctor` call, so the product arrives in a verified state. It also ensures the vault-root `requests/` inbox exists as a shared folder-note with the same protected `# Summary` structure.
+`/spec.product-config` is the heavier step. It collects the information install cannot derive: what the product is called, where its spec lives, whether it has source code, which experts review its docs. When you attach a source repo, it runs a dependency scan in the background. On save, the skill writes the product folder-note and all three category folder-notes, each with a protected `# Summary` section carrying a précis placeholder (which it fills immediately) and stats markers (which the daemon keeps current as assets are added and gates flip). Four behavior-keyed review classes are generated — one per doc-kind, with wildcard globs covering every asset category — and the `lazy-review.scan` discovery routine gains one coarse mask covering the product's whole subtree, so the daemon immediately starts watching the new product's files; the precise file-to-class routing happens at dispatch time through the class globs. Re-running `/spec.product-config` in edit mode on a product from an older install reconciles any legacy per-category classes into the collapsed set automatically. The skill ends with a `/spec.doctor` call, so the product arrives in a verified state. It also ensures the vault-root `requests/` inbox exists as a shared folder-note with the same protected `# Summary` structure.
 
 After that, `/spec.doctor` is a recurring check you run on demand: after any significant coding sprint, after merging a branch, or whenever you suspect drift. For a code-bound product, Agent B diffs the tech-doc surface against the current code and reports undocumented routes, removed functions, and changed constants. For all products, Agent C catches the consistency errors that accumulate during active development — a `spec_stage` whose mirror tag was not updated, a missing or duplicated protected H1 section on a status folder-note, a broken wikilink introduced by a rename. Agent D catches gate-model violations: a gate flipped manually without its coupling doc in `approved` stage, a precedence violation (a later gate true while an earlier is false), a top-level folder that is neither built-in nor a declared asset category. Running without `--apply` first gives you the full report with no side effects; then re-run with `--apply` to walk the fixes interactively.
 
@@ -66,49 +66,48 @@ After that, `/spec.doctor` is a recurring check you run on demand: after any sig
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  specInstall[spec.install: template dirs, gate-tick routine, request-handler runtime]
-  specProductConfig[spec.product-config: product record, folder tree, review classes]
-  registeredProduct([Registered product])
-  specDoctor[spec.doctor: recurring health-check]
-  parallelChecks{Dispatch parallel agents}
-  checkA[A — link health]
-  checkB[B — source staleness]
-  checkC[C — role / header / stage]
-  checkD[D — status gates / folders / intake]
-  checkCross[Check 8 — cross-reference]
-  specHelp[spec.help: discovery]
+  specInstall[spec.install - creates consumer template dirs, registers spec.gate-tick, wires request-handler across channels 6a-6g]
+  specProductConfig[spec.product-config - writes product record, scaffolds folder tree, generates four behavior-keyed review classes]
+  normalizeScanMasks[Normalizes lazy-review.scan coarse discovery masks]
+  registeredProduct[Registered product]
+  specDoctor[spec.doctor - recurring health-check loop]
+  agentLinkHealth[Agent A - link health]
+  agentSourceStaleness[Agent B - source staleness]
+  agentRoleHeaderStage[Agent C - role/header/stage]
+  agentStatusGates[Agent D - status gates/folders/intake]
+  checkCrossReference[Check 8 - inline cross-reference]
+  specHelp[spec.help - always-available discovery entry point]
 
-  specInstall -->|install complete| specProductConfig
-  specProductConfig -->|product created| registeredProduct
-  registeredProduct -->|trigger health-check| specDoctor
-  specDoctor -->|recurring pass| parallelChecks
-  parallelChecks -->|dispatch A| checkA
-  parallelChecks -->|dispatch B| checkB
-  parallelChecks -->|dispatch C| checkC
-  parallelChecks -->|dispatch D| checkD
-  parallelChecks -->|inline| checkCross
-  checkA -->|findings| specDoctor
-  checkB -->|findings| specDoctor
-  checkC -->|findings| specDoctor
-  checkD -->|findings| specDoctor
-  checkCross -->|findings| specDoctor
-  specDoctor -->|validation pass| registeredProduct
+  specInstall -->|hands off to| specProductConfig
+  specProductConfig -->|generates classes, then| normalizeScanMasks
+  normalizeScanMasks -->|completes to| registeredProduct
+  specDoctor -->|dispatches parallel| agentLinkHealth
+  specDoctor -->|dispatches parallel| agentSourceStaleness
+  specDoctor -->|dispatches parallel| agentRoleHeaderStage
+  specDoctor -->|dispatches parallel| agentStatusGates
+  specDoctor -->|runs inline| checkCrossReference
+  agentLinkHealth -->|findings| specDoctor
+  agentSourceStaleness -->|findings| specDoctor
+  agentRoleHeaderStage -->|findings| specDoctor
+  agentStatusGates -->|findings| specDoctor
+  checkCrossReference -->|findings| specDoctor
+  specDoctor -->|recurring validation pass| registeredProduct
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
-  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
   classDef sub fill:#2e2240,stroke:#7e63a8,color:#fff
 
   class specInstall entry
   class specProductConfig action
+  class normalizeScanMasks action
   class registeredProduct success
-  class specDoctor action
-  class parallelChecks guard
-  class checkA sub
-  class checkB sub
-  class checkC sub
-  class checkD sub
-  class checkCross sub
-  class specHelp entry
+  class specDoctor service
+  class agentLinkHealth service
+  class agentSourceStaleness service
+  class agentRoleHeaderStage service
+  class agentStatusGates service
+  class checkCrossReference action
+  class specHelp sub
 ```

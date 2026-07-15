@@ -55,15 +55,13 @@ The staging lock is an infrastructure layer that the rest of the lazycortex-core
 %%{init: {'themeVariables':{'background':'transparent','transitionColor':'#000','transitionLabelColor':'#000','labelBackgroundColor':'#fff','edgeLabelBackground':'#fff','stateLabelColor':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','state':{'diagramPadding':5,'useMaxWidth':true}}}%%
 stateDiagram-v2
   [*] --> noLock
-  noLock --> held : hook or skill acquires lock before touching index
-  held --> noLock : staging window closes, auto-release
-  held --> noLock : heuristic auto-break - dead PID, stale-and-idle, or different host
-  held --> statusInspected : inspect via /lazy-core.git-status
-  statusInspected --> noLock : manual break via /lazy-core.git-unlock
-  noLock --> [*]
-
+  noLock --> held : hook or skill acquires lock
+  held --> noLock : staging window closes
+  held --> noLock : auto-broken - dead PID, stale-and-idle, or different host
+  held --> statusCheck : inspect via /lazy-core.git-status
+  statusCheck --> noLock : manual break via /lazy-core.git-unlock
+  statusCheck --> held : lock still valid, no break
   style noLock fill:#1e3a5f,stroke:#4a90e2,color:#fff
   style held fill:#1e5f3a,stroke:#4ae290,color:#fff
-  style statusInspected fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  style statusCheck fill:#5f4a1e,stroke:#e2a14a,color:#fff
 ```
-</content>

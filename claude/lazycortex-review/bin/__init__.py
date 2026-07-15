@@ -8,7 +8,4 @@ Layered (bottom → top):
   Orchestration:     state_machine, dispatcher
   CLI entry:         lazy_review
   Slash commands:    start, finalize, stop, status
-
-Modules are populated incrementally per
-`docs/plans/lazy-review.rewrite-from-scratch.md`.
 """

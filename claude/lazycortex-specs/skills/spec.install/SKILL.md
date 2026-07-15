@@ -311,22 +311,7 @@ No validators are wired — the WTR doc is approved by the operator directly thr
 
 ### 6f. Sync `lazy-review.scan` paths (MANDATORY when 6e classes are added)
 
-`lazy-review.scan` is the md-scan routine the daemon uses to discover review-active files. Its `paths:` list is the discovery sieve — the dispatcher only sees files that pass through it. By contract `lazy-review.configure` keeps `routines[lazy-review.scan].paths` in sync with the union of every `review.classes[].paths` glob (see `lazycortex-review/skills/lazy-review.configure/SKILL.md`). When `spec.install` writes classes in 6e DIRECTLY (bypassing `lazy-review.configure`), it MUST also extend `routines[lazy-review.scan].paths` to match — otherwise the daemon never scans the spawned spec docs and the new classes are dead.
-
-The md-scan matcher uses `PurePath.match` semantics where `*` does NOT cross `/`, so each level of nesting needs its own glob. Append the missing globs to `routines.lazy-review.scan.paths`:
-
-```yaml
-# product-level files (operator folder-note + product design.md / tech.md)
-- "<vault_root>/<spec_path_prefix>/products/*/*.md"
-# per-asset dirs (folder-note + authored docs)
-- "<vault_root>/<spec_path_prefix>/products/*/features/*/*.md"
-- "<vault_root>/<spec_path_prefix>/products/*/changes/*/*.md"
-- "<vault_root>/<spec_path_prefix>/products/*/bugs/*/*.md"
-# request inbox
-- "<vault_root>/requests/*.md"
-```
-
-`<vault_root>` is `spec.vault_root` from settings (default `specs`). `<spec_path_prefix>` is the leading segment of every registered product's `spec_path` — e.g. `Server` for `Server/products/<key>`, or empty (no prefix) for `products/<key>`. Append only the globs not already in the list (dedupe).
+`lazy-review.scan` is the md-scan routine the daemon uses to discover review-active files. Its `paths:` sieve is deliberately coarse — one scope-root mask per scope; filename/depth precision lives in `review.classes[].paths` (dispatch-time routing) and the routine's frontmatter filter. The two masks to ensure are `<vault_root>/requests/*.md` and `<vault_root>/<spec_path_prefix>/products/**/*.md`, where `<vault_root>` is the `spec.vault_root` setting (default `specs`); when it is `.`, omit the prefix. **Warning:** `**`-bearing sieve masks are matched anchored at the repo root (unlike class `paths`, which the dispatcher matches right-anchored), so each mask MUST carry the `<vault_root>` prefix — a mask missing it matches nothing under the default `specs/` layout. When `routines["lazy-review.scan"]` is present, normalize it: (1) ensure both masks above are in `paths`; (2) remove every legacy filename-suffixed mask those coarse masks subsume, in BOTH shapes — with or without the `<vault_root>` prefix; (3) inside `filter.frontmatter` set `review_active` to `{"in": [true], "not_in": []}` (drop the legacy `null` leg); (4) set `interval_sec` to `60` when it still carries the legacy `5` (minute cadence for coarse scans; an operator-chosen value other than 5 stays untouched). When the routine is absent (daemon-disabled project), skip silently. Idempotent; the 6e classes need no per-doc-kind sieve entries — the coarse prefix mask covers every depth under the products tree.
 
 Outcome: `wiring-applied:<N>` where N is 0..7 (the four 6a–6d blocks plus the two 6e classes plus the 6f paths sync).
 

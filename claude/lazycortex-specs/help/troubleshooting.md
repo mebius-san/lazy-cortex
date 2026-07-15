@@ -1,26 +1,31 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-07-12
+last_regen: 2026-07-15
 no_diagram: true
 source_skills:
-  - spec.create-asset
-  - spec.add-asset-category
-  - spec.create-request
-  - spec.create-from-code
-  - spec.finalize-branch
-  - spec.flip-gate
-  - spec.request-attach
   - spec.install
-  - spec.refresh-sources
   - spec.product-config
-  - spec.resolve-dependency
-  - spec.request-classify
-  - spec.request-spawn
-  - spec.request-find-candidates
-  - spec.resolve-repo
-  - spec.sync-with-code
+  - spec.doctor
+  - spec.create-asset
+  - spec.create-feature
+  - spec.create-change
+  - spec.create-bug
+  - spec.add-asset-category
+  - spec.create-from-code
+  - spec.create-request
+  - spec.flip-gate
+  - spec.gate-tick
   - spec.set-stage
+  - spec.sync-with-code
+  - spec.finalize-branch
+  - spec.resolve-repo
+  - spec.resolve-dependency
+  - spec.source-url
+  - spec.request-classify
+  - spec.request-find-candidates
+  - spec.request-attach
+  - spec.request-spawn
 ---
 # Troubleshooting
 
@@ -130,7 +135,7 @@ source_skills:
 
 **Likely cause**: The product compound-key you passed has no record in `lazy.settings.json[products]`. The product was never registered, or the key was mistyped.
 
-**Fix**: Run `/spec.product-config` to register the product, then re-invoke `/spec.create-asset <product> <category> <slug>`. Verify the compound-key matches exactly what the wizard wrote into config.
+**Fix**: Run `/spec.product-config` to register the product, then re-invoke `/spec.create-asset <product> <category> <slug>`. Verify the compound-key matches exactly what the wizard wrote into config. This applies equally to `/spec.create-feature`, `/spec.create-change`, and `/spec.create-bug` — all three are thin wrappers over `/spec.create-asset` and refuse the same way.
 
 ---
 
@@ -284,26 +289,6 @@ source_skills:
 
 ---
 
-## `/spec.refresh-sources` refuses naming a non-authored doc
-
-**Symptom**: The skill rejects the target file, saying its `spec_role` is not an authored-doc role.
-
-**Likely cause**: You ran `/spec.refresh-sources` on a status folder-note or another file that doesn't carry `spec_source_docs` / `spec_source_requests`. Source projection only applies to authored docs.
-
-**Fix**: Re-invoke on the authored doc itself (`design.md`, `plan.md`, `bug.md`, or the product-level `tech.md`), not on the folder-note.
-
----
-
-## `/spec.refresh-sources` skips the stats refresh
-
-**Symptom**: The output reports a `skipped-unavailable` stats outcome for a category or product-root note, even though the précis was written.
-
-**Likely cause**: The `render-container-stats` CLI is not on `PATH` — the plugin's tooling isn't fully installed in this shell environment.
-
-**Fix**: Re-run `/spec.install` to restore the CLI, then re-invoke `/spec.refresh-sources <doc>` — the précis it already wrote stays in place; only the stats region needs the follow-up run.
-
----
-
 ## `/spec.request-attach` refuses because the target doc is in a terminal stage
 
 **Symptom**: The skill aborts with a refusal naming the target doc's stage (`rejected` or `cancelled`), saying the operator must revive the doc before attaching.
@@ -421,4 +406,3 @@ source_skills:
 **Likely cause**: The repo is hosted on a forge instance (self-hosted GitLab, Gitea, Forgejo, …) whose hostname the plugin can't classify automatically, and no explicit override is set on the record.
 
 **Fix**: Add `forge: <key>` (one of `github`, `gitlab`, `bitbucket`, `gitea`, `forgejo`, `sourcehut`) to the repo's record via `/spec.product-config`, then re-invoke.
-</content>

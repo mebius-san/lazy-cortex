@@ -77,19 +77,28 @@ _DEFAULT_SETTINGS = {
         "_version": 1,
         "lazy-review.scan": {
             "type": "md-scan",
-            "interval_sec": 5,
+            # Minute cadence — the whole-vault sieve reads every .md's
+            # frontmatter per tick; 5s belongs to narrow request routines.
+            # Matches spec.gate-tick's precedent for `**/*.md` scans.
+            "interval_sec": 60,
             "timeout_sec": 60,
             "priority": 10,
+            # Coarse scope-root masks, one per product / scope, written by
+            # the generators (`lazy-review.configure`, `spec.product-config`,
+            # `spec.install`): `<root>/**/*.md` — `**` is recursive in the
+            # core md-scan matcher. Filename/depth precision lives in
+            # review.classes[].paths (dispatch-time routing) and the
+            # frontmatter filter below, never here.
             "paths": [],
-            # `review_active: { in: [None, True] }` covers the in-cycle
-            # states (bootstrap-pending + active). `review_result:
-            # { in: [None] }` excludes post-finalize files (finalize
-            # strips `review_active` AND stamps `review_result`, so the
-            # file matches `review_active: [None]` alone but belongs to
-            # the consumer apply-gate, not the scan loop).
+            # Only opted-in files: start/submit stamp `review_active: true`
+            # atomically, and the state machine skips non-active files — so
+            # an absent-key file could only ever produce a no-op subprocess
+            # spawn, which the whole-vault sieve would multiply per tick.
+            # `review_result: { in: [None] }` excludes post-finalize files
+            # (finalize strips `review_active` AND stamps `review_result`).
             "filter": {
                 "frontmatter": {
-                    ReviewKey.ACTIVE: {"in": [None, True], "not_in": []},
+                    ReviewKey.ACTIVE: {"in": [True], "not_in": []},
                     ReviewKey.RESULT: {"in": [None], "not_in": []},
                 },
             },
