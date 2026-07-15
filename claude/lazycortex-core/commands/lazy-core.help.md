@@ -65,7 +65,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - [setup-routine](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-routine.md) — Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
 - [setup-runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-runtime.md) — Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover if the working tree or a remote sync halts it.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/troubleshooting.md) — Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Answers to non-obvious questions about install vs setup, settings placement, plugin composition, agent routing, the expert runtime and job lifecycle, the memory subsystem, routine types, daemon recovery, metrics provisioning, and push automation, git staging coordination, MCP tool permissions, change-history tooling, and the public-repo guard scanner.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git locking, and MCP permissions.
 
 Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-core/help/`.
 <!-- help-block:end -->

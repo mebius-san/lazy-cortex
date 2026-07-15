@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Per-expert long-term memory tracked in git — experts consult notes before primary work, write new notes as a side-effect of jobs, and consolidate via reflect passes.
-last_regen: 2026-07-14
+last_regen: 2026-07-15
 diagram_spec:
   anchor: "How the four skills compose"
   request: "Flow diagram showing the four memory skills and how they compose: mark-persona opts an expert in (writes lazy.settings.json experts entry); write is the only blessed note writer (writes .memory/<expert>/ notes, regenerates .tags/); reflect dispatches a kind=reflect job that feeds run logs and existing notes to the expert, which then calls write; index rebuilds .tags/ from note frontmatter as a recovery path. Show .memory/<expert>/ and .memory/.tags/ as shared state that write maintains and reflect reads."
@@ -65,26 +65,24 @@ Four skills make this possible: one to opt an expert in, one to write notes atom
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
   markPersonaSkill[mark-persona opts expert in]
-  settingsEntry[lazy.settings.json experts entry]
-  writeSkill[write - blessed note writer]
-  memoryNotes[.memory/expert/ notes]
-  tagsIndex[.tags/ index]
+  expertsSettingsEntry[(lazy.settings.json experts entry)]
   reflectSkill[reflect dispatches reflect job]
-  reflectJob[kind=reflect job]
-  runLogs[run logs]
-  expertProcess[expert processes logs and notes]
-  indexSkill[index rebuilds .tags/]
+  runLogs[(Run logs)]
+  expertReflectJob[Expert processes reflect job]
+  writeSkill[write - blessed note writer]
+  expertMemoryNotes[(.memory/expert notes)]
+  memoryTags[(.memory/.tags/)]
+  indexSkill[index rebuilds .tags/ from frontmatter]
 
-  markPersonaSkill -->|writes| settingsEntry
-  reflectSkill -->|dispatches| reflectJob
-  reflectJob -->|feeds| expertProcess
-  runLogs -->|feeds| expertProcess
-  memoryNotes -->|feeds| expertProcess
-  expertProcess -->|calls| writeSkill
-  writeSkill -->|writes notes| memoryNotes
-  writeSkill -->|regenerates| tagsIndex
-  indexSkill -->|reads| memoryNotes
-  indexSkill -->|rebuilds| tagsIndex
+  markPersonaSkill -->|writes| expertsSettingsEntry
+  reflectSkill -->|dispatches kind reflect job| expertReflectJob
+  runLogs -->|feeds run logs| expertReflectJob
+  expertMemoryNotes -->|feeds existing notes| expertReflectJob
+  expertReflectJob -->|calls| writeSkill
+  writeSkill -->|writes notes| expertMemoryNotes
+  writeSkill -->|regenerates| memoryTags
+  expertMemoryNotes -->|reads frontmatter| indexSkill
+  indexSkill -->|rebuilds tags| memoryTags
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
@@ -93,11 +91,10 @@ flowchart LR
   class markPersonaSkill entry
   class reflectSkill entry
   class indexSkill entry
+  class expertReflectJob action
   class writeSkill action
-  class memoryNotes action
-  class tagsIndex action
-  class reflectJob action
-  class runLogs action
-  class expertProcess action
-  class settingsEntry success
+  class expertsSettingsEntry success
+  class runLogs success
+  class expertMemoryNotes success
+  class memoryTags success
 ```

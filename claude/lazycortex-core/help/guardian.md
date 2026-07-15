@@ -22,7 +22,7 @@ The guardian block addresses both. `/lazy-guard.check-public` is a parallel, fou
 
 **`/lazy-repo.mark-public`** is the guided end-to-end workflow for taking a repo or subtree public. It calls `/lazy-guard.check-public` internally, then walks you through resolving every finding before it proceeds. FAIL findings (secrets) must be resolved — encrypted, template-ized, or redacted — before the workflow continues. WARN findings (PII, infrastructure literals, local paths) can be fixed or formally waived with a justification. Once all secrets are cleared it writes `.guard-waivers.json` — which records your waiver decisions and simultaneously activates the pre-commit hook for all future commits — and in whole-repo mode it optionally flips GitHub visibility via `gh`. If you only want a subtree to be public (for example `claude/**` ships to the marketplace while the rest of the repo stays private), pass the scope glob: the hook then scans only those paths on every commit, and the GitHub visibility step is skipped.
 
-**`/lazy-guard.allow-mcp`** works independently of the other two. It enumerates every tool the target MCP server exposes in your current session and classifies each one into three buckets: safe or reversible reads and low-risk writes go into `permissions.allow` (no prompt), truly destructive operations go into `permissions.ask` (always prompt), and medium-risk tools are left out of both so Claude Code's default per-call prompt applies when you actually invoke them. Results land in `settings.local.json` — gitignored by default — so your personal permission choices never appear in commits your teammates inherit. Classification is tool-level, not server-level: a read-shaped tool on a "dangerous" server still goes to `allow`; a destructive tool on a "safe" server still goes to `ask`. For globally defined servers the skill checks existing state and infers the target scope before asking; it only prompts when scope is genuinely undetermined. Because classifying tools requires live MCP tool schemas that only exist in an interactive session, a headless cross-project rollout (`/lazy-core.autosetup`) skips this skill entirely and reports it as a live-session-only step — you run `/lazy-guard.allow-mcp` yourself, interactively, once per repo, after the rollout finishes.
+**`/lazy-guard.allow-mcp`** works independently of the other two. It enumerates every tool the target MCP server exposes in your current session and classifies each one into three buckets: safe or reversible reads and low-risk writes go into `permissions.allow` (no prompt), truly destructive operations go into `permissions.ask` (always prompt), and medium-risk tools are left out of both so Claude Code's default per-call prompt applies when you actually invoke them. If you've previously pinned one of those medium-risk tools into `allow` or `ask` yourself, the skill treats that as a deliberate trust decision and leaves it exactly where it is on every future run — it never re-asks about it or moves it back to the default bucket. Results land in `settings.local.json` — gitignored by default — so your personal permission choices never appear in commits your teammates inherit. Classification is tool-level, not server-level: a read-shaped tool on a "dangerous" server still goes to `allow`; a destructive tool on a "safe" server still goes to `ask`. For globally defined servers the skill checks existing state and infers the target scope before asking; it only prompts when scope is genuinely undetermined. Because classifying tools requires live MCP tool schemas that only exist in an interactive session, a headless cross-project rollout (`/lazy-core.autosetup`) skips this skill entirely and reports it as a live-session-only step — you run `/lazy-guard.allow-mcp` yourself, interactively, once per repo, after the rollout finishes.
 
 ## How they work together
 
@@ -44,7 +44,7 @@ Optionally, `/lazy-guard.allow-mcp` can also install a SessionStart preload hook
 
 **Previewing MCP registrations before writing.** Pass `--dry-run` to `/lazy-guard.allow-mcp` and it prints the full planned diff — what goes to `allow`, what goes to `ask`, what gets skipped, and what cross-scope leaks would be cleaned up — without touching any file.
 
-**Reversing a prior allow decision.** Re-run `/lazy-guard.allow-mcp` for the server. If any tool the classifier considers destructive is still sitting in `allow` from a past run, the skill asks you per-tool whether to promote it to `ask`. Your prior `allow` entry is never silently removed — each reversal requires an explicit confirmation.
+**Reversing a prior allow decision.** Re-run `/lazy-guard.allow-mcp` for the server. If any tool the classifier considers destructive is still sitting in `allow` from a past run, the skill asks you per-tool whether to promote it to `ask`. Your prior `allow` entry is never silently removed — each reversal requires an explicit confirmation. A tool you've pinned into the default (medium-risk) bucket is never touched by this reversal flow at all — that pin is permanent until you change it by hand.
 
 **Cleaning up leaked permissions.** If you previously registered MCP tool permissions in tracked `settings.json` instead of `settings.local.json`, re-running `/lazy-guard.allow-mcp` for that server will find the leaked entries and ask you per-entry whether to move them. Entries in the wrong-scope `settings.local.json` (for example a project server's entries sitting in the global file) are surfaced and cleaned up the same way.
 
@@ -60,31 +60,31 @@ Optionally, `/lazy-guard.allow-mcp` can also install a SessionStart preload hook
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  checkPublicScan[Run lazy-guard.check-public]
-  findingsExist{Findings found?}
-  resolveFindings[Resolve or waive findings]
-  markPublicRun[Run lazy-repo.mark-public]
-  createWaiversAndHook[Create .guard-waivers.json and activate pre-commit hook]
-  repoPublic[Repo marked public]
-  allowMcpClassify[Run lazy-guard.allow-mcp]
-  classifyMcpTool{Classify MCP tool}
-  allowBucket[Allow bucket]
-  askBucket[Ask bucket]
-  skipBucket[Skip bucket]
+  userRunsCheckPublic[User runs lazy-guard.check-public]
+  secretsFound{Secrets found?}
+  failGuardScan[Fail guard scan]
+  feedFindingsToMarkPublic[Feed findings to lazy-repo.mark-public]
+  createWaiversFile[Create .guard-waivers.json]
+  activatePreCommitHook[Activate pre-commit hook]
+  repoMarkedPublic[Repo marked public]
+  userRunsAllowMcp[User runs lazy-guard.allow-mcp]
+  classifyMcpTools[Classify MCP server tools]
+  bucketDecision{Allow, ask, or skip?}
   writeSettingsLocal[Write settings.local.json]
+  settingsUpdated[settings.local.json updated]
 
-  checkPublicScan -->|scans repo| findingsExist
-  findingsExist -->|clean| markPublicRun
-  findingsExist -->|found| resolveFindings
-  markPublicRun -->|runs| createWaiversAndHook
-  createWaiversAndHook -->|done| repoPublic
-  allowMcpClassify -->|classifies| classifyMcpTool
-  classifyMcpTool -->|allow| allowBucket
-  classifyMcpTool -->|ask| askBucket
-  classifyMcpTool -->|skip| skipBucket
-  allowBucket -->|writes| writeSettingsLocal
-  askBucket -->|writes| writeSettingsLocal
-  skipBucket -->|writes| writeSettingsLocal
+  userRunsCheckPublic -->|scan repo| secretsFound
+  secretsFound -->|found| failGuardScan
+  secretsFound -->|clean| feedFindingsToMarkPublic
+  feedFindingsToMarkPublic -->|invoke| createWaiversFile
+  createWaiversFile -->|enable hook| activatePreCommitHook
+  activatePreCommitHook -->|done| repoMarkedPublic
+  userRunsAllowMcp -->|list MCP tools| classifyMcpTools
+  classifyMcpTools -->|evaluate| bucketDecision
+  bucketDecision -->|allow| writeSettingsLocal
+  bucketDecision -->|ask| writeSettingsLocal
+  bucketDecision -->|skip| writeSettingsLocal
+  writeSettingsLocal -->|persist| settingsUpdated
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
@@ -92,17 +92,16 @@ flowchart LR
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class checkPublicScan entry
-  class allowMcpClassify entry
-  class findingsExist guard
-  class classifyMcpTool guard
-  class markPublicRun action
-  class createWaiversAndHook action
-  class allowBucket action
-  class askBucket action
-  class skipBucket action
-  class repoPublic success
-  class writeSettingsLocal success
-  class resolveFindings error
+  class userRunsCheckPublic entry
+  class userRunsAllowMcp entry
+  class secretsFound guard
+  class bucketDecision guard
+  class feedFindingsToMarkPublic action
+  class createWaiversFile action
+  class activatePreCommitHook action
+  class classifyMcpTools action
+  class writeSettingsLocal action
+  class repoMarkedPublic success
+  class settingsUpdated success
+  class failGuardScan error
 ```
-</content>

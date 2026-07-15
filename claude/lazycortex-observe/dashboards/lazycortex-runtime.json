@@ -336,7 +336,7 @@
                         "color": "green"
                       },
                       "1": {
-                        "text": "PAUSED — dirty tree",
+                        "text": "PAUSED \u2014 dirty tree",
                         "color": "orange"
                       }
                     }
@@ -370,7 +370,7 @@
     {
       "type": "table",
       "title": "Routine health ($period)",
-      "description": "One row per routine × repo: how long since the last tick, tick and error counts over the selected period.",
+      "description": "One row per routine \u00d7 repo: how long since the last tick, tick and error counts over the selected period.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -386,6 +386,13 @@
           "expr": "sum by (routine, repo) (increase(lazycortex_runtime_routine_ticks_total{repo=~\"$repo\"}[$period]))",
           "legendFormat": "",
           "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (routine, repo) (increase(lazycortex_runtime_routine_runs_total{repo=~\"$repo\"}[$period])) or 0 * sum by (routine, repo) (increase(lazycortex_runtime_routine_ticks_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "",
+          "refId": "E",
           "instant": true,
           "format": "table"
         },
@@ -423,15 +430,17 @@
               "routine": 0,
               "repo": 1,
               "Value #B": 3,
-              "Value #C": 4,
-              "Value #D": 5
+              "Value #E": 4,
+              "Value #C": 5,
+              "Value #D": 6
             },
             "renameByName": {
               "routine": "Routine",
               "repo": "Repo",
               "Value #B": "Ticks",
               "Value #C": "Errors",
-              "Value #D": "Busy time"
+              "Value #D": "Busy time",
+              "Value #E": "Runs"
             }
           }
         }
@@ -457,13 +466,6 @@
             },
             "properties": [
               {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "gauge",
-                  "mode": "gradient"
-                }
-              },
-              {
                 "id": "min",
                 "value": 0
               }
@@ -482,6 +484,18 @@
               {
                 "id": "decimals",
                 "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
               }
             ]
           },
@@ -494,7 +508,9 @@
               {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "color-text"
+                  "type": "gauge",
+                  "mode": "gradient",
+                  "valueDisplayMode": "text"
                 }
               },
               {
@@ -516,6 +532,10 @@
                     }
                   ]
                 }
+              },
+              {
+                "id": "min",
+                "value": 0
               }
             ]
           }
@@ -543,7 +563,7 @@
     },
     {
       "type": "table",
-      "title": "Errors by routine × reason ($period)",
+      "title": "Errors by routine \u00d7 reason ($period)",
       "description": "Empty table = no errors in the selected period.",
       "datasource": {
         "type": "prometheus",
@@ -705,7 +725,7 @@
     },
     {
       "type": "table",
-      "title": "Queue by expert × state (now)",
+      "title": "Queue by expert \u00d7 state (now)",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -841,7 +861,7 @@
       "targets": [
         {
           "expr": "sum by (expert, repo, state) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=~\"queued|active\"})",
-          "legendFormat": "{{expert}} / {{repo}} · {{state}}",
+          "legendFormat": "{{expert}} / {{repo}} \u00b7 {{state}}",
           "refId": "A"
         }
       ],
@@ -878,7 +898,7 @@
       "targets": [
         {
           "expr": "sum by (expert, repo, state) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=~\"failed|dead\"})",
-          "legendFormat": "{{expert}} / {{repo}} · {{state}}",
+          "legendFormat": "{{expert}} / {{repo}} \u00b7 {{state}}",
           "refId": "A"
         }
       ],
@@ -931,7 +951,7 @@
     },
     {
       "type": "table",
-      "title": "Tokens by routine × model × expert ($period)",
+      "title": "Tokens by routine \u00d7 model \u00d7 expert ($period)",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"

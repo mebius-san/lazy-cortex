@@ -308,6 +308,8 @@ Each entry under `routines` may carry an optional `type` field. Default is `subp
 | `git` | `branch`, `watch`, `expert`, `request`, `interval_sec` | `repo_dir`, `remote`, `path_filter`, `timeout_sec` |
 | `md-scan` | `paths`, `expert`, `interval_sec` | `filter`, `request`, `cadence`, `timeout_sec` |
 
+`paths` globs: a pattern containing `**` is matched full-path-anchored with `**` spanning any number of segments (including zero); a pattern without `**` keeps `PurePath.match` semantics (right-anchored, `*` never crosses `/`). In `**`-bearing patterns character classes like `[abc]` are treated as literal text (only `*` and `?` are wildcards); patterns without `**` keep full `PurePath.match` semantics.
+
 Closed-set strict validation: unknown type, unknown field, missing required, or per-type custom constraint violation → `RoutineConfigError` at registration time.
 
 **Common optional fields (any type):** `protocol: <ref>` or `protocols: [<ref>, ...]` — declares which protocol(s) the routine's dispatched jobs follow. The dispatcher resolves each ref via `reference_resolver.resolve(..., category="protocols", ...)` and threads the resolved paths through to each job's `config.json`. Protocols are routine-side, not expert-side — expert entries in `lazy.settings.json[experts]` do NOT carry a `protocol` field. See `lazy-core.expert-protocols-contract.md`.
@@ -577,6 +579,7 @@ Closed label vocabulary — values come from a fixed enum, never from raw except
 ```
 # Counters
 lazycortex_runtime_routine_ticks_total{routine,repo,status}
+lazycortex_runtime_routine_runs_total{routine,repo}
 lazycortex_runtime_routine_errors_total{routine,repo,reason}
 lazycortex_runtime_tokens_total{routine,repo,model,kind}
 lazycortex_runtime_daemon_halts_total{repo,reason,triggered_by}
@@ -596,6 +599,8 @@ lazycortex_runtime_build_info{version,daemon_name,repo}
 `status` ∈ `{ok, error, timeout, crash}`. `state` ∈ `{ready, running, done}`. `kind` ∈ `{input, output, cache_read, cache_write}`.
 
 `dirty_tree` is 1 while the daemon's pre-iteration check finds uncommitted changes and routine dispatch is silently paused (the operator may be mid-edit); it drops back to 0 on the first iteration after the tree settles. This is the only externally visible trace of the silent skip — it is not a halt and records no incident.
+
+`routine_runs_total` counts only non-idle ticks: a tick whose routine type reports an explicit `dispatched_count` of 0 (an inbox / md-scan / git poll that matched nothing) increments `ticks_total` but not `runs_total`. Ticks from types that report no dispatch count always count as runs. `ticks_total` is the scheduler heartbeat; `runs_total` is the real-work rate.
 
 The `reason` label is metric-specific:
 

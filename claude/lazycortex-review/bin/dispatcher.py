@@ -529,7 +529,9 @@ def _iter_class_files(repo: Path, paths: list[str]) -> Iterable[Path]:
   # `request/*.md` matches only direct children — unlike `fnmatch.fnmatch`, which
   # treats `*` as "any character including /" and silently makes class 1 (request/*.md)
   # swallow files that belong to deeper-nested classes (request/products/*/changes/*/design.md).
-  # Mirrors routine_types.RepoWalk's choice in lazycortex-core for the same reason.
+  # Unlike the core md-scan sieve (which additionally supports recursive `**`
+  # for its coarse discovery globs), class paths stay precise single-segment
+  # globs — this matcher is the routing precision the sieve deliberately lacks.
   repo_str = str(repo)
   for base, dirs, files in os.walk(repo_str):
       # Skip dot-folders by default (.git, .claude internals).

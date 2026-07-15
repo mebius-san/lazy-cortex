@@ -69,34 +69,35 @@ When you see a job reach `done` status in the list, run `/lazy-expert.collect-jo
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
   userDispatchesJob[User dispatches job]
-  dispatchJobSkill[dispatch-job]
-  runtimeDaemon((Runtime daemon))
-  collectJobSkill[collect-job]
-  userCollectsResults[User collects results]
-  listJobsSkill[list-jobs]
-  cancelJobSkill[cancel-job]
+  dispatchJob[dispatch-job]
+  runtimeDaemonDrainsQueue((Runtime daemon drains queue))
+  userChecksJobStatus{Check job status?}
+  listJobs[list-jobs]
+  cancelJob[cancel-job]
+  collectJob[collect-job]
+  userReceivesResults[User receives results]
 
-  userDispatchesJob -->|runs| dispatchJobSkill
-  dispatchJobSkill -->|enqueues job| runtimeDaemon
-  runtimeDaemon -->|drains queue| collectJobSkill
-  collectJobSkill -->|returns results| userCollectsResults
-  userDispatchesJob -->|optionally runs| listJobsSkill
-  listJobsSkill -->|queries| runtimeDaemon
-  userDispatchesJob -->|optionally runs| cancelJobSkill
-  cancelJobSkill -->|cancels| runtimeDaemon
+  userDispatchesJob -->|dispatch-job| dispatchJob
+  dispatchJob -->|job queued| runtimeDaemonDrainsQueue
+  runtimeDaemonDrainsQueue -->|job running| userChecksJobStatus
+  userChecksJobStatus -->|list-jobs| listJobs
+  userChecksJobStatus -->|cancel-job| cancelJob
+  userChecksJobStatus -->|job done| collectJob
+  listJobs -->|status shown| userChecksJobStatus
+  collectJob -->|collect-job| userReceivesResults
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
-  classDef sub fill:#2e2240,stroke:#7e63a8,color:#fff
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-  classDef service fill:#1e4a5f,stroke:#4abce2,color:#fff
+  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
   class userDispatchesJob entry
-  class dispatchJobSkill action
-  class collectJobSkill action
-  class runtimeDaemon service
-  class userCollectsResults success
-  class listJobsSkill sub
-  class cancelJobSkill sub
+  class dispatchJob action
+  class runtimeDaemonDrainsQueue action
+  class userChecksJobStatus guard
+  class listJobs action
+  class cancelJob error
+  class collectJob action
+  class userReceivesResults success
 ```
-</content>

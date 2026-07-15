@@ -781,6 +781,8 @@ class TickResultKey:
     OUTCOME: The integration outcome carried on a worktree-finish tick.
     WORK_ID: The unit-of-work identifier carried on a worktree tick.
     BRANCH: The task branch name carried on a worktree tick.
+    DISPATCHED_COUNT: The number of items the tick actually dispatched; absent when the
+      routine type does not report one.
   """
 
   NAME = "name"
@@ -791,6 +793,7 @@ class TickResultKey:
   OUTCOME = "outcome"
   WORK_ID = "work_id"
   BRANCH = "branch"
+  DISPATCHED_COUNT = "dispatched_count"
 
 
 # ----------------------------------------------------------------------------------------
@@ -845,6 +848,7 @@ class MetricStateKey:
     DAEMON_NAME: The daemon identifier captured at init.
     LOCK: The threading lock guarding metric mutations.
     TICKS: The routine-tick counter instrument.
+    RUNS: The non-idle-run counter instrument.
     ERRORS: The routine-error counter instrument.
     TOKENS: The token-consumption counter instrument.
     DURATION: The tick-duration histogram instrument.
@@ -866,6 +870,7 @@ class MetricStateKey:
   DAEMON_NAME = "daemon_name"
   LOCK = "lock"
   TICKS = "ticks"
+  RUNS = "runs"
   ERRORS = "errors"
   TOKENS = "tokens"
   DURATION = "duration"

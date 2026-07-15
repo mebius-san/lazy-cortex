@@ -1,8 +1,7 @@
 """
 Stdlib-only Prometheus metrics for the lazycortex-core runtime daemon.
 
-Every label value comes from a closed set declared in the observability plan
-(`docs/plans/2026-05-05-runtime-observability.md`, `## Cross-cutting design decisions`).
+Every label value comes from a closed, declared set.
 Label values derived from raw user input, raw exception text, file paths, job ids,
 branch names, commit shas, or hostnames are rejected. The `daemon_name` label is
 intentionally a constant — operator identity (hostname) must not leak into metric
@@ -386,6 +385,13 @@ def init(repo_label: str, version: str, daemon_name: str) -> None:
     "Routine ticks dispatched by the runtime daemon.",
     ("repo", "routine", "status"),
   )
+  _state[MetricStateKey.RUNS] = _Counter(
+    # waiver: external Prometheus metric name, not a domain constant
+    "lazycortex_runtime_routine_runs_total",
+    # waiver: external Prometheus HELP text, not a domain constant
+    "Routine ticks that performed real work (dispatched at least one item, or a type that always works).",
+    ("repo", "routine"),
+  )
   _state[MetricStateKey.ERRORS] = _Counter(
     # waiver: external Prometheus metric name, not a domain constant
     "lazycortex_runtime_routine_errors_total",
@@ -504,7 +510,10 @@ def _resolve_status(exit_code: int, error: str | None) -> tuple[str, str | None]
   return ("error", "subprocess_error")
 
 
-def record_tick(routine: str, exit_code: int, duration_sec: float, error: str | None) -> None:
+def record_tick(
+    routine: str, exit_code: int, duration_sec: float, error: str | None,
+    dispatched: int | None = None,
+) -> None:
   """
   Record one completed routine tick across the relevant counters, histogram, and gauge.
 
@@ -514,6 +523,8 @@ def record_tick(routine: str, exit_code: int, duration_sec: float, error: str | 
     duration_sec: Wall-clock duration of the tick in seconds.
     error: Optional error tag from the runtime daemon, in the format described
       by `_resolve_status`.
+    dispatched: Number of items the tick dispatched, when the routine type reports
+      one. `0` marks the tick as idle; None (type reports no count) counts as a run.
 
   Raises:
     ValueError: If `routine` fails the closed-vocabulary label check.
@@ -528,6 +539,11 @@ def record_tick(routine: str, exit_code: int, duration_sec: float, error: str | 
   with _state[MetricStateKey.LOCK]:
     _state[MetricStateKey.TICKS].inc(
       { MetricLabel.REPO: repo, MetricLabel.ROUTINE: routine, MetricLabel.STATUS: status })
+    # A tick is a "run" unless its routine type reported an explicit zero dispatch count —
+    # scan/inbox/git ticks that matched nothing are the idle heartbeat, not real work.
+    if dispatched is None or dispatched > 0:
+      _state[MetricStateKey.RUNS].inc(
+        { MetricLabel.REPO: repo, MetricLabel.ROUTINE: routine })
     if reason is not None:
       _state[MetricStateKey.ERRORS].inc(
         { MetricLabel.REPO: repo, MetricLabel.ROUTINE: routine, MetricLabel.REASON: reason })
@@ -641,7 +657,7 @@ def _registry_for(name: str) -> _Counter | _Gauge | _Histogram | None:
   if not is_enabled():
     return None
   for key in (
-    "ticks", "errors", "tokens", "duration", "last_tick",
+    "ticks", "runs", "errors", "tokens", "duration", "last_tick",
     "queue_depth", "up", "daemon_halted", "build_info", "halt_count", "dirty_tree",
   ):
     metric = _state.get(key)
@@ -724,7 +740,7 @@ def render() -> bytes:
     return b""
   lines: list[str] = []
   for key in (
-    "up", "build_info", "ticks", "errors", "tokens",
+    "up", "build_info", "ticks", "runs", "errors", "tokens",
     "duration", "last_tick", "queue_depth",
     "daemon_halted", "halt_count", "dirty_tree",
   ):

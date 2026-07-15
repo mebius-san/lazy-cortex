@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to an existing codebase, generate its design and tech docs from source, then scaffold the first feature.
-last_regen: 2026-07-12
+last_regen: 2026-07-15
 diagram_spec:
   anchor: "## How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs spec.product-config to register the product and write settings, then runs spec.create-from-code to scan source and produce design + tech docs, then runs spec.create-feature to scaffold the first feature asset; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -148,4 +148,3 @@ sequenceDiagram
   specVault-->>createFeature: feature asset written
   createFeature-->>operator: first feature asset ready
 ```
-</content>

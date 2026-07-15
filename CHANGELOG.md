@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.16.0 — 2026-07-15 UTC
+
+- `md-scan` routine `paths` patterns containing `**` now match recursively across any directory depth (e.g. `<root>/**/*.md`) instead of requiring an exact glob per directory; character classes like `[abc]` inside such patterns are treated as literal text, not wildcards.
+- New `routine_runs_total` metric counts non-idle routine runs, giving visibility into how often each routine actually fires versus sits idle.
+
 ### 5.15.0 — 2026-07-15 UTC
 
 - Install and scaffold-sync steps now detect current vs. diverged mirrored files via deterministic byte-comparison instead of agent judgment, catching drift more reliably.
@@ -417,6 +422,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.1.1 — 2026-07-15 UTC
+
+- `spec.product-config` and `spec.install` now write coarse, recursive `**` scope-root masks for `lazy-review.scan` — one per-product mask with an active-only filter, replacing the old per-class glob-union generator, so new categories, doc-kinds, and nesting depths reach discovery with zero config edits.
+- Fixed generated sieve masks missing the content-root prefix, which could silently blind `lazy-review.scan` under the default `specs/` layout.
+
 ### 3.1.0 — 2026-07-12 UTC
 
 - `spec.product-config` review-class generation now produces four behavior-keyed classes (design/plan/tech/bug) with wildcard globs covering every asset category, migrates legacy per-category classes automatically, and verifies expert names before saving — closing a gap that could leave testers unregistered.
@@ -622,6 +632,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 5.2.3 — 2026-07-15 UTC
+
+- The discovery scan now dispatches only files explicitly opted into review (`review_active: true`). Files without the flag were previously scanned but always skipped as no-ops, so review behavior is unchanged — the daemon just stops spawning those no-op checks. Scan masks switched to coarse per-scope globs and the cadence moved from 5 seconds to one minute, cutting subprocess launches on large vaults with routing precision untouched (review classes still match exactly).
+- Fixed generated scan masks missing the content-root prefix, which could silently hide documents under the default `specs/` layout from the scan daemon.
+
 ### 5.2.2 — 2026-07-12 UTC
 
 - _no user-visible changes_ (internal install-skill documentation alignment)
@@ -660,6 +675,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).
 
 ## lazycortex-observe
+
+### 0.7.0 — 2026-07-15 UTC
+
+- Routine health table now shows a Runs column (non-idle runs), with health bars moved to the Errors and Busy time columns.
 
 ### 0.6.0 — 2026-07-15 UTC
 
