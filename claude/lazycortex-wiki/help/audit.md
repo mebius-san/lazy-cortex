@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Run integrity checks across a wiki scope — orphan topics, broken links, missing summaries, stale glosses, unknown axes, and overlapping scopes — with optional auto-repair.
-last_regen: 2026-06-03
+last_regen: 2026-07-16
 no_diagram: true
 source_skills:
   - lazy-wiki.doctor
@@ -14,7 +14,7 @@ Over time a curated wiki drifts: See-also links point to renamed or deleted node
 
 ## When you'd use this
 
-- After a large batch of file renames, deletions, or moves — checking that See-also links and the topic index still match reality.
+- After a large batch of file renames or moves — checking that See-also links and the topic index still match reality. (Node deletions are pruned automatically as they happen — see below — so this is mainly about renames, where the old link is stale rather than gone.)
 - Periodically to catch missing summaries on nodes that were added outside the curator workflow.
 - When `/wiki.query` returns unexpected results and you suspect the topic index is stale.
 - After editing tag axes in `/wiki.configure` — verifying no existing tags reference a now-unknown axis.
@@ -28,7 +28,9 @@ Phase 1 is always read-only — nothing is written. The `lazycortex-wiki doctor`
 
 Findings fall into two categories. Fixable checks (`orphan-topic`, `index-desync`, `broken-see-also`, `stale-gloss`) have automated repairs the skill can apply. Report-only checks (`broken-repo-key`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`) require your own action — they surface a problem but the right resolution depends on your intent, so the skill does not rewrite your content for them.
 
-If fixable findings exist, the skill asks whether to apply the repairs. On confirmation it passes `--apply` to the same command: the topic index is rebuilt, broken See-also lines are dropped, and stale glosses are refreshed. Each fix is reported individually. If you decline, the read-only audit result stands and no files are modified.
+If fixable findings exist, the skill asks whether to apply the repairs. On confirmation it passes `--apply` to the same command: the topic index is rebuilt, broken See-also lines are dropped, and stale glosses are refreshed. Applying a fix only touches the lines that need it — the rest of a node's See-also section is left exactly as it was. Each fix is reported individually. If you decline, the read-only audit result stands and no files are modified.
+
+You'll see fewer `broken-see-also` findings than you might expect from deleted nodes specifically: deleting a wiki node now prunes every See-also line pointing at it automatically, either through the background daemon (if it's running) or the next `/wiki.relink` (if it isn't) — no audit run required. A `broken-see-also` finding here usually means the target was renamed or moved rather than deleted, or that the automatic pruning hasn't run yet.
 
 If the scope id you pass is not in `lazy.settings.json`, the command exits non-zero and the skill surfaces the error without proceeding to the presentation or apply phases.
 
@@ -38,6 +40,7 @@ If the scope id you pass is not in `lazy.settings.json`, the command exits non-z
 - **Adding or editing scope configuration** — run `/wiki.configure`. It owns `lazy.settings.json[wiki.scopes]`; do not hand-edit that file.
 - **Resolving unknown axes** — run `/wiki.configure` to add the axis to the scope definition, or to rename the axis used in existing tags. The skill writes the settings; then re-run `/wiki.doctor` to confirm the finding is cleared.
 - **Missing summaries** — these are report-only. Run `/wiki.relink` (the curation block) to have the curator fill in summaries for uncurated nodes.
+- **A `broken-see-also` finding keeps appearing after deleting a node** — if the background daemon isn't running, the automatic pruning happens on your next `/wiki.relink` rather than instantly. Run `/wiki.relink` on the affected scope, then re-run `/wiki.doctor` to confirm the finding is gone.
 
 ## See also
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -35,6 +36,8 @@ import index as _index        # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import nodes as _nodes        # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import prune as _prune        # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import relink as _relink      # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import scope as _scope        # noqa: E402
@@ -48,6 +51,7 @@ _SUBCOMMANDS = {
   "resolve-scope":  "Resolve a file path to its scope id and config entry.",
   "apply-node":     "Apply a curation.json result to a node file (classify or link fields).",
   "process-file":   "Process a single node: dispatch a classify curation job.",
+  "prune-node":     "Drop See-also links to a deleted node and rebuild the scope index.",
   "dispatch-link":  "Dispatch a link curation job for a node (chains from classify).",
   "relink-all":     "Full pass over all nodes in a scope; rebuild topics index.",
   "relink-plan":    "Compute the daemon-free relink plan (initial/incremental/anchor-lost) as JSON.",
@@ -77,6 +81,7 @@ class Cli:
   _CMD_RESOLVE_SCOPE  = "resolve-scope"
   _CMD_APPLY_NODE     = "apply-node"
   _CMD_PROCESS_FILE   = "process-file"
+  _CMD_PRUNE_NODE     = "prune-node"
   _CMD_DISPATCH_LINK  = "dispatch-link"
   _CMD_BUILD_INDEX    = "build-index"
   _CMD_RELINK_PLAN    = "relink-plan"
@@ -121,12 +126,21 @@ class Cli:
   _ARG_APPLY               = "--apply"
   _ARG_APPLY_DEST          = "apply"
   _ARG_APPLY_HELP          = "Perform fixable repairs (index rebuild, drop broken see-also, refresh stale glosses)."
+  _ARG_NO_COMMIT           = "--no-commit"
+  _ARG_NO_COMMIT_DEST      = "no_commit"
+  _ARG_NO_COMMIT_HELP      = "Mutate files only; skip the git commit (caller owns the commit)."
+  _ARG_PRUNE_PATH_HELP     = "Git-item JSON string or bare path of the deleted node."
 
   # Curation result JSON field names.
   _FIELD_WIKI_SUMMARY = "wiki_summary"
   _FIELD_TOPICS       = "topics"
   _FIELD_CONNECTORS   = "connectors"
   _FIELD_SEE_ALSO     = "see_also"
+
+  # Prune result JSON field names (mirrors prune.NodePruner result keys).
+  _FIELD_PRUNED_NODES = "pruned_nodes"
+  _FIELD_DELETED      = "deleted"
+  _FIELD_INDEX        = "index"
 
   # Scope config key carrying the tag axis list.
   _CFG_TAG_AXES        = "tag_axes"
@@ -195,6 +209,8 @@ class Cli:
       return self._cmd_apply_node(args)
     if cmd == self._CMD_PROCESS_FILE:
       return self._cmd_process_file(args)
+    if cmd == self._CMD_PRUNE_NODE:
+      return self._cmd_prune_node(args)
     if cmd == self._CMD_DISPATCH_LINK:
       return self._cmd_dispatch_link(args)
     if cmd == self._CMD_BUILD_INDEX:
@@ -245,6 +261,15 @@ class Cli:
           help = self._ARG_PROCESS_PATH_HELP,
         )
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_PRUNE_NODE:
+        p.add_argument(self._ARG_PATH, help = self._ARG_PRUNE_PATH_HELP)
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+        p.add_argument(
+          self._ARG_NO_COMMIT,
+          dest = self._ARG_NO_COMMIT_DEST,
+          action = self._ACTION_STORE_TRUE,
+          help = self._ARG_NO_COMMIT_HELP,
+        )
       elif name == self._CMD_DISPATCH_LINK:
         p.add_argument(self._ARG_PATH, help = self._ARG_DISPATCH_LINK_PATH_HELP)
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
@@ -985,6 +1010,100 @@ class Cli:
       payload = payload,
     )
     print(f"process-file: dispatched (classify) {raw_path}")
+    return 0
+
+  def _cmd_prune_node(self, args: argparse.Namespace) -> int:
+    """
+    Prune See-also links to a deleted node and persist the result.
+
+    Reconciles one scope's See-also links and topic index after a wiki node is deleted, so a
+    daemon-invoked run leaves a clean working tree.
+
+    Notes:
+      - Exits successfully without making changes when the target path still exists or falls
+        outside any tracked scope.
+      - Commits the touched nodes and the rebuilt topic index to git unless the caller opts out.
+
+    Args:
+      args: Parsed argument namespace. `.path` accepts a bare file path or a git-item JSON
+        string (as produced by the `deleted_files` git watch); must also carry `.repo` and
+        `.no_commit`.
+
+    Returns:
+      Integer exit code; 0 on success or skip, 1 when the commit step fails.
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+
+    raw_path = self._parse_path_arg(args.path)
+    node_path = Path(raw_path)
+    abs_path = node_path if node_path.is_absolute() else repo / node_path
+
+    # guard: the file still exists — not a deletion, nothing to prune
+    if abs_path.is_file():
+      print(f"prune-node: skip (file exists) {raw_path}")
+      return 0
+
+    resolver = _scope.ScopeResolver(repo = repo)
+    result = resolver.resolve_scope_by_path(node_path)
+    # guard: deleted path does not belong to any configured scope
+    if result is None:
+      print(f"prune-node: skip (no scope) {raw_path}")
+      return 0
+
+    scope_id, cfg = result
+    pruner = _prune.NodePruner(repo = repo, scope_id = scope_id, cfg = cfg)
+    outcome = pruner.prune(abs_path)
+
+    if not args.no_commit:
+      touched = [ *outcome[self._FIELD_PRUNED_NODES], outcome[self._FIELD_INDEX] ]
+      exit_code = self._commit_paths(
+        repo    = repo,
+        paths   = touched,
+        message = f"wiki(prune): drop links to {outcome[self._FIELD_DELETED]} ({scope_id})",
+      )
+      # guard: commit failed — surface the error so the daemon records it
+      if exit_code != 0:
+        return exit_code
+
+    print(json.dumps(outcome))
+    return 0
+
+  def _commit_paths(self, *, repo: Path, paths: list[str], message: str) -> int:
+    """
+    Commit the given repo-relative paths when any of them carries changes.
+
+    Notes:
+      - Returns success without committing when there is nothing to commit — no paths given,
+        or none of the given paths changed.
+
+    Args:
+      repo: Absolute repository root the git commands run in.
+      paths: Repo-relative paths to stage and commit.
+      message: Commit message.
+
+    Returns:
+      0 on success or clean no-op, 1 when a git command fails.
+    """
+    # guard: nothing to commit
+    if not paths:
+      return 0
+    try:
+      status = subprocess.check_output(
+        [ "git", "status", "--porcelain", "--", *paths ],
+        cwd = str(repo), text = True,
+      ).strip()
+      # guard: no changes among the touched paths — clean no-op
+      if not status:
+        return 0
+      subprocess.check_output([ "git", "add", "--", *paths ], cwd = str(repo), text = True)
+      subprocess.check_output(
+        [ "git", "commit", "-m", message, "--", *paths ],
+        cwd = str(repo), text = True,
+      )
+    except subprocess.CalledProcessError as e:
+      print(f"prune-node: git failed: {e}", file = sys.stderr)
+      return 1
     return 0
 
   def _cmd_dispatch_link(self, args: argparse.Namespace) -> int:

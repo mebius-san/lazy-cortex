@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git locking, and MCP permissions.
-last_regen: 2026-07-15
+last_regen: 2026-07-16
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -32,7 +32,6 @@ source_skills:
   - lazy-log.recall
   - lazy-log.timeline
   - lazy-log.summary
-  - lazy-log.bullets
 ---
 # FAQ
 
@@ -295,6 +294,14 @@ Yes. The skill supports a `public_scopes` array in `.guard-waivers.json`. When t
 
 ---
 
+## Which `Bash` commands trigger the secret scan and the commit recorder?
+
+Both the `lazy-guard.check-public` pre-commit hook and the `lazy-log.commit-recorder` hook detect a commit by looking for a `git commit` invocation anywhere in the `Bash` command string — not only a command that starts with it. That covers the two shapes people actually type: a chained command like `git add . && git commit -m "..." && git push`, and a flag-prefixed form like `git -C some/dir commit`. `mcp__git__git_commit` calls are always detected, since there is no command string to scan. The secret scan runs on this detection *before* the commit happens, against the staged diff; the commit recorder runs *after*, deciding whether to append an entry to `.logs/commits.jsonl`.
+
+For the recorder specifically, detecting a commit and recording one aren't the same thing — it only appends once a commit has actually landed. In a chained command, a non-zero exit code belongs to whichever segment failed last, so a commit that succeeded followed by a `git push` that failed still reports overall failure. The recorder resolves this by checking whether `HEAD` was committed within the last 60 seconds: if the chain reports failure but `HEAD` is fresh, the commit itself landed and still gets recorded; if the whole chain aborted before `git commit` ever ran, `HEAD` stays stale and nothing is appended. Entries are also deduplicated by SHA, so retrying a failed push after a real commit never double-records it.
+
+---
+
 ## Why does `/lazy-core.install` check Python version before anything else?
 
 Every plugin in the lazycortex marketplace requires Python 3.12 or newer. The install skill runs the Python check as Step 0 — before it touches any files — because all plugin hooks (`lazy-guard.check-public.py`, `lazy-guard.settings.py`, `lazy-core.model-router.py`, `lazy-core.git-guard.py`) will fail silently at runtime if the Python floor is not met. Failing at Step 0 with a clear "install Python 3.12 via brew or pyenv" message is better than installing all the rule files and discovering hook failures later.
@@ -358,7 +365,7 @@ Run `/lazy-core.git-status` to inspect the lock (holder, age, liveness, whether 
 
 They read the same sources (the changelog, run logs, raw commits, git log, and memory) but answer different shapes of question. `/lazy-log.recall "<query>"` is for "why was X changed?" or "when did we change Y?" — it returns a ranked table of matches with git SHAs so you can jump straight to a commit. `/lazy-log.timeline` is for "what happened when" — it produces a chronological list within a date range or topic filter, newest-first by default. `/lazy-log.summary "<topic>"` is for "tell me the whole story" — it clusters everything related to a topic by sub-theme and writes a narrative, not a list.
 
-Two more agents round out this block but aren't for asking questions: `/lazy-log.distill` runs automatically after commits (or on demand) to turn raw commit entries into the theme-first prose that `.logs/changelog.md` holds — it is throttled to once per 4 hours. `/lazy-log.bullets` is release-drafting tooling that turns one plugin's commit range into outcome-led CHANGELOG bullets.
+`/lazy-log.distill` rounds out this block but isn't for asking questions: it runs automatically after commits (or on demand) to turn raw commit entries into the theme-first prose that `.logs/changelog.md` holds — it is throttled to once per 4 hours.
 
 ---
 

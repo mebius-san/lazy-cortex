@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, querying the wiki, and interpreting doctor findings.
-last_regen: 2026-06-03
+last_regen: 2026-07-16
 no_diagram: true
 source_skills:
   - lazy-wiki.query
@@ -14,7 +14,7 @@ source_skills:
 
 ## Do I need to run `/wiki.install` before anything else?
 
-Yes. `/wiki.install` seeds the `wiki` settings section in `lazy.settings.json`, registers the `wiki.scan` and `wiki.relink-weekly` routines, seeds agent model tiers for the wiki curator, and copies the navigation rule into your rules directory. Nothing else in the plugin will work until that section exists. The install is idempotent — running it again on an already-configured project is safe and will not overwrite values you have set.
+Yes. `/wiki.install` seeds the `wiki` settings section in `lazy.settings.json`, registers the `wiki.scan`, `wiki.scan-deletes`, and `wiki.relink-weekly` routines, seeds agent model tiers for the wiki curator, and copies the navigation rule into your rules directory. Nothing else in the plugin will work until that section exists. The install is idempotent — running it again on an already-configured project is safe and will not overwrite values you have set.
 
 After install, run `/wiki.configure` to define at least one scope (the set of path globs the wiki covers, the tag axes, and where to write the topics index). `/wiki.query` and `/wiki.relink` both require at least one configured scope to proceed.
 
@@ -52,7 +52,7 @@ Subsequent runs are incremental: only nodes touched since the last committed anc
 
 ## When should I run `/wiki.relink` versus waiting for the daemon routines?
 
-`/wiki.relink` is the right choice when you do not have the runtime daemon running, when you want to force a full or incremental relink right now in your current session, or after a rebase or `reset --hard` that made the previous anchor unreachable. The daemon routines (`wiki.scan` for per-commit event processing and `wiki.relink-weekly` for the weekly full sweep) handle ongoing maintenance automatically when the lazycortex-core runtime is active; `/wiki.relink` is the manual equivalent that works standalone.
+`/wiki.relink` is the right choice when you do not have the runtime daemon running, when you want to force a full or incremental relink right now in your current session, or after a rebase or `reset --hard` that made the previous anchor unreachable. The daemon routines (`wiki.scan` for per-commit event processing, `wiki.scan-deletes` for per-commit deletion pruning, and `wiki.relink-weekly` for the weekly full sweep) handle ongoing maintenance automatically when the lazycortex-core runtime is active; `/wiki.relink` is the manual equivalent that works standalone and covers all of the same ground in one dispatch.
 
 ---
 
@@ -65,6 +65,14 @@ No. `anchor-lost` means the `wiki_synced_sha` stored in `topics.md` became unrea
 ## A curator subagent reported an error during `/wiki.relink` — do I need to restart?
 
 No. When a curator reports an error for a specific node (malformed input, a failed `apply-node`, or a schema violation), `/wiki.relink` skips that node and continues with the rest. The skipped node is picked up on the next relink. After the run finishes, check the report for any skipped nodes and run `/wiki.relink` again to re-process them once the underlying issue is resolved.
+
+---
+
+## What happens to See-also links when I delete a wiki node?
+
+Deleting a file that was part of the wiki does not leave dangling links behind. `/wiki.relink` detects deleted nodes as the `drop[]` set in its plan and, in Step 5, drops any See-also line pointing at the deleted path from every node that still references it, then folds that change into the same commit as the rest of the relink.
+
+If the runtime daemon is active, this happens automatically and independently of a relink: the `wiki.scan-deletes` routine watches for deleted files on every commit and calls the same prune logic, committing the cleanup on its own as soon as the deletion is detected. Either path also rebuilds `topics.md` so the deleted node's entry disappears from the index. You do not need to manually search for or remove broken links after deleting a file.
 
 ---
 

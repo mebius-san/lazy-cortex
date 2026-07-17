@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.16.1 — 2026-07-16 UTC
+
+- Fixed: chained and flag-form `git commit` invocations (e.g. `git add x && git commit -m "..." && git push`, `git -C dir commit`) are now correctly recognized by the commit-recorder and public-repo secret-scan hooks — previously only bare `git commit` calls were detected, so most real commits were silently dropped from commit history and chained commits could bypass the pre-publish secret scan.
+- Fixed: a commit that succeeded inside a chain whose later segment failed (e.g. a rejected `git push`) is no longer lost from the commit feed — on a non-zero exit code the recorder now records when `HEAD` is fresh and not yet recorded, and skips only genuinely failed commits.
+
 ### 5.16.0 — 2026-07-15 UTC
 
 - `md-scan` routine `paths` patterns containing `**` now match recursively across any directory depth (e.g. `<root>/**/*.md`) instead of requiring an exact glob per directory; character classes like `[abc]` inside such patterns are treated as literal text, not wildcards.
@@ -774,6 +779,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 2.0.2 — 2026-07-16 UTC
+
+- The "no test-driven production surface" coding-guideline principle now ships in the canonical guidelines (`lazy-python.coding-guidelines.md`) instead of living only in the project-local overlay, so every consumer gets it.
+
 ### 2.0.1 — 2026-07-15 UTC
 
 - Fixed the `D9` docstring check incorrectly flagging consumer-registered definition-style sections (e.g. custom Args/Attributes-style sections) as narrative text — plain-style sections are still checked.
@@ -838,6 +847,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 1.6.0 — 2026-07-16 UTC
+
+- New automatic pruning of dangling See-also links: deleting a wiki node now drops every See-also line pointing at it across the scope and rebuilds the topic index, instead of leaving stale links behind. `/wiki.relink` applies the same pruning for removed nodes as part of its existing pass.
+- **Fix:** `wiki.doctor --apply` no longer corrupts See-also sections — dropping a broken link or refreshing a stale gloss was stripping the `- ` list-item prefix from lines that should have been left untouched.
+- **Fix:** Help and overview docs now point at the real `/wiki.relink` skill instead of two skills that don't exist (`wiki.relink-doc`, `wiki.relink-all`).
 
 ### 1.5.2 — 2026-07-08 UTC
 

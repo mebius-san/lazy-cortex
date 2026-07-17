@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-06-03
+last_regen: 2026-07-16
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Decision tree rooted on which skill produced the error; first branch splits on install failures vs. configure failures vs. query failures vs. relink failures vs. doctor failures; install leaves: plugin-not-enabled, core-not-installed, cache-empty; configure leaves: wiki-section-missing, scope-id-invalid, paths-empty; query leaves: no-scopes-configured, no-material-matched; relink leaves: unknown-scope, anchor-lost, curator-error, empty-commit; doctor leaves: unknown-scope, no-scopes-configured; each leaf points to the troubleshooting entry that resolves it"
+  request: "Decision tree rooted on which skill or routine produced the symptom; first branch splits on install failures vs. configure failures vs. query failures vs. relink failures vs. doctor failures vs. dangling-link sync issues; install leaves: plugin-not-enabled, core-not-installed, cache-empty, no-routines-registered; configure leaves: wiki-section-missing, scope-id-invalid, paths-empty; query leaves: no-scopes-configured, no-material-matched; relink leaves: unknown-scope, anchor-lost, curator-error, empty-commit; doctor leaves: unknown-scope, no-scopes-configured; sync leaf: dangling-see-also-link → see Troubleshooting entry on lingering See-also links after a node delete; each leaf points to the troubleshooting entry that resolves it"
   kind_hint: decision-tree
 source_skills:
   - lazy-wiki.install
@@ -42,6 +42,16 @@ source_skills:
 **Likely cause**: The plugin was enabled in settings but the local cache directory has not been populated, so the rule-file glob found nothing.
 
 **Fix**: Run `/plugin update lazycortex-wiki@lazycortex` in Claude Code to fetch the plugin files, then re-run `/wiki.install`.
+
+---
+
+## The wiki curator never runs automatically after install
+
+**Symptom**: `/wiki.install` completes, but nodes never get curated on their own after a commit — the wiki only updates when you run `/wiki.relink` by hand.
+
+**Likely cause**: The project's background daemon is disabled. Install always registers the curator itself, but the routines that trigger it automatically — one that reacts to changed files, one that prunes links to deleted files, and one that does a weekly full rescan — only fire when the daemon is running, so their registration is skipped while it's off.
+
+**Fix**: Enable the daemon via `/lazy-core.install` (Gate 1), then re-run `/wiki.install` to register the routines. Until then, use `/wiki.relink <scope-id>` whenever you want the scope brought up to date.
 
 ---
 
@@ -155,85 +165,15 @@ source_skills:
 
 ---
 
+## A deleted node's See-also links linger in other nodes
+
+**Symptom**: You deleted a node file, but other nodes in the scope still carry a "See also" link pointing at the now-missing path.
+
+**Likely cause**: Nothing has pruned the dangling link yet. When the background daemon is running, deletions are picked up automatically — a dedicated routine watches for deleted files and, on its next poll, drops the dangling See-also lines and rebuilds `topics.md`. Without the daemon, or before its next poll, no automatic pass has happened.
+
+**Fix**: With a running daemon, wait for the next poll (roughly a minute) — the deletion is pruned and committed on its own. Without a daemon, run `/wiki.relink <scope-id>`, whose pruning step drops links to any deleted nodes as part of the normal relink pass. You can also run `/wiki.doctor <scope-id>` and confirm the fixable "broken See-also" finding, which drops the dangling lines directly.
+
+---
+
 ## Diagnostic flowchart
-
-```mermaid
-%%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
-flowchart TD
-  skillError{Which skill produced the error?}
-
-  installBranch{Install failure type?}
-  configureBranch{Configure failure type?}
-  queryBranch{Query failure type?}
-  relinkBranch{Relink failure type?}
-  doctorBranch{Doctor failure type?}
-
-  pluginNotEnabled[plugin-not-enabled → see Troubleshooting: Install — Plugin Not Enabled]
-  coreNotInstalled[core-not-installed → see Troubleshooting: Install — Core Not Installed]
-  cacheEmpty[cache-empty → see Troubleshooting: Install — Cache Empty]
-
-  wikiSectionMissing[wiki-section-missing → see Troubleshooting: Configure — Wiki Section Missing]
-  scopeIdInvalid[scope-id-invalid → see Troubleshooting: Configure — Scope ID Invalid]
-  pathsEmpty[paths-empty → see Troubleshooting: Configure — Paths Empty]
-
-  noScopesConfiguredQ[no-scopes-configured → see Troubleshooting: Query — No Scopes Configured]
-  noMaterialMatched[no-material-matched → see Troubleshooting: Query — No Material Matched]
-
-  unknownScopeR[unknown-scope → see Troubleshooting: Relink — Unknown Scope]
-  anchorLost[anchor-lost → see Troubleshooting: Relink — Anchor Lost]
-  curatorError[curator-error → see Troubleshooting: Relink — Curator Error]
-  emptyCommit[empty-commit → see Troubleshooting: Relink — Empty Commit]
-
-  unknownScopeD[unknown-scope → see Troubleshooting: Doctor — Unknown Scope]
-  noScopesConfiguredD[no-scopes-configured → see Troubleshooting: Doctor — No Scopes Configured]
-
-  skillError -->|install| installBranch
-  skillError -->|configure| configureBranch
-  skillError -->|query| queryBranch
-  skillError -->|relink| relinkBranch
-  skillError -->|doctor| doctorBranch
-
-  installBranch -->|plugin-not-enabled| pluginNotEnabled
-  installBranch -->|core-not-installed| coreNotInstalled
-  installBranch -->|cache-empty| cacheEmpty
-
-  configureBranch -->|wiki-section-missing| wikiSectionMissing
-  configureBranch -->|scope-id-invalid| scopeIdInvalid
-  configureBranch -->|paths-empty| pathsEmpty
-
-  queryBranch -->|no-scopes-configured| noScopesConfiguredQ
-  queryBranch -->|no-material-matched| noMaterialMatched
-
-  relinkBranch -->|unknown-scope| unknownScopeR
-  relinkBranch -->|anchor-lost| anchorLost
-  relinkBranch -->|curator-error| curatorError
-  relinkBranch -->|empty-commit| emptyCommit
-
-  doctorBranch -->|unknown-scope| unknownScopeD
-  doctorBranch -->|no-scopes-configured| noScopesConfiguredD
-
-  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
-  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
-
-  class skillError guard
-  class installBranch guard
-  class configureBranch guard
-  class queryBranch guard
-  class relinkBranch guard
-  class doctorBranch guard
-  class pluginNotEnabled error
-  class coreNotInstalled error
-  class cacheEmpty error
-  class wikiSectionMissing error
-  class scopeIdInvalid error
-  class pathsEmpty error
-  class noScopesConfiguredQ error
-  class noMaterialMatched error
-  class unknownScopeR error
-  class anchorLost error
-  class curatorError error
-  class emptyCommit error
-  class unknownScopeD error
-  class noScopesConfiguredD error
-```
+</content>

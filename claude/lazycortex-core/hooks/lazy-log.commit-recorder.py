@@ -3,7 +3,9 @@
 """
 PostToolUse hook that records every successful git commit to `.logs/commits.jsonl`.
 
-Fires after `Bash(git commit*)` or `mcp__git__git_commit`. Writes one JSON line per commit with the
+Fires after any `Bash` command containing a `git commit` invocation (leading, chained like
+`git add … && git commit … && git push`, or flag-prefixed like `git -C dir commit`) or after
+`mcp__git__git_commit`. Writes one JSON line per commit with the
 SHA, ISO date, author, branch, subject, body, file list, and aggregate insertions / deletions. The
 file is the raw commit feed that `lazy-log.distill` later converts into functional prose in
 `.logs/changelog.md`, and that `lazy-log.recall` searches.
@@ -24,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from typing import TYPE_CHECKING
@@ -38,6 +41,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 import hook_gate  # noqa: E402
 # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
 from constants import HookName  # noqa: E402
+
+
+# Freshness window for the failure-path HEAD check: a HEAD younger than this is treated as
+# produced by the just-finished chain (the commit succeeded, a later segment failed).
+HEAD_FRESHNESS_SECONDS = 60
 
 
 def get_commit_info() -> dict | None:
@@ -128,6 +136,27 @@ def get_commit_info() -> dict | None:
   }
 
 
+def head_is_fresh() -> bool:
+  """
+  Report whether the current `HEAD` commit was created within the freshness window.
+
+  Returns:
+    True when the committer timestamp of `HEAD` lies within `HEAD_FRESHNESS_SECONDS` of the
+    current wall clock. False when the timestamp is older, when the repository has no reachable
+    `HEAD`, or when `git` is not on the executable search path.
+  """
+  try:
+    raw = subprocess.check_output(
+      [ "git", "log", "-1", "--pretty=format:%ct" ],
+      stderr = subprocess.DEVNULL,
+      text = True,
+    ).strip()
+    committed_at = int(raw)
+  except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+    return False
+  return abs(time.time() - committed_at) <= HEAD_FRESHNESS_SECONDS
+
+
 def should_run(payload: dict) -> bool:
   """
   Decide whether the current hook invocation corresponds to a successful git commit.
@@ -137,10 +166,16 @@ def should_run(payload: dict) -> bool:
       `tool_input`, and optionally `tool_response`.
 
   Returns:
-    True when the payload represents a successful `mcp__git__git_commit` call or a `Bash` call
-    whose command starts with `git commit` and whose recorded exit code is zero or unknown.
-    False for every other tool invocation and for `Bash` git commits whose response carries a
-    non-zero exit code.
+    - True when the payload represents a `mcp__git__git_commit` call, or a `Bash` call containing a
+      `git commit` invocation anywhere in the command — leading, chained (`git add X && git commit
+      -m "..." && git push`), or flag-prefixed (`git -C dir commit`) — whose recorded exit code is
+      zero or unknown, or a failed such `Bash` call whose `HEAD` commit is nonetheless fresh (in a
+      chain the exit code belongs to the last failed segment, so a successful commit followed by a
+      failed push still records).
+    - False for every other tool invocation, and for `Bash` git commits that left `HEAD` stale.
+    - Quoted look-alikes (e.g. `echo "git commit"`) are accepted false positives: the hook is
+      deliberately permissive, `get_commit_info()` still requires a real `HEAD`, and the caller's
+      SHA dedup absorbs repeat and spurious firings.
   """
   # waiver: external-format hook-payload field name, not an internal key
   tool_name = payload.get("tool_name", "")
@@ -151,16 +186,23 @@ def should_run(payload: dict) -> bool:
   if tool_name == "Bash":
     # waiver: external-format hook-payload field names, not internal keys
     command = payload.get("tool_input", {}).get("command", "")
-    if re.match(r"git\s+commit\b", command):
-      # in PostToolUse we also want to skip failures; consult tool_response when present
+    # search, not match: real-world commits are usually chained (`git add … && git commit …`),
+    # so the commit verb rarely sits at position 0; each `(?:\s+-\S+(?:\s+[^-\s]\S*)?)` tolerates
+    # one flag between `git` and `commit`, with or without a separate argument token (`-C dir`,
+    # `-c k=v`, `--no-pager`). Flag arguments with embedded whitespace
+    # (`git -C "dir with space" commit`) still don't match — accepted gap.
+    if re.search(r"\bgit\b(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+commit\b", command):
+      # in PostToolUse a non-zero exit code belongs to the LAST failed segment of a chain, so a
+      # successful commit followed by a failed push must still record; consult HEAD freshness
       # waiver: external-format hook-payload field name, not an internal key
       response = payload.get("tool_response", {})
       # response may carry "exit_code" or similar; be permissive when the field is absent
       # waiver: external-format hook-payload field name, not an internal key
       exit_code = response.get("exit_code")
-      # guard: known failure exit code — do not record
+      # guard: failed call — record only when HEAD is fresh (a genuinely failed `git commit`
+      # leaves HEAD at the old, stale commit; the caller's SHA dedup covers re-commit retries)
       if exit_code is not None and exit_code != 0:
-        return False
+        return head_is_fresh()
       return True
   return False
 

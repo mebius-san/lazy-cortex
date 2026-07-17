@@ -20,7 +20,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 2 — Classify each node`
    - `Step 3 — Normalize tags + rebuild topics index`
    - `Step 4 — Link each node`
-   - `Step 5 — Note dropped nodes`
+   - `Step 5 — Prune dropped nodes`
    - `Step 6 — Commit touched files + record anchor`
    - `Step 7 — Clean up scratch`
    - `Log the run`
@@ -92,11 +92,17 @@ For each absolute node path in `link[]`:
 
 The curator writes the node via `apply-node`; the skill runs no `apply-node`. If a curator reports an error, skip that node and continue. Track each curated node path for the Step 6 commit. Outcome: `linked:<n>` (or `empty-set` when `link[]` was empty).
 
-## Step 5 — Note dropped nodes
+## Step 5 — Prune dropped nodes
 
-For each path in `drop[]`: the node was deleted since the anchor. The Step 3 index rebuild already excludes it (it no longer exists on disk, so `iter_nodes` skips it). No per-node action is needed here — record the dropped paths for the report.
+For each path in `drop[]`: the node was deleted since the anchor. The Step 3 index rebuild already excludes it from `topics.md` (it no longer exists on disk, so `iter_nodes` skips it), but other nodes may still carry See-also links pointing at it. Drop those dangling lines deterministically:
 
-Outcome: `dropped:<n>` (or `empty-set` when `drop[]` was empty).
+```
+Bash(lazycortex-wiki prune-node <dropped-path> --repo <repo-root> --no-commit)
+```
+
+Run once per dropped path. `--no-commit` is mandatory here — the Step 6 commit owns all writes. Capture the `pruned_nodes` paths from each JSON result and add them to the Step 6 staging set (the index is already tracked from Step 3). A `skip (no scope)` note is fine — the node resolved to no scope and nothing was touched.
+
+Outcome: `dropped:<n> pruned:<m>` (or `empty-set` when `drop[]` was empty).
 
 ## Step 6 — Commit touched files + record anchor
 

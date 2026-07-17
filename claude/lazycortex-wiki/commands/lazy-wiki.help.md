@@ -11,10 +11,9 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 **Skills** (invoke as `/<name>` or via Skill tool):
 
-- `wiki.install` — bootstrap the plugin: create config directories, register the `wiki` settings section, register the git-watch and weekly-scan routines, compose the `wiki-curator` expert, sync `lazy-wiki.navigation` rule to the consumer's rules directory, then point you at `/wiki.configure` for the first scope.
+- `wiki.install` — bootstrap the plugin: create config directories, register the `wiki` settings section, register the git-watch (changed + deleted files) and weekly-scan routines, compose the `wiki-curator` expert, sync `lazy-wiki.navigation` rule to the consumer's rules directory, then point you at `/wiki.configure` for the first scope.
 - `wiki.configure` — interactive wizard (one question at a time) to create or edit a scope: scope id, path globs (markdown and/or code), optional exclude paths, tag axes, topics-index path. Writes the scope entry to `lazy.settings.json[wiki.scopes]`.
-- `wiki.relink-doc` — curate a single node: dispatch the `wiki-curator` expert for that node, then run the deterministic pass to update the topic index.
-- `wiki.relink-all` — full pass over all nodes in a scope: `wiki.relink-doc` per node, then full rebuild of `topics.md`.
+- `wiki.relink` — daemon-free relink of one wiki scope: computes the relink plan, dispatches the wiki curator per node, rebuilds `topics.md`, and commits under the operator identity.
 - `wiki.query` — associative Q&A over the wiki graph: a thin dispatcher that runs a per-scope `seeker` subagent to pick entry points from `topics.md`, then a single `gatherer` subagent to traverse glossed See-also links and synthesise the answer — keeping the large index and node bodies out of the main session.
 - `wiki.doctor` — read-only integrity audit across a scope: orphan topics, broken See-also links, broken repo-keys, topic-index desync, missing summaries, stale glosses, unknown axes, near-duplicate axis values, broken `<wiki>` blocks in code, overlapping scopes.
 
@@ -32,7 +31,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 **Documentation:**
 
 - [audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/audit.md) — Run integrity checks across a wiki scope — orphan topics, broken links, missing summaries, stale glosses, unknown axes, and overlapping scopes — with optional auto-repair.
-- [curation](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/curation.md) — Curate wiki nodes in-session or via daemon routines — classify summaries and topic tags, normalise the tag vocabulary, and build glossed See-also links.
+- [curation](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/curation.md) — Curate wiki nodes in-session via /wiki.relink or via daemon routines — classify summaries and topic tags, normalise the tag vocabulary, build glossed See-also links, and prune links to deleted nodes.
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/install-and-audit.md) — Bootstrap lazycortex-wiki in a project — install, configure scopes, run integrity audits, and orient yourself with the built-in help command.
 - [query](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/query.md) — Associative Q&A over the wiki graph — /wiki.query dispatches seekers to find entry points then a gatherer to traverse glossed See-also links and synthesise the answer.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/troubleshooting.md) — Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.

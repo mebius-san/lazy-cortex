@@ -325,8 +325,14 @@ def main() -> None:
   if tool_name == "Bash":
     # waiver: external-format tool-input field name, not an internal key
     command = tool_input.get("command", "")
-    # guard: ignore Bash calls that aren't `git commit`
-    if not re.match(r"git\s+commit\b", command):
+    # guard: ignore Bash calls with no `git commit` invocation anywhere in the command
+    # (search, not match: chained commands like `git add … && git commit …` must still gate;
+    # each `(?:\s+-\S+(?:\s+[^-\s]\S*)?)` tolerates one flag between `git` and `commit`, with or
+    # without a separate argument token — `-C dir`, `-c k=v`, `--no-pager`. Quoted look-alikes
+    # (`echo "git commit"`) are accepted false positives — a spurious firing merely triggers a
+    # harmless extra scan. Flag arguments with embedded whitespace
+    # (`git -C "dir with space" commit`) still don't match — accepted gap.)
+    if not re.search(r"\bgit\b(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+commit\b", command):
       return
   # waiver: external Claude Code tool name, not a domain key
   elif tool_name == "mcp__git__git_commit":
