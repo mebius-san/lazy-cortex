@@ -52,6 +52,19 @@ conventions.
 - Maintain consistency with existing codebase patterns.
 - Prefer composition to inheritance when designing class relationships.
 
+## No Test-Driven Production Surface
+- Never add production code whose only consumer is tests. Forbidden: constructor injection
+  parameters, `shared()`/`reset_*` dual-path accessors, "test mode" flags, widened visibility,
+  extra indirection — anything introduced so that tests can bypass the production path.
+- Production design decides itself; tests adapt. If a class is conceptually a singleton — make it
+  a singleton. If a value comes from config — tests feed test data through the SAME loading path
+  production uses (`load_from_memory`, fixtures), never through a bypass parameter.
+- Test-only needs live in test code — fixtures, helpers, monkeypatch, fixture-scoped state reset.
+  Never in the production class.
+- Red flag test: for every parameter, method, or branch you add, name its production caller. If
+  none exists, or the justification starts with "so that tests can..." — stop and redesign
+  production-first.
+
 
 # Code Formatting and Visual Structure
 

@@ -289,7 +289,9 @@ def _drop_see_also_line(node: _nodes.MarkdownNode, broken_target: str) -> None:
       continue
     kept_lines.append(ln)
   new_inner = "\n".join(kept_lines)
-  kept_items = [ ln.strip()[2:] for ln in new_inner.splitlines() if ln.strip().startswith("- ") ]
+  # Keep the full `- [text](target) — gloss` list-item strings: apply_link grafts
+  # see_also_lines verbatim (ready-to-graft, per the curator protocol).
+  kept_items = [ ln.strip() for ln in new_inner.splitlines() if ln.strip().startswith("- ") ]
   node.apply_link(see_also_lines = kept_items)
 
 
@@ -344,8 +346,8 @@ def _refresh_gloss_markdown(
           new_lines.append(f"- {target} — {new_gloss}")
         continue
     new_lines.append(stripped)
-  # Keep only actual list items for apply_link.
-  items = [ ln[2:] for ln in new_lines if ln.startswith("- ") ]
+  # Keep the full `- …` list-item strings: apply_link grafts them verbatim.
+  items = [ ln for ln in new_lines if ln.startswith("- ") ]
   node.apply_link(see_also_lines = items)
 
 

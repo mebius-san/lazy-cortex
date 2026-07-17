@@ -1,11 +1,11 @@
 ---
 name: lazy-wiki.install
-description: "Bootstrap the lazycortex-wiki plugin for the current project (or globally). Creates the template dir, syncs the navigation rule, seeds the wiki settings section + agent_models, registers the `wiki.curator` expert (always), and — when the daemon is enabled — registers the two curator routines. Idempotent and quiet on re-run — every decision is persisted and never re-asked. Detects install scope automatically."
+description: "Bootstrap the lazycortex-wiki plugin for the current project (or globally). Creates the template dir, syncs the navigation rule, seeds the wiki settings section + agent_models, registers the `wiki.curator` expert (always), and — when the daemon is enabled — registers the three wiki routines. Idempotent and quiet on re-run — every decision is persisted and never re-asked. Detects install scope automatically."
 allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(ls *), Bash(python3 *), Bash(lazycortex-core *)
 ---
 # Install lazycortex-wiki
 
-Bootstrap the plugin in the right scope: create the wiki template directory, sync the `lazy-wiki.navigation` rule shipped by the plugin into the consumer's rules directory, seed the `wiki` settings section, seed agent model tiers for the curator, compose the `wiki.curator` expert (unconditionally — it is dispatch-routing config, not daemon-only), and — only when this project uses the background daemon — register the two curator routines (`wiki.scan` and `wiki.relink-weekly`). Idempotent and quiet on re-run.
+Bootstrap the plugin in the right scope: create the wiki template directory, sync the `lazy-wiki.navigation` rule shipped by the plugin into the consumer's rules directory, seed the `wiki` settings section, seed agent model tiers for the curator, compose the `wiki.curator` expert (unconditionally — it is dispatch-routing config, not daemon-only), and — only when this project uses the background daemon — register the three wiki routines (`wiki.scan`, `wiki.scan-deletes`, `wiki.relink-weekly`). Idempotent and quiet on re-run.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -30,7 +30,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
 This skill is **idempotent and quiet on re-run**. Every choice it makes is persisted, and on the next run the persisted value is read first and honoured silently — the user is asked again only when nothing is on record yet.
 
 - **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-rule "install this rule?" prompt and no per-artifact opt-in.
-- **Daemon gate applies to routines only.** The `wiki.curator` expert is dispatch-routing config and is registered unconditionally; only the two curator *routines* depend on the background daemon. This skill reads the tracked `daemon.enabled` flag and gates the routine registration on it silently — it never asks the daemon question itself (Gate 1 belongs to `lazy-core.install`).
+- **Daemon gate applies to routines only.** The `wiki.curator` expert is dispatch-routing config and is registered unconditionally; only the three wiki *routines* depend on the background daemon. This skill reads the tracked `daemon.enabled` flag and gates the routine registration on it silently — it never asks the daemon question itself (Gate 1 belongs to `lazy-core.install`).
 - **Everything derivable is derived, not asked:** install scope (from where the plugin is *enabled* — see Step 1), curator git identity (a deterministic bot id), the watched branch.
 
 ## File-sync policy (applies to every file this skill writes)
@@ -159,7 +159,7 @@ Outcome (one line per seeded entry): `agent_models.lazycortex.<key> = <tier> (<s
 
 ## Step 7: Register curator expert + (daemon-gated) routines
 
-The `wiki.curator` **expert** is dispatch-routing config — the entry that resolves which agent + aspects run when the curator is dispatched. It is registered **unconditionally**, exactly like any other expert (not daemon-gated). The two curator **routines** (`wiki.scan`, `wiki.relink-weekly`) only ever *fire* under the background daemon, so their registration is gated on the project's `daemon.enabled` flag. The non-daemon parts of this install (rule, settings section, `agent_models`, template dir, CLI allow-pattern) are done by Steps 3–6 and Step 8.
+The `wiki.curator` **expert** is dispatch-routing config — the entry that resolves which agent + aspects run when the curator is dispatched. It is registered **unconditionally**, exactly like any other expert (not daemon-gated). The three wiki **routines** (`wiki.scan`, `wiki.scan-deletes`, `wiki.relink-weekly`) only ever *fire* under the background daemon, so their registration is gated on the project's `daemon.enabled` flag. The non-daemon parts of this install (rule, settings section, `agent_models`, template dir, CLI allow-pattern) are done by Steps 3–6 and Step 8.
 
 ### Expert (always registered)
 
@@ -192,7 +192,7 @@ PYTHONPATH=<core-bin> python3 -c "from lazy_settings import load_tracked_section
 
 ### Routines
 
-Ensure `routines` exists as an object (create `{"_version": 1}` if absent — never overwrite existing content). For each of the two routines below, apply absent-only semantics (present → **kept-local**, absent → **seeded**):
+Ensure `routines` exists as an object (create `{"_version": 1}` if absent — never overwrite existing content). For each of the three routines below, apply absent-only semantics (present → **kept-local**, absent → **seeded**):
 
 **`wiki.scan`** — event-driven git-watch routine, processes changed files:
 
@@ -210,6 +210,20 @@ Ensure `routines` exists as an object (create `{"_version": 1}` if absent — ne
 Substitute `<current-branch>` with the output of `Bash(git rev-parse --abbrev-ref HEAD)` (the branch the daemon watches). The core `dispatch_git` routine type reads `branch` as a branch-name string for `git rev-parse <remote>/<branch>` — a boolean breaks it.
 
 The `filter` block is the earliest cut: git-watch drops a changed file whose frontmatter matches before `process-file` runs, so a document under review (`review_active: true`) never reaches the curator. It mirrors the per-scope `filter` (the source of truth honored on every path); seeding it here keeps the daemon quiet during review. Absent-only semantics apply to the whole routine — a user who removed the filter is not re-seeded.
+
+**`wiki.scan-deletes`** — event-driven git-watch routine, prunes links to deleted nodes:
+
+```json
+"wiki.scan-deletes": {
+  "type": "git",
+  "watch": "deleted_files",
+  "branch": "<current-branch>",
+  "interval_sec": 60,
+  "command": ["lazycortex-wiki", "prune-node"]
+}
+```
+
+Same `<current-branch>` substitution as `wiki.scan`. No `filter` block — a deleted file has no frontmatter to read; `prune-node` itself skips paths that resolve to no scope. The consumer is deterministic (no curator dispatch): it drops See-also lines pointing at the deleted node, rebuilds `topics.md`, and commits.
 
 **`wiki.relink-weekly`** — weekly full rescan:
 
@@ -252,7 +266,7 @@ Outcome: `cli-allow-added` or `cli-allow-already-present`.
 
 - Read back the written `lazy.settings.json` and confirm it parses.
 - Confirm `wiki` and `agent_models.lazycortex` are present.
-- Confirm `experts.wiki.curator` is present (always registered). When the daemon gate passed (enabled or unset): also confirm `routines.wiki.scan` and `routines.wiki.relink-weekly` are present. When the routines were `skipped-daemon-disabled`, do NOT expect those two routine keys — their absence is correct; `experts.wiki.curator` must still be present.
+- Confirm `experts.wiki.curator` is present (always registered). When the daemon gate passed (enabled or unset): also confirm `routines.wiki.scan`, `routines.wiki.scan-deletes`, and `routines.wiki.relink-weekly` are present. When the routines were `skipped-daemon-disabled`, do NOT expect those three routine keys — their absence is correct; `experts.wiki.curator` must still be present.
 - Report to the user:
   - Scope detected.
   - Plugin version + commit synced from `installed_plugins.json`.
@@ -275,4 +289,4 @@ One line per task in the canonical list above, with its outcome word.
 - **`/wiki.install` aborts: "plugin not enabled"** — `lazycortex-wiki@lazycortex` absent or empty in `~/.claude/plugins/installed_plugins.json` → add `"lazycortex-wiki@lazycortex": true` to `enabledPlugins`, restart Claude Code, re-run.
 - **`/wiki.install` aborts: "lazycortex-core not installed"** — `default-tiers.json` not found → install `lazycortex-core` first, then re-run.
 - **`/wiki.install` aborts: "plugin cache is empty"** — rule glob returned zero files → run `/plugin update lazycortex-wiki@lazycortex`, then re-run.
-- **Curator never runs after install (no routines)** — Step 7 read `daemon.enabled = false` in the tracked `lazy.settings.json` and skipped the two curator *routines* (outcome `skipped-daemon-disabled`); the `wiki.curator` expert, rule, settings section, and CLI allow-pattern still installed → enable the daemon via `/lazy-core.install` (Gate 1), then re-run `/wiki.install` to register the curator routines.
+- **Curator never runs after install (no routines)** — Step 7 read `daemon.enabled = false` in the tracked `lazy.settings.json` and skipped the three wiki *routines* (outcome `skipped-daemon-disabled`); the `wiki.curator` expert, rule, settings section, and CLI allow-pattern still installed → enable the daemon via `/lazy-core.install` (Gate 1), then re-run `/wiki.install` to register the curator routines.

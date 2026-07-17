@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
-last_regen: 2026-07-15
+last_regen: 2026-07-16
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing how lazy-guard.check-public feeds findings into lazy-repo.mark-public (which creates .guard-waivers.json and activates the pre-commit hook), and how lazy-guard.allow-mcp independently classifies MCP server tools into allow/ask/skip buckets and writes them to settings.local.json"
@@ -18,7 +18,7 @@ The guardian block addresses both. `/lazy-guard.check-public` is a parallel, fou
 
 ## What's in this block
 
-**`/lazy-guard.check-public`** is the scanner. It dispatches four parallel agents — one for secrets (FAIL severity), one for PII (WARN), one for infrastructure literals (WARN), and one for hardcoded local paths (WARN). After the agents return, it merges their results, deduplicates overlapping matches, applies any waivers already recorded in `.guard-waivers.json`, and presents a unified findings report with fix strategies. You can run it standalone at any time for an ad-hoc audit. Once `.guard-waivers.json` exists at the repo root, a pre-commit hook runs the same scan on every staged diff automatically, blocking any commit that contains an unresolved FAIL finding.
+**`/lazy-guard.check-public`** is the scanner. It dispatches four parallel agents — one for secrets (FAIL severity), one for PII (WARN), one for infrastructure literals (WARN), and one for hardcoded local paths (WARN). After the agents return, it merges their results, deduplicates overlapping matches, applies any waivers already recorded in `.guard-waivers.json`, and presents a unified findings report with fix strategies. You can run it standalone at any time for an ad-hoc audit. Once `.guard-waivers.json` exists at the repo root, a pre-commit hook runs the same scan automatically, blocking any commit that contains an unresolved FAIL finding. The hook doesn't just watch commands that start with `git commit` — it looks for a `git commit` invocation anywhere in the command, so a chained shell command like `git add . && git commit -m "..." && git push` still gets scanned, and so do flag forms like `git -C some/dir commit` or `git -c user.name=x commit`. It also fires on `git commit` issued through the git MCP server, not just Bash.
 
 **`/lazy-repo.mark-public`** is the guided end-to-end workflow for taking a repo or subtree public. It calls `/lazy-guard.check-public` internally, then walks you through resolving every finding before it proceeds. FAIL findings (secrets) must be resolved — encrypted, template-ized, or redacted — before the workflow continues. WARN findings (PII, infrastructure literals, local paths) can be fixed or formally waived with a justification. Once all secrets are cleared it writes `.guard-waivers.json` — which records your waiver decisions and simultaneously activates the pre-commit hook for all future commits — and in whole-repo mode it optionally flips GitHub visibility via `gh`. If you only want a subtree to be public (for example `claude/**` ships to the marketplace while the rest of the repo stays private), pass the scope glob: the hook then scans only those paths on every commit, and the GitHub visibility step is skipped.
 
@@ -26,7 +26,7 @@ The guardian block addresses both. `/lazy-guard.check-public` is a parallel, fou
 
 ## How they work together
 
-Run `/lazy-repo.mark-public` when you're ready to publish. It calls `/lazy-guard.check-public` internally, surfaces all findings, and guides you through them one by one. FAIL findings must be resolved — encrypt, template-ize, or redact — before the workflow continues; the skill won't write `.guard-waivers.json` until every secret is cleared. WARN findings can be fixed or waived with a justification you provide. At the end of that process `/lazy-repo.mark-public` writes `.guard-waivers.json`, which immediately arms the pre-commit hook. From that point forward every staged commit is scanned automatically, and you only return to `/lazy-repo.mark-public` if you want to re-examine scope or add waivers interactively.
+Run `/lazy-repo.mark-public` when you're ready to publish. It calls `/lazy-guard.check-public` internally, surfaces all findings, and guides you through them one by one. FAIL findings must be resolved — encrypt, template-ize, or redact — before the workflow continues; the skill won't write `.guard-waivers.json` until every secret is cleared. WARN findings can be fixed or waived with a justification you provide. At the end of that process `/lazy-repo.mark-public` writes `.guard-waivers.json`, which immediately arms the pre-commit hook. From that point forward every commit whose command contains a `git commit` invocation — anywhere in it, including inside a chained `&&` sequence or behind flags like `git -C` — is scanned automatically, and you only return to `/lazy-repo.mark-public` if you want to re-examine scope or add waivers interactively.
 
 For day-to-day auditing, run `/lazy-guard.check-public` directly. Run it after adding a config file, after pulling in new dependencies, or on any cadence that fits your workflow. It reads the existing `.guard-waivers.json` — including your accepted waivers — and skips everything already resolved.
 
@@ -60,31 +60,30 @@ Optionally, `/lazy-guard.allow-mcp` can also install a SessionStart preload hook
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  userRunsCheckPublic[User runs lazy-guard.check-public]
-  secretsFound{Secrets found?}
-  failGuardScan[Fail guard scan]
-  feedFindingsToMarkPublic[Feed findings to lazy-repo.mark-public]
-  createWaiversFile[Create .guard-waivers.json]
-  activatePreCommitHook[Activate pre-commit hook]
-  repoMarkedPublic[Repo marked public]
-  userRunsAllowMcp[User runs lazy-guard.allow-mcp]
-  classifyMcpTools[Classify MCP server tools]
-  bucketDecision{Allow, ask, or skip?}
-  writeSettingsLocal[Write settings.local.json]
-  settingsUpdated[settings.local.json updated]
+  runCheckPublic[Run lazy-guard.check-public: scan for secrets, PII, paths]
+  hasSecrets{Secrets found?}
+  blockOnSecrets[FAIL: resolve secrets before publishing]
+  runMarkPublic[Run lazy-repo.mark-public]
+  repoPublic[".guard-waivers.json written, pre-commit hook active"]
 
-  userRunsCheckPublic -->|scan repo| secretsFound
-  secretsFound -->|found| failGuardScan
-  secretsFound -->|clean| feedFindingsToMarkPublic
-  feedFindingsToMarkPublic -->|invoke| createWaiversFile
-  createWaiversFile -->|enable hook| activatePreCommitHook
-  activatePreCommitHook -->|done| repoMarkedPublic
-  userRunsAllowMcp -->|list MCP tools| classifyMcpTools
-  classifyMcpTools -->|evaluate| bucketDecision
-  bucketDecision -->|allow| writeSettingsLocal
-  bucketDecision -->|ask| writeSettingsLocal
-  bucketDecision -->|skip| writeSettingsLocal
-  writeSettingsLocal -->|persist| settingsUpdated
+  runAllowMcp[Run lazy-guard.allow-mcp: classify MCP server tools]
+  classifyByRisk{Risk level per tool?}
+  addToAllowBucket[Add to permissions.allow]
+  addToAskBucket[Add to permissions.ask]
+  skipMediumRisk[Skip: no entry written, prompts per call]
+  writeSettingsLocal[Write settings.local.json]
+
+  runCheckPublic -->|scan repo| hasSecrets
+  hasSecrets -->|yes| blockOnSecrets
+  hasSecrets -->|no| runMarkPublic
+  runMarkPublic -->|write waivers + activate hook| repoPublic
+
+  runAllowMcp -->|enumerate tools| classifyByRisk
+  classifyByRisk -->|safe/reversible| addToAllowBucket
+  classifyByRisk -->|destructive| addToAskBucket
+  classifyByRisk -->|medium-risk| skipMediumRisk
+  addToAllowBucket -->|persist| writeSettingsLocal
+  addToAskBucket -->|persist| writeSettingsLocal
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
@@ -92,16 +91,9 @@ flowchart LR
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class userRunsCheckPublic entry
-  class userRunsAllowMcp entry
-  class secretsFound guard
-  class bucketDecision guard
-  class feedFindingsToMarkPublic action
-  class createWaiversFile action
-  class activatePreCommitHook action
-  class classifyMcpTools action
-  class writeSettingsLocal action
-  class repoMarkedPublic success
-  class settingsUpdated success
-  class failGuardScan error
+  class runCheckPublic,runAllowMcp entry
+  class hasSecrets,classifyByRisk guard
+  class runMarkPublic,addToAllowBucket,addToAskBucket,skipMediumRisk action
+  class repoPublic,writeSettingsLocal success
+  class blockOnSecrets error
 ```

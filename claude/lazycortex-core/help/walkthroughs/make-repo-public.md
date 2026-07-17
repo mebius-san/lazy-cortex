@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
-last_regen: 2026-07-15
+last_regen: 2026-07-16
 diagram_spec:
   anchor: "How the flow works"
   request: "End-to-end participant exchange when /lazy-repo.mark-public runs: user invokes the skill, skill checks git and GitHub visibility (preflight), determines scope (whole-repo vs. subtree), dispatches four parallel security scans (secrets, PII, infra, local paths) via /lazy-guard.check-public, presents unified findings table, loops per FAIL for resolution (encrypt/template/redact) and per WARN for fix/waive/skip, writes .guard-waivers.json with public_author and accepted waivers activating the pre-commit hook, then in whole-repo mode flips visibility via gh repo edit. Five participants: User, /lazy-repo.mark-public, /lazy-guard.check-public, Security Scan Agents, GitHub."
@@ -16,7 +16,7 @@ You are about to make a private repository public. Before flipping the visibilit
 
 ## Outcome
 
-After completing this walkthrough you have a `.guard-waivers.json` committed at the repo root, every secret resolved (encrypted, templated, or redacted), your public author identity recorded so it auto-waives future author-field findings, and — in whole-repo mode — the repository flipped to public on GitHub. The pre-commit hook is active from the moment `.guard-waivers.json` lands: every subsequent `git commit` scans staged changes automatically and blocks on new secrets.
+After completing this walkthrough you have a `.guard-waivers.json` committed at the repo root, every secret resolved (encrypted, templated, or redacted), your public author identity recorded so it auto-waives future author-field findings, and — in whole-repo mode — the repository flipped to public on GitHub. The pre-commit hook is active from the moment `.guard-waivers.json` lands: it watches for `git commit` anywhere you run it — a bare `git commit`, a chained command like `git add … && git commit … && git push`, or a flag form like `git -C <dir> commit` — and scans staged changes automatically, blocking on new secrets.
 
 ## What you need
 
@@ -91,7 +91,7 @@ The skill writes the waiver file to the repo root with all accepted waivers from
 
 The `public_author` block is a top-level key separate from `waivers[]`. It governs every B4 author-field finding under the declared scopes automatically — no per-file waiver entry needed.
 
-Creating this file also activates the pre-commit hook: from this point forward, every `git commit` in this repo automatically scans staged changes and blocks on new secrets. To disable pre-commit scanning entirely, delete `.guard-waivers.json` via a tracked commit. To add new accepted exceptions later, re-run `/lazy-guard.check-public` and choose the waiver option for any finding you want to accept — the skill appends the entry.
+Creating this file also activates the pre-commit hook: from this point forward, the hook scans staged changes and blocks on new secrets whenever a `git commit` shows up in a command you run — not just a bare `git commit` at the start. It also catches `git commit` buried in a chained command (`git add … && git commit … && git push`) and `git commit` invoked with flags before the subcommand (`git -C <dir> commit`), so there is no accidental gap between "the hook is on" and "the command I actually type gets scanned". To disable pre-commit scanning entirely, delete `.guard-waivers.json` via a tracked commit. To add new accepted exceptions later, re-run `/lazy-guard.check-public` and choose the waiver option for any finding you want to accept — the skill appends the entry.
 
 Verification gate: confirm `.guard-waivers.json` is committed and the hook is active before continuing.
 
@@ -126,33 +126,26 @@ sequenceDiagram
   participant scanAgents as Security Scan Agents
   participant github as GitHub
 
-  user->>markPublic: invoke /lazy-repo.mark-public
-  markPublic->>github: preflight - check git and GitHub visibility
-  github-->>markPublic: current visibility state
-  Note over markPublic: determine scope - whole-repo vs subtree
-  markPublic->>checkPublic: dispatch /lazy-guard.check-public
-  par secrets scan
-    checkPublic->>scanAgents: run secrets scan
-  and PII scan
-    checkPublic->>scanAgents: run PII scan
-  and infra scan
-    checkPublic->>scanAgents: run infra scan
-  and local paths scan
-    checkPublic->>scanAgents: run local paths scan
+  user->>markPublic: /lazy-repo.mark-public
+  markPublic->>github: preflight — check current repo visibility
+  github-->>markPublic: visibility state
+  Note over markPublic: determine scope (whole-repo vs. subtree)
+  markPublic->>checkPublic: /lazy-guard.check-public
+  checkPublic->>scanAgents: dispatch secrets, PII, infra, local-paths scans (parallel)
+  scanAgents-->>checkPublic: findings per check (FAIL/WARN)
+  checkPublic-->>markPublic: unified findings table
+  markPublic->>user: present findings table
+  loop per FAIL
+    user->>markPublic: resolve (encrypt/template/redact)
   end
-  scanAgents-->>checkPublic: return findings
-  checkPublic-->>markPublic: present unified findings table
-  loop per FAIL - resolve
-    markPublic->>user: present FAIL - choose encrypt, template, or redact
+  loop per WARN
+    user->>markPublic: fix / waive / skip
   end
-  loop per WARN - resolve
-    markPublic->>user: present WARN - choose fix, waive, or skip
-  end
-  markPublic->>markPublic: write .guard-waivers.json with public_author and accepted waivers
+  Note over markPublic: write .guard-waivers.json (public_author + accepted waivers, activates pre-commit hook)
   alt whole-repo mode
-    markPublic->>github: gh repo edit - flip visibility to public
+    markPublic->>github: gh repo edit --visibility public
+    github-->>markPublic: visibility flipped
   else subtree-public mode
-    Note over markPublic: skip visibility flip, waivers scoped by public_scopes
+    Note over markPublic: skip visibility flip — public_scopes gates the guard instead
   end
-  markPublic-->>user: mark-public complete
 ```

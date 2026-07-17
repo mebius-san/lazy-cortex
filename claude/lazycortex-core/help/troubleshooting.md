@@ -1,16 +1,19 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-07-15
+last_regen: 2026-07-16
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; scaffold → sub-branch on registry-not-found / core-cli-unresolved / core-cli-path-stale / entry-not-found-or-manifest-collision / upsert-remove-error-or-validate-fail; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-inbox-not-gitignored / routine-settings-unwritable / pump-protected / offer-protocols-routine-absent; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; scaffold → sub-branch on registry-not-found / core-cli-unresolved / core-cli-path-stale / entry-not-found-or-manifest-collision / upsert-remove-error-or-validate-fail; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive / chained-commit-not-scanned; hook-not-firing → hook-not-firing; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-inbox-not-gitignored / routine-settings-unwritable / pump-protected / offer-protocols-routine-absent; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed / chained-commit-not-recorded."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.agent-models
   - lazy-core.audit
   - lazy-core.doctor
+  - lazy-core.git-status
+  - lazy-core.git-unlock
   - lazy-core.install
+  - lazy-core.optimize
   - lazy-core.scaffold-local
   - lazy-core.scaffold-sync
   - lazy-core.setup
@@ -19,7 +22,12 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-expert.list-jobs
   - lazy-guard.allow-mcp
+  - lazy-guard.check-public
   - lazy-log.clean
+  - lazy-log.distill
+  - lazy-log.recall
+  - lazy-log.summary
+  - lazy-log.timeline
   - lazy-memory.index
   - lazy-memory.mark-persona
   - lazy-memory.reflect
@@ -379,9 +387,13 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: You commit to a public repo and Claude Code does not scan staged changes.
 
-**Likely cause**: `.guard-waivers.json` is missing from the repo root. The pre-commit hook uses the presence of this file as the opt-in signal — without it, scanning is disabled.
+**Likely cause 1**: `.guard-waivers.json` is missing from the repo root. The pre-commit hook uses the presence of this file as the opt-in signal — without it, scanning is disabled.
 
-**Fix**: Run `/lazy-repo.mark-public`. The skill creates `.guard-waivers.json` at the repo root with the correct schema, which is the opt-in signal that activates the hook. From the next commit onward, every `git commit` triggers the scan automatically.
+**Likely cause 2**: You committed with a chained or flag-form command — `git add . && git commit -m "..." && git push`, `git -C <dir> commit`, or `cd <dir> && git commit` — on a plugin version older than this fix. Earlier versions of the `lazy-guard.check-public` hook only recognized a `Bash` command that literally started with `git commit`, so any chained invocation slipped through unscanned even with `.guard-waivers.json` present.
+
+**Fix for cause 1**: Run `/lazy-repo.mark-public`. The skill creates `.guard-waivers.json` at the repo root with the correct schema, which is the opt-in signal that activates the hook. From the next commit onward, every `git commit` triggers the scan automatically.
+
+**Fix for cause 2**: Run `/plugin update lazycortex-core@lazycortex` to pick up the current hook, which detects `git commit` anywhere in the command — chained or flag-prefixed — not just at the start. Restart any open Claude Code sessions afterward; hook registrations are held in memory for the session's lifetime.
 
 ---
 
@@ -695,6 +707,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## Commits stopped appearing in `.logs/commits.jsonl`, and the distilled changelog misses recent work
+
+**Symptom**: `.logs/commits.jsonl` (the raw feed `lazy-log.distill` converts into `.logs/changelog.md`, and that `lazy-log.recall`, `lazy-log.summary`, and `lazy-log.timeline` search) stops growing even though you're committing regularly. Recent commits are simply absent from the changelog and from change-history queries.
+
+**Likely cause**: You're committing with a chained or flag-form command — `git add . && git commit -m "..." && git push`, `cd <dir> && git commit`, or `git -C <dir> commit` — on a plugin version older than this fix. The `lazy-log.commit-recorder` hook used to gate on a `Bash` command that literally started with `git commit`; any real-world chained invocation (the dominant pattern) never triggered the recorder, so the commit was silently dropped from the feed. A push that failed after a successful commit in the same chain could also drop an otherwise-recorded commit under the older gate.
+
+**Fix**: Run `/plugin update lazycortex-core@lazycortex` to pick up the current hook, which detects `git commit` anywhere in the command — including chained and flag-prefixed forms — and still records a commit that succeeded even when a later segment of the same chain (e.g. the push) failed. Restart any open Claude Code sessions afterward; hook registrations are held in memory for the session's lifetime. Past commits made under the old hook are not retroactively recorded — only commits going forward are captured.
+
+---
+
 ## Migrated from `lazycortex-log` (since core 3.0.0)
 
 `lazycortex-log` was retired and its artifacts absorbed into `lazycortex-core`. If you see commit-hook errors like:
@@ -722,13 +744,13 @@ flowchart TD
   installOrSetup[install-or-setup: python floor, plugin cache, settings writability, supervisor/unit errors, metrics port, audit findings]
   scaffold[scaffold: registry glob match, template not found, specificity tie resolution, contract violation]
   agentModels[agent-models: model resolution order, subagent_type routing miss, model override rejected]
-  mcpOrSecurity[mcp-or-security: server config missing, guard scan FAIL, credential leak, waiver file absent]
+  mcpOrSecurity[mcp-or-security: server config missing, guard scan FAIL, credential leak, waiver file absent, chained commit not scanned]
   hookNotFiring[hook-not-firing: matcher glob mismatch, hooks block missing in settings.json, PreToolUse-PostToolUse wiring]
   expertRuntime[expert-runtime: init, payload, registration, collect-cancel, spawn hangs, preflight]
   routines[routines: command resolution, daemon registry walk miss, cadence-schedule config, blocking subprocess order]
   daemonOrRuntime[daemon-or-runtime: stale daemon, never starts, recover loops, state unparseable, remote halt refires]
   memory[memory: Hindsight MCP connectivity, bank routing, recall-retain failure, auto-memory file conflict]
-  logClean[log-clean: distill cadence gate, waiver frontmatter reason, log dir naming, audit listing]
+  logClean[log-clean: distill cadence gate, waiver frontmatter reason, log dir naming, audit listing, chained commit not recorded]
 
   observedSymptom -->|install-or-setup| installOrSetup
   observedSymptom -->|scaffold| scaffold
