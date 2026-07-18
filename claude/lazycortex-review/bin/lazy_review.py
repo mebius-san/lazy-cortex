@@ -14,8 +14,9 @@ Subcommands:
 - `finalize` — delegate to :mod:`finalize`.
 
 The CLI writes per-tick logs to
-`<repo>/.logs/lazy-review/runs/<UTC-timestamp>.jsonl` (one JSON line
-per file processed) per `lazy-log.logging`.
+`<repo>/.logs/lazy-review/runs/<UTC-date>.jsonl` (one JSON line per file
+processed, appended to a per-day file) per `lazy-log.logging`. Files older
+than the retention window are pruned on the first write of each day.
 """
 from __future__ import annotations
 # waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -75,12 +76,47 @@ def _file_has_uncommitted_edits(repo: Path, file_path: Path) -> bool:
   return bool(result.stdout.strip())
 
 
+# Days a per-day runs log survives before the first-write-of-the-day prune removes it.
+_RUNS_LOG_RETENTION_DAYS = 30
+
+
+def _prune_runs_logs(log_dir: Path, today: str) -> None:
+  """
+  Delete run-log files whose date component is older than the retention window.
+
+  Handles both per-day names (`YYYY-MM-DD.jsonl`) and legacy per-invocation
+  names (`YYYY-MM-DDTHH-MM-SSZ.jsonl`) by comparing the leading date prefix.
+  Best-effort: unlink failures are ignored so logging can never block work.
+  """
+  # waiver: date-prefix length of YYYY-MM-DD, tied to the log filename format above
+  cutoff = time.strftime(
+    "%Y-%m-%d", time.gmtime(time.time() - _RUNS_LOG_RETENTION_DAYS * 86400))
+  try:
+    entries = list(log_dir.iterdir())
+  except OSError:
+    return
+  # waiver: length of the YYYY-MM-DD prefix in the log filename format, local to this parser
+  date_prefix_len = 10
+  for entry in entries:
+    prefix = entry.name[:date_prefix_len]
+    # guard: keep anything without a date-shaped prefix, and everything inside the window
+    if len(prefix) != date_prefix_len or not prefix[:4].isdigit() or prefix >= cutoff or prefix == today:
+      continue
+    try:
+      entry.unlink()
+    except OSError:
+      pass
+
+
 def _log_tick(repo: Path, result: dict) -> None:
   # waiver: filesystem path idiom
   log_dir = repo / ".logs" / "lazy-review" / "runs"
   log_dir.mkdir(parents=True, exist_ok=True)
-  ts = time.strftime("%Y-%m-%dT%H-%M-%SZ", time.gmtime())
-  log_file = log_dir / f"{ts}.jsonl"
+  today = time.strftime("%Y-%m-%d", time.gmtime())
+  log_file = log_dir / f"{today}.jsonl"
+  # prune only on the first write of a day — appends to an existing day file skip the listing
+  if not log_file.exists():
+    _prune_runs_logs(log_dir, today)
   # waiver: stdlib encoding/mode idiom
   with log_file.open("a") as fh:
     for action in result.get(JobKey.ACTIONS, []):

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-07-12
+last_regen: 2026-07-18
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -99,3 +99,4 @@ Run `/lazy-review.configure` again. The wizard reads the persisted style and ask
 ## Where do run logs land?
 
 Each skill writes a timestamped log under `.logs/claude/<skill-name>/` in the current repo. For example, a `start` run lands at `.logs/claude/lazy-review.start/<UTC-timestamp>.md`. The `status` skill is read-only and does not write a log.
+</content>

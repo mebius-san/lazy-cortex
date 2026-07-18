@@ -534,8 +534,9 @@ def _iter_class_files(repo: Path, paths: list[str]) -> Iterable[Path]:
   # globs — this matcher is the routing precision the sieve deliberately lacks.
   repo_str = str(repo)
   for base, dirs, files in os.walk(repo_str):
-      # Skip dot-folders by default (.git, .claude internals).
-    dirs[:] = [d for d in dirs if d != Paths.GIT_DIR]
+    # Skip dot-folders (.git, .claude internals, .logs, .experts, …) — review documents never
+    # live under them, and runtime-log churn there would otherwise scale every walk.
+    dirs[:] = [d for d in dirs if not d.startswith(".")]
     for name in files:
       full = Path(base) / name
       rel = full.relative_to(repo).as_posix()
@@ -4134,9 +4135,19 @@ def _class_for_file(settings: dict, repo: Path, file_path: Path) -> dict | None:
     The matching class config dict, or `None` when no class matches.
   """
   fp = file_path.resolve()
+  # guard: a path outside the repo (or a vanished file) belongs to no class
+  try:
+    rel = PurePosixPath(fp.relative_to(repo.resolve()).as_posix())
+  except ValueError:
+    return None
+  if not fp.is_file():
+    return None
+  # Match the one known path against each class's globs directly — same
+  # `PurePosixPath.match` semantics as `_iter_class_files`, without paying a
+  # full repo walk per class per invocation.
   for class_cfg in review_classes(settings):
-    for hit in _iter_class_files(repo, class_cfg.get(JobKey.PATHS) or []):
-      if hit.resolve() == fp:
+    for pat in class_cfg.get(JobKey.PATHS) or []:
+      if rel.match(pat):
         return class_cfg
   return None
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
-summary: Opt a document into the review loop, track round-by-round approval state, and finalize it once every section is signed off.
-last_regen: 2026-06-10
+summary: Take one document through a full review cycle from opt-in to finalize.
+last_regen: 2026-07-18
 diagram_spec:
   anchor: "How the review loop flows"
   request: "Sequence diagram showing: operator runs /lazy-review.start → banner inserted + commit → daemon dispatches expert jobs per section → operator reads suggestions and ticks approve → operator checks status via /lazy-review.status → all sections approved → operator runs /lazy-review.finalize → finalized commit with Doc-Review-Phase: finalize trailer"
@@ -90,39 +90,28 @@ To pause the loop without losing round state, use `/lazy-review.stop <file>` —
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant operator as Operator
-  participant cli as lazy-review CLI
-  participant daemon as Daemon
-  participant experts as Expert Agents
-  participant doc as Document
+  participant reviewCli as lazy-review CLI
+  participant daemon as Runtime Daemon
+  participant expertJob as Expert Job
+  participant gitRepo as Git Repo
 
-  operator->>cli: /lazy-review.start
-  cli->>doc: insert review banner
-  doc-->>cli: banner inserted
-  cli->>cli: commit banner insertion
-  Note over cli,daemon: review session initialised
-  cli->>daemon: dispatch expert jobs per section
-  daemon->>experts: assign section review job
-  experts->>doc: read section content
-  doc-->>experts: section text
-  experts-->>daemon: suggestions for section
-  daemon-->>cli: expert results ready
-  cli-->>operator: suggestions available
-
-  loop for each section
-    operator->>cli: tick approve on section
-    cli->>doc: mark section approved
-    doc-->>cli: approval recorded
-    cli-->>operator: section approved
+  operator->>reviewCli: /lazy-review.start
+  reviewCli->>gitRepo: insert banner and commit
+  reviewCli->>daemon: dispatch expert jobs per section
+  loop per section
+    daemon->>expertJob: run review job
+    expertJob-->>daemon: return suggestions
   end
-
-  operator->>cli: /lazy-review.status
-  cli->>daemon: query approval state
-  daemon-->>cli: all sections approved
-  cli-->>operator: status — all sections approved
-
-  operator->>cli: /lazy-review.finalize
-  cli->>doc: apply finalized changes
-  doc-->>cli: changes applied
-  cli->>cli: commit with Doc-Review-Phase: finalize trailer
-  cli-->>operator: finalized commit created
+  daemon-->>reviewCli: jobs queued
+  Note over operator,reviewCli: operator reads suggestions
+  operator->>reviewCli: tick approve
+  operator->>reviewCli: /lazy-review.status
+  alt all sections approved
+    reviewCli-->>operator: all sections approved
+    operator->>reviewCli: /lazy-review.finalize
+    reviewCli->>gitRepo: commit with Doc-Review-Phase - finalize trailer
+    gitRepo-->>operator: finalized commit
+  else sections pending
+    reviewCli-->>operator: sections still pending
+  end
 ```
