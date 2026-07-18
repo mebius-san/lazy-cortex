@@ -637,6 +637,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 5.2.4 — 2026-07-18 UTC
+
+- Faster class resolution — lookups no longer walk the whole repo tree.
+- Run logs now write per-day files with automatic retention, so old logs don't pile up.
+
 ### 5.2.3 — 2026-07-15 UTC
 
 - The discovery scan now dispatches only files explicitly opted into review (`review_active: true`). Files without the flag were previously scanned but always skipped as no-ops, so review behavior is unchanged — the daemon just stops spawning those no-op checks. Scan masks switched to coarse per-scope globs and the cadence moved from 5 seconds to one minute, cutting subprocess launches on large vaults with routing precision untouched (review classes still match exactly).
