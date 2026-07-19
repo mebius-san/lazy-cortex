@@ -70,6 +70,32 @@ Do not run tests before lint and type-check are clean — typing errors mask tes
 - Use when you want to confirm "this parses and compiles" without running the test suite or invoking heavy type-check tools.
 - Does NOT perform type checking, style linting, or import availability validation.
 
+## Type-only imports (toi)
+
+- Detects imports referenced **only** inside type annotations — candidates for a `if TYPE_CHECKING:` block. Invoked as `chk toi <path>` (project runner) and in the `all` sequence.
+- Scans directories (pass a directory, not a single file); reports one `note` per finding at the import statement's line.
+
+### Waiver comments
+
+Some imports *look* type-only but must stay at runtime — any library that resolves annotations at runtime makes them statically invisible to `toi` (`inspect.signature(eval_str = True)`, `typing.get_type_hints`, pydantic, FastMCP / FastAPI parameter schemas). Silence a false positive with the ecosystem-standard `# waiver: <reason>` comment (same convention as `pcf`):
+
+- **Above the import** — `# waiver: <reason>` on the line directly above silences that import. For a multi-line `from x import ( … )`, a waiver above the `from x import (` header silences **every** name in the block; a waiver above a single name inside the parens silences **only that name**.
+- **Inline on a name** — a trailing `# waiver: <reason>` to the right of a name inside the parens silences **only that name**; inline on the `from x import (` header silences the whole block.
+- **Multi-line reason** — the `# waiver:` line plus any contiguous `#` comment lines directly below it form one waiver block.
+- **Non-empty reason required** — a bare `# waiver:` with no reason does **not** silence the finding (consistent with `pcf` and `lazy-log.audit`, where an empty waiver is a failure).
+- **Reporting** — silenced findings are quiet by default; `chk toi <path> -v` (verbose) prints a `waived: N` count and flags any empty-reason `# waiver:` markers as `invalid waiver`.
+
+```python
+# waiver: EntityFieldValue is resolved at runtime by FastMCP (inspect.signature
+# eval_str=True) to build the tool schema; a TYPE_CHECKING-only import would raise
+# NameError the moment the tool is registered
+from tiv.core import (
+  DataIoMode,
+  EntityFieldValue,   # (silenced by the block-header waiver above)
+  EntityOps,
+)
+```
+
 ## PyTest
 
 - Run from the project root with the project venv active.

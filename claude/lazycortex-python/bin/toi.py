@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import ast
 import os
+import re
 import sys
 # noinspection PyCompatibility
 import tomllib
@@ -16,6 +17,12 @@ if TYPE_CHECKING:
 
 # hardcoded exclusions that should never be scanned
 HARDCODED_EXCLUDES = ['.venv', '__pycache__']
+
+# regex matching a valid waiver comment (non-empty explanation after the colon)
+WAIVER_RE = re.compile(r'#\s*waiver:\s*\S')
+
+# regex matching a waiver marker regardless of whether a reason follows
+WAIVER_MARKER_RE = re.compile(r'#\s*waiver:')
 
 
 # ----------------------------------------------------------------------------------------
@@ -38,8 +45,8 @@ def load_config() -> dict:
 
 # ----------------------------------------------------------------------------------------
 
-# define alias for (module, line number)
-ImportInfo = tuple[str | None, int]
+# define alias for (module, import-statement line number, imported-name line number)
+ImportInfo = tuple[str | None, int, int]
 
 # define alias for output structure: filepath -> list of suggestions
 SuggestionsMap = dict[str, list[tuple[int, str | None, str]]]
@@ -119,10 +126,11 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
     if self.in_type_checking:
       return
 
-    # record each imported symbol and its source module
+    # record each imported symbol, its source module, and both the statement
+    # line (shared by all names in the block) and the name's own line
     for alias in node.names:
       name = alias.asname or alias.name
-      self.imported_names[name] = (node.module, node.lineno)
+      self.imported_names[name] = (node.module, node.lineno, alias.lineno)
 
 
   # waiver: ast visitor methods must use `visit_<NodeType>` naming (PascalCase suffix required by ast.NodeVisitor)
@@ -138,10 +146,10 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
     if self.in_type_checking:
       return
 
-    # record each import symbol and source module
+    # record each import symbol, source module, and the name's own line
     for alias in node.names:
       name = alias.asname or alias.name
-      self.imported_names[name] = (alias.name, node.lineno)
+      self.imported_names[name] = (alias.name, node.lineno, alias.lineno)
 
 
   # waiver: ast visitor methods must use `visit_<NodeType>` naming (PascalCase suffix required by ast.NodeVisitor)
@@ -352,34 +360,113 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
       self.runtime_refs.add(node.attr)
 
 
-def analyze_file(path: str) -> tuple[list[tuple[int, str | None, str]], str | None]:
+def _line_matches(source_lines: list[str], lineno: int, pattern: re.Pattern[str]) -> bool:
+  """
+  Check whether a waiver pattern applies to a given line.
+
+  A pattern applies when it matches inline on the line itself or on any line of the
+  contiguous block of `#` comment lines immediately above it (multi-line waiver block).
+
+  Args:
+    source_lines: list of source code lines.
+    lineno: the 1-based line number to check.
+    pattern: the compiled regex to match against candidate lines.
+
+  Returns:
+    True if the pattern matches inline or in the comment block directly above.
+  """
+  idx = lineno - 1
+
+  # check inline on the line itself
+  if 0 <= idx < len(source_lines) and pattern.search(source_lines[idx]):
+    return True
+
+  # walk up through the contiguous block of comment-only lines directly above
+  prev = idx - 1
+  while prev >= 0:
+    stripped = source_lines[prev].strip()
+    # guard: stop at the first non-comment line — the block ends here
+    if not stripped.startswith('#'):
+      break
+    if pattern.search(source_lines[prev]):
+      return True
+    prev -= 1
+
+  return False
+
+
+def _waiver_status(source_lines: list[str], header_line: int, name_line: int) -> str:
+  """
+  Classify how a waiver comment affects a type-only import finding.
+
+  A finding is silenced when a valid waiver covers either the imported name's own
+  line (silences that name) or the import statement's header line (silences every
+  name in the block). A waiver marker with an empty reason never silences.
+
+  Args:
+    source_lines: list of source code lines.
+    header_line: 1-based line of the `import` / `from ... import (` statement.
+    name_line: 1-based line of the specific imported name.
+
+  Returns:
+    `waived` when a valid waiver applies, `invalid` when only an empty-reason
+    waiver marker applies, `active` otherwise.
+  """
+  # guard: a valid waiver on the name line or the block header silences the finding
+  if _line_matches(source_lines, name_line, WAIVER_RE) \
+      or _line_matches(source_lines, header_line, WAIVER_RE):
+    return 'waived'
+
+  # guard: an empty-reason waiver marker is present but does not silence
+  if _line_matches(source_lines, name_line, WAIVER_MARKER_RE) \
+      or _line_matches(source_lines, header_line, WAIVER_MARKER_RE):
+    return 'invalid'
+
+  return 'active'
+
+
+def analyze_file(
+    path: str
+) -> tuple[list[tuple[int, str | None, str]], str | None, int, list[tuple[int, str | None, str]]]:
   """
   Analyze a Python file to identify type-only import opportunities.
-  
+
   Args:
     path: path to the Python file to analyze
-    
+
   Returns:
-    Tuple containing a suggestion list and optional warning message.
+    Tuple of active suggestions, optional warning message, waived-finding count,
+    and the list of findings carrying an invalid (empty-reason) waiver marker.
   """
   # imports that must always be in the main scope even if only used in annotations
   runtime_required = {'InitVar'}
-  
+
   # read and parse the file into an AST
   with open(path, 'r', encoding = 'utf-8') as f:
     source = f.read()
   tree = ast.parse(source, filename = path)
+  source_lines = source.splitlines()
 
   # initialize and apply the analyzer
   analyzer = TypeOnlyImportAnalyzer()
   analyzer.visit(tree)
 
-  # collect type-only import suggestions, excluding runtime-required imports
-  suggestions = [
-    (lineno, mod, name)
-    for name, (mod, lineno) in analyzer.imported_names.items()
-    if name in analyzer.ann_refs and name not in analyzer.runtime_refs and name not in runtime_required
-  ]
+  # partition type-only findings by waiver status; the note keeps the import
+  # statement line (header) so output is unchanged for waiver-free files
+  suggestions: list[tuple[int, str | None, str]] = []
+  invalid: list[tuple[int, str | None, str]] = []
+  waived = 0
+  for name, (mod, header_line, name_line) in analyzer.imported_names.items():
+    # guard: only names used solely in annotations are candidates
+    if name not in analyzer.ann_refs or name in analyzer.runtime_refs or name in runtime_required:
+      continue
+    status = _waiver_status(source_lines, header_line, name_line)
+    if status == 'waived':
+      waived += 1
+      continue
+    if status == 'invalid':
+      invalid.append((header_line, mod, name))
+    suggestions.append((header_line, mod, name))
 
   # emit a warning if TYPE_CHECKING is used but future import is missing
   warning = None
@@ -387,24 +474,29 @@ def analyze_file(path: str) -> tuple[list[tuple[int, str | None, str]], str | No
     relpath = os.path.relpath(path, start = os.getcwd())
     warning = f'{relpath}:1: warning: uses TYPE_CHECKING but lacks `from __future__ import annotations`'
 
-  return suggestions, warning
+  return suggestions, warning, waived, invalid
 
 
-def walk_dir(root: str, exclude_substrings: list[str]) -> tuple[SuggestionsMap, list[str], int]:
+def walk_dir(
+    root: str, exclude_substrings: list[str]
+) -> tuple[SuggestionsMap, list[str], int, int, SuggestionsMap]:
   """
   Walk the directory tree and analyze all Python files for type-only imports.
-  
+
   Args:
     root: root directory path to scan
     exclude_substrings: list of substrings to exclude from file paths
-    
+
   Returns:
-    Tuple containing suggestion map, warning list, and files processed count.
+    Tuple of suggestion map, warning list, files-processed count, total waived
+    count, and the map of findings carrying an invalid (empty-reason) waiver.
   """
   # initialize containers for results and warnings
   all_suggestions: SuggestionsMap = defaultdict(list)
+  invalid_map: SuggestionsMap = defaultdict(list)
   warnings: list[str] = []
   files_processed = 0
+  total_waived = 0
 
   # combine hardcoded and user-provided exclusions
   all_excludes = HARDCODED_EXCLUDES + exclude_substrings
@@ -418,16 +510,19 @@ def walk_dir(root: str, exclude_substrings: list[str]) -> tuple[SuggestionsMap, 
         if any(sub in path for sub in all_excludes):
           continue
         try:
-          suggestions, warning = analyze_file(path)
+          suggestions, warning, waived, invalid = analyze_file(path)
           files_processed += 1
+          total_waived += waived
           if suggestions:
             all_suggestions[path].extend(suggestions)
+          if invalid:
+            invalid_map[path].extend(invalid)
           if warning:
             warnings.append(warning)
         except SyntaxError as e:
           print(f'[!] Syntax error in {path}: {e}', file = sys.stderr)
 
-  return all_suggestions, warnings, files_processed
+  return all_suggestions, warnings, files_processed, total_waived, invalid_map
 
 
 def main() -> None:
@@ -445,6 +540,8 @@ def main() -> None:
                       help = 'root directory to scan')
   parser.add_argument('--exclude', action = 'append', metavar = 'SUBSTRING',
                       help = 'exclude files or directories containing this substring')
+  parser.add_argument('-v', '--verbose', action = 'store_true',
+                      help = 'report the waived-finding count and invalid waiver markers')
   args = parser.parse_args()
 
   # get a path from CLI or use the current directory
@@ -466,7 +563,9 @@ def main() -> None:
     exclude_substrings.extend(args.exclude)
 
   # run analysis over a directory
-  results, warnings, files_processed = walk_dir(base_path, exclude_substrings)
+  results, warnings, files_processed, total_waived, invalid_map = walk_dir(
+      base_path, exclude_substrings
+  )
 
   # print all suggestions in file:line format
   for filepath, suggestions in results.items():
@@ -477,6 +576,15 @@ def main() -> None:
   # print all file-level warnings
   for warning in warnings:
     print(warning)
+
+  # in verbose mode, flag empty-reason waiver markers and report the waived count
+  if args.verbose:
+    for filepath, findings in invalid_map.items():
+      relpath = os.path.relpath(filepath, start = os.getcwd())
+      for lineno, mod, name in findings:
+        print(f'{relpath}:{lineno}: note: invalid waiver (empty reason) for import '
+              f'{name} from {mod} — finding not suppressed')
+    print(f'waived: {total_waived}')
 
   # print success message if no issues found
   if not results and not warnings:
