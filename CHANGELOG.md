@@ -784,6 +784,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 2.0.3 — 2026-07-18 UTC
+
+- `toi` checker honors `# waiver: <reason>` comments to silence false type-only-import findings for names resolved at runtime (pydantic, FastMCP/FastAPI, etc.); `-v` now reports waived counts.
+
 ### 2.0.2 — 2026-07-16 UTC
 
 - The "no test-driven production surface" coding-guideline principle now ships in the canonical guidelines (`lazy-python.coding-guidelines.md`) instead of living only in the project-local overlay, so every consumer gets it.
