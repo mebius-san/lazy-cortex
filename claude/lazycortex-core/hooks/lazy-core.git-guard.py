@@ -367,6 +367,12 @@ def _handle_stop(payload: dict) -> int:
   # guard: index is already clean
   if not staged:
     return 0
+  # guard: staged content isn't this session's — a peer session or a manual/terminal stage owns
+  # it, so ending this turn isn't leaving OUR work hanging. The Stop nag only fires when the
+  # session that staged is the one about to stop.
+  lock = staging_lock.inspect(repo)
+  if lock is None or lock.session_id != staging_lock.resolve_session_id():
+    return 0
   preview = staged[: 10]
   more = len(staged) - len(preview)
   file_list = "\n".join(f"  {p}" for p in preview)
