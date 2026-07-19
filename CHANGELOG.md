@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.16.2 — 2026-07-19 UTC
+
+- Fixed a false-positive nag from the git-guard Stop hook — it now blocks only when your own session left files staged, not when a peer session or a manual terminal `git add` left the shared index non-empty.
+
 ### 5.16.1 — 2026-07-16 UTC
 
 - Fixed: chained and flag-form `git commit` invocations (e.g. `git add x && git commit -m "..." && git push`, `git -C dir commit`) are now correctly recognized by the commit-recorder and public-repo secret-scan hooks — previously only bare `git commit` calls were detected, so most real commits were silently dropped from commit history and chained commits could bypass the pre-publish secret scan.
