@@ -18,10 +18,11 @@ import os
 import secrets
 import sys
 import time
+from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from collections.abc import Iterator
 
 
 JOURNAL_REL = ".runtime/errors.jsonl"
@@ -96,6 +97,14 @@ _JOB_PREFIX = "job:"
 _JOBS_BASE_REL = ".experts/.jobs"
 _RES_GONE = "gone"
 
+# Crash-loop dedupe: an event identical to the journal's last line within this window is spam, not signal.
+# The journal itself is the persistent memory, so the guard survives process restarts.
+_DEDUP_WINDOW_SEC = 3600
+_TAIL_READ_BYTES = 4096
+_DEDUP_KEYS = (_F_INCIDENT, _F_PHASE, _F_KIND, _F_CAUSE, _F_DETAIL)
+# ponytail: folding only reads an incident's tail — 200 events is forensics headroom; raise if that ever pinches
+_MAX_EVENTS_PER_INCIDENT = 200
+
 
 def _ulid() -> str:
   """
@@ -133,8 +142,13 @@ def record(repo: Path, event: dict) -> None:  # type: ignore[type-arg]
   """
   Append one event to the journal. Best-effort — never raises into the caller.
 
-  Fills `id` (ULID) and `ts` (UTC) when absent, truncates `detail`, and writes a
-  single atomic O_APPEND line. A failed write degrades to a stderr note.
+  Notes:
+    - A missing `id` or `ts` is filled in before the event is written, and an overlong `detail` is
+      truncated to fit the line-length budget.
+    - Each event lands in the journal as a single atomic line; concurrent writers never produce a torn
+      line.
+    - An event that repeats the incident, phase, kind, cause, and detail of the immediately preceding
+      entry, recorded within a short window, is dropped silently so a crash loop cannot flood the journal.
 
   Args:
     repo: Repository root containing the `.runtime/` directory.
@@ -154,6 +168,12 @@ def record(repo: Path, event: dict) -> None:  # type: ignore[type-arg]
       ev[_F_DETAIL] = (ev.get(_F_DETAIL) or "")[:200]
       line = json.dumps(ev, ensure_ascii = False, separators = (",", ":"))
     path = Path(repo) / JOURNAL_REL
+    # guard: crash-loop dedupe — a repeat of the last journal line within the window adds no fold signal
+    prev = _last_event(path)
+    if (prev is not None
+        and all(prev.get(k) == ev.get(k) for k in _DEDUP_KEYS)
+        and time.time() - _event_unix(prev) < _DEDUP_WINDOW_SEC):
+      return
     path.parent.mkdir(parents = True, exist_ok = True)
     fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, _MODE_RW_R_R)
     try:
@@ -180,33 +200,69 @@ def resolve(repo: Path, incident: str, *, resolution: str, **extra: object) -> N
 
 
 # waiver: dict[str, object] annotation is caller-hostile — event dicts carry mixed-type values; Any is the correct type but banned; bare dict is the lesser evil
-def _read_journal(repo: Path) -> list[dict]:  # type: ignore[type-arg]
+def _last_event(path: Path) -> dict | None:  # type: ignore[type-arg]
   """
-  Return parsed journal events, silently skipping torn/corrupt lines.
+  Return the journal's last parseable event, or `None` if there is none.
+
+  Notes:
+    - Cost is bounded and independent of journal size.
+
+  Args:
+    path: Journal file path.
+
+  Returns:
+    The last complete event dict, or `None` when the file is missing, empty,
+    or its last line is torn/corrupt.
+  """
+  try:
+    with open(path, "rb") as f:
+      f.seek(0, os.SEEK_END)
+      f.seek(max(0, f.tell() - _TAIL_READ_BYTES))
+      tail = f.read().decode(_UTF8, errors = _UTF8_ERRORS_REPLACE)
+  except OSError:
+    return None
+  for raw in reversed(tail.splitlines()):
+    line = raw.strip()
+    # guard: trailing blank lines are not events — keep scanning upward
+    if not line:
+      continue
+    try:
+      return json.loads(line)
+    except (ValueError, json.JSONDecodeError):
+      # guard: torn last line (crash mid-write) — no dedupe basis, let the write proceed
+      return None
+  return None
+
+
+# waiver: Iterator[dict] — event dicts carry mixed-type values; Any is the correct type but banned; bare dict is the lesser evil
+def _iter_journal(repo: Path) -> Iterator[dict]:  # type: ignore[type-arg]
+  """
+  Yield parsed journal events, skipping torn or corrupt lines.
+
+  Notes:
+    - Memory usage stays bounded no matter how large the journal has grown.
 
   Args:
     repo: Repository root containing the `.runtime/` directory.
 
-  Returns:
-    A list of event dicts from the journal, in file order.
+  Yields:
+    Event dicts from the journal, in file order.
   """
   path = Path(repo) / JOURNAL_REL
-  # guard: missing journal is normal on a fresh repo — return empty
+  # guard: missing journal is normal on a fresh repo — yield nothing
   if not path.is_file():
-    return []
-  out = []
-  for raw in path.read_text(encoding = _UTF8, errors = _UTF8_ERRORS_REPLACE).splitlines():
-    # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
-    raw = raw.strip()  # noqa: PLW2901
-    # guard: blank lines between records are not events — skip silently
-    if not raw:
-      continue
-    try:
-      out.append(json.loads(raw))
-    except (ValueError, json.JSONDecodeError):
-      # guard: corrupt line (e.g. crash mid-write) — skip, never break the read
-      print(_MSG_CORRUPT_LINE, file = sys.stderr)
-  return out
+    return
+  with open(path, encoding = _UTF8, errors = _UTF8_ERRORS_REPLACE) as f:
+    for raw in f:
+      line = raw.strip()
+      # guard: blank lines between records are not events — skip silently
+      if not line:
+        continue
+      try:
+        yield json.loads(line)
+      except (ValueError, json.JSONDecodeError):
+        # guard: corrupt line (e.g. crash mid-write) — skip, never break the read
+        print(_MSG_CORRUPT_LINE, file = sys.stderr)
 
 
 # waiver: dict[str, object] annotation is caller-hostile — event dicts carry mixed-type values; Any is the correct type but banned; bare dict is the lesser evil
@@ -225,20 +281,6 @@ def _read_snapshot(repo: Path) -> dict:  # type: ignore[type-arg]
     return json.loads(path.read_text(encoding = _UTF8))
   except (OSError, ValueError, json.JSONDecodeError):
     return {"counters": {}, _SNAP_OPEN: []}
-
-
-# waiver: dict[str, object] annotation is caller-hostile — event dicts carry mixed-type values; Any is the correct type but banned; bare dict is the lesser evil
-def _all_events(repo: Path) -> list[dict]:  # type: ignore[type-arg]
-  """
-  Snapshot-carried open events plus the live journal.
-
-  Args:
-    repo: Repository root.
-
-  Returns:
-    Combined list of event dicts, snapshot events first.
-  """
-  return list(_read_snapshot(repo).get(_SNAP_OPEN, [])) + _read_journal(repo)
 
 
 # waiver: dict[str, object] annotation is caller-hostile — event dicts carry mixed-type values; Any is the correct type but banned; bare dict is the lesser evil
@@ -272,6 +314,9 @@ def incidents(repo: Path, *, state: str = _ST_ALL, since: str | None = None) -> 
   """
   Fold the journal (+ snapshot) into one row per incident, newest first.
 
+  Notes:
+    - Memory scales with the incident count, not the total number of events in the journal.
+
   Args:
     repo: Repository root.
     state: Filter — `open`, `needs_operator`, `closed`, or `all`.
@@ -284,19 +329,21 @@ def incidents(repo: Path, *, state: str = _ST_ALL, since: str | None = None) -> 
     A list of incident dicts (`id`, `incident`, `state`, `kind`, `cause`, `severity`,
     `expert`, `job_id`, `routine`, `detail`, `ts`, `events`).
   """
-  # waiver: dict[str, list[dict]] — inner list carries mixed-type event dicts; Any is banned; bare dict is the lesser evil
-  by_incident: dict[str, list[dict]] = {}  # type: ignore[type-arg]
-  for ev in _all_events(repo):
+  # folding only needs each incident's last event plus a count — never the full event lists
+  # waiver: dict[str, dict] inner value is a mixed-type event dict; Any is banned; bare dict is the lesser evil
+  last_by_incident: dict[str, dict] = {}  # type: ignore[type-arg]
+  counts: dict[str, int] = {}
+  for ev in chain(_read_snapshot(repo).get(_SNAP_OPEN, []), _iter_journal(repo)):
     inc = ev.get(_F_INCIDENT)
     if inc:
-      by_incident.setdefault(inc, []).append(ev)
+      last_by_incident[inc] = ev
+      counts[inc] = counts.get(inc, 0) + 1
   out = []
-  for inc, evs in by_incident.items():
-    st = _fold_state(evs)
+  for inc, last in last_by_incident.items():
+    st = _fold_state([ last ])
     # guard: state filter — skip if caller restricted to a specific state
     if state not in (_ST_ALL, st):
       continue
-    last = evs[-1]
     # guard: --since cursor — ULIDs sort lexicographically by time, drop anything not newer
     last_id = last.get(_F_ID, "")
     # guard: skip incidents at or before the since-cursor
@@ -309,7 +356,7 @@ def incidents(repo: Path, *, state: str = _ST_ALL, since: str | None = None) -> 
       _F_SEVERITY: last.get(_F_SEVERITY, _SEV_ERROR),
       _F_EXPERT: last.get(_F_EXPERT), _F_JOB_ID: last.get(_F_JOB_ID),
       _F_ROUTINE: last.get(_F_ROUTINE), _F_DETAIL: last.get(_F_DETAIL, ""),
-      _F_TS: last.get(_F_TS), "events": len(evs),
+      _F_TS: last.get(_F_TS), "events": counts[inc],
     })
   out.sort(key = lambda i: i.get(_F_TS) or "", reverse = True)
   return out
@@ -350,26 +397,6 @@ def _event_unix(ev: dict) -> float:  # type: ignore[type-arg]
     return 0.0
 
 
-# waiver: dict[str, object] annotation is caller-hostile — event dicts carry mixed-type values; Any is the correct type but banned; bare dict is the lesser evil
-def _latest_per_incident(events: list[dict]) -> dict[str, dict]:  # type: ignore[type-arg]
-  """
-  Map each incident to its newest event by append order (last occurrence wins).
-
-  Args:
-    events: Events in append order.
-
-  Returns:
-    A mapping of incident key to its latest event.
-  """
-  # waiver: dict[str, dict] inner value is a mixed-type event dict; Any is banned; bare dict is the lesser evil
-  latest: dict[str, dict] = {}  # type: ignore[type-arg]
-  for ev in events:
-    inc = ev.get(_F_INCIDENT)
-    if inc:
-      latest[inc] = ev
-  return latest
-
-
 # waiver: dict[str, object] annotation is caller-hostile — snapshot carries mixed-type values; Any is banned; bare dict is the lesser evil
 def _write_snapshot(repo: Path, snap: dict) -> None:  # type: ignore[type-arg]
   """
@@ -383,23 +410,6 @@ def _write_snapshot(repo: Path, snap: dict) -> None:  # type: ignore[type-arg]
   path.parent.mkdir(parents = True, exist_ok = True)
   tmp = path.with_name(path.name + _TMP_SUFFIX)
   tmp.write_text(json.dumps(snap, ensure_ascii = False, indent = 2), encoding = _UTF8)
-  os.replace(tmp, path)
-
-
-# waiver: list[dict] inner value is a mixed-type event dict; Any is banned; bare dict is the lesser evil
-def _rewrite_journal(repo: Path, events: list[dict]) -> None:  # type: ignore[type-arg]
-  """
-  Atomically replace the journal with the given events via a temp file and rename.
-
-  Args:
-    repo: Repository root.
-    events: Events to write as the new journal body, in order.
-  """
-  path = Path(repo) / JOURNAL_REL
-  path.parent.mkdir(parents = True, exist_ok = True)
-  tmp = path.with_name(path.name + _TMP_SUFFIX)
-  body = "".join(json.dumps(e, ensure_ascii = False, separators = (",", ":")) + "\n" for e in events)
-  tmp.write_text(body, encoding = _UTF8)
   os.replace(tmp, path)
 
 
@@ -436,11 +446,15 @@ def _gc_gone_job_incidents(repo: Path) -> int:
 # waiver: dict[str, object] annotation is caller-hostile — result carries mixed-type values; Any is banned; bare dict is the lesser evil
 def prune(repo: Path, retention_days: int) -> dict:  # type: ignore[type-arg]
   """
-  Drop journal events older than the window, folding them into the snapshot.
+  Drop aged and over-cap journal events, retaining still-open incidents in the snapshot.
 
-  Young events stay in the journal verbatim. A still-open or needs-operator incident
-  whose every event aged out is carried forward as its latest event in the snapshot,
-  so it never vanishes. Dropped `opened` events bump cumulative per-kind counters.
+  Notes:
+    - Each incident keeps only its newest events up to a fixed per-incident cap, regardless of age, so
+      one noisy incident can never grow the journal without bound.
+    - A still-open or needs-operator incident whose every event aged out is carried forward as its
+      latest event in the snapshot, so it never disappears from the incident list.
+    - Dropped `opened` events bump cumulative per-kind counters retained in the snapshot.
+    - Memory scales with the incident count, not the total number of events in the journal.
 
   Args:
     repo: Repository root.
@@ -451,23 +465,51 @@ def prune(repo: Path, retention_days: int) -> dict:  # type: ignore[type-arg]
   """
   _gc_gone_job_incidents(repo)
   cutoff = time.time() - retention_days * _SECONDS_PER_DAY
-  events = _read_journal(repo)
   snap = _read_snapshot(repo)
   counters = dict(snap.get(_SNAP_COUNTERS, {}))
-  states = {i[_F_INCIDENT]: i[_F_STATE] for i in incidents(repo, state = _ST_ALL)}
-  kept = [e for e in events if _event_unix(e) >= cutoff]
-  kept_incidents = {e.get(_F_INCIDENT) for e in kept}
-  dropped = [e for e in events if _event_unix(e) < cutoff]
-  for e in dropped:
-    # guard: only `opened` events advance the all-time error counter
-    if e.get(_F_PHASE) == _PH_OPENED:
-      k = e.get(_F_KIND, _UNKNOWN_KIND)
-      counters[k] = counters.get(k, 0) + 1
-  latest = _latest_per_incident(events + list(snap.get(_SNAP_OPEN, [])))
+  # pass 1 — per-incident latest event + young-event counts; snapshot first so journal events win
+  # waiver: dict[str, dict] inner value is a mixed-type event dict; Any is banned; bare dict is the lesser evil
+  latest: dict[str, dict] = {}  # type: ignore[type-arg]
+  young_counts: dict[str, int] = {}
+  for ev in snap.get(_SNAP_OPEN, []):
+    inc = ev.get(_F_INCIDENT)
+    if inc:
+      latest[inc] = ev
+  for ev in _iter_journal(repo):
+    inc = ev.get(_F_INCIDENT)
+    if inc:
+      latest[inc] = ev
+      if _event_unix(ev) >= cutoff:
+        young_counts[inc] = young_counts.get(inc, 0) + 1
+  # pass 2 — stream kept events straight to the tmp journal
+  path = Path(repo) / JOURNAL_REL
+  path.parent.mkdir(parents = True, exist_ok = True)
+  tmp = path.with_name(path.name + _TMP_SUFFIX)
+  pruned = 0
+  kept = 0
+  seen: dict[str, int] = {}
+  with open(tmp, "w", encoding = _UTF8) as out:
+    for ev in _iter_journal(repo):
+      inc = ev.get(_F_INCIDENT)
+      young = _event_unix(ev) >= cutoff
+      drop = not young
+      if young and inc:
+        seen[inc] = seen.get(inc, 0) + 1
+        # guard: incident cap — only the newest _MAX_EVENTS_PER_INCIDENT survive; folding reads the tail only
+        drop = seen[inc] <= young_counts.get(inc, 0) - _MAX_EVENTS_PER_INCIDENT
+      if drop:
+        pruned += 1
+        # guard: only `opened` events advance the all-time error counter
+        if ev.get(_F_PHASE) == _PH_OPENED:
+          k = ev.get(_F_KIND, _UNKNOWN_KIND)
+          counters[k] = counters.get(k, 0) + 1
+        continue
+      out.write(json.dumps(ev, ensure_ascii = False, separators = (",", ":")) + "\n")
+      kept += 1
   carry = [
-    latest[inc] for inc, st in states.items()
-    if st in (_ST_OPEN, _ST_NEEDS_OPERATOR) and inc not in kept_incidents and inc in latest
+    ev for inc, ev in latest.items()
+    if _fold_state([ ev ]) in (_ST_OPEN, _ST_NEEDS_OPERATOR) and inc not in young_counts
   ]
   _write_snapshot(repo, {_SNAP_COUNTERS: counters, _SNAP_OPEN: carry})
-  _rewrite_journal(repo, kept)
-  return {"pruned": len(dropped), "kept": len(kept), "carried": len(carry)}
+  os.replace(tmp, path)
+  return {"pruned": pruned, "kept": kept, "carried": len(carry)}

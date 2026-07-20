@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.16.3 — 2026-07-20 UTC
+
+- Error ledger now runs bounded during a crash loop — duplicate events within the same hour are deduped and pruning caps each incident at 200 kept events, preventing multi-GB journals and multi-minute freezes.
+- The runtime daemon's runner now refuses to start on Python older than 3.12 (the marketplace floor) with a clear one-line error, instead of crash-looping under an unsupported interpreter.
+
 ### 5.16.2 — 2026-07-19 UTC
 
 - Fixed a false-positive nag from the git-guard Stop hook — it now blocks only when your own session left files staged, not when a peer session or a manual terminal `git add` left the shared index non-empty.
