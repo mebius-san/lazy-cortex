@@ -10,6 +10,13 @@ plugin cache. Mirrors Claude Code's `--plugin-dir` for the daemon's
 separate-process world.
 """
 import os, sys
+
+# guard: the daemon requires Python >= 3.12 — launchd/PATH may resolve an older python3, which
+# crash-loops every iteration and floods the error ledger. Refuse before any import.
+if sys.version_info < (3, 12):
+    sys.exit(f"lazycortex runner: Python >= 3.12 required, got {sys.version.split()[0]} "
+             f"({sys.executable}) — fix which python3 the supervisor resolves")
+
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from runtime_daemon import run, set_plugin_dirs
