@@ -436,6 +436,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.2.0 — 2026-07-21 UTC
+
+- Fixed `spec.request-open` / `spec.request-apply` routines re-dispatching every 5 seconds forever; they now default to a 60-second interval and correctly exclude the requests folder-note. Re-run `/spec.install` to apply the fix to existing vaults.
+
 ### 3.1.1 — 2026-07-15 UTC
 
 - `spec.product-config` and `spec.install` now write coarse, recursive `**` scope-root masks for `lazy-review.scan` — one per-product mask with an active-only filter, replacing the old per-class glob-union generator, so new categories, doc-kinds, and nesting depths reach discovery with zero config edits.

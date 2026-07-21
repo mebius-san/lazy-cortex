@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Resolve repos, dependencies, and build forge-correct source URLs so every spec link stays accurate regardless of where code is hosted.
-last_regen: 2026-07-12
+last_regen: 2026-07-21
 diagram_spec:
   anchor: "How the three skills compose"
   request: "Show how spec.resolve-repo, spec.resolve-dependency, and spec.source-url call each other: spec.source-url calls spec.resolve-repo to get RepoInfo; spec.resolve-dependency calls spec.resolve-repo internally for internal-product and internal-repo entries; spec.resolve-repo reads lazy.settings.json[repos] and inspects the git remote. Output is a URL or a dep record."
@@ -30,7 +30,7 @@ Everything flows through `/spec.resolve-repo`. You give it a repo key — a stri
 
 `/spec.source-url` calls `/spec.resolve-repo` first, then picks up the forge key and looks up the URL template for the requested kind — `blob` for a file link, `tree` for a directory link. It substitutes `base_url`, branch, and path into the template and returns the complete URL. When the calling doc pins a branch via `spec_source_branches`, you pass it as the optional `branch` argument and the URL points at the feature branch instead of the default. The skill is stateless and idempotent: same inputs, same URL, every time.
 
-`/spec.resolve-dependency` handles the dependency side. A product's `dependencies` array in `lazy.settings.json` accepts three entry shapes. A `product:` entry names another product by compound key; the skill looks that product up, calls `/spec.resolve-repo` on its source repo, and returns a wikilink to its design doc plus a `dev_link` pointing at the repo root. A `repo:` entry names a repo key directly; the skill resolves it the same way and finds whichever product declares that repo as its source. An `external:` entry already has `spec_url` and `dev_url` spelled out — the skill validates the fields are present and returns them as-is. The output is always `{kind, spec_link, dev_link, local_spec_path?}` — one consistent shape regardless of entry flavour, which is what callers like `/spec.product-config` import classification expect.
+`/spec.resolve-dependency` handles the dependency side. A product's `dependencies` array in `lazy.settings.json` accepts three entry shapes. A `product:` entry names another product by compound key; the skill looks that product up, calls `/spec.resolve-repo` on its source repo, and returns a wikilink to its design doc (at the product's flattened spec root — no `docs/` subfolder) plus a `dev_link` pointing at the repo root. A `repo:` entry names a repo key directly; the skill resolves it the same way and finds whichever product declares that repo as its source. An `external:` entry already has `spec_url` and `dev_url` spelled out — the skill validates the fields are present and returns them as-is. The output is always `{kind, spec_link, dev_link, local_spec_path?}` — one consistent shape regardless of entry flavour, which is what callers like `/spec.product-config` import classification expect.
 
 ## Common adjustments
 
@@ -92,4 +92,3 @@ flowchart LR
 - [install-and-audit](install-and-audit.md) — register products and repos via `/spec.product-config`, which is the only writer for the settings this block reads.
 - [code-sync](code-sync.md) — `/spec.sync-with-code` and `/spec.finalize-branch` are the primary callers of `/spec.source-url` in normal operation.
 - [asset-to-release](walkthroughs/asset-to-release.md) — walkthrough that exercises source-link generation as part of the full gate journey.
-</content>
