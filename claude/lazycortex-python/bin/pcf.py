@@ -51,6 +51,12 @@ DEFAULT_CONFIG = {
   # private identifiers tolerated in docstring narrative by D9.
   # populated from pyproject.toml [tool.pcf] private_name_allowlist.
   'private_name_allowlist': [],
+  # extra numeric values never flagged as magic, merged onto the built-in trivial set.
+  # populated from pyproject.toml [tool.pcf] allowed_magic_numbers (e.g. angle constants).
+  'allowed_magic_numbers': [],
+  # extra string values never flagged as magic, merged onto the built-in trivial set.
+  # populated from pyproject.toml [tool.pcf] allowed_magic_strings.
+  'allowed_magic_strings': [],
 }
 
 
@@ -3636,8 +3642,8 @@ _ENUM_BASE_NAMES = frozenset({
   'CoreEnum', 'CoreIntEnum', 'CoreStrEnum', 'CoreFlag', 'CoreIntFlag',
 })
 
-# numeric values that are never flagged as magic.
-_TRIVIAL_NUMBERS: frozenset[float] = frozenset({ -1, 0, 1, 2, 0.5 })
+# numeric values that are never flagged as magic (powers of two and their reciprocals).
+_TRIVIAL_NUMBERS: frozenset[float] = frozenset({ -1, 0, 0.25, 0.5, 1, 2, 4 })
 
 # chars that identify a string as a format placeholder template.
 _FORMAT_PLACEHOLDER_CHARS = ('{', '}', '%')
@@ -4025,7 +4031,9 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
   that guideline section and mirrored here.
   """
 
-  def __init__(self, source_lines: list[str], project_root: str | None = None) -> None:
+  def __init__(self, source_lines: list[str], project_root: str | None = None,
+               allowed_numbers: list[float] | None = None,
+               allowed_strings: list[str] | None = None) -> None:
     """
     Initialize the magic-literal analyzer.
 
@@ -4033,9 +4041,17 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
       source_lines: list of source code lines, used for waiver detection.
       project_root: optional project root directory; when provided, enables
         cross-file validation of string literals used as member names.
+      allowed_numbers: extra numeric values never flagged as magic, merged onto
+        the built-in trivial set.
+      allowed_strings: extra string values never flagged as magic, merged onto
+        the built-in trivial set.
     """
     self.source_lines = source_lines
     self.project_root = project_root
+
+    # trivial-literal sets: built-in defaults widened by consumer config
+    self.trivial_numbers = _TRIVIAL_NUMBERS | frozenset(allowed_numbers or [])
+    self.trivial_strings = _TRIVIAL_STRINGS | frozenset(allowed_strings or [])
 
     # lazy-loaded set of project-wide identifiers (populated on first member-name check)
     self._project_idents: frozenset[str] | None = None
@@ -4117,7 +4133,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
       return
 
     # guard: numeric value in the trivial set
-    if isinstance(value, (int, float)) and value in _TRIVIAL_NUMBERS:
+    if isinstance(value, (int, float)) and value in self.trivial_numbers:
       return
 
     # guard: string that is empty, in the trivial set, punctuation-only, or a format template
@@ -4126,7 +4142,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
       if not value:
         return
       # guard: trivial marker string (underscore, dunder-placeholder, etc.)
-      if value in _TRIVIAL_STRINGS:
+      if value in self.trivial_strings:
         return
       # guard: whitespace/punctuation only
       if _PUNCT_ONLY_RE.match(value):
@@ -4936,7 +4952,22 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
   if bool(config.get('check_magic_literal', True)):
     project_root_raw = config.get('_project_root')
     project_root = project_root_raw if isinstance(project_root_raw, str) else None
-    magic_analyzer = MagicLiteralAnalyzer(source_lines, project_root = project_root)
+    allowed_numbers_raw = config.get('allowed_magic_numbers', []) or []
+    allowed_numbers = (
+      [ n for n in allowed_numbers_raw if isinstance(n, (int, float)) and not isinstance(n, bool) ]
+      if isinstance(allowed_numbers_raw, list) else []
+    )
+    allowed_strings_raw = config.get('allowed_magic_strings', []) or []
+    allowed_strings = (
+      [ s for s in allowed_strings_raw if isinstance(s, str) ]
+      if isinstance(allowed_strings_raw, list) else []
+    )
+    magic_analyzer = MagicLiteralAnalyzer(
+      source_lines,
+      project_root = project_root,
+      allowed_numbers = allowed_numbers,
+      allowed_strings = allowed_strings,
+    )
     magic_analyzer.visit(tree)
     all_issues.extend(magic_analyzer.analyze())
 

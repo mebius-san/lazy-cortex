@@ -577,12 +577,13 @@ if TYPE_CHECKING:
 ## Magic Literals
 - **Every magic numeric or string literal used inline must be moved to an Enum or a class-level constants container, or carry a `# waiver: <reason>` comment on the preceding line.** A "magic literal" is a value that encodes structural or domain meaning (a prefix, a tag, a threshold, a naming convention) but appears as a bare `'...'` or number at the use site. Declare it once — as an `Enum` / `IntEnum` / `StrEnum` member when the value belongs to a finite named set, or as a class attribute on a dedicated constants-container class when it is a singleton value.
 - **Applies to**: method-call arguments, comparisons, dict/attribute lookups, return values, augmented-assign RHS, binary operations with a non-constant operand, and subscript slices beyond the trivial set.
-- **Auto-exempt numeric values** (no constant required): `-1`, `0`, `1`, `2`, `0.5`, and their float equivalents.
+- **Auto-exempt numeric values** (no constant required): `-1`, `0`, `0.25`, `0.5`, `1`, `2`, `4`, and their float equivalents. Extend per-project with `[tool.pcf] allowed_magic_numbers` (merged onto this set — use for domain constants like angles `[45, 90, 180, 270, 360]`).
 - **Auto-exempt strings** (no constant required):
   - Empty string `''`.
   - Underscore markers: `'_'`, `'__'`.
   - Strings made entirely of whitespace or punctuation (e.g., `' '`, `', '`, `': '`, `'.'`, `'\n'`, `'/'`, `'/'`).
   - Strings containing `{`, `}`, or `%` (format placeholders).
+  - `'None'`, `'set()'`, `'null'` (repr/serializer idioms). Extend per-project with `[tool.pcf] allowed_magic_strings` (merged onto this set).
 - **Auto-exempt contexts** (no constant required — the checker mirrors this list exactly):
   - Function/method default argument values (`def f(x = 'foo')`), including keyword-only defaults.
   - `dataclasses.field(default = …)` / `default_factory`, `pydantic.Field(…)`, `attrs.field(…)`, `msgspec.field(…)`.

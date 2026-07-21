@@ -274,6 +274,14 @@ banned_docstring_phrases = [
 # Private identifiers tolerated in docstring narrative by D9.
 # private_name_allowlist = ["_my_filters"]
 
+# Extra numeric values never flagged as magic literals, merged onto the built-in
+# trivial set ({-1, 0, 0.25, 0.5, 1, 2, 4}). Use for domain constants — e.g. angles.
+# allowed_magic_numbers = [45, 90, 180, 270, 360]
+
+# Extra string values never flagged as magic literals, merged onto the built-in
+# trivial set ({"_", "__", "None", "set()", "null"}).
+# allowed_magic_strings = ["ACTIVE", "PENDING"]
+
 # Project-registered docstring sections merged into the section machinery.
 # style: "bulleted" | "definition" | "plain". Order anchor: after/before must
 # name a built-in section or a previously declared entry (else appended last).
