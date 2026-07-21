@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-07-15
+last_regen: 2026-07-21
 no_diagram: true
 source_skills:
   - spec.install
@@ -22,6 +22,7 @@ source_skills:
   - spec.resolve-repo
   - spec.resolve-dependency
   - spec.source-url
+  - spec.request-router
   - spec.request-classify
   - spec.request-find-candidates
   - spec.request-attach
@@ -46,6 +47,16 @@ source_skills:
 **Likely cause**: A prior install already wired the routine. The skill never force-overwrites an existing registration.
 
 **Fix**: This is a normal idempotent outcome — no action needed. If you need to change the routine's shape (interval, filter, paths), run `/lazy-routine.unregister spec.gate-tick` first, then re-run `/spec.install` to register the updated version.
+
+---
+
+## The requests inbox note keeps getting re-dispatched forever
+
+**Symptom**: The vault's `requests/requests.md` folder-note (the inbox's own description page, not a real request) keeps showing up as picked up by the request-intake routines on every tick, and never settles.
+
+**Likely cause**: A `/spec.install` run from before the plugin added the `filter.folder_note: false` clause registered `spec.request-open` / `spec.request-apply` without excluding folder-notes. The folder-note carries no `review_active` / `review_result` frontmatter, so it matches the intake filter every tick and gets re-dispatched indefinitely — the worker finds nothing to do and never stamps the frontmatter that would drop it out of scope.
+
+**Fix**: Re-run `/spec.install` — the skill's File-sync policy upgrades an existing routine registration in place, adding the missing `folder_note: false` clause (and raising `interval_sec` to `60` if it still carries the legacy `5`, unless you deliberately chose a different value). No manual edit to the routine's YAML is needed or supported.
 
 ---
 

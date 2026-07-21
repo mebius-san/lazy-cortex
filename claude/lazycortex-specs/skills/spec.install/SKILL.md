@@ -195,22 +195,23 @@ Under `routines` add the key `spec.request-open` if missing:
 ```yaml
 spec.request-open:
   type: md-scan
-  interval_sec: 5
+  interval_sec: 60
   timeout_sec: 30
   priority: 30
   paths: ["requests/*.md"]
   filter:
+    folder_note: false
     frontmatter:
       review_active: {in: [null], not_in: []}
       review_result: {in: [null], not_in: []}
   command: ["lazycortex-specs", "open-request"]
 ```
 
-The joint filter `review_active: [null] + review_result: [null]` catches files that have not yet entered the review loop — naked files (no frontmatter at all) AND partial-bootstrap files (`request_status: draft` set but `review_active` missing). The `review_result: [null]` clause excludes post-finalize files: finalize strips `review_active` AND stamps `review_result` (`approved` / `approved-with-concerns`), so those files match `review_active: [null]` alone but must be routed to the apply gate, not re-bootstrapped. The command brings the file to canonical opt-in shape, atomic commit under `spec.request-open` bot identity.
+The joint filter `review_active: [null] + review_result: [null]` catches files that have not yet entered the review loop — naked files (no frontmatter at all) AND partial-bootstrap files (`request_status: draft` set but `review_active` missing). The `review_result: [null]` clause excludes post-finalize files: finalize strips `review_active` AND stamps `review_result` (`approved` / `approved-with-concerns`), so those files match `review_active: [null]` alone but must be routed to the apply gate, not re-bootstrapped. The `folder_note: false` clause excludes the `requests/` folder-note (`requests/requests.md` — the Obsidian folder-note convention `<dir>/<dir>.md`): it is an inbox description carrying no `review_active` / `review_result`, so without this clause it matches the filter on every tick and the routine re-dispatches it forever (open-request finds nothing to do and never stamps the frontmatter that would drop it out). The command brings the file to canonical opt-in shape, atomic commit under `spec.request-open` bot identity.
 
 Once the script commits with `review_active: true`, the file falls out of this routine's filter and into `lazy-review.scan`'s loop. After finalize stamps `review_result`, the apply routine (6b) takes over.
 
-If the routine already exists, apply the File-sync policy: byte-identical → `unchanged`; a stale shape that the shipped delta upgrades cleanly (e.g. adding the missing `review_result: [null]` clause without contradicting a local edit) → merge silently (`merged`); only a genuine contradiction (a local edit that the shipped shape would overwrite incompatibly — older `expert:` form replaced by `command:`, a deliberately narrowed `request_status: [null]` filter) triggers an `AskUserQuestion` with a unified diff.
+If the routine already exists, apply the File-sync policy: byte-identical → `unchanged`; a stale shape that the shipped delta upgrades cleanly → merge silently (`merged`). Upgrades that count as clean: adding the missing `review_result: [null]` clause; adding the missing `filter.folder_note: false` clause; setting `interval_sec` to `60` when it still carries the legacy `5` (an operator-chosen value other than 5 stays untouched) — all provided no local edit contradicts them. Only a genuine contradiction (a local edit that the shipped shape would overwrite incompatibly — older `expert:` form replaced by `command:`, a deliberately narrowed `request_status: [null]` filter, an operator-set `folder_note: true`) triggers an `AskUserQuestion` with a unified diff.
 
 ### 6b. md-scan apply routine (mechanical, command-based)
 
@@ -219,11 +220,12 @@ Under `routines` add the key `spec.request-apply` if missing:
 ```yaml
 spec.request-apply:
   type: md-scan
-  interval_sec: 5
+  interval_sec: 60
   timeout_sec: 60
   priority: 20
   paths: ["requests/*.md"]
   filter:
+    folder_note: false
     frontmatter:
       request_status: {in: ["draft"], not_in: []}
       review_result: {in: ["approved", "approved-with-concerns"], not_in: []}
@@ -234,7 +236,7 @@ The daemon resolves `command[0]` (`lazycortex-specs`) to the plugin's bin script
 
 The joint filter `request_status: ["draft"] + review_result: ["approved", "approved-with-concerns"]` matches only the post-finalize state: finalize stamped `review_result` (clean approve OR approve-with-concerns) as its last step, and the terminal `request_status` has not been written yet (still `draft`). Stop-aborted reviews (no `review_result` ever written) and mid-review files (transient `review_*` keys present but `review_result` not yet stamped) do not match — apply only fires on a clean finalize. The worker reads the resolved routing prose that `spec.request-router` folded into `# Routing` during review and enacts it.
 
-If the routine already exists, apply the File-sync policy: the older `expert: spec.request-apply` form (LLM-dispatched apply) is superseded by the shipped `command:` shape — when no local edit contradicts the swap, replace it silently (`merged`); only when a local edit on that entry would be lost does it become a genuine conflict and ask with a unified diff.
+If the routine already exists, apply the File-sync policy: the older `expert: spec.request-apply` form (LLM-dispatched apply) is superseded by the shipped `command:` shape; the missing `filter.folder_note: false` clause is added; and `interval_sec` is set to `60` when it still carries the legacy `5` (an operator-chosen value other than 5 stays untouched) — when no local edit contradicts these, merge silently (`merged`); only when a local edit on that entry would be lost does it become a genuine conflict and ask with a unified diff.
 
 ### 6c. Expert entry
 

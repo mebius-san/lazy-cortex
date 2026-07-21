@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Ingest free-form requests and route them into the right place in the spec tree — classify, find candidates, then attach or spawn.
-last_regen: 2026-06-23
+last_regen: 2026-07-21
 diagram_spec:
   anchor: "How the block flows"
   request: "Flow diagram showing the requests block pipeline: spec.request-router orchestrates — it calls spec.request-classify (returns a class token), then spec.request-find-candidates (returns a ranked candidate list). Based on the candidates score, the flow branches: high-confidence match goes to spec.request-attach (attaches to an existing entity); no match goes to spec.request-spawn (scaffolds a new entity then delegates to spec.request-attach). Show operator confirmation step between router output and apply."
@@ -67,41 +67,41 @@ Each populated doc gets the request's wikilink appended to its `spec_source_requ
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  requestArrives[Request arrives]
+  requestReceived[Request received]
   classifyRequest[spec.request-classify]
   findCandidates[spec.request-find-candidates]
   scoreCheck{High-confidence match?}
-  operatorConfirm{Operator confirms?}
-  spawnEntity[spec.request-spawn]
   attachEntity[spec.request-attach]
-  aborted[Aborted — request held]
-  done[Entity updated — Done]
+  spawnEntity[spec.request-spawn]
+  operatorConfirm{Operator confirms?}
+  applyChanges[Apply changes]
+  requestCancelled[Request cancelled]
 
-  requestArrives -->|orchestrate| classifyRequest
+  requestReceived -->|orchestrate| classifyRequest
   classifyRequest -->|class token| findCandidates
   findCandidates -->|ranked candidates| scoreCheck
+  scoreCheck -->|high confidence| attachEntity
   scoreCheck -->|no match| spawnEntity
-  scoreCheck -->|high confidence| operatorConfirm
-  spawnEntity -->|new entity ready| operatorConfirm
-  operatorConfirm -->|confirmed| attachEntity
-  operatorConfirm -->|rejected| aborted
-  attachEntity -->|attached| done
+  spawnEntity -->|delegate| attachEntity
+  attachEntity -->|router output| operatorConfirm
+  operatorConfirm -->|confirm| applyChanges
+  operatorConfirm -->|reject| requestCancelled
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
-  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class requestArrives entry
+  class requestReceived entry
   class classifyRequest action
   class findCandidates action
   class scoreCheck guard
-  class operatorConfirm guard
-  class spawnEntity action
   class attachEntity action
-  class done success
-  class aborted error
+  class spawnEntity action
+  class operatorConfirm guard
+  class applyChanges success
+  class requestCancelled error
 ```
 
 ## See also
