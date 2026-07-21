@@ -793,6 +793,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 2.0.4 — 2026-07-21 UTC
+
+- `pcf` magic-literal check now supports per-project allowlists (`[tool.pcf] allowed_magic_numbers` / `allowed_magic_strings`), merged on top of the built-in trivial set; the built-in trivial numbers also widen to include `0.25` and `4`.
+
 ### 2.0.3 — 2026-07-18 UTC
 
 - `toi` checker honors `# waiver: <reason>` comments to silence false type-only-import findings for names resolved at runtime (pydantic, FastMCP/FastAPI, etc.); `-v` now reports waived counts.
