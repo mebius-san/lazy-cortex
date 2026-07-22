@@ -589,7 +589,7 @@ if TYPE_CHECKING:
   - `dataclasses.field(default = …)` / `default_factory`, `pydantic.Field(…)`, `attrs.field(…)`, `msgspec.field(…)`.
   - Decorator arguments (e.g., `@retry(max_attempts = 3)`, `@deprecated('reason')`).
   - `__slots__`, `__all__`, `__match_args__`, and any dunder tuple/list assignment.
-  - First positional string of `TypeVar`, `NewType`, `ParamSpec`, `TypeVarTuple`, `NamedTuple('X', …)`, `TypedDict('X', …)`, `Enum('X', …)`, `namedtuple('X', …)` — the type/class name.
+  - First positional string of `TypeVar`, `NewType`, `ParamSpec`, `TypeVarTuple`, `TypeAliasType`, `ContextVar`, `NamedTuple('X', …)`, `TypedDict('X', …)`, `Enum('X', …)` (and the other enum functional forms), `namedtuple('X', …)`, `make_dataclass('X', …)`, `new_class('X', …)` — the declared symbol name.
   - Second argument of `getattr` / `setattr` / `hasattr` / `delattr` — the attribute name.
   - `open(...)` call: the **mode** (2nd positional or `mode=` kwarg) and the **`encoding=`** kwarg — standard file-open parameters.
   - Member-name introspection probes: `'X' in EXPR.__dict__`, `'X' in vars(EXPR)`, `'X' in dir(EXPR)`. The checker **validates** the name: if `X` matches any identifier declared anywhere in the project, it is skipped; otherwise it is flagged as a probable typo or stale reference.

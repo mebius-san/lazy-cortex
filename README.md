@@ -117,41 +117,30 @@ See [`claude/lazycortex-wiki/`](claude/lazycortex-wiki/) for details.
 
 ## Quick start
 
-1. Add the marketplace and enable the plugins you want (see Installation below).
-2. Restart Claude Code.
+1. Add the marketplace and install the plugins you want (see Installation below).
+2. Run `/reload-plugins`.
 3. For each enabled plugin, run its install skill once per project: `/lazy-core.install`, `/lazy-python.install`, etc. This drops the plugin's rule templates into `.claude/rules/` and sets up any log/changelog scaffolding.
 4. Invoke skills via slash commands. Hooks activate automatically.
 
 ## Installation
 
-All plugins live in a single Claude Code marketplace. Add the marketplace and enable the plugins you want in your `~/.claude/settings.json`:
+All plugins live in a single Claude Code marketplace. Add the marketplace once, then install the plugins you want:
 
-```json
-{
-  "extraKnownMarketplaces": {
-    "lazycortex": {
-      "source": {
-        "source": "github",
-        "repo": "mebius-san/lazy-cortex"
-      },
-      "autoUpdate": true
-    }
-  },
-  "enabledPlugins": {
-    "lazycortex-core@lazycortex": true,
-    "lazycortex-diagram@lazycortex": true,
-    "lazycortex-experts@lazycortex": true,
-    "lazycortex-observe@lazycortex": true,
-    "lazycortex-obsidian@lazycortex": true,
-    "lazycortex-python@lazycortex": true,
-    "lazycortex-review@lazycortex": true,
-    "lazycortex-specs@lazycortex": true,
-    "lazycortex-wiki@lazycortex": true
-  }
-}
+```
+/plugin marketplace add mebius-san/lazy-cortex
+/plugin install lazycortex-core@lazycortex
+/plugin install lazycortex-diagram@lazycortex
+/plugin install lazycortex-experts@lazycortex
+/plugin install lazycortex-observe@lazycortex
+/plugin install lazycortex-obsidian@lazycortex
+/plugin install lazycortex-python@lazycortex
+/plugin install lazycortex-review@lazycortex
+/plugin install lazycortex-specs@lazycortex
+/plugin install lazycortex-wiki@lazycortex
+/reload-plugins
 ```
 
-Restart Claude Code after enabling. Each plugin's README explains its setup steps — most have a `<plugin>.install` skill you run once per project.
+Each plugin's README explains its setup steps — most have a `<plugin>.install` skill you run once per project.
 
 ## Author
 

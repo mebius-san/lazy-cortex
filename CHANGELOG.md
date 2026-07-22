@@ -801,6 +801,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 2.0.7 — 2026-07-22 UTC
+
+- Fixed the name-argument checker (`pcf`) flagging false positives on legitimate stdlib patterns — `ContextVar`, `TypeAliasType`, `make_dataclass`, `new_class`, and `ReprEnum` no longer trigger spurious warnings.
+
 ### 2.0.6 — 2026-07-22 UTC
 
 - `# guard:` detection now also recognizes `try`/`except` validations that exit scope (return/continue/break/raise/sys.exit), and treats always-raising calls like `pytest.skip`/`sys.exit` as exits — fixes false guard-clause flags an audit found in real code (70 of 995).
