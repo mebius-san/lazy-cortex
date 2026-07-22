@@ -3596,9 +3596,9 @@ _REGEX_FUNC_NAMES = frozenset({
 
 # functions whose first positional string is a type/class name, not a value.
 _NAME_ARG_CALL_NAMES = frozenset({
-  'TypeVar', 'NewType', 'ParamSpec', 'TypeVarTuple',
-  'NamedTuple', 'TypedDict', 'Enum', 'IntEnum', 'StrEnum', 'Flag', 'IntFlag',
-  'namedtuple',
+  'TypeVar', 'NewType', 'ParamSpec', 'TypeVarTuple', 'TypeAliasType',
+  'NamedTuple', 'TypedDict', 'Enum', 'IntEnum', 'StrEnum', 'ReprEnum', 'Flag', 'IntFlag',
+  'namedtuple', 'ContextVar', 'make_dataclass', 'new_class',
   # project-level dynamic enum builder: FooInit.build_field_names_enum('FooType')
   'build_field_names_enum',
 })
