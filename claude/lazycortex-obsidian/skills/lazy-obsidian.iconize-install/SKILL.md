@@ -1,8 +1,8 @@
 ---
 name: lazy-obsidian.iconize-install
 description: "Scaffold the iconize-sync system into an Obsidian vault: local icon-map, pre-commit shim, and a `.gitignore` entry for Iconize's live `data.json` (it's rewritten on every icon click and by the bundled iconize-reloader plugin — runtime state, not source). Quiet file-sync — writes/merges silently when absent, unchanged, or non-conflicting; asks only on a genuine same-region conflict. Orphans (a retired vault-local protocol doc, stale worker-written PostToolUse entries) are left in place silently, never deleted. Migrates icon-map schema in place. Re-runnable; idempotent. Must be run from the consumer vault's git root. Installs all three iconize-sync hard-dependency plugins — `obsidian-icon-folder` (Iconize), `folder-notes`, and the bundled `iconize-reloader` — via the `/lazy-obsidian.update-plugin` primitive, which also deep-merges opinionated settings from `plugin-settings.json`. PostToolUse is plugin-shipped — no consumer settings.json mutation."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(chmod *), Bash(python3 *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), Bash(jq *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList
-argument-hint: "[--dry-run] — scaffolds into <repo-root>/.claude/ and <repo-root>/.githooks/"
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(git -C *), Bash(chmod *), Bash(python3 *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), Bash(jq *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList
+argument-hint: "[repo=<abs>] [--dry-run] — scaffolds into <repo-root>/.claude/ and <repo-root>/.githooks/ (repo= sets the target under headless dispatch)"
 ---
 # Install iconize-sync (Obsidian)
 
@@ -53,8 +53,12 @@ The plugin no longer scaffolds a vault-local protocol doc. The single canonical 
 
 ## Step 1 — Locate repo root and vault
 
-- Repo root: `git rev-parse --show-toplevel`.
-- Vault: walk from repo root looking for `.obsidian/`. If none found, abort with a message telling the user to initialize Obsidian first.
+- Repo root (`<repo-root>`):
+  - **Headless dispatch** — if the invoking prompt carries `repo=<abs>` (a `repo=`-targeted run, e.g. from `lazy-core.autosetup` / `lazy-obsidian.install`), `<repo-root>` **is** that path. Do **not** run `git rev-parse` — a dispatched agent's Bash cwd is the coordinator's repo, not the target, so cwd-derived roots mutate the wrong repo.
+  - **Interactive** — no `repo=` in the prompt: `<repo-root>` = `git rev-parse --show-toplevel` (cwd is the vault the operator is standing in).
+- Vault (`<vault>`): walk from `<repo-root>` looking for `.obsidian/` (usually `<repo-root>` itself). If none found, abort with a message telling the user to initialize Obsidian first.
+
+Every mutating command below MUST target `<repo-root>` / `<vault>` explicitly (`--vault <vault>`, `git -C <repo-root>`, absolute `<repo-root>/…` paths) — never a cwd-relative path or a cwd walk-up. Only the git/Claude-run hook entrypoints (the pre-commit shim, PostToolUse, Stop) are allowed to resolve the vault from cwd, because there cwd is guaranteed to be the repo.
 
 ## Step 1.5 — Install/update hard-dependency plugins
 
@@ -130,13 +134,13 @@ The icon-map uses a bilateral version handshake (`schema_version` + optional `mi
 
 This step is quiet by default: it writes, merges, and migrates the icon-map silently and prompts **only** on a genuine per-key value conflict (the same key carries different values in the authored file and the shipped template, and we can't tell which should survive). Adding shipped keys, keeping authored keys, and applying a schema transform are all non-contradicting operations done silently. "Conflict" ≠ "bytes differ".
 
-Retrieve `SCHEMA_VERSION`, `SUPPORTED_SCHEMA`, and `HOOK_VERSION` from the worker: `python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py check-versions`.
+Retrieve `SCHEMA_VERSION`, `SUPPORTED_SCHEMA`, and `HOOK_VERSION` from the worker: `python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py --vault <vault> check-versions`.
 
 ### Decision matrix
 
-**Pre-flight (case 0): legacy-path migration.** Pre-1.0.0 versions of this skill placed the icon-map at `.claude/obsidian-iconize/icon-map.json`. The 1.0.0 layout is `.claude/iconize/obsidian-icon-map.json` — `iconize/` as the resolver subsystem dir, file name carries the platform tag. A path move is a clean `mv` with no content change — apply it silently, no prompt. If the legacy file exists AND the new path does not: `mkdir -p .claude/iconize && mv .claude/obsidian-iconize/icon-map.json .claude/iconize/obsidian-icon-map.json && rmdir .claude/obsidian-iconize 2>/dev/null`. Outcome contributes `path-migrated` to the Step 6 report; then continue with cases 1–5 below against the new path (the file is now at the new path → cases 2-or-later apply, never case 1). If both the legacy and the new path exist, leave the legacy file as a **kept-orphan** (don't clobber the new path) and proceed against the new path.
+**Pre-flight (case 0): legacy-path migration.** Pre-1.0.0 versions of this skill placed the icon-map at `.claude/obsidian-iconize/icon-map.json`. The 1.0.0 layout is `.claude/iconize/obsidian-icon-map.json` — `iconize/` as the resolver subsystem dir, file name carries the platform tag. A path move is a clean `mv` with no content change — apply it silently, no prompt. If the legacy file exists AND the new path does not: `mkdir -p <repo-root>/.claude/iconize && mv <repo-root>/.claude/obsidian-iconize/icon-map.json <repo-root>/.claude/iconize/obsidian-icon-map.json && rmdir <repo-root>/.claude/obsidian-iconize 2>/dev/null`. Outcome contributes `path-migrated` to the Step 6 report; then continue with cases 1–5 below against the new path (the file is now at the new path → cases 2-or-later apply, never case 1). If both the legacy and the new path exist, leave the legacy file as a **kept-orphan** (don't clobber the new path) and proceed against the new path.
 
-Cases 1–5 below operate on `.claude/iconize/obsidian-icon-map.json`:
+Cases 1–5 below operate on `<repo-root>/.claude/iconize/obsidian-icon-map.json`:
 
 1. **Target missing** → install the plugin's template at `${CLAUDE_PLUGIN_ROOT}/templates/iconize/obsidian-icon-map.json`. No prompt. State: **installed**.
 2. **Target present, `schema_version == SCHEMA_VERSION`** (handshake OK):
@@ -172,19 +176,19 @@ The only prompts this step raises are the per-key value-conflict prompts in case
 Invoke the plugin worker's `install-hooks` subcommand. This writes the pre-commit shim to `.githooks/pre-commit`. No consumer `settings.json` mutation happens here (the PostToolUse hook is plugin-shipped; see architecture note above).
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py install-hooks
+python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py --vault <vault> install-hooks
 ```
 
 Then reconcile `core.hooksPath`:
 
-- **Unset** → `git config core.hooksPath .githooks` silently (clean apply — nothing local to contradict). Outcome: **set**.
+- **Unset** → `git -C <repo-root> config core.hooksPath .githooks` silently (clean apply — nothing local to contradict). Outcome: **set**.
 - **Already `.githooks`** → no-op. Outcome: **already-set**.
 - **Set to some OTHER path** → genuine conflict: the user points git at a different hooks dir and the pre-commit shim won't fire from `.githooks`. This is the ONLY case that prompts. `AskUserQuestion`: **set-hooksPath** (repoint to `.githooks`) / **keep-local** (leave the user's path; warn the shim won't run until they wire it in). Outcome: **set** / **kept-local**.
 
 ## Step 4 — Create callbacks dir
 
 ```
-mkdir -p .claude/callbacks
+mkdir -p <repo-root>/.claude/callbacks
 ```
 
 Leave empty; add a `.gitkeep` so the directory is tracked. (Users drop executable scripts here to implement exotic `callback:` matchers.)
@@ -206,7 +210,7 @@ Idempotent: re-running reports **already-ignored** every time after the first wr
 
 ## Step 5 — Verify
 
-Run the worker's `check-versions`. Expect exit 0. Report shape includes:
+Run the worker's `--vault <vault> check-versions`. Expect exit 0. Report shape includes:
 
 - `pre_commit.status` — `ok` / `missing` / `major-drift` / `minor-drift`.
 - `icon_map_schema.status` — `ok` / `incompatible` / `missing`.
@@ -214,7 +218,7 @@ Run the worker's `check-versions`. Expect exit 0. Report shape includes:
 
 Any non-`ok` status surfaces as a drift finding; re-run the relevant step to resolve.
 
-Then run `reconcile --dry-run` and print the plan so the user can see what a full sweep would do. Do not apply.
+Then run `--vault <vault> --dry-run reconcile` and print the plan so the user can see what a full sweep would do. Do not apply.
 
 ## Step 6 — Report
 
