@@ -510,6 +510,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 2.2.2 — 2026-07-22 UTC
+
+- The iconize install skills now target the repository they are dispatched against explicitly instead of inferring it from the current directory, so an automated multi-repo setup run scaffolds each vault's icon hooks and config into that vault rather than into whichever repo the run was launched from.
+
 ### 2.2.1 — 2026-07-08 UTC
 
 - The install skill now derives its target scope from where the plugin is actually enabled (via `lazycortex-core detect-scope`) instead of the install record's `scope` field, so its config lands at the correct project-vs-user scope even when the two have drifted.
@@ -796,6 +800,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 2.0.5 — 2026-07-22 UTC
+
+- Tightened the `# guard:` comment rule to apply only to true guard clauses — an `if` whose body exits the current scope (`return`/`continue`/`break`/`raise`/`sys.exit`); accumulation and branch `if`s now use a plain comment instead.
 
 ### 2.0.4 — 2026-07-21 UTC
 

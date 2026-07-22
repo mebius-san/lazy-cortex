@@ -45,7 +45,7 @@ The command prints exactly one word:
 
 The scope is derived — do NOT ask.
 
-**Do NOT compare an entry's `projectPath` against the current working directory.** Step 2 targets `<repo-root>` (i.e. `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
+**Do NOT compare an entry's `projectPath` against the current working directory.** Step 2 targets `<repo-root>` (resolved in Step 2 — the `repo=` dispatch arg when headless, else `git rev-parse --show-toplevel` in the current cwd) regardless of any entry's `projectPath`. A `projectPath` mismatch is **never** grounds for aborting.
 
 Abort **only** on `not-installed` — the shared plugin cache is the sole proof of installation, and enablement cannot substitute for missing sources. In that case tell the user to install it first:
 ```json
@@ -64,7 +64,7 @@ For each source file `<installPath>/rules/<name>.md`, the rule destination by sc
 | `user` | `~/.claude/rules/<name>.md` |
 | `project` | `<repo-root>/.claude/rules/<name>.md` |
 
-Project root is `git rev-parse --show-toplevel` (or current working directory if not in a git repo — but warn the user).
+Project root (`<repo-root>`): if the invoking prompt carries `repo=<abs>` (a `repo=`-targeted headless run, e.g. from `lazy-core.autosetup`), `<repo-root>` **is** that path — do **not** run `git rev-parse`, because a dispatched agent's Bash cwd is the coordinator's repo, not the target. Only for an interactive run with no `repo=` is `<repo-root>` = `git rev-parse --show-toplevel` (or current working directory if not in a git repo — but warn the user).
 
 If the glob returns zero files, abort and tell the user the plugin cache is empty — they likely need to run `/plugin update lazycortex-obsidian@lazycortex` first.
 
@@ -133,7 +133,7 @@ Skip this step ONLY when scope is `user` — iconize-sync is a vault concern.
 
 No opt-in prompt: the full vault setup installs iconize-sync unconditionally (plugin enabled means full functionality). The child skill is itself quiet and idempotent — it installs Iconize + Folder Notes + iconize-reloader via `/lazy-obsidian.update-plugin`, scaffolds the icon-map + pre-commit shim, asserts Iconize frontmatter settings, manages its one `.gitignore` line, and version-checks its hard deps — silently re-running every state and prompting only on a genuine conflict. None of those states are observable from the icon-map file alone, so always run it; never short-circuit on a probe.
 
-Invoke `/lazy-obsidian.iconize-install` as the next skill call. Record **chained** for the report.
+Invoke `/lazy-obsidian.iconize-install` as the next skill call, forwarding the target explicitly as `repo=<repo-root>` so the child mutates the target repo and not the coordinator's cwd. Record **chained** for the report.
 
 ## Step 6.5: Run `/lazy-obsidian.diagram-install` (project scope only)
 
