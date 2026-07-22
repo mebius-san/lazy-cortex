@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
-last_regen: 2026-07-12
+last_regen: 2026-07-22
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -42,9 +42,19 @@ source_skills:
 
 **Symptom**: You picked `sci-fi` (or `fantasy`) when `/lazy-experts.install` asked which classes to register, but only one expert entry appeared — `sci-fi.fiction-writer` (or `fantasy.fiction-writer`) — with no interpreter, designer, planner, implementer, debugger, reviewer, or tester for that class.
 
-**Likely cause**: This is the intended behaviour, not a bug. The class map seeds roles differently by class kind: technical classes (`claude-plugin`, `game-dev`, `dotfiles`, and any future non-fiction class) get all seven engineering roles; fiction classes (`sci-fi`, `fantasy`) get only `fiction-writer`, because the other seven roles assume an engineering lifecycle (design specs, implementation plans, code review) that doesn't apply to literary work. Fiction classes also never receive `lazy-experts.tech-writing-aspect` — its bans on prose style contradict literary craft.
+**Likely cause**: This is the intended behaviour, not a bug. The class map seeds roles differently by class kind: technical classes (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, and any future non-fiction class) get all seven engineering roles; fiction classes (`sci-fi`, `fantasy`) get only `fiction-writer`, because the other seven roles assume an engineering lifecycle (design specs, implementation plans, code review) that doesn't apply to literary work. Fiction classes also never receive `lazy-experts.tech-writing-aspect` — its bans on prose style contradict literary craft.
 
-**Fix**: Nothing to fix if you're working purely in a fiction domain — `fiction-writer` is the complete role set for `sci-fi`/`fantasy`. If your project also spans a technical domain (`claude-plugin`, `game-dev`, `dotfiles`), register at least one expert of that class by hand in `lazy.settings.json[experts]`, or clear the `experts` section and re-run `/lazy-experts.install` so it asks again and seeds both class kinds together.
+**Fix**: Nothing to fix if you're working purely in a fiction domain — `fiction-writer` is the complete role set for `sci-fi`/`fantasy`. If your project also spans a technical domain (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`), register at least one expert of that class by hand in `lazy.settings.json[experts]`, or clear the `experts` section and re-run `/lazy-experts.install` so it asks again and seeds both class kinds together.
+
+---
+
+## Report ends with "system-experts: N missing"
+
+**Symptom**: The final report from `/lazy-experts.install` ends with a line like `system-experts: 2 missing`, followed by entries such as `system: review.historian (missing — run /lazy-review.install to register, or ignore if the feature is deliberately unconfigured)`.
+
+**Likely cause**: Every sibling plugin (`lazycortex-core`, `lazycortex-review`, `lazycortex-specs`, `lazycortex-wiki`) registers its own system expert (`lazy-runtime.doctor`, `review.doc_doctor`/`review.historian`, `spec.request-router`, `wiki.curator`) through its own install skill. `/lazy-experts.install` only checks whether those entries are present for sibling plugins that are enabled at the current scope — it reports a gap when a sibling plugin is enabled but has never run its own install.
+
+**Fix**: `/lazy-experts.install` never seeds these entries itself — the owning plugin's install is the sole writer. Run the fix command the report names for the missing entry (e.g. `/lazy-review.install`, `/lazy-core.install`, `/spec.install`, `/lazy-wiki.install`), or leave it alone if you deliberately haven't configured that plugin's feature yet.
 
 ---
 

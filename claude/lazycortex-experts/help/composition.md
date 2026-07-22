@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Assemble a named specialist by pairing one generic agent with aspects in lazy.settings.json[experts], following the technical/fiction class map.
-last_regen: 2026-07-12
+last_regen: 2026-07-22
 no_diagram: true
 source_skills: []
 ---
@@ -9,7 +9,7 @@ source_skills: []
 
 A specialist is a named expert entry you declare in `lazy.settings.json[experts]`. It pairs one generic agent (the persona) with one or more aspects (the knowledge and discipline layers) so the expert runtime can produce a fully-qualified specialist system prompt at dispatch time — without you authoring a fresh agent for each domain or use-case.
 
-The composition pattern has two moving parts. The **agent** supplies the output discipline: the interpreter knows how to structure a gap-free brief, the designer knows how to write a declarative spec, the planner knows how to produce a file-level task list, the implementer/debugger/reviewer/tester know their execution-stage disciplines, and the fiction-writer knows the craft of narrative prose. The **aspect** supplies the knowledge layer on top: a domain aspect adds what counts as a complete brief for a LazyCortex plugin change, what a game-design document must contain, or what a science-fiction premise owes the reader; a cross-cutting aspect adds working discipline that applies no matter the domain. Neither layer changes the other's responsibilities; the expert runtime merges them at dispatch time in the order you declare them.
+The composition pattern has two moving parts. The **agent** supplies the output discipline: the interpreter knows how to structure a gap-free brief, the designer knows how to write a declarative spec, the planner knows how to produce a file-level task list, the implementer/debugger/reviewer/tester know their execution-stage disciplines, and the fiction-writer knows the craft of narrative prose. The **aspect** supplies the knowledge layer on top: a domain aspect adds what counts as a complete brief for a LazyCortex plugin change, an Obsidian plugin, a data pipeline, a game-design document, or what a science-fiction premise owes the reader; a cross-cutting aspect adds working discipline that applies no matter the domain. Neither layer changes the other's responsibilities; the expert runtime merges them at dispatch time in the order you declare them.
 
 ## When you'd use this
 
@@ -25,10 +25,10 @@ Start by deciding which generic agent fits the job. Three agents are design-time
 
 Next, pick the aspects that add the knowledge and discipline your specialist needs. Aspects fall into two groups:
 
-- **Domain aspects** name the subject matter. Three are technical — `lazy-experts.claude-plugin-aspect`, `lazy-experts.game-dev-aspect`, `lazy-experts.dotfiles-aspect` — and pair with any of the seven technical-lifecycle agents. Two are fiction genre aspects — `lazy-experts.sci-fi-aspect`, `lazy-experts.fantasy-aspect` — and pair with `lazy-experts.fiction-writer`. If another plugin in your project ships a domain aspect, reference it by its plugin-namespace prefix the same way.
+- **Domain aspects** name the subject matter. Five are technical — `lazy-experts.claude-plugin-aspect`, `lazy-experts.game-dev-aspect`, `lazy-experts.dotfiles-aspect`, `lazy-experts.obsidian-plugin-aspect`, `lazy-experts.data-pipeline-aspect` — and pair with any of the seven technical-lifecycle agents. Two are fiction genre aspects — `lazy-experts.sci-fi-aspect`, `lazy-experts.fantasy-aspect` — and pair with `lazy-experts.fiction-writer`. If another plugin in your project ships a domain aspect, reference it by its plugin-namespace prefix the same way.
 - **Cross-cutting aspects** apply regardless of domain. `lazy-experts.discipline-aspect` carries the iron laws (verify before completion, never guess past a gap, no performative agreement) and belongs on every specialist you build, technical or fiction. `lazy-experts.tech-writing-aspect` bans literary devices and enforces a single-term-per-concept dictionary — it belongs on every **technical** specialist, but never on a fiction specialist: its bans on metaphor and figurative imagery directly contradict what `lazy-experts.fiction-writer`'s own persona requires.
 
-This technical/fiction split is the same class map `/lazy-experts.install` applies when it seeds specialists automatically: technical classes (`claude-plugin`, `game-dev`, `dotfiles`) compose `discipline-aspect` and `tech-writing-aspect` onto all seven technical-lifecycle roles (interpreter, designer, planner, implementer, debugger, reviewer, tester); fiction classes (`sci-fi`, `fantasy`) compose `discipline-aspect` only onto `fiction-writer`. When you hand-compose a specialist outside the wizard, follow the same split — a technical specialist without `tech-writing-aspect` loses terminology discipline it should have, and a fiction specialist carrying `tech-writing-aspect` gets crippled prose instructions that fight its own agent persona.
+This technical/fiction split is the same class map `/lazy-experts.install` applies when it seeds specialists automatically: technical classes (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`) compose `discipline-aspect` and `tech-writing-aspect` onto all seven technical-lifecycle roles (interpreter, designer, planner, implementer, debugger, reviewer, tester); fiction classes (`sci-fi`, `fantasy`) compose `discipline-aspect` only onto `fiction-writer`. When you hand-compose a specialist outside the wizard, follow the same split — a technical specialist without `tech-writing-aspect` loses terminology discipline it should have, and a fiction specialist carrying `tech-writing-aspect` gets crippled prose instructions that fight its own agent persona.
 
 Declare the entry in `<repo>/.claude/lazy.settings.json` under the `experts` key:
 
@@ -74,7 +74,7 @@ When you list more than one aspect, the expert runtime merges them in declaratio
 
 **Use `/lazy-experts.install` as a baseline.** If you are building a specialist that is close to one already seeded by the class map, run `/lazy-experts.install` first to register the nearest base class, then add your custom entry alongside it. The install skill never overwrites existing entries, so your custom work is safe.
 
-**Building a technical specialist by hand.** Mirror the class map: pair one of the seven technical-lifecycle agents (interpreter, designer, planner, implementer, debugger, reviewer, tester) with a technical domain aspect, then append `lazy-experts.discipline-aspect` and `lazy-experts.tech-writing-aspect` in that order, same as `/lazy-experts.install` would.
+**Building a technical specialist by hand.** Mirror the class map: pair one of the seven technical-lifecycle agents (interpreter, designer, planner, implementer, debugger, reviewer, tester) with a technical domain aspect (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, or `data-pipeline`), then append `lazy-experts.discipline-aspect` and `lazy-experts.tech-writing-aspect` in that order, same as `/lazy-experts.install` would.
 
 **Building a fiction specialist by hand.** Pair `lazy-experts.fiction-writer` with a genre aspect (`sci-fi` or `fantasy`), then append `lazy-experts.discipline-aspect` only. Never add `lazy-experts.tech-writing-aspect` to a fiction specialist.
 

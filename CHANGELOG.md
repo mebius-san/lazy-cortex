@@ -750,6 +750,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 0.7.0 — 2026-07-22 UTC
+
+- New `obsidian-plugin` and `data-pipeline` domain-aspect classes for expert composition, plus a completeness check the install skill now runs so a system-expert install can't silently skip a required aspect.
+
 ### 0.6.0 — 2026-07-13 UTC
 
 - New `lazy-experts.tester` agent — a persona-only tester role that writes test plans, executes them, files bug reports, and minimizes steps-to-reproduce, after first discovering how the repo actually tests things.

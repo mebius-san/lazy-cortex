@@ -7,7 +7,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 ---
 
-**lazycortex-experts** — generic lifecycle experts plus a starter set of domain aspects. Eight persona-only agents (interpreter / designer / planner / implementer / debugger / reviewer / tester / fiction-writer) combine with composable aspect files (claude-plugin / game-dev / dotfiles / sci-fi / fantasy) and two cross-cutting aspects (discipline, tech-writing) to form specialists you assemble in `lazy.settings.json[experts]`. No protocols, routines, or dispatcher ship from this plugin — the dispatching routine supplies the protocol and the agent follows it.
+**lazycortex-experts** — generic lifecycle experts plus a starter set of domain aspects. Eight persona-only agents (interpreter / designer / planner / implementer / debugger / reviewer / tester / fiction-writer) combine with composable aspect files (claude-plugin / game-dev / dotfiles / obsidian-plugin / data-pipeline / sci-fi / fantasy) and two cross-cutting aspects (discipline, tech-writing) to form specialists you assemble in `lazy.settings.json[experts]`. No protocols, routines, or dispatcher ship from this plugin — the dispatching routine supplies the protocol and the agent follows it.
 
 **Agents** (invoke via Agent tool, normally only via a routine that dispatches expert jobs):
 
@@ -25,6 +25,8 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-experts.claude-plugin-aspect` — Claude Code plugin authoring expertise (plugin tree, marketplace, artifact contracts, install / sync / publish lifecycle, consumer-effort versioning).
 - `lazy-experts.game-dev-aspect` — general game-development expertise (core loop, progression, balance, telemetry, content vs mechanics separation).
 - `lazy-experts.dotfiles-aspect` — general principles for personal-computer / network configuration management (dotfile-repo conventions, shell rc structure, host-vs-personal split, package manifests, init systems, secret handling). Public-marketplace-safe.
+- `lazy-experts.obsidian-plugin-aspect` — Obsidian community-plugin development expertise (plugin lifecycle, vault/workspace API boundaries, settings persistence, mobile compatibility, metadata-cache interplay, community release process).
+- `lazy-experts.data-pipeline-aspect` — data synchronization / pipeline engineering expertise (idempotency, incremental state, resumability, quota/rate-limit budgeting, integrity verification, source-data safety).
 - `lazy-experts.sci-fi-aspect` — science-fiction genre expertise (novum and worked-through consequences, extrapolation coherence, limits-as-pressure, terms introduced through use).
 - `lazy-experts.fantasy-aspect` — fantasy genre expertise (magic with rules and cost, world-consistency, naming/language coherence, lore continuity, wonder anchored in consequence).
 - `lazy-experts.discipline-aspect` — cross-cutting execution discipline, auto-composed onto every seeded expert regardless of domain: verify-before-completion, never-guess-past-a-gap, no-performative-agreement, and the principle that turns would-be human gates into document questions.
@@ -32,7 +34,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 **Skills** (invoke as `/<name>` or via Skill tool):
 
-- `lazy-experts.install` — bootstrap the plugin for the current project (or globally). Seeds agent-model tiers from `lazycortex-core`'s defaults into `lazy.settings.json[agent_models].lazycortex` and composes expert entries per the class map (technical classes: seven roles, discipline + tech-writing; sci-fi/fantasy: fiction-writer, discipline only). Idempotent.
+- `lazy-experts.install` — bootstrap the plugin for the current project (or globally). Seeds agent-model tiers from `lazycortex-core`'s defaults into `lazy.settings.json[agent_models].lazycortex` and composes expert entries per the class map (technical classes: seven roles, discipline + tech-writing; sci-fi/fantasy: fiction-writer, discipline only). Also checks system-expert completeness against sibling plugins' registrations and reports gaps. Idempotent.
 
 **Commands**:
 
@@ -60,11 +62,11 @@ The expert never runs until a routine elsewhere dispatches a job to it — by de
 **Documentation:**
 
 - [agents](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/agents.md) — Eight persona-only agents — three design-time, four execution-stage, and one literary agent for fiction deliverables.
-- [aspects](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/aspects.md) — Seven aspect files (five domain, two cross-cutting) that layer knowledge and working rigor onto any generic expert via lazy.settings.json composition.
+- [aspects](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/aspects.md) — Nine aspect files (seven domain, two cross-cutting) that layer knowledge and working rigor onto any generic expert via lazy.settings.json composition.
 - [composition](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/composition.md) — Assemble a named specialist by pairing one generic agent with aspects in lazy.settings.json[experts], following the technical/fiction class map.
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/install-and-audit.md) — Bootstrap lazycortex-experts by seeding agent-model tiers and class-mapped composed expert entries into lazy.settings.json.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/troubleshooting.md) — Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, the technical/fiction class map, composing specialists, and runtime questions.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, the technical/fiction class map, composing specialists, and the eight generic agents' lane boundaries.
 
 Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-experts/help/`.
 <!-- help-block:end -->
