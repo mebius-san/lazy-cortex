@@ -801,6 +801,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 2.0.6 — 2026-07-22 UTC
+
+- `# guard:` detection now also recognizes `try`/`except` validations that exit scope (return/continue/break/raise/sys.exit), and treats always-raising calls like `pytest.skip`/`sys.exit` as exits — fixes false guard-clause flags an audit found in real code (70 of 995).
+
 ### 2.0.5 — 2026-07-22 UTC
 
 - Tightened the `# guard:` comment rule to apply only to true guard clauses — an `if` whose body exits the current scope (`return`/`continue`/`break`/`raise`/`sys.exit`); accumulation and branch `if`s now use a plain comment instead.

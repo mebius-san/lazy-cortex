@@ -440,6 +440,7 @@ these conventions.
   - Do not add any comments to any imports and all import sections even if it has more than five lines.
 - Use `# guard: <description>` ONLY for a guard clause: an `if` whose body exits the current scope — `return`, `continue`, `break`, `raise`, or `sys.exit`. If the body does anything else (assign, append, call, mutate), it is NOT a guard — use a plain `# <description>` comment or none.
   - Hard test: cover the `if` body. If control leaves the function or loop iteration, it is a guard. Otherwise it is not.
+  - A `try`/`except` validation whose `except` block exits the scope the same way (e.g. a contract cast that logs and returns on `TypeError`) also qualifies as a guard. Calls that always raise (`pytest.skip`, `sys.exit`) count as exits.
   - Place the guard comment immediately before the `if` statement that performs the check.
   - The description states what the check rejects, literally. Never invent a "skip"/"else" narrative the code does not execute.
   - Keep the description short and focused on what is being validated.
@@ -492,7 +493,7 @@ The codebase uses several marker prefixes in comments. Each serves a specific pu
 - `DBG:` — marks diagnostic/debug code blocks used during development to inspect runtime state.
 - `REF:` — marks source references pointing to related code, classes, constants, or `DOC(…)` groups elsewhere in the codebase. Stripped automatically during generation; serves only as human-readable traceability links.
 - `opt:` — marks optimization annotations that explain why a non-obvious implementation choice was made for performance reasons.
-- `guard:` — marks a guard clause: an `if` whose body exits the current scope (`return`/`continue`/`break`/`raise`/`sys.exit`). Not for accumulation or branch ifs (see guard rules in Comments section above).
+- `guard:` — marks a guard clause: an `if` (or equivalent `try`/`except` validation) whose body exits the current scope (`return`/`continue`/`break`/`raise`/`sys.exit`). Not for accumulation or branch ifs (see guard rules in Comments section above).
 - `DOC(…):` — marks documentation comments that describe domain rules, mechanics, algorithms, or other domain-specific concepts (see DOC Comments section below).
 - `waiver:` — marks an intentional exception from a coding rule. The comment must explain **why** the exception is justified. Required whenever `typing.cast()` is used (see Type Casting rules) or any other banned pattern is unavoidable.
 
