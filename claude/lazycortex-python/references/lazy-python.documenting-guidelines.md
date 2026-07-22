@@ -438,10 +438,23 @@ these conventions.
   - Start with a lowercase letter.
   - Be concise (one sentence when possible).
   - Do not add any comments to any imports and all import sections even if it has more than five lines.
-- Use `# guard: <description>` comments for early-exit validation checks (guard clauses). These comments mark defensive checks that validate preconditions before proceeding with the main logic.
-  - Example: `# guard: check target position`.
+- Use `# guard: <description>` ONLY for a guard clause: an `if` whose body exits the current scope — `return`, `continue`, `break`, `raise`, or `sys.exit`. If the body does anything else (assign, append, call, mutate), it is NOT a guard — use a plain `# <description>` comment or none.
+  - Hard test: cover the `if` body. If control leaves the function or loop iteration, it is a guard. Otherwise it is not.
   - Place the guard comment immediately before the `if` statement that performs the check.
+  - The description states what the check rejects, literally. Never invent a "skip"/"else" narrative the code does not execute.
   - Keep the description short and focused on what is being validated.
+  - Correct:
+      # guard: no target position, nothing to move
+      if target is None:
+        return
+  - Wrong (accumulation if — not a guard, comment invents a "skip"):
+      # guard: skip rows whose action carries no asset id
+      if row[ChapterField.SKILL_AID]:
+        asset_aids.add(row[ChapterField.SKILL_AID])
+  - Right version of the above:
+      # collect asset ids present on skill rows
+      if row[ChapterField.SKILL_AID]:
+        asset_aids.add(row[ChapterField.SKILL_AID])
 - Correct:
 ```python
 # convert vector back to original coordinates
@@ -479,7 +492,7 @@ The codebase uses several marker prefixes in comments. Each serves a specific pu
 - `DBG:` — marks diagnostic/debug code blocks used during development to inspect runtime state.
 - `REF:` — marks source references pointing to related code, classes, constants, or `DOC(…)` groups elsewhere in the codebase. Stripped automatically during generation; serves only as human-readable traceability links.
 - `opt:` — marks optimization annotations that explain why a non-obvious implementation choice was made for performance reasons.
-- `guard:` — marks early-exit validation checks (guard clauses) that validate preconditions before proceeding with the main logic (see guard rules in Comments section above).
+- `guard:` — marks a guard clause: an `if` whose body exits the current scope (`return`/`continue`/`break`/`raise`/`sys.exit`). Not for accumulation or branch ifs (see guard rules in Comments section above).
 - `DOC(…):` — marks documentation comments that describe domain rules, mechanics, algorithms, or other domain-specific concepts (see DOC Comments section below).
 - `waiver:` — marks an intentional exception from a coding rule. The comment must explain **why** the exception is justified. Required whenever `typing.cast()` is used (see Type Casting rules) or any other banned pattern is unavoidable.
 
