@@ -436,6 +436,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.3.0 — 2026-07-23 UTC
+
+- Repo entries can set `local_path: "."` to mean the current checkout — same-repo products now resolve correctly across dev and runtime checkouts, with no hardcoded absolute paths needed. Re-run `/spec.install` (or `/plugin update`) to pick up the new resolver.
+
 ### 3.2.0 — 2026-07-21 UTC
 
 - Fixed `spec.request-open` / `spec.request-apply` routines re-dispatching every 5 seconds forever; they now default to a 60-second interval and correctly exclude the requests folder-note. Re-run `/spec.install` to apply the fix to existing vaults.

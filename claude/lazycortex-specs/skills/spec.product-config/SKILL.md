@@ -103,7 +103,7 @@ Outcome: `sourced` or `design-only`.
 Triggered from Step 4 when `source.repo` names an unregistered repo:
 
 1. `AskUserQuestion` for the repo key (lowercase-with-hyphens, e.g. `backend`, `shared`). Validate uniqueness among the keys in the `repos` section read in Step 1.
-2. `AskUserQuestion` for `local_path` (an absolute path to the checkout). Validate the directory exists and is a git repo.
+2. `AskUserQuestion` for `local_path`. Stem: `local_path` is where `spec.resolve-repo` reads this repo's source and git remote. Why-it-matters: an absolute path pins the repo to one machine's checkout; `"."` (same-repo) stays checkout-agnostic. Options: `this repo (.)` — the code lives in the very repo that holds `lazy.settings.json`; write the literal `"."` and every checkout (dev, or a runtime checkout under `~/lazy-runtime/<repo>`) resolves it to its own root via `git rev-parse --show-toplevel`, so no absolute path leaks into the tracked settings; and `absolute path` — a fixed checkout elsewhere on this machine (the cross-repo case, e.g. a separate spec-vault and code repo), typed via "other". Validate existence: for `"."` run `git rev-parse --show-toplevel` (cwd must be a git repo); for an absolute path, the directory exists and is a git repo. See: `${CLAUDE_PLUGIN_ROOT}/references/spec.config-protocol.md`.
 3. Auto-detect the default branch:
 
    ```bash

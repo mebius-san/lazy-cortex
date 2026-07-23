@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Resolve repos, dependencies, and build forge-correct source URLs so every spec link stays accurate regardless of where code is hosted.
-last_regen: 2026-07-21
+last_regen: 2026-07-23
 diagram_spec:
   anchor: "How the three skills compose"
   request: "Show how spec.resolve-repo, spec.resolve-dependency, and spec.source-url call each other: spec.source-url calls spec.resolve-repo to get RepoInfo; spec.resolve-dependency calls spec.resolve-repo internally for internal-product and internal-repo entries; spec.resolve-repo reads lazy.settings.json[repos] and inspects the git remote. Output is a URL or a dep record."
@@ -28,13 +28,15 @@ When a spec document links to source code or records a dependency on another pro
 
 Everything flows through `/spec.resolve-repo`. You give it a repo key — a string you chose when you ran `/spec.product-config` to register the repo, such as `backend` or `shared`. The skill reads that record from `lazy.settings.json[repos]`, runs `git remote get-url origin` on the local checkout, normalises the URL from SSH to HTTPS if needed, and identifies the forge by matching the hostname against the known-forges table. What comes back is a `RepoInfo` record: `local_path`, `branch`, `remote_url`, `host`, `owner`, `repo`, `forge`, and `base_url`. Each skill run caches the record for its duration, so building hundreds of source URLs for a large codebase doesn't shell out on every call.
 
+A repo's `local_path` is usually an absolute path to a separate checkout, but when the product's spec lives in the same repo as its code, you can register `local_path: "."` instead — the skill expands it to the current checkout's root at resolve time, so the same registration works whether you're running from a dev checkout or a runtime checkout in a different location.
+
 `/spec.source-url` calls `/spec.resolve-repo` first, then picks up the forge key and looks up the URL template for the requested kind — `blob` for a file link, `tree` for a directory link. It substitutes `base_url`, branch, and path into the template and returns the complete URL. When the calling doc pins a branch via `spec_source_branches`, you pass it as the optional `branch` argument and the URL points at the feature branch instead of the default. The skill is stateless and idempotent: same inputs, same URL, every time.
 
 `/spec.resolve-dependency` handles the dependency side. A product's `dependencies` array in `lazy.settings.json` accepts three entry shapes. A `product:` entry names another product by compound key; the skill looks that product up, calls `/spec.resolve-repo` on its source repo, and returns a wikilink to its design doc (at the product's flattened spec root — no `docs/` subfolder) plus a `dev_link` pointing at the repo root. A `repo:` entry names a repo key directly; the skill resolves it the same way and finds whichever product declares that repo as its source. An `external:` entry already has `spec_url` and `dev_url` spelled out — the skill validates the fields are present and returns them as-is. The output is always `{kind, spec_link, dev_link, local_spec_path?}` — one consistent shape regardless of entry flavour, which is what callers like `/spec.product-config` import classification expect.
 
 ## Common adjustments
 
-**Registering a repo** — if `/spec.resolve-repo` aborts because a key is not registered, run `/spec.product-config` to add or edit the product that owns that repo. The wizard writes `lazy.settings.json[repos][<key>]` with `local_path` and `branch`. Do not edit the settings file by hand.
+**Registering a repo** — if `/spec.resolve-repo` aborts because a key is not registered, run `/spec.product-config` to add or edit the product that owns that repo. The wizard writes `lazy.settings.json[repos][<key>]` with `local_path` and `branch`. For a product whose spec and code share one repo, the wizard can set `local_path` to `"."` rather than an absolute path. Do not edit the settings file by hand.
 
 **Adding a forge override for a self-hosted instance** — if the hostname is not in the known-forges table (for example, `gitlab.internal.company.example`), `/spec.resolve-repo` aborts with a message naming the missing key. Run `/spec.product-config`, find the repo record, and set `forge` to one of the supported keys (`github`, `gitlab`, `bitbucket`, `gitea`, `forgejo`, `sourcehut`) — whichever matches the instance's URL scheme. The skill writes the override.
 

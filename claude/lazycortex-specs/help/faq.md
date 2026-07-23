@@ -1,15 +1,16 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about products, assets, gates, code sync, releases, requests, and source links in lazycortex-specs.
-last_regen: 2026-07-21
+last_regen: 2026-07-23
 no_diagram: true
 source_skills:
   - spec.create-asset
   - spec.create-feature
   - spec.create-change
   - spec.create-bug
+  - spec.add-asset-category
+  - spec.create-from-code
   - spec.create-request
-  - spec.request-router
   - spec.flip-gate
   - spec.gate-tick
   - spec.set-stage
@@ -18,7 +19,11 @@ source_skills:
   - spec.resolve-repo
   - spec.resolve-dependency
   - spec.source-url
-  - spec.install
+  - spec.request-router
+  - spec.request-classify
+  - spec.request-find-candidates
+  - spec.request-attach
+  - spec.request-spawn
   - spec.product-config
   - spec.doctor
 ---
@@ -32,6 +37,14 @@ Run `/spec.product-config` to register a new product. The wizard asks for the pr
 
 ---
 
+## Can I generate a product's spec from an existing codebase instead of writing it by hand?
+
+Yes, for a product that is already registered with a source binding. Run `/spec.create-from-code <product>` — it scans the source in parallel, then writes a behaviour-only product design doc and a code-grounded product tech doc, complete with the primary behavioural and architecture diagrams. It also surfaces feature-candidates it found in the code and, per candidate, asks whether to scaffold a full feature (delegating to `/spec.create-asset`), record it only as an architectural area inside the tech doc, or skip it.
+
+The skill requires the product to already carry a `source` binding — register that first with `/spec.product-config`. On a design-only product (no source attached) it no-ops rather than guessing at code that isn't wired in.
+
+---
+
 ## What is the difference between a feature, a change, and a bug?
 
 All three are assets — they share the same gate ladder and folder layout — but the problem they capture is different. A **feature** describes new behaviour that does not yet exist. A **change** is the atomic modification of something that already exists: a rename, a constraint relaxation, a behaviour adjustment. A **bug** describes a defect: what was supposed to happen, what happened instead, and how to reproduce it.
@@ -42,9 +55,9 @@ The document layout differs too. Features and changes get `design.md` + `plan.md
 
 ## Can the plugin track non-software work — characters, scenes, chapters?
 
-Yes, as long as the category has already been declared on the product. `/spec.create-asset <product> <category> <slug>` accepts any built-in category (`feature` / `change` / `bug`) or any key already present in the product's `asset_categories` — anything else is refused, with the refusal message naming the category and the product and pointing you at the skill that registers new categories on a product.
+Yes, as long as the category has already been declared on the product. Run `/spec.add-asset-category <product> <category>` to register a new category — it writes the category into the product's `asset_categories`, scaffolds the category folder, and renders its operator-zone folder-note. Once registered, `/spec.create-asset <product> <category> <slug>` accepts it; naming a category that has not been registered is refused, with the refusal message naming the category and the product and pointing you at `/spec.add-asset-category`.
 
-Once a category exists on the product, `/spec.create-asset` scales its clarifying questions to it: for an operator-defined category the questions are grounded in whatever the category's `design.md` template is meant to capture. The result behaves identically to a feature — five gates, the same folder-note shape, the same review flow.
+Once a category exists on the product, `/spec.create-asset` scales its clarifying questions to it: for an operator-defined category the questions are grounded in whatever the category's `design.md` template is meant to capture. The result behaves identically to a feature — five gates, the same folder-note shape, the same review flow. A category's docs are covered automatically by the product's existing behaviour-keyed review classes (their globs already span every category folder) — registering a category never touches `review.classes`.
 
 ---
 
@@ -105,6 +118,14 @@ Once the request body is approved during review, the `spec.request-router` agent
 
 ---
 
+## The requests pipeline mentions classify / find-candidates / attach / spawn — do I ever run those myself?
+
+Normally no — `spec.request-router` calls them for you once a request's body is approved in review: it classifies the body (`spec.request-classify`), searches for existing attach targets (`spec.request-find-candidates`), then either attaches to an existing entity (`spec.request-attach`) or spawns a brand-new one (`spec.request-spawn`) once you confirm the routing.
+
+Each is also a standalone primitive you can invoke directly if you want manual control — for example to re-classify a request after editing it, or to attach a request to a specific entity without waiting for the router's ranking. `spec.request-attach` and `spec.request-spawn` are idempotent on the request side: re-running with the same request/target pair is a safe no-op rather than a duplicate append.
+
+---
+
 ## Source links in my tech doc point at the wrong forge URL format. How do I fix that?
 
 Every source URL in the spec system is built by the `spec.source-url` primitive from a known-forges table (GitHub, GitLab, Bitbucket, Gitea, Forgejo, SourceHut) — never inlined as a hard-coded `/blob/<branch>/<path>`. Run `/spec.doctor <product>` to find links that were not produced that way; it reports every source link whose format doesn't match, or whose branch segment doesn't match the file's pin or the repo default.
@@ -130,11 +151,4 @@ Re-run `/spec.doctor <product> --apply` — the fix loop offers to strip the obs
 ## A dependency in my product record points at a product or repo key that no longer exists. What do I do?
 
 `spec.resolve-dependency` refuses with a clear error naming the missing key rather than silently dropping or guessing at it. Run `/spec.product-config` on the product — its dependency step lets you review, extend, or correct the `dependencies` list; it never removes an entry you don't explicitly touch, so you can fix just the stale one.
-
----
-
-## What does `/spec.install` actually set up, and do I need to run it more than once?
-
-`/spec.install` bootstraps the plugin for the current project (or globally): it creates the per-category template-override directories, reads or seeds the repo's default authoring language, registers the `spec.gate-tick` daemon routine so gates advance automatically, wires the request-handler runtime (the routines and review class that make the requests inbox live), and offers to register your first product via `/spec.product-config`.
-
-It's idempotent — safe to re-run any time, including after a plugin update. Every write follows the same rule: an absent file is created, a locally-changed-but-compatible one is merged silently, and only a genuine conflict (a local edit the shipped update would clobber) stops to ask you. Re-running never re-asks a question it already has an answer for, and it never deletes anything you configured by hand.
+</content>

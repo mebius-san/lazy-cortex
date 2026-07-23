@@ -25,13 +25,25 @@ lazycortex-core settings-get repos
 
 The command prints the `repos` object — each key is a repo key, each value a record. Select the record under `<repo>` and read:
 
-- `local_path` (required) — absolute path to the local checkout.
+- `local_path` (required) — absolute path to the local checkout, **or the literal `"."`** meaning "the repo that contains this settings file" (same-repo products).
 - `branch` (required) — default branch to link against.
 - `forge` (optional) — explicit forge key override; only used when the hostname is not in the known-forges table.
 
 If `<repo>` is not a key in the `repos` section, abort with a message telling the user to register the repo via `/spec.product-config` (the wizard that writes `lazy.settings.json[repos][<repo>]`).
 
 If the record is present but `local_path` or `branch` is missing, abort with a message naming the incomplete record (`local_path` + `branch` are required, `forge` optional).
+
+### 1a. Resolve `local_path == "."` (same-repo products)
+
+When `local_path` is the literal `"."`, expand it to the root of the current checkout:
+
+```bash
+git rev-parse --show-toplevel
+```
+
+(cwd = the repo holding `.claude/lazy.settings.json`). Use the expanded absolute path for every downstream step AND for the returned `local_path` field — checkout-agnostic by design: a dev checkout resolves to the dev root, a runtime checkout (`~/lazy-runtime/<repo>`) resolves to the runtime root, each reading its own source and its own git remote. If `git rev-parse --show-toplevel` fails (cwd is not a git repo), abort with "`repos[<key>].local_path` is `.` but the current directory is not a git repo".
+
+An absolute `local_path` is used verbatim (no expansion). The "directory exists and is a git repo" validation and every downstream field (`branch`, `remote_url`, `host`, `owner`, `forge`, `base_url`) are computed from the resolved path in both cases.
 
 ### 2. Get the remote URL
 
@@ -97,6 +109,7 @@ The `RepoInfo` record above. Callers pass the repo key and path to `spec.source-
 
 - **`/spec.resolve-repo` aborts: repo key not registered** — `<key>` is not a key in `lazy.settings.json[repos]` → register the repo via `/spec.product-config`, then re-run.
 - **`/spec.resolve-repo` aborts: missing `local_path` or `branch`** — the `repos[<key>]` record is incomplete → add `local_path:` and `branch:` to the record (optionally `forge:`) via `/spec.product-config` and re-run.
+- **`/spec.resolve-repo` aborts: `local_path` is `.` but the current directory is not a git repo** — the record uses the same-repo `"."` form but `git rev-parse --show-toplevel` failed → run from inside the checkout that holds `.claude/lazy.settings.json`, or set an absolute `local_path`.
 - **`/spec.resolve-repo` aborts: "no git remotes configured"** — `git remote` returned nothing for the checkout at `<local_path>` → add at least one remote (`git remote add origin <url>`) and re-run.
 - **`/spec.resolve-repo` aborts: nested GitLab subgroup path** — the remote URL path has more than two segments (`owner/group/repo`) → nested subgroups are not yet supported; use an explicit `forge:` override and a two-segment owner/repo or wait for subgroup support.
 - **`/spec.resolve-repo` aborts: unknown forge** — the remote's hostname is not in the known-forges table and no `forge:` key is set in the record → add `forge: <key>` (one of `github`, `gitlab`, `bitbucket`, `gitea`, `forgejo`, `sourcehut`) to `lazy.settings.json[repos][<key>]`.

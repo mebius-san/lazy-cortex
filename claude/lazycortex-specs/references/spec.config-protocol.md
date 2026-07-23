@@ -64,11 +64,15 @@ repos:
   shared:
     local_path: /abs/path/to/shared
     branch: master
+  self:                       # same-repo product — code lives in this very repo
+    local_path: "."           # expands to `git rev-parse --show-toplevel` per checkout
+    branch: master
+    forge: github             # explicit when the remote host isn't auto-detected
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `local_path` | yes | Absolute path to the local checkout, used to read source during generation |
+| `local_path` | yes | Absolute path to the local checkout, **or `"."` — the repo containing this settings file** (same-repo products); `spec.resolve-repo` expands `"."` to `git rev-parse --show-toplevel` so each checkout resolves to its own root |
 | `branch` | yes | Branch to link against (typically `main` / `master`). Skills compare against this as the repo's default when reconciling pins |
 | `forge` | no | Forge key override (`github` / `gitlab` / `bitbucket` / `gitea` / `forgejo` / `sourcehut`). Needed ONLY when the hostname on the local checkout's git remote is not in the known-forges table (e.g., self-hosted GitLab / Gitea). For well-known hosts, omit this field — the forge is auto-detected |
 
