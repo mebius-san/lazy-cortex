@@ -1,7 +1,7 @@
 ---
 name: lazy-diagram.install
 description: "Bootstrap the lazycortex-diagram plugin for the current project (or globally). Syncs the authoring rule shipped by the plugin into the consumer's rules directory and seeds agent model tiers for the per-format drawer agents. Idempotent and quiet on re-run — an enabled plugin installs its whole surface, decisions are derived not asked, and orphaned rules are left in place. Detects install scope automatically."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(date *), Bash(diff *), Bash(lazycortex-core *), AskUserQuestion
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(date *), Bash(diff *), Bash(lazycortex-core *), AskUserQuestion, Skill
 ---
 # Install lazycortex-diagram
 
@@ -15,7 +15,7 @@ This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 1 — Detect install scope`
    - `Step 2 — Determine paths`
    - `Step 3 — Sync rule templates`
-   - `Step 4 — Seed lazy.settings.json`
+   - `Step 4 — Seed agent-model tiers`
    - `Step 5 — Verify / Report`
    - `Step 6 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
@@ -103,61 +103,22 @@ For every rule name in (source ∪ target):
 
 Target files outside this plugin's owned namespaces (other plugins, user-authored rules) are never touched and never reported as orphans.
 
-## Step 4: Seed lazy.settings.json
+## Step 4: Seed agent-model tiers
 
-Non-destructively seed the `lazycortex` domain group in `agent_models` with the subagents this plugin ships. **Tier values are read from `lazycortex-core`'s `default-tiers.json` at runtime** — there is no hardcoded table here. Adding/removing a `lazycortex-diagram:*` agent and updating `default-tiers.json` is enough; this step picks the change up automatically.
+Seed the `agent_models.lazycortex` group with this plugin's drawer subagents by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-diagram:`-prefix filter, and the non-destructive per-key semantics (absent→add, equal→unchanged, different→kept-local). There is no inline tier logic here.
 
-### Target file
+Dispatch, passing the scope resolved in Step 1 (`project` | `user`):
 
-| Scope | Path |
-|---|---|
-| `user` | `~/.claude/lazy.settings.json` |
-| `project` | `<repo-root>/.claude/lazy.settings.json` |
-
-### Read or initialize
-
-Read the target file. If missing or unparseable, treat its contents as `{"version": 1, "agent_models": {}}`.
-
-### Ensure domain group exists
-
-Ensure `agent_models.lazycortex` exists as an object (create empty `{}` if absent — never overwrite existing content, and never touch other groups).
-
-### Build the seed set from `default-tiers.json`
-
-`lazycortex-core` is a declared dependency (`plugin.json`), so it must be installed (in the cache) or co-resident (in the dev vault). Locate the canonical defaults file per the inter-plugin boundary contract — walk `$LAZYCORTEX_PLUGIN_DIRS` first, fall back to the cache glob when env is unset (install-time invocation outside the daemon):
-
-```bash
-FILE=""
-IFS=":" read -ra DIRS <<< "${LAZYCORTEX_PLUGIN_DIRS:-}"
-for d in "${DIRS[@]}"; do
-  if [[ "$d" == *"/lazycortex-core" ]] && [ -f "$d/skills/lazy-core.agent-models/default-tiers.json" ]; then
-    FILE="$d/skills/lazy-core.agent-models/default-tiers.json"; break
-  fi
-done
-[ -z "$FILE" ] && FILE=$(ls ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/skills/lazy-core.agent-models/default-tiers.json 2>/dev/null | sort -V | tail -1)
+```
+Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-diagram scope=<scope>")
 ```
 
-The newest version wins. Read the file, parse the JSON, and select every key under `defaults` that starts with `lazycortex-diagram:`. Those are the entries to seed (key + tier verbatim).
+Fold the primitive's returned report block verbatim into this skill's Step 5 report. Surface its terminal outcomes:
 
-If the file is absent → FAIL with `lazycortex-core not installed; install it before /lazy-diagram.install`. Don't fall through to a hardcoded fallback — silent drift is exactly what the SOT is meant to prevent.
+- **`sot-missing`** — `lazycortex-core`'s `default-tiers.json` was not found → the primitive aborts; relay its message (`lazycortex-core not installed; install it before seeding lazycortex-diagram tiers`) and do not fabricate seed lines.
+- **`no-entries`** — the SOT lists no `lazycortex-diagram:` agents → report it plainly (a maintainer must extend `default-tiers.json`); not an abort.
 
-### Apply per-key semantics
-
-For each `(dispatch, tier)` pulled from the JSON (write back only if anything changed):
-
-- **absent** in `agent_models.lazycortex` → add the entry with the JSON's tier. State **added**.
-- **equal** → leave untouched. State **unchanged**.
-- **different** → leave the user's value untouched. State **kept-local** (report user's value alongside the JSON's).
-
-Never touch other `lazycortex` entries (e.g. `lazycortex-log:*` seeded by `lazy-log.install`).
-
-### Write back
-
-If any mutation happened, write the file with `version: 1` at the top.
-
-### Report outcome
-
-One line per seeded entry: `lazycortex.<key> = <value> (<state>)`. Include the resolved `default-tiers.json` path so the user can see where the defaults came from.
+Step outcome: `seeded` (any entry added) or `unchanged`.
 
 ## Step 5: Verify / Report
 

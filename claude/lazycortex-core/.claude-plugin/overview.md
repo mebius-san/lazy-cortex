@@ -41,8 +41,8 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 
 ## Quick start
 
-1. Enable the plugin in `~/.claude/settings.json` (see the README for the marketplace + `enabledPlugins` block).
-2. Restart Claude Code.
+1. Install the plugin (see the README's Installation section — `/plugin marketplace add` + `/plugin install`).
+2. Run `/reload-plugins`.
 3. Run `/lazy-core.install` inside each project (or once globally) to drop the always-loaded `lazy-core.hygiene` and `lazy-guard.security` rules, sync authoring templates, and seed `lazy.settings.json`.
 4. Run `/lazy-core.audit` to see what is currently loading; run `/lazy-core.doctor` whenever the config feels off.
 5. For public repos: run `/lazy-repo.mark-public` to set up `.guard-waivers.json` and opt into pre-commit scanning.

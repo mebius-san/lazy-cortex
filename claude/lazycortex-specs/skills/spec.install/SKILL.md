@@ -35,7 +35,7 @@ Bash(PYTHONPATH=<core-bin> python3 -c "from lazy_settings import load_tracked_se
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 11 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. Canonical list (titles verbatim):
    - `Step 1 — Detect install scope`
@@ -44,6 +44,7 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 4 — Seed default language`
    - `Step 5 — Register the gate-tick routine`
    - `Step 6 — Wire the request-handler runtime`
+   - `Step 6.5 — Seed agent-model tiers`
    - `Step 7 — Offer first product registration`
    - `Step 8 — Register the plugin-CLI Bash allow-pattern`
    - `Step 9 — Verify`
@@ -330,6 +331,23 @@ Idempotent with the same offer from `lazy-review.install`: already-attached prot
 
 Outcome: the helper's return — `attached:<n>` / `declined` / `no-relevant-candidates` / `routine-absent`.
 
+## Step 6.5: Seed agent-model tiers
+
+The plugin ships the `spec.request-router` subagent (wired as an expert in Step 6). Seed the `agent_models.lazycortex` group with this plugin's subagents by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-specs:`-prefix filter, and the non-destructive per-key semantics (absent→add, equal→unchanged, different→kept-local). There is no inline tier logic here.
+
+Dispatch, passing the scope resolved in Step 1 (`project` | `user`):
+
+```
+Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-specs scope=<scope>")
+```
+
+Fold the primitive's returned report block verbatim into this skill's Step 9 report. Surface its terminal outcomes:
+
+- **`sot-missing`** — `lazycortex-core`'s `default-tiers.json` was not found → the primitive aborts; relay its message (`lazycortex-core not installed; install it before seeding lazycortex-specs tiers`) and do not fabricate seed lines.
+- **`no-entries`** — the SOT lists no `lazycortex-specs:` agents → report it plainly (a maintainer must extend `default-tiers.json`); not an abort.
+
+Step outcome: `seeded` (any entry added) or `unchanged`.
+
 ## Step 7: Offer first product registration
 
 Ask via `AskUserQuestion`:
@@ -372,6 +390,7 @@ Outcome: `cli-allow-added` or `cli-allow-already-present`.
   - Step 4 outcome (`language-on-record:<code>`, `language-default-en`, or `language-set:<code>`)
   - Step 5 outcome (`routine-registered`, `routine-already-present`, or `skipped-daemon-disabled`)
   - Step 6 outcome (`wiring-applied:<N>`, `wiring-applied:<N> (daemon-disabled)`, or `skipped-user-scope`)
+  - Step 6.5 outcome (`seeded` or `unchanged`), with the primitive's report block folded in verbatim; surface `sot-missing` / `no-entries` if returned
   - Step 7 outcome (`registered: <compound-key>` or `skipped-per-user-choice`)
 
 ## Step 10: Log the run

@@ -73,22 +73,9 @@ Resolve paths:
 | `user` | `~/.claude/rules/` | `~/.claude/lazy.settings.json` |
 | `project` | `<repo-root>/.claude/rules/` | `<repo-root>/.claude/lazy.settings.json` |
 
-Locate `lazycortex-core`'s `default-tiers.json` per the inter-plugin contract — walk `$LAZYCORTEX_PLUGIN_DIRS` first, fall back to the cache glob when env is unset:
+The `lazycortex-core` tier SOT (`default-tiers.json`) is located by the seeding primitive itself in Step 6 — this step only resolves the rules dir and target `lazy.settings.json` path from the scope.
 
-```bash
-FILE=""
-IFS=":" read -ra DIRS <<< "${LAZYCORTEX_PLUGIN_DIRS:-}"
-for d in "${DIRS[@]}"; do
-  if [[ "$d" == *"/lazycortex-core" ]] && [ -f "$d/skills/lazy-core.agent-models/default-tiers.json" ]; then
-    FILE="$d/skills/lazy-core.agent-models/default-tiers.json"; break
-  fi
-done
-[ -z "$FILE" ] && FILE=$(ls ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/skills/lazy-core.agent-models/default-tiers.json 2>/dev/null | sort -V | tail -1)
-```
-
-Newest version wins. If absent → FAIL: *"lazycortex-core not installed; install it before /wiki.install."*
-
-Outcome: `target-resolved: <settings-path>`, `defaults-resolved: <tiers-path>`.
+Outcome: `target-resolved: <settings-path>`.
 
 ## Step 3: Create template directory
 
@@ -143,19 +130,21 @@ Outcome: `wiki-section: <seeded|already-present>`.
 
 ## Step 6: Seed agent_models
 
-Ensure `agent_models` exists as an object and `agent_models.lazycortex` exists as an object (create both if absent — never overwrite other groups or other `lazycortex` entries).
+Delegate the entire seed to the shared primitive — do not hand-roll SOT lookup, `lazycortex-wiki:` filtering, or per-key apply:
 
-From the resolved `default-tiers.json`, select every key under `defaults` that starts with `lazycortex-wiki:`. Those are the entries to seed.
+```
+Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-wiki scope=<scope>")
+```
 
-For each `(dispatch, tier)` pair:
+`<scope>` is the value resolved in Step 1 (`project` or `user`). The primitive locates `lazycortex-core`'s `default-tiers.json`, selects every `lazycortex-wiki:*` entry, applies absent/equal/different (`added` / `unchanged` / `kept-local`) semantics against `agent_models.lazycortex`, and writes back only on a mutation.
 
-- **absent** in `agent_models.lazycortex` → add the entry. State `added`.
-- **equal** → leave untouched. State `unchanged`.
-- **different** → leave the user's value untouched. State `kept-local` (report both values).
+Fold the primitive's returned `agent-models-seed(...)` block into the Step 9 report verbatim. Surface its outcome:
 
-Write the file if any mutation happened (preserve `_version: 1` at top level).
+- `sot-missing` → abort the install (`lazycortex-core` not installed) — same FAIL as Step 2's defaults check.
+- `no-entries` → surface plainly (`default-tiers.json` is missing this plugin's agents); not an abort.
+- `seeded-N` / `unchanged` → the normal path.
 
-Outcome (one line per seeded entry): `agent_models.lazycortex.<key> = <tier> (<state>)`.
+Outcome: `agent-models: <seeded-N|unchanged|no-entries>`.
 
 ## Step 7: Register curator expert + (daemon-gated) routines
 
@@ -181,7 +170,7 @@ State `experts.wiki.curator: <seeded|kept-local>`.
 
 ### Daemon gate for the routines (read-first, never ask)
 
-Gate 1 (`daemon.enabled`) is owned by `lazy-core.install`. This skill only **reads** the tracked flag and honours it silently — it never opens an `AskUserQuestion`. Resolve `<core-bin>` (the `bin/` dir of the newest `lazycortex-core` — the parent of the directory holding `default-tiers.json` resolved in Step 2 is its `skills/...`; walk `$LAZYCORTEX_PLUGIN_DIRS` for `*/lazycortex-core/bin`, falling back to `ls ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/bin | sort -V | tail -1`), then read the flag:
+Gate 1 (`daemon.enabled`) is owned by `lazy-core.install`. This skill only **reads** the tracked flag and honours it silently — it never opens an `AskUserQuestion`. Resolve `<core-bin>` (the `bin/` dir of the newest `lazycortex-core` — walk `$LAZYCORTEX_PLUGIN_DIRS` for `*/lazycortex-core/bin`, falling back to `ls ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/bin | sort -V | tail -1`), then read the flag:
 
 ```bash
 PYTHONPATH=<core-bin> python3 -c "from lazy_settings import load_tracked_section; from pathlib import Path; print(load_tracked_section(Path('<repo-root>/.claude/lazy.settings.json'),'daemon').get('enabled','unset'))"

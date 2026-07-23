@@ -470,10 +470,13 @@ Append it to the candidate list unconditionally:
 
 It then flows through §§ 2–4 exactly like a scanned candidate (skipped if already registered, bot `git_author`, entry `{agent, git_author}`).
 
-Additionally, ensure the doctor's model tier exists in the **project** `agent_models` (the expert runtime resolves models from `<repo-root>/.claude/lazy.settings.json` only). Pull the tier for key `lazycortex-core:lazy-runtime.doctor` from `${CLAUDE_PLUGIN_ROOT}/skills/lazy-core.agent-models/default-tiers.json` (same SOT and same missing-file FAIL as Step 6), then merge it under the `lazycortex` group via `load_tracked_section` / `save_section`:
+Additionally, ensure lazycortex-core's own agent-model tiers — the doctor's included — exist in the **project** `agent_models.lazycortex` (the expert runtime resolves models from `<repo-root>/.claude/lazy.settings.json` only). Dogfood the shared seeding primitive instead of hand-rolling the SOT lookup (same pattern as Step 4 dispatching `lazy-core.scaffold-sync`):
 
-- **absent** → add `agent_models.lazycortex["lazycortex-core:lazy-runtime.doctor"] = <tier from JSON>`. State **tier-added**.
-- **present** (any value) → leave the user's value untouched. State **tier-kept-local**.
+```
+Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-core scope=project")
+```
+
+`scope=project` (NOT Step 1's install scope) because Steps 9–13 always target the runtime repo and the doctor's tier must land in `<repo-root>/.claude/lazy.settings.json` for expert-runtime resolution. The primitive reads the same SOT (`default-tiers.json`, same missing-file FAIL as Step 6), seeds every `lazycortex-core:<agent>` key — the doctor plus its sibling agents — under the `lazycortex` group, and never clobbers an operator override. State per the primitive's report: **tier-added** (entries seeded), **tier-kept-local** (operator overrides preserved), or **unchanged**. Fold its per-key block into the Step 14 report.
 
 ### 2. Filter already-registered candidates
 
@@ -790,6 +793,7 @@ Report to the user:
 - Experts directory bootstrap outcome (Step 10)
 - `.memory/` directory bootstrap outcome (Step 10.5)
 - Expert registration outcome (Step 11)
+- lazycortex-core agent-model tier seed outcome (Step 11 §1b, via `lazy-core.agent-models-seed`)
 - Expert-pump routine registration outcome (Step 12)
 - Daemon supervisor install outcome (Step 13)
 - Sandbox/permissions merge outcome (Step 13.5)

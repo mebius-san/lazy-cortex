@@ -1,11 +1,11 @@
 ---
 name: spec.add-asset-category
-description: Register a new operator-defined asset category on a product — writes the category block (`icon`, optional `color`) into `products[<key>].asset_categories.<name>` and scaffolds the category folder + operator-zone folder-note (carrying the managed `iconize_icon`/`iconize_color` and an operator-authored `description`). The category's docs are covered automatically by the product's behavior-keyed review classes (wildcard globs) — this skill never touches `review.classes`. Invoke when an operator wants a product to grow a new asset kind (characters / scenes / chapters / …) beyond the built-in feature / change / bug set.
+description: Register a new operator-defined asset category on a product — writes the category block (`icon`, optional `color`) into `products[<key>].asset_categories.<name>` and scaffolds the category folder + operator-zone folder-note (carrying the managed `iconize_icon`/`iconize_color` and an operator-authored `description`). The category's docs are covered automatically by the shared behavior-keyed review classes (right-anchored wildcard globs) — this skill never touches `review.classes`. Invoke when an operator wants a product to grow a new asset kind (characters / scenes / chapters / …) beyond the built-in feature / change / bug set.
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, AskUserQuestion, TaskCreate, TaskUpdate, TaskList
 ---
 # Add Asset Category
 
-Register one operator-defined asset category on a product and wire it into the system end to end. Resolves the product from `lazy.settings.json[products][<key>]`, collects the category name / description / icon through a one-question-at-a-time wizard, writes the category block into the product's `asset_categories`, and scaffolds the category folder and its operator-zone folder-note. Review coverage is automatic: the product's behavior-keyed review classes (`design@<key>` / `plan@<key>`, written by `spec.product-config` Step 10 with `<spec_path>/*/*/<doc>.md` globs) already span every category folder, so this skill writes NO review classes and syncs NO routine globs. Asset categories are an open set — a category registered here is recognised by `spec.request-classify`, `spec.create-asset`, and the review daemon on their next run, with no rubric, class, or code edit.
+Register one operator-defined asset category on a product and wire it into the system end to end. Resolves the product from `lazy.settings.json[products][<key>]`, collects the category name / description / icon through a one-question-at-a-time wizard, writes the category block into the product's `asset_categories`, and scaffolds the category folder and its operator-zone folder-note. Review coverage is automatic: the shared behavior-keyed review classes (`design` / `plan`, written by `spec.product-config` Step 10 with right-anchored `*/<doc>.md` globs — or a product's `<kind>@<key>` override) already span every category folder, so this skill writes NO review classes and syncs NO routine globs. Asset categories are an open set — a category registered here is recognised by `spec.request-classify`, `spec.create-asset`, and the review daemon on their next run, with no rubric, class, or code edit.
 
 The category's per-block config carries ONLY `{ "icon": <icon> }` (plus optional `"color"`). The category's human description does NOT live in config — it is authored into the `description` frontmatter of the category folder-note (`<spec_path>/<name>/<name>.md`), which the plugin only READS. The plugin WRITES the managed `iconize_icon` / `iconize_color` keys into that folder-note from config. The folder-note carries NO `spec_role` — it is an operator-zone folder-note.
 
@@ -139,7 +139,7 @@ Outcome: `logged`.
 
 ## Report
 
-One line per task in the canonical list, with its outcome word. A missing line is a bug. End with a note that review coverage is inherited from the product's behavior-keyed classes — `spec.create-asset` docs under `<spec_path>/<name>/<slug>/` match the `design@<key>` / `plan@<key>` globs with no class written here.
+One line per task in the canonical list, with its outcome word. A missing line is a bug. End with a note that review coverage is inherited from the shared behavior-keyed classes — `spec.create-asset` docs under `<spec_path>/<name>/<slug>/` match the right-anchored `design` / `plan` globs (or the product's `<kind>@<key>` override) with no class written here.
 
 ## Failure modes
 

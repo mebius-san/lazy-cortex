@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.17.0 — 2026-07-23 UTC
+
+- Plugin installs now seed their subagents' model tiers from a single canonical source via a shared helper, instead of each install hand-rolling the lookup. The catalog now covers the diagram, python, and specs agents too, and `lazycortex-core`'s own install seeds every one of its agents (previously only the runtime doctor).
+
 ### 5.16.3 — 2026-07-20 UTC
 
 - Error ledger now runs bounded during a crash loop — duplicate events within the same hour are deduped and pruning caps each incident at 200 kept events, preventing multi-GB journals and multi-minute freezes.
@@ -436,6 +440,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.4.0 — 2026-07-23 UTC
+
+- Review classes are now shared across the whole spec vault: one design / plan / tech / bug set serves every product, so registering additional products no longer duplicates the class set. A product whose review experts differ still gets its own per-product override.
+- Install now seeds the request-router agent's model tier automatically.
+
 ### 3.3.0 — 2026-07-23 UTC
 
 - Repo entries can set `local_path: "."` to mean the current checkout — same-repo products now resolve correctly across dev and runtime checkouts, with no hardcoded absolute paths needed. Re-run `/spec.install` (or `/plugin update`) to pick up the new resolver.
@@ -513,6 +522,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 2.2.3 — 2026-07-23 UTC
+
+- Install now seeds the tag-page agent's model tier from the shared canonical catalog.
 
 ### 2.2.2 — 2026-07-22 UTC
 
@@ -628,6 +641,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.1.4 — 2026-07-23 UTC
+
+- Install now seeds the diagram drawer agents' model tiers automatically from the shared canonical catalog.
+
 ### 1.1.3 — 2026-07-08 UTC
 
 - The install skill now derives its target scope from where the plugin is actually enabled (via `lazycortex-core detect-scope`) instead of the install record's `scope` field, so its config lands at the correct project-vs-user scope even when the two have drifted.
@@ -657,6 +674,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 5.2.5 — 2026-07-23 UTC
+
+- Install now seeds the review agents' model tiers automatically (previously left unset until you ran the model-tier wizard).
 
 ### 5.2.4 — 2026-07-18 UTC
 
@@ -754,6 +775,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 0.7.1 — 2026-07-23 UTC
+
+- Install now seeds the expert agents' model tiers from the shared canonical catalog instead of a bundled copy.
+
 ### 0.7.0 — 2026-07-22 UTC
 
 - New `obsidian-plugin` and `data-pipeline` domain-aspect classes for expert composition, plus a completeness check the install skill now runs so a system-expert install can't silently skip a required aspect.
@@ -808,6 +833,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 2.0.8 — 2026-07-23 UTC
+
+- Install now seeds the docstring-writer and test-writer agents' model tiers automatically (previously left unset until you ran the model-tier wizard).
 
 ### 2.0.7 — 2026-07-22 UTC
 
@@ -897,6 +926,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 1.6.1 — 2026-07-23 UTC
+
+- Install now seeds the wiki agents' model tiers from the shared canonical catalog instead of a bundled copy.
 
 ### 1.6.0 — 2026-07-16 UTC
 

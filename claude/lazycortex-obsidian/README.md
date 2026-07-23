@@ -110,26 +110,13 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-obsidian/help/`.
 
 ## Installation
 
-Add the marketplace and enable the plugin in your global `~/.claude/settings.json`:
-
-```json
-{
-  "extraKnownMarketplaces": {
-    "lazycortex": {
-      "source": {
-        "source": "github",
-        "repo": "mebius-san/lazy-cortex"
-      },
-      "autoUpdate": true
-    }
-  },
-  "enabledPlugins": {
-    "lazycortex-obsidian@lazycortex": true
-  }
-}
+```
+/plugin marketplace add mebius-san/lazy-cortex
+/plugin install lazycortex-obsidian@lazycortex
+/reload-plugins
 ```
 
-Restart Claude Code. Skills appear as `lazycortex-obsidian:<skill.name>`.
+Skills appear as `lazycortex-obsidian:<skill.name>`.
 
 ## Usage
 
