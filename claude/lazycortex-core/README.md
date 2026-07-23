@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fde68a"
 ---
 # lazycortex-core
 
@@ -49,8 +49,8 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 
 ## Quick start
 
-1. Enable the plugin in `~/.claude/settings.json` (see the README for the marketplace + `enabledPlugins` block).
-2. Restart Claude Code.
+1. Install the plugin (see the README's Installation section — `/plugin marketplace add` + `/plugin install`).
+2. Run `/reload-plugins`.
 3. Run `/lazy-core.install` inside each project (or once globally) to drop the always-loaded `lazy-core.hygiene` and `lazy-guard.security` rules, sync authoring templates, and seed `lazy.settings.json`.
 4. Run `/lazy-core.audit` to see what is currently loading; run `/lazy-core.doctor` whenever the config feels off.
 5. For public repos: run `/lazy-repo.mark-public` to set up `.guard-waivers.json` and opt into pre-commit scanning.
@@ -60,6 +60,7 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 | Skill | Description |
 |---|---|
 | `lazy-core.agent-models` | Interactively assign model tiers (haiku/sonnet/opus/default) to every dispatchable subagent missing from `lazy.settings.json`, and prune entries whose plugin agent no longer exists. Auto-routes each entry to its structurally-correct scope: `_user.*` → global file, `_project.*` → project file, `_builtin.*` → global (override with `--scope=project\|global`). Non-interactive executors (`lazy-core.autosetup`) auto-apply the curated tiers from `default-tiers.json`, apply the prune, and report the rest as needs-interactive. Cheap, standalone, idempotent — safe to re-run. Invoked directly or by `lazy-core.optimize` Phase 7. |
+| `lazy-core.agent-models-seed` | Install-time helper: seed the `agent_models.lazycortex` group of a consumer's `lazy.settings.json` with the canonical model tiers for one plugin's shipped subagents, read from `lazycortex-core`'s `default-tiers.json` (the single source of truth). Invoked by a plugin's install skill via Skill dispatch — never operator-facing. |
 | `lazy-core.audit` | Quick read-only audit of what gets loaded into conversation context at startup plus skill-writing, agent-writing, rule-writing, and logging compliance. Shows sizes, loading behavior, optimization opportunities, Execution-Discipline preamble presence, no-Optional headings, narrative-padding heuristics, rule-file frontmatter/size/code-block/scope enforcement, and logging-rule installation state. No changes made. |
 | `lazy-core.doctor` | Health check for Claude Code project configuration. Verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, checks that installed plugins are at the latest marketplace version, and delegates to sibling audit skills (lazy-guard.check-public, lazy-log.audit) when they apply. Reports issues and offers targeted fixes. Run periodically or when something feels off. |
 | `lazy-core.git-status` | Read-only inspect of the lazy-core.git staging lock. Prints holder, age, liveness, and whether the lock is currently breakable. No state mutation. |
@@ -156,26 +157,13 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-core/help/`.
 
 ## Installation
 
-Add the marketplace and enable the plugin in your global `~/.claude/settings.json`:
-
-```json
-{
-  "extraKnownMarketplaces": {
-    "lazycortex": {
-      "source": {
-        "source": "github",
-        "repo": "mebius-san/lazy-cortex"
-      },
-      "autoUpdate": true
-    }
-  },
-  "enabledPlugins": {
-    "lazycortex-core@lazycortex": true
-  }
-}
+```
+/plugin marketplace add mebius-san/lazy-cortex
+/plugin install lazycortex-core@lazycortex
+/reload-plugins
 ```
 
-Restart Claude Code. Skills appear as `lazycortex-core:<skill.name>`.
+Skills appear as `lazycortex-core:<skill.name>`.
 
 ## Usage
 
@@ -183,6 +171,7 @@ Invoke skills with slash commands:
 
 ```
 /lazy-core.agent-models
+/lazy-core.agent-models-seed
 /lazy-core.audit
 /lazy-core.doctor
 /lazy-core.git-status

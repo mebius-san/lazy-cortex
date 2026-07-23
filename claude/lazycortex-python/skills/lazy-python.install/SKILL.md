@@ -1,7 +1,7 @@
 ---
 name: lazy-python.install
 description: Quiet install that wires lazycortex-python into a consumer repo — mirrors rules, deploys chk-py / tst-py wrappers, bootstraps the pyproject.toml checker stack, scaffolds project overlay guidelines, syncs the scaffold template, and records python.env_source when the repo ships an env-bootstrap script. Asks the user almost nothing: install scope is derived, `pch` (PyCharm offline inspections) follows whether `inspect.sh` is present, and it never touches CLAUDE.md (the plugin rules load from `.claude/rules/` regardless); the only prompt beyond a File-sync conflict is disambiguating multiple env_source candidates. The PostToolUse check-style hook auto-registers from the plugin manifest — no install step writes to settings.json.
-allowed-tools: Bash, Read, Edit, Write, Glob, Grep, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet
+allowed-tools: Bash, Read, Edit, Write, Glob, Grep, Skill, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet
 user-invocable: true
 ---
 # Install lazycortex-python
@@ -12,7 +12,7 @@ The PostToolUse check-style hook auto-registers from the plugin's `hooks/hooks.j
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Mirror plugin rules into .claude/rules/`
@@ -22,6 +22,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5 — Scaffold project overlay guidelines under docs/guidelines/`
    - `Step 6 — Sync scaffold templates via lazy-core.scaffold-sync`
    - `Step 7 — Record python.env_source when a project env script is present`
+   - `Step 7.5 — Seed agent-model tiers`
    - `Step 8 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`installed`, `unchanged`, `merged`, `wrappers-deployed-2`, `already-present`, …).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
@@ -165,6 +166,23 @@ The phase reads the current value and probes the candidate scripts (`cli/env`, `
 The zero- and single-candidate paths are silent; the only prompt this step can raise is the multiple-candidate disambiguation.
 
 Outcome: `env-source-already-set` / `env-source-no-candidate` / `env-source-recorded:<path>` / `env-source-skipped-per-user-choice`.
+
+## Step 7.5: Seed agent-model tiers
+
+Seed the `agent_models.lazycortex` group with this plugin's shipped subagents (`lazy-python.docstring-writer`, `lazy-python.test-writer`) by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-python:`-prefix filter, and the non-destructive per-key semantics (absent→add, equal→unchanged, different→kept-local). No inline tier logic here. Scope is `project` — lazycortex-python is per-repo tooling (see "Decisions are remembered" above), so the primitive targets `<repo-root>/.claude/lazy.settings.json`.
+
+Dispatch:
+
+```
+Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-python scope=project")
+```
+
+Fold the primitive's returned report block verbatim into this skill's Report. Surface its terminal outcomes:
+
+- **`sot-missing`** — `lazycortex-core`'s `default-tiers.json` was not found → the primitive aborts; relay its message (`lazycortex-core not installed; install it before seeding lazycortex-python tiers`) and do not fabricate seed lines.
+- **`no-entries`** — the SOT lists no `lazycortex-python:` agents → report it plainly (a maintainer must extend `default-tiers.json`); not an abort.
+
+Outcome: `seeded` (any entry added) or `unchanged`.
 
 ## Step 8: Log the run
 

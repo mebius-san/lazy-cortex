@@ -10,7 +10,7 @@ Per-repo bootstrap: gets a clean checkout to the point where the daemon can star
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. Canonical titles:
    - `Step 1 — Bootstrap settings + dirs`
@@ -18,9 +18,10 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 3 — Attach optional routine protocols`
    - `Step 4 — Surface gitignore suggestions`
    - `Step 5 — Register the plugin-CLI Bash allow-pattern`
+   - `Step 5.5 — Seed agent-model tiers`
    - `Step 6 — Point user at /lazy-review.configure`
    - `Report`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** Each step emits a one-word outcome (`installed` / `already-installed` / `registered` / `already-present` / `skipped-daemon-disabled` / `attached` / `no-relevant-candidates` / `declined` / `surfaced` / `cli-allow-added` / `cli-allow-already-present` / `pointed` / `report-emitted`).
+2. **Mark each task `in_progress` on enter and `completed` on exit.** Each step emits a one-word outcome (`installed` / `already-installed` / `registered` / `already-present` / `skipped-daemon-disabled` / `attached` / `no-relevant-candidates` / `declined` / `surfaced` / `cli-allow-added` / `cli-allow-already-present` / `seeded` / `unchanged` / `pointed` / `report-emitted`).
 3. **Do not reach the Report step until every prior task is `completed`.**
 
 ## Decisions are remembered, never re-asked
@@ -126,6 +127,21 @@ Bash(lazycortex-core permission-allow <repo-root>/.claude/settings.local.json "B
 ```
 
 Outcome: `cli-allow-added` or `cli-allow-already-present`.
+
+## Step 5.5 — Seed agent-model tiers
+
+The plugin ships the `lazy-review.doc_doctor` and `lazy-review.historian` subagents. Seed their canonical model tiers into the `agent_models.lazycortex` group by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-review:`-prefix filter, and the non-destructive per-key semantics (absent→add, equal→unchanged, different→kept-local). No inline tier logic here. lazy-review is per-repo, so the scope is always `project`.
+
+```
+Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-review scope=project")
+```
+
+Fold the primitive's returned report block verbatim into this skill's Report. Surface its terminal outcomes:
+
+- **`sot-missing`** — `lazycortex-core`'s `default-tiers.json` was not found → the primitive aborts; relay its message (`lazycortex-core not installed; install it before seeding lazycortex-review tiers`) and do not fabricate seed lines.
+- **`no-entries`** — the SOT lists no `lazycortex-review:` agents → report it plainly (a maintainer must extend `default-tiers.json`); not an abort.
+
+Outcome: `seeded` (any entry added) or `unchanged`.
 
 ## Step 6 — Point user at /lazy-review.configure
 

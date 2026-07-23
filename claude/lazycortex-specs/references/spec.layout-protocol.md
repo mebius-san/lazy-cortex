@@ -35,7 +35,7 @@ There is **no `backlog/` folder** (removed), **no `human-tasks.md` loose file** 
 Asset categories are an **open set**:
 
 - **Built-in**: `feature` / `change` / `bug`, with folders `features/` / `changes/` / `bugs/`. Always present.
-- **Operator-defined**: any key declared in `products[<key>].asset_categories` (config block carrying `{ icon, color? }`). A category registered via `/spec.add-asset-category` is recognised by `spec.create-asset`, `spec.request-classify`, and the review daemon on their next run without a rubric or code edit. Each operator-defined category gets its own folder `<spec_path>/<name>/`, its operator-zone folder-note, and a default design + plan review-class pair.
+- **Operator-defined**: any key declared in `products[<key>].asset_categories` (config block carrying `{ icon, color? }`). A category registered via `/spec.add-asset-category` is recognised by `spec.create-asset`, `spec.request-classify`, and the review daemon on their next run without a rubric or code edit. Each operator-defined category gets its own folder `<spec_path>/<name>/` and its operator-zone folder-note; its design / plan docs are covered by the shared behavior-keyed review classes (right-anchored `*/design.md` / `*/plan.md` globs) — no per-category class is created.
 
 An asset folder (under any category) is `<spec_path>/<category>/<slug>/` and holds:
 

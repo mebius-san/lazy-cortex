@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#93c5fd"
 ---
 # lazycortex-wiki
 
@@ -86,26 +86,13 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-wiki/help/`.
 
 ## Installation
 
-Add the marketplace and enable the plugin in your global `~/.claude/settings.json`:
-
-```json
-{
-  "extraKnownMarketplaces": {
-    "lazycortex": {
-      "source": {
-        "source": "github",
-        "repo": "mebius-san/lazy-cortex"
-      },
-      "autoUpdate": true
-    }
-  },
-  "enabledPlugins": {
-    "lazycortex-wiki@lazycortex": true
-  }
-}
+```
+/plugin marketplace add mebius-san/lazy-cortex
+/plugin install lazycortex-wiki@lazycortex
+/reload-plugins
 ```
 
-Restart Claude Code. Skills appear as `lazycortex-wiki:<skill.name>`.
+Skills appear as `lazycortex-wiki:<skill.name>`.
 
 ## Usage
 

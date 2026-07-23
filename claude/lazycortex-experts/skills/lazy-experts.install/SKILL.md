@@ -1,7 +1,7 @@
 ---
 name: lazy-experts.install
 description: "Bootstrap the lazycortex-experts plugin for the current project (or globally). Seeds two things into `lazy.settings.json`: (1) agent-model tiers for the generic agents from `lazycortex-core`'s `default-tiers.json` into `agent_models.lazycortex`; (2) composed expert entries per the class map (technical classes seed seven roles; fiction classes `sci-fi`/`fantasy` seed only `fiction-writer`) into `experts` — every entry also carries `lazycortex-experts:lazy-experts.discipline-aspect` (plus `lazy-experts.tech-writing-aspect` on technical classes), `lazycortex-core:lazy-memory.persona-aspect`, and a deterministic bot `git_author`. Asks which expert classes to register ONLY when no domain-class experts exist yet (system experts seeded by sibling plugins don't count); when domain experts are present it derives the classes and completes them without asking. Also checks system-expert completeness against the registry of sibling-plugin experts and reports missing ones (never seeds them — the owning plugin's install does). Experts and tiers are dispatch-routing config used by interactive flows AND the daemon — never gated on `daemon.enabled`. Idempotent and quiet on re-run; existing entries are never overwritten. Detects install scope automatically."
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *), Bash(lazycortex-core *)
+allowed-tools: Read, Write, Edit, Glob, Skill, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *), Bash(lazycortex-core *)
 ---
 # Install lazycortex-experts
 
@@ -60,23 +60,9 @@ Outcome: `scope-detected: <user|project>`.
 | `user` | `~/.claude/lazy.settings.json` |
 | `project` | `<repo-root>/.claude/lazy.settings.json` (root = `git rev-parse --show-toplevel`, or cwd if not in a git repo — warn the user) |
 
-Locate `lazycortex-core`'s shipped defaults file per the inter-plugin boundary contract — walk `$LAZYCORTEX_PLUGIN_DIRS` first, fall back to the cache glob when env is unset (install-time invocation outside the daemon):
+The `lazycortex-core` defaults file (`default-tiers.json`, the tier SOT) is located by the seeding primitive itself in Step 4 — this step only resolves the target `lazy.settings.json` path from the scope.
 
-```bash
-CORE_DIR=""
-IFS=":" read -ra DIRS <<< "${LAZYCORTEX_PLUGIN_DIRS:-}"
-for d in "${DIRS[@]}"; do
-  if [[ "$d" == *"/lazycortex-core" ]] && [ -f "$d/skills/lazy-core.agent-models/default-tiers.json" ]; then
-    CORE_DIR="$d"; break
-  fi
-done
-[ -z "$CORE_DIR" ] && CORE_DIR=$(ls -d ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/ 2>/dev/null | sort -V | tail -1)
-FILE="$CORE_DIR/skills/lazy-core.agent-models/default-tiers.json"
-```
-
-Newest version wins. If `$FILE` is absent → FAIL with `lazycortex-core not installed; install it before /lazy-experts.install`. Do NOT fall through to a hardcoded fallback — silent drift is exactly what the SOT is meant to prevent.
-
-Outcome: `target-resolved: <path>`, `defaults-resolved: <path>`.
+Outcome: `target-resolved: <path>`.
 
 ## Step 3: Determine expert classes
 
@@ -117,19 +103,15 @@ Outcome: `classes: <comma-list> (asked|derived)`.
 
 ## Step 4: Seed agent_models
 
-Read the target `lazy.settings.json`. If missing or unparseable, initialize as `{"_version": 1, "agent_models": {}, "experts": {"_version": 1}}`. Ensure `agent_models.lazycortex` exists as an object (create empty `{}` if absent — never overwrite other groups).
+Dispatch the shared seeding primitive — it locates `lazycortex-core`'s `default-tiers.json` (the SOT), selects the `lazycortex-experts:*` keys, and applies them to `agent_models.lazycortex` in the target `lazy.settings.json` with absent→add / equal→unchanged / different→kept-local semantics (never clobbers an operator override, never touches other groups):
 
-Read the resolved defaults JSON. Select every key under `defaults` that starts with `lazycortex-experts:` — these are the agent-tier entries to seed.
+```
+Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazycortex-experts scope=<scope>")
+```
 
-For each `(dispatch, tier)` pair from the defaults file, write back only if anything changed:
+`<scope>` is the value resolved in Step 1 (`user` or `project`). Capture the primitive's report block — its `sot:` path and per-key states — verbatim; Step 7 folds it into the install report and surfaces `sot-missing` / `no-entries` if the primitive returns them.
 
-- **absent** in `agent_models.lazycortex` → add the entry. State `added`.
-- **equal** → leave untouched. State `unchanged`.
-- **different** → leave the user's value untouched. State `kept-local` (report both values).
-
-Never touch other `lazycortex` entries (seeded by sibling install skills).
-
-Outcome (one line per seeded entry): `lazycortex.<key> = <tier> (<state>)`.
+Outcome: `seeded` (entries added) or `unchanged` (nothing to add).
 
 ## Step 5: Seed expert entries
 
@@ -230,9 +212,9 @@ Outcome: `system-experts: complete` or `system-experts: <N> missing`.
 - Report to the user:
   - Scope detected.
   - Plugin version + commit synced from (from `installed_plugins.json`).
-  - Defaults file path used.
   - Class set + whether it was `asked` or `derived` (Step 3).
-  - Per-key outcome for both `agent_models` and `experts`.
+  - The `agent_models` seed result: fold in the Step 4 primitive's report block (its `sot:` defaults path + per-key states). If the primitive returned `sot-missing` or `no-entries`, surface that line prominently.
+  - Per-key outcome for `experts`.
   - System-expert check result (Step 6): the `system-experts:` outcome plus one line per missing/unknown key.
   - If any existing technical-class experts lack the tech-writing aspect: `hint: <N> existing expert(s) missing lazycortex-experts:lazy-experts.tech-writing-aspect — append it to their aspects[] by hand, or remove the entries and re-run to re-seed.`
 

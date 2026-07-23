@@ -85,26 +85,13 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-observe/help/`.
 
 ## Installation
 
-Add the marketplace and enable the plugin in your global `~/.claude/settings.json`:
-
-```json
-{
-  "extraKnownMarketplaces": {
-    "lazycortex": {
-      "source": {
-        "source": "github",
-        "repo": "mebius-san/lazy-cortex"
-      },
-      "autoUpdate": true
-    }
-  },
-  "enabledPlugins": {
-    "lazycortex-observe@lazycortex": true
-  }
-}
+```
+/plugin marketplace add mebius-san/lazy-cortex
+/plugin install lazycortex-observe@lazycortex
+/reload-plugins
 ```
 
-Restart Claude Code. Skills appear as `lazycortex-observe:<skill.name>`.
+Skills appear as `lazycortex-observe:<skill.name>`.
 
 ## Usage
 
