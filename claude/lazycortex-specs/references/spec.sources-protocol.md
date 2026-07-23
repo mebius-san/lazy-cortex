@@ -161,7 +161,7 @@ Source code is referenced by forge URL (GitHub / GitLab / Bitbucket / Gitea / Fo
 
 ### Known-forges table
 
-`spec.resolve-repo` maps a git remote hostname to a forge key; `spec.source-url` maps `(forge key, kind)` to a URL template. `<base>` in each template is `https://<host>/<owner>/<repo>` (no trailing slash, no `.git` suffix).
+`spec.resolve-repo` maps a git remote hostname to a forge key; `spec.source-url` maps `(forge key, kind)` to a URL template. `<base>` in each template is `https://<host>/<owner>/<repo>` (no trailing slash, no `.git` suffix). A repo record whose `local_path` is `"."` (same-repo product) resolves to `git rev-parse --show-toplevel` in the current checkout before the remote is read — the forge/`<base>` derivation is otherwise identical (see [config-protocol](./spec.config-protocol.md) Part 1 § Repo records).
 
 | Forge key | Hostname match | File URL (`kind=blob`) | Tree URL (`kind=tree`) |
 |---|---|---|---|

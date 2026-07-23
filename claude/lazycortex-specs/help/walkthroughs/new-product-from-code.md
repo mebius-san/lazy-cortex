@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to an existing codebase, generate its design and tech docs from source, then scaffold the first feature.
-last_regen: 2026-07-15
+last_regen: 2026-07-23
 diagram_spec:
   anchor: "## How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs spec.product-config to register the product and write settings, then runs spec.create-from-code to scan source and produce design + tech docs, then runs spec.create-feature to scaffold the first feature asset; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -29,7 +29,7 @@ After completing this walkthrough you will have:
 
 - `lazycortex-specs` installed and running (`/spec.install` completed at least once in this repo).
 - `lazycortex-core` available — it provides the `settings-get` / `settings-set` CLI and the runtime daemon.
-- A local checkout of the source repo you want to document. The checkout must exist on disk at a path Claude Code can read.
+- A local checkout of the source repo you want to document — either the same repo that holds your spec vault (`/spec.product-config` can register it with `local_path: "."`, so every checkout resolves its own root with no absolute path needed), or a separate checkout that exists on disk at a path Claude Code can read.
 - At least one expert registered in `lazy.settings.json[experts]` for the designer, developer, and tester roles. If you have not set up experts yet, run `/spec.install` — it offers to configure them — or run `lazycortex-experts` to compose the personas first.
 - `lazycortex-diagram` available — the creation skill draws diagrams in the generated docs.
 
@@ -43,7 +43,7 @@ The key decisions you will make:
 
 - **Product leaf name** — the folder name that becomes the trailing segment of the compound key (e.g. `api-gateway`, `invoicing`). Use lowercase-with-hyphens.
 - **Subsystem and namespace** — where in the vault the product folder sits. You can place it directly under a top-level subsystem folder, or inside an optional namespace grouping folder.
-- **Source repo** — whether this product has source code (it does) and which registered repo key maps to it. If the checkout is not registered yet, the wizard runs an inline sub-wizard to capture the local path and default branch for you. Point it at the root of your checkout.
+- **Source repo** — whether this product has source code (it does) and which registered repo key maps to it. If the checkout is not registered yet, the wizard runs an inline sub-wizard to capture the local path and default branch for you. When the code lives in the very repo that holds your spec vault, pick `this repo (.)` — the wizard writes the literal `"."` so every checkout (dev machine, or a runtime checkout elsewhere) resolves its own root, no absolute path required. Otherwise point it at the root of a separate checkout that lives elsewhere on disk.
 - **Source paths** — the subdirectories within the repo that this product covers. A single path like `src/api` is fine; you can add more paths if the product spans multiple subdirectories. The skill validates that each path exists on disk.
 - **Dependencies** — the skill dispatches a read-only scan of your source paths and presents each detected dependency (internal products, cross-repo, or external packages) for you to accept or skip, one at a time.
 - **Expert assignments** — the designer, developer, and tester personas that will review this product's docs. Pick from your registered experts.
