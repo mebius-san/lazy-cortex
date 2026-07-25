@@ -940,6 +940,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-wiki
 
+### 1.6.2 — 2026-07-25 UTC
+
+- Fixed git-watch curation jobs failing every run with an `unpinned_model` error — the curator expert lookup used the wrong key and never resolved a model tier.
+
 ### 1.6.1 — 2026-07-23 UTC
 
 - Install now seeds the wiki agents' model tiers from the shared canonical catalog instead of a bundled copy.

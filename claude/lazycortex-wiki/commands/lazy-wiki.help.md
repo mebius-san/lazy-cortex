@@ -11,7 +11,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 **Skills** (invoke as `/<name>` or via Skill tool):
 
-- `wiki.install` — bootstrap the plugin: create config directories, register the `wiki` settings section, register the git-watch (changed + deleted files) and weekly-scan routines, compose the `wiki-curator` expert, sync `lazy-wiki.navigation` rule to the consumer's rules directory, then point you at `/wiki.configure` for the first scope.
+- `wiki.install` — bootstrap the plugin: create config directories, register the `wiki` settings section, register the git-watch (changed + deleted files) and weekly-scan routines, compose the `wiki.curator` expert, sync `lazy-wiki.navigation` rule to the consumer's rules directory, then point you at `/wiki.configure` for the first scope.
 - `wiki.configure` — interactive wizard (one question at a time) to create or edit a scope: scope id, path globs (markdown and/or code), optional exclude paths, tag axes, topics-index path. Writes the scope entry to `lazy.settings.json[wiki.scopes]`.
 - `wiki.relink` — daemon-free relink of one wiki scope: computes the relink plan, dispatches the wiki curator per node, rebuilds `topics.md`, and commits under the operator identity.
 - `wiki.query` — associative Q&A over the wiki graph: a thin dispatcher that runs a per-scope `seeker` subagent to pick entry points from `topics.md`, then a single `gatherer` subagent to traverse glossed See-also links and synthesise the answer — keeping the large index and node bodies out of the main session.

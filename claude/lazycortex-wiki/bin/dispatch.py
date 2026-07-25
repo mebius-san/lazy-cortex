@@ -34,7 +34,7 @@ class CoreDispatch:
   """
 
   # Expert name as it appears in `lazy.settings.json[experts]`.
-  EXPERT_NAME = "wiki-curator"
+  EXPERT_NAME = "wiki.curator"
 
   # Subcommand forwarded to lazycortex-core.
   _CMD_DISPATCH = "dispatch-job"
@@ -82,7 +82,7 @@ class CoreDispatch:
     payload: dict,
   ) -> dict:
     """
-    Queue a wiki-curator job for one node via `dispatch-job`.
+    Queue a `wiki.curator` job for one node via `dispatch-job`.
 
     Builds the full job bundle and forwards it to `lazycortex-core
     dispatch-job`.  Core owns the job-dir layout, config.json
