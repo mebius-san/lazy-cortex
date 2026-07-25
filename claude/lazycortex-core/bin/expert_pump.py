@@ -38,8 +38,8 @@ from reference_resolver import resolve, ReferenceError  # pylint: disable=redefi
 from runtime_daemon import _check_working_tree
 from constants import (
   EnvVar, HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase, IncidentState,
-  JobArtifact, JobConfigKey, JobErrorCategory, JobFile, JobMarker, JobOutcome, JobRequestKey, JobResponseKey,
-  RuntimeFile, SettingsFile, SettingsKey,
+  JobArtifact, JobConfigKey, JobErrorCategory, JobFile, JobLogOutcome, JobMarker, JobOutcome, JobRequestKey,
+  JobResponseKey, RuntimeFile, SettingsFile, SettingsKey,
 )
 
 from typing import TYPE_CHECKING
@@ -254,6 +254,7 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
       # guard: claimant died after the expert finished — finalize instead of marking dead
       if (jdir / JobFile.RESPONSE).exists():
         _finalize_orphaned_job(jdir)
+        _append_jobs_log(repo, edir.name, jdir.name, _classify_finished(jdir))
         continue
       # guard: first sighting — open the grace window instead of marking dead
       if grace_sec > 0 and not candidate.exists():
@@ -267,10 +268,12 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
       # guard: response landed during this scan — finalize instead of marking dead
       if (jdir / JobFile.RESPONSE).exists():
         _finalize_orphaned_job(jdir)
+        _append_jobs_log(repo, edir.name, jdir.name, _classify_finished(jdir))
         continue
       candidate.unlink(missing_ok = True)
       (jdir / JobArtifact.DEAD_JSON).write_text(json.dumps(blob, indent = 2))
       (jdir / JobMarker.DEAD).touch()
+      _append_jobs_log(repo, edir.name, jdir.name, JobLogOutcome.DEAD)
       # waiver: small internal subkey, not a reusable domain key
       cause = blob.get("likely_cause", "unknown")
       error_ledger.record(repo, {
@@ -473,11 +476,14 @@ def pump(repo: Path) -> dict:
   if ready_candidates:
     ready_candidates.sort(key = lambda t: t[0])
     _mtime, name, jdir = ready_candidates[0]
+    started = time.monotonic()
     try:
       _process_one(repo, name, jdir)
       processed = 1
+      _log_job_attempt(repo, name, jdir, started)
     except _ExpertLeftDirtyTree as e:
       processed = 1
+      _log_job_attempt(repo, name, jdir, started)
       return {
         "experts": expert_count, "processed": processed,
         "cleaned": cleaned, "detected_dead": detected_dead, "halted": True,
@@ -1220,6 +1226,97 @@ def _append_stream_stall_log(repo: Path, expert_name: str, jdir: Path, attempt: 
   # waiver: stdlib idiom, not a domain constant
   with log_path.open("a") as f:
     f.write(json.dumps(record) + "\n")
+
+
+def _classify_finished(jdir: Path) -> str:
+  """
+  Classify a DONE-marked job directory into its job-log outcome token.
+
+  Args:
+    jdir: Path to the job directory carrying a DONE marker.
+
+  Returns:
+    `JobLogOutcome.FAILED` when `response.json` carries an error outcome;
+    `JobLogOutcome.DONE` otherwise, including when the response is missing or malformed.
+  """
+  resp_path = jdir / JobFile.RESPONSE
+  # guard: no response file — a finalized orphan without a payload counts as done
+  if not resp_path.exists():
+    return JobLogOutcome.DONE
+  try:
+    outcome = json.loads(resp_path.read_text()).get(JobResponseKey.OUTCOME)
+  except (OSError, json.JSONDecodeError):
+    # malformed response.json — mirror the queue-depth classifier's generic-done fallback
+    return JobLogOutcome.DONE
+  # guard: an explicit error outcome marks the finished job as failed
+  if outcome == JobOutcome.ERROR:
+    return JobLogOutcome.FAILED
+  return JobLogOutcome.DONE
+
+
+def _append_jobs_log(
+    repo: Path, expert_name: str, job_id: str, outcome: str, *, duration_sec: float | None = None,
+) -> None:
+  """
+  Append a single job-attempt record to the runtime job log.
+
+  The record is written under `.logs/lazy-core/runtime/jobs.jsonl` as a JSON line.
+  The metrics module folds these records into the per-expert job counters on scrape.
+  Best-effort — a write failure is reported to stderr and never raised to the caller.
+
+  Args:
+    repo: Repository root whose log directory receives the record.
+    expert_name: Name of the expert that owns the job.
+    job_id: Identifier of the job directory the attempt ran in.
+    outcome: One of the `JobLogOutcome` tokens.
+    duration_sec: Wall-clock duration of the attempt, when the caller measured one.
+  """
+  record: dict = {
+    "ts": time.time(),
+    "expert": expert_name,
+    "job_id": job_id,
+    "outcome": outcome,
+  }
+  if duration_sec is not None:
+    # waiver: external job-log JSON field name and millisecond rounding precision, not internal keys
+    record["duration_sec"] = round(duration_sec, 3)
+  try:
+    # waiver: filesystem path idiom, not a domain constant
+    log_dir = repo / ".logs/lazy-core/runtime"
+    log_dir.mkdir(parents = True, exist_ok = True)
+    # waiver: filesystem path idiom, not a domain constant
+    # waiver: stdlib idiom, not a domain constant
+    with (log_dir / "jobs.jsonl").open("a") as f:
+      f.write(json.dumps(record) + "\n")
+  except Exception as e:  # pragma: no cover — defensive
+    sys.stderr.write(f"job log append failed: {e}\n")
+
+
+def _log_job_attempt(repo: Path, expert_name: str, jdir: Path, started_monotonic: float) -> None:
+  """
+  Record the outcome of one job-processing attempt in the runtime job log.
+
+  Classifies the job directory as it stands after the attempt: a DONE marker maps to
+  done/failed via the response outcome; anything else is an attempt-level error that
+  leaves the job queued for retry. Best-effort — a logging failure never affects the tick.
+
+  Args:
+    repo: Repository root whose log directory receives the record.
+    expert_name: Name of the expert that owns the job.
+    jdir: Path to the job directory the attempt ran in.
+    started_monotonic: `time.monotonic()` timestamp taken just before the attempt.
+  """
+  try:
+    if (jdir / JobMarker.DONE).exists():
+      outcome = _classify_finished(jdir)
+    else:
+      outcome = JobLogOutcome.ERROR
+    _append_jobs_log(
+      repo, expert_name, jdir.name, outcome,
+      duration_sec = time.monotonic() - started_monotonic,
+    )
+  except Exception as e:  # pragma: no cover — defensive
+    sys.stderr.write(f"job log append failed: {e}\n")
 
 
 def _write_error(jdir: Path, category: str, message: str) -> None:

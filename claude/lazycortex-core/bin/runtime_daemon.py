@@ -1701,6 +1701,7 @@ def _emit_tick_metrics_if_available(repo_root: Path, result: dict) -> None:
   )
   metrics.set_queue_depth_from_filesystem(repo_root)
   metrics.aggregate_tokens_from_log(repo_root)
+  metrics.aggregate_jobs_from_log(repo_root)
 
 
 if __name__ == "__main__":

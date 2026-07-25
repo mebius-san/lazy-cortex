@@ -700,6 +700,24 @@ class JobOutcome:
 
 
 # ----------------------------------------------------------------------------------------
+class JobLogOutcome:
+  """
+  `outcome` value tokens in the pump's per-attempt job log records.
+
+  Attributes:
+    DONE: The attempt finished the job without an error outcome.
+    FAILED: The attempt finished the job with an error outcome.
+    DEAD: The job was marked dead by the dead-job detector.
+    ERROR: The attempt failed transiently or logically; the job stays queued for retry.
+  """
+
+  DONE = "done"
+  FAILED = "failed"
+  DEAD = "dead"
+  ERROR = "error"
+
+
+# ----------------------------------------------------------------------------------------
 class JobCollectKey:
   """
   Keys in the descriptor dicts that job-collect and job-list return.
@@ -859,7 +877,10 @@ class MetricStateKey:
     BUILD_INFO: The build-info gauge instrument.
     HALT_COUNT: The cumulative-halt counter instrument.
     DIRTY_TREE: The dirty-working-tree silent-skip gauge instrument.
+    EXPERT_JOBS: The expert-job-attempt counter instrument.
+    EXPERT_JOB_DURATION: The expert-job-attempt duration histogram instrument.
     TOKEN_OFFSET: The byte offset into the token log read so far.
+    JOBS_OFFSET: The byte offset into the job log read so far.
     SERVER: The WSGI server object.
     SERVER_THREAD: The server's background thread.
   """
@@ -881,7 +902,10 @@ class MetricStateKey:
   BUILD_INFO = "build_info"
   HALT_COUNT = "halt_count"
   DIRTY_TREE = "dirty_tree"
+  EXPERT_JOBS = "expert_jobs"
+  EXPERT_JOB_DURATION = "expert_job_duration"
   TOKEN_OFFSET = "token_offset"
+  JOBS_OFFSET = "jobs_offset"
   SERVER = "server"
   SERVER_THREAD = "server_thread"
 
@@ -900,6 +924,7 @@ class MetricLabel:
     STATUS: The tick-status label.
     REASON: The error-reason label.
     EXPERT: The expert-name label.
+    OUTCOME: The job-attempt outcome label.
     MODEL: The model-tier label.
     KIND: The token-kind label.
     VERSION: The plugin-version label.
@@ -911,6 +936,7 @@ class MetricLabel:
   STATUS = "status"
   REASON = "reason"
   EXPERT = "expert"
+  OUTCOME = "outcome"
   MODEL = "model"
   KIND = "kind"
   VERSION = "version"

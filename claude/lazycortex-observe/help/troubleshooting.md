@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-observe install, uninstall, and doctor — symptoms, likely causes, and fixes.
-last_regen: 2026-07-15
+last_regen: 2026-07-25
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree rooted at the operator's situation: top-level branch on whether the shipper is installed at all (answer file present?); if not-installed, branch further on whether the Step 0 pre-flight found an already-covered host (routes to --integrate-only or --force-standalone guidance) versus a genuinely clear host (routes to plain install); if installed, branch on whether the host runs in integrate mode (scrape-targets file present and current vs missing/stale) or standalone mode — standalone then branches on whether the service is active, whether local /metrics is reachable, whether agent self-metrics show successful remote_write (token vs observer-reachability vs WAL-recovery sub-branches), and whether WAL is oversized. Separate top-level branch for uninstall failures (launchctl error 5 vs systemctl unit-not-found). Each leaf cites the troubleshooting entry that resolves it."
@@ -80,6 +80,16 @@ source_skills:
 **Likely cause**: The lazycortex-core daemon is running but has not yet dispatched a routine. Metrics are only emitted after the first routine tick.
 
 **Fix**: Wait for the first routine tick — usually a few seconds after the daemon starts — then re-run `/lazy-observe.doctor`. No config change is needed.
+
+---
+
+## Dashboard shows "No data" for the "Expert health" panel
+
+**Symptom**: Most panels in the imported Grafana dashboard populate normally, but the "Expert health ($period)" table stays empty ("No data") for one or more repos.
+
+**Likely cause**: This panel reads `lazycortex_runtime_expert_jobs_total`, a series that lazycortex-core only started emitting from version 5.17.1 onward. A repo shows "No data" here when its checkout is still on an older lazycortex-core, its daemon hasn't been restarted since upgrading past 5.17.1, or the daemon is current but hasn't attempted an expert job yet — the series only appears after the first expert job attempt.
+
+**Fix**: Confirm the checkout is on lazycortex-core ≥ 5.17.1, then restart that checkout's daemon supervisor to pick up the version: `launchctl kickstart -k gui/$UID com.lazycortex.runtime` (macOS) or `systemctl --user restart lazycortex-runtime.service` (Linux). Dispatch or wait for at least one expert job on that checkout — the panel populates after the first attempt. If you haven't re-imported the dashboard since it gained this panel, re-import `claude/lazycortex-observe/dashboards/lazycortex-runtime.json`.
 
 ---
 
@@ -243,4 +253,3 @@ flowchart TD
   class launchctlError5 error
   class systemctlUnitNotFound error
 ```
-</content>

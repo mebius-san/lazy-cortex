@@ -27,7 +27,7 @@ from wsgiref.simple_server import make_server
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import (  # pylint: disable=import-error
-  JobFile, JobMarker, JobOutcome, JobResponseKey, JobStatus, MetricLabel, MetricStateKey,
+  JobFile, JobLogOutcome, JobMarker, JobOutcome, JobResponseKey, JobStatus, MetricLabel, MetricStateKey,
 )
 
 from typing import TYPE_CHECKING
@@ -462,6 +462,20 @@ def init(repo_label: str, version: str, daemon_name: str) -> None:
     "1 while the daemon skips routine dispatch because the working tree has uncommitted changes.",
     ("repo",),
   )
+  _state[MetricStateKey.EXPERT_JOBS] = _Counter(
+    # waiver: external Prometheus metric name, not a domain constant
+    "lazycortex_runtime_expert_jobs_total",
+    # waiver: external Prometheus HELP text, not a domain constant
+    "Expert job attempts by outcome, aggregated from the pump's job log.",
+    ("repo", "expert", "outcome"),
+  )
+  _state[MetricStateKey.EXPERT_JOB_DURATION] = _Histogram(
+    # waiver: external Prometheus metric name, not a domain constant
+    "lazycortex_runtime_expert_job_duration_seconds",
+    # waiver: external Prometheus HELP text, not a domain constant
+    "Wall-clock duration of one expert job attempt in seconds.",
+    ("repo", "expert"),
+  )
 
   _state[MetricStateKey.UP].set(None, 1)
   _state[MetricStateKey.BUILD_INFO].set(
@@ -470,6 +484,8 @@ def init(repo_label: str, version: str, daemon_name: str) -> None:
 
   # token_offset is populated by aggregate_tokens_from_log on each scrape
   _state[MetricStateKey.TOKEN_OFFSET] = 0
+  # jobs_offset is populated by aggregate_jobs_from_log on each scrape
+  _state[MetricStateKey.JOBS_OFFSET] = 0
 
 
 def _resolve_status(exit_code: int, error: str | None) -> tuple[str, str | None]:
@@ -659,6 +675,7 @@ def _registry_for(name: str) -> _Counter | _Gauge | _Histogram | None:
   for key in (
     "ticks", "runs", "errors", "tokens", "duration", "last_tick",
     "queue_depth", "up", "daemon_halted", "build_info", "halt_count", "dirty_tree",
+    "expert_jobs", "expert_job_duration",
   ):
     metric = _state.get(key)
     if metric is not None and metric.name == name:
@@ -742,6 +759,7 @@ def render() -> bytes:
   for key in (
     "up", "build_info", "ticks", "runs", "errors", "tokens",
     "duration", "last_tick", "queue_depth",
+    "expert_jobs", "expert_job_duration",
     "daemon_halted", "halt_count", "dirty_tree",
   ):
     metric = _state.get(key)
@@ -1005,3 +1023,70 @@ def aggregate_tokens_from_log(repo_root: Path) -> None:
           )
     offset = f.tell()
   _state[MetricStateKey.TOKEN_OFFSET] = offset
+
+
+# --- Job aggregation ----------------------------------------------------------
+
+# Job attempts are recorded into <repo>/.logs/lazy-core/runtime/jobs.jsonl by
+# the expert pump. This module reads from a checkpointed offset stored in
+# `_state[MetricStateKey.JOBS_OFFSET]` (process-local, same lifecycle as the
+# token-log offset above).
+
+_JOB_LOG_OUTCOMES = frozenset({
+  JobLogOutcome.DONE, JobLogOutcome.FAILED, JobLogOutcome.DEAD, JobLogOutcome.ERROR,
+})
+
+
+def aggregate_jobs_from_log(repo_root: Path) -> None:
+  """
+  Fold new entries from the expert-pump job log into the per-expert job metrics.
+
+  Consumes only entries appended since the previous call, so repeated scrapes never
+  double-count a record. Each record increments the expert-jobs counter by outcome;
+  records carrying a duration also feed the job-duration histogram.
+
+  Notes:
+    - Malformed lines, unknown outcomes, and entries with label values outside the closed
+      set are skipped silently, so a corrupt log suffix never poisons the counters.
+
+  Args:
+    repo_root: Absolute path to the repository root.
+  """
+  # guard: metrics are off — skip the log read entirely
+  if not is_enabled():
+    return
+  # waiver: filesystem path idiom (job-log location), not domain constants
+  log_path = repo_root / ".logs" / "lazy-core" / "runtime" / "jobs.jsonl"
+  # guard: no job log yet — nothing to aggregate
+  if not log_path.exists():
+    return
+  offset = _state.get(MetricStateKey.JOBS_OFFSET, 0)
+  repo = _state[MetricStateKey.REPO]
+  # waiver: stdlib file-mode idiom
+  with log_path.open("rb") as f:
+    f.seek(offset)
+    for raw in f:
+      try:
+        # waiver: stdlib encoding idiom
+        rec = json.loads(raw.decode("utf-8"))
+      except (UnicodeDecodeError, json.JSONDecodeError):
+        # malformed line — skip without poisoning the counters
+        continue
+      # waiver: external job-log JSON field names, not internal keys
+      expert = rec.get("expert") or ""
+      # waiver: external job-log JSON field names, not internal keys
+      outcome = rec.get("outcome") or ""
+      # guard: closed-vocabulary checks reject entries with unsafe or unknown label values
+      if outcome not in _JOB_LOG_OUTCOMES or not _LABEL_VALUE_RE.match(expert):
+        continue
+      _state[MetricStateKey.EXPERT_JOBS].inc(
+        { MetricLabel.REPO: repo, MetricLabel.EXPERT: expert, MetricLabel.OUTCOME: outcome },
+      )
+      # waiver: external job-log JSON field name, not an internal key
+      duration = rec.get("duration_sec")
+      if isinstance(duration, (int, float)):
+        _state[MetricStateKey.EXPERT_JOB_DURATION].observe(
+          { MetricLabel.REPO: repo, MetricLabel.EXPERT: expert }, float(duration),
+        )
+    offset = f.tell()
+  _state[MetricStateKey.JOBS_OFFSET] = offset

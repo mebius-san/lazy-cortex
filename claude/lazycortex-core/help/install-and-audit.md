@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-last_regen: 2026-07-15
+last_regen: 2026-07-25
 diagram_spec:
   anchor: "Bootstrap order"
   request: "Flowchart of the single-plugin vs multi-plugin bootstrap path — install/setup, optional restart, audit, and the optional optimize+doctor branch — ending at bootstrap complete."
@@ -24,7 +24,7 @@ This block covers all five of core's interactive lifecycle skills, plus two non-
 
 ## What's in this block
 
-**`/lazy-core.install`** is the foundation step. Run it once per project (or globally) right after enabling the plugin and restarting Claude Code. It syncs every rule template the plugin ships into the correct rules directory, copies authoring templates into `.claude/templates/core/`, and bootstraps the scaffold registry. It then seeds `lazy.settings.json` with the three built-in agent-model routing defaults and adds `.logs/`, `.runtime/`, and `.lazyignore` to the repo. After the rules and settings groundwork is in place, it registers expert candidates: any agent file in an enabled plugin that carries `expert_protocol:` frontmatter is added to `lazy.settings.json[experts]` — this happens regardless of whether you use the background daemon, because experts are also dispatched interactively. Step 10.5 bootstraps `.memory/` for the same reason. Behind two remembered gates — `daemon.enabled` (does this project use the background daemon at all? — a project-wide policy shared with everyone who clones the repo) and `daemon.run_here` (run it for this checkout? — a per-working-copy choice, so several checkouts of the project on one machine each decide independently) — it also sets up the daemon routines and installs a launchd or systemd supervisor (named per checkout so two same-named checkouts don't collide). When the daemon runs for this checkout, Step 13.6 offers to provision Prometheus-style metrics: a free loopback port is allocated automatically and reused on re-run, the enablement flag and repo label are written to tracked `lazy.settings.json` (shared across every clone), the allocated port itself goes only into this checkout's gitignored local overlay (a port free on one machine may be taken on another), and a host-wide scrape-targets file is regenerated so an external Prometheus with `file_sd_configs` picks up every enabled checkout on the machine with zero manual edits. The skill is idempotent — re-running after a plugin update picks up new rule templates without clobbering rules you chose to keep local.
+**`/lazy-core.install`** is the foundation step. Run it once per project (or globally) right after enabling the plugin and restarting Claude Code. It syncs every rule template the plugin ships into the correct rules directory, copies authoring templates into `.claude/templates/core/`, and bootstraps the scaffold registry. It then seeds `lazy.settings.json` with the three built-in agent-model routing defaults and adds `.logs/`, `.runtime/`, and `.lazyignore` to the repo. After the rules and settings groundwork is in place, it registers expert candidates: any agent file in an enabled plugin that carries `expert_protocol:` frontmatter is added to `lazy.settings.json[experts]` — this happens regardless of whether you use the background daemon, because experts are also dispatched interactively. Alongside that, it fills in Claude model tiers for every agent lazycortex-core itself ships — including the runtime doctor, which carries no `expert_protocol:` frontmatter and would otherwise be invisible to the scan — so those tiers are on record without waiting for the interactive agent-models wizard, and any tier you've already set by hand is left untouched. Step 10.5 bootstraps `.memory/` for the same reason. Behind two remembered gates — `daemon.enabled` (does this project use the background daemon at all? — a project-wide policy shared with everyone who clones the repo) and `daemon.run_here` (run it for this checkout? — a per-working-copy choice, so several checkouts of the project on one machine each decide independently) — it also sets up the daemon routines and installs a launchd or systemd supervisor (named per checkout so two same-named checkouts don't collide). When the daemon runs for this checkout, Step 13.6 offers to provision Prometheus-style metrics: a free loopback port is allocated automatically and reused on re-run, the enablement flag and repo label are written to tracked `lazy.settings.json` (shared across every clone), the allocated port itself goes only into this checkout's gitignored local overlay (a port free on one machine may be taken on another), and a host-wide scrape-targets file is regenerated so an external Prometheus with `file_sd_configs` picks up every enabled checkout on the machine with zero manual edits. The skill is idempotent — re-running after a plugin update picks up new rule templates without clobbering rules you chose to keep local.
 
 **`/lazy-core.audit`** is the read-only context-weight and compliance measurement. It first runs a set of inline logging-compliance checks — confirming the logging rule is installed, `.logs/` and `.runtime/` exist and are gitignored, and any `logging-waiver:` frontmatter carries a concrete reason rather than a placeholder — then dispatches four parallel scan agents. Agent A measures everything that loads at conversation start — CLAUDE.md files, always-loaded rules, and the memory index — sorted by size. Agent B covers on-demand assets, MCP server enablement, Python runtime availability, path hygiene, naming hygiene, and skill/agent/rule-writing compliance checks (missing Execution-Discipline preambles, "Optional" headings, narrative padding, broken artifact references, oversize files, non-canonical `paths:` shapes). Agent C checks help-doc coverage and staleness against each plugin's README scenario list. Agent D audits the expert runtime across ten sub-checks: `lazy.settings.json[experts]` schema (D1), agent reference resolution (D2), aspect reference resolution (D8), arguments key and size validation (D9), `.memory/` directory hygiene (D10), flat `daemon`/`routines` section schema (D3), routine command resolvability (D4), orphan job directories (D5), stale completed jobs (D6), and daemon liveness (D7). No changes are made.
 
@@ -105,43 +105,43 @@ For public-repo safety, see the **guardian** block: `/lazy-repo.mark-public` cre
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  userStartsBootstrap[User starts bootstrap]
-  singleOrMultiPlugin{Single or multi-plugin?}
-  installSetupSingle[Install/setup single plugin]
-  installSetupMulti[Install/setup multi-plugin]
-  restartNeeded{Restart needed?}
-  restartClaude[Restart Claude Code]
+  chooseBootstrapMode{Single-plugin or multi-plugin?}
+  installSinglePlugin[Install/setup single plugin]
+  installMultiplePlugins[Install/setup multiple plugins]
+  restartNeeded{Restart required?}
+  restartClaudeCode[Restart Claude Code]
   runAudit[Run audit]
-  optimizeDoctor{Optimize and doctor?}
-  runOptimizeDoctor[Run optimize and doctor]
+  optimizeDoctorNeeded{Run optimize and doctor?}
+  runOptimize[Run optimize]
+  runDoctor[Run doctor]
   bootstrapComplete[Bootstrap complete]
 
-  userStartsBootstrap -->|choose scope| singleOrMultiPlugin
-  singleOrMultiPlugin -->|single plugin| installSetupSingle
-  singleOrMultiPlugin -->|multi-plugin| installSetupMulti
-  installSetupSingle -->|installed| restartNeeded
-  installSetupMulti -->|installed| restartNeeded
-  restartNeeded -->|yes| restartClaude
+  chooseBootstrapMode -->|single-plugin| installSinglePlugin
+  chooseBootstrapMode -->|multi-plugin| installMultiplePlugins
+  installSinglePlugin -->|proceed| restartNeeded
+  installMultiplePlugins -->|proceed| restartNeeded
+  restartNeeded -->|yes| restartClaudeCode
   restartNeeded -->|no| runAudit
-  restartClaude -->|restarted| runAudit
-  runAudit -->|audited| optimizeDoctor
-  optimizeDoctor -->|yes| runOptimizeDoctor
-  optimizeDoctor -->|no| bootstrapComplete
-  runOptimizeDoctor -->|done| bootstrapComplete
+  restartClaudeCode -->|resume| runAudit
+  runAudit -->|next| optimizeDoctorNeeded
+  optimizeDoctorNeeded -->|yes| runOptimize
+  optimizeDoctorNeeded -->|no| bootstrapComplete
+  runOptimize -->|next| runDoctor
+  runDoctor -->|done| bootstrapComplete
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
-  class userStartsBootstrap entry
-  class singleOrMultiPlugin guard
+  class chooseBootstrapMode entry
   class restartNeeded guard
-  class optimizeDoctor guard
-  class installSetupSingle action
-  class installSetupMulti action
-  class restartClaude action
+  class optimizeDoctorNeeded guard
+  class installSinglePlugin action
+  class installMultiplePlugins action
+  class restartClaudeCode action
   class runAudit action
-  class runOptimizeDoctor action
+  class runOptimize action
+  class runDoctor action
   class bootstrapComplete success
 ```
