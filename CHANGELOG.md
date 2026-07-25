@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.17.1 — 2026-07-25 UTC
+
+- Runtime now tracks per-Expert job metrics — attempts logged to `jobs.jsonl`, new Prometheus counters/histograms for job counts and duration, and a new Expert health table on the dashboard.
+
 ### 5.17.0 — 2026-07-23 UTC
 
 - Plugin installs now seed their subagents' model tiers from a single canonical source via a shared helper, instead of each install hand-rolling the lookup. The catalog now covers the diagram, python, and specs agents too, and `lazycortex-core`'s own install seeds every one of its agents (previously only the runtime doctor).
@@ -727,6 +731,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).
 
 ## lazycortex-observe
+
+### 0.7.1 — 2026-07-25 UTC
+
+- Runtime dashboard now includes an Expert health table — one row per expert × repo with job counts by outcome (done / failed / dead), attempt errors, and busy time over the selected period. Re-import `dashboards/lazycortex-runtime.json` to pick it up (requires lazycortex-core ≥ 5.17.1 with a restarted daemon).
 
 ### 0.7.0 — 2026-07-15 UTC
 

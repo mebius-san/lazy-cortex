@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
-last_regen: 2026-07-12
+last_regen: 2026-07-25
 no_diagram: true
 source_skills:
   - lazy-observe.install
@@ -86,7 +86,7 @@ Nothing breaks. Every step treats an already-absent target as a silent no-op, ne
 
 ## How do I check whether the pipeline is working end-to-end?
 
-Run `/lazy-observe.doctor`. It performs eight checks in sequence without touching any file or service state: reads your answer file, confirms the service unit is loaded and the agent process is up, verifies every local lazycortex-core daemon's `/metrics` endpoint contains `lazycortex_runtime_*` series, checks the agent's own self-metrics for a non-zero remote_write success rate, reaches out to your observer URL to confirm it's reachable, and reports the WAL directory size. Each check resolves to `PASS`, `WARN`, or `FAIL` with a one-line suggested fix. It is safe to run at any time.
+Run `/lazy-observe.doctor`. It performs seven checks in sequence without touching any file or service state: reads your answer file, confirms the service unit is loaded and the agent process is up, verifies every local lazycortex-core daemon's `/metrics` endpoint contains `lazycortex_runtime_*` series, checks the agent's own self-metrics for a non-zero remote_write success rate, reaches out to your observer URL to confirm it's reachable, and reports the WAL directory size. Each check resolves to `PASS`, `WARN`, or `FAIL` with a one-line suggested fix. It is safe to run at any time.
 
 ---
 
@@ -105,3 +105,4 @@ The `/metrics` endpoint is serving data from the lazycortex-core daemon, but no 
 ## I already have a shipper loaded under the same launchctl label. What do I do?
 
 Run `/lazy-observe.uninstall` first. The uninstaller will call `launchctl bootout` (or `systemctl --user disable` on Linux) to remove the existing service cleanly, then you can re-run `/lazy-observe.install`. If you skipped uninstall and the installer failed with "already loaded", the service may still be running normally — check with `/lazy-observe.doctor` before uninstalling to decide whether the existing config is worth keeping.
+</content>

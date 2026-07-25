@@ -36,7 +36,7 @@ The `daemon` key is optional. When absent, no git ops are performed and `polling
 | `cleanup_dead_after` | duration string | `"7d"` | Age after which a DEAD-marked stuck job dir is deleted. DEAD jobs are marked by `expert_pump._detect_dead_jobs` when their PID file references a dead process; the forensic window before cleanup matches `cleanup_completed_after` by default. |
 | `stream_idle_timeout_sec` | int | `90` | Seconds of stdout silence from a `claude -p` expert spawn before it is treated as a frozen stream, its process group killed, and the spawn re-tried. |
 | `stream_max_retries` | int | `3` | Maximum number of in-memory re-spawns on stream-idle-stall before the job is left with a transient error for the next tick. Separate from the on-disk `attempts` counter. |
-| `cleanup_runtime_log_after` | duration string | `"30d"` | Age after which a per-day `.logs/lazy-core/runtime/<date>.jsonl` file is deleted. `tokens.jsonl` is append-only and not subject to this retention — operators rotate it manually. |
+| `cleanup_runtime_log_after` | duration string | `"30d"` | Age after which a per-day `.logs/lazy-core/runtime/<date>.jsonl` file is deleted. `tokens.jsonl` and `jobs.jsonl` are append-only and not subject to this retention — operators rotate them manually. |
 | `loop_detect_window` | int | `threshold * 4` | Number of recent commits to inspect for the per-(author, file) loop-detection heuristic. Must be ≥ `loop_detect_threshold`. Larger values give better accuracy at the cost of a slightly slower `git log` query. |
 
 Duration strings: a number followed by a unit suffix — `s`, `m`, `h`, or `d` (e.g. `"30d"`, `"12h"`, `"300s"`).
@@ -582,10 +582,12 @@ lazycortex_runtime_routine_ticks_total{routine,repo,status}
 lazycortex_runtime_routine_runs_total{routine,repo}
 lazycortex_runtime_routine_errors_total{routine,repo,reason}
 lazycortex_runtime_tokens_total{routine,repo,model,kind}
+lazycortex_runtime_expert_jobs_total{expert,repo,outcome}
 lazycortex_runtime_daemon_halts_total{repo,reason,triggered_by}
 
 # Histograms
 lazycortex_runtime_routine_tick_duration_seconds{routine,repo}
+lazycortex_runtime_expert_job_duration_seconds{expert,repo}
 
 # Gauges
 lazycortex_runtime_routine_last_tick_timestamp{routine,repo}
@@ -596,7 +598,7 @@ lazycortex_runtime_up
 lazycortex_runtime_build_info{version,daemon_name,repo}
 ```
 
-`status` ∈ `{ok, error, timeout, crash}`. `state` ∈ `{ready, running, done}`. `kind` ∈ `{input, output, cache_read, cache_write}`.
+`status` ∈ `{ok, error, timeout, crash}`. `state` ∈ `{ready, running, done}`. `kind` ∈ `{input, output, cache_read, cache_write}`. `outcome` ∈ `{done, failed, dead, error}` — per job attempt, aggregated from the pump's `.logs/lazy-core/runtime/jobs.jsonl`; `error` marks an attempt that failed transiently and left the job queued for retry, the other three are terminal.
 
 `dirty_tree` is 1 while the daemon's pre-iteration check finds uncommitted changes and routine dispatch is silently paused (the operator may be mid-edit); it drops back to 0 on the first iteration after the tree settles. This is the only externally visible trace of the silent skip — it is not a halt and records no incident.
 

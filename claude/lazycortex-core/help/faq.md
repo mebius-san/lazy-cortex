@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git locking, and MCP permissions.
-last_regen: 2026-07-16
+last_regen: 2026-07-25
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -32,6 +32,7 @@ source_skills:
   - lazy-log.recall
   - lazy-log.timeline
   - lazy-log.summary
+  - lazy-log.bullets
 ---
 # FAQ
 
@@ -369,6 +370,15 @@ They read the same sources (the changelog, run logs, raw commits, git log, and m
 
 ---
 
+## How do I turn a plugin's commit range into a user-facing changelog entry?
+
+Dispatch `lazy-log.bullets` with the plugin name, its directory, a commit range (`<old-sha>..HEAD`), the new version, and the release date. It reads every commit in that range scoped to the plugin's own directory, drops the ones a user installing the plugin would never feel — `chore:`/`style:`/`test:` commits, docs-only syncs, plugin-development plumbing, test-only changes — and rewrites what survives as outcome-led bullets grouped by scope, grouping related commits into one bullet and marking any breaking change with a **Breaking:** lead-in. The result is a ready-to-use `### <version> — <date> UTC` release block that you paste into your changelog yourself; the agent does not write to any file for you.
+
+This is a different job from `/lazy-log.distill`: distill maintains the internal, always-current `.logs/changelog.md` narrative used for change-history queries across the whole project, while `lazy-log.bullets` produces one discrete, versioned release block scoped to a single plugin's commits, meant for a public-facing changelog.
+
+---
+
 ## What does `/lazy-log.clean` do with old run-log folders?
 
 It classifies every subdirectory under `./.logs/claude/` against the live set of skill/agent/command names. Folders matching a canonical name are left alone; folders that look like a renamed or typo'd canonical name are offered for merge; folders matching a known anonymous pattern (`task-N`, `plan-execute-N`, and similar) are batched into one prompt per pattern instead of one prompt per folder; everything else is reviewed individually. For each orphan you choose per-folder: leave it, delete it, or distill its substantive content into memory first and then delete it. Nothing on disk changes until every prompt has been answered — the skill is read-first and applies all approved actions in one final pass.
+</content>

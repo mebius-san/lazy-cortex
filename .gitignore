@@ -69,3 +69,6 @@ __pycache__/
 
 # obsidian-git — per-device settings (auto-pull/push, author); auth in localStorage
 .obsidian/plugins/obsidian-git/data.json
+
+# vault-nickname — per-device vault display name, must not sync across machines
+.obsidian/plugins/vault-nickname/data*.json

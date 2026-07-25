@@ -1,13 +1,12 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-07-14
+last_regen: 2026-07-25
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
   kind_hint: sequence
 source_skills:
-  - lazy-core.install
   - lazy-expert.dispatch-job
   - lazy-expert.list-jobs
   - lazy-expert.collect-job
@@ -154,20 +153,22 @@ If `/lazy-expert.list-jobs` shows the job as `dead` but `/lazy-expert.collect-jo
 sequenceDiagram
   participant user as User
   participant session as Claude Session
-  participant queue as .experts/.jobs/ Queue
-  participant daemon as Daemon Runner
-  participant expert as Expert Agent
+  participant jobQueue as .experts/.jobs/ Queue
+  participant daemon as Daemon (Runner)
+  participant expertAgent as Expert Agent
 
-  user->>session: run /lazy-expert.dispatch-job
-  session->>queue: write job payload
-  daemon->>queue: poll for new jobs
-  queue-->>daemon: deliver queued job
-  daemon->>expert: spawn expert agent
-  expert->>expert: process job
-  expert->>queue: write response.json
-  expert->>queue: touch DONE marker
-  user->>session: run /lazy-expert.collect-job
-  session->>queue: check for DONE marker
-  queue-->>session: DONE marker present
-  session-->>user: return response.json result
+  user->>session: /lazy-expert.dispatch-job
+  session->>jobQueue: write job payload
+  Note over jobQueue: job queued, awaiting pickup
+  daemon->>jobQueue: poll for new jobs
+  jobQueue-->>daemon: pending job found
+  daemon->>expertAgent: spawn expert agent for job
+  expertAgent->>expertAgent: run expert task
+  expertAgent-->>jobQueue: write response.json
+  expertAgent-->>jobQueue: touch DONE marker
+  Note over jobQueue: job complete
+  user->>session: /lazy-expert.collect-job
+  session->>jobQueue: check for DONE marker
+  jobQueue-->>session: DONE found + response.json
+  session-->>user: return job result
 ```

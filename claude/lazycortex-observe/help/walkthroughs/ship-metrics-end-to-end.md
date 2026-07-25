@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: From a clean checkout to your first dashboard panel — install the runtime daemon with metrics enabled, produce traffic, install the shipper, verify the pipeline.
-last_regen: 2026-07-15
+last_regen: 2026-07-25
 diagram_spec:
   anchor: "How it flows"
   request: "Sequence diagram: operator → lazy-core.install installs the runtime daemon and auto-registers any expert candidates found; near the end of the same run the install wizard asks whether to enable the Prometheus metrics endpoint for this checkout, operator says yes, the skill allocates a free port sequentially from 9464, writes enabled+repo_label into the tracked lazy.settings.json and the allocated port into this checkout's gitignored local overlay, then the operator restarts the daemon supervisor so the one-shot metrics.init() picks up the new setting and the daemon now exposes /metrics on the allocated loopback port; operator dispatches an expert job via /lazy-expert.dispatch-job; daemon picks up the job, runs the expert, records a tick → metrics counter increments; operator runs /lazy-observe.install which pre-flight-checks for an already-covered host, finds none, walks the agent-kind/URL/auth wizard, renders agent config + service unit covering every metrics-enabled daemon on the host, loads the supervised service; agent scrapes /metrics and remote_writes to operator's Prometheus; operator runs /lazy-observe.doctor; doctor verifies service active + local /metrics reachable for every daemon + agent self-metrics show successful remote_write + observer URL reachable + WAL bounded; final state: charts populated in operator's Grafana."
@@ -69,7 +69,7 @@ Expected output: all `PASS`, with `Step 5 — Agent self-metrics show successful
 
 ## After you're done
 
-Open your observer's UI (Grafana, Mimir Explore, etc.) and query `lazycortex_runtime_routine_ticks_total` — at least one series should show data. Import `claude/lazycortex-observe/dashboards/lazycortex-runtime.json` into Grafana for the shipped list-centric dashboard: a Daemons table up top (one row per repo — liveness, a Work column reading OK / PAUSED — dirty tree when the daemon skips dispatch over an uncommitted working tree, and failed/dead jobs and errors with gradient bars), a routine-health table with per-routine Ticks / Runs / Errors / Busy time columns (Runs counts only ticks that actually dispatched something, separate from the scheduler's raw tick cadence; gradient bars sit on Errors and Busy time), error and halt tables, open-vs-problem queue charts sitting right under the queue table, and a token section closing the page with expert/model/repo/kind breakdown tables and donuts (model names drop the `claude-` prefix) — all driven by a single `period` selector instead of the time picker. Add `claude/lazycortex-observe/alerts/lazycortex-runtime.rules.yml` to your Prometheus `rule_files` glob to enable the four shipped alerts (`StaleNoTick`, `ErrorRateHigh`, `DaemonHalted`, `NoMetricsScraped`).
+Open your observer's UI (Grafana, Mimir Explore, etc.) and query `lazycortex_runtime_routine_ticks_total` — at least one series should show data. Import `claude/lazycortex-observe/dashboards/lazycortex-runtime.json` into Grafana for the shipped list-centric dashboard: a Daemons table up top (one row per repo — liveness, a Work column reading OK / PAUSED — dirty tree when the daemon skips dispatch over an uncommitted working tree, and failed/dead jobs and errors with gradient bars), a routine-health table with per-routine Ticks / Runs / Errors / Busy time columns (Runs counts only ticks that actually dispatched something, separate from the scheduler's raw tick cadence; gradient bars sit on Errors and Busy time), an Expert health table right below it (one row per expert × repo — Jobs / Done / Failed / Dead / Errors / Busy time over the selected period, drawn from the same attempt log the pump writes to `jobs.jsonl`, so you can see which expert is chewing through retries before it shows up in the queue tables), error and halt tables, open-vs-problem queue charts sitting right under the queue table, and a token section closing the page with expert/model/repo/kind breakdown tables and donuts (model names drop the `claude-` prefix) — all driven by a single `period` selector instead of the time picker. Add `claude/lazycortex-observe/alerts/lazycortex-runtime.rules.yml` to your Prometheus `rule_files` glob to enable the four shipped alerts (`StaleNoTick`, `ErrorRateHigh`, `DaemonHalted`, `NoMetricsScraped`).
 
 Re-run `/lazy-observe.doctor` periodically (e.g. weekly) to catch slow drift — token rotation gone wrong, WAL accumulation past the configured `max_age`, observer endpoint changes. The skill is read-only, so it's safe to run as often as you want.
 
@@ -81,29 +81,29 @@ To tear down: `/lazy-observe.uninstall` unloads the service and removes the rend
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant operator as Operator
-  participant installSkill as Install Skills
+  participant installer as lazy-core.install
   participant daemon as Runtime Daemon
-  participant shipperAgent as Shipper Agent
-  participant prometheus as Prometheus/Grafana
+  participant observeInstall as lazy-observe.install
+  participant metricsAgent as Metrics Agent
+  participant prometheus as Prometheus
 
-  operator->>installSkill: run lazy-core.install
-  Note over installSkill: installs runtime daemon, auto-registers expert candidates
-  installSkill-->>operator: enable Prometheus metrics endpoint?
-  operator-->>installSkill: yes, enable metrics
-  Note over installSkill: allocate free port from 9464, write enabled+repo_label to lazy.settings.json, write port to local overlay
+  operator->>installer: install runtime daemon
+  installer-->>operator: auto-registered expert candidates
+  installer->>operator: enable Prometheus metrics endpoint?
+  operator-->>installer: yes
+  Note over installer: allocate free port sequentially from 9464, write enabled and repo_label into tracked lazy.settings.json, write allocated port into gitignored local overlay
   operator->>daemon: restart daemon supervisor
-  Note over daemon: metrics.init() picks up setting, daemon exposes /metrics on loopback port
-  operator->>daemon: dispatch expert job via /lazy-expert.dispatch-job
-  Note over daemon: runs expert job, records tick, increments metrics counter
-  operator->>installSkill: run lazy-observe.install
-  Note over installSkill: pre-flight check finds no already-covered host
-  installSkill-->>operator: walk agent-kind/URL/auth wizard
-  operator-->>installSkill: provide agent-kind, URL, auth
-  installSkill->>shipperAgent: render agent config + service unit, load supervised service
-  shipperAgent->>daemon: scrape /metrics
-  shipperAgent->>prometheus: remote_write metrics
-  operator->>installSkill: run lazy-observe.doctor
-  installSkill->>daemon: verify service active, local /metrics reachable
-  installSkill->>prometheus: verify remote_write succeeding, observer URL reachable, WAL bounded
-  Note over prometheus: charts populated in Grafana
+  Note over daemon: one-shot metrics.init() picks up new setting, exposes /metrics on allocated loopback port
+  operator->>daemon: dispatch expert job via lazy-expert.dispatch-job
+  daemon-->>operator: tick recorded, metrics counter increments
+  operator->>observeInstall: install lazy-observe agent
+  observeInstall->>daemon: pre-flight check for covered host
+  daemon-->>observeInstall: no existing coverage found
+  Note over observeInstall: walk agent-kind, URL, and auth wizard, render agent config and service unit for every metrics-enabled daemon on host
+  observeInstall->>metricsAgent: load supervised service
+  metricsAgent->>daemon: scrape /metrics
+  metricsAgent->>prometheus: remote_write metrics
+  operator->>observeInstall: run lazy-observe.doctor
+  observeInstall-->>operator: service active, /metrics reachable, self-metrics show successful remote_write, WAL bounded
+  Note over prometheus: Grafana charts populated
 ```
