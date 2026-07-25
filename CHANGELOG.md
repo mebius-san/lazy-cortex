@@ -732,6 +732,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 0.7.2 — 2026-07-25 UTC
+
+- Tokens-by-routine table no longer breaks out a separate Model column — rows are now grouped by routine × expert only.
+- Expert health and Routine health panels now render at matching heights.
+
 ### 0.7.1 — 2026-07-25 UTC
 
 - Runtime dashboard now includes an Expert health table — one row per expert × repo with job counts by outcome (done / failed / dead), attempt errors, and busy time over the selected period. Re-import `dashboards/lazycortex-runtime.json` to pick it up (requires lazycortex-core ≥ 5.17.1 with a restarted daemon).

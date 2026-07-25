@@ -570,7 +570,7 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 24,
         "x": 0,
         "y": 16
@@ -785,7 +785,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 24
+        "y": 26
       },
       "targets": [
         {
@@ -866,7 +866,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 24
+        "y": 26
       },
       "targets": [
         {
@@ -946,7 +946,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 24
+        "y": 26
       },
       "targets": [
         {
@@ -1067,7 +1067,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 32
+        "y": 34
       },
       "timeFrom": "$period",
       "targets": [
@@ -1104,7 +1104,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 32
+        "y": 34
       },
       "timeFrom": "$period",
       "targets": [
@@ -1163,7 +1163,7 @@
     },
     {
       "type": "table",
-      "title": "Tokens by routine × model × expert ($period)",
+      "title": "Tokens by routine × expert ($period)",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1172,39 +1172,39 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 42
       },
       "targets": [
         {
-          "expr": "label_replace(sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"input\"}[$period])), \"model\", \"$1\", \"model\", \"claude-(.+)\")",
+          "expr": "sum by (routine, repo, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"input\"}[$period]))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "label_replace(sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"output\"}[$period])), \"model\", \"$1\", \"model\", \"claude-(.+)\")",
+          "expr": "sum by (routine, repo, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"output\"}[$period]))",
           "legendFormat": "",
           "refId": "B",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "label_replace(sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_read\"}[$period])), \"model\", \"$1\", \"model\", \"claude-(.+)\")",
+          "expr": "sum by (routine, repo, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_read\"}[$period]))",
           "legendFormat": "",
           "refId": "C",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "label_replace(sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_write\"}[$period])), \"model\", \"$1\", \"model\", \"claude-(.+)\")",
+          "expr": "sum by (routine, repo, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_write\"}[$period]))",
           "legendFormat": "",
           "refId": "D",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "label_replace(sum by (routine, repo, model, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period])) > 0, \"model\", \"$1\", \"model\", \"claude-(.+)\")",
+          "expr": "sum by (routine, repo, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period])) > 0",
           "legendFormat": "",
           "refId": "E",
           "instant": true,
@@ -1221,23 +1221,22 @@
           "options": {
             "excludeByName": {
               "Time": true,
-              "exported_repo": true
+              "exported_repo": true,
+              "model": true
             },
             "indexByName": {
               "routine": 0,
               "repo": 1,
-              "model": 2,
-              "expert": 3,
-              "Value #A": 4,
-              "Value #B": 5,
-              "Value #C": 6,
-              "Value #D": 7,
-              "Value #E": 8
+              "expert": 2,
+              "Value #A": 3,
+              "Value #B": 4,
+              "Value #C": 5,
+              "Value #D": 6,
+              "Value #E": 7
             },
             "renameByName": {
               "routine": "Routine",
               "repo": "Repo",
-              "model": "Model",
               "expert": "Expert",
               "Value #A": "Input",
               "Value #B": "Output",
@@ -1322,7 +1321,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 50
+        "y": 52
       },
       "targets": [
         {
@@ -1369,7 +1368,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 50
+        "y": 52
       },
       "targets": [
         {
@@ -1416,7 +1415,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 58
+        "y": 60
       },
       "targets": [
         {
@@ -1463,7 +1462,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 58
+        "y": 60
       },
       "targets": [
         {
