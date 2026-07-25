@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-07-16
+last_regen: 2026-07-25
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Decision tree rooted on which skill or routine produced the symptom; first branch splits on install failures vs. configure failures vs. query failures vs. relink failures vs. doctor failures vs. dangling-link sync issues; install leaves: plugin-not-enabled, core-not-installed, cache-empty, no-routines-registered; configure leaves: wiki-section-missing, scope-id-invalid, paths-empty; query leaves: no-scopes-configured, no-material-matched; relink leaves: unknown-scope, anchor-lost, curator-error, empty-commit; doctor leaves: unknown-scope, no-scopes-configured; sync leaf: dangling-see-also-link → see Troubleshooting entry on lingering See-also links after a node delete; each leaf points to the troubleshooting entry that resolves it"
+  request: "Decision tree rooted on which skill or routine produced the symptom; first branch splits on install failures vs. configure failures vs. query failures vs. relink failures vs. doctor failures vs. dangling-link sync issues; install leaves: plugin-not-enabled, core-not-installed, cache-empty, no-routines-registered; configure leaves: wiki-section-missing, scope-id-invalid, paths-empty, topics-index-blank; query leaves: no-scopes-configured, no-material-matched; relink leaves: unknown-scope, anchor-lost, curator-error, empty-commit; doctor leaves: unknown-scope, no-scopes-configured; sync leaf: dangling-see-also-link → see Troubleshooting entry on lingering See-also links after a node delete; each leaf points to the troubleshooting entry that resolves it"
   kind_hint: decision-tree
 source_skills:
   - lazy-wiki.install
@@ -82,6 +82,16 @@ source_skills:
 **Likely cause**: At least one path glob is required — a blank entry is not accepted. The wizard loops until a non-empty glob is provided.
 
 **Fix**: Enter at least one path glob, for example `docs/**/*.md` or `src/**/*.py`. Multiple globs can be comma-separated. If you want to cover the whole repo, use `**/*.md` as a starting point and refine later by re-running `/wiki.configure` in edit mode.
+
+---
+
+## `/wiki.configure` keeps re-asking for the topics index path
+
+**Symptom**: The `topics.md` path prompt repeats or rejects your input without saving the scope.
+
+**Likely cause**: A relative file path is required for `topics_index` — a blank entry is not accepted. The file itself doesn't need to exist yet; the wizard only rejects an empty answer.
+
+**Fix**: Enter a relative path for the scope's topic index, for example `wiki/docs-topics.md`. `/wiki.relink` creates the file on its first run if it doesn't already exist.
 
 ---
 
@@ -176,4 +186,3 @@ source_skills:
 ---
 
 ## Diagnostic flowchart
-</content>

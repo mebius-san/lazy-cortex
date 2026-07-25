@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, querying the wiki, and interpreting doctor findings.
-last_regen: 2026-07-16
+last_regen: 2026-07-25
 no_diagram: true
 source_skills:
   - lazy-wiki.query
@@ -14,7 +14,7 @@ source_skills:
 
 ## Do I need to run `/wiki.install` before anything else?
 
-Yes. `/wiki.install` seeds the `wiki` settings section in `lazy.settings.json`, registers the `wiki.scan`, `wiki.scan-deletes`, and `wiki.relink-weekly` routines, seeds agent model tiers for the wiki curator, and copies the navigation rule into your rules directory. Nothing else in the plugin will work until that section exists. The install is idempotent — running it again on an already-configured project is safe and will not overwrite values you have set.
+Yes. `/wiki.install` seeds the `wiki` settings section in `lazy.settings.json`, seeds agent model tiers for the wiki curator, registers the `wiki.curator` expert, and copies the navigation rule into your rules directory. If your project uses the background daemon (or hasn't decided yet), it also registers the `wiki.scan`, `wiki.scan-deletes`, and `wiki.relink-weekly` routines; if the daemon is explicitly disabled for the project, the routines are skipped and only the curator expert and settings are installed. Nothing else in the plugin will work until the `wiki` section exists. The install is idempotent — running it again on an already-configured project is safe and will not overwrite values you have set.
 
 After install, run `/wiki.configure` to define at least one scope (the set of path globs the wiki covers, the tag axes, and where to write the topics index). `/wiki.query` and `/wiki.relink` both require at least one configured scope to proceed.
 
@@ -112,7 +112,7 @@ Yes, but expect a normalization pass on the next relink. Run `/wiki.configure` a
 
 ## How do I add a second repository to a scope's See-also links?
 
-See-also links can reference nodes in other repositories using a `@<repo-key>/<path>` notation. Register the external repo in the `repos` map in `lazy.settings.json` by running `/lazy-core.configure` or the equivalent settings skill — do not edit `lazy.settings.json` by hand. Once the key is registered, the curator can resolve those cross-repo paths when building links, and `/wiki.query` can validate and traverse them.
+See-also links can reference nodes in other repositories using a `@<repo-key>/<path>` notation. Both `/wiki.query` and `/wiki.relink` resolve `<repo-key>` against the `repos` map at the top level of `lazy.settings.json` — a project-wide registry that lazycortex-wiki reads but does not itself manage. If the key you need is not already present in that map, it needs to be added at the project level before cross-repo links will resolve; consult your project's setup for how that registry is maintained. Once the key exists, the curator can resolve cross-repo paths when building links, and `/wiki.query` can validate and traverse them.
 
 ---
 

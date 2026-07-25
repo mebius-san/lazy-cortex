@@ -98,5 +98,5 @@ flowchart LR
 
 ## See also
 
-- [install-and-audit](install-and-audit.md) — Bootstrap lazycortex-wiki in your project, compose the wiki-curator expert, and register the scan and weekly routines.
+- [install-and-audit](install-and-audit.md) — Bootstrap lazycortex-wiki in your project, compose the wiki.curator expert, and register the scan and weekly routines.
 - [query](query.md) — Associative Q&A over the wiki graph built by this block.

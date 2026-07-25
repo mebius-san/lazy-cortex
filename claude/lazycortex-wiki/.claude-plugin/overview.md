@@ -12,7 +12,7 @@
 - **curation** — Per-node curator dispatch: curate one node's summary, topic tags, and See-also links; update the topic index. Members: wiki.relink.
 - **query** — Associative Q&A over the wiki graph. `/wiki.query` dispatches a per-scope `lazy-wiki.seeker` to pick entry points from the topic index, then a single `lazy-wiki.gatherer` to traverse glossed See-also links and synthesise the answer — the large index and node bodies stay in the subagents' contexts. Members: wiki.query.
 - **audit** — Integrity checks across the scope: orphan topics, broken links, missing summaries, stale glosses, unknown axes, overlapping scopes. Members: wiki.doctor.
-- **install-and-audit** — Bootstrap lazycortex-wiki in your project: create scope config, register routines, compose the wiki-curator expert, sync the navigation rule. Members: wiki.install, wiki.configure, wiki.doctor, wiki.help.
+- **install-and-audit** — Bootstrap lazycortex-wiki in your project: create scope config, register routines, compose the wiki.curator expert, sync the navigation rule. Members: wiki.install, wiki.configure, wiki.doctor, wiki.help.
 
 ## Requirements
 
@@ -22,7 +22,7 @@
 ## Quick start
 
 1. Install the plugin (`/plugin install lazycortex-wiki@lazycortex`).
-2. Run `/wiki.install` to register routines, compose the wiki-curator expert, and sync the navigation rule.
+2. Run `/wiki.install` to register routines, compose the wiki.curator expert, and sync the navigation rule.
 3. Run `/wiki.configure` to create your first scope (paths, tag axes, topics index location).
 4. Run `/wiki.relink <scope-id>` to curate all nodes in the scope and build the initial `topics.md`.
 5. From then on the git-watch routine handles incremental updates on each commit automatically.
