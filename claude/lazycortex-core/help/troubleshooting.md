@@ -4,7 +4,7 @@ summary: Common failure modes across lazycortex-core skills — symptoms, likely
 last_regen: 2026-07-26
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive / chained-commit-not-scanned; hook-not-firing → hook-not-firing; git-coordination → staging-lock-refused-or-stuck; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / collect-status-pending-for-cancelled / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-inbox-not-gitignored / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed / chained-commit-not-recorded."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / daemon-run-here-syncs-across-machines / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive / chained-commit-not-scanned; hook-not-firing → hook-not-firing; git-coordination → staging-lock-refused-or-stuck; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / collect-status-pending-for-cancelled / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-inbox-not-gitignored / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed / chained-commit-not-recorded."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.agent-models
@@ -132,6 +132,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Fix**: Edit the relevant flag directly and re-run `/lazy-core.install`:
 - To change the project-wide daemon policy, update `daemon.enabled` in `.claude/lazy.settings.json`.
 - To change the decision for this checkout only, update `daemon.run_here` in `.claude/lazy.settings.local.json` (or delete that key to let the next install re-ask).
+
+---
+
+## A second machine on the same synced checkout bootstraps a duplicate daemon
+
+**Symptom**: You installed the daemon supervisor on one machine, and later, on a different machine that opens the same checkout over a file sync tool (Dropbox, iCloud Drive, Syncthing, or similar), a daemon turns out to be running there too — even though you never answered a daemon prompt on that second machine.
+
+**Likely cause**: `.claude/lazy.settings.local.json` is gitignored but not sync-ignored. When the checkout itself lives on a synced path, the `daemon.run_here: true` decision recorded on the first machine syncs into `lazy.settings.local.json` on every other machine holding that path. Each of those machines then sees the per-checkout gate as already answered and bootstraps its own supervisor, producing duplicate daemons for the same repo.
+
+**Fix**: Set `daemon.run_here` to an explicit host list naming only the machine that should run the daemon, for example `["nexus"]`, instead of a plain `true`. Re-run `/lazy-core.install` on every other machine that shares the synced checkout — the skill reads the host list, sees its own hostname is not on it, and removes the stray supervisor unit it finds there instead of installing one.
 
 ---
 
@@ -735,7 +745,7 @@ New sessions pick up the consolidated hook from `lazycortex-core` cleanly.
 flowchart TD
   symptomGroup{Which symptom group?}
 
-  installSetup[17 install/setup entries]
+  installSetup[18 install/setup entries]
   agentModels[agent-models entries]
   mcpOrSecurity[mcp-or-security entries]
   hookNotFiring[hook-not-firing entries]

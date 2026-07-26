@@ -42,7 +42,7 @@ This skill is **idempotent and quiet on re-run**. Every choice it makes is persi
 - **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-rule "install this rule?" prompt and no per-artifact opt-in — wanting the plugin means wanting its surface.
 - **Two daemon gates, asked once each:**
   - `daemon.enabled` (tracked `lazy.settings.json`) — does *this project* use the background daemon at all? Set false → the daemon-only steps (routines, supervisor, sandbox, runtime plumbing) are skipped for the project and never re-raised. Experts, `agent_models` tiers, rules, skills, and manual commands still install — they are not daemon-bound.
-  - `daemon.run_here` (this checkout's gitignored `lazy.settings.local.json`) — run the daemon for *this checkout* (this working copy)? Per-checkout, NOT per-machine: each clone of the project has its own overlay, so several checkouts on one machine each decide independently. Set false → the supervisor + sandbox are skipped for this checkout and never re-raised, even though the project keeps `daemon.enabled = true`.
+  - `daemon.run_here` (this checkout's gitignored `lazy.settings.local.json`) — run the daemon for *this checkout* (this working copy)? Per-checkout, NOT per-machine: each clone of the project has its own overlay, so several checkouts on one machine each decide independently. Set false → the supervisor + sandbox are skipped for this checkout and never re-raised, even though the project keeps `daemon.enabled = true`. May also be a **list of hostnames** (`["nexus"]`) when the checkout is a file-synced path shared across machines — the overlay then travels with the sync, and the list names the only hosts allowed to run it.
 - **Everything derivable is derived, not asked:** install scope (from where the plugin is *enabled* — see Step 1), supervisor kind (from platform), dev-mode (from whether this repo ships plugin sources), expert git identity (a deterministic bot id).
 
 ## File-sync policy (applies to every file this skill writes)
@@ -537,17 +537,26 @@ If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disa
 
 Whether the daemon runs for **this checkout** (this working copy of the project) (Gate 2) is a per-checkout decision, recorded once in THIS checkout's own gitignored local overlay (`daemon.run_here`) and honoured silently on every re-run. It is NOT per-machine: a machine may hold several checkouts of the same project, each with its own `.claude/lazy.settings.local.json`, and the daemon runs only on the checkout(s) where `run_here` is true. Read it first; ask only when nothing is on record.
 
+`run_here` accepts a **list of hostnames** in addition to `true` / `false`. A gitignored overlay is per-checkout only as long as the checkout itself is per-machine; when the checkout lives on a file-synced path (Dropbox, iCloud, Syncthing), the overlay is copied to every machine holding that path and a bare `true` leaks the daemon onto hosts that must never run one. `"run_here": ["nexus"]` gates the same decision on the host instead: the entry is compared against `hostname -s` lowercased, and every host outside the list both skips the install AND tears down any supervisor unit for this checkout it already has — so a sweep on the wrong machine self-heals a leaked daemon instead of preserving it.
+
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 from lazy_settings import load_local_only_section
 from pathlib import Path
+import socket
 sec = load_local_only_section(Path('<repo-root>/.claude/lazy.settings.json'), 'daemon')
-print(sec.get('run_here', 'unset'))
+rh = sec.get('run_here', 'unset')
+host = socket.gethostname().split('.')[0].lower()
+if isinstance(rh, list):
+  print('run-here' if host in [str(h).lower() for h in rh] else 'not-this-host')
+else:
+  print({ True: 'run-here', False: 'run-here-declined' }.get(rh, 'unset'))
 "
 ```
 
-- Output `True` → run the daemon for this checkout; proceed to 13a and install the supervisor. Do NOT ask.
-- Output `False` → not this checkout; state **run-here-declined**, skip the supervisor and Step 13.5. Do NOT ask.
+- Output `run-here` → run the daemon for this checkout; proceed to 13a and install the supervisor. Do NOT ask.
+- Output `run-here-declined` → not this checkout; state **run-here-declined**, skip the supervisor and Step 13.5. Do NOT ask.
+- Output `not-this-host` → a host list is on record and this host is not in it; go to **13d** (teardown), state **not-this-host**, then skip the supervisor install and Step 13.5. Do NOT ask.
 - Output `unset` → ask once:
 
 This is the **operational** question — it OWNS the "run / start / this checkout" language (Gate 1 had none). The project already opted into the daemon; this decides whether to actually start it on this particular working copy:
@@ -648,9 +657,27 @@ When the platform is Linux:
 8. State **systemd-installed** (or **systemd-installed-dev-mode** when `<dev_mode>` is True).
 7. State **systemd-installed** (or **systemd-installed-dev-mode** when `<dev_mode>` is True).
 
+### 13d. Teardown when a host list excludes this host
+
+Reached only from the `not-this-host` branch of the gate. Compute `<REPO_ID>` with the 13a snippet (same formula, same inputs), then remove this checkout's supervisor unit **on this host only** — the unit for a checkout that must not run here is either a leak from a synced overlay or a stale install, and leaving it loaded keeps a duplicate daemon alive.
+
+macOS (`darwin`):
+1. If `~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist` is absent → state **no-stray-unit** and return.
+2. `Bash(launchctl bootout gui/$UID/com.lazycortex.runtime.<REPO_ID> 2>/dev/null; true)` — a not-loaded unit is not an error.
+3. `Bash(rm -f ~/Library/LaunchAgents/com.lazycortex.runtime.<REPO_ID>.plist)`
+4. State **stray-unit-removed**.
+
+Linux:
+1. If `~/.config/systemd/user/lazy-core-runtime-<REPO_ID>.service` is absent → state **no-stray-unit** and return.
+2. `Bash(systemctl --user disable --now lazy-core-runtime-<REPO_ID>.service 2>/dev/null; true)`
+3. `Bash(rm -f ~/.config/systemd/user/lazy-core-runtime-<REPO_ID>.service)`
+4. State **stray-unit-removed**.
+
+Never touch a unit whose `<REPO_ID>` differs — that id belongs to another checkout, which owns its own gate.
+
 ## Step 13.5: Configure expert-spawn sandbox in .runtime/sandbox.settings.json
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), OR Step 13 stated `run-here-declined`, inherit the skip with outcome `skipped-not-run-here` and move to Step 14 — there is no daemon running here to sandbox.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), OR Step 13 stated `run-here-declined` or `not-this-host`, inherit the skip with outcome `skipped-not-run-here` and move to Step 14 — there is no daemon running here to sandbox.
 
 Otherwise, the runtime daemon spawns `claude -p --permission-mode dontAsk` subprocesses for every expert job, passing `--settings <repo-root>/.runtime/sandbox.settings.json`. The sandbox scope lives in that daemon-owned runtime file — NOT in `.claude/settings.local.json` — because `.claude/settings.local.json` is loaded by EVERY Claude session in the checkout, so a `sandbox.enabled: true` there would also confine the operator's interactive session (e.g. breaking `git push` over SSH, which the sandbox's HTTP/HTTPS proxy cannot carry). `--settings` is passed only on the spawn, so the sandbox reaches the expert subprocess and never the interactive session.
 
@@ -714,7 +741,7 @@ One line combining the sandbox-file state, the permissions-file state, and the m
 
 ## Step 13.6: Provision metrics (port + repo label + scrape-targets file)
 
-If Step 13 ended in `run-here-declined` (or was skipped), inherit the outcome and state **skipped-not-run-here** — metrics are provisioned only for checkouts that actually run the daemon on this machine.
+If Step 13 ended in `run-here-declined` or `not-this-host` (or was skipped), inherit the outcome and state **skipped-not-run-here** — metrics are provisioned only for checkouts that actually run the daemon on this machine.
 
 Read-first, like every gate in this skill:
 
@@ -822,6 +849,7 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Step 13 fails: `launchctl load` error** — the plist was written but `launchctl load` returned a non-zero exit code → inspect the plist at `~/Library/LaunchAgents/` for substitution errors, then run `launchctl load <path>` manually.
 - **Step 13 fails: `systemctl --user enable --now` error** — the service unit was written but `systemctl` returned a non-zero exit code → run `systemctl --user status lazy-core-runtime-<REPO_ID>.service` to inspect the error, then correct and re-enable manually.
 - **Daemon never starts for this checkout after install** — Gate 2 (`daemon.run_here`) is `false` in this checkout's gitignored `lazy.settings.local.json`, so no supervisor was installed → edit the flag to `true` (or delete it) and re-run `/lazy-core.install` to install the supervisor for this checkout.
+- **A second machine started its own daemon for the same checkout** — the checkout sits on a file-synced path (Dropbox, iCloud, Syncthing), so the gitignored overlay carrying `daemon.run_here: true` was synced to that machine and its install honoured the flag → set `daemon.run_here` to a host list naming only the machine that should run it (`["nexus"]`) and re-run `/lazy-core.install` on the other machine; it removes the stray supervisor unit instead of installing one.
 - **Re-run never asks about the daemon again** — both gates are already on record (`daemon.enabled` in tracked settings, `daemon.run_here` in the local overlay); this is the intended quiet-on-re-run behaviour → to revisit a decision, edit or delete the relevant flag and re-run.
 
 ## Notes
