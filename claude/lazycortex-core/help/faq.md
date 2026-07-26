@@ -146,6 +146,14 @@ If the daemon later starts and finds its recorded port already taken by somethin
 
 ---
 
+## My checkout is on Dropbox/iCloud/Syncthing and shows up on more than one machine — won't `run_here` start a daemon on all of them?
+
+It would, if `run_here` only accepted `true`/`false` — the gitignored per-checkout overlay that holds that flag (`.claude/lazy.settings.local.json`) is a plain file, so a file-synced checkout carries the same overlay to every machine holding that path. A bare `true` answered once during install would leak the daemon onto every synced machine, not just the one you meant.
+
+To avoid that, set `run_here` to a list of hostnames instead of a boolean, for example `["nexus"]`, naming the only machine(s) allowed to run this checkout's daemon. `/lazy-core.install` compares the list against each machine's own hostname: the named host installs the supervisor as normal, while every other host both skips the supervisor install AND tears down any supervisor unit it already has for that checkout — so re-running `/lazy-core.install` on a machine that shouldn't be running it self-heals a leaked daemon instead of leaving it running. Edit the overlay by hand to switch from a boolean to a hostname list, then re-run `/lazy-core.install` to apply it.
+
+---
+
 ## What payload fields does `/lazy-expert.dispatch-job` require?
 
 Every job payload must contain three fields: `kind` (the job type, e.g. `"doc-review"`), `role` (the expert role to handle it, e.g. `"designer"`), and `request` (the task description string). These are the minimum the protocol contract enforces; if any field is missing, dispatch aborts with "payload missing required field(s): `<list>`."

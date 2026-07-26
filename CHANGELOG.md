@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.18.1 — 2026-07-26 UTC
+
+- Fixed daemon leaking onto other machines sharing a Dropbox/iCloud/Syncthing-synced checkout: `daemon.run_here` now accepts a list of hostnames, and `/lazy-core.install` tears down any stray daemon it finds on a host not in the list.
+
 ### 5.18.0 — 2026-07-26 UTC
 
 - Cancelling an expert job now stops the running headless-Claude process instead of just marking it, and keeps the job bundle on disk as `cancelled` instead of deleting it — forensics survive cancellation, and `list-jobs` reports the new status.
