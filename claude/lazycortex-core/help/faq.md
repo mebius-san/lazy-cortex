@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git locking, and MCP permissions.
-last_regen: 2026-07-25
+last_regen: 2026-07-26
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -60,7 +60,7 @@ Yes. `/plugin update` refreshes the plugin cache but does not re-sync rule files
 
 ## My runtime daemon still behaves like an old version after I updated the plugin — why?
 
-The daemon isn't started directly; a small shim at `.claude/bin/lazy.runtime.sh` resolves the newest `lazycortex-core` build in the plugin cache each time it starts, then execs that version's runner. If the shim script itself is stale — content-drifted from the version the plugin currently ships — it can carry an outdated resolution rule and keep pointing at an old cached version even after `/plugin update` pulls the fix down. `/lazy-core.install` re-syncs the shim on content drift (state **refreshed** in its report) whenever the shipped template changed, so re-running it after a plugin update is what actually gets a supervised daemon onto the new build; `/plugin update` alone only refreshes the cache the shim reads from.
+This should now be rare: the daemon checks on every tick whether a newer `lazycortex-core` version is sitting in the plugin cache and, when a supervised deployment finds one, restarts itself in place onto it automatically — no operator action needed. If you still see stale behavior, the remaining cause is the launch shim itself: a small script at `.claude/bin/lazy.runtime.sh` resolves the cached build each time the daemon starts, and if the shim's own content is stale — drifted from the version the plugin currently ships — it can carry an outdated resolution rule. `/lazy-core.install` re-syncs the shim on content drift (state **refreshed** in its report), so re-running it after a plugin update is what gets a supervised daemon's launcher current; `/plugin update` alone only refreshes the cache the shim and the daemon both read from.
 
 ---
 
@@ -162,13 +162,13 @@ Optional fields — `source` (array of input file paths), `context` (array of co
 
 ## How do I check on a job I dispatched, and get its result?
 
-Run `/lazy-expert.list-jobs` to see every job in the queue, optionally filtered by `expert` or `status` (`queued`, `active`, `dead`, `done`, `failed`), sorted oldest-first with an age in seconds. Once a job's status is `done`, run `/lazy-expert.collect-job <expert> <job_id>` — it returns `{status, response}` and, on success, lists the paths of the result files so you can `Read` them directly. If the job is still `pending`, `collect-job` reports that and you try again later; there is no blocking wait built in.
+Run `/lazy-expert.list-jobs` to see every job in the queue, optionally filtered by `expert` or `status` (`queued`, `active`, `cancelled`, `dead`, `done`, `failed`), sorted oldest-first with an age in seconds. Once a job's status is `done`, run `/lazy-expert.collect-job <expert> <job_id>` — it returns `{status, response}` and, on success, lists the paths of the result files so you can `Read` them directly. If the job is still `pending`, `collect-job` reports that and you try again later; there is no blocking wait built in.
 
 ---
 
 ## Can I cancel a dispatched job?
 
-Yes, with `/lazy-expert.cancel-job <expert> <job_id>`. It deletes the job's directory, but always confirms first — for a `done` job it warns you're discarding a completed result, and for a `pending` job it warns the runtime daemon may already be processing it. Answering no leaves the job untouched. If the job_id doesn't exist (already collected, cancelled, or never dispatched), the skill reports "not found" instead of erroring.
+Yes, with `/lazy-expert.cancel-job <expert> <job_id>`. Cancellation stops the executor immediately — SIGTERM, then a grace period, then SIGKILL against its process groups — places a `CANCELLED` marker, and withdraws the job from the queue. Nothing is deleted: the bundle (request, response, transcript, result) stays on disk for forensics and ages out on the same 30-day window as failed jobs. It always confirms first — for a `pending` job it warns that if the daemon is already executing it, the executor process will be stopped immediately; for a `done` job it asks whether to mark it cancelled anyway, noting the bundle stays either way. Answering no leaves the job untouched. If the job_id doesn't exist (already collected, cancelled, or never dispatched), the skill reports "not found" instead of erroring.
 
 ---
 
@@ -381,4 +381,3 @@ This is a different job from `/lazy-log.distill`: distill maintains the internal
 ## What does `/lazy-log.clean` do with old run-log folders?
 
 It classifies every subdirectory under `./.logs/claude/` against the live set of skill/agent/command names. Folders matching a canonical name are left alone; folders that look like a renamed or typo'd canonical name are offered for merge; folders matching a known anonymous pattern (`task-N`, `plan-execute-N`, and similar) are batched into one prompt per pattern instead of one prompt per folder; everything else is reviewed individually. For each orphan you choose per-folder: leave it, delete it, or distill its substantive content into memory first and then delete it. Nothing on disk changes until every prompt has been answered — the skill is read-first and applies all approved actions in one final pass.
-</content>

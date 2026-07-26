@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-review in a repo, define document review classes, and validate configuration with a read-only audit.
-last_regen: 2026-07-15
+last_regen: 2026-07-26
 diagram_spec:
   anchor: "How install, configure, and audit fit together"
   request: "Show the three-step setup flow: /lazy-review.install seeds settings and dirs, /lazy-review.configure adds review classes via wizard, /lazy-review.audit validates the result. Include the daemon.enabled gate that controls whether the lazy-review.scan routine is registered."
@@ -16,7 +16,7 @@ Getting lazycortex-review running in a repo is a three-command sequence: install
 
 ## What's in this block
 
-**`/lazy-review.install`** seeds the repo for review. It merges the `review.classes`, `experts`, and `routines` defaults into `.claude/lazy.settings.json`, creates the `.experts/.jobs/` job queue and `.logs/lazy-review/runs/` log tree, and adds the `Bash(lazycortex-review *)` allow-pattern to `settings.local.json` so that cross-skill CLI calls succeed in `dontAsk` permission mode. If the project's `daemon.enabled` flag is `false`, install registers everything except the `lazy-review.scan` routine — a daemon-gated routine that can't run is dead config. When the routine does survive the gate, install also offers any optional routine protocols relevant to reviewing authored markdown documents; accept or decline each one, the mandatory doc-review and markdown-style protocols stay attached either way. The skill is idempotent: re-running it on an already-bootstrapped repo is a no-op on every setting and directory that already exists.
+**`/lazy-review.install`** seeds the repo for review. It merges the `review.classes`, `experts`, and `routines` defaults into `.claude/lazy.settings.json`, creates the `.experts/.jobs/` job queue and `.logs/lazy-review/runs/` log tree, and adds the `Bash(lazycortex-review *)` allow-pattern to `settings.local.json` so that cross-skill CLI calls succeed in `dontAsk` permission mode. If the project's `daemon.enabled` flag is `false`, install registers everything except the `lazy-review.scan` routine — a daemon-gated routine that can't run is dead config. When the routine does survive the gate, install also offers any optional routine protocols relevant to reviewing authored markdown documents; accept or decline each one, the mandatory doc-review and markdown-style protocols stay attached either way. Install also seeds the canonical model tier for the plugin's two shipped agents (`lazy-review.doc_doctor` and `lazy-review.historian`) into the project's agent-model configuration, so they run on the right model from the first invocation without a separate setup step. The skill is idempotent: re-running it on an already-bootstrapped repo is a no-op on every setting and directory that already exists.
 
 **`/lazy-review.configure`** turns an empty `review.classes` block into a live class definition. The wizard collects the glob pattern that identifies which documents belong to the class, the main-writer and historian expert assignments, any `validation` or `terminal` section definitions, and the edit-marker style. Every question is read-first: if a value is already recorded in the settings file the wizard skips the prompt and reuses the persisted value silently. Once all values are collected, the skill writes them back and immediately calls `/lazy-review.audit` so you see any configuration inconsistencies before the first review round starts. When the daemon is running, it also folds this class's globs into the `lazy-review.scan` routine — coarsening each into a directory-level mask, filtering the scan to only documents that have opted into review, and running on a minute cadence — so the daemon watches the right directories without re-scanning documents nobody opted in.
 
@@ -43,36 +43,49 @@ You can run configure multiple times to register additional document classes. Ea
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  installSeedsSettings[Run lazy-review.install]
+  runInstall[Run /lazy-review.install]
+  seedSettingsAndDirs[Seed settings and dirs]
+  runConfigure[Run /lazy-review.configure]
+  addReviewClasses[Add review classes via wizard]
   daemonEnabledGate{daemon.enabled?}
   registerScanRoutine[Register lazy-review.scan routine]
-  unregisterScanRoutine[Unregister lazy-review.scan routine]
-  configureAddsReviewClasses[Run lazy-review.configure wizard]
-  auditValidatesResult[Run lazy-review.audit]
+  skipScanRegistration[Skip lazy-review.scan registration]
+  runAudit[Run /lazy-review.audit]
+  auditValid{Audit validates result?}
   setupComplete[Setup complete]
+  auditFailed[Audit reports errors]
 
-  installSeedsSettings -->|Step 2| daemonEnabledGate
-  daemonEnabledGate -->|true or unset| registerScanRoutine
-  daemonEnabledGate -->|false| unregisterScanRoutine
-  registerScanRoutine -->|install done| configureAddsReviewClasses
-  unregisterScanRoutine -->|install done| configureAddsReviewClasses
-  configureAddsReviewClasses -->|classes added| auditValidatesResult
-  auditValidatesResult -->|validated| setupComplete
+  runInstall -->|seeds| seedSettingsAndDirs
+  seedSettingsAndDirs -->|next| runConfigure
+  runConfigure -->|wizard| addReviewClasses
+  addReviewClasses -->|check| daemonEnabledGate
+  daemonEnabledGate -->|enabled| registerScanRoutine
+  daemonEnabledGate -->|disabled| skipScanRegistration
+  registerScanRoutine -->|next| runAudit
+  skipScanRegistration -->|next| runAudit
+  runAudit -->|check| auditValid
+  auditValid -->|valid| setupComplete
+  auditValid -->|invalid| auditFailed
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class installSeedsSettings entry
+  class runInstall entry
+  class seedSettingsAndDirs action
+  class runConfigure action
+  class addReviewClasses action
   class daemonEnabledGate guard
   class registerScanRoutine action
-  class unregisterScanRoutine action
-  class configureAddsReviewClasses action
-  class auditValidatesResult action
+  class skipScanRegistration action
+  class runAudit action
+  class auditValid guard
   class setupComplete success
+  class auditFailed error
 ```
 
 ## See also
 
-- The `review-loop` block covers `/lazy-review.start`, `/lazy-review.status`, `/lazy-review.stop`, and `/lazy-review.finalize` — the day-to-day verbs you reach for after install-and-audit is complete.
+- The `review-cycle` block covers `/lazy-review.start`, `/lazy-review.status`, `/lazy-review.stop`, and `/lazy-review.finalize` — the day-to-day verbs you reach for after install-and-audit is complete.

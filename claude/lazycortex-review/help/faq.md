@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-07-18
+last_regen: 2026-07-26
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -92,11 +92,10 @@ The audit script could not find `.claude/lazy.settings.json`. Run `/lazy-review.
 
 ## Can I change the edit-marker style after configuring a class?
 
-Run `/lazy-review.configure` again. The wizard reads the persisted style and asks only if nothing is on record — but because the style is already set, it will read it silently and re-validate. To change the value, the simplest path is to run `/lazy-review.configure`, which surfaces the current style in its Phase 4 prompt and lets you pick a new one when the persisted value is absent from the file (i.e., clear the `review.edit_marker_style` key first by running the audit to confirm it is safe, then re-enter the wizard). The wizard is the correct entry point; never hand-edit `lazy.settings.json` directly.
+`/lazy-review.configure`'s style question is read-first: it only asks when nothing is on record for `review.edit_marker_style`, so re-running the wizard on a class that already has a style just reuses it silently — there's no prompt to pick a different one. There is currently no configure flow for changing an already-set style; the wizard is still the correct entry point for everything else about the class (globs, writer groups, sections), just not for revisiting this one value.
 
 ---
 
 ## Where do run logs land?
 
 Each skill writes a timestamped log under `.logs/claude/<skill-name>/` in the current repo. For example, a `start` run lands at `.logs/claude/lazy-review.start/<UTC-timestamp>.md`. The `status` skill is read-only and does not write a log.
-</content>

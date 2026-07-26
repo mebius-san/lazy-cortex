@@ -412,5 +412,3 @@ Use two separate steps: `Bash(mkdir -p ...)` then `Write` tool. Never chain with
 - **Per-product overrides** are NOT created by this skill — they live under `.claude/templates/spec.<category>/<compound-key>/` (one folder per category that the operator wants to customize), scaffolded by `spec.product-config` when the user opts into customization.
 - **User-scope skip**: Step 6 (request runtime wiring) is a project-scope-only step. Request files live in `<vault-root>/requests/` per-vault; wiring at user scope would point the daemon at the wrong path. The skill detects user scope at Step 1 and silently skips Step 6 (`skipped-user-scope`).
 - **Daemon-disabled skip**: Steps 5 and 6 read the tracked `daemon.enabled` flag; when the project has opted out of the daemon, the routine registrations are skipped silently (`skipped-daemon-disabled`). `lazy-core.install` owns the first-time daemon question — this skill never re-asks it.
-</content>
-</invoke>

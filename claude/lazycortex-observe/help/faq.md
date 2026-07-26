@@ -105,4 +105,3 @@ The `/metrics` endpoint is serving data from the lazycortex-core daemon, but no 
 ## I already have a shipper loaded under the same launchctl label. What do I do?
 
 Run `/lazy-observe.uninstall` first. The uninstaller will call `launchctl bootout` (or `systemctl --user disable` on Linux) to remove the existing service cleanly, then you can re-run `/lazy-observe.install`. If you skipped uninstall and the installer failed with "already loaded", the service may still be running normally — check with `/lazy-observe.doctor` before uninstalling to decide whether the existing config is worth keeping.
-</content>

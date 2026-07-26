@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#93c5fd"
+iconize_color: "#fde68a"
 ---
 # lazycortex-core
 
@@ -70,7 +70,7 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 | `lazy-core.scaffold-local` | Manage `_local` scaffold entries in the consumer repo: add a new repo-specific template type (group + kind + globs) or remove an existing one. Safe path to author `_local` entries without hand-editing the fragile registry YAML. |
 | `lazy-core.scaffold-sync` | Install-time helper: copies a plugin's authoring templates into the consumer's `.claude/templates/<group>/` directories and upserts the corresponding scaffold-registry entries. Invoked by a plugin's install skill via Skill dispatch. |
 | `lazy-core.setup` | Meta-installer that runs every applicable plugin install + post-install configurator for the current project. Discovers `<namespace>.install` skills in enabled plugins and any skill carrying `lazy_setup_phase:` frontmatter, builds an ordered plan, runs each child, and reports results. Idempotent — safe to re-run after every plugin update or on a fresh project. Use after `/plugin update`, on a fresh clone, or after enabling a new plugin. Optional `--dry-run` previews the plan without executing. |
-| `lazy-expert.cancel-job` | Cancel an expert job by removing its directory. Confirms via AskUserQuestion for non-done jobs. Wraps expert_runtime.cancel_job. |
+| `lazy-expert.cancel-job` | Cancel an expert job — stop its executor immediately and mark the bundle CANCELLED, keeping the directory for forensics. Confirms via AskUserQuestion. Wraps expert_runtime.cancel_job. |
 | `lazy-expert.collect-job` | Collect the result of a dispatched expert job. Wraps expert_runtime.collect_job and returns {status, response?}. |
 | `lazy-expert.dispatch-job` | Dispatch a job to a named expert queue. Wraps expert_runtime.dispatch_job and returns {job_id, queue_path}. |
 | `lazy-expert.list-jobs` | List expert queue jobs, optionally filtered by expert name or status. Wraps expert_runtime.list_jobs. |

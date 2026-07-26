@@ -6,7 +6,7 @@ logging-waiver: "read-only status query — single read, no mutation, no decisio
 ---
 # Expert List Jobs
 
-List all jobs in the expert queue, sorted oldest-first by age. Supports optional filters for expert name and status (`queued`, `active`, `dead`, `done`, `failed`). Output is a tabular summary of `{expert, job_id, status, age_sec}`.
+List all jobs in the expert queue, sorted oldest-first by age. Supports optional filters for expert name and status (`queued`, `active`, `cancelled`, `dead`, `done`, `failed`). Output is a tabular summary of `{expert, job_id, status, age_sec}`.
 
 ### Job status enum
 
@@ -14,6 +14,7 @@ List all jobs in the expert queue, sorted oldest-first by age. Supports optional
 |---|---|
 | `READY` only (no `PID`) | `queued` |
 | `READY` + `PID` (no `DEAD`, no `response.json`) | `active` |
+| `CANCELLED` exists (outranks every other marker) | `cancelled` |
 | `DEAD` exists | `dead` |
 | `DONE` + `response.json` (outcome ≠ error) | `done` |
 | `DONE` + `response.json` (outcome == error) | `failed` |
@@ -37,9 +38,9 @@ This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 All inputs are optional:
 - `expert` (string) — filter to one expert.
-- `status` (string) — filter to one of `queued`, `active`, `dead`, `done`, or `failed`.
+- `status` (string) — filter to one of `queued`, `active`, `cancelled`, `dead`, `done`, or `failed`.
 
-If `status` is provided but not one of these five values → abort: "status must be one of: queued, active, dead, done, failed. Got: `<value>`."
+If `status` is provided but not one of these six values → abort: "status must be one of: queued, active, cancelled, dead, done, failed. Got: `<value>`."
 
 Outcome: `validated` or `aborted`.
 
@@ -119,6 +120,6 @@ input: "expert=<expert|none> status=<status|none>"
 
 ## Failure modes
 
-- **"status must be one of: queued, active, dead, done, failed"** — caller passed an unsupported status value → use one of the five valid values.
+- **"status must be one of: queued, active, cancelled, dead, done, failed"** — caller passed an unsupported status value → use one of the six valid values.
 - **"No jobs found"** — the jobs base directory is absent or empty → confirm that jobs have been dispatched and `.experts/.jobs/` exists.
 - **`.experts/.jobs/` missing** — expert runtime not bootstrapped in this repo → run `/lazy-core.install`.

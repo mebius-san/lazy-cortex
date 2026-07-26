@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Register, unregister, preflight, and recover routines in the per-repo serial daemon — five routine types keep the async team running in order, with a validator that catches broken expert configs before they run live.
-last_regen: 2026-07-15
+last_regen: 2026-07-26
 diagram_spec:
   anchor: "Runtime lifecycle"
   request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers an uncommitted_changes halt; a failed remote sync triggers a git_pull_diverged / git_push_failed / git_remote_unavailable halt; /lazy-runtime.recover (commit/stash/discard/abort for tree halts; manual-fix + resume for remote-sync halts) cleans the precondition and resumes; unregister removes a routine from the loop."
@@ -115,4 +115,3 @@ stateDiagram-v2
 - [experts](experts.md) — The async expert team whose jobs are drained by the `lazy-expert.pump` routine this block manages.
 - [setup-runtime](walkthroughs/setup-runtime.md) — Bootstrap the per-repo serial daemon so the async expert team has an executor.
 - [setup-routine](walkthroughs/setup-routine.md) — Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-</content>

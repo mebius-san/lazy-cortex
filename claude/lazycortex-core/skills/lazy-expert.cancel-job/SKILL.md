@@ -1,13 +1,11 @@
 ---
 name: lazy-expert.cancel-job
-description: Cancel an expert job by removing its directory. Confirms via AskUserQuestion for non-done jobs. Wraps expert_runtime.cancel_job.
+description: Cancel an expert job — stop its executor immediately and mark the bundle CANCELLED, keeping the directory for forensics. Confirms via AskUserQuestion. Wraps expert_runtime.cancel_job.
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Write, AskUserQuestion
 ---
 # Expert Cancel Job
 
-Cancel an expert job by removing its job directory. For `done` jobs, asks for confirmation. For `pending` jobs (READY marker present), warns the daemon may be processing and confirms before deletion.
-
-Future hardening note: a `.claude_pid` lockfile will eventually distinguish "pending-not-started" from "pending-in-flight". For now, all pending jobs require confirmation regardless.
+Cancel an expert job. Cancellation stops the running executor (SIGTERM → grace → SIGKILL on its process groups), removes the `READY` marker, and places a `CANCELLED` marker. The bundle directory (request, response, transcript, result) stays on disk for post-mortem and ages out via the failed-job cleanup window; the dedup key is released, so a fresh dispatch with the same key creates a new job. Nothing is deleted. Confirmation is required for every live job.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -39,13 +37,15 @@ Determine job state by checking the job directory:
 
 ```
 Bash(test -d .experts/.jobs/<expert_name>/<job_id> && echo exists || echo missing)
+Bash(test -f .experts/.jobs/<expert_name>/<job_id>/CANCELLED && echo cancelled || true)
 Bash(test -f .experts/.jobs/<expert_name>/<job_id>/DONE && echo done || echo pending)
 ```
 
 Classify as:
 - `missing` — job directory does not exist → report and exit. Outcome: `missing`.
+- `cancelled` — CANCELLED marker already present → already cancelled, nothing to do. Outcome: `already-cancelled`.
 - `done` — DONE marker present.
-- `pending` — directory exists but no DONE marker (READY marker present).
+- `pending` — directory exists, no DONE marker (queued or running; a PID marker means the daemon claimed it).
 
 Outcome: `classified`.
 
@@ -53,11 +53,13 @@ Outcome: `classified`.
 
 For `missing`: print "Job `<job_id>` not found for expert `<expert_name>`." and exit with outcome `absent`.
 
-For `pending`: call `AskUserQuestion`: "Job `<job_id>` is pending — the runtime daemon may be processing it. Cancel anyway?" (Yes/No). If No → exit with outcome `user-aborted`.
+For `already-cancelled`: print "Job `<job_id>` is already cancelled; bundle kept at `.experts/.jobs/<expert_name>/<job_id>/`." and exit with outcome `already-cancelled`.
 
-For `done`: call `AskUserQuestion`: "Job `<job_id>` is already done. Remove it anyway?" (Yes/No). If No → exit with outcome `user-aborted`.
+For `pending`: call `AskUserQuestion`: "Job `<job_id>` is pending — if the daemon is executing it, its executor process will be stopped immediately. Cancel?" (Yes/No). If No → exit with outcome `user-aborted`.
 
-Outcome: `confirmed`, `user-aborted`, or `absent`.
+For `done`: call `AskUserQuestion`: "Job `<job_id>` is already done. Mark it cancelled anyway? (The bundle stays on disk either way.)" (Yes/No). If No → exit with outcome `user-aborted`.
+
+Outcome: `confirmed`, `user-aborted`, `already-cancelled`, or `absent`.
 
 ## Step 4 — Cancel job
 
@@ -72,7 +74,7 @@ print('cancelled')
 ")
 ```
 
-Print: "Job `<job_id>` cancelled."
+Print: "Job `<job_id>` cancelled — executor stopped, bundle kept at `.experts/.jobs/<expert_name>/<job_id>/` with a CANCELLED marker."
 
 Outcome: `cancelled` or `error`.
 
@@ -98,7 +100,7 @@ input: "expert_name=<expert_name> job_id=<job_id>"
 `## Actions`
 - Validated inputs
 - Classified job as <status>
-- Confirmation: <confirmed|user-aborted|absent>
+- Confirmation: <confirmed|user-aborted|already-cancelled|absent>
 - Cancellation: <cancelled|skipped>
 
 `## Result` `<success|aborted>` — job_id=`<job_id>`, outcome=`<outcome>`.
@@ -106,6 +108,6 @@ input: "expert_name=<expert_name> job_id=<job_id>"
 ## Failure modes
 
 - **"expert_name is required"** (or `job_id`) — required argument missing → supply both.
-- **"Job not found"** — job directory absent; job was never dispatched or already cancelled → verify job_id and expert_name.
-- **User aborts confirmation** — user chose No → no files deleted; job remains in current state.
+- **"Job not found"** — job directory absent; job was never dispatched or its bundle already aged out → verify job_id and expert_name via `/lazy-expert.list-jobs`.
+- **User aborts confirmation** — user chose No → nothing signalled, no markers changed; job remains in its current state.
 - **Python `ModuleNotFoundError`** — plugin not installed → run `/lazy-core.install`.

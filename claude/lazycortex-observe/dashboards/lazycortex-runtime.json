@@ -147,14 +147,14 @@
   "panels": [
     {
       "type": "table",
-      "title": "Daemons ($period)",
+      "title": "Daemons Health ($period)",
       "description": "One row per runtime daemon: liveness, halt state, problem jobs now, errors and tokens over the selected period.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 6,
+        "h": 9,
         "w": 24,
         "x": 0,
         "y": 0
@@ -168,14 +168,14 @@
           "format": "table"
         },
         {
-          "expr": "sum by (repo) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=\"failed\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "expr": "sum by (repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\",outcome=\"failed\"}[$period])) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
           "legendFormat": "",
           "refId": "C",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "sum by (repo) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=\"dead\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "expr": "sum by (repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\",outcome=\"dead\"}[$period])) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
           "legendFormat": "",
           "refId": "D",
           "instant": true,
@@ -192,6 +192,13 @@
           "expr": "max by (repo) (lazycortex_runtime_dirty_tree{repo=~\"$repo\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
           "legendFormat": "",
           "refId": "G",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (repo) (increase(lazycortex_runtime_routine_tick_duration_seconds_sum{repo=~\"$repo\"}[$period])) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "legendFormat": "",
+          "refId": "H",
           "instant": true,
           "format": "table"
         }
@@ -214,15 +221,17 @@
               "Value #C": 4,
               "Value #D": 5,
               "Value #E": 6,
-              "Value #G": 3
+              "Value #G": 3,
+              "Value #H": 7
             },
             "renameByName": {
               "repo": "Daemon",
               "Value #B": "Halted",
-              "Value #C": "Failed jobs",
-              "Value #D": "Dead jobs",
+              "Value #C": "Failed",
+              "Value #D": "Dead",
               "Value #E": "Errors",
-              "Value #G": "Work"
+              "Value #G": "Work",
+              "Value #H": "Busy time"
             }
           }
         }
@@ -276,20 +285,19 @@
           {
             "matcher": {
               "id": "byRegexp",
-              "options": "^(Failed jobs|Dead jobs|Errors)$"
+              "options": "^(Failed|Dead|Errors)$"
             },
             "properties": [
               {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "gauge",
-                  "mode": "gradient",
-                  "valueDisplayMode": "text"
-                }
-              },
-              {
                 "id": "min",
                 "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
               },
               {
                 "id": "thresholds",
@@ -297,19 +305,19 @@
                   "mode": "absolute",
                   "steps": [
                     {
-                      "color": "green",
+                      "color": "transparent",
                       "value": null
                     },
                     {
-                      "color": "orange",
-                      "value": 1
-                    },
-                    {
                       "color": "red",
-                      "value": 5
+                      "value": 0.5
                     }
                   ]
                 }
+              },
+              {
+                "id": "custom.width",
+                "value": 70
               }
             ]
           },
@@ -336,12 +344,40 @@
                         "color": "green"
                       },
                       "1": {
-                        "text": "PAUSED — dirty tree",
+                        "text": "PAUSED \u2014 dirty tree",
                         "color": "orange"
                       }
                     }
                   }
                 ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Busy time"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge",
+                  "mode": "gradient",
+                  "valueDisplayMode": "text"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
               }
             ]
           }
@@ -370,7 +406,7 @@
     {
       "type": "table",
       "title": "Routine health ($period)",
-      "description": "One row per routine × repo: how long since the last tick, tick and error counts over the selected period.",
+      "description": "One row per routine \u00d7 repo: how long since the last tick, tick and error counts over the selected period.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -379,7 +415,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 6
+        "y": 9
       },
       "targets": [
         {
@@ -468,6 +504,10 @@
               {
                 "id": "min",
                 "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 70
               }
             ]
           },
@@ -506,11 +546,14 @@
             },
             "properties": [
               {
+                "id": "min",
+                "value": 0
+              },
+              {
                 "id": "custom.cellOptions",
                 "value": {
-                  "type": "gauge",
-                  "mode": "gradient",
-                  "valueDisplayMode": "text"
+                  "type": "color-background",
+                  "mode": "basic"
                 }
               },
               {
@@ -519,23 +562,31 @@
                   "mode": "absolute",
                   "steps": [
                     {
-                      "color": "text",
+                      "color": "transparent",
                       "value": null
                     },
                     {
-                      "color": "orange",
-                      "value": 1
-                    },
-                    {
                       "color": "red",
-                      "value": 5
+                      "value": 0.5
                     }
                   ]
                 }
               },
               {
-                "id": "min",
-                "value": 0
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Runs"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
               }
             ]
           }
@@ -564,7 +615,7 @@
     {
       "type": "table",
       "title": "Expert health ($period)",
-      "description": "One row per expert × repo: job attempts over the selected period by outcome (done / failed / dead), attempt-level errors that left the job queued for retry, and busy time.",
+      "description": "One row per expert \u00d7 repo: job attempts over the selected period by outcome (done / failed / dead), attempt-level errors that left the job queued for retry, and busy time.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -573,7 +624,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 16
+        "y": 19
       },
       "targets": [
         {
@@ -718,16 +769,15 @@
             },
             "properties": [
               {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "gauge",
-                  "mode": "gradient",
-                  "valueDisplayMode": "text"
-                }
-              },
-              {
                 "id": "min",
                 "value": 0
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
               },
               {
                 "id": "thresholds",
@@ -735,302 +785,27 @@
                   "mode": "absolute",
                   "steps": [
                     {
-                      "color": "text",
+                      "color": "transparent",
                       "value": null
                     },
                     {
-                      "color": "orange",
-                      "value": 1
-                    },
-                    {
                       "color": "red",
-                      "value": 5
+                      "value": 0.5
                     }
                   ]
                 }
               }
             ]
-          }
-        ]
-      },
-      "options": {
-        "showHeader": true,
-        "cellHeight": "sm",
-        "footer": {
-          "show": false,
-          "reducer": [
-            "sum"
-          ],
-          "fields": [],
-          "countRows": false,
-          "enablePagination": false
-        },
-        "sortBy": [
-          {
-            "desc": true,
-            "displayName": "Jobs"
-          }
-        ]
-      }
-    },
-    {
-      "type": "table",
-      "title": "Errors by routine × reason ($period)",
-      "description": "Empty table = no errors in the selected period.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 26
-      },
-      "targets": [
-        {
-          "expr": "sum by (routine, repo, reason) (increase(lazycortex_runtime_routine_errors_total{repo=~\"$repo\"}[$period])) > 0",
-          "legendFormat": "",
-          "refId": "A",
-          "instant": true,
-          "format": "table"
-        }
-      ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "exported_repo": true
-            },
-            "indexByName": {
-              "routine": 0,
-              "repo": 1,
-              "reason": 2,
-              "Value": 3
-            },
-            "renameByName": {
-              "routine": "Routine",
-              "repo": "Repo",
-              "reason": "Reason",
-              "Value": "Errors"
-            }
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "filterable": false,
-            "inspect": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "showHeader": true,
-        "cellHeight": "sm",
-        "footer": {
-          "show": false,
-          "reducer": [
-            "sum"
-          ],
-          "fields": [],
-          "countRows": false,
-          "enablePagination": false
-        },
-        "sortBy": [
-          {
-            "desc": true,
-            "displayName": "Errors"
-          }
-        ]
-      }
-    },
-    {
-      "type": "table",
-      "title": "Halt events ($period)",
-      "description": "Empty table = no halts in the selected period.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 26
-      },
-      "targets": [
-        {
-          "expr": "sum by (repo, reason, triggered_by) (increase(lazycortex_runtime_daemon_halts_total{repo=~\"$repo\"}[$period])) > 0",
-          "legendFormat": "",
-          "refId": "A",
-          "instant": true,
-          "format": "table"
-        }
-      ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "exported_repo": true
-            },
-            "indexByName": {
-              "repo": 0,
-              "reason": 1,
-              "triggered_by": 2,
-              "Value": 3
-            },
-            "renameByName": {
-              "repo": "Repo",
-              "reason": "Reason",
-              "triggered_by": "Triggered by",
-              "Value": "Halts"
-            }
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "filterable": false,
-            "inspect": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "showHeader": true,
-        "cellHeight": "sm",
-        "footer": {
-          "show": false,
-          "reducer": [
-            "sum"
-          ],
-          "fields": [],
-          "countRows": false,
-          "enablePagination": false
-        },
-        "sortBy": [
-          {
-            "desc": true,
-            "displayName": "Halts"
-          }
-        ]
-      }
-    },
-    {
-      "type": "table",
-      "title": "Queue by expert × state (now)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 26
-      },
-      "targets": [
-        {
-          "expr": "sum by (expert, repo, state) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state!=\"done\"}) > 0",
-          "legendFormat": "",
-          "refId": "A",
-          "instant": true,
-          "format": "table"
-        }
-      ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Time": true,
-              "exported_repo": true
-            },
-            "indexByName": {
-              "expert": 0,
-              "repo": 1,
-              "state": 2,
-              "Value": 3
-            },
-            "renameByName": {
-              "expert": "Expert",
-              "repo": "Repo",
-              "state": "State",
-              "Value": "Jobs"
-            }
-          }
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "decimals": 0,
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "filterable": false,
-            "inspect": false
-          }
-        },
-        "overrides": [
+          },
           {
             "matcher": {
-              "id": "byName",
-              "options": "State"
+              "id": "byRegexp",
+              "options": "^(Jobs|Done|Failed|Dead|Errors)$"
             },
             "properties": [
               {
-                "id": "mappings",
-                "value": [
-                  {
-                    "type": "value",
-                    "options": {
-                      "failed": {
-                        "color": "orange",
-                        "index": 0
-                      },
-                      "dead": {
-                        "color": "red",
-                        "index": 1
-                      },
-                      "active": {
-                        "color": "green",
-                        "index": 2
-                      },
-                      "queued": {
-                        "color": "blue",
-                        "index": 3
-                      }
-                    }
-                  }
-                ]
-              },
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "color-text"
-                }
+                "id": "custom.width",
+                "value": 70
               }
             ]
           }
@@ -1067,13 +842,13 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 34
+        "y": 29
       },
       "timeFrom": "$period",
       "targets": [
         {
           "expr": "sum by (expert, repo, state) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=~\"queued|active\"})",
-          "legendFormat": "{{expert}} / {{repo}} · {{state}}",
+          "legendFormat": "{{expert}} / {{repo}} \u00b7 {{state}}",
           "refId": "A"
         }
       ],
@@ -1104,13 +879,13 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 34
+        "y": 29
       },
       "timeFrom": "$period",
       "targets": [
         {
           "expr": "sum by (expert, repo, state) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=~\"failed|dead\"})",
-          "legendFormat": "{{expert}} / {{repo}} · {{state}}",
+          "legendFormat": "{{expert}} / {{repo}} \u00b7 {{state}}",
           "refId": "A"
         }
       ],
@@ -1163,7 +938,7 @@
     },
     {
       "type": "table",
-      "title": "Tokens by routine × expert ($period)",
+      "title": "Tokens by routine \u00d7 expert ($period)",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1172,7 +947,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 37
       },
       "targets": [
         {
@@ -1260,28 +1035,7 @@
             "inspect": false
           }
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Total"
-            },
-            "properties": [
-              {
-                "id": "custom.cellOptions",
-                "value": {
-                  "type": "gauge",
-                  "mode": "gradient",
-                  "valueDisplayMode": "text"
-                }
-              },
-              {
-                "id": "min",
-                "value": 0
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "options": {
         "showHeader": true,
@@ -1321,7 +1075,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 47
       },
       "targets": [
         {
@@ -1368,7 +1122,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 52
+        "y": 47
       },
       "targets": [
         {
@@ -1415,7 +1169,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 60
+        "y": 55
       },
       "targets": [
         {
@@ -1462,7 +1216,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 60
+        "y": 55
       },
       "targets": [
         {

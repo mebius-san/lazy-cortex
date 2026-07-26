@@ -17,7 +17,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-core.install` — bootstrap the plugin into a project (or globally); copies hygiene + security rule templates. Idempotent.
 - `lazy-core.optimize` — slim oversized rule files, move reference material to agents, fix global-vs-local settings leakage.
 - `lazy-core.setup` — meta-installer that runs every enabled lazycortex plugin's install skill in dependency order. Idempotent.
-- `lazy-expert.cancel-job` — cancel an expert job by removing its directory. Confirms via AskUserQuestion for non-done jobs.
+- `lazy-expert.cancel-job` — cancel an expert job: stops its executor (SIGTERM, grace, then SIGKILL) and marks the bundle `CANCELLED`, keeping the directory on disk for forensics; releases the dedup key. Confirms via AskUserQuestion for non-done jobs.
 - `lazy-expert.collect-job` — collect the result of a dispatched expert job; returns `{status, response}`.
 - `lazy-expert.dispatch-job` — dispatch a job to a named expert queue; returns `{job_id, queue_path}`.
 - `lazy-expert.list-jobs` — list expert queue jobs, optionally filtered by expert name or status.

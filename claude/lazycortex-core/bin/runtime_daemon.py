@@ -47,6 +47,8 @@ _CLEANUP_INTERVAL_SEC = 3600
 _QUIET_TICK_MAX_SEC = 1.5
 # Dirty-tree halt messages truncate the path list to this many lines.
 _MAX_DIRTY_PATH_LINES = 50
+# Home-relative root of the Claude Code plugin cache; layout is <registry>/<plugin>/<version>/bin/<plugin>.
+PLUGIN_CACHE_REL = ".claude/plugins/cache"
 
 
 class GitPullDiverged(RuntimeError):
@@ -977,13 +979,71 @@ def _plugin_roots() -> list[Path]:
   return out
 
 
-def _restart_in_place() -> None:
+def _version_sort_key(name: str) -> tuple[int, ...]:
+  """
+  Build a numeric sort key for a plugin-cache version directory name.
+
+  Splits the name on `.` and keeps the leading digits of each component, so `5.13.0` ranks above
+  `5.9.0` — a plain string comparison ranks `9` above `1` and picks the wrong directory. Components
+  carrying no digits contribute `0`.
+
+  Args:
+    name: Version directory name as it appears in the plugin cache.
+
+  Returns:
+    A tuple of integers ordered the way version numbers are.
+  """
+  out: list[int] = []
+  for part in name.split("."):
+    digits = "".join(c for c in part if c.isdigit())
+    out.append(int(digits) if digits else 0)
+  return tuple(out)
+
+
+def _newer_core_runner() -> Path | None:
+  """
+  Resolve a newer cached `lazycortex-core` runner than the one this process started from.
+
+  The own-code fingerprint compares file *contents* at the paths the process actually loaded, which
+  never change for a plugin-cache install: an update writes a fresh `<version>/` directory and leaves
+  the running one untouched. Without this check a cache-installed daemon keeps running the version it
+  started on until an operator restarts it by hand. Version directories are compared instead of bytes.
+
+  Returns:
+    Path to the newer version's runner entrypoint, or `None` when this process runs from a source
+    checkout (where the fingerprint is the live mechanism) or already runs the latest cached version.
+  """
+  here = Path(__file__).resolve().parent
+  # guard: not a plugin-cache install — the own-code fingerprint covers a source checkout
+  if PLUGIN_CACHE_REL not in here.as_posix():
+    return None
+  running = here.parent
+  versions = [ v for v in running.parent.iterdir() if v.is_dir() ]
+  # guard: no sibling version directories to compare against
+  if not versions:
+    return None
+  latest = max(versions, key = lambda v: _version_sort_key(v.name))
+  # guard: already on the latest cached version
+  if latest == running:
+    return None
+  # waiver: filesystem path idiom, not a domain constant
+  runner = latest / "bin" / "runner"
+  return runner if runner.is_file() else None
+
+
+def _restart_in_place(new_runner: Path | None = None) -> None:
   """
   Restart the daemon process so it reloads its own updated source.
 
   Under a supervisor (`LAZYCORTEX_SUPERVISED=1`), exits cleanly so launchd / systemd relaunches the
   process with fresh code. Otherwise replaces the current process image with a fresh interpreter via
   `os.execv`, so the restart works even when no supervisor is present.
+
+  Args:
+    new_runner: Runner entrypoint to exec, when the restart is driven by a newer cached plugin
+      version rather than an edit of the loaded source. Load-bearing in the unsupervised path:
+      re-execing the original argument vector would relaunch the same stale runner and the version
+      check would fire again on the very next iteration, restarting forever.
 
   Raises:
     SystemExit: When running under a supervisor — the supervisor owns the relaunch.
@@ -992,7 +1052,8 @@ def _restart_in_place() -> None:
   if os.environ.get("LAZYCORTEX_SUPERVISED") == "1":
     raise SystemExit(0)
   # unsupervised — replace the process image with a fresh interpreter
-  os.execv(sys.executable, [ sys.executable, *sys.argv ])
+  argv = [ str(new_runner), *sys.argv[1:] ] if new_runner is not None else list(sys.argv)
+  os.execv(sys.executable, [ sys.executable, *argv ])
 
 
 def _record_metrics_port_conflict(repo_root: Path, port: int, e: OSError) -> None:
@@ -1083,8 +1144,9 @@ def run(repo_root: Path) -> None:
     - When the daemon is halted, the loop sleeps for the polling interval directly to avoid a tight
       CPU loop driven by stale `last_run` timestamps.
     - The signal handlers set a stop flag that ends the loop after the current iteration completes.
-    - When the daemon's own loaded source changes (detected by a stable two-read fingerprint), the
-      process restarts at the iteration boundary so it picks up the new code.
+    - When the daemon's own loaded source changes (detected by a stable two-read fingerprint), or a
+      newer version of the plugin appears in the plugin cache, the process restarts at the iteration
+      boundary so it picks up the new code.
 
   Args:
     repo_root: Absolute path to the repository the daemon should drive.
@@ -1117,15 +1179,22 @@ def run(repo_root: Path) -> None:
     _run_iteration_guarded(repo_root)
     sleep_s: float = 5.0   # safe default when the tail blows up
     try:
-      # restart boundary — after the iteration completed and any commit landed; an own-code change
-      # detected here means the loaded daemon source no longer matches disk. Skip while halted so a
-      # restart never masks a halt the operator still needs to see and recover from.
-      if not runtime_state.load(repo_root).get(StateKey.DAEMON_HALTED) and fp.changed():
-        _log_routine_result(repo_root, {
-          TickResultKey.NAME: "_self_restart", TickResultKey.EXIT: 0, TickResultKey.DURATION_SEC: 0.0,
-          "message": "restart: own code changed",
-        })
-        _restart_in_place()
+      # restart boundary — after the iteration completed and any commit landed. Two independent
+      # triggers: the loaded daemon source no longer matches disk (source checkout), or a newer
+      # version of this plugin is cached than the one the process started from (cache install — the
+      # update lands in a fresh directory, so the fingerprint sees no byte change). Skip while halted
+      # so a restart never masks a halt the operator still needs to see and recover from.
+      if not runtime_state.load(repo_root).get(StateKey.DAEMON_HALTED):
+        newer_runner = _newer_core_runner()
+        if newer_runner is not None or fp.changed():
+          _log_routine_result(repo_root, {
+            TickResultKey.NAME: "_self_restart", TickResultKey.EXIT: 0, TickResultKey.DURATION_SEC: 0.0,
+            "message": (
+              f"restart: newer cached version {newer_runner.parents[1].name}"
+              if newer_runner is not None else "restart: own code changed"
+            ),
+          })
+          _restart_in_place(newer_runner)
       # compute sleep based on latest cfg + last_run state
       daemon = load_section(settings_path, SettingsKey.DAEMON)
       # waiver: inline numeric/default literal, not a domain constant
@@ -1183,8 +1252,7 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
     bin_path = _resolve_in_plugin_dir(pd, plugin)
     if bin_path is not None:
       return [ str(bin_path), *cmd[1:] ]
-  # waiver: filesystem path idiom, not a domain constant
-  cache = Path.home() / ".claude/plugins/cache"
+  cache = Path.home() / PLUGIN_CACHE_REL
   # real layout: cache/<registry>/<plugin>/<version>/bin/<plugin>
   plugin_dirs: list[Path] = []
   if cache.is_dir():

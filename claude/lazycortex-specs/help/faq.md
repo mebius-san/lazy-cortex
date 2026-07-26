@@ -151,4 +151,3 @@ Re-run `/spec.doctor <product> --apply` — the fix loop offers to strip the obs
 ## A dependency in my product record points at a product or repo key that no longer exists. What do I do?
 
 `spec.resolve-dependency` refuses with a clear error naming the missing key rather than silently dropping or guessing at it. Run `/spec.product-config` on the product — its dependency step lets you review, extend, or correct the `dependencies` list; it never removes an entry you don't explicitly touch, so you can fix just the stale one.
-</content>

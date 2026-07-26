@@ -111,4 +111,3 @@ flowchart LR
 - **discipline** — the three rules and five reference guidelines that install puts in place and audit verifies.
 - **checkers** — the `chk-py` and `tst-py` wrappers that Step 2 deploys, and the `python.env_source` script they source after the venv activates.
 - **hook** — the PostToolUse hook that auto-registers from the plugin manifest; audit Check 10 verifies its manifest is well-formed.
-</content>
