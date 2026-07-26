@@ -134,6 +134,27 @@ def _owner_of_section(section_body: str) -> tuple[str, str] | None:
   return None
 
 
+def _section_tag_line(section_body: str) -> str | None:
+  """
+  Return the section's tag line — its first non-empty content line when that line is a tag.
+
+  The tag line is the section's identity under spec inv 8 (`#expert/<flat>/<id>`,
+  `#protected/<owner>/<region>`, `#consumer/<...>`): two sections carrying the same tag line
+  are two instances of the same section.
+
+  Returns:
+    The stripped tag line when the first non-empty content line is a single-line Obsidian
+    hashtag, or `None` when the section is untagged.
+  """
+  for line in section_body.split("\n"):
+    stripped = line.strip()
+    # guard: leading blank lines aren't the tag line; skip to the first non-empty content line.
+    if not stripped:
+      continue
+    return stripped if _TAG_LINE_RE.match(stripped) else None
+  return None
+
+
 def _section_is_tagged(section_body: str) -> bool:
   """
   Report whether the section's first non-empty content line is an Obsidian-style single-line
@@ -173,9 +194,10 @@ def _drop_sections(
   Walk `body` H1 sections and remove those that match the policy.
 
   When `drop_owned` is `True`, any section whose first non-empty content line is a tag
-  (spec inv 8) is removed, except when its 2-part owner equals `keep_owner`. This covers
-  any foreign-owned overlay — they are not "main writer's body". When `drop_history` is
-  `True`, the `# History` section
+  (spec inv 8) is removed, except when `keep_owner` is given and the section's 2-part owner
+  equals it. This covers any foreign-owned overlay — they are not "main writer's body" —
+  including ownerless tagged sections (`#protected/...`, `#consumer/...`), which are always
+  removed under the policy. When `drop_history` is `True`, the `# History` section
   (titled exactly `History`, with or without an ownership tag) is also removed.
 
   Returns:
@@ -194,11 +216,15 @@ def _drop_sections(
     section_body_only = section_text[len(_heading_line_for(start, end, body)):]
     owner = _owner_of_section(section_body_only)
     tagged = _section_is_tagged(section_body_only)
-    # guard: under drop_history policy, the # History section is removed (not kept) — skip appending it.
-    if drop_history and _parser.is_historian_section(section_body_only):
+    # guard: the # History section is governed solely by drop_history — never by the drop_owned
+    # policy, even though the historian's tag is ownerless.
+    if _parser.is_historian_section(section_body_only):
+      if not drop_history:
+        keep_ranges.append((start, end))
       continue
-    # guard: under drop_owned policy, foreign-owned tagged sections are removed; the kept owner is exempt.
-    if drop_owned and tagged and owner != keep_owner:
+    # guard: under drop_owned policy, tagged sections are removed; only an explicitly kept owner is
+    # exempt — ownerless tagged sections (#protected/..., owner is None) must never match a None keep_owner.
+    if drop_owned and tagged and (keep_owner is None or owner != keep_owner):
       continue
     keep_ranges.append((start, end))
   return "".join(body[s:e] for s, e in keep_ranges)
@@ -889,6 +915,9 @@ def _restore_owned_and_history(
   `new_content_body` (between the status callout or banner and the operator's free body);
   `"bottom"` sections are appended after it, before `# History`. When `section_layout` is
   `None` or a given owner is absent from the map, the section defaults to `"bottom"`.
+  Operator-side duplicates of the same tagged section (identical tag line) are collapsed to
+  the first instance — the tag pair is the section's identity, so a repeated instance is
+  damage from an earlier round, not content.
 
   Returns:
     The assembled body with top-positioned sections, `new_content_body`, bottom-positioned
@@ -898,6 +927,7 @@ def _restore_owned_and_history(
   bottom_parts: list[str] = []
   spans = _enumerate_h1_spans(operator_body)
   history_section: str | None = None
+  seen_tags: set[str] = set()
   for start, end, _title, _heading in spans:
     section_text = operator_body[start:end]
     heading_len = len(_heading_line_for(start, end, operator_body))
@@ -910,9 +940,17 @@ def _restore_owned_and_history(
   # Spec inv 8: preserve EVERY tagged H1 section (any tag), not
   # only 2-part #expert/<flat>/<section-id>. Downstream consumer
   # overlays may carry other prefixes. All foreign to the main writer.
-    # guard: only foreign-owned tagged sections get re-placed; skip untagged main-writer body and the caller's own section.
-    if not tagged or owner == skip_owner:
+    # guard: only foreign-owned tagged sections get re-placed; skip untagged main-writer body and the
+    # caller's own section — but an ownerless tagged section (owner is None) never matches a None skip_owner.
+    if not tagged or (skip_owner is not None and owner == skip_owner):
       continue
+    tag_line = _section_tag_line(section_body_only)
+    # guard: the tag pair is the section's identity — a second operator-side instance with the same
+    # tag is a duplicate; restore only the first so damaged documents self-heal to one instance.
+    if tag_line is not None and tag_line in seen_tags:
+      continue
+    if tag_line is not None:
+      seen_tags.add(tag_line)
     position = (section_layout or {}).get(owner, Position.BOTTOM) if owner else Position.BOTTOM
     if position == Position.TOP:
       top_parts.append(section_text)

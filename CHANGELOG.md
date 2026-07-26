@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.18.0 — 2026-07-26 UTC
+
+- Cancelling an expert job now stops the running headless-Claude process instead of just marking it, and keeps the job bundle on disk as `cancelled` instead of deleting it — forensics survive cancellation, and `list-jobs` reports the new status.
+- Fixed the background daemon not restarting itself after a newer version was installed via cache — it used to keep running the old version until manually restarted. Dev-mode now correctly runs the in-repo runner instead of the cached copy. Re-run install to pick up this fix.
+
 ### 5.17.1 — 2026-07-25 UTC
 
 - Runtime now tracks per-Expert job metrics — attempts logged to `jobs.jsonl`, new Prometheus counters/histograms for job counts and duration, and a new Expert health table on the dashboard.
@@ -679,6 +684,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 5.2.6 — 2026-07-26 UTC
+
+- Fixed protected-section duplication during document reassembly — repeated rewrites could double up sections tagged `#protected/...` (1→2→4 instances across specs/core docs); affected documents now self-heal to a single instance on the next write.
+
 ### 5.2.5 — 2026-07-23 UTC
 
 - Install now seeds the review agents' model tiers automatically (previously left unset until you ran the model-tier wizard).
@@ -731,6 +740,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).
 
 ## lazycortex-observe
+
+### 0.7.4 — 2026-07-26 UTC
+
+- Daemons table resized to comfortably fit five rows without clipping.
+- Dashboard tables unified around per-period flow, with error counts highlighted in red and narrower count columns.
+- Halts and Queue tables removed from the runtime dashboard — the whole middle row is gone.
 
 ### 0.7.2 — 2026-07-25 UTC
 

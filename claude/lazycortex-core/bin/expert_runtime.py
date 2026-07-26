@@ -15,7 +15,6 @@ from __future__ import annotations
 from typing import TypedDict
 
 import json
-import shutil
 import time
 import uuid
 from pathlib import Path
@@ -32,6 +31,12 @@ if TYPE_CHECKING:
 
 
 JOBS_BASE = ".experts/.jobs"
+# Grace between SIGTERM and SIGKILL when cancel_job tears down a claimed job's processes.
+_CANCEL_KILL_GRACE_SEC = 5.0
+# Wall-clock cap for the pgrep child-enumeration subprocess in _stop_claimant.
+_PGREP_TIMEOUT_SEC = 10
+# Poll interval while waiting out the SIGTERM grace window in _kill_group.
+_KILL_POLL_SEC = 0.1
 
 
 class _RoutineDefaults(TypedDict):
@@ -144,6 +149,9 @@ def dispatch_job(
           continue
         # guard: CONSUMED bundles have been retired by the consumer
         if (jdir / JobMarker.CONSUMED).exists():
+          continue
+        # guard: CANCELLED bundles released their dedup key on cancellation
+        if (jdir / JobMarker.CANCELLED).exists():
           continue
         req_file = jdir / JobFile.REQUEST
         # guard: bundle missing request.json is malformed and cannot match
@@ -424,8 +432,8 @@ def list_jobs(
 
   Status enum: `queued` (READY only, no PID), `active` (READY + PID),
   `done` (DONE without error outcome), `failed` (DONE with error outcome),
-  `dead` (DEAD marker present). Bundles in none of these shapes are
-  skipped.
+  `dead` (DEAD marker present), `cancelled` (CANCELLED marker present).
+  Bundles in none of these shapes are skipped.
 
   When `include_remote` is true, every tracker under
   `<repo>/.experts/.remote-jobs/<label>/<expert>/*.json` is also followed
@@ -516,10 +524,13 @@ def _job_status(jdir: Path) -> str | None:
     jdir: Path to the bundle directory to classify.
 
   Returns:
-    `"dead"`, `"failed"`, `"done"`, `"active"`, or `"queued"` when the
-    bundle matches one of the recognised marker shapes, or None when
-    the bundle is in an unrecognised shape.
+    `"cancelled"`, `"dead"`, `"failed"`, `"done"`, `"active"`, or
+    `"queued"` when the bundle matches one of the recognised marker
+    shapes, or None when the bundle is in an unrecognised shape.
   """
+  # cancellation is a terminal operator decision — it outranks every other marker
+  if (jdir / JobMarker.CANCELLED).exists():
+    return JobStatus.CANCELLED
   if (jdir / JobMarker.DEAD).exists():
     return JobStatus.DEAD
   if (jdir / JobMarker.DONE).exists():
@@ -541,20 +552,116 @@ def _job_status(jdir: Path) -> str | None:
 
 def cancel_job(repo: Path, expert: str, job_id: str) -> None:
   """
-  Remove a job bundle from disk.
+  Cancel a job: stop its executor immediately and mark the bundle `CANCELLED`.
 
-  Idempotent — calling on a non-existent bundle is a no-op. The entire
-  bundle directory (request, response, source, context, result) is
-  removed, so forensic contents are not retained.
+  The bundle directory (request, response, source, context, result,
+  transcript) stays on disk for operator post-mortem; the standard
+  cleanup window for failed jobs removes it later. The `READY` marker is
+  removed and `CANCELLED` is placed, so the pump never picks the job up
+  and the dedup key it may hold is released for a fresh dispatch.
+
+  When the bundle carries a live `PID` marker (the pump worker that
+  claimed the job), the worker's child process groups — the spawned
+  executor runs in its own session — are terminated first, then the
+  worker's own group, each with a SIGTERM → grace → SIGKILL escalation.
+
+  Idempotent — calling on a non-existent or already-cancelled bundle is
+  a no-op.
 
   Args:
     repo: Absolute path to the repository that hosts the job queue.
     expert: Expert name as registered in `lazy.settings.json[experts]`.
-    job_id: Identifier of the job to remove.
+    job_id: Identifier of the job to cancel.
   """
   d = _job_dir(repo, expert, job_id)
-  if d.exists():
-    shutil.rmtree(d)
+  # guard: bundle never existed or was already removed
+  if not d.exists():
+    return
+  # CANCELLED lands before the kill so a worker outcome-path racing the signal
+  # finds the terminal marker already in place
+  (d / JobMarker.CANCELLED).touch()
+  pid_file = d / JobMarker.PID
+  if pid_file.exists():
+    try:
+      pid = int(pid_file.read_text().strip())
+    except (OSError, ValueError):
+      pid = None
+    if pid is not None:
+      _stop_claimant(pid)
+  (d / JobMarker.READY).unlink(missing_ok = True)
+
+
+def _stop_claimant(pid: int) -> None:
+  """
+  Terminate a job's claimant worker and its spawned executor.
+
+  The PID marker names the pump worker; the executor it spawned runs in
+  its own session (separate process group), so killing the worker's
+  group alone would orphan a still-running executor. Child pids are
+  enumerated first (via `pgrep -P`), each child's group is torn down,
+  then the worker's own group — every kill escalating SIGTERM → grace →
+  SIGKILL.
+
+  Args:
+    pid: OS process id recorded in the bundle's PID marker.
+  """
+  # waiver: deferred / late-bound local imports per the plugin import style (avoids import cycles / optional deps)
+  import os
+  import subprocess
+  # guard: claimant already gone — nothing left to signal (children were reparented; the
+  # spawned executor exits on its own once its stdout consumer disappeared)
+  try:
+    os.kill(pid, 0)
+  except (ProcessLookupError, PermissionError):
+    return
+  child_pids: list[int] = []
+  try:
+    out = subprocess.run(
+      [ "pgrep", "-P", str(pid) ], capture_output = True, text = True,
+      timeout = _PGREP_TIMEOUT_SEC, check = False,
+    ).stdout
+    child_pids = [ int(line) for line in out.split() if line.strip().isdigit() ]
+  except (OSError, subprocess.TimeoutExpired):
+    # ponytail: no pgrep on this host — fall through to killing the worker group only
+    pass
+  for target in [ *child_pids, pid ]:
+    _kill_group(target)
+
+
+def _kill_group(pid: int) -> None:
+  """
+  Terminate one process group with a SIGTERM → grace → SIGKILL escalation.
+
+  Args:
+    pid: Any process id inside the group to tear down.
+  """
+  # waiver: deferred / late-bound local imports per the plugin import style (avoids import cycles / optional deps)
+  import os
+  import signal
+  # PermissionError ranks with ProcessLookupError throughout: a group we may not signal
+  # (or a zombie-only group, which macOS reports as EPERM) is one we are done with
+  try:
+    pgid = os.getpgid(pid)
+  except (ProcessLookupError, PermissionError):
+    return
+  try:
+    os.killpg(pgid, signal.SIGTERM)
+  except (ProcessLookupError, PermissionError):
+    return
+  deadline = time.time() + _CANCEL_KILL_GRACE_SEC
+  while time.time() < deadline:
+    # probe the GROUP, not the pid — an unreaped zombie keeps os.kill(pid, 0) succeeding
+    # forever, which would burn the whole grace window on an already-dead executor
+    try:
+      os.killpg(pgid, 0)
+    except (ProcessLookupError, PermissionError):
+      return
+    time.sleep(_KILL_POLL_SEC)
+  # guard: SIGTERM ignored within the grace window — force-kill the whole group
+  try:
+    os.killpg(pgid, signal.SIGKILL)
+  except (ProcessLookupError, PermissionError):
+    pass
 
 
 def consume_job(

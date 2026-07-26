@@ -25,6 +25,11 @@
 # one --plugin-dir <plugin-root> per match BEFORE existing args. The runner
 # consults --plugin-dir paths first and falls back to the cache, so dev-mode
 # transparently prefers in-repo plugin sources over their cached copies.
+# Dev-mode also execs the IN-REPO core runner when the repo ships one, instead of
+# the cached runner: otherwise the daemon loop imports core from an immutable cache
+# version directory while its subprocess routines resolve to the in-repo sources
+# (--plugin-dir) — split-brain — and the daemon's own-code fingerprint watches the
+# cache files, so a `git pull` of core never reaches the loop and never restarts it.
 
 # Re-exec through a login shell before parsing, so the operator's .zprofile/.zshrc
 # populate the environment (token + PATH) for everything below. The guard variable
@@ -43,6 +48,7 @@ DEV_MODE=0
 ENV_FILES=()
 ARGS=()
 REPO=""
+DEV_RUNNER=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --login-shell)
@@ -99,9 +105,20 @@ if [ "$DEV_MODE" = "1" ] && [ -n "$REPO" ] && [ -d "$REPO/claude" ]; then
   if [ ${#DEV_DIRS[@]} -gt 0 ]; then
     ARGS=("${ARGS[0]}" "${DEV_DIRS[@]}" "${ARGS[@]:1}")
   fi
+  # The in-repo core is authoritative in dev-mode — exec ITS runner so the daemon loop
+  # imports the same sources its routines resolve to, and the own-code fingerprint
+  # watches files a `git pull` actually rewrites. Falls through to the cache when the
+  # repo carries no core plugin (dev-mode on a consumer repo of other plugins).
+  if [ -x "$REPO/claude/lazycortex-core/bin/runner" ]; then
+    DEV_RUNNER="$REPO/claude/lazycortex-core/bin/runner"
+  fi
 fi
 
-# sort -rV: version sort, not lexicographic — plain sort -r picks 5.9.0 over 5.13.0 ("9" > "1")
-RUNNER=$(ls -d ~/.claude/plugins/cache/*/lazycortex-core/*/bin/runner 2>/dev/null | sort -rV | head -1)
-[ -z "$RUNNER" ] && { echo "lazycortex-core/bin/runner not found in plugin cache" >&2; exit 1; }
+if [ -n "$DEV_RUNNER" ]; then
+  RUNNER="$DEV_RUNNER"
+else
+  # sort -rV: version sort, not lexicographic — plain sort -r picks 5.9.0 over 5.13.0 ("9" > "1")
+  RUNNER=$(ls -d ~/.claude/plugins/cache/*/lazycortex-core/*/bin/runner 2>/dev/null | sort -rV | head -1)
+  [ -z "$RUNNER" ] && { echo "lazycortex-core/bin/runner not found in plugin cache" >&2; exit 1; }
+fi
 exec "$RUNNER" "${ARGS[@]}"

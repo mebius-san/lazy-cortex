@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-07-25
+last_regen: 2026-07-26
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive / chained-commit-not-scanned; hook-not-firing → hook-not-firing; git-coordination → staging-lock-refused-or-stuck; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-inbox-not-gitignored / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed / chained-commit-not-recorded."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive / chained-commit-not-scanned; hook-not-firing → hook-not-firing; git-coordination → staging-lock-refused-or-stuck; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / collect-status-pending-for-cancelled / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-inbox-not-gitignored / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed / chained-commit-not-recorded."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.agent-models
@@ -479,9 +479,19 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: `/lazy-expert.collect-job` reports `status: missing`, or `/lazy-expert.cancel-job` reports "Job `<job_id>` not found for expert `<expert_name>`."
 
-**Likely cause**: The job directory was never created (the dispatch failed silently or the wrong `expert_name` was used), or the job was already cancelled.
+**Likely cause**: The job directory was never created — the dispatch failed silently, or the `job_id` / `expert_name` was mistyped.
 
 **Fix**: Verify the `job_id` and `expert_name` match exactly what `/lazy-expert.dispatch-job` returned. Run `/lazy-expert.list-jobs` to see all active jobs and confirm whether the job was dispatched. If the job is absent, re-dispatch with the correct payload and expert name.
+
+---
+
+## `/lazy-expert.collect-job` reports `status: pending` forever for a job you cancelled
+
+**Symptom**: You ran `/lazy-expert.cancel-job` for a job and it confirmed "cancelled — executor stopped", but polling that same job afterward with `/lazy-expert.collect-job` keeps reporting `status: pending` instead of ever settling.
+
+**Likely cause**: Cancelling a job stops its executor and stamps a `CANCELLED` marker on the bundle, but the bundle directory — request, response, transcript, result — is deliberately kept on disk for post-mortem rather than removed, and cancellation never writes the `DONE` marker. `/lazy-expert.collect-job` only distinguishes `missing`, `pending`, `done`, and `failed`; a cancelled bundle with no `DONE` marker reads as `pending` indefinitely.
+
+**Fix**: Use `/lazy-expert.list-jobs` to check the job's real state instead — a cancelled job is reported there with `status: cancelled`. Treat that as the terminal answer for a cancelled job; `/lazy-expert.collect-job` will never resolve it out of `pending`.
 
 ---
 
@@ -497,11 +507,11 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## `/lazy-expert.list-jobs` rejects the status filter
 
-**Symptom**: Running `/lazy-expert.list-jobs` with a `status` argument fails immediately with "status must be one of: queued, active, dead, done, failed."
+**Symptom**: Running `/lazy-expert.list-jobs` with a `status` argument fails immediately with "status must be one of: queued, active, cancelled, dead, done, failed."
 
-**Likely cause**: The value passed to the `status` filter is not one of the five recognised strings. Common mistakes include `pending` (old vocabulary), `IN_PROGRESS`, `DONE` (uppercase), or `ready`.
+**Likely cause**: The value passed to the `status` filter is not one of the six recognised strings. Common mistakes include `pending` (old vocabulary), `IN_PROGRESS`, `DONE` (uppercase), `ready`, or `CANCELLED` (uppercase — the filter is case-sensitive).
 
-**Fix**: Use one of the five valid filter values: `queued`, `active`, `dead`, `done`, or `failed`. To see all jobs regardless of status, omit the `status` argument entirely.
+**Fix**: Use one of the six valid filter values: `queued`, `active`, `cancelled`, `dead`, `done`, or `failed`. To see all jobs regardless of status, omit the `status` argument entirely.
 
 ---
 

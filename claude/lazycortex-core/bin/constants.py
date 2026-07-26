@@ -57,6 +57,7 @@ class JobMarker:
       still no `response.json`.
 
     CONSUMED: Consumer-side marker — whoever read the response is finished with it.
+    CANCELLED: Operator-side terminal marker — the job was cancelled; the bundle stays for forensics.
     PID: Holds the OS process id of the pump worker that claimed the job.
   """
 
@@ -65,6 +66,7 @@ class JobMarker:
   DEAD = "DEAD"
   DEAD_CANDIDATE = "DEAD_CANDIDATE"
   CONSUMED = "CONSUMED"
+  CANCELLED = "CANCELLED"
   PID = "PID"
 
 
@@ -756,6 +758,7 @@ class JobStatus:
     DONE: The bundle finished without an error outcome.
     FAILED: The bundle finished with an error outcome.
     DEAD: The bundle carries a DEAD marker.
+    CANCELLED: The bundle carries a CANCELLED marker — cancelled by the operator.
     ALREADY_QUEUED: Dispatch result token — a live bundle already owns the dedup key.
   """
 
@@ -766,6 +769,7 @@ class JobStatus:
   DONE = "done"
   FAILED = "failed"
   DEAD = "dead"
+  CANCELLED = "cancelled"
   ALREADY_QUEUED = "already-queued"
 
 

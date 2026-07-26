@@ -233,6 +233,9 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
       # guard: job already DEAD — skip to keep idempotent
       if (jdir / JobMarker.DEAD).exists():
         continue
+      # guard: job CANCELLED — the operator killed its executor deliberately; not a death
+      if (jdir / JobMarker.CANCELLED).exists():
+        continue
       # guard: no PID file — job is queued, not claimed
       if not (jdir / JobMarker.PID).exists():
         continue
@@ -467,6 +470,7 @@ def pump(repo: Path) -> dict:
         ready_marker.exists()
         and not (jdir / JobMarker.DONE).exists()
         and not (jdir / JobMarker.DEAD).exists()
+        and not (jdir / JobMarker.CANCELLED).exists()
       )
       # guard: only collect actually-ready jobs into the FIFO queue
       if not ready:
@@ -1349,8 +1353,10 @@ def _maybe_cleanup(jdir: Path, done_after: float, fail_after: float, dead_after:
 
   Jobs marked DONE are retained for `done_after` seconds when the response succeeded,
   or `fail_after` seconds when the response carried an error outcome. Jobs marked DEAD
-  are retained for `dead_after` seconds as a forensic window. Jobs in neither state
-  are left untouched.
+  are retained for `dead_after` seconds as a forensic window. Cancelled jobs share the
+  `fail_after` window (`cleanup_failed_after`, default 30d) — a cancellation is an
+  operator intervention whose forensics deserve the long window; no separate knob.
+  Jobs in none of these states are left untouched.
 
   Args:
     jdir: Path to the job directory being considered for cleanup.
@@ -1361,6 +1367,14 @@ def _maybe_cleanup(jdir: Path, done_after: float, fail_after: float, dead_after:
   Returns:
     1 if the job directory was removed, 0 otherwise.
   """
+  # cancellation outranks every other marker (same precedence as status classification)
+  if (jdir / JobMarker.CANCELLED).exists():
+    age = time.time() - (jdir / JobMarker.CANCELLED).stat().st_mtime
+    if age >= fail_after:
+      shutil.rmtree(jdir)
+      return 1
+    return 0
+
   if (jdir / JobMarker.DONE).exists():
     age = time.time() - (jdir / JobMarker.DONE).stat().st_mtime
     resp_path = jdir / JobFile.RESPONSE

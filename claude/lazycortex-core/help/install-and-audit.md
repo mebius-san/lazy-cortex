@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-last_regen: 2026-07-25
+last_regen: 2026-07-26
 diagram_spec:
   anchor: "Bootstrap order"
   request: "Flowchart of the single-plugin vs multi-plugin bootstrap path — install/setup, optional restart, audit, and the optional optimize+doctor branch — ending at bootstrap complete."
@@ -80,7 +80,7 @@ The full journey for a new project: install → restart → audit → doctor if 
 
 **Re-run never asks about the daemon again** — once both gate values are on record (`daemon.enabled` in tracked settings, `daemon.run_here` in the gitignored local overlay), install is silent on re-run. To revisit a decision, edit or delete the relevant flag and re-run `/lazy-core.install`.
 
-**Dev-mode supervisor** — if this repo is a plugin-authoring vault, re-run `/lazy-core.install` and the dev-mode flag is derived automatically (detected by the presence of `plugin.json` files under `claude/`). The supervisor passes `--dev-mode` to `lazy.runtime.sh`, which prefers in-repo plugin sources over the plugin cache. For all other repos the flag is False.
+**Dev-mode supervisor** — if this repo is a plugin-authoring vault, re-run `/lazy-core.install` and the dev-mode flag is derived automatically (detected by the presence of `plugin.json` files under `claude/`). The supervisor passes `--dev-mode` to `lazy.runtime.sh`, which prefers in-repo plugin sources over the plugin cache — a stale cached copy of the runner is never re-executed once the in-repo one is available. For all other repos the flag is False.
 
 **Settings file auto-migration** — if `/lazy-core.doctor` or `/lazy-core.audit` warns that `lazy.settings.json` has a root `version` key, run any lazy-core skill (such as `/lazy-core.audit`) to trigger the one-time automatic migration: the settings loader rewrites the file to the current per-section `_version` format on its first read and removes the legacy root key.
 
