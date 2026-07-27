@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Drive an asset's readiness gates and per-file doc stages from creation through release using a two-layer progression model.
-last_regen: 2026-07-23
+last_regen: 2026-07-26
 diagram_spec:
   anchor: "How the layers feed each other"
   request: "Show the two-layer progression model: per-file spec_stage transitions (empty→draft→approved) feeding into the five flat gates (spec_design_done through spec_released) via gate-tick auto-flips and human-signal callouts, with spec.set-stage, spec.flip-gate, and spec.gate-tick as the labeled actors."
@@ -86,3 +86,4 @@ flowchart LR
 - `authoring` block — create the spec assets whose docs flow into these gates.
 - `code-sync` block — `spec.sync-with-code` and `spec.finalize-branch` drive the human-signal gates (`spec_develop_done`, `spec_tests_passing`, `spec_released`) from code state.
 - `asset-to-release` walkthrough — full journey of a single asset from creation through all five gates.
+</content>

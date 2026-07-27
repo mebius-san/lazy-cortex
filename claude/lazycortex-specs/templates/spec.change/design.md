@@ -13,6 +13,18 @@ spec_source_docs: []
 
 _Populated by `spec.create-asset` (called directly or via `spec.create-change`). Behavior-only — describes WHAT the change does. No source URLs, file paths, or code identifiers here. Describes the intended target behavior, not what the code does today; only an explicit operator decision narrows scope, never the state of the implementation._
 
+## Overview
+_What is being changed and why._
+
+## Goals
+_What the change aims to achieve._
+
+## Current State
+_How it is now — not necessarily behavior: architecture, configuration, structure._
+
+## Target State
+_How it will be. The diagram anchors here, when there is something to draw._
+
 # Sources
 #protected/spec/sources
 

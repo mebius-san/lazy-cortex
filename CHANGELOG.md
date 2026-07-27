@@ -453,6 +453,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.5.1 — 2026-07-26 UTC
+
+- New design-doc skeleton for products, features, and changes — captures Overview/Goals/Principles/Design/Behavior/Known Limitations/Boundaries, adds a conditional UI-layout section, and drops the old Roadmap section.
+- Fixed a hard failure from the dead `c4-container` diagram kind (spec steps now request `architecture` diagrams); a new mechanical check also catches hand-written diagram fences that skipped the drawer, which previously could pass review silently.
+
 ### 3.4.0 — 2026-07-23 UTC
 
 - Review classes are now shared across the whole spec vault: one design / plan / tech / bug set serves every product, so registering additional products no longer duplicates the class set. A product whose review experts differ still gets its own per-product override.

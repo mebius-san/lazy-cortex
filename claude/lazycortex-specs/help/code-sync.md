@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Keep a product spec aligned with its source repo — pull in-flight code changes into the tech doc and rebase branch pins after a merge.
-last_regen: 2026-06-23
+last_regen: 2026-07-26
 diagram_spec:
   anchor: "How the two skills relate"
   request: "Decision-tree showing when to reach for spec.sync-with-code vs spec.finalize-branch and what each produces — inputs are 'code changed since last sync' and 'branch just merged or deleted'; outputs are tech-doc updates, gate proposals, pin rewrites, and spec_released proposals."
@@ -48,30 +48,25 @@ The **asset-to-release** walkthrough traces the full journey from asset creation
 ```mermaid
 %%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart TD
-  codeChanged{Code changed since last sync?}
-  branchMergedOnly{Branch just merged or deleted?}
-  branchMerged{Branch just merged or deleted?}
-  runSync[spec.sync-with-code — tech-doc updates, gate proposals, pin rewrites]
-  runFinalize[spec.finalize-branch — spec_released proposals]
-  runBoth[spec.sync-with-code, then spec.finalize-branch — all outputs]
-  doNothing[No skill needed — nothing to reconcile]
+  codeChangedSinceLastSync{Code changed since last sync?}
+  branchMergedOrDeleted{Branch just merged or deleted?}
 
-  codeChanged -->|yes| branchMerged
-  codeChanged -->|no| branchMergedOnly
-  branchMergedOnly -->|yes| runFinalize
-  branchMergedOnly -->|no| doNothing
-  branchMerged -->|yes| runBoth
-  branchMerged -->|no| runSync
+  runSyncWithCode[spec.sync-with-code: tech-doc updates, gate proposals, pin rewrites]
+  runFinalizeBranch[spec.finalize-branch: spec_released proposal, pins finalized]
+  noActionNeeded[Outcome: no action needed]
+
+  codeChangedSinceLastSync -->|yes| runSyncWithCode
+  codeChangedSinceLastSync -->|no| branchMergedOrDeleted
+  branchMergedOrDeleted -->|yes| runFinalizeBranch
+  branchMergedOrDeleted -->|no| noActionNeeded
 
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class codeChanged guard
-  class branchMerged guard
-  class branchMergedOnly guard
-  class runBoth success
-  class runSync success
-  class runFinalize success
-  class doNothing error
+  class codeChangedSinceLastSync guard
+  class branchMergedOrDeleted guard
+  class runSyncWithCode success
+  class runFinalizeBranch success
+  class noActionNeeded success
 ```
+</content>

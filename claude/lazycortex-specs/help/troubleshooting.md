@@ -1,19 +1,32 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-07-23
+last_regen: 2026-07-26
 no_diagram: true
 source_skills:
   - spec.create-asset
+  - spec.create-feature
+  - spec.create-change
+  - spec.create-bug
+  - spec.add-asset-category
   - spec.create-from-code
-  - spec.product-config
-  - spec.resolve-repo
+  - spec.create-request
+  - spec.flip-gate
+  - spec.gate-tick
+  - spec.set-stage
   - spec.sync-with-code
   - spec.finalize-branch
+  - spec.resolve-repo
+  - spec.resolve-dependency
+  - spec.source-url
   - spec.request-router
+  - spec.request-classify
+  - spec.request-find-candidates
+  - spec.request-attach
+  - spec.request-spawn
+  - spec.install
+  - spec.product-config
   - spec.doctor
-  - spec.gate-tick
-  - spec.flip-gate
 ---
 # Troubleshooting
 
@@ -87,6 +100,26 @@ source_skills:
 
 ---
 
+## `/spec.add-asset-category` refuses because the category already exists
+
+**Symptom**: The skill rejects the new category name, saying it is already a key in the product's `asset_categories`.
+
+**Likely cause**: A category with that exact name was registered before — re-running the skill with the same name does not overwrite it.
+
+**Fix**: Pick a different category name, or edit the existing category's declaration and folder-note directly if you only meant to change its icon or description.
+
+---
+
+## `/spec.add-asset-category` aborts saying an icon is required
+
+**Symptom**: The wizard aborts after you decline every icon option, saying a category cannot be registered without one.
+
+**Likely cause**: You declined both the iconize suggestion and the emoji fallback without supplying either.
+
+**Fix**: Re-run `/spec.add-asset-category` and answer the icon question with an iconize icon name or an emoji — the category is not written until an icon is set.
+
+---
+
 ## `/spec.create-from-code` refuses an unregistered product or no-ops on a design-only product
 
 **Symptom**: The skill either refuses with "product not registered" or prints "product has no code binding" and stops without writing any files.
@@ -94,6 +127,16 @@ source_skills:
 **Likely cause**: For the "not registered" case, the product key is not in `products`. For the "design-only" case, the product record exists but has no `source` block binding it to a code repo.
 
 **Fix**: For an unregistered product, run `/spec.product-config` first. For a design-only product, re-run `/spec.product-config` in edit mode to attach a source repo — the wizard adds the `source.repo` and `source.paths` block without clobbering any existing asset categories.
+
+---
+
+## `/spec.create-request` aborts with nothing to capture
+
+**Symptom**: The skill aborts saying it has no idea to capture.
+
+**Likely cause**: You ran the skill without giving it a raw idea, and didn't supply one when the wizard asked.
+
+**Fix**: Re-invoke `/spec.create-request` and give it a sentence or two describing the idea before the wizard's clarifying questions run.
 
 ---
 
@@ -124,6 +167,36 @@ source_skills:
 **Likely cause**: The path or slug you passed is ambiguous — it could map to multiple products or categories — or it does not match any asset folder.
 
 **Fix**: Pass the unambiguous asset directory path (e.g. `Server/products/api/features/csv-export`).
+
+---
+
+## `/spec.set-stage` refuses: file's role isn't an authored doc
+
+**Symptom**: The skill refuses, saying the target file's `spec_role` is not an authored-doc role.
+
+**Likely cause**: `spec_stage` only applies to `design.md`, `tech.md`, `plan.md`, and `bug.md` — you pointed the skill at a folder-note or another file type instead.
+
+**Fix**: Re-invoke `/spec.set-stage` against one of the four authored docs.
+
+---
+
+## `/spec.set-stage` refuses: stage isn't in the closed set
+
+**Symptom**: The skill refuses, saying the stage value isn't in the closed set.
+
+**Likely cause**: You passed a stage outside `empty | draft | approved | rejected | cancelled` — often a leftover from an older model (`review`, `done`, `wtr`).
+
+**Fix**: Pass `draft` and set `review_active: true` for a doc that's currently in review, `approved` once it's accepted, or whichever closed-set value matches your intent.
+
+---
+
+## `/spec.set-stage` refuses: cancelled isn't allowed on this file
+
+**Symptom**: The skill refuses to set `cancelled` on the target file.
+
+**Likely cause**: `design.md` and `bug.md` are mandatory docs and can't be cancelled individually — cancellation belongs on `tech.md` (a docs-only feature) or `plan.md` (a no-code bug fix).
+
+**Fix**: Set `cancelled` on `tech.md` or `plan.md` instead, whichever fits the asset. If the whole asset is abandoned, cancel it at the asset level via `/spec.flip-gate` instead of a single file.
 
 ---
 
@@ -244,3 +317,103 @@ source_skills:
 **Likely cause**: The repo is hosted on a forge instance (self-hosted GitLab, Gitea, Forgejo, …) whose hostname the plugin can't classify automatically, and no explicit override is set on the record.
 
 **Fix**: Add `forge: <key>` (one of `github`, `gitlab`, `bitbucket`, `gitea`, `forgejo`, `sourcehut`) to the repo's record via `/spec.product-config`, then re-invoke.
+
+---
+
+## `/spec.resolve-dependency` refuses with a malformed dependency entry
+
+**Symptom**: The primitive refuses, naming a dependency entry that lacks a required key.
+
+**Likely cause**: The entry in the product's `dependencies` array doesn't match any of the three documented shapes — it's missing a `product:`, `repo:`, or `external:` key.
+
+**Fix**: Fix the entry via `/spec.product-config` (edit mode) so it matches one of the three shapes, then re-invoke `/spec.resolve-dependency`.
+
+---
+
+## `/spec.resolve-dependency` refuses: product or repo not found
+
+**Symptom**: The primitive refuses, naming a product or repo key from a dependency entry that doesn't resolve.
+
+**Likely cause**: A `product:` entry points at a key that isn't in `products`, or a `repo:` entry points at a key that isn't in `repos` — unregistered, or mistyped.
+
+**Fix**: Register the missing product or repo via `/spec.product-config`, or correct the key spelling in the dependency entry.
+
+---
+
+## `/spec.request-find-candidates` refuses when the request's class is unknown
+
+**Symptom**: The candidate search refuses, saying the request hasn't been classified yet.
+
+**Likely cause**: Classification runs before candidate search in the request-routing flow — an `unknown` class means that step hasn't settled.
+
+**Fix**: Let the routing pass classify the request first, then let candidate search run again on the classified request.
+
+---
+
+## `/spec.request-attach` aborts: request or target path doesn't exist
+
+**Symptom**: The skill aborts, pointing at a request or target path that isn't on disk.
+
+**Likely cause**: The request file's path is wrong, or the target you passed isn't a folder-note carrying `role: status`.
+
+**Fix**: Double-check the request file's path, and pass the folder-note path of the entity you want to attach to — not a wikilink and not a bare folder name.
+
+---
+
+## `/spec.request-attach` aborts: target entity is cancelled
+
+**Symptom**: The skill aborts, saying the target entity is cancelled.
+
+**Likely cause**: The feature/change/bug you're trying to attach the request to has `spec_cancelled: true` — attaching to a cancelled entity isn't allowed.
+
+**Fix**: Pick a different, active target for the attach, or spawn a fresh entity instead of reusing the cancelled one.
+
+---
+
+## `/spec.request-spawn` refuses: target folder already exists
+
+**Symptom**: The skill refuses, saying the target folder for the new entity already exists.
+
+**Likely cause**: The slug picked for the new feature/change/bug collides with an existing asset folder in the same category.
+
+**Fix**: Pick a different, unique slug and re-invoke.
+
+---
+
+## `/spec.install` aborts: plugin not installed
+
+**Symptom**: The skill aborts saying `lazycortex-specs@lazycortex` isn't in your installed plugins.
+
+**Likely cause**: The plugin was never enabled, or enablement didn't survive a settings edit.
+
+**Fix**: Add `"lazycortex-specs@lazycortex": true` to `enabledPlugins` in your `settings.json`, restart Claude Code, then re-run `/spec.install`.
+
+---
+
+## `/spec.install` reports the gate-tick routine is already registered
+
+**Symptom**: Running `/spec.install` again prints that the `spec.gate-tick` routine is already registered, and nothing else changes.
+
+**Likely cause**: A prior install already wired the routine — re-running install never overwrites an existing routine registration.
+
+**Fix**: This is the expected outcome, not an error — nothing to fix. If you need to change the routine's shape, unregister it first via `/lazy-routine.unregister spec.gate-tick`, then re-run `/spec.install`.
+
+---
+
+## `/spec.doctor` reports the product is not registered
+
+**Symptom**: The audit stops immediately, saying the product key isn't in `lazy.settings.json[products]`.
+
+**Likely cause**: The product was never registered, or the key you passed to `/spec.doctor` doesn't match what's registered.
+
+**Fix**: Register the product via `/spec.product-config`, then re-run `/spec.doctor <product>`.
+
+---
+
+## `/spec.doctor` reports the product folder name collides with `design`/`tech`
+
+**Symptom**: The audit reports a failure saying the product's folder leaf name is reserved, with no auto-fix offered even under `--apply`.
+
+**Likely cause**: The product's folder is named `design` or `tech` — that collides with the product-level `design.md` / `tech.md` files that sit at the same level.
+
+**Fix**: Rename the product's folder to a non-reserved name by hand. `/spec.doctor --apply` won't rewrite it for you.

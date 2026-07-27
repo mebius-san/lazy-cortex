@@ -118,13 +118,13 @@ See [`claude/lazycortex-wiki/`](claude/lazycortex-wiki/) for details.
 ## Quick start
 
 1. Add the marketplace and install the plugins you want (see Installation below).
-2. Run `/reload-plugins`.
-3. For each enabled plugin, run its install skill once per project: `/lazy-core.install`, `/lazy-python.install`, etc. This drops the plugin's rule templates into `.claude/rules/` and sets up any log/changelog scaffolding.
+2. Run `/reload-plugins` to activate them (no restart needed).
+3. For each installed plugin, run its install skill once per project: `/lazy-core.install`, `/lazy-diagram.install`, etc. This drops the plugin's rule templates into `.claude/rules/` and sets up any log/changelog scaffolding.
 4. Invoke skills via slash commands. Hooks activate automatically.
 
 ## Installation
 
-All plugins live in a single Claude Code marketplace. Add the marketplace once, then install the plugins you want:
+All plugins live in a single Claude Code marketplace. Add the marketplace once, then install the plugins you want — run these inside Claude Code:
 
 ```
 /plugin marketplace add mebius-san/lazy-cortex
@@ -140,7 +140,7 @@ All plugins live in a single Claude Code marketplace. Add the marketplace once, 
 /reload-plugins
 ```
 
-Each plugin's README explains its setup steps — most have a `<plugin>.install` skill you run once per project.
+`/reload-plugins` activates them without a restart. Each plugin's README explains its setup steps — most have a `<plugin>.install` skill you run once per project.
 
 ## Author
 

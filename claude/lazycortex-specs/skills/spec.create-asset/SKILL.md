@@ -142,7 +142,7 @@ Skip entirely under `--empty` (outcome `skipped-empty-mode`).
 
 Otherwise author the authored-doc bodies in the product's language (Step 1), drawing on the Step 3 clarification:
 
-- **default layout** — rewrite `design.md`'s sections with real content from the clarification. `design.md` describes WHAT, never HOW: no source URLs, repo file paths, or class/function names. It describes the **intended** behavior, not the current code's: existing gaps, half-built paths, or "not yet supported" branches are never written in as limitations, and only an explicit operator decision from the Step 3 clarification — never the state of the code — narrows scope. "It does not do that yet" is a question for the operator, not a fact for the spec. The section list is owned by `${CLAUDE_PLUGIN_ROOT}/templates/spec.<category>/design.md` — replace its placeholder prose, do not append. Author a user-flow / behavior section that the Step 7 diagram can anchor under.
+- **default layout** — rewrite `design.md`'s sections with real content from the clarification. `design.md` describes WHAT, never HOW: no source URLs, repo file paths, or class/function names. It describes the **intended** behavior, not the current code's: existing gaps, half-built paths, or "not yet supported" branches are never written in as limitations, and only an explicit operator decision from the Step 3 clarification — never the state of the code — narrows scope. "It does not do that yet" is a question for the operator, not a fact for the spec. The section list is owned by `${CLAUDE_PLUGIN_ROOT}/templates/spec.<category>/design.md` (feature: `Overview / Goals / Design / Behavior / Known Limitations / Boundaries`; change: `Overview / Goals / Current State / Target State`) — replace each section's placeholder prose in place, never add or drop sections.
 - **`bug` layout** — fill `bug.md`'s sections (`## Summary`, `## Repro steps`, `## Observed behavior`, `## Expected behavior`, `## Environment`, `## Related code / logs`) from the repro / observed-vs-expected / environment answers. Keep the frontmatter and header exactly as the scaffold wrote them.
 
 `plan.md` stays a placeholder — an external planning tool fills it during planning. Do not populate it here.
@@ -155,10 +155,12 @@ Otherwise draw only diagrams that have a real home in the authored doc — invok
 
 Diagram set by layout:
 
-- **default layout** — one `flow` diagram under `design.md`'s user-flow / behavior section.
+- **default layout** — one `flow` diagram under `design.md`'s `## Behavior` (feature) or `## Target State` (change); for a change with nothing to draw, the outcome `skipped-section-empty` is acceptable.
 - **`bug` layout** — one `flow` under `## Repro steps` + one `sequence` under `## Observed behavior`.
 
 This is a deliberate reduction. The obsolete fixed five-seam list (architecture / erd / state-or-flow / layout across a per-asset `design.md`+`tech.md`) no longer applies now that per-asset `tech.md` and the `layout` role are gone. Draw ONLY diagrams with a real anchor section in `design.md` / `bug.md`; never invent a section to host a diagram.
+
+Before emitting the outcome word, verify the artifact — run it, do not attest. Every mermaid fence the drawer emits opens with an init directive on the fence's first line, so a hand-composed fence is detectable from the file alone. Run `Grep(pattern: "^%%\\{init:", path: <target_file>, output_mode: "count")` per authored doc and compare the count against the number of diagrams that returned `created` / `replaced` / `unchanged` for that file. A lower count means a fence was written by hand instead of drawn: emit `failed:hand-authored-fence` and re-invoke the drawer for the affected anchor — never patch the fence by hand, and never substitute a `kind` the drawer rejected (a `failed:format-not-supported-for-kind` return is a bug in the caller's kind, not a licence to compose the fence yourself).
 
 ## Step 9 — Log the run
 
