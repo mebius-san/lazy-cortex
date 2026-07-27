@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to an existing codebase, generate its design and tech docs from source, then scaffold the first feature.
-last_regen: 2026-07-23
+last_regen: 2026-07-26
 diagram_spec:
   anchor: "## How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs spec.product-config to register the product and write settings, then runs spec.create-from-code to scan source and produce design + tech docs, then runs spec.create-feature to scaffold the first feature asset; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -20,7 +20,7 @@ You have a working codebase — a service, a library, an application — and no 
 After completing this walkthrough you will have:
 
 - A product record in `lazy.settings.json[products]` that names your codebase's source repo and the paths within it your product covers.
-- A `design.md` — behavior-only, no source URLs — describing what the product does for its users, with an inline flow diagram under `## Behavior` and an inline layout diagram under `## Layout` (if the product has a UI).
+- A `design.md` — behavior-only, no source URLs — describing what the product does for its users, with an inline flow diagram under `## Behavior` and, if the product has a UI, an inline layout diagram under its UI subsection.
 - A `tech.md` — code-grounded, with forge-correct source URLs — covering the source map, architecture, and components, with an architecture diagram under `## Architecture` and a class diagram under `## Components`.
 - At least one feature folder under `features/<slug>/` with a scaffolded `design.md` and `plan.md` ready for authoring.
 - Review classes wired so every doc enters the review loop automatically.
@@ -30,7 +30,7 @@ After completing this walkthrough you will have:
 - `lazycortex-specs` installed and running (`/spec.install` completed at least once in this repo).
 - `lazycortex-core` available — it provides the `settings-get` / `settings-set` CLI and the runtime daemon.
 - A local checkout of the source repo you want to document — either the same repo that holds your spec vault (`/spec.product-config` can register it with `local_path: "."`, so every checkout resolves its own root with no absolute path needed), or a separate checkout that exists on disk at a path Claude Code can read.
-- At least one expert registered in `lazy.settings.json[experts]` for the designer, developer, and tester roles. If you have not set up experts yet, run `/spec.install` — it offers to configure them — or run `lazycortex-experts` to compose the personas first.
+- At least one expert registered in `lazy.settings.json[experts]` for the designer, developer, tester, and historian roles — unless this is not your first product in the vault, in which case you can ride the shared expert set an earlier product already set up. If you have not set up experts yet, run `/spec.install` — it offers to configure them — or run `lazycortex-experts` to compose the personas first.
 - `lazycortex-diagram` available — the creation skill draws diagrams in the generated docs.
 
 ## The journey
@@ -46,9 +46,9 @@ The key decisions you will make:
 - **Source repo** — whether this product has source code (it does) and which registered repo key maps to it. If the checkout is not registered yet, the wizard runs an inline sub-wizard to capture the local path and default branch for you. When the code lives in the very repo that holds your spec vault, pick `this repo (.)` — the wizard writes the literal `"."` so every checkout (dev machine, or a runtime checkout elsewhere) resolves its own root, no absolute path required. Otherwise point it at the root of a separate checkout that lives elsewhere on disk.
 - **Source paths** — the subdirectories within the repo that this product covers. A single path like `src/api` is fine; you can add more paths if the product spans multiple subdirectories. The skill validates that each path exists on disk.
 - **Dependencies** — the skill dispatches a read-only scan of your source paths and presents each detected dependency (internal products, cross-repo, or external packages) for you to accept or skip, one at a time.
-- **Expert assignments** — the designer, developer, and tester personas that will review this product's docs. Pick from your registered experts.
+- **Expert assignments** — the designer, developer, tester, and historian personas that will review this product's docs. If the vault already carries a shared expert set from an earlier product, you can ride it as-is or define a product-specific override; otherwise your answers here seed the vault's shared set.
 
-When the wizard finishes, the skill writes the product record into settings, creates the on-disk folder tree with its operator-zone folder-notes (each carrying a `# Summary` skeleton with a précis and stats markers), and generates the built-in review classes — one per doc-kind (design, plan, tech, bug), each with wildcard globs spanning every asset category so a later category you add is covered automatically. It then runs `/spec.doctor` automatically and reports any issues.
+When the wizard finishes, the skill writes the product record into settings, creates the on-disk folder tree with its operator-zone folder-notes (each carrying a `# Summary` skeleton with a précis and stats markers), and generates the built-in review classes — one per doc-kind (design, plan, tech, bug), each with wildcard globs spanning every asset category so a later category you add is covered automatically, reusing the vault's shared set when your expert choices match it. It then runs `/spec.doctor` automatically and reports any issues.
 
 If `/spec.product-config` points you at `lazycortex-experts` before finishing, it means a chosen expert name is not registered. Compose the persona via `lazycortex-experts`, then re-run `/spec.product-config`.
 
@@ -67,19 +67,19 @@ The skill resolves your product's source binding, then fans out four parallel Ex
 
 After scanning, the skill authors two docs:
 
-**`design.md`** is behavior-only: what the product does, who uses it, and what the user-visible limitations are. It never contains source URLs or file paths — just observable behavior. Two diagrams land inline here: a `flow` diagram under `## Behavior` and a `layout` diagram under `## Layout` (for products with a UI; otherwise the layout seam reports `skipped-section-empty`).
+**`design.md`** is behavior-only: what the product does, who uses it, and what the user-visible limitations are. It never contains source URLs or file paths — just observable behavior. A `flow` diagram lands inline under `## Behavior`; products with a UI also get a `layout` diagram under the `###`-level UI subsection (products without a UI declare no layout seam at all).
 
-**`tech.md`** is code-grounded: the source map, architecture narrative, component breakdown, route tables (if applicable), and a dependency table with forge-correct source URLs. Two more diagrams land inline here: a `c4-container` diagram under `## Architecture` and a `class` diagram under `## Components`.
+**`tech.md`** is code-grounded: the source map, architecture narrative, component breakdown, route tables (if applicable), and a dependency table with forge-correct source URLs. Two more diagrams land inline here: an `architecture` diagram under `## Architecture` and a `class` diagram under `## Components`.
 
 Once both docs are written, the skill presents Agent D's candidate feature list and asks you what to do with each one:
 
-- **scaffold feature** — delegates immediately to `spec.create-asset`, which opens its own wizard for that feature (see Step 3). Pick this for features you want to document now. Each scaffolded feature also receives a wikilink in the product `design.md`'s `## Roadmap` section.
+- **scaffold feature** — delegates immediately to `spec.create-asset`, which opens its own wizard for that feature (see Step 3). Pick this for features you want to document now. Scaffolded features leave no trace in `design.md` — the folder-notes aggregate the decomposition catalog.
 - **treat as architectural area** — adds a subsection to the tech doc's `## Architectural Areas`; no feature folder is created.
 - **skip** — leaves no trace.
 
 Work through each candidate. You do not need to scaffold all of them now — you can run `/spec.create-feature` again later for any candidate you skipped.
 
-**Verification gate.** Both `design.md` and `tech.md` should exist and carry `spec_stage: draft`. The design doc must contain no source URLs. Confirm that all four diagram seams are accounted for in the skill's verification report: `design.md:## Behavior` (flow), `design.md:## Layout` (layout), `tech.md:## Architecture` (c4-container), `tech.md:## Components` (class).
+**Verification gate.** Both `design.md` and `tech.md` should exist and carry `spec_stage: draft`. The design doc must contain no source URLs. Confirm that every declared diagram seam is accounted for in the skill's verification report: `design.md:## Behavior` (flow), `tech.md:## Architecture` (architecture), `tech.md:## Components` (class), plus the UI-subsection layout seam when the product has a UI.
 
 ### Step 3 — Scaffold the first feature with `/spec.create-feature`
 
@@ -121,30 +121,17 @@ sequenceDiagram
   participant specVault as Spec Vault
 
   operator->>productConfig: run spec.product-config
-  productConfig->>specVault: write product registration entry
-  specVault-->>productConfig: registration confirmed
-  productConfig->>specVault: write settings (lazy.settings.json)
-  specVault-->>productConfig: settings written
-  productConfig-->>operator: product registered and configured
-
-  Note over operator,specVault: Handoff — product identity and settings are now in the vault
-
+  productConfig->>specVault: register product record in lazy.settings.json
+  productConfig->>specVault: scaffold product folder tree
+  productConfig-->>operator: product registered
+  Note over productConfig,specVault: handoff - product scaffolded, ready for code scan
   operator->>createFromCode: run spec.create-from-code
-  createFromCode->>specVault: read product registration and settings
-  specVault-->>createFromCode: product config loaded
-  createFromCode->>createFromCode: scan source code
-  createFromCode->>specVault: write design doc
-  specVault-->>createFromCode: design doc written
-  createFromCode->>specVault: write tech doc
-  specVault-->>createFromCode: tech doc written
-  createFromCode-->>operator: design and tech docs produced
-
-  Note over operator,specVault: Handoff — design and tech docs now anchor the feature scaffold
-
+  createFromCode->>specVault: scan bound source repo
+  createFromCode->>specVault: write product design doc
+  createFromCode->>specVault: write code-grounded product tech doc
+  createFromCode-->>operator: design and tech docs ready
+  Note over createFromCode,specVault: handoff - docs grounded, ready for first feature
   operator->>createFeature: run spec.create-feature
-  createFeature->>specVault: read design doc and tech doc
-  specVault-->>createFeature: docs loaded
-  createFeature->>specVault: scaffold first feature asset
-  specVault-->>createFeature: feature asset written
-  createFeature-->>operator: first feature asset ready
+  createFeature->>specVault: scaffold first feature asset folder
+  createFeature-->>operator: feature asset scaffolded
 ```

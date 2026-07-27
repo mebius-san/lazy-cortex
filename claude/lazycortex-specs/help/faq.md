@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about products, assets, gates, code sync, releases, requests, and source links in lazycortex-specs.
-last_regen: 2026-07-23
+last_regen: 2026-07-26
 no_diagram: true
 source_skills:
   - spec.create-asset
@@ -24,10 +24,18 @@ source_skills:
   - spec.request-find-candidates
   - spec.request-attach
   - spec.request-spawn
+  - spec.install
   - spec.product-config
   - spec.doctor
+  - spec.help
 ---
 # Frequently asked questions
+
+## Do I need to run anything before registering my first product?
+
+Yes — run `/spec.install` once per project (or once globally, if you want the plugin available everywhere). It ensures the per-category template-override directories exist, seeds the repo's authoring language (asks only if none is on record), registers the `spec.gate-tick` daemon routine so asset gates advance automatically, and wires the requests-inbox runtime (open / apply routines, the `spec.request-router` expert, and its review class) at project scope. It's idempotent — re-running it is always safe and never overwrites config you've customized since. At the end it offers to chain straight into `/spec.product-config` so you can register your first product in the same pass, or you can skip and run that separately whenever you're ready.
+
+---
 
 ## What is a "product" and do I need one before I can create any assets?
 
@@ -151,3 +159,9 @@ Re-run `/spec.doctor <product> --apply` — the fix loop offers to strip the obs
 ## A dependency in my product record points at a product or repo key that no longer exists. What do I do?
 
 `spec.resolve-dependency` refuses with a clear error naming the missing key rather than silently dropping or guessing at it. Run `/spec.product-config` on the product — its dependency step lets you review, extend, or correct the `dependencies` list; it never removes an entry you don't explicitly touch, so you can fix just the stale one.
+
+---
+
+## Is there a quick way to see every skill this plugin ships, without opening the help docs?
+
+Yes — run `/spec.help`. It prints a one-screen cheatsheet grouped by area (bootstrap, authoring, gates & lifecycle, request processing, sync & validation, primitives) with a one-line description per skill, plus links to the full walkthroughs, troubleshooting, and FAQ chapters. It's a static reference — no tools run, nothing is logged — so it's the fastest way to recall a skill's name or check what a primitive does before diving into the longer docs.

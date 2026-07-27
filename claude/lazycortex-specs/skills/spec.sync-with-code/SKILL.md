@@ -131,7 +131,7 @@ For every `(target_file, anchor_section)` pair recorded at the end of Step 4, lo
 | Role | Anchor | kind |
 |---|---|---|
 | design (product) | `## Behavior` | `flow` |
-| tech (product) | `## Architecture` | `c4-container` |
+| tech (product) | `## Architecture` | `architecture` |
 | tech (product) | `## Components` | `class` |
 | design (asset) | `## User Flow` | `flow` |
 | design (asset) | `## Changes` | `flow` |
@@ -200,6 +200,8 @@ For every seam in `seams[]`, the corresponding `Step 4b` child task `diagram <re
 
 Then diff `seams[]` against the run logs `lazycortex-diagram:lazy-diagram.draw` actually emitted under `.logs/claude/lazy-diagram.draw/` during this session (filtered by today's UTC timestamp range). Each entry in `seams[]` must appear at least once with `target_file`, `anchor_section`, and `kind` matching the computed triple. Any computed seam missing from the logs, or any logged seam not in `seams[]`, is a Verify failure. `unchanged` is a successful seam invocation, not a missing seam — the diff treats it as present.
 
+Then check the artifact, not just the process — run it, do not attest. Every mermaid fence the drawer emits opens with an init directive on the fence's first line, so a hand-composed fence is detectable from the file alone. For each distinct `target_file` in `seams[]`, run `Grep(pattern: "^%%\\{init:", path: <target_file>, output_mode: "count")` and compare the count against the number of seams targeting that file with outcome `created` / `replaced` / `unchanged`. A lower count means a fence was hand-written instead of drawn — Verify failure; re-invoke `lazycortex-diagram:lazy-diagram.draw` for the affected seam rather than editing the fence.
+
 When `seams[]` is empty (no prose was rewritten in Step 4), Verify passes trivially — log outcome `no-seams-this-run` for `Step 4a` and `Step 4b` and continue.
 
 The seam-kind map in Step 4a is owned by the parallel definitions in `spec.create-from-code` / `spec.create-asset` Verify sections. If any of those add or rename a seam, update Step 4a's table here in the same edit.
@@ -223,6 +225,6 @@ Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/spec
 - **Per-file stages via `spec.set-stage`** — closed set `empty | draft | approved | rejected | cancelled`; never rewrite `spec_stage` frontmatter directly.
 - **Scaffold, don't infer** — a missing status folder-note is scaffolded with all gates `false`; code-grounded `spec_develop_done` flips and stage corrections are separate, operator-confirmed proposals.
 - **Never delete without asking** — if a function/route was removed from code, flag it and ask before removing from the tech doc.
-- **Preserve manual additions** — design docs may contain hand-written sections (Roadmap, Known Limitations). Never touch these during sync; surface behavior-level change candidates and let the operator edit the design doc.
+- **Preserve manual additions** — design docs may contain hand-written sections (Goals, Principles, Known Limitations). Never touch these during sync; surface behavior-level change candidates and let the operator edit the design doc.
 - **Diff, don't rewrite** — use `Edit` to update specific sections, not `Write` to overwrite the whole file.
 - **Delegate heavy reads** — when the change set is large, fan out to parallel Explore agents; main session synthesizes and asks.

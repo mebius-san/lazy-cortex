@@ -30,9 +30,9 @@ This skill has two modes (`product` + `feature`) with mode-specific step lists. 
    - `Step P3 — Create the doc structure`
    - `Step P4 — Author product-design prose`
    - `Step P5 — Draw design.md:## Behavior:flow`
-   - `Step P6 — Draw design.md:## Layout:layout`
+   - `Step P6 — Draw design.md UI layout (conditional)`
    - `Step P7 — Author product-tech prose`
-   - `Step P8 — Draw tech.md:## Architecture:c4-container`
+   - `Step P8 — Draw tech.md:## Architecture:architecture`
    - `Step P9 — Draw tech.md:## Components:class`
    - `Step P10 — Scaffold candidate features (delegate)`
    - `Step P11 — Verify`
@@ -160,7 +160,7 @@ Product docs live loose at the product root (no `docs/` subfolder). Per `${CLAUD
 └── tech.md         # code-grounded — source URLs via spec.source-url
 ```
 
-The empty asset-category dirs (`features/`, `changes/`, `bugs/`, `requests/`) and the operator-zone category folder-notes are owned by `/spec.product-config` and already exist for a registered product. Do NOT create them here, do NOT create `backlog/`, do NOT author any operator-zone folder-note, and do NOT create `human-tasks.md`, any `changelog.md` (the role is removed from the model), any `spec_role: layout` doc, or any `layout.excalidraw` file — those roles are removed from the model (the `## Layout` diagram in Step P6 is an inline mermaid fence in `design.md`, not a doc). If a category dir is somehow absent, create the empty dir with `Bash(mkdir -p …)` but author NO folder-note (that is product-config's territory).
+The empty asset-category dirs (`features/`, `changes/`, `bugs/`, `requests/`) and the operator-zone category folder-notes are owned by `/spec.product-config` and already exist for a registered product. Do NOT create them here, do NOT create `backlog/`, do NOT author any operator-zone folder-note, and do NOT create `human-tasks.md`, any `changelog.md` (the role is removed from the model), any `spec_role: layout` doc, or any `layout.excalidraw` file — those roles are removed from the model (the layout diagram in Step P6 is an inline mermaid fence in `design.md`, not a doc). If a category dir is somehow absent, create the empty dir with `Bash(mkdir -p …)` but author NO folder-note (that is product-config's territory).
 
 ### P4 — Author product-design prose
 
@@ -186,19 +186,25 @@ spec_source_docs:
 > **<Subsystem>** · **<product>** — design
 
 ## Overview
-What it is, who it's for, how to access it (URL, command, entry point — as user-facing behavior, not a route handler name).
+What the product is: the problem it solves, who it's for, what would be missing without it. How to access it (command, entry point) as user-facing behavior, not a route handler name.
+
+## Goals
+What the product aims to achieve — the outcomes that count as success.
+
+## Principles
+Invariants the product holds as a whole (the rules that never bend, e.g. "the working tree stays clean", "routines run serially"). Violating a principle is a bug, not a taste choice.
+
+## Design
+The key product decisions with WHY it is this way and not otherwise. When the product has a UI, describe the visual surface in a `###`-level UI subsection here or under `## Behavior` — whichever reads better; the layout diagram (Step P6) anchors at that subsection. Products without a UI get no such subsection.
 
 ## Behavior
-User-visible capabilities grouped by area. Describe what the product DOES for the user. The flow diagram (Step P5) anchors here — do not author an ASCII sketch.
-
-## Layout
-The product's UI surface arrangement — screens, panels, regions, navigation as the user encounters them, in behavior terms (no component / file names). The layout diagram (Step P6) anchors here — do not author an ASCII sketch. Omit the section body prose only if the product has no UI to lay out; the draw step then reports `skipped-section-empty`.
+Cross-cutting observable behavior that belongs to the product as a whole, not to any single feature (per-feature behavior lives in the feature docs). The flow diagram (Step P5) anchors here — do not author an ASCII sketch.
 
 ## Known Limitations
-User-facing constraints derived from TODOs and current scope. Phrase as observable behavior, not source-level references.
+Things the product does, but with a known ceiling — accepted constraints, candidates for future work. Phrase as observable behavior, not source-level references.
 
-## Roadmap
-Placeholder: "_Planned improvements. Each item becomes a feature design doc under features/ when work begins._"
+## Boundaries
+What the product deliberately does NOT do; the seams with neighboring products and who owns what.
 
 # Sources
 ```
@@ -217,9 +223,11 @@ After writing, set the per-file stage authoritatively via the `Skill` tool (`ski
 
 Invoke `lazycortex-diagram:lazy-diagram.draw` (via the `Skill` tool) with `target_file=<spec_path>/design.md`, `anchor_section="## Behavior"`, `kind="flow"`, `format="mermaid"`, and `request=` a one-sentence summary of what the diagram depicts followed by `facts: the actors, decision points, and outcomes named in the prose just authored` (terminology parity with the host section is the only contract). Pass `exemplar_override_dir=<spec_path>/.claude/templates/spec.diagrams/<compound-key>` if that directory exists (`<exemplar_override_dir>/diagram.mermaid/diagram-<kind>.md`). The return value IS the outcome for `Step P5`.
 
-### P6 — Draw `## Layout` layout
+### P6 — Draw the UI layout (conditional)
 
-Invoke `lazycortex-diagram:lazy-diagram.draw` (via the `Skill` tool) with `target_file=<spec_path>/design.md`, `anchor_section="## Layout"`, `kind="layout"`, `format="mermaid"`, and `request=` a one-sentence summary of the product's UI arrangement followed by `facts: the screens, panels, regions, and navigation named in the prose just authored`. Pass `exemplar_override_dir` as in Step P5 if present. This is an inline diagram only — it does NOT create any `spec_role: layout` doc or `layout.excalidraw` file. If the product has no UI to lay out (the `## Layout` body is empty), the draw outcome `skipped-section-empty` is acceptable. The return value IS the outcome for `Step P6`.
+Only when the product has a UI — the Step P4 prose then carries a `###`-level UI subsection inside `## Design` or `## Behavior`. Invoke `lazycortex-diagram:lazy-diagram.draw` (via the `Skill` tool) with `target_file=<spec_path>/design.md`, `anchor_section="### <the UI subsection heading>"`, `kind="layout"`, `format="mermaid"`, and `request=` a one-sentence summary of the product's UI arrangement followed by `facts: the screens, panels, regions, and navigation named in the subsection prose`. Pass `exemplar_override_dir` as in Step P5 if present. This is an inline diagram only — it does NOT create any `spec_role: layout` doc or `layout.excalidraw` file. The return value IS the outcome for `Step P6`.
+
+If the product has no UI, no UI subsection exists and no layout seam is declared: do NOT invoke the drawer and do NOT author an empty section — complete the task with outcome `no-ui`.
 
 ### P7 — Author product-tech prose
 
@@ -279,9 +287,9 @@ Fill the template's `spec_source_docs: []` with that array, then project the bod
 
 After writing, set the per-file stage via `spec.set-stage` → `draft` on `tech.md`.
 
-### P8 — Draw `## Architecture` c4-container
+### P8 — Draw `## Architecture` architecture
 
-Invoke `lazycortex-diagram:lazy-diagram.draw` with `target_file=<spec_path>/tech.md`, `anchor_section="## Architecture"`, `kind="c4-container"`, `format="mermaid"`, and `request=` a one-sentence summary followed by `facts: the components, layers, and wires identified by the scan agents`. Pass `exemplar_override_dir` as in Step P5 if present. Return value IS the outcome for `Step P8`.
+Invoke `lazycortex-diagram:lazy-diagram.draw` with `target_file=<spec_path>/tech.md`, `anchor_section="## Architecture"`, `kind="architecture"`, `format="mermaid"`, and `request=` a one-sentence summary followed by `facts: the components, layers, and wires identified by the scan agents`. Pass `exemplar_override_dir` as in Step P5 if present. Return value IS the outcome for `Step P8`.
 
 ### P9 — Draw `## Components` class
 
@@ -301,11 +309,9 @@ After every candidate is decided, run the scaffolds serially. For each `scaffold
 Skill(skill: "lazycortex-specs:spec.create-asset", args: "<product> feature <candidate-slug>")
 ```
 
-Pass the candidate's source files / one-line purpose / behavior summary in the dispatch prompt so create-asset's clarifying step has grounding. Optionally pass `--empty` first (`<product> feature <candidate-slug> --empty`) when you want to scaffold the shell and populate the design body yourself afterward — but the default is the full create-asset run, which authors the design doc and draws the feature's own behavioral diagram. For a candidate, this skill does NOT author the feature folder, does NOT scaffold a per-asset `tech.md` (removed — only the product carries `tech.md`), and does NOT seed any workflow. create-asset owns the asset scaffold + its diagrams. (The product-level `## Layout` diagram in Step P6 is the only `layout`-kind diagram this skill draws, and it lands inline in `design.md`, not in a feature folder.)
+Pass the candidate's source files / one-line purpose / behavior summary in the dispatch prompt so create-asset's clarifying step has grounding. Optionally pass `--empty` first (`<product> feature <candidate-slug> --empty`) when you want to scaffold the shell and populate the design body yourself afterward — but the default is the full create-asset run, which authors the design doc and draws the feature's own behavioral diagram. For a candidate, this skill does NOT author the feature folder, does NOT scaffold a per-asset `tech.md` (removed — only the product carries `tech.md`), and does NOT seed any workflow. create-asset owns the asset scaffold + its diagrams. (The product-level layout diagram in Step P6 is the only `layout`-kind diagram this skill draws, and it lands inline in `design.md`, not in a feature folder.)
 
-After every candidate is resolved:
-
-- If any candidate was scaffolded, add a path-qualified wikilink to each under the product design doc's `## Roadmap` section.
+Scaffolded candidates leave NO trace in `design.md` — the decomposition catalog is owned by the folder-notes (`<key>.md`, `features/features.md`), which aggregate the assets themselves.
 
 This step emits `no-candidates` if Agent D returned an empty `findings` list.
 
@@ -315,10 +321,11 @@ This step emits `no-candidates` if Agent D returned an empty `findings` list.
 - Both product docs carry the default `spec_source_docs` frontmatter array and a body `# Sources` section with the `#protected/spec/sources` tag and a `## Docs` sub-section whose bullets match the frontmatter list (per `${CLAUDE_PLUGIN_ROOT}/references/spec.sources-protocol.md`).
 - Product tech doc source URLs are all produced by `spec.source-url` (never inlined forge path schemes) and carry no line-number fragments.
 - Both product docs carry the migrated `spec_role` + `spec_stage` frontmatter and the mandatory header (frontmatter + H1 + breadcrumb) per `${CLAUDE_PLUGIN_ROOT}/references/spec.layout-protocol.md`.
-- No operator-zone folder-note, no `human-tasks.md`, no `spec_role: layout` doc, no `layout.excalidraw` file, and no `backlog/` were created (those are removed roles / product-config's territory). The `## Layout` diagram is an inline mermaid fence in `design.md`, not a separate doc.
+- No operator-zone folder-note, no `human-tasks.md`, no `spec_role: layout` doc, no `layout.excalidraw` file, and no `backlog/` were created (those are removed roles / product-config's territory). The layout diagram, when the product has a UI, is an inline mermaid fence in `design.md`, not a separate doc.
 - No sub-product folders were created (scaffolded candidates are **features** under `<spec_path>/features/`, delegated to create-asset, never sibling products).
 - Wikilinks use path-qualified form per `${CLAUDE_PLUGIN_ROOT}/references/spec.layout-protocol.md` and target existing pages.
-- **Product-diagram-seam coverage** (Caller-contract clause 3 of `lazycortex-diagram:lazy-diagram.draw`): the declared product seam set is `{design.md:## Behavior:flow, design.md:## Layout:layout, tech.md:## Architecture:c4-container, tech.md:## Components:class}` — four seams (the `layout` kind is drawn inline in `design.md`, not as the removed `layout` doc-role / excalidraw). List `.logs/claude/lazy-diagram.draw/` entries created in this run (compare timestamps against this run's start) and confirm every declared seam appears as one logged invocation with an outcome word (`skipped-section-empty` is a valid outcome for the layout seam when the product has no UI). Any declared seam without a log entry — or any logged invocation outside the declared set — is a Verify failure. Feature-candidate diagrams are owned and logged by create-asset, not counted here.
+- **Product-diagram-seam coverage** (Caller-contract clause 3 of `lazycortex-diagram:lazy-diagram.draw`): the declared product seam set is built from the authored structure — always `{design.md:## Behavior:flow, tech.md:## Architecture:architecture, tech.md:## Components:class}`, plus `design.md:### <UI subsection>:layout` only when Step P4 authored a UI subsection. List `.logs/claude/lazy-diagram.draw/` entries created in this run (compare timestamps against this run's start) and confirm every declared seam appears as one logged invocation with an outcome word; when no UI subsection exists, confirm NO layout invocation was logged (Step P6 outcome `no-ui`). Any declared seam without a log entry — or any logged invocation outside the declared set — is a Verify failure. Feature-candidate diagrams are owned and logged by create-asset, not counted here.
+- **Drawer-authored fences** (mechanical, run it — do not attest): every mermaid fence the drawer emits opens with an init directive on the fence's first line, so a hand-composed fence is detectable from the artifact alone. For each seam target_file, run `Grep(pattern: "^%%\\{init:", path: <target_file>, output_mode: "count")` and compare the count against the number of seams that landed in that file with outcome `created` / `replaced` / `unchanged`. A count lower than the seam count means a fence was written by hand instead of by the drawer — Verify failure; re-invoke `lazycortex-diagram:lazy-diagram.draw` for the affected seam rather than editing the fence. This check is the enforceable half of the clause above: the seam-log diff proves the drawer was *called*, this proves its output is what actually landed.
 
 ### P12 — Log the run
 
@@ -366,7 +373,7 @@ One line per task in the active mode's canonical list, with its outcome word. A 
 - **No nested products** — sub-areas become `## Architectural Areas` subsections of the product tech doc, not separate product spec folders.
 - **Delegate heavy reads** — parallel Explore agents scan source; the main session synthesizes and decides.
 - **Feature mode delegates to create-asset** — it owns the asset scaffold, docs, and diagrams. No per-asset `tech.md`, no `layout` diagram, no seeded workflow originate from this skill.
-- **Product diagrams: `flow` + `layout` + `c4-container` + `class`** — four inline mermaid seams. `flow` + `layout` land in `design.md` (`## Behavior` / `## Layout`), `c4-container` + `class` in `tech.md`. The `layout` seam is an inline diagram only — never the removed `spec_role: layout` doc / `layout.excalidraw` file. `layout` reports `skipped-section-empty` when the product has no UI.
+- **Product diagrams: `flow` + `architecture` + `class`, plus `layout` for UI products only** — inline mermaid seams. `flow` lands in `design.md` (`## Behavior`), `architecture` + `class` in `tech.md`; `layout` anchors at the `###`-level UI subsection in `design.md` and exists only when the product has a UI (otherwise Step P6 reports `no-ui` and no seam is declared). The `layout` seam is an inline diagram only — never the removed `spec_role: layout` doc / `layout.excalidraw` file.
 - **Source attribution** — both product docs carry default `spec_source_docs` frontmatter and a body `# Sources` section (`## Docs` projected from that list; `## Requests` empty), mirroring `spec.create-asset`, per `${CLAUDE_PLUGIN_ROOT}/references/spec.sources-protocol.md`.
 - **Migrated frontmatter keys** — authored docs use `spec_role` / `spec_stage`; per-file stages flow through `spec.set-stage`. Pins use `spec_source_branches`.
 - **Naming, folder structure, header section, and wikilink format** are owned by `${CLAUDE_PLUGIN_ROOT}/references/` — this skill never inlines those patterns.

@@ -95,7 +95,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/troubleshooting.md) — Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/faq.md) — Answers to common questions about products, assets, gates, code sync, releases, requests, and source links in lazycortex-specs.
 
-Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-specs/help/`.
+(`mebius-san` resolves from `.guard-waivers.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
 ## Agents
 
@@ -110,6 +110,8 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-specs/help/`.
 | `spec.help` | Show lazycortex-specs purpose and a one-line summary of each skill it ships |
 
 ## Installation
+
+Add the marketplace once, then install this plugin — run inside Claude Code:
 
 ```
 /plugin marketplace add mebius-san/lazy-cortex
