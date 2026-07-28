@@ -1,10 +1,10 @@
 ---
 chapter_type: block
 summary: Register, unregister, preflight, and recover routines in the per-repo serial daemon — five routine types keep the async team running in order, with a validator that catches broken expert configs before they run live.
-last_regen: 2026-07-26
+last_regen: 2026-07-28
 diagram_spec:
   anchor: "Runtime lifecycle"
-  request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers an uncommitted_changes halt; a failed remote sync triggers a git_pull_diverged / git_push_failed / git_remote_unavailable halt; /lazy-runtime.recover (commit/stash/discard/abort for tree halts; manual-fix + resume for remote-sync halts) cleans the precondition and resumes; unregister removes a routine from the loop."
+  request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers an uncommitted_changes halt; a failed remote sync retries with backoff and only escalates to a git_pull_diverged / git_push_failed / git_remote_unavailable halt once retries are exhausted; /lazy-runtime.recover (commit/stash/discard/abort for tree halts; manual-fix + resume for remote-sync halts) cleans the precondition and resumes; unregister removes a routine from the loop."
 source_skills:
   - lazy-routine.register
   - lazy-routine.unregister
@@ -33,7 +33,7 @@ Every type accepts the same two dispatch shapes: either a `command` list (spawn 
 
 **`/lazy-runtime.preflight`** validates that every expert-shape routine's target expert is actually launchable — before a broken config fails silently at runtime and eats the routine's wall timeout. It runs static config checks (does the agent / aspects / protocols resolve, is `mcp_config` a valid path, does the expert resolve an explicit model — pinned or via `agent_models` — rather than silently inheriting the operator's CLI default) and then, unless you pass `--no-probe`, emulates the real launch with a trivial prompt that does no real work, catching MCP servers that hang or need interactive auth. On a failing expert it proposes a concrete fix and applies it only after you confirm. Every expert spawns hermetically by default — none of the lazycortex hooks (`git-guard`, `check-public`, `model-router`, `settings-guard`, `commit-recorder`) run inside it unless you opt specific ones back in via that expert's `hooks.enabled` list — and the verdict table's active-hooks column shows exactly which ones are wired in for each expert.
 
-**`/lazy-runtime.recover`** handles daemon halts. The daemon halts in two distinct families: a dirty working tree (a routine or expert left uncommitted changes) and a failed remote sync (the daemon's pre- or post-tick git pull or push hit an unrecoverable state). The skill reads the halt context from `.runtime/state.json`, surfaces which routine triggered the halt — a routine name, `_git_pre` or `_git_post` for daemon-side remote-sync halts, or `lazy-expert.pump` for pump-internal halts — and for dirty-tree halts, which paths are dirty. It then guides you through the appropriate fix and clears the halt atomically once the precondition holds.
+**`/lazy-runtime.recover`** handles daemon halts. The daemon halts in two distinct families: a dirty working tree (a routine or expert left uncommitted changes) and a failed remote sync (the daemon's pre- or post-tick git pull or push hit an unrecoverable state, even after its own automatic retries). The skill reads the halt context from `.runtime/state.json`, surfaces which routine triggered the halt — a routine name, `_git_pre` or `_git_post` for daemon-side remote-sync halts, or `lazy-expert.pump` for pump-internal halts — and for dirty-tree halts, which paths are dirty. It then guides you through the appropriate fix and clears the halt atomically once the precondition holds.
 
 ## How they work together
 
@@ -54,11 +54,11 @@ For `uncommitted_changes` halts — the most common case — you choose one of f
 
 Once cleanup produces a clean tree the skill clears the `daemon_halted` block and the daemon resumes. If the tree is still dirty after cleanup the skill reports `still-dirty` without clearing the halt — run `git status` manually, resolve, and re-invoke `/lazy-runtime.recover`.
 
-For remote-sync halts (`git_pull_diverged`, `git_push_failed`, `git_remote_unavailable`) the daemon cannot safely resolve the situation automatically. The skill surfaces reason-specific guidance and asks you to repair the state by hand before confirming resume:
+For remote-sync halts (`git_pull_diverged`, `git_push_failed`, `git_remote_unavailable`) the daemon cannot safely resolve the situation automatically. A brief network blip does not reach this point at all — the daemon's pre- and post-tick git sync retries the underlying fetch/pull/push a few times with increasing backoff (2s, then 5s, then 10s) before giving up, so a transient hiccup clears itself without ever touching the halt state. Once that retry window is exhausted, the skill surfaces reason-specific guidance and asks you to repair the state by hand before confirming resume:
 
 - `git_pull_diverged` — inspect with `git log --oneline HEAD origin/<branch>`, then rebase, merge, or reset to reconcile the diverged histories.
 - `git_push_failed` — try `git push origin <branch>` manually to read the underlying error (auth failure, branch protection, push race).
-- `git_remote_unavailable` — check network and VPN, then run `git fetch origin <branch>` to confirm reachability before resuming.
+- `git_remote_unavailable` — check network and VPN, then run `git fetch origin <branch>` to confirm reachability before resuming. By the time this halt fires, the daemon has already retried the sync several times over roughly 17 seconds without success, so treat it as a real outage rather than a blip.
 
 After you confirm, the skill clears the halt block. It runs no git commands itself — the next daemon tick re-evaluates the actual git state. If the halt re-fires immediately, the underlying issue was not fully resolved; reinspect and address the root cause before re-running `/lazy-runtime.recover`.
 
@@ -80,6 +80,7 @@ If a routine's expert keeps timing out after a halt, or you suspect the underlyi
 - **Check daemon halt status before recovering** — inspect `.runtime/state.json` directly to confirm halt state, read the halt reason and `dirty_paths`, and identify which routine or expert triggered the halt (`triggered_by`, `expert`, `job_id`).
 - **Narrow an `md-scan` to specific frontmatter states** — the `filter` field accepts a composite filter block; `null` in the `in` list matches files where the key is absent entirely, so `{"frontmatter": {"request_status": {"in": [null, "draft"], "not_in": []}}}` catches both new files and in-progress ones.
 - **Route a routine's jobs to a remote repo's expert** — use `<expert>@<repo>` in the `expert` field when registering. The target repo must be registered in `lazy.settings.json` and reachable from the daemon's working directory.
+- **A daemon push or pull hits a brief network blip** — no action needed. The daemon retries the underlying fetch/pull/push automatically with increasing backoff (2s, 5s, 10s) before it would ever halt; a `git_remote_unavailable` halt only fires once that whole retry window is exhausted, so seeing the halt at all means the remote stayed unreachable throughout.
 - **Halt re-fires immediately after resume** — if a remote-sync halt returns on the very next daemon tick, the underlying condition was not fully resolved. Run `git fetch origin <branch>; git log --oneline HEAD origin/<branch>` and address the actual cause before re-running `/lazy-runtime.recover`.
 - **Run something after every daemon push** — set `daemon.git.post_push_hook` (and optionally `post_push_timeout_sec`) in the `daemon.git` block of `lazy.settings.json`. It only fires on a push that actually advances `origin/<base_branch>`; a failing or hanging hook is journaled and never affects the daemon's own tick, so it is safe to point at flaky external automation.
 
@@ -89,22 +90,27 @@ If a routine's expert keeps timing out after a halt, or you suspect the underlyi
 %%{init: {'themeVariables':{'background':'transparent','transitionColor':'#000','transitionLabelColor':'#000','labelBackgroundColor':'#fff','edgeLabelBackground':'#fff','stateLabelColor':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','state':{'diagramPadding':5,'useMaxWidth':true}}}%%
 stateDiagram-v2
   [*] --> registered
-  registered --> running : schedule due
-  running --> running : run next routine
-  running --> haltedUncommittedChanges : uncommitted_changes
-  running --> haltedRemoteSync : git_pull_diverged
-  running --> haltedRemoteSync : git_push_failed
-  running --> haltedRemoteSync : git_remote_unavailable
-  haltedUncommittedChanges --> running : recover - commit, stash, discard, or abort
-  haltedRemoteSync --> running : recover - manual fix and resume
+  registered --> running : daemon loop runs routine
+  running --> syncing : remote sync
+  syncing --> running : run next routine per interval_sec or cron schedule
+  syncing --> retryingSync : sync fails
+  retryingSync --> syncing : retry with backoff
+  retryingSync --> remoteSyncHalted : retries exhausted - git_pull_diverged, git_push_failed or git_remote_unavailable
+  running --> uncommittedChangesHalt : dirty working tree
+  uncommittedChangesHalt --> recovering : lazy-runtime.recover - commit, stash, discard or abort
+  remoteSyncHalted --> recovering : lazy-runtime.recover - manual-fix
+  recovering --> running : resume
   registered --> unregistered : unregister
   running --> unregistered : unregister
-  unregistered --> [*] : done
+  unregistered --> [*] : lifecycle complete
 
   style registered fill:#1e3a5f,stroke:#4a90e2,color:#fff
   style running fill:#1e5f3a,stroke:#4ae290,color:#fff
-  style haltedUncommittedChanges fill:#5f4a1e,stroke:#e2a14a,color:#fff
-  style haltedRemoteSync fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  style syncing fill:#1e5f3a,stroke:#4ae290,color:#fff
+  style retryingSync fill:#1e5f3a,stroke:#4ae290,color:#fff
+  style uncommittedChangesHalt fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  style remoteSyncHalted fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+  style recovering fill:#5f4a1e,stroke:#e2a14a,color:#fff
   style unregistered fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 ```
 

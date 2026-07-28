@@ -62,7 +62,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/troubleshooting.md) — Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/faq.md) — Answers to common questions about setting up scopes, running relinks, querying the wiki, and interpreting doctor findings.
 
-Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-wiki/help/`.
+(`mebius-san` resolves from `.guard-waivers.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
 ## Agents
 
@@ -85,6 +85,8 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-wiki/help/`.
 | `lazy-wiki.navigation.md` | Discovery and navigation contract for the curated semantic wiki. Tells agents how to enter the wiki, follow glossed links, find backlinks, and when to use /wiki.query. |
 
 ## Installation
+
+Add the marketplace once, then install this plugin — run inside Claude Code:
 
 ```
 /plugin marketplace add mebius-san/lazy-cortex

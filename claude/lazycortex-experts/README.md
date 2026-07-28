@@ -66,7 +66,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/troubleshooting.md) — Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, the technical/fiction class map, composing specialists, and the eight generic agents' lane boundaries.
 
-Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-experts/help/`.
+(`mebius-san` resolves from `.guard-waivers.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
 ## Agents
 
@@ -88,6 +88,8 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-experts/help/`.
 | `lazy-experts.help` | Show lazycortex-experts purpose and a one-line summary of each agent, aspect, skill, and command it ships |
 
 ## Installation
+
+Add the marketplace once, then install this plugin — run inside Claude Code:
 
 ```
 /plugin marketplace add mebius-san/lazy-cortex

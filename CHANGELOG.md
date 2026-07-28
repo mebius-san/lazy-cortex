@@ -4,6 +4,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.19.0 — 2026-07-28 UTC
+
+- **Breaking:** `lazy-core.git-guard` now defaults to pathspec commits — the git index belongs to you, not the agent. A bare `git commit`, `commit -a`, `git add` with content, `git rm`, and `git mv` are all refused; the agent registers new files with `git add -N` and commits explicit paths (`git commit -- <path> <path>`). Nothing you park in the index can ride along in an agent's commit any more. Roll back to the previous staging-window mutex with `git.pathspec_enabled: false` in `lazy.settings.json`; `git.mutex_enabled` controls the mutex itself.
+- Fixed: a single unreachable-remote blip no longer halts the runtime daemon for up to an hour. Remote fetches, pulls, and pushes retry with a 2s/5s/10s backoff first, so a brief outage costs seconds instead of downtime. Real divergence and a push the remote rejected still halt immediately, as before.
+
 ### 5.18.1 — 2026-07-26 UTC
 
 - Fixed daemon leaking onto other machines sharing a Dropbox/iCloud/Syncthing-synced checkout: `daemon.run_here` now accepts a list of hostnames, and `/lazy-core.install` tears down any stray daemon it finds on a host not in the list.
@@ -453,6 +458,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.5.2 — 2026-07-28 UTC
+
+- Fixed asset creation being refused at the précis step under lazycortex-core 5.19.0: it staged the folder-note before committing it, which the git guard's new pathspec discipline rejects. It now names the folder-note in the commit pathspec instead, leaving your index alone.
+
 ### 3.5.1 — 2026-07-26 UTC
 
 - New design-doc skeleton for products, features, and changes — captures Overview/Goals/Principles/Design/Behavior/Known Limitations/Boundaries, adds a conditional UI-layout section, and drops the old Roadmap section.
@@ -871,6 +880,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 2.0.9 — 2026-07-28 UTC
+
+- LaTeX is now banned everywhere in Python source, not just in docstrings: `DOC(...)` comments must carry formulas as plain prose too. Nothing that reads a `.py` file — your editor, or Python tooling — renders math, so producing Obsidian-compatible LaTeX belongs to markdown assembly at build time.
+
 ### 2.0.8 — 2026-07-23 UTC
 
 - Install now seeds the docstring-writer and test-writer agents' model tiers automatically (previously left unset until you ran the model-tier wizard).
@@ -963,6 +976,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 1.6.3 — 2026-07-28 UTC
+
+- Fixed `/wiki.relink` being refused mid-run under lazycortex-core 5.19.0: it staged its rewritten nodes before committing them, which the git guard's new pathspec discipline rejects. It now names the nodes in the commit pathspec instead, leaving your index alone.
 
 ### 1.6.2 — 2026-07-25 UTC
 

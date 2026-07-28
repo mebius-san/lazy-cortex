@@ -9,7 +9,7 @@ Bootstrap the plugin in the right scope: copy every rule template shipped by the
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 17 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 20 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 0 — Verify Python ≥ 3.12 (floor)`
@@ -19,6 +19,7 @@ This skill has 17 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 4 — Sync authoring templates`
    - `Step 5 — Verify`
    - `Step 6 — Seed lazy.settings.json`
+   - `Step 6.5 — Seed git-guard flags`
    - `Step 7 — Bootstrap .logs/, .runtime/, lazy.settings.local.json gitignore, and .lazyignore`
    - `Step 8 — Migrate stale lazycortex-log hook registrations`
    - `Step 9 — Bootstrap runtime defaults`
@@ -229,6 +230,26 @@ If any mutation happened, write the file with `version: 1` at the top. Preserve 
 ### Report outcome
 
 One line per seeded default: `_builtin.<key> = <value> (<state>)`. Plus `_user`, `_project`: `created (empty)` if new, `unchanged` otherwise.
+
+## Step 6.5: Seed git-guard flags
+
+Make the two `lazy-core.git-guard` behaviours visible and tunable in the consumer's tracked settings. Both default to `true` in code; seeding them writes the defaults down so the operator can flip either one without reading the hook.
+
+**Scope:** project only. The guard resolves its config from the repo root, so a `git` section at `user` scope is never read. At `user` scope, state `skipped-user-scope` and move on.
+
+**Target:** `<repo-root>/.claude/lazy.settings.json`, section `git`.
+
+Ensure the section exists with `"_version": 1`, then apply per-key semantics — **absent** → write the default, **present** → leave the operator's value untouched (`kept-local`, report the value):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | Master kill-switch for the whole hook. |
+| `pathspec_enabled` | `true` | Commits must name their paths; the index stays the operator's. |
+| `mutex_enabled` | `true` | Staging-window mutex — dormant while `pathspec_enabled` is true. |
+
+`pathspec_enabled` defaulting to `true` is a **behaviour change** for a repo upgrading from an older plugin version: agents lose bare `git commit`, `git add` with content, `git rm`, and `git mv`. Say so in the report line, and name the rollback: set `pathspec_enabled` to `false` to restore mutex-only behaviour. Do not ask — the default is deliberate and the flag is one edit away.
+
+Report outcome: `git.<key> = <value> (<added|kept-local>)`, or `skipped-user-scope`.
 
 ## Step 7: Bootstrap .logs/, .runtime/, lazy.settings.local.json gitignore, and .lazyignore
 
@@ -814,6 +835,7 @@ Report to the user:
 - For each rule: state (**installed**, **merged**, **unchanged**, **kept-local**, or **kept-orphan**) and target `<path>`
 - For each authoring template: state and target `<path>` (Step 4)
 - Per-key `agent_models` seed outcome from Step 6
+- Per-key `git` flag seed outcome (Step 6.5), including the pathspec behaviour-change note when `pathspec_enabled` was newly written
 - `.logs/` directory + `.lazyignore` seed bootstrap outcome (Step 7)
 - Hook migration outcome (Step 8): one line per settings path (`migrated` or `no-stale-entries`)
 - Runtime bootstrap outcome (Step 9)

@@ -132,7 +132,7 @@ Skip entirely under `--empty` (outcome `skipped-empty-mode`).
 
 Otherwise author the asset's `# Summary` précis: 1–2 phrases capturing the feature / change / bug essence drawn from the clarification answers (Step 3) and the doc just scaffolded. Write the précis between the `<!-- spec:precis:start -->` and `<!-- spec:precis:end -->` markers in the asset's `<slug>.md` folder-note (the `folder_note` path from the scaffold's JSON output), replacing the `_TBD` placeholder. The `# Summary` section in the folder-note is protected (`#protected/spec/summary`) — edit ONLY the précis text inside the markers; do not touch the `<!-- spec:stats:* -->` markers or the operator-zone body below the section.
 
-Commit the updated folder-note atomically (`git add <folder_note> && git commit -m "docs(<slug>): author précis"`).
+Commit the updated folder-note by naming it in the commit pathspec (`git commit -m "docs(<slug>): author précis" -- <folder_note>`). No `git add` — the pathspec carries the worktree content directly, per `lazy-core.git`'s pathspec discipline, and leaves the operator's index untouched.
 
 Outcome: `precis-authored` or `skipped-empty-mode`.
 

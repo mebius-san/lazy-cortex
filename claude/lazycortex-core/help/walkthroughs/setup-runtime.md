@@ -1,14 +1,14 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover if the working tree or a remote sync halts it.
-last_regen: 2026-07-25
+last_regen: 2026-07-28
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, answers yes to the runtime-daemon wizard, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh, daemon starts and polls .experts/.jobs/ on interval, user checks .runtime/state.json for a recent last_run; (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks a cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
   kind_hint: sequence
 source_skills:
+  - lazy-core.install
   - lazy-runtime.recover
-  - lazy-runtime.preflight
 ---
 # How do I bootstrap the runtime daemon and recover it if it halts?
 
@@ -28,7 +28,7 @@ After completing this walkthrough you have a running runtime daemon that polls f
 
 ### Step 1 — Install and start the daemon
 
-Run `/lazy-core.install` inside the repo and answer **Yes** to the runtime-daemon wizard. The wizard's full sequence — what it writes to `lazy.settings.json`, the expert-discovery scan, the daemon-supervisor offer, the expert-spawn sandbox question, and the optional Prometheus metrics endpoint — is covered in the **Install, audit, and maintain lazycortex-core** block chapter; work through Steps there before continuing here. Come back once the wizard has finished.
+Run `/lazy-core.install` inside the repo and answer **Yes** to the runtime-daemon wizard. The wizard's full sequence — what it writes to `lazy.settings.json`, the expert-discovery scan, the daemon-supervisor offer, the expert-spawn sandbox question, the git-guard flags it now seeds into `lazy.settings.json` (`git.enabled`, `git.pathspec_enabled`, `git.mutex_enabled`), and the optional Prometheus metrics endpoint — is covered in the **Install, audit, and maintain lazycortex-core** block chapter; work through Steps there before continuing here. Come back once the wizard has finished.
 
 If you chose a supervisor during install, the daemon is already running — skip to Step 2. Otherwise start it by hand from the repo root:
 
@@ -71,7 +71,7 @@ The skill reads the halt context and shows you `triggered_by` (which routine or 
 - **discard** — runs `git checkout -- . && git clean -fd`. Throws away every dirty change. This is irreversible.
 - **abort** — leaves everything as-is and exits. The daemon stays halted until you clean up manually and re-run the skill.
 
-**Remote-sync halts (`git_pull_diverged` / `git_push_failed` / `git_remote_unavailable`)** — the daemon's pre- or post-tick remote sync (configured via the `daemon.git` block in `lazy.settings.json`) hit an unrecoverable state. The skill does not attempt to fix these automatically (automatic resolution could silently drop your commits). Instead it surfaces reason-specific guidance — for example, inspecting `git log --oneline HEAD origin/<branch>` for a diverged branch, or checking network and `git remote -v` for a remote-unavailable halt. After you resolve the situation by hand, confirm **resume** to clear the halt block. The daemon's next tick re-evaluates; if the condition persists it will halt again with the same reason.
+**Remote-sync halts (`git_pull_diverged` / `git_push_failed` / `git_remote_unavailable`)** — the daemon's pre- or post-tick remote sync (configured via the `daemon.git` block in `lazy.settings.json`) hit an unrecoverable state. Before you ever see this halt, the daemon retries on its own with backoff whenever a remote-touching operation looks merely unreachable (a network blip, a DNS hiccup) — so a brief outage no longer halts the daemon at all; `git_remote_unavailable` now only fires once those retries are exhausted. The skill does not attempt to fix these automatically (automatic resolution could silently drop your commits). Instead it surfaces reason-specific guidance — for example, inspecting `git log --oneline HEAD origin/<branch>` for a diverged branch, or checking network and `git remote -v` for a remote-unavailable halt. After you resolve the situation by hand, confirm **resume** to clear the halt block. The daemon's next tick re-evaluates; if the condition persists it will halt again with the same reason.
 
 Once cleanup or manual repair succeeds and the tree is clean, the skill atomically clears the `daemon_halted` block from `state.json`. The daemon resumes scheduling on its next iteration with no restart required.
 
@@ -95,28 +95,27 @@ The `daemon_halted` recovery path is an expected operational event, not an error
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant installWizard as lazy-core.install Wizard
-  participant fileSystem as Filesystem
-  participant runtimeDaemon as lazy.runtime.sh Daemon
-  participant recoverSkill as lazy-runtime.recover
+  participant wizard as Install Wizard
+  participant daemon as Runtime Daemon
+  participant recover as Recovery Skill
 
-  user->>installWizard: /lazy-core.install
-  installWizard->>user: runtime-daemon wizard prompt
-  user-->>installWizard: yes
-  installWizard->>fileSystem: write lazy.runtime.sh, settings experts, daemon and routines sections
-  user->>runtimeDaemon: run lazy.runtime.sh
-  loop poll .experts/.jobs on interval
-    runtimeDaemon->>fileSystem: poll .experts/.jobs
-  end
-  user->>fileSystem: check .runtime/state.json
-  fileSystem-->>user: last_run recent
-  Note over fileSystem: working tree goes dirty
-  runtimeDaemon->>fileSystem: write daemon_halted to state.json
-  user->>recoverSkill: /lazy-runtime.recover
-  recoverSkill->>fileSystem: read halt context
-  fileSystem-->>recoverSkill: halt context
-  recoverSkill-->>user: show halt context, choose cleanup mode
-  user-->>recoverSkill: pick commit, stash, or discard
-  recoverSkill->>fileSystem: clear daemon_halted
-  Note over runtimeDaemon: daemon resumes on next iteration
+  Note over user,wizard: Phase 1 - install and wizard setup
+  user->>wizard: run /lazy-core.install
+  wizard->>user: prompt runtime-daemon wizard
+  user->>wizard: answer yes
+  wizard-->>user: writes .claude/bin/lazy.runtime.sh, lazy.settings.json experts, daemon and routines sections
+
+  Note over user,daemon: Phase 2 - daemon polling
+  user->>daemon: run .claude/bin/lazy.runtime.sh
+  daemon-->>user: daemon started, polling .experts/.jobs on interval
+  user->>daemon: check .runtime/state.json
+  daemon-->>user: last_run is recent
+
+  Note over daemon: Phase 3 - halt and recovery
+  daemon->>daemon: working tree goes dirty, writes daemon_halted to .runtime/state.json
+  user->>recover: run /lazy-runtime.recover
+  recover-->>user: shows halt context
+  user->>recover: picks cleanup mode - commit, stash, or discard
+  recover-->>daemon: clears daemon_halted
+  daemon-->>user: resumes on next iteration
 ```
