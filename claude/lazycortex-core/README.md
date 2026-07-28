@@ -95,7 +95,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [agent-models](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/agent-models.md) — Assign model tiers to every agent in your vault, prune dead entries for deleted agents, and route dispatches automatically.
 - [change-history](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/change-history.md) — Run-log housekeeping and change-history access — clean up orphaned log directories, distill commits into themed prose, and ask "why was X changed?" across every source at once.
 - [experts](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/experts.md) — Dispatch jobs to named expert workers, keep the main session free, and collect results when the daemon finishes them.
-- [git-coordination](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/git-coordination.md) — Inspect and manually break the per-repo staging lock that prevents concurrent Claude Code sessions from corrupting each other's git index changes.
+- [git-coordination](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/git-coordination.md) — Protect your repo's git index from Claude Code — pathspec-only commits by default, an optional staging lock for concurrent sessions, and the two skills to inspect and break it.
 - [guardian](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/guardian.md) — Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/install-and-audit.md) — Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
 - [memory](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/memory.md) — Per-expert long-term memory tracked in git — experts consult notes before primary work, write new notes as a side-effect of jobs, and consolidate via reflect passes.
@@ -106,9 +106,9 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [setup-routine](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-routine.md) — Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
 - [setup-runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-runtime.md) — Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover if the working tree or a remote sync halts it.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/troubleshooting.md) — Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git locking, and MCP permissions.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git staging, and MCP permissions.
 
-Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-core/help/`.
+(`mebius-san` resolves from `.guard-waivers.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
 ## Agents
 
@@ -156,6 +156,8 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-core/help/`.
 | `lazy-log.commit-recorder` | `Bash`, `mcp__git__git_commit` | PostToolUse hook that records every successful git commit to `.logs/commits.jsonl`. |
 
 ## Installation
+
+Add the marketplace once, then install this plugin — run inside Claude Code:
 
 ```
 /plugin marketplace add mebius-san/lazy-cortex

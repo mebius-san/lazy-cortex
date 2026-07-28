@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#93c5fd"
+iconize_color: "#86efac"
 ---
 # lazycortex-review
 
@@ -90,7 +90,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-review/help/troubleshooting.md) — Common failure modes across lazycortex-review skills — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-review/help/faq.md) — Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
 
-Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-review/help/`.
+(`mebius-san` resolves from `.guard-waivers.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
 ## Agents
 
@@ -106,6 +106,8 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-review/help/`.
 | `lazy-review.help` | Cheatsheet for lazycortex-review — public verbs, install/configure flow, where logs and errors land. The first thing a new consumer should run. |
 
 ## Installation
+
+Add the marketplace once, then install this plugin — run inside Claude Code:
 
 ```
 /plugin marketplace add mebius-san/lazy-cortex

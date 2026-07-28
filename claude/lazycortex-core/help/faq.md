@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git locking, and MCP permissions.
-last_regen: 2026-07-26
+summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git staging, and MCP permissions.
+last_regen: 2026-07-28
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -32,7 +32,6 @@ source_skills:
   - lazy-log.recall
   - lazy-log.timeline
   - lazy-log.summary
-  - lazy-log.bullets
 ---
 # FAQ
 
@@ -362,11 +361,19 @@ Protocols themselves are attached to a routine at the point the routine is regis
 
 ---
 
+## Why does `git commit` now refuse a bare commit and ask me to name paths?
+
+The git-guard hook's default behavior changed: **pathspec discipline** is now the default mode (`lazy.settings.json["git"]["pathspec_enabled"]` defaults to `true`), and it replaces the staging-window mutex as what most sessions actually hit. Under pathspec discipline the shared git index is treated as the operator's own space — a Claude session never leaves content parked there for a later commit to accidentally sweep up. Concretely: a bare `git commit` (or `-a`/`-am`/`.`/`:/`/a directory pathspec) is refused; every commit must name explicit paths, e.g. `git commit -m "..." -- <path> <path>`. A new file is registered with `git add -N <path>` (no content staged) rather than a plain `git add`; renames and deletes go through Bash `mv`/`rm`, never `git mv`/`git rm` (both auto-stage); `git reset` still works normally if something needs un-parking. The only exceptions are a bare commit mid-merge (git itself refuses a partial commit there) and `--amend` when a pathspec is given or the index is already clean.
+
+If a session's own tooling staged content for you (a skill, a pre-commit pipeline step), fold the paths it reports into your commit pathspec rather than falling back to a bare commit. You don't need to change anything to opt in — the hook enforces the new default and tells you the pathspec form to use whenever it refuses a bare commit.
+
+---
+
 ## What is the git staging lock, and when do I need to touch it?
 
-Multiple Claude Code sessions can share one checkout, and without coordination one session's `git commit` could sweep up another session's staged files. A hook enforces a per-repo mutex on the staging window — from the first `git add` that makes the index non-empty to the `git commit` that empties it again — so only one session stages at a time. Most of the time you never see this: the hook auto-breaks the lock when the holding process is dead, on a different host, or has gone idle for a while.
+The staging-window mutex is the previous default and is now dormant on a fresh install — it only takes over when you flip `lazy.settings.json["git"]["pathspec_enabled"]` to `false` and `["mutex_enabled"]` to `true`. In that mode, multiple Claude Code sessions sharing one checkout serialize the staging window — from the first `git add` that makes the index non-empty to the `git commit` that empties it again — so only one session stages at a time, with the same auto-break heuristics as before (holder process dead, on a different host, or idle for a while).
 
-Run `/lazy-core.git-status` to inspect the lock (holder, age, liveness, whether it's currently breakable) without changing anything. Only reach for `/lazy-core.git-unlock` — which asks for confirmation before deleting the lock file — when status shows a lock that the automatic heuristics won't break on their own, for example a holder that is alive but you know has abandoned its staging window.
+`/lazy-core.git-status` and `/lazy-core.git-unlock` only have something to act on under mutex mode; on the pathspec-discipline default no session ever opens a staging window, so there is nothing to inspect or break. Run `/lazy-core.git-status` to check the lock (holder, age, liveness, whether it's currently breakable) without changing anything, and reach for `/lazy-core.git-unlock` — which asks for confirmation before deleting the lock file — only when status shows a lock the automatic heuristics won't break on their own. Setting `lazy.settings.json["git"]["enabled"]` to `false` silences the hook entirely, in either mode.
 
 ---
 
@@ -378,14 +385,7 @@ They read the same sources (the changelog, run logs, raw commits, git log, and m
 
 ---
 
-## How do I turn a plugin's commit range into a user-facing changelog entry?
-
-Dispatch `lazy-log.bullets` with the plugin name, its directory, a commit range (`<old-sha>..HEAD`), the new version, and the release date. It reads every commit in that range scoped to the plugin's own directory, drops the ones a user installing the plugin would never feel — `chore:`/`style:`/`test:` commits, docs-only syncs, plugin-development plumbing, test-only changes — and rewrites what survives as outcome-led bullets grouped by scope, grouping related commits into one bullet and marking any breaking change with a **Breaking:** lead-in. The result is a ready-to-use `### <version> — <date> UTC` release block that you paste into your changelog yourself; the agent does not write to any file for you.
-
-This is a different job from `/lazy-log.distill`: distill maintains the internal, always-current `.logs/changelog.md` narrative used for change-history queries across the whole project, while `lazy-log.bullets` produces one discrete, versioned release block scoped to a single plugin's commits, meant for a public-facing changelog.
-
----
-
 ## What does `/lazy-log.clean` do with old run-log folders?
 
 It classifies every subdirectory under `./.logs/claude/` against the live set of skill/agent/command names. Folders matching a canonical name are left alone; folders that look like a renamed or typo'd canonical name are offered for merge; folders matching a known anonymous pattern (`task-N`, `plan-execute-N`, and similar) are batched into one prompt per pattern instead of one prompt per folder; everything else is reviewed individually. For each orphan you choose per-folder: leave it, delete it, or distill its substantive content into memory first and then delete it. Nothing on disk changes until every prompt has been answered — the skill is read-first and applies all approved actions in one final pass.
+</content>

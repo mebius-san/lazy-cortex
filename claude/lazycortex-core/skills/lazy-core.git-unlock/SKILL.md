@@ -26,11 +26,13 @@ This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 Run the same inspect one-liner as `/lazy-core.git-status` Step 2 to capture current lock state. Read that skill's `SKILL.md` to extract the snippet — use it verbatim.
 
+If the snippet reports `Lock: N/A` — the guard is disabled, or the repo runs on the pathspec row where no staging window is ever opened — print that line, skip Steps 2 and 3, and emit outcome `no-lock-in-play`.
+
 If `state is None` (no lock) → print "no lock to break" and emit outcome `not-found`.
 
 If the lock exists, the one-liner output includes the holder's session ID, PID, age, host, branch, liveness status, and whether it is currently breakable. Capture this output for Step 2.
 
-**Outcome: `asserted` (lock found) or `not-found` (no lock).**
+**Outcome: `asserted` (lock found), `not-found` (no lock), or `no-lock-in-play` (pathspec row / guard disabled).**
 
 ## Step 2 — Confirm with the operator
 

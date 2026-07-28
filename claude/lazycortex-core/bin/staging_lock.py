@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 # --- Defaults -----------------------------------------------------------------
 
 DEFAULT_ENABLED = True
+DEFAULT_MUTEX_ENABLED = True
+DEFAULT_PATHSPEC_ENABLED = True
 DEFAULT_WAIT_SECONDS = 30.0
 DEFAULT_MAX_HOLD_SECONDS = 600.0
 DEFAULT_MAX_IDLE_SECONDS = 300.0
@@ -44,10 +46,18 @@ LOCK_FILENAME = "lazy-git.lock"  # under <repo>/.git/
 @dataclass(frozen = True)
 class StagingConfig:
   """
-  Tunable configuration for the staging-window mutex.
+  Tunable configuration for the staging-window mutex and the pathspec commit discipline.
+
+  The two behaviours are independent flags under one master kill-switch. `pathspec_enabled`
+  supersedes the mutex on the agent path rather than composing with it — an intent-to-add entry
+  would otherwise take a lock that the "index empty after commit" release check can never clear.
 
   Attributes:
-    enabled: Whether the mutex is active; when false, every acquire call returns immediately.
+    enabled: Master kill-switch; when false the guard is silent and every acquire call returns
+      immediately.
+    mutex_enabled: Whether the staging-window mutex is active.
+    pathspec_enabled: Whether commits are required to name their paths explicitly, leaving the
+      index to the operator.
     wait_seconds: Maximum time an acquire call will poll before returning a refused result.
     max_hold_seconds: Age threshold beyond which a held lock becomes eligible for the
       stale-and-idle break rule.
@@ -55,6 +65,8 @@ class StagingConfig:
       for the stale-and-idle break rule.
   """
   enabled: bool = DEFAULT_ENABLED
+  mutex_enabled: bool = DEFAULT_MUTEX_ENABLED
+  pathspec_enabled: bool = DEFAULT_PATHSPEC_ENABLED
   wait_seconds: float = DEFAULT_WAIT_SECONDS
   max_hold_seconds: float = DEFAULT_MAX_HOLD_SECONDS
   max_idle_seconds: float = DEFAULT_MAX_IDLE_SECONDS
@@ -671,6 +683,10 @@ def load_config(repo_root: Path) -> StagingConfig:
   return StagingConfig(
     # waiver: lock config-section field name, paired with its DEFAULT_* constant
     enabled = bool(section.get("enabled", DEFAULT_ENABLED)),
+    # waiver: lock config-section field name, paired with its DEFAULT_* constant
+    mutex_enabled = bool(section.get("mutex_enabled", DEFAULT_MUTEX_ENABLED)),
+    # waiver: lock config-section field name, paired with its DEFAULT_* constant
+    pathspec_enabled = bool(section.get("pathspec_enabled", DEFAULT_PATHSPEC_ENABLED)),
     # waiver: lock config-section field name, paired with its DEFAULT_* constant
     wait_seconds = float(section.get("wait_seconds", DEFAULT_WAIT_SECONDS)),
     # waiver: lock config-section field name, paired with its DEFAULT_* constant

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-last_regen: 2026-07-26
+last_regen: 2026-07-28
 diagram_spec:
   anchor: "Bootstrap order"
   request: "Flowchart of the single-plugin vs multi-plugin bootstrap path — install/setup, optional restart, audit, and the optional optimize+doctor branch — ending at bootstrap complete."
@@ -24,7 +24,7 @@ This block covers all five of core's interactive lifecycle skills, plus two non-
 
 ## What's in this block
 
-**`/lazy-core.install`** is the foundation step. Run it once per project (or globally) right after enabling the plugin and restarting Claude Code. It syncs every rule template the plugin ships into the correct rules directory, copies authoring templates into `.claude/templates/core/`, and bootstraps the scaffold registry. It then seeds `lazy.settings.json` with the three built-in agent-model routing defaults and adds `.logs/`, `.runtime/`, and `.lazyignore` to the repo. After the rules and settings groundwork is in place, it registers expert candidates: any agent file in an enabled plugin that carries `expert_protocol:` frontmatter is added to `lazy.settings.json[experts]` — this happens regardless of whether you use the background daemon, because experts are also dispatched interactively. Alongside that, it fills in Claude model tiers for every agent lazycortex-core itself ships — including the runtime doctor, which carries no `expert_protocol:` frontmatter and would otherwise be invisible to the scan — so those tiers are on record without waiting for the interactive agent-models wizard, and any tier you've already set by hand is left untouched. Step 10.5 bootstraps `.memory/` for the same reason. Behind two remembered gates — `daemon.enabled` (does this project use the background daemon at all? — a project-wide policy shared with everyone who clones the repo) and `daemon.run_here` (run it for this checkout? — a per-working-copy choice, so several checkouts of the project on one machine each decide independently, and instead of a plain yes/no it can also hold a list of hostnames for a checkout that lives on a file-synced path — Dropbox, iCloud, Syncthing — shared across several machines; only the listed hosts run the daemon, and running install on any other host tears down whatever supervisor unit that checkout already has on this host) — it also sets up the daemon routines and installs a launchd or systemd supervisor (named per checkout so two same-named checkouts don't collide). When the daemon runs for this checkout, Step 13.6 offers to provision Prometheus-style metrics: a free loopback port is allocated automatically and reused on re-run, the enablement flag and repo label are written to tracked `lazy.settings.json` (shared across every clone), the allocated port itself goes only into this checkout's gitignored local overlay (a port free on one machine may be taken on another), and a host-wide scrape-targets file is regenerated so an external Prometheus with `file_sd_configs` picks up every enabled checkout on the machine with zero manual edits. The skill is idempotent — re-running after a plugin update picks up new rule templates without clobbering rules you chose to keep local.
+**`/lazy-core.install`** is the foundation step. Run it once per project (or globally) right after enabling the plugin and restarting Claude Code. It syncs every rule template the plugin ships into the correct rules directory, copies authoring templates into `.claude/templates/core/`, and bootstraps the scaffold registry. It then seeds `lazy.settings.json` with the three built-in agent-model routing defaults and adds `.logs/`, `.runtime/`, and `.lazyignore` to the repo. It also seeds two `lazy-core.git-guard` behaviour flags into the same tracked settings file, project scope only — `pathspec_enabled` (commits must name their paths, so the shared git index stays the operator's rather than snapshotting whatever else was parked there) and `mutex_enabled` (the staging-window mutex, dormant while pathspec mode is on) — both defaulting to `true`. An operator value already on record is left untouched; on a repo upgrading from an older install, newly writing `pathspec_enabled: true` is a real behaviour change — bare `git commit`, `git add` with content, `git rm`, and `git mv` stop working for agents — so the skill calls this out in its report along with the rollback (set the flag to `false`) rather than asking about it. After the rules and settings groundwork is in place, it registers expert candidates: any agent file in an enabled plugin that carries `expert_protocol:` frontmatter is added to `lazy.settings.json[experts]` — this happens regardless of whether you use the background daemon, because experts are also dispatched interactively. Alongside that, it fills in Claude model tiers for every agent lazycortex-core itself ships — including the runtime doctor, which carries no `expert_protocol:` frontmatter and would otherwise be invisible to the scan — so those tiers are on record without waiting for the interactive agent-models wizard, and any tier you've already set by hand is left untouched. Step 10.5 bootstraps `.memory/` for the same reason. Behind two remembered gates — `daemon.enabled` (does this project use the background daemon at all? — a project-wide policy shared with everyone who clones the repo) and `daemon.run_here` (run it for this checkout? — a per-working-copy choice, so several checkouts of the project on one machine each decide independently. Instead of a plain yes/no it can also hold a list of hostnames for a checkout that lives on a file-synced path — Dropbox, iCloud, Syncthing — shared across several machines; only the listed hosts run the daemon, and running install on any other host tears down whatever supervisor unit that checkout already has on this host) — it also sets up the daemon routines and installs a launchd or systemd supervisor (named per checkout so two same-named checkouts don't collide). When the daemon runs for this checkout, Step 13.6 offers to provision Prometheus-style metrics: a free loopback port is allocated automatically and reused on re-run, the enablement flag and repo label are written to tracked `lazy.settings.json` (shared across every clone), the allocated port itself goes only into this checkout's gitignored local overlay (a port free on one machine may be taken on another), and a host-wide scrape-targets file is regenerated so an external Prometheus with `file_sd_configs` picks up every enabled checkout on the machine with zero manual edits. The skill is idempotent — re-running after a plugin update picks up new rule templates without clobbering rules you chose to keep local.
 
 **`/lazy-core.audit`** is the read-only context-weight and compliance measurement. It first runs a set of inline logging-compliance checks — confirming the logging rule is installed, `.logs/` and `.runtime/` exist and are gitignored, and any `logging-waiver:` frontmatter carries a concrete reason rather than a placeholder — then dispatches four parallel scan agents. Agent A measures everything that loads at conversation start — CLAUDE.md files, always-loaded rules, and the memory index — sorted by size. Agent B covers on-demand assets, MCP server enablement, Python runtime availability, path hygiene, naming hygiene, and skill/agent/rule-writing compliance checks (missing Execution-Discipline preambles, "Optional" headings, narrative padding, broken artifact references, oversize files, non-canonical `paths:` shapes). Agent C checks help-doc coverage and staleness against each plugin's README scenario list. Agent D audits the expert runtime across ten sub-checks: `lazy.settings.json[experts]` schema (D1), agent reference resolution (D2), aspect reference resolution (D8), arguments key and size validation (D9), `.memory/` directory hygiene (D10), flat `daemon`/`routines` section schema (D3), routine command resolvability (D4), orphan job directories (D5), stale completed jobs (D6), and daemon liveness (D7). No changes are made.
 
@@ -86,6 +86,8 @@ The full journey for a new project: install → restart → audit → doctor if 
 
 **Settings file auto-migration** — if `/lazy-core.doctor` or `/lazy-core.audit` warns that `lazy.settings.json` has a root `version` key, run any lazy-core skill (such as `/lazy-core.audit`) to trigger the one-time automatic migration: the settings loader rewrites the file to the current per-section `_version` format on its first read and removes the legacy root key.
 
+**Tuning git-guard's pathspec discipline** — `/lazy-core.install` seeds `git.pathspec_enabled` and `git.mutex_enabled` (both default `true`) into tracked `lazy.settings.json`, project scope only, at Step 6.5. Pathspec mode requires every commit to name its paths and blocks bare `git commit`, `git add` with content, `git rm`, and `git mv` for agents working in the repo. If you'd rather fall back to the older mutex-only staging coordination, set `git.pathspec_enabled` to `false` and re-run `/lazy-core.install` — it leaves an operator-set value untouched on every subsequent re-run. `git.enabled` is the master kill-switch for the whole `lazy-core.git-guard` hook.
+
 **Rolling an update out across many repos** — dispatch `lazy-core.autosetup` once per repo path from a cross-project rollout loop rather than running `/lazy-core.setup` interactively in each checkout. It is meant for repos that have already been through a first-time install — it will not make the first-time decisions for you. Each dispatch reads the target repo's own enabled-plugin set, so a rollout loop touching repos with different plugin combinations installs the right chain in each one rather than the union of everything on the machine.
 
 **A repo comes back `needs-interactive` from autosetup or autocheckup** — this means the step it hit is genuinely a first-time or preference decision (a daemon gate never answered, a file conflict, a model tier not in the default-tiers table). Open that repo and run the equivalent interactive skill (`/lazy-core.install`, `/lazy-core.setup`, or `/lazy-core.doctor`) once to put the decision on record; subsequent autosetup/autocheckup passes on that repo will apply it silently from then on.
@@ -100,35 +102,37 @@ Every other lazycortex plugin assumes that `lazy.settings.json` exists and carri
 
 The audit and doctor can run at any time without side effects and do not require install to have completed first — though their findings are more meaningful once the plugin is properly bootstrapped.
 
-For public-repo safety, see the **guardian** block: `/lazy-repo.mark-public` creates `.guard-waivers.json`, which also activates the pre-commit hook for every subsequent commit. For the async expert team, see the **runtime**, **experts**, and **memory** blocks — their setup walkthroughs pick up where this block's install step leaves off.
+For public-repo safety, see the **guardian** block: `/lazy-repo.mark-public` creates `.guard-waivers.json`, which also activates the pre-commit hook for every subsequent commit. For the async expert team, see the **runtime**, **experts**, and **memory** blocks — their setup walkthroughs pick up where this block's install step leaves off. For details on the staging mutex and the pathspec commit discipline `/lazy-core.install` seeds here, see the **git-coordination** block.
 
 ## Bootstrap order
 
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  chooseBootstrapMode{Single-plugin or multi-plugin?}
-  installSinglePlugin[Install/setup single plugin]
-  installMultiplePlugins[Install/setup multiple plugins]
+  bootstrapStart[Start bootstrap]
+  pluginCountCheck{Single plugin or multi-plugin?}
+  installSetupSingle[Install and setup single plugin]
+  installSetupMulti[Install and setup multiple plugins]
   restartNeeded{Restart required?}
   restartClaudeCode[Restart Claude Code]
   runAudit[Run audit]
-  optimizeDoctorNeeded{Run optimize and doctor?}
+  optimizeRequested{Optimize requested?}
   runOptimize[Run optimize]
   runDoctor[Run doctor]
   bootstrapComplete[Bootstrap complete]
 
-  chooseBootstrapMode -->|single-plugin| installSinglePlugin
-  chooseBootstrapMode -->|multi-plugin| installMultiplePlugins
-  installSinglePlugin -->|proceed| restartNeeded
-  installMultiplePlugins -->|proceed| restartNeeded
+  bootstrapStart -->|choose path| pluginCountCheck
+  pluginCountCheck -->|single plugin| installSetupSingle
+  pluginCountCheck -->|multi plugin| installSetupMulti
+  installSetupSingle -->|next| restartNeeded
+  installSetupMulti -->|next| restartNeeded
   restartNeeded -->|yes| restartClaudeCode
   restartNeeded -->|no| runAudit
   restartClaudeCode -->|resume| runAudit
-  runAudit -->|next| optimizeDoctorNeeded
-  optimizeDoctorNeeded -->|yes| runOptimize
-  optimizeDoctorNeeded -->|no| bootstrapComplete
-  runOptimize -->|next| runDoctor
+  runAudit -->|check| optimizeRequested
+  optimizeRequested -->|yes| runOptimize
+  optimizeRequested -->|no| bootstrapComplete
+  runOptimize -->|then| runDoctor
   runDoctor -->|done| bootstrapComplete
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
@@ -136,13 +140,14 @@ flowchart LR
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
-  class chooseBootstrapMode entry
+  class bootstrapStart entry
+  class pluginCountCheck guard
+  class installSetupSingle action
+  class installSetupMulti action
   class restartNeeded guard
-  class optimizeDoctorNeeded guard
-  class installSinglePlugin action
-  class installMultiplePlugins action
   class restartClaudeCode action
   class runAudit action
+  class optimizeRequested guard
   class runOptimize action
   class runDoctor action
   class bootstrapComplete success

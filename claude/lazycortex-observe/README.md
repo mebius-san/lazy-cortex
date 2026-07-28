@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#93c5fd"
+iconize_color: "#86efac"
 ---
 # lazycortex-observe
 
@@ -75,7 +75,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/troubleshooting.md) — Common failure modes across lazycortex-observe install, uninstall, and doctor — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/faq.md) — Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
 
-Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-observe/help/`.
+(`mebius-san` resolves from `.guard-waivers.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
 ## Commands
 
@@ -84,6 +84,8 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-observe/help/`.
 | `lazy-observe.help` | Show lazycortex-observe purpose and a one-line summary of each skill it ships |
 
 ## Installation
+
+Add the marketplace once, then install this plugin — run inside Claude Code:
 
 ```
 /plugin marketplace add mebius-san/lazy-cortex

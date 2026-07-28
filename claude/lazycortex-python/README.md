@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#93c5fd"
 ---
 # lazycortex-python
 
@@ -74,7 +74,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/troubleshooting.md) — Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, and writer agents.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/faq.md) — Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, tests, and the checker stack.
 
-Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-python/help/`.
+(`mebius-san` resolves from `.guard-waivers.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
 ## Agents
 
@@ -104,6 +104,8 @@ Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-python/help/`.
 | `lazy-python.check-style` | `Edit\|Write` | PostToolUse hook for lazy-python. |
 
 ## Installation
+
+Add the marketplace once, then install this plugin — run inside Claude Code:
 
 ```
 /plugin marketplace add mebius-san/lazy-cortex

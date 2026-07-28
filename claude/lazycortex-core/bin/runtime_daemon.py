@@ -39,6 +39,31 @@ if TYPE_CHECKING:
 # default per-routine subprocess timeout; overridable per-routine via routines[<name>].timeout_sec
 DEFAULT_TIMEOUT_SEC = 300
 POST_TICK_MAX_PUSH_ATTEMPTS = 3
+# Sleeps between retries of a remote-touching git command whose failure looks like a transport
+# blip. One entry per retry, so the command runs len()+1 times at worst and costs sum() seconds.
+REMOTE_RETRY_BACKOFF_SEC = ( 2.0, 5.0, 10.0 )
+# Substrings that mark a git failure as unreachable-remote rather than a refusal git computed.
+# Matched case-insensitively against stderr. A non-fast-forward rejection deliberately matches
+# none of these — it is an answer from a reachable remote and must surface on the first attempt.
+_GIT_TRANSPORT_MARKERS = (
+  "could not resolve host",
+  "could not read from remote repository",
+  "unable to access",
+  "connection timed out",
+  "connection refused",
+  "connection reset",
+  "network is unreachable",
+  "no route to host",
+  "operation timed out",
+  "temporary failure in name resolution",
+  "ssh: connect to host",
+  "kex_exchange_identification",
+  "remote end hung up unexpectedly",
+  "early eof",
+  "rpc failed",
+  "broken pipe",
+  "timed out",
+)
 # default wall-clock cap for the operator's post-push hook; overridable via daemon.git.post_push_timeout_sec
 DEFAULT_POST_PUSH_TIMEOUT_SEC = 30
 # Hourly throttle for runtime-log + worktree cleanup (seconds).
@@ -1305,6 +1330,66 @@ def _run_git(repo_root: Path, args: list[str]) -> None:
     raise
 
 
+def _is_transport_failure(error: subprocess.CalledProcessError) -> bool:
+  """
+  Decide whether a failed git invocation could not reach the remote at all.
+
+  Args:
+    error: The exception raised by the failed git invocation.
+
+  Returns:
+    True when stderr carries a transport / DNS / SSH marker, meaning the failure says nothing about
+    the repository state and is worth retrying. False for every answer a reachable remote computed
+    (non-fast-forward rejection, missing ref, permission denied), which must surface immediately.
+  """
+  raw = error.stderr or b""
+  # waiver: stdlib decode-error mode, not a domain constant
+  text = raw.decode(errors = "replace") if isinstance(raw, bytes) else str(raw)
+  lowered = text.lower()
+  return any(marker in lowered for marker in _GIT_TRANSPORT_MARKERS)
+
+
+def _run_git_remote(repo_root: Path, args: list[str]) -> None:
+  """
+  Run a remote-touching git command, retrying with backoff while the remote looks unreachable.
+
+  A single packet-loss moment used to halt the whole daemon loop until an operator or the hourly
+  doctor cleared it. Retrying the reachability class only keeps that halt for remotes that are
+  genuinely down: any failure the remote itself computed propagates on the first attempt, so the
+  caller's own race handling and the divergence halt keep their current timing.
+
+  Args:
+    repo_root: Absolute path to the repository the git command targets.
+    args: Argument vector passed to the `git` executable (without the leading `git` token).
+
+  Raises:
+    subprocess.CalledProcessError: When the command fails for a non-transport reason, or when every
+      retry is exhausted with the remote still unreachable.
+  """
+  slept = 0.0
+  for delay in REMOTE_RETRY_BACKOFF_SEC:
+    try:
+      _run_git(repo_root, args)
+    except subprocess.CalledProcessError as e:
+      # guard: the remote answered — this is not a blip and must not be retried
+      if not _is_transport_failure(e):
+        raise
+      sys.stderr.write(f"git {' '.join(args)}: remote unreachable, retrying in {delay}s\n")
+      time.sleep(delay)
+      slept += delay
+      continue
+    # guard: nothing to report when the first attempt already succeeded
+    if slept:
+      _log_routine_result(repo_root, {
+        TickResultKey.NAME: "_git_remote_retry", TickResultKey.EXIT: 0,
+        TickResultKey.DURATION_SEC: slept,
+        TickResultKey.NOTE: f"git {' '.join(args)} recovered after {slept}s of transient failure",
+      })
+    return
+  # Final attempt: whatever it raises is the failure the caller sees.
+  _run_git(repo_root, args)
+
+
 def _run_git_capture(repo_root: Path, args: list[str]) -> str:
   """
   Run a git command in the daemon repository and return its stripped standard output.
@@ -1333,7 +1418,9 @@ def _git_pre(repo_root: Path, git_cfg: dict | None) -> None:
 
   Checks out the operator's base branch without resetting it, then optionally fast-forwards from the
   remote when settings request pull or pull/push. Divergent histories trigger an explicit halt path
-  rather than a silent merge or rebase.
+  rather than a silent merge or rebase. The remote-touching commands absorb a transient unreachable
+  remote through `_run_git_remote`; only a remote down for the whole backoff window reaches the
+  caller as a failure.
 
   Args:
     repo_root: Absolute path to the repository the daemon is driving.
@@ -1354,7 +1441,7 @@ def _git_pre(repo_root: Path, git_cfg: dict | None) -> None:
   # guard: remote sync not requested
   if git_cfg.get(GitConfigKey.REMOTE_SYNC) not in ( "pull", "pull_push" ):
     return
-  _run_git(repo_root, [ "fetch", "origin", base_branch ])
+  _run_git_remote(repo_root, [ "fetch", "origin", base_branch ])
   local = _run_git_capture(repo_root, [ "rev-parse", "HEAD" ])
   remote = _run_git_capture(repo_root, [ "rev-parse", f"origin/{base_branch}" ])
   # guard: already in sync
@@ -1363,7 +1450,7 @@ def _git_pre(repo_root: Path, git_cfg: dict | None) -> None:
   base = _run_git_capture(repo_root, [ "merge-base", "HEAD", f"origin/{base_branch}" ])
   # local is an ancestor of remote → fast-forward pull is safe (operator pushed ahead)
   if base == local:
-    _run_git(repo_root, [ "pull", "--ff-only", "origin", base_branch ])
+    _run_git_remote(repo_root, [ "pull", "--ff-only", "origin", base_branch ])
     return
   # remote is an ancestor of local → unpushed routine commits from a prior tick; _git_post pushes them
   if base == remote:
@@ -1431,6 +1518,11 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
   operator state. After a push that advances the remote, the operator's post-push hook runs (see
   _run_post_push_hook).
 
+  Two retry layers sit here and do not overlap: `_run_git_remote` absorbs an unreachable remote,
+  while this function's own loop re-fetches after a push the remote *rejected* because the operator
+  moved it. An unreachable remote therefore leaves this loop immediately — re-fetching over a dead
+  transport would only burn the remaining attempts.
+
   Args:
     repo_root: Absolute path to the repository the daemon is driving.
     git_cfg: Sub-section of `daemon.git` from `lazy.settings.json`, or `None` to disable push.
@@ -1451,7 +1543,7 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
   branch = git_cfg[GitConfigKey.BASE_BRANCH]
 
   for _attempt in range(POST_TICK_MAX_PUSH_ATTEMPTS):
-    _run_git(repo_root, [ "fetch", "origin", branch ])
+    _run_git_remote(repo_root, [ "fetch", "origin", branch ])
     local = _run_git_capture(repo_root, [ "rev-parse", "HEAD" ])
     remote = _run_git_capture(repo_root, [ "rev-parse", f"origin/{branch}" ])
 
@@ -1464,8 +1556,12 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
     if base == remote:
       # local is strictly ahead of origin (no operator commits in the gap) → fast-forward push
       try:
-        _run_git(repo_root, [ "push", "origin", branch ])
-      except subprocess.CalledProcessError:
+        _run_git_remote(repo_root, [ "push", "origin", branch ])
+      except subprocess.CalledProcessError as e:
+        # guard: the remote stayed unreachable across every retry — re-fetching cannot help, so let
+        # the caller halt instead of burning the remaining attempts on the same dead transport
+        if _is_transport_failure(e):
+          raise
         # race: operator pushed between our fetch and our push; retry
         continue
       _run_post_push_hook(repo_root, git_cfg, branch, old_sha = remote)
@@ -1495,8 +1591,11 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
 
     # rebase clean — push the rebased commits
     try:
-      _run_git(repo_root, [ "push", "origin", branch ])
-    except subprocess.CalledProcessError:
+      _run_git_remote(repo_root, [ "push", "origin", branch ])
+    except subprocess.CalledProcessError as e:
+      # guard: unreachable remote — see the fast-forward branch above
+      if _is_transport_failure(e):
+        raise
       # race again: another operator push slid in between our rebase and our push; retry the whole
       # loop
       continue

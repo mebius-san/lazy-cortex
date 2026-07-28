@@ -1,36 +1,38 @@
 ---
-description: "Serialize git staging across concurrent Claude Code sessions sharing one checkout — honor the lazy-core.git-guard hook and the lock file under .git/lazy-git.lock."
-always_loaded: "Constrains every git add/rm/mv/reset/commit tool call. The cost is constant; the protection prevents lost commits when two sessions share a checkout."
+description: "Protect the shared git index — the pathspec commit discipline and the staging-window mutex, both enforced by the lazy-core.git-guard hook."
+always_loaded: "Constrains every git index verb. Prevents an agent commit from sweeping in operator-parked content."
 ---
 
-# `lazy-core.git` — staging-window mutex
+# `lazy-core.git` — the shared index
 
-Multiple Claude Code sessions on the same checkout share **one git index**. Without coordination, session A's `git commit` can capture session B's staged files. The `lazy-core.git-guard` hook (`hooks/lazy-core.git-guard.py`, helper at `bin/staging_lock.py`) enforces a per-repo mutex on the *staging window* — the interval from the first `git add` that creates a non-empty index to the `git commit` that empties it.
+The operator and every Claude session on a checkout share **one git index**. A bare `git commit` snapshots all of it, so anything parked there rides along silently. The `lazy-core.git-guard` hook enforces one of two behaviours, flagged in `<repo>/.claude/lazy.settings.json["git"]` under the `enabled` master switch (`false` there silences the hook entirely):
 
-## What you (Claude) need to do
+| `pathspec_enabled` | `mutex_enabled` | What applies |
+|---|---|---|
+| `true` (default) | either | Pathspec discipline; mutex dormant (you never open a staging window). |
+| `false` | `true` | Staging-window mutex. |
+| `false` | `false` | Guard silent. |
 
-- **Trust the hook.** If the hook returns a `permissionDecision: deny` saying "another Claude session is staging…", do not retry the same call immediately. Wait briefly and try once; if it still refuses, escalate to the user — do not bypass with raw shell git or `--no-verify`.
-- **Do not break the lock yourself.** The hook auto-breaks dead PIDs, host mismatches, and stale-and-idle holders. Manual breakage is `/lazy-core.git-unlock` only, and it asks before acting.
-- **Stage → commit promptly.** Plan all edits before any `git add` — staging is final assembly, not a workspace. Run `git_add` → any pre-commit pipeline → `git_commit` back-to-back, nothing between. `git mv` auto-stages: for multi-file refactors prefer Bash `mv` and a single `git add -A` at the end. Idle non-empty index >10 min triggers the stale-and-idle break-rule (work in the tree stays).
-- **Same session re-stages freely.** Re-entry is a no-op; you can `git add` multiple times in a row without the hook intervening.
+**The rule teaches, the hook catches.** A `permissionDecision: deny` means you broke the discipline below — rephrase. Never retry verbatim, never bypass with `--no-verify` or a raw wrapper.
 
-## Hook surface
+## Pathspec discipline (`pathspec_enabled`)
 
-- **PreToolUse** on `git add|rm|mv|reset` (Bash + MCP) — acquires or refuses the lock.
-- **PreToolUse** on `git commit` — diagnostic only; never blocks (could be `--amend` or a path-specced commit).
-- **PostToolUse** on `git commit|reset` — releases the lock if the index is now empty.
+**The index is not yours.** It belongs to the operator (parked adds, a half-assembled review). Its contents are none of your business, and you leave nothing in it.
 
-## Known edges
+- **New file** → `git add -N <path>` (registers the path, stages no content). Nothing else may `git add`.
+- **Rename / delete** → Bash `mv` / `rm` in the worktree. Never `git mv` / `git rm` — both auto-stage.
+- **Commit** → always explicit paths: `git commit -m "..." -- <path> <path>`. Never bare, never `-a` / `-am` / `-i`, never `.` / `:/` / a directory pathspec.
+- **MCP `git_add` / `git_commit`** are unusable here — they cannot carry a pathspec. Use Bash.
+- `git reset` stays allowed; the operator may need to un-park from inside a session.
+- **Exceptions:** a bare commit mid-merge (git refuses a partial commit there), and `--amend` either with a pathspec or against a clean index.
 
-- **`git stash push`** — empties the index without going through hook matchers; the lock stays until next commit/reset/manual unlock. Stale-and-idle break-rule catches it within ~10 min. Don't stash mid-stage if you can avoid it.
-- **`git commit -- <pathspec>`** — bypasses the index entirely; doesn't violate the invariant; rare in agent flows.
-- **Raw shell `git`** outside Claude Code — invisible to the hook. Stale-and-idle break-rule limits damage if a human staged-and-walked-away.
+A skill that stages for you returns the paths it touched — fold them into your commit pathspec.
 
-## Operator escape hatches
+## Staging-window mutex (`mutex_enabled` without `pathspec_enabled`)
 
-- `/lazy-core.git-status` — read-only inspect (holder, age, liveness, breakability).
-- `/lazy-core.git-unlock` — confirmed manual break.
+Serializes the *staging window* — first `git add` to the `git commit` that empties the index — via a per-repo lock at `.git/lazy-git.lock`.
 
-## Disabling
-
-In `<repo>/.claude/lazy.settings.json` add `{"git": {"enabled": false}}` to short-circuit the hook entirely. Useful in single-session repos where the lock is noise.
+- **Trust the hook.** On "another Claude session is staging…", wait, retry once, then escalate to the user.
+- **Stage → commit promptly.** Plan all edits before any `git add`; run add → pre-commit pipeline → commit back-to-back; re-staging within one session is a no-op. An idle non-empty index >10 min is broken by the stale-and-idle rule (worktree content stays).
+- **Don't break the lock yourself.** Dead PIDs, host mismatches, and stale holders auto-break; the operator's hatches are `/lazy-core.git-status` and `/lazy-core.git-unlock`, both inert on the pathspec row.
+- **Edges:** `git stash push` and raw shell `git` bypass the matchers, so a lock can linger until the stale rule fires.

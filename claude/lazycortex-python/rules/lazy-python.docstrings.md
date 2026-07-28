@@ -12,7 +12,7 @@ Critical docstring-discipline reminders for any `.py` file. Read the full canon 
 - **Opening `"""` and closing `"""` each on their own line** — never on the same line as content. Single-line docstrings are still two lines: the opening and closing fence each get a line.
 - **Describe external behaviour only** in `Summary` / `Scope` — no implementation details, no internal algorithms, no narration of "how it works", no call sequences, no private-internal references.
 - **DOC comments** (`DOC(...)` blocks): no code references (class / method / variable names); describe domain concepts only.
-- **DOC comment formulas**: use Obsidian-compatible LaTeX, not plain text.
+- **No LaTeX anywhere in Python source** — docstrings and `DOC(...)` comments alike. Formulas are plain prose with backticked identifiers and unicode operators (e.g. "the effective factor is `1 - r`, with `r` in `[-1, 1]`"). Obsidian-compatible LaTeX is the concern of the markdown-assembly tooling that collects `DOC(...)` blocks at build time, never of the source.
 - **Single backticks for inline code** in docstrings and DOC comments — never double backticks (that is reStructuredText, not the project's flavour).
 - **Special-comment preservation** — `TODO:`, `TMP:`, `DBG:`, `REF:`, `opt:`, `guard:`, and `DOC(...)` comments must never be removed, reworded, or relocated when editing surrounding docstrings. Treat `TMP:`-marked code as non-existent and `TODO:`-marked code as already implemented when writing the Summary/Scope of a containing artifact.
 

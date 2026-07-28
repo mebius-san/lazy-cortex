@@ -57,7 +57,7 @@ these conventions.
   - Avoid redundant sections when there is nothing meaningful to add.
   - Start section text with two spaces of indentation relative to the section title.
   - Limit the length of any text line to 117 characters.
-  - No LaTeX or math markup in docstrings. Forbidden in any docstring section: `$...$` / `$$...$$` inline and block math, `\(...\)` / `\[...\]` delimiters, and backslash commands (`\frac`, `\sum`, `\in`, `\leq`, `\geq`, `\cdot`, `\times`, `\alpha`–`\omega`, `\sqrt`, `\mathbb`, etc.). Write formulas in plain prose with backticked identifiers and unicode operators where needed (e.g. "the effective factor is `1 - r`, with `r` in `[-1, 1]`"). LaTeX is allowed ONLY in `DOC(...)` line comments, where Obsidian renders it — docstrings are read by Python tooling, which does not render math.
+  - No LaTeX or math markup anywhere in Python source — docstrings and `DOC(...)` line comments alike. Forbidden in any docstring section and in any `DOC(...)` block: `$...$` / `$$...$$` inline and block math, `\(...\)` / `\[...\]` delimiters, and backslash commands (`\frac`, `\sum`, `\in`, `\leq`, `\geq`, `\cdot`, `\times`, `\alpha`–`\omega`, `\sqrt`, `\mathbb`, etc.). Write formulas in plain prose with backticked identifiers and unicode operators where needed (e.g. "the effective factor is `1 - r`, with `r` in `[-1, 1]`"). Source is read in the editor by humans and by Python tooling, neither of which renders math; producing Obsidian-compatible LaTeX from these plain-text formulas belongs to the markdown-assembly tooling, at build time.
 
 ## Docstrings
 - Coverage: All classes, functions, methods, and properties must have docstrings.

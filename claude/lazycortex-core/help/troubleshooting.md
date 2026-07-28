@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-07-26
+last_regen: 2026-07-28
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / daemon-run-here-syncs-across-machines / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive / chained-commit-not-scanned; hook-not-firing → hook-not-firing; git-coordination → staging-lock-refused-or-stuck; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / collect-status-pending-for-cancelled / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-inbox-not-gitignored / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires / post-push-hook-silent-failure; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed / chained-commit-not-recorded."
+  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / daemon-run-here-syncs-across-machines / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive / chained-commit-not-scanned; hook-not-firing → hook-not-firing; git-coordination → sub-branch on staging-lock-refused-or-stuck / pathspec-refused; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / collect-status-pending-for-cancelled / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-inbox-not-gitignored / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires-after-backoff-exhausted / post-push-hook-silent-failure; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed / chained-commit-not-recorded."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.agent-models
@@ -385,9 +385,19 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: A `git add`, `git commit`, or equivalent staging call is refused with a message naming another Claude Code session as the current staging holder, even though you don't see another session obviously active.
 
-**Likely cause**: The per-repo staging lock at `.git/lazy-git.lock` is held by a session whose PID is dead, on a different host, or has sat idle past the staleness threshold — the hook's auto-break heuristics only release the lock once one of those conditions is confirmed, so a genuinely-recent hold on the same host is (correctly) treated as still in progress and blocks new staging.
+**Likely cause**: The per-repo staging lock at `.git/lazy-git.lock` is held by a session whose PID is dead, on a different host, or has sat idle past the staleness threshold — the hook's auto-break heuristics only release the lock once one of those conditions is confirmed, so a genuinely-recent hold on the same host is (correctly) treated as still in progress and blocks new staging. This applies only when the repo runs the staging-window mutex row of `lazy-core.git-guard`.
 
 **Fix**: Run `/lazy-core.git-status` to see who holds the lock, how long it has been held, and whether the break-the-lock heuristics already consider it breakable. If the report shows it should already be breakable, retry the git operation — the hook re-evaluates on the next call. If the lock is genuinely stuck (the holder confirmed abandoned, heuristics not yet satisfied), run `/lazy-core.git-unlock`; it shows the same holder details and asks for confirmation before force-clearing the lock.
+
+---
+
+## A `git commit`, `git add`, `git rm`, or `git mv` is refused: "the git index belongs to the operator"
+
+**Symptom**: A `git commit` (bare, `-a`/`-am`, `.`, `:/`, or a directory pathspec), a `git add` that would stage file content, a `git rm`, a `git mv`, or an `mcp__git__git_add` / `mcp__git__git_commit` call is refused with a `lazy-core.git-guard` deny message saying the git index belongs to the operator and naming the required explicit-pathspec form.
+
+**Likely cause**: The repo's default git-guard row is the pathspec discipline — the shared index is treated as operator territory, not session scratch space. Under this row, `git add` may only register a path with `-N` (no content staged); `git rm` and `git mv` are refused outright because both auto-stage as a side effect; a commit must name every path explicitly (`-- <path> <path>`) — never bare, `-a`/`-am`, `.`, `:/`, or a directory pathspec; and the MCP `git_add` / `git_commit` tools are refused unconditionally because neither can carry a pathspec at all.
+
+**Fix**: Rephrase into the canonical form the deny message names — never retry verbatim and never bypass with `--no-verify`. For a new file, run `git add -N <path>` to register it, then commit with `git commit -m "..." -- <path> <path>`. For a rename or delete, use a plain Bash `mv` / `rm` in the worktree (never `git mv` / `git rm`), then commit the old and new paths explicitly. Switch any MCP git-tool call to the equivalent Bash `git` command. `git reset` stays unrestricted. A bare or broad commit is only accepted mid-merge/rebase/cherry-pick (git itself refuses a partial commit there) or as `--amend` against an already-clean index.
 
 ---
 
@@ -607,7 +617,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: You confirmed the repair through `/lazy-runtime.recover` for a `git_pull_diverged`, `git_push_failed`, or `git_remote_unavailable` halt, but the daemon halts again on the very next tick with the same reason.
 
-**Likely cause**: `/lazy-runtime.recover` on the manual-fix path only clears the halt block — it does not itself run any git commands. If the underlying network issue, divergence, or push rejection was not fully resolved before you confirmed, the daemon's next pre-tick remote sync re-detects the same failure and halts again.
+**Likely cause**: `/lazy-runtime.recover` on the manual-fix path only clears the halt block — it does not itself run any git commands. If the underlying network issue, divergence, or push rejection was not fully resolved before you confirmed, the daemon's next pre-tick remote sync re-detects the same failure and halts again. A `git_remote_unavailable` halt specifically is no longer raised on a brief network blip — the daemon now retries a remote-touching command through a short backoff ladder (2s, then 5s, then 10s) before giving up, and logs a routine-result note when a retry recovers. Seeing this halt therefore means the remote stayed unreachable for the whole ~17-second window, not just a moment; a transient blip shorter than that now resolves silently mid-tick and never reaches you as a halt at all.
 
 **Fix**: Re-inspect the actual git state from your terminal: run `git fetch origin <branch>` to test reachability, `git log --oneline HEAD origin/<branch>` to check for divergence, or `git push origin <branch>` to observe the push rejection message. Resolve the root cause first, then re-run `/lazy-runtime.recover` and confirm once the situation is genuinely clear.
 
@@ -743,42 +753,93 @@ New sessions pick up the consolidated hook from `lazycortex-core` cleanly.
 ```mermaid
 %%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart TD
-  symptomGroup{Which symptom group?}
+  symptomObserved{Observed symptom group?}
 
-  installSetup[18 install/setup entries]
-  agentModels[agent-models entries]
-  mcpOrSecurity[mcp-or-security entries]
-  hookNotFiring[hook-not-firing entries]
-  gitCoordination[git-coordination entries]
-  expertRuntime[14 expert-runtime entries]
-  routines[routines entries]
-  daemonOrRuntime[daemon-or-runtime entries]
-  memory[memory entries]
-  logClean[log-clean entries]
+  symptomObserved -->|install or setup| installOrSetup{Which install issue?}
+  symptomObserved -->|agent models| agentModels{Which agent-model issue?}
+  symptomObserved -->|mcp or security| mcpOrSecurity{Which MCP or security issue?}
+  symptomObserved -->|hook not firing| hookNotFiring[Outcome: hook-not-firing]
+  symptomObserved -->|git coordination| gitCoordination{Which git-coordination issue?}
+  symptomObserved -->|expert runtime| expertRuntime{Which expert-runtime issue?}
+  symptomObserved -->|routines| routines{Which routine issue?}
+  symptomObserved -->|daemon or runtime| daemonOrRuntime{Which daemon-or-runtime issue?}
+  symptomObserved -->|memory| memory{Which memory issue?}
+  symptomObserved -->|log clean| logClean{Which log-clean issue?}
 
-  symptomGroup -->|install or setup| installSetup
-  symptomGroup -->|agent models| agentModels
-  symptomGroup -->|mcp or security| mcpOrSecurity
-  symptomGroup -->|hook not firing| hookNotFiring
-  symptomGroup -->|git coordination| gitCoordination
-  symptomGroup -->|expert runtime| expertRuntime
-  symptomGroup -->|routines| routines
-  symptomGroup -->|daemon or runtime| daemonOrRuntime
-  symptomGroup -->|memory| memory
-  symptomGroup -->|log clean| logClean
+  installOrSetup -->|python floor| pythonFloorNotMet[Outcome: python-floor-not-met]
+  installOrSetup -->|plugin missing| pluginNotInstalled[Outcome: plugin-not-installed]
+  installOrSetup -->|settings write fails| settingsUnwritable[Outcome: settings-unwritable]
+  installOrSetup -->|setup child fails| setupChildFailed[Outcome: setup-child-failed]
+
+  agentModels -->|bad scope flag| invalidScopeFlag[Outcome: invalid-scope-flag]
+  agentModels -->|bad tier value| tierIgnoredBadValue[Outcome: tier-ignored-bad-value]
+  agentModels -->|duplicate key| duplicateKey[Outcome: duplicate-key]
+
+  mcpOrSecurity -->|server absent| serverNotLoaded[Outcome: server-not-loaded]
+  mcpOrSecurity -->|repeated prompts| permissionLoop[Outcome: permission-loop]
+  mcpOrSecurity -->|mark-public fails| markPublicFailUnresolved[Outcome: mark-public-fail-unresolved]
+
+  gitCoordination -->|lock refused| stagingLockRefusedOrStuck[Outcome: staging-lock-refused-or-stuck]
+  gitCoordination -->|pathspec refused| pathspecRefused[Outcome: pathspec-refused]
+
+  expertRuntime -->|not registered| expertNotRegistered[Outcome: expert-not-registered]
+  expertRuntime -->|malformed response| collectResponseMalformed[Outcome: collect-response-malformed]
+  expertRuntime -->|spawn hangs| expertSpawnHangsOrTimesOut[Outcome: expert-spawn-hangs-or-times-out]
+
+  routines -->|bad name format| routineNameFormat[Outcome: routine-name-format]
+  routines -->|conflict| routineConflict[Outcome: routine-conflict]
+  routines -->|missing field| routineMissingField[Outcome: routine-missing-field]
+
+  daemonOrRuntime -->|never starts| daemonNeverStarts[Outcome: daemon-never-starts]
+  daemonOrRuntime -->|still dirty| recoverStillDirty[Outcome: recover-still-dirty]
+  daemonOrRuntime -->|backoff exhausted| remoteHaltRefiresAfterBackoffExhausted[Outcome: remote-halt-refires-after-backoff-exhausted]
+
+  memory -->|not persona| memoryNotPersona[Outcome: memory-not-persona]
+  memory -->|no sources| reflectNoSources[Outcome: reflect-no-sources]
+  memory -->|bad frontmatter| memoryFrontmatterInvalid[Outcome: memory-frontmatter-invalid]
+
+  logClean -->|dir absent| logDirAbsent[Outcome: log-dir-absent]
+  logClean -->|resolver failed| logResolverFailed[Outcome: log-resolver-failed]
 
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
-  class symptomGroup guard
-  class installSetup success
-  class agentModels success
-  class mcpOrSecurity success
+  class symptomObserved guard
+  class installOrSetup guard
+  class agentModels guard
+  class mcpOrSecurity guard
+  class gitCoordination guard
+  class expertRuntime guard
+  class routines guard
+  class daemonOrRuntime guard
+  class memory guard
+  class logClean guard
+
   class hookNotFiring success
-  class gitCoordination success
-  class expertRuntime success
-  class routines success
-  class daemonOrRuntime success
-  class memory success
-  class logClean success
+  class pythonFloorNotMet success
+  class pluginNotInstalled success
+  class settingsUnwritable success
+  class setupChildFailed success
+  class invalidScopeFlag success
+  class tierIgnoredBadValue success
+  class duplicateKey success
+  class serverNotLoaded success
+  class permissionLoop success
+  class markPublicFailUnresolved success
+  class stagingLockRefusedOrStuck success
+  class pathspecRefused success
+  class expertNotRegistered success
+  class collectResponseMalformed success
+  class expertSpawnHangsOrTimesOut success
+  class routineNameFormat success
+  class routineConflict success
+  class routineMissingField success
+  class daemonNeverStarts success
+  class recoverStillDirty success
+  class remoteHaltRefiresAfterBackoffExhausted success
+  class memoryNotPersona success
+  class reflectNoSources success
+  class memoryFrontmatterInvalid success
+  class logDirAbsent success
+  class logResolverFailed success
 ```

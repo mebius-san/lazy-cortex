@@ -114,13 +114,18 @@ Record the new anchor, then commit everything in one atomic step under the opera
    ```
    Bash(lazycortex-wiki set-synced-sha <scope-id> <HEAD> --repo <repo-root>)
    ```
-3. Stage the touched node files + `topics.md` and commit in a single atomic Bash chain:
+3. Commit the touched node files + `topics.md` by naming them in the commit pathspec:
 
    ```
-   Bash(git add <node-1> <node-2> … <topics.md> && git commit -m "wiki(relink): <scope-id> (<mode>, classify N / link M / drop K)")
+   Bash(git commit -m "wiki(relink): <scope-id> (<mode>, classify N / link M / drop K)" -- <node-1> <node-2> … <topics.md>)
    ```
 
-   Use plain `git commit` — do NOT invoke `pub.pre-commit` (these are scope/data files, not plugin source). If the staged set is empty (idempotent re-run produced no byte change), report `unchanged` and do not create an empty commit.
+   No `git add` — the pathspec carries the worktree content straight into the commit, which is
+   what `lazy-core.git`'s pathspec discipline requires and what leaves the operator's index
+   alone. A node file this run created must be registered first with `Bash(git add -N <node>)`
+   so the pathspec can see it. Do NOT invoke any project-level pre-commit pipeline — these are
+   scope/data files, not plugin source. If nothing changed (idempotent re-run produced no byte
+   change), report `unchanged` and do not create an empty commit.
 
 Outcome: `committed` / `unchanged`.
 

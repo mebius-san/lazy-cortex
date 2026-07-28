@@ -50,6 +50,13 @@ repo = Path(subprocess.check_output(["git","rev-parse","--show-toplevel"], text=
 state = staging_lock.inspect(repo)
 cfg = staging_lock.load_config(repo)
 me = staging_lock.resolve_session_id()
+if not cfg.enabled:
+    print("Lock: N/A (git guard disabled for this repo)")
+    raise SystemExit(0)
+if cfg.pathspec_enabled:
+    print("Lock: N/A (pathspec mode — the guard never opens a staging window)")
+    print("      Set git.pathspec_enabled false in .claude/lazy.settings.json for the mutex row.")
+    raise SystemExit(0)
 if state is None:
     print("Lock: NONE (no staging in progress)")
     raise SystemExit(0)
@@ -67,7 +74,7 @@ print(f"Owner:       {'this session' if state.session_id == me else 'peer'}")
 PY
 ```
 
-**Outcome: `inspected`.**
+**Outcome: `inspected`, `no-lock-in-play` (pathspec row), or `guard-disabled`.**
 
 ## Step 3 — Log the run
 
