@@ -155,15 +155,59 @@ def _matching_paren(command: str, start: int) -> int | None:
   return None
 
 
+def _split_unquoted_lines(command: str) -> list[str]:
+  """
+  Split a Bash command on the newlines that actually separate invocations.
+
+  A newline inside a quoted word belongs to that word — the multi-paragraph commit message of
+  `git commit -m "subject<newline><newline>body" -- a.py` is one argument, and cutting it at the
+  blank line leaves both halves carrying an unbalanced quote. Only newlines outside quoting
+  separate one invocation from the next.
+
+  Args:
+    command: The command with substitutions already elided.
+
+  Returns:
+    The command's lines, with quoted newlines preserved inside their line. An unterminated quote
+    leaves the remainder as one line, so the tokeniser still refuses it and the caller fails closed.
+  """
+  lines: list[str] = []
+  current: list[str] = []
+  quote: str | None = None
+  i = 0
+  while i < len(command):
+    ch = command[i]
+    # guard: a backslash escapes the next character outside single quotes
+    if ch == "\\" and quote != "'" and i + 1 < len(command):
+      current.append(command[i:i + 2])
+      i += 2
+      continue
+    if quote is None and ch in "'\"":
+      quote = ch
+    elif ch == quote:
+      quote = None
+    # guard: an unquoted newline ends the line; a quoted one is part of the word
+    if ch == "\n" and quote is None:
+      lines.append("".join(current))
+      current = []
+      i += 1
+      continue
+    current.append(ch)
+    i += 1
+  lines.append("".join(current))
+  return lines
+
+
 def _chunks(command: str) -> list[list[str]] | None:
   """
   Split a Bash command string into per-invocation token lists.
 
-  Command substitutions are elided to a placeholder word first, then lines are separated so a
-  multi-line script does not collapse into one invocation, then each line is tokenised with shell
-  quoting rules and split on chain separators. Tokenisation runs with `punctuation_chars` so
-  `git add x; git commit` separates even without whitespace around the `;`, and a redirection
-  target never reads as a pathspec.
+  Command substitutions are elided to a placeholder word first, then unquoted newlines separate
+  lines so a multi-line script does not collapse into one invocation while a multi-paragraph
+  commit message stays one argument, then each line is tokenised with shell quoting rules and
+  split on chain separators. Tokenisation runs with `punctuation_chars` so `git add x; git commit`
+  separates even without whitespace around the `;`, and a redirection target never reads as a
+  pathspec.
 
   Args:
     command: The raw Bash command as delivered by Claude Code.
@@ -174,7 +218,7 @@ def _chunks(command: str) -> list[list[str]] | None:
   """
   out: list[list[str]] = []
   # Substitutions are elided across the whole string first — a heredoc inside one spans lines.
-  for line in _elide_substitutions(command).splitlines():
+  for line in _split_unquoted_lines(_elide_substitutions(command)):
     lexer = shlex.shlex(line, posix = True, punctuation_chars = True)
     lexer.whitespace_split = True
     try:

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Curate wiki nodes in-session via /wiki.relink or via daemon routines — classify summaries and topic tags, normalise the tag vocabulary, build glossed See-also links, and prune links to deleted nodes.
-last_regen: 2026-07-16
+last_regen: 2026-07-29
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing /wiki.relink driving the curation block: (1) relink-plan produces classify[], link[], drop[] lists; (2) curator agent runs classify per node via apply-node; (3) normalize-tags consolidates the tag vocabulary via retag; (4) build-index rebuilds topics.md; (5) curator agent runs link per node via apply-node; (6) prune-node drops dangling See-also lines for each path in drop[]; (7) relink commits all touched files and records the wiki_synced_sha anchor. Show that the curator agent is dispatched twice (classify phase, link phase), that prune-node is a deterministic primitive with no curator dispatch, and that the skill owns the single commit."
@@ -14,7 +14,7 @@ When you run `/wiki.relink`, you get a fully curated wiki scope without needing 
 
 Two pieces share this work. `/wiki.relink` is the orchestrator: it computes what to process, fires the curator agent for each node, prunes links to deleted nodes, rebuilds the topic index at the right moment, and makes the commit. `lazy-wiki.curator` is the expert: it reads each node in place, applies editorial judgment, and writes the result directly to the file via the deterministic `apply-node` or `retag` primitives — it never hand-edits. The two pieces are cleanly separated: the skill owns the index rebuild, the deletion pruning, and the commit; the curator owns every write to node content.
 
-The same curation logic runs autonomously when the runtime daemon is active. On every commit, the `wiki.scan` routine watches changed files and feeds each one through `lazycortex-wiki process-file` (per-node classify + link, committed by the curator itself in tail-on mode). A companion `wiki.scan-deletes` routine watches for deleted files and feeds each one through `lazycortex-wiki prune-node` — a deterministic pass with no curator dispatch at all, since a deleted file has no content left to classify. Every Monday at 04:00 the `wiki.relink-weekly` routine fires `lazycortex-wiki relink-all`, which re-classifies every node in the scope — useful for consolidating tag vocabulary drift that accumulates between daily commits.
+The same curation logic runs autonomously when the runtime daemon is active. On every commit, the `wiki.scan` routine watches changed files and feeds each one through `lazycortex-wiki process-file` (per-node classify + link, committed by the curator itself in tail-on mode). A companion `wiki.scan-deletes` routine watches for deleted files and feeds each one through `lazycortex-wiki prune-node` — a deterministic pass with no curator dispatch at all, since a deleted file has no content left to classify. Every Monday at 04:00 the `wiki.relink-weekly` routine fires `lazycortex-wiki relink-all` with no scope id — the scope id is an optional argument, and omitting it walks every configured scope in turn, printing one JSON result line per scope. Each scope's nodes get re-classified — useful for consolidating tag vocabulary drift that accumulates between daily commits. Naming a specific scope id still works if you ever run `relink-all` yourself; naming an unknown scope id still exits with an error either way.
 
 ## When you'd use this
 
@@ -23,7 +23,7 @@ The same curation logic runs autonomously when the runtime daemon is active. On 
 - You are working in a project that runs without the runtime daemon and need the wiki to stay current after each session's changes.
 - You need to force a full rescan of a scope — for example after a rebase or a `reset --hard` that orphaned the previous sync anchor.
 - A file you deleted was linked from other nodes and you want those dangling See-also lines cleaned up in the same run, not left to rot.
-- The daemon is running and you want to understand what it does automatically: classify + link per changed node on each commit, link pruning per deleted node, a full rescan on the weekly sweep.
+- The daemon is running and you want to understand what it does automatically: classify + link per changed node on each commit, link pruning per deleted node, a full rescan across every configured scope on the weekly sweep.
 
 ## How it fits together
 
@@ -45,7 +45,7 @@ The skill starts by running `relink-plan`, which inspects the `wiki_synced_sha` 
 
 If the curator reports an error for a specific node (malformed input, a failed `apply-node`), the skill skips that node, continues with the rest, and surfaces the error in the report. The skipped node is picked up on the next relink.
 
-**Daemon paths.** When the runtime daemon is active, curation happens without any `/wiki.relink` invocation. The `wiki.scan` routine watches every commit for changed files and calls `lazycortex-wiki process-file` for each one — the curator runs in tail-on mode and owns its own classify, link, and commit. The `wiki.scan-deletes` routine watches every commit for deleted files and calls `lazycortex-wiki prune-node` for each one — no curator dispatch, since there is no content left to judge; it drops dangling See-also links, rebuilds `topics.md`, and commits on its own. The `wiki.relink-weekly` routine calls `lazycortex-wiki relink-all` on a cron schedule, dispatching a classify job for every node regardless of change — the primary mechanism for vocabulary consolidation across a mature scope. All three routines are seeded by `/wiki.install` and managed by the core runtime; you do not invoke them directly.
+**Daemon paths.** When the runtime daemon is active, curation happens without any `/wiki.relink` invocation. The `wiki.scan` routine watches every commit for changed files and calls `lazycortex-wiki process-file` for each one — the curator runs in tail-on mode and owns its own classify, link, and commit. The `wiki.scan-deletes` routine watches every commit for deleted files and calls `lazycortex-wiki prune-node` for each one — no curator dispatch, since there is no content left to judge; it drops dangling See-also links, rebuilds `topics.md`, and commits on its own. The `wiki.relink-weekly` routine calls `lazycortex-wiki relink-all` on a cron schedule with no scope id, so one run sweeps every scope configured in your project — one JSON result line per scope — dispatching a classify job for every node in each scope regardless of change; this is the primary mechanism for vocabulary consolidation across a mature scope. All three routines are seeded by `/wiki.install` and managed by the core runtime; you do not invoke them directly.
 
 ## Common adjustments
 
@@ -53,7 +53,7 @@ If the curator reports an error for a specific node (malformed input, a failed `
 
 **Anchor lost after a rebase or reset.** The plan detects this automatically and switches to `anchor-lost` mode using a content-hash backstop. The run proceeds normally and records a fresh anchor at the end — you do not need to do anything.
 
-**Tag vocabulary is drifting.** The normalise step runs automatically on every relink, but it only sees values that exist after the current classify pass. If you want to consolidate tags across an already-classified scope without relinking everything, invoke `/wiki.relink` on that scope — the plan will return an `incremental` set of changed nodes and the normalise pass will tidy the vocabulary.
+**Tag vocabulary is drifting.** The normalise step runs automatically on every relink, but it only sees values that exist after the current classify pass. If you want to consolidate tags across an already-classified scope without relinking everything, invoke `/wiki.relink` on that scope — the plan will return an `incremental` set of changed nodes and the normalise pass will tidy the vocabulary. The weekly daemon sweep does this across every configured scope automatically, so most projects never need to trigger it by hand.
 
 **Selecting a specific scope.** Pass the scope id directly: `/wiki.relink <scope-id>`. The skill skips the interactive prompt.
 

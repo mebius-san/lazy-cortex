@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Associative Q&A over the wiki graph — /wiki.query dispatches seekers to find entry points then a gatherer to traverse glossed See-also links and synthesise the answer.
-last_regen: 2026-06-03
+last_regen: 2026-07-29
 diagram_spec:
   anchor: "How the query pipeline works"
   request: "Sequence diagram showing /wiki.query dispatching one seeker per scope in parallel to read topics.md and return entry points, then dispatching a single gatherer to traverse See-also links depth-first and return a synthesised answer block back to the skill, which presents the answer and entry-point seed to the user."
@@ -74,6 +74,7 @@ sequenceDiagram
 
   skill-->>user: answer block + entry-point seeds
 ```
+
 
 ## See also
 
