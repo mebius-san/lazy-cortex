@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git staging, and MCP permissions.
-last_regen: 2026-07-28
+summary: Non-obvious answers on install/setup, audit/doctor/optimize/checkup, expert runtime, memory, routines, git staging, and MCP permissions.
+last_regen: 2026-07-29
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -9,6 +9,10 @@ source_skills:
   - lazy-core.doctor
   - lazy-core.optimize
   - lazy-core.setup
+  - lazy-core.checkup
+  - lazy-core.agent-models
+  - lazy-core.git-status
+  - lazy-core.git-unlock
   - lazy-repo.mark-public
   - lazy-guard.check-public
   - lazy-guard.allow-mcp
@@ -24,14 +28,7 @@ source_skills:
   - lazy-memory.index
   - lazy-memory.reflect
   - lazy-memory.mark-persona
-  - lazy-core.agent-models
-  - lazy-core.git-status
-  - lazy-core.git-unlock
   - lazy-log.clean
-  - lazy-log.distill
-  - lazy-log.recall
-  - lazy-log.timeline
-  - lazy-log.summary
 ---
 # FAQ
 
@@ -78,6 +75,14 @@ A **patch bump** (e.g. `1.0.0` → `1.0.1`) is safe to drop in with no action �
 `/lazy-core.optimize` is action-oriented: it slims oversized rule files (moving reference material into agent definitions) and audits global `settings.json` for project-specific entries that should move to local settings. Run it when startup feels slow or after adding new rules/agents — audit and doctor tell you something is off, optimize is one of the skills that fixes it.
 
 Run `/lazy-core.audit` for a quick read on context footprint, `/lazy-core.doctor` when something in the config feels broken and you want fixes offered, and `/lazy-core.optimize` specifically to shrink startup context.
+
+---
+
+## What does `/lazy-core.checkup` add on top of `/lazy-core.audit` and `/lazy-core.doctor`?
+
+`/lazy-core.checkup` is a single entry point that runs `/lazy-core.audit` and `/lazy-core.doctor` (in report-only mode) for you, merges every finding from both — plus whatever sibling plugin audits doctor delegates to — into one table grouped by plugin and sorted by severity, and then asks once which mutating fix-flow to run: `/lazy-core.optimize`, the doctor's interactive fix loop, or nothing. It does not implement any scan logic itself; it is pure orchestration over the skills you would otherwise run one at a time.
+
+Reach for `/lazy-core.checkup` when you want one combined report across every audit this plugin coordinates instead of reading `/lazy-core.audit` and `/lazy-core.doctor` output separately and cross-referencing them yourself. Reach for the individual skills directly when you only care about one of the two (a quick context-footprint check, or just the doctor's currency check).
 
 ---
 
@@ -377,15 +382,6 @@ The staging-window mutex is the previous default and is now dormant on a fresh i
 
 ---
 
-## `/lazy-log.recall`, `/lazy-log.timeline`, and `/lazy-log.summary` all search change history — which one do I use?
-
-They read the same sources (the changelog, run logs, raw commits, git log, and memory) but answer different shapes of question. `/lazy-log.recall "<query>"` is for "why was X changed?" or "when did we change Y?" — it returns a ranked table of matches with git SHAs so you can jump straight to a commit. `/lazy-log.timeline` is for "what happened when" — it produces a chronological list within a date range or topic filter, newest-first by default. `/lazy-log.summary "<topic>"` is for "tell me the whole story" — it clusters everything related to a topic by sub-theme and writes a narrative, not a list.
-
-`/lazy-log.distill` rounds out this block but isn't for asking questions: it runs automatically after commits (or on demand) to turn raw commit entries into the theme-first prose that `.logs/changelog.md` holds — it is throttled to once per 4 hours.
-
----
-
 ## What does `/lazy-log.clean` do with old run-log folders?
 
 It classifies every subdirectory under `./.logs/claude/` against the live set of skill/agent/command names. Folders matching a canonical name are left alone; folders that look like a renamed or typo'd canonical name are offered for merge; folders matching a known anonymous pattern (`task-N`, `plan-execute-N`, and similar) are batched into one prompt per pattern instead of one prompt per folder; everything else is reviewed individually. For each orphan you choose per-folder: leave it, delete it, or distill its substantive content into memory first and then delete it. Nothing on disk changes until every prompt has been answered — the skill is read-first and applies all approved actions in one final pass.
-</content>

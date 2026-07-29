@@ -109,7 +109,8 @@ class Cli:
   _ARG_DOCTOR_SCOPE_ID_HELP = "Scope id to audit; omit to audit every configured scope."
   _ARG_RELINK_SCOPE_ID_HELP = "Scope id to plan a relink pass for."
   _ARG_RELINK_ALL_SCOPE_ID_HELP = (
-    "Scope id to re-classify and re-link every node for (full pass, no src-hash skip)."
+    "Scope id to re-classify and re-link every node for (full pass, no src-hash skip); "
+    "omit to pass over every configured scope."
   )
   _ARG_SHA                  = "sha"
   _ARG_SHA_HELP             = "Commit SHA to record as the wiki_synced_sha anchor."
@@ -280,7 +281,12 @@ class Cli:
         p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_RELINK_SCOPE_ID_HELP)
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_RELINK_ALL:
-        p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_RELINK_ALL_SCOPE_ID_HELP)
+        p.add_argument(
+          self._ARG_SCOPE_ID,
+          nargs = "?",
+          default = None,
+          help = self._ARG_RELINK_ALL_SCOPE_ID_HELP,
+        )
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_FIND_CANDIDATES:
         p.add_argument(self._ARG_NODE_PATH, help = self._ARG_NODE_PATH_HELP)
@@ -523,35 +529,33 @@ class Cli:
 
   def _cmd_relink_all(self, args: argparse.Namespace) -> int:
     """
-    Dispatch a classify curation job for every node in the given scope.
+    Dispatch a classify curation job for every node in the requested scope, or in every configured scope.
 
     Re-processes all nodes regardless of whether the operator source has changed,
-    making it suitable for a full-scope vocabulary consolidation pass.  The scope's
-    existing per-axis tag values are collected once and shared across every dispatched
-    payload as the classify anchor, so curators on a cold catalog still pull the
-    consolidated vocabulary.  Primarily fired by the `wiki.relink-weekly` daemon
-    schedule routine; direct invocation is also valid.
+    making it suitable for a full-scope vocabulary consolidation pass.  Primarily
+    fired by the `wiki.relink-weekly` daemon schedule routine, which names no scope
+    and so passes over the whole configuration; direct invocation may name one scope.
 
     Notes:
-      - Exits 1 with a `relink-all: unknown scope '<id>'` message on stderr when the
-        requested scope is not configured.
+      - Exits 1 with a `relink-all: unknown scope '<id>'` message on stderr when a
+        scope id is given and is not configured.
       - Dispatches one classify job per node without waiting for any job to complete.
-      - Prints `{"scope": "<id>", "dispatched": N, "skipped": K}` as a single JSON line
-        on stdout.  `skipped` increments only for files the node factory does not recognise.
+      - Prints `{"scope": "<id>", "dispatched": N, "skipped": K}` as one JSON line per
+        scope passed over, so a run with no scope configured prints nothing and exits 0.
 
     Args:
-      args: Parsed argument namespace; must carry `.scope_id` and `.repo`.
+      args: Parsed argument namespace; must carry `.scope_id` (None for every scope) and `.repo`.
 
     Returns:
-      Integer exit code (0 on success, 1 when the scope is unknown).
+      Integer exit code (0 on success, 1 when a named scope is unknown).
     """
     repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
     repo = Path(repo_raw).resolve()
     resolver = _scope.ScopeResolver(repo = repo)
     scopes = resolver.load_scopes()
 
-    # guard: requested scope id not present in settings
-    if args.scope_id not in scopes:
+    # guard: a named scope that is not present in settings is an operator error
+    if args.scope_id is not None and args.scope_id not in scopes:
       print(
         f"relink-all: unknown scope '{args.scope_id}' "
         f"(known: {', '.join(sorted(scopes)) or 'none'})",
@@ -559,12 +563,40 @@ class Cli:
       )
       return 1
 
-    scope_cfg = scopes[args.scope_id]
+    targets = sorted(scopes) if args.scope_id is None else [ args.scope_id ]
+    for scope_id in targets:
+      dispatched, skipped = self._relink_scope(repo, resolver, scope_id, scopes[scope_id])
+      print(json.dumps({
+        "scope":      scope_id,
+        "dispatched": dispatched,
+        "skipped":    skipped,
+      }))
+    return 0
+
+  def _relink_scope(
+    self, repo: Path, resolver: _scope.ScopeResolver, scope_id: str, scope_cfg: dict,
+  ) -> tuple[int, int]:
+    """
+    Dispatch a classify curation job for every node in one scope.
+
+    The scope's existing per-axis tag values are collected once and shared across every
+    dispatched payload as the classify anchor, so curators on a cold catalog still pull
+    the consolidated vocabulary.
+
+    Args:
+      repo: Absolute path to the repository root.
+      resolver: Scope resolver used to enumerate the scope's nodes.
+      scope_id: Scope identifier as defined in `lazy.settings.json[wiki.scopes]`.
+      scope_cfg: Configuration block for that scope.
+
+    Returns:
+      A `(dispatched, skipped)` pair; `skipped` counts only files the node factory does not recognise.
+    """
     tag_axes: list[str] = scope_cfg.get(self._CFG_TAG_AXES) or []
     nodes = resolver.iter_nodes(scope_cfg)
 
     existing_tags = _tags.TagOps(
-      repo = repo, scope_id = args.scope_id, cfg = scope_cfg,
+      repo = repo, scope_id = scope_id, cfg = scope_cfg,
     ).collect()
 
     dispatcher = _dispatch.CoreDispatch()
@@ -588,7 +620,7 @@ class Cli:
         self._PAYLOAD_NODE_PATH:     str(abs_path),
         self._PAYLOAD_NODE_CONT:     node_content,
         self._CFG_TAG_AXES:          tag_axes,
-        self._PAYLOAD_SCOPE_ID:      args.scope_id,
+        self._PAYLOAD_SCOPE_ID:      scope_id,
         self._PAYLOAD_PINS:          pins,
         self._PAYLOAD_EXISTING_TAGS: existing_tags,
       }
@@ -599,12 +631,7 @@ class Cli:
       )
       dispatched += 1
 
-    print(json.dumps({
-      "scope":      args.scope_id,
-      "dispatched": dispatched,
-      "skipped":    skipped,
-    }))
-    return 0
+    return dispatched, skipped
 
   def _cmd_find_candidates(self, args: argparse.Namespace) -> int:
     """

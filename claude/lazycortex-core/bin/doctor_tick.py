@@ -6,6 +6,11 @@ daemon needs medical attention and, if so, dispatches a single
 `lazy-runtime.doctor` expert job to the queue. The agent itself
 performs every diagnosis + fix-or-give-up decision.
 
+Before evaluating the triggers, a halt raised because the git remote
+could not be reached is re-probed once it is an hour old and cleared
+when the remote answers again — that class of halt describes a
+transient outage, not a state a human has to resolve.
+
 Trigger conditions (OR-joined):
 1. `state.daemon_halted.reason == "uncommitted_changes"` and
    `halted_since` is at least 1 hour old — operator clearly is not
@@ -39,6 +44,8 @@ if TYPE_CHECKING:
 
 JOBS_BASE = ".experts/.jobs"
 DEAD_HALT_AGE_SEC = 3600  # halt must be ≥1h old before doctor takes over
+REMOTE_NAME = "origin"
+REMOTE_PROBE_TIMEOUT_SEC = 15
 
 
 def _dead_jobs_needing_doctor(repo: Path) -> list[dict]:
@@ -78,6 +85,48 @@ def _dead_jobs_needing_doctor(repo: Path) -> list[dict]:
         "jdir_rel": str(jdir.relative_to(repo)),
       })
   return out
+
+
+def _clear_reachable_remote_halt(repo: Path) -> bool:
+  """
+  Clear a stale unreachable-remote halt once the remote answers again.
+
+  A momentary network or SSH failure halts the daemon permanently: nothing re-probes the remote, so
+  the loop stays down long after connectivity returns. Only the reachability class is self-checkable
+  this way — divergence and rejected pushes describe real history the operator must resolve.
+
+  Args:
+    repo: Absolute path to the repository root.
+
+  Returns:
+    True when a halt was cleared and the daemon may resume, False when there was nothing to clear,
+    the halt is younger than `DEAD_HALT_AGE_SEC`, or the remote is still unreachable.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import recover
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  from runtime_state import get_halted
+  halt = get_halted(repo)
+  # guard: only an unreachable-remote halt is self-checkable
+  if halt is None or halt.get(HaltKey.REASON) != HaltReason.GIT_REMOTE_UNAVAILABLE:
+    return False
+  age = time.time() - float(halt.get(HaltKey.HALTED_SINCE, 0))
+  # guard: halt is younger than the threshold — give the operator and the daemon's own retry time
+  if age < DEAD_HALT_AGE_SEC:
+    return False
+  try:
+    probe = subprocess.run(
+      [ "git", "ls-remote", "--heads", REMOTE_NAME ],
+      cwd = str(repo), capture_output = True, text = True,
+      timeout = REMOTE_PROBE_TIMEOUT_SEC, check = False,
+    )
+  except (subprocess.TimeoutExpired, OSError):
+    return False
+  # guard: remote is still unreachable — leave the halt for the next tick to retry
+  if probe.returncode != 0:
+    return False
+  recover.resume(repo)
+  return True
 
 
 def _stuck_halt(repo: Path) -> dict | None:
@@ -238,11 +287,15 @@ def doctor_tick(repo: Path) -> dict:
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from expert_runtime import dispatch_job, retire_completed_jobs
   repo = Path(repo)
+  remote_halt_cleared = _clear_reachable_remote_halt(repo)
   halt = _stuck_halt(repo)
   dead_jobs = _dead_jobs_needing_doctor(repo)
   # guard: no trigger condition met — leave the queue untouched
   if not halt and not dead_jobs:
-    return { "triggered": False, "halt": None, "dead_jobs": 0 }
+    return {
+      "triggered": False, "halt": None, "dead_jobs": 0,
+      "remote_halt_cleared": remote_halt_cleared,
+    }
   # Recycle finished doctor bundles before re-dispatch: the doctor is fire-and-
   # forget (nobody consumes its response), so a DONE bundle — success or error —
   # holds the dedup slot and silently disables the doctor until the cleanup TTL.
@@ -271,4 +324,5 @@ def doctor_tick(repo: Path) -> dict:
     "dead_jobs": len(dead_jobs),
     "retired": retired,
     "dispatch": result,
+    "remote_halt_cleared": remote_halt_cleared,
   }

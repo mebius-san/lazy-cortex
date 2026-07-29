@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, querying the wiki, and interpreting doctor findings.
-last_regen: 2026-07-25
+last_regen: 2026-07-29
 no_diagram: true
 source_skills:
   - lazy-wiki.query
@@ -52,7 +52,7 @@ Subsequent runs are incremental: only nodes touched since the last committed anc
 
 ## When should I run `/wiki.relink` versus waiting for the daemon routines?
 
-`/wiki.relink` is the right choice when you do not have the runtime daemon running, when you want to force a full or incremental relink right now in your current session, or after a rebase or `reset --hard` that made the previous anchor unreachable. The daemon routines (`wiki.scan` for per-commit event processing, `wiki.scan-deletes` for per-commit deletion pruning, and `wiki.relink-weekly` for the weekly full sweep) handle ongoing maintenance automatically when the lazycortex-core runtime is active; `/wiki.relink` is the manual equivalent that works standalone and covers all of the same ground in one dispatch.
+`/wiki.relink` is the right choice when you do not have the runtime daemon running, when you want to force a full or incremental relink right now in your current session, or after a rebase or `reset --hard` that made the previous anchor unreachable. The daemon routines (`wiki.scan` for per-commit event processing, `wiki.scan-deletes` for per-commit deletion pruning, and `wiki.relink-weekly` for the weekly full sweep) handle ongoing maintenance automatically when the lazycortex-core runtime is active — the weekly routine sweeps every configured scope in one pass, reporting one result line per scope, so you never need to trigger it per scope yourself. `/wiki.relink` is the manual equivalent that works standalone and covers the same ground for one scope at a time in a single dispatch.
 
 ---
 
@@ -119,3 +119,9 @@ See-also links can reference nodes in other repositories using a `@<repo-key>/<p
 ## Is it safe to re-run `/wiki.install` on a project that is already set up?
 
 Yes. `/wiki.install` is fully idempotent. It will not overwrite existing scope configurations, agent model overrides, routine entries, or expert definitions that you have customised. It reports each item's outcome (`already-present`, `kept-local`, `unchanged`) so you can see what it skipped. The only interactive prompt you may see is around rule file drift — if the shipped navigation rule differs from your local copy, the install will ask whether to overwrite.
+
+---
+
+## Does the weekly full sweep relink every scope, or do I need one per scope?
+
+One weekly run covers every configured scope. The `wiki.relink-weekly` routine calls the plugin's full-sweep sub-command with no scope id, which passes over every scope registered in `lazy.settings.json[wiki.scopes]` and prints one result line per scope. You do not need to configure or trigger the sweep separately for each scope — adding a new scope via `/wiki.configure` is enough for it to be picked up on the next weekly run.

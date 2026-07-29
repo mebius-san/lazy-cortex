@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-07-28
+last_regen: 2026-07-29
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / daemon-run-here-syncs-across-machines / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive / chained-commit-not-scanned; hook-not-firing → hook-not-firing; git-coordination → sub-branch on staging-lock-refused-or-stuck / pathspec-refused; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / collect-status-pending-for-cancelled / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-inbox-not-gitignored / routine-settings-unwritable / pump-protected; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires-after-backoff-exhausted / post-push-hook-silent-failure; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed / chained-commit-not-recorded."
@@ -21,12 +21,7 @@ source_skills:
   - lazy-expert.list-jobs
   - lazy-guard.allow-mcp
   - lazy-guard.check-public
-  - lazy-log.bullets
   - lazy-log.clean
-  - lazy-log.distill
-  - lazy-log.recall
-  - lazy-log.summary
-  - lazy-log.timeline
   - lazy-memory.index
   - lazy-memory.mark-persona
   - lazy-memory.reflect
@@ -399,6 +394,10 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Fix**: Rephrase into the canonical form the deny message names — never retry verbatim and never bypass with `--no-verify`. For a new file, run `git add -N <path>` to register it, then commit with `git commit -m "..." -- <path> <path>`. For a rename or delete, use a plain Bash `mv` / `rm` in the worktree (never `git mv` / `git rm`), then commit the old and new paths explicitly. Switch any MCP git-tool call to the equivalent Bash `git` command. `git reset` stays unrestricted. A bare or broad commit is only accepted mid-merge/rebase/cherry-pick (git itself refuses a partial commit there) or as `--amend` against an already-clean index.
 
+**Likely cause (a legitimate command was refused, pre-5.19.0)**: Two separate parser bugs in `lazy-core.git-guard`, both fixed in core 5.19.0, could deny an already-correct command. First, a quoted multi-paragraph `-m` message containing a blank line was split into two invocations at the newline before quote-balance was checked, so an ordinary `git commit -m "subject\n\nbody"` came back looking unbalanced and got denied outright. Second, `git -C <other-repo> ...` was judged against the *current* repo's guard settings instead of the repository the command actually targets, so a legitimate cross-repo command (for example, a publish mirror sync) was refused as if it touched the shared index here.
+
+**Fix (legitimate command refused)**: Run `/plugin update lazycortex-core@lazycortex` to pick up core 5.19.0 or later, then restart any open Claude Code sessions — hook registrations are held in memory for the session's lifetime. Re-run the same command afterward: a multi-line commit message now parses as one invocation, and a `-C <dir>` command is judged against the repository it actually names rather than the current one.
+
 ---
 
 ## A routine's expert spawns keep timing out or the job dies doing nothing
@@ -621,6 +620,8 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Fix**: Re-inspect the actual git state from your terminal: run `git fetch origin <branch>` to test reachability, `git log --oneline HEAD origin/<branch>` to check for divergence, or `git push origin <branch>` to observe the push rejection message. Resolve the root cause first, then re-run `/lazy-runtime.recover` and confirm once the situation is genuinely clear.
 
+**Update — `git_remote_unavailable` can clear itself**: Once a `git_remote_unavailable` halt has stood for about an hour, the daemon's hourly health-check tick re-probes the remote directly (`git ls-remote --heads origin`) before doing anything else, and clears the halt on its own the moment the remote answers — no `/lazy-runtime.recover` run required. This self-heal is scoped to `git_remote_unavailable` only; `git_pull_diverged` and `git_push_failed` still need the manual fetch/log/push inspection above followed by an explicit `/lazy-runtime.recover` confirmation, since only a person can judge whether a divergence or rejection is genuinely resolved.
+
 ---
 
 ## The daemon's post-push hook doesn't seem to fire, or fires but nothing happens
@@ -718,16 +719,6 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: You're committing with a chained or flag-form command — `git add . && git commit -m "..." && git push`, `cd <dir> && git commit`, or `git -C <dir> commit` — on a plugin version older than this fix. The `lazy-log.commit-recorder` hook used to gate on a `Bash` command that literally started with `git commit`; any real-world chained invocation (the dominant pattern) never triggered the recorder, so the commit was silently dropped from the feed. A push that failed after a successful commit in the same chain could also drop an otherwise-recorded commit under the older gate.
 
 **Fix**: Run `/plugin update lazycortex-core@lazycortex` to pick up the current hook, which detects `git commit` anywhere in the command — including chained and flag-prefixed forms — and still records a commit that succeeded even when a later segment of the same chain (e.g. the push) failed. Restart any open Claude Code sessions afterward; hook registrations are held in memory for the session's lifetime. Past commits made under the old hook are not retroactively recorded — only commits going forward are captured.
-
----
-
-## A changelog release block from `lazy-log.bullets` is missing a commit you expected
-
-**Symptom**: You dispatched `lazy-log.bullets` to draft a release block for a plugin, but a commit you know landed in the range doesn't show up as a bullet.
-
-**Likely cause**: The agent's Step 3 filter deliberately drops commits it judges internal-only — `chore:` / `style:` / `test:` types, docs-only README syncs, plugin-development plumbing scoped to maintainer-only tooling, and pure `refactor:`/`docs:` commits with no user-visible behaviour change. The heuristic is "would a user installing the plugin feel this change?" — if the answer is no, the commit is dropped on purpose, not lost.
-
-**Fix**: If the dropped commit does have user-visible impact the filter missed (a new check that emits new warnings, a changed default, a bug users could hit), point that out when reviewing the drafted block — the dispatching release flow can re-run `lazy-log.bullets` with a note to keep that commit, or a person can add the bullet by hand before the block is prepended to `CHANGELOG.public.md`. `lazy-log.bullets` never commits anything itself, so the drafted block is always reviewed before it lands.
 
 ---
 
@@ -843,3 +834,4 @@ flowchart TD
   class logDirAbsent success
   class logResolverFailed success
 ```
+

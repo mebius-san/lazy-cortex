@@ -559,6 +559,30 @@ def _reconcile_halt_metric(state: dict) -> None:
     pass
 
 
+def _routine_error_detail(result: dict) -> str:
+  """
+  Render a never-empty failure description for a failed routine tick.
+
+  A routine whose subprocess merely exits non-zero carries its diagnosis in the captured
+  output, not in an `error` field — reading `error` alone leaves the incident blank for
+  exactly the class of failure that needs reading (a plugin CLI rejecting its arguments).
+
+  Args:
+    result: Tick-result record produced by `dispatch_routine`.
+
+  Returns:
+    The error text when present, else the captured stderr, else the captured stdout, else
+    a description of the exit code. Never an empty string.
+  """
+  # waiver: small internal subkeys, not reusable domain keys
+  for key in (TickResultKey.ERROR, "stderr_tail", "stdout_tail"):
+    text = str(result.get(key) or "").strip()
+    # guard: first populated channel wins — stderr before stdout, both after an explicit error
+    if text:
+      return text
+  return f"exit {result.get(TickResultKey.EXIT, 0)}"
+
+
 def _classify_routine_error(err: str) -> str:
   """
   Map a failed routine tick's error text to a closed-set cause string.
@@ -757,7 +781,7 @@ def _run_iteration(repo_root: Path) -> None:
     _log_routine_result(repo_root, result)
     # a failed routine tick (any type) lands in the error ledger
     if result.get(TickResultKey.EXIT, 0) != 0 or result.get(TickResultKey.ERROR):
-      detail = str(result.get(TickResultKey.ERROR, ""))
+      detail = _routine_error_detail(result)
       cause = _classify_routine_error(detail)
       error_ledger.record(repo_root, {
         IncidentKey.INCIDENT: f"routine:{name}", IncidentKey.PHASE: IncidentPhase.OPENED,

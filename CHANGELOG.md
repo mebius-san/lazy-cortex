@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.19.1 — 2026-07-29 UTC
+
+- An ordinary commit whose message body spans several paragraphs is no longer refused by the git guard. The guard could not read a message containing a blank line and fell back to denying the command, so the only commit form that worked was the heredoc workaround.
+- A failing scheduled routine now records what its command actually printed. Previously the incident detail was blank for the most common failure — a command that simply exited non-zero — which is exactly the case where the message matters.
+- A daemon halted because the git remote was briefly unreachable now resumes on its own once the remote answers again. Until now that halt was permanent: nothing re-checked the remote, so a momentary network blip took the runtime down until someone noticed.
+
 ### 5.19.0 — 2026-07-28 UTC
 
 - **Breaking:** `lazy-core.git-guard` now defaults to pathspec commits — the git index belongs to you, not the agent. A bare `git commit`, `commit -a`, `git add` with content, `git rm`, and `git mv` are all refused; the agent registers new files with `git add -N` and commits explicit paths (`git commit -- <path> <path>`). Nothing you park in the index can ride along in an agent's commit any more. Roll back to the previous staging-window mutex with `git.pathspec_enabled: false` in `lazy.settings.json`; `git.mutex_enabled` controls the mutex itself.
@@ -976,6 +982,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 1.6.4 — 2026-07-29 UTC
+
+- The weekly full-rescan routine that install seeds now runs. Naming a scope became optional for `relink-all`, so the seeded command covers every configured scope instead of failing on a missing argument every week — it had never once succeeded in any repo that ran the installer.
 
 ### 1.6.3 — 2026-07-28 UTC
 

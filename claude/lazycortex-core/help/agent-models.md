@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Assign model tiers to every agent in your vault, prune dead entries for deleted agents, and route dispatches automatically.
-last_regen: 2026-07-28
+last_regen: 2026-07-29
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
@@ -64,4 +64,3 @@ When this wizard runs without you at the keyboard — for example when `lazy-cor
 ## See also
 
 - [install-and-audit](install-and-audit.md) — bootstrap lazycortex-core and verify your configuration baseline before setting up model routing.
-</content>
