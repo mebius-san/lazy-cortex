@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, querying the wiki, and interpreting doctor findings.
-last_regen: 2026-07-29
+last_regen: 2026-07-31
 no_diagram: true
 source_skills:
   - lazy-wiki.query
@@ -39,6 +39,8 @@ The id must match `^[a-z][a-z0-9_-]*$` — lowercase letters, digits, hyphens, a
 During Phase 7 of the configure wizard, you are asked whether to skip documents that are currently under review. If you answer yes, the scope gains a filter that excludes any node with `review_active: true` in its frontmatter — the same flag set by `lazycortex-review` when a review opens. While a document is under active review, the curator will not classify or link it, and it will not appear in the topics index. When the review closes and `review_active` is removed, the document re-enters the wiki on the next relink.
 
 The same filter is also seeded into the `wiki.scan` routine at install time so that the runtime daemon drops review-active documents before they ever reach the curator. Both filters work together — you do not need to configure them separately.
+
+Alongside the review-skip answer, every scope is seeded with `folder_note: false`. A note named after its own folder (`sync/sync.md` inside `sync/`) displays as the folder itself under the folder-notes convention, so it is a structural navigation node rather than a document worth curating; excluding it keeps summaries, tags, and See-also sections off your folder tree. You are not asked about this — it is the default. Set `folder_note: true` in the scope's `filter` by hand for the opposite selection, or remove the key to curate folder notes alongside everything else.
 
 ---
 
@@ -92,7 +94,9 @@ There are two common causes. First, the topics index for the relevant scope may 
 
 ## What does `/wiki.doctor` check, and which findings can it fix automatically?
 
-`/wiki.doctor [<scope-id>]` runs a read-only audit first and groups findings by severity (`FAIL`, `WARN`, `INFO`). Fixable findings — `orphan-topic`, `index-desync`, `broken-see-also`, and `stale-gloss` — are repaired by rebuilding the topic index, dropping broken See-also lines, or refreshing stale glosses. The skill asks for confirmation before applying any fix.
+`/wiki.doctor [<scope-id>]` runs a read-only audit first and groups findings by severity (`FAIL`, `WARN`, `INFO`). Fixable findings — `orphan-topic`, `index-desync`, `see-also-path-base`, `broken-see-also`, and `stale-gloss` — are repaired by rebuilding the topic index, rewriting See-also links onto the canonical path base, dropping broken See-also lines, or refreshing stale glosses. The skill asks for confirmation before applying any fix.
+
+`see-also-path-base` catches a See-also link written against the wrong path form for the target node (for example, a relative link that no longer matches how the node's canonical path is tracked in the index) — the fix rewrites the link's target to the canonical path without touching its gloss.
 
 Report-only findings (`broken-repo-key`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`) identify structural issues that require a curator relink or a scope reconfiguration to resolve — the doctor surfaces them but does not modify nodes for those checks.
 

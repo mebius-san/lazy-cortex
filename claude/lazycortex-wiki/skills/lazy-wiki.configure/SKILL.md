@@ -87,16 +87,18 @@ Outcome: `collected`.
 
 ## Phase 7 — Collect filter
 
-The per-scope `filter` excludes a node from the wiki on the fly by its frontmatter (the node is not curated, not indexed, not linked while it matches). The common case is standing down on documents currently under review.
+The per-scope `filter` excludes a node from the wiki on the fly (the node is not curated, not indexed, not linked while it matches). Two sub-filters: `frontmatter` — the common case is standing down on documents currently under review; `folder_note` — a note named after its own folder (`sync/sync.md`) renders as the folder itself under the folder-notes convention, so it is a structural navigation node, not a document to curate.
 
-`AskUserQuestion`:
+`folder_note: false` is not asked — it is the structural default for every scope. Seed it whenever the key is absent (new scope, or an edit-mode scope whose filter predates it); never overwrite an operator's explicit `true`, which selects folder notes exclusively.
+
+`AskUserQuestion` collects the review-skip half only:
 - New mode: *"Skip documents that are currently in review? While `review_active: true` (set by lazycortex-review) is present, the document is left out of the wiki and re-enters when review closes. (yes / no)"*
 - Edit mode: *"Review-skip filter for scope `<id>` (current: `<"on" when filter.frontmatter.review_active present, else "off">`; yes keeps it on, no clears it):"*
 
-- **yes** → hold the filter object `{ "frontmatter": { "review_active": { "not_in": [true] } } }`.
-- **no** → hold no filter (clears any existing one in edit mode).
+- **yes** → hold `{ "frontmatter": { "review_active": { "not_in": [true] } }, "folder_note": false }`.
+- **no** → hold `{ "folder_note": false }` (clears any existing frontmatter sub-filter in edit mode).
 
-Default: **yes**. Richer predicates (other frontmatter keys, `in` allow-lists, `folder_note`) follow the same schema as a routine's `filter` block and are hand-editable in `lazy.settings.json` — this wizard only collects the review-skip default.
+Default: **yes**. Richer predicates (other frontmatter keys, `in` allow-lists) follow the same schema as a routine's `filter` block and are hand-editable in `lazy.settings.json` — this wizard only collects the review-skip default.
 
 Outcome: `collected`.
 
@@ -112,7 +114,7 @@ Build the scope object:
 }
 ```
 
-Add `"exclude_paths"` only if the collected array is non-empty. Add `"filter"` only when Phase 7 held a filter object (review-skip chosen).
+Add `"exclude_paths"` only if the collected array is non-empty. Add `"filter"` as held by Phase 7 — always present, since `folder_note` is seeded there; in edit mode carry over any operator-authored sub-filter the wizard does not collect.
 
 Write the updated settings back: set `lazy.settings.json[wiki.scopes][<id>]` to the constructed object. Preserve all other keys. Use `Write` to the target file.
 
@@ -122,7 +124,7 @@ Outcome: `written` and `logged`.
 
 ## Report
 
-One line per task in the canonical list, with its outcome word. Summary line: `scope <id> <created|updated>: paths=<count>, tag_axes=[<axes>], topics_index=<path>, filter=<on|off>`.
+One line per task in the canonical list, with its outcome word. Summary line: `scope <id> <created|updated>: paths=<count>, tag_axes=[<axes>], topics_index=<path>, review-skip=<on|off>, folder_note=<value held in the filter>`.
 
 ## Failure modes
 

@@ -162,7 +162,7 @@ Fields:
 
 Fields:
 
-- `see_also` — array of ready-to-graft markdown list-item strings. Each string is a complete, valid markdown list item of the form `- [<link-text>](<path>) — <gloss>`. For same-repo targets `<path>` is a repo-relative POSIX path. For cross-repo targets `<path>` uses the `@<repo-key>/path` qualifier. The gloss is the target node's `wiki_summary` as listed in `context/topics.md` (copy verbatim — do not paraphrase). `pinned_links` from `pins.json` must appear; `unrelated_links` must not appear. An empty array is valid when no related nodes are found.
+- `see_also` — array of ready-to-graft markdown list-item strings. Each string is a complete, valid markdown list item of the form `- [<link-text>](<path>) — <gloss>`. For same-repo targets `<path>` is copied verbatim from the target's entry in `context/topics.md`; the path base is not the curator's concern, because `apply-node` rewrites every same-repo target to the canonical base (relative to the directory of the node being written) before it reaches the file. For cross-repo targets `<path>` uses the `@<repo-key>/path` qualifier and is written through untouched. The gloss is the target node's `wiki_summary` as listed in `context/topics.md` (copy verbatim — do not paraphrase). `pinned_links` from `pins.json` must appear; `unrelated_links` must not appear. An empty array is valid when no related nodes are found.
 
 `wiki_summary` and `topics` MUST NOT appear in a `link` result.
 

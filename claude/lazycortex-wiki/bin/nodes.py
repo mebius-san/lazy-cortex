@@ -21,6 +21,7 @@ from __future__ import annotations
 # pylint: disable=import-error
 
 import hashlib
+import os
 import re
 
 from markers import Markers
@@ -64,6 +65,145 @@ _MIN_QUOTED_LEN = 2
 # read the existing See-also target set from both markdown nodes (block
 # inner text) and code nodes (individual `<wiki>` see-also entries).
 _SEE_ALSO_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+
+# Qualifier that marks a See-also target as living in another repo.
+_CROSS_REPO_PREFIX = "@"
+
+# Directory whose presence marks a repository root.
+_GIT_DIR = ".git"
+
+
+def _repo_root_for(node_path: Path) -> Path | None:
+  """
+  Return the nearest ancestor directory of `node_path` that holds a `.git` entry.
+
+  Args:
+    node_path: Absolute path to a node file.
+
+  Returns:
+    The repository root, or `None` when no ancestor carries `.git`.
+  """
+  for parent in node_path.resolve().parents:
+    # guard: this ancestor is a repository root
+    if (parent / _GIT_DIR).exists():
+      return parent
+  return None
+
+
+def resolve_see_also_target(target: str, node_path: Path) -> Path | None:
+  """
+  Resolve a same-repo See-also target against every base the wiki has ever written.
+
+  The canonical base is the directory of the node carrying the link. Targets written
+  against a coarser base (the scope root, the repo root) still resolve: after the node
+  directory, each ancestor directory up to and including the repo root is tried in turn,
+  nearest first. Cross-repo targets belong to `repos.resolve_link` and are not handled here.
+
+  Args:
+    target: Raw link target string from a See-also entry.
+    node_path: Absolute path of the node file carrying the link.
+
+  Returns:
+    Absolute path of the existing target file, or `None` when the target is cross-repo
+    or resolves to no file under any base.
+  """
+  # guard: cross-repo target — not a path relative to any local base
+  if target.startswith(_CROSS_REPO_PREFIX):
+    return None
+
+  node_dir = node_path.resolve().parent
+  candidate = (node_dir / target).resolve()
+  # guard: already written against the canonical base
+  if candidate.is_file():
+    return candidate
+
+  repo = _repo_root_for(node_path)
+  # guard: node lives outside any repository — no coarser base to try
+  if repo is None:
+    return None
+
+  for base in node_dir.parents:
+    # guard: walked above the repo root — stop widening
+    if base != repo and repo not in base.parents:
+      break
+    candidate = (base / target).resolve()
+    if candidate.is_file():
+      return candidate
+  return None
+
+
+def normalize_see_also_target(target: str, node_path: Path) -> str:
+  """
+  Rewrite a See-also target to the canonical node-directory-relative spelling.
+
+  A target that already uses the canonical base is returned unchanged, so the rewrite
+  is idempotent. Cross-repo targets and targets that resolve to no file are returned
+  verbatim — a rewrite would either corrupt the qualifier or invent a path.
+
+  Args:
+    target: Raw link target string from a See-also entry.
+    node_path: Absolute path of the node file carrying the link.
+
+  Returns:
+    The canonical target string.
+  """
+  abs_target = resolve_see_also_target(target, node_path)
+  # guard: cross-repo or unresolvable — leave the operator's string alone
+  if abs_target is None:
+    return target
+  return os.path.relpath(abs_target, node_path.resolve().parent)
+
+
+def normalize_see_also_line(line: str, node_path: Path) -> str:
+  """
+  Rewrite every markdown link target in one See-also item to the canonical base.
+
+  Only markdown-link targets (`[text](path)`) are rewritten; a bare-path item carries
+  no link syntax and is returned unchanged.
+
+  Args:
+    line: One See-also item string, with or without its leading list bullet.
+    node_path: Absolute path of the node file carrying the item.
+
+  Returns:
+    The item with canonical link targets.
+  """
+  def _rewrite(match: re.Match) -> str:
+    raw = match.group(0)
+    target = match.group(1).strip()
+    canonical = normalize_see_also_target(target, node_path)
+    return raw.replace(f"({match.group(1)})", f"({canonical})", 1)
+
+  return _SEE_ALSO_LINK_RE.sub(_rewrite, line)
+
+
+def repo_relative_see_also_target(target: str, node_path: Path) -> str:
+  """
+  Express a See-also target as a repo-relative POSIX path for comparison purposes.
+
+  This is the identity form used to compare edges across nodes (each node writes its
+  targets against its own directory, so the stored strings are not comparable). Cross-repo
+  targets and unresolvable targets are returned verbatim.
+
+  Args:
+    target: Raw link target string from a See-also entry.
+    node_path: Absolute path of the node file carrying the link.
+
+  Returns:
+    Repo-relative POSIX path string, or the original target when it cannot be resolved.
+  """
+  abs_target = resolve_see_also_target(target, node_path)
+  # guard: cross-repo or unresolvable — nothing to express
+  if abs_target is None:
+    return target
+  repo = _repo_root_for(node_path)
+  # guard: no repository root to anchor against
+  if repo is None:
+    return target
+  try:
+    return abs_target.relative_to(repo).as_posix()
+  except ValueError:
+    return target
 
 
 def _find_fences(text: str) -> tuple[int, int, int] | None:
@@ -804,20 +944,23 @@ class MarkdownNode:
   @property
   def see_also_targets(self) -> set[str]:
     """
-    Set of forward See-also link target paths as written by the curator.
+    Set of forward See-also link target paths, expressed repo-relative.
 
-    Parses `[text](path)` link entries from the `# See also` marker block
-    and exposes every unique `path` value verbatim. Same-repo targets appear as
-    repo-relative POSIX paths; cross-repo targets keep their `@<repo-key>/path`
-    qualifier. Empty when the See-also section is absent or empty. Used by
-    `dispatch-link` to skip back-link dispatches for attractor nodes that
-    already forward-link to the target.
+    Parses `[text](path)` link entries from the `# See also` marker block. Stored
+    targets are relative to this node's own directory, so each one is re-expressed as
+    a repo-relative POSIX path — the identity form in which edges from different nodes
+    are comparable. Cross-repo targets keep their `@<repo-key>/path` qualifier. Empty
+    when the See-also section is absent or empty. Used by `dispatch-link` to skip
+    back-link dispatches for attractor nodes that already forward-link to the target.
     """
     inner = self.see_also_inner
     # guard: no See-also section — no outgoing edges
     if not inner:
       return set()
-    return { m.group(1).strip() for m in _SEE_ALSO_LINK_RE.finditer(inner) }
+    return {
+      repo_relative_see_also_target(m.group(1).strip(), self._path)
+      for m in _SEE_ALSO_LINK_RE.finditer(inner)
+    }
 
   @property
   def source_hash(self) -> str:
@@ -952,6 +1095,10 @@ class MarkdownNode:
     Specifically: grafts the `# See also` section via
     `Markers.ensure_see_also`.
 
+    Every link target is normalised to the canonical node-directory-relative base
+    before it is written, so a target copied from `topics.md` (whose links are
+    relative to the index directory) or spelled repo-relative lands correctly.
+
     Args:
       see_also_lines: Ready-to-graft markdown list-item strings for the
         See-also section, one per list item.  An empty list produces an
@@ -969,7 +1116,9 @@ class MarkdownNode:
       pre = text[:close_end]
       body = text[close_end:]
 
-    inner = "\n".join(see_also_lines)
+    inner = "\n".join(
+      normalize_see_also_line(line, self._path) for line in see_also_lines
+    )
     body = self._markers.ensure_see_also(body, inner)
     text = pre + body
 
@@ -1574,11 +1723,12 @@ class CodeNode:
   @property
   def see_also_targets(self) -> set[str]:
     """
-    Set of forward See-also link target paths as written by the curator.
+    Set of forward See-also link target paths, expressed repo-relative.
 
     Parses `[text](path)` link entries from every item in the `<wiki>` block's
-    `see-also` list and exposes every unique `path` value verbatim. Same-repo
-    targets appear as repo-relative POSIX paths; cross-repo targets keep their
+    `see-also` list. Stored targets are relative to this node's own directory, so
+    each one is re-expressed as a repo-relative POSIX path — the identity form in
+    which edges from different nodes are comparable. Cross-repo targets keep their
     `@<repo-key>/path` qualifier. Empty when the `<wiki>` block has no see-also
     items. Used by `dispatch-link` to skip back-link dispatches for attractor
     nodes that already forward-link to the target.
@@ -1586,7 +1736,7 @@ class CodeNode:
     out: set[str] = set()
     for item in self.see_also:
       for match in _SEE_ALSO_LINK_RE.finditer(item):
-        out.add(match.group(1).strip())
+        out.add(repo_relative_see_also_target(match.group(1).strip(), self._path))
     return out
 
   @property
@@ -1718,7 +1868,8 @@ class CodeNode:
     Write the link-phase field: `see-also`.
 
     Leaves `summary`, `topics`, all pin fields, and code outside the block
-    untouched.  The operation is idempotent.
+    untouched.  The operation is idempotent.  Link targets are normalised to the
+    canonical node-directory-relative base, as in `MarkdownNode.apply_link`.
 
     Args:
       see_also_lines: Lines to set as `see-also:` items.
@@ -1728,7 +1879,7 @@ class CodeNode:
     # curator emits (`- [name](path) — gloss`) so the block renderer's own `  - `
     # is the only bullet (mirrors the bare-topics strip in apply_classify).
     current[_FK_SEE_ALSO] = [
-      line[2:] if line.startswith("- ") else line
+      normalize_see_also_line(line[2:] if line.startswith("- ") else line, self._path)
       for line in see_also_lines
     ]
     self._write_block(current)

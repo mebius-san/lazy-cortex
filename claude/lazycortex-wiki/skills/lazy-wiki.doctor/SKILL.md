@@ -5,7 +5,7 @@ allowed-tools: Read, Bash(lazycortex-wiki doctor *), Bash(date -u *), Bash(git r
 ---
 # lazy-wiki.doctor
 
-Run the integrity audit over one wiki scope (or every configured scope), present the findings grouped by severity, and — only after the operator confirms — apply the fixable repairs. Fixable repairs are: rebuild the topic index (orphan-topic, index-desync), drop broken See-also lines (broken-see-also), and refresh stale glosses (stale-gloss). All other findings are report-only.
+Run the integrity audit over one wiki scope (or every configured scope), present the findings grouped by severity, and — only after the operator confirms — apply the fixable repairs. Fixable repairs are: rebuild the topic index (orphan-topic, index-desync), rewrite See-also targets written against a non-canonical path base (see-also-path-base), drop broken See-also lines (broken-see-also), and refresh stale glosses (stale-gloss). All other findings are report-only.
 
 Invocation: `/wiki.doctor [<scope-id>]`
 
@@ -36,7 +36,7 @@ Outcome: `audited`.
 
 ## Phase 2 — Present findings
 
-Summarise the captured output for the operator: the per-scope counts by severity, and a short list of the concrete findings (check name, node path, message). Call out which findings are fixable (`orphan-topic`, `index-desync`, `broken-see-also`, `stale-gloss`) versus report-only (`broken-repo-key`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`).
+Summarise the captured output for the operator: the per-scope counts by severity, and a short list of the concrete findings (check name, node path, message). Call out which findings are fixable (`orphan-topic`, `index-desync`, `see-also-path-base`, `broken-see-also`, `stale-gloss`) versus report-only (`broken-repo-key`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`).
 
 If the audit found zero findings, report "scope clean" and skip to the Log step (mark Phase 3 `skipped` with outcome `skipped-per-user-choice`).
 

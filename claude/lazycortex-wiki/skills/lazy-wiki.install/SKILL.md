@@ -191,14 +191,17 @@ Ensure `routines` exists as an object (create `{"_version": 1}` if absent — ne
   "watch": "changed_files",
   "branch": "<current-branch>",
   "interval_sec": 60,
-  "filter": { "frontmatter": { "review_active": { "not_in": [true] } } },
+  "filter": {
+    "frontmatter": { "review_active": { "not_in": [true] } },
+    "folder_note": false
+  },
   "command": ["lazycortex-wiki", "process-file"]
 }
 ```
 
 Substitute `<current-branch>` with the output of `Bash(git rev-parse --abbrev-ref HEAD)` (the branch the daemon watches). The core `dispatch_git` routine type reads `branch` as a branch-name string for `git rev-parse <remote>/<branch>` — a boolean breaks it.
 
-The `filter` block is the earliest cut: git-watch drops a changed file whose frontmatter matches before `process-file` runs, so a document under review (`review_active: true`) never reaches the curator. It mirrors the per-scope `filter` (the source of truth honored on every path); seeding it here keeps the daemon quiet during review. Absent-only semantics apply to the whole routine — a user who removed the filter is not re-seeded.
+The `filter` block is the earliest cut, on two criteria. `frontmatter` drops a changed file whose frontmatter matches before `process-file` runs, so a document under review (`review_active: true`) never reaches the curator. `folder_note: false` drops a note named after its own folder (`sync/sync.md`) — under the folder-notes convention that file renders as the folder itself, a structural navigation node rather than a document, so curating it produces summary + tags + See-also on a container. The predicate is tri-state: omitting the key means "do not restrict", and `true` selects folder notes exclusively. Both mirror the per-scope `filter` (the source of truth honored on every path); seeding them here keeps the daemon quiet during review and off the folder tree. Absent-only semantics apply to the whole routine — a user who removed the filter is not re-seeded.
 
 **`wiki.scan-deletes`** — event-driven git-watch routine, prunes links to deleted nodes:
 

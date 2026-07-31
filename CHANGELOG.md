@@ -1006,6 +1006,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-wiki
 
+### 1.7.0 — 2026-08-01 UTC
+
+- See-also links are now stored relative to the linking node's own directory instead of the repo root, so links keep resolving correctly as nodes move within a scope.
+- New `doctor` check `see-also-path-base` (WARN, fixable) detects links resolving under a coarser base than necessary and repairs them by rewriting the target under `--apply`.
+- `wiki.scan` and the configure wizard now default new nodes' `filter.folder_note` to `false`, so a note named after its own folder is treated as regular content instead of being curated as the folder container.
+
 ### 1.6.4 — 2026-07-29 UTC
 
 - The weekly full-rescan routine that install seeds now runs. Naming a scope became optional for `relink-all`, so the seeded command covers every configured scope instead of failing on a missing argument every week — it had never once succeeded in any repo that ran the installer.
