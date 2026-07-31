@@ -518,11 +518,23 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   from pathlib import Path
   started = time.time()
   repo = Path(repo)
-  # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
-  inbox_dir = repo / cfg["inbox_dir"]
+  inbox_rel = cfg[RoutineKey.INBOX_DIR]
+  inbox_dir = repo / inbox_rel
 
   # guard: configured inbox dir does not exist — nothing to scan
   if not inbox_dir.exists():
+    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+    from external_dirs import is_declared
+    # guard: a declared external dir that is absent or dangling is a real failure, not an idle tick —
+    # the daemon opens one folded `routine:<name>` incident from the non-zero exit
+    if is_declared(repo, inbox_rel):
+      return {
+        TickResultKey.NAME: name, TickResultKey.EXIT: -1,
+        TickResultKey.DURATION_SEC: time.time() - started,
+        "dispatched_count": 0,
+        # waiver: daemon error/trigger token, not an internal key
+        TickResultKey.ERROR: f"external_dir_broken: {inbox_rel}",
+      }
     return {
       TickResultKey.NAME: name, TickResultKey.EXIT: 0,
       TickResultKey.DURATION_SEC: time.time() - started,
@@ -1184,9 +1196,143 @@ def _compile_recursive_glob(pat: str) -> re.Pattern[str]:
   return re.compile("".join(parts) + r"\Z")
 
 
+# Walk-list cache shared by every md-scan routine of one daemon iteration: sibling
+# routines tick back-to-back, and each RepoWalk costs git subprocesses. TTL sits
+# below the minimum routine interval (60s) so every tick still re-walks once.
+# waiver: module-level mutable cache — the daemon main loop is serial by contract, no locking needed
+_WALK_CACHE: dict[str, tuple[float, list[Path]]] = {}
+_WALK_CACHE_TTL_SEC = 30.0
+# waiver: filesystem sentinel path under the gitignored runtime log tree, not a reusable cross-module key
+_MD_SCAN_STATE_DIR = ".logs/lazy-core/runtime/md-scan-state"
+
+
+def _walk_repo_files(repo: Path, now: float) -> list[Path]:
+  """
+  Return the repo's non-ignored file list, shared across md-scan routines.
+
+  Args:
+    repo: Path-like reference to the repository.
+    now: Tick start timestamp used for cache freshness.
+
+  Returns:
+    Absolute file paths from `RepoWalk`, possibly served from the per-repo
+    cache when a walk younger than the TTL exists.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  from repo_walk import RepoWalk
+  key = str(repo.resolve())
+  cached = _WALK_CACHE.get(key)
+  # guard: a fresh-enough walk already exists for this repo — share it
+  if cached is not None and now - cached[0] < _WALK_CACHE_TTL_SEC:
+    return cached[1]
+  files = list(RepoWalk(repo).iter_files())
+  _WALK_CACHE[key] = ( now, files )
+  return files
+
+
+def _dir_signature(d: Path, walk_files: list[Path], memo: dict[str, str]) -> str:
+  """
+  Fingerprint a directory subtree by file paths, mtimes, and sizes.
+
+  The candidate's whole parent directory is hashed — not the candidate file
+  alone — because md-scan consumers (e.g. the spec gate-tick worker) read
+  sibling documents to decide whether work exists. Only files present in the
+  ignore-filtered walk list participate, so ever-churning gitignored state
+  (runtime journals, job bundles) can never invalidate a signature.
+
+  Args:
+    d: Directory to fingerprint.
+    walk_files: The tick's ignore-filtered absolute file list.
+    memo: Per-tick cache mapping directory path to its computed signature.
+
+  Returns:
+    Hex digest stable while no walked file under `d` changes.
+  """
+  key = str(d)
+  # guard: already fingerprinted this directory during this tick
+  if key in memo:
+    return memo[key]
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import hashlib
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import os
+  prefix = key.rstrip(os.sep) + os.sep
+  entries = []
+  for p in walk_files:
+    sp = str(p)
+    # guard: file lives outside the fingerprinted directory
+    if not sp.startswith(prefix):
+      continue
+    try:
+      st = os.stat(sp)
+    except OSError:
+      continue
+    entries.append(( sp, st.st_mtime_ns, st.st_size ))
+  entries.sort()
+  sig = hashlib.sha256(repr(entries).encode()).hexdigest()
+  memo[key] = sig
+  return sig
+
+
+def _scan_state_path(repo: Path, name: str) -> Path:
+  """
+  Compute the dispatch-state file path for one command-shape md-scan routine.
+
+  Args:
+    repo: Path-like reference to the repository.
+    name: Routine name.
+
+  Returns:
+    Path under the gitignored runtime log tree.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  from pathlib import Path
+  return Path(repo) / _MD_SCAN_STATE_DIR / f"{name}.json"
+
+
+def _load_scan_state(repo: Path, name: str) -> dict:
+  """
+  Read the routine's persisted candidate-signature map, empty on any failure.
+
+  Args:
+    repo: Path-like reference to the repository.
+    name: Routine name.
+
+  Returns:
+    Mapping of absolute candidate path to its last clean-run signature.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import json
+  try:
+    loaded = json.loads(_scan_state_path(repo, name).read_text())
+  except (OSError, ValueError):
+    return {}
+  return loaded if isinstance(loaded, dict) else {}
+
+
+def _save_scan_state(repo: Path, name: str, state: dict) -> None:
+  """
+  Persist the routine's candidate-signature map, best-effort.
+
+  Args:
+    repo: Path-like reference to the repository.
+    name: Routine name.
+    state: Mapping of absolute candidate path to signature.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import json
+  path = _scan_state_path(repo, name)
+  try:
+    path.parent.mkdir(parents = True, exist_ok = True)
+    path.write_text(json.dumps(state, indent = 1, sort_keys = True))
+  except OSError:
+    # guard: state persistence is an optimization — never fail the tick over it
+    pass
+
+
 def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   """
-  Glob `cfg["paths"]`, apply the composite filter, dispatch one job per surviving file.
+  Dispatch one job per file matching the routine's configured path globs and filter.
 
   For each candidate that passes `cfg["filter"]` (absent = match-all):
 
@@ -1194,10 +1340,12 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
       `expert_runtime.dispatch_job` with `dedup_key = str(f)`. The expert
       receives the absolute path under the `file` key (with any extra keys
       from `request` templated in).
-    - `command` shape: spawn `command + [str(f)]` as a subprocess. Dedup via a
-      per-routine PID lockfile under `.experts/.subprocess-locks/<routine-name>/<sha>.json`
-      so two ticks don't race for the same file. Stale locks (dead PID, or
-      older than `timeout_sec`) are replaced.
+    - `command` shape: spawn `command + [str(f)]` as a blocking subprocess.
+      A change-detection gate skips the spawn when the candidate's parent-dir
+      signature (file paths + mtimes + sizes) is unchanged since the last
+      clean run; the signature map persists under
+      `.logs/lazy-core/runtime/md-scan-state/<routine-name>.json`. Failed
+      runs are never recorded, so they retry on the next tick.
 
   In-place semantics: never moves the source file; the consumer reads and edits
   the file where it lies. Per-file errors accumulate; one bad file does NOT
@@ -1223,8 +1371,6 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   import time
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from pathlib import Path, PurePath
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from repo_walk import RepoWalk
   started = time.time()
   repo = Path(repo)
 
@@ -1250,7 +1396,8 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   ]
   seen_abs = set()
   candidates = []
-  for full in RepoWalk(repo).iter_files():
+  walk_files = _walk_repo_files(repo, started)
+  for full in walk_files:
     rel = full.relative_to(repo).as_posix()
     for pat, rx in compiled:
       matched = rx.match(rel) is not None if rx is not None else PurePath(rel).match(pat)
@@ -1270,6 +1417,7 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
 
   dispatched = 0
   skipped = 0
+  unchanged = 0
   # Per-file errors accumulate; one bad file does NOT abort the scan tick
   # for the remaining files (Bug 59). Shared-state errors (frontmatter_parser
   # missing, command resolution failure) DO abort early — those are not
@@ -1316,6 +1464,12 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
     # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
     import subprocess as _subprocess
     subprocess_env = { **_os.environ, **routine_protocols_env(cfg) }
+    # Change-detection state: a candidate whose parent-dir signature is unchanged
+    # since the last clean run is skipped instead of re-spawning the consumer
+    # every tick. Failed runs are never recorded, so they retry next tick.
+    scan_state = _load_scan_state(repo, name)
+    next_state: dict = {}
+    sig_memo: dict[str, str] = {}
 
   for f in candidates:
     try:
@@ -1329,11 +1483,18 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
       continue
     try:
       if use_command:
+        # waiver: resolved_cmd/timeout_sec/_subprocess/subprocess_env/scan_state/next_state/sig_memo are set in the use_command else-branch, used under the same guard
+        # pylint: disable=possibly-used-before-assignment
+        sig = _dir_signature(f.parent, walk_files, sig_memo)
+        # guard: nothing under this candidate's directory changed since the last
+        # clean run — the consumer would re-derive the same no-op; skip the spawn
+        if scan_state.get(str(f)) == sig:
+          next_state[str(f)] = sig
+          unchanged += 1
+          continue
         # Blocking — one process at a time per tick. The daemon's main loop is
         # intentionally serial: parallel spawns are a strict no-no across the
         # runtime.
-        # waiver: resolved_cmd/timeout_sec/_subprocess/subprocess_env are set in the use_command else-branch, used under the same guard
-        # pylint: disable=possibly-used-before-assignment
         proc = _subprocess.run(
           [ *resolved_cmd, str(f) ],
           cwd = str(repo),
@@ -1351,6 +1512,9 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
             "stderr_tail": tail,
           })
           continue
+        # Record the pre-run signature: the consumer's own edits shift the dir
+        # signature, so the next tick re-runs once more and settles on a no-op.
+        next_state[str(f)] = sig
         dispatched += 1
       else:
         request = _render_template(
@@ -1389,11 +1553,16 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
       })
       continue
 
+  # guard: command shape — persist the change-detection state when it moved
+  # waiver: scan_state/next_state are set in the use_command else-branch, used under the same guard
+  # pylint: disable=possibly-used-before-assignment
+  if use_command and next_state != scan_state:
+    _save_scan_state(repo, name, next_state)
   # Surface aggregated per-file errors in the routine result. Exit code is
   # non-zero only when EVERY candidate failed (= the whole tick was lost) so
   # operators can distinguish "one fixture broken" from "the routine is
   # down". A mixed pass returns exit=0 with `errors=[…]` for visibility.
-  total_handled = dispatched + skipped
+  total_handled = dispatched + skipped + unchanged
   if errors and total_handled == 0:
     first = errors[0]
     return {
@@ -1415,6 +1584,8 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
     TickResultKey.DURATION_SEC: time.time() - started,
     "dispatched_count": dispatched,
     "skipped_count": skipped,
+    # waiver: small internal subkey, not a reusable domain key
+    "unchanged_count": unchanged,
   }
   if errors:
     # waiver: small internal subkey, not a reusable domain key

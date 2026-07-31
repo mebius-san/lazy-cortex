@@ -1,31 +1,27 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-07-26
+last_regen: 2026-07-30
 no_diagram: true
 source_skills:
-  - spec.create-asset
-  - spec.create-feature
-  - spec.create-change
-  - spec.create-bug
   - spec.add-asset-category
-  - spec.create-from-code
+  - spec.create-asset
   - spec.create-request
-  - spec.flip-gate
-  - spec.gate-tick
-  - spec.set-stage
-  - spec.sync-with-code
+  - spec.create-from-code
   - spec.finalize-branch
-  - spec.resolve-repo
-  - spec.resolve-dependency
-  - spec.source-url
-  - spec.request-router
-  - spec.request-classify
-  - spec.request-find-candidates
+  - spec.import
+  - spec.flip-gate
+  - spec.refresh-sources
   - spec.request-attach
-  - spec.request-spawn
   - spec.install
+  - spec.request-spawn
   - spec.product-config
+  - spec.resolve-dependency
+  - spec.request-find-candidates
+  - spec.request-classify
+  - spec.sync-with-code
+  - spec.set-stage
+  - spec.resolve-repo
   - spec.doctor
 ---
 # Troubleshooting
@@ -370,6 +366,26 @@ source_skills:
 
 ---
 
+## `/spec.refresh-sources` refuses on a non-authored doc
+
+**Symptom**: The skill refuses, saying the target file's `spec_role` isn't an authored-doc role.
+
+**Likely cause**: `spec.refresh-sources` only operates on `design.md`, `tech.md`, `plan.md`, or `bug.md` — the docs that carry `spec_source_docs` / `spec_source_requests` frontmatter. You pointed it at a folder-note (`spec_role: status`) or another file type instead.
+
+**Fix**: Re-invoke `/spec.refresh-sources` against one of the four authored docs.
+
+---
+
+## `/spec.refresh-sources` skips the stats refresh
+
+**Symptom**: The run completes and rewrites the `# Sources` sub-sections and précis, but reports that the container-stats refresh was skipped.
+
+**Likely cause**: The `render-container-stats` CLI isn't on `PATH` — the specs tool isn't installed, or the shell environment can't see it.
+
+**Fix**: Re-run `/spec.install` to restore the CLI, then re-invoke `/spec.refresh-sources` if you need the stats block refreshed too. The `# Sources` rewrite and précis already landed even without the stats step.
+
+---
+
 ## `/spec.request-spawn` refuses: target folder already exists
 
 **Symptom**: The skill refuses, saying the target folder for the new entity already exists.
@@ -397,6 +413,36 @@ source_skills:
 **Likely cause**: A prior install already wired the routine — re-running install never overwrites an existing routine registration.
 
 **Fix**: This is the expected outcome, not an error — nothing to fix. If you need to change the routine's shape, unregister it first via `/lazy-routine.unregister spec.gate-tick`, then re-run `/spec.install`.
+
+---
+
+## `/spec.import` reports every count as `0`
+
+**Symptom**: The run summary shows `0` fetched, `0` landed, `0` skipped across the board.
+
+**Likely cause**: Either `spec.imports[]` has no entries configured in `lazy.settings.json`, or the configured upstream repo(s) have no product registered with a `handoff` record.
+
+**Fix**: Configure `spec.imports` with at least one upstream repo entry, and confirm the upstream repo's `products[<key>].handoff` block exists. Re-run `/spec.import` once configured.
+
+---
+
+## `/spec.import` keeps reporting drift on the same asset every run
+
+**Symptom**: The same imported asset shows up as drifted on every `/spec.import` run, even after previous runs.
+
+**Likely cause**: The upstream doc changed after the original handoff. `/spec.import` refuses to overwrite the locally-landed copy on principle — design is frozen at the moment of handoff.
+
+**Fix**: Compare the local copy against the upstream doc by hand and decide whether to adopt the upstream change. `/spec.import` will not auto-resolve this for you.
+
+---
+
+## `/spec.import` lists an entry under `errors`
+
+**Symptom**: The run summary's `errors` list names one of your `spec.imports[]` entries.
+
+**Likely cause**: That entry's `git_url` was unreachable, its ref/branch didn't resolve, or the upstream repo's `lazy.settings.json` was malformed. The other configured entries still ran normally in the same pass.
+
+**Fix**: Fix the entry — correct the URL, correct the `ref`, or ask the upstream repo's operator to repair its settings — then re-run `/spec.import`.
 
 ---
 

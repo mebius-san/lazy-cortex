@@ -16,7 +16,7 @@ The plugin manages *structure* and *lifecycle*, not the prose — authoring stay
 - **code-sync** — Keep specs aligned with the source repo across commits and branch merges. Members: spec.sync-with-code, spec.finalize-branch.
 - **source-links** — Resolve repos, dependencies, and forge-correct source URLs. Members: spec.resolve-repo, spec.resolve-dependency, spec.source-url.
 - **requests** — Ingest free-form requests and route them into the spec tree. Members: spec.request-router, spec.request-classify, spec.request-find-candidates, spec.request-attach, spec.request-spawn.
-- **install-and-audit** — Bootstrap, configure a product, and audit a spec in this repo. Members: spec.install, spec.product-config, spec.doctor, spec.help.
+- **install-and-audit** — Bootstrap, configure a product, pull cross-repo design handoffs, and audit a spec in this repo. Members: spec.install, spec.product-config, spec.import, spec.doctor, spec.help.
 
 ## Walkthroughs
 

@@ -34,6 +34,7 @@ There is no `spec.cfg-<product>.md` rule file any more — that form is removed.
 | `icon` | no | Iconize identifier (Lucide name or emoji) painted on the product folder; mirrored into the product folder-note's managed `iconize_icon` |
 | `dependencies` | no | List of upstream deps (other products, repos, or external) — see [sources](./spec.sources-protocol.md) Part 3 |
 | `asset_categories` | no | Operator-defined categories beyond the built-in set, as `{<name>: {icon: <icon>, color?: <hex>}}`. See [folder-structure](./spec.layout-protocol.md) |
+| `handoff.stop_after` | no | Marks this product as a cross-repo handoff source (spec-repo side). One of the five flat gates; default `spec_design_done` when `handoff` is present without an explicit `stop_after`. See Part 4 |
 
 Example product record:
 
@@ -132,7 +133,53 @@ Skills that write or edit spec content MUST honour the resolved language (ISO 63
 - When editing existing prose, keep the existing language — do not retranslate.
 - No linguistic validation is attempted.
 
-## Part 4 — Wizard-question explanation standard
+## Part 4 — Cross-repo handoff (spec-repo → dev-repo)
+
+A design authored and approved in one repo (a spec-repo) can be pulled into another repo (a dev-repo) where planning and implementation continue. The transfer is git-pull-based, one-directional, and non-interactive — no cross-repo wikilinks, no shared local paths. Identity across repos is the product **compound-key + category + slug**, never a path and never a wikilink.
+
+### `products[<key>].handoff` — spec-repo side (stop gate)
+
+A product record MAY carry a `handoff` block marking it as a transfer source:
+
+```json
+"handoff": { "stop_after": "spec_design_done" }
+```
+
+`stop_after` is one of the five flat gates (`spec_design_done`, `spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, `spec_released`; default `spec_design_done`). It names the gate at which this product's own asset lifecycle stops in this repo: scaffolding a new asset under this product omits every authored doc belonging to a stage after the stop gate (e.g. `stop_after: spec_design_done` scaffolds no `plan.md`). No other behavior changes — the gate ladder simply has nowhere further to advance, and no follow-up review opens past the missing doc. `handoff` carries no `target` field; a spec-repo does not know who consumes it — consumers declare their own sources via `spec.imports[]` below.
+
+### `spec.imports[]` — dev-repo side (pull sources)
+
+The plugin-owned `spec` settings section gains an `imports` array — the spec-repos this repo pulls approved designs from:
+
+```json
+"spec": {
+  "imports": [
+    { "git_url": "git@github.com:you/spec-repo.git", "ref": "main", "products": ["chapter"] }
+  ]
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `git_url` | yes | Any git-clonable URL. Fetched into a gitignored cache under `.experts/.spec-imports/` — never a tracked path, never assumed shared between machines |
+| `ref` | no (default: remote HEAD) | Branch/tag/ref to fetch |
+| `products` | no (default: every `handoff` product found in the fetched repo) | Restrict the pull to specific upstream product keys |
+
+`/spec.import` and the daemon-registered `spec.import-pull` routine (see `spec.install`) drive the same import primitive over every configured entry: fetch, select each entry's `handoff` products whose stop gate is `true` AND have at least one qualifying asset to land this run, resolve (or auto-register) the matching dev-repo product record, land each qualifying asset's approved authored docs, and commit atomically under a bot identity. A product with no qualifying asset this run is never auto-registered — registration and landing happen together, never registration alone. Landing never requires the dev-repo product's `spec_path` to mirror the spec-repo's — only `<category>/<slug>/` is preserved. An unregistered dev-repo product is auto-registered from the fetched record (`spec_path` mirrored under this repo's content-root as the default; `source`, `handoff`, and `dependencies` stripped) — the mirrored path is the auto-registration default, not a constraint on an already-registered product. Auto-registration writes the product record only — it does not scaffold the product's folder-note tree or icons; the operator completes those via `/spec.product-config` edit mode when desired.
+
+Each `spec.imports[]` entry is processed independently: a fetch/parse failure on one entry (unreachable `git_url`, malformed settings) is recorded and does not prevent the other configured entries from landing normally in the same run.
+
+### `spec_imported: true` — frontmatter marker (read-only semantics)
+
+Every doc landed by an import carries `spec_imported: true` in frontmatter, alongside its imported `spec_stage: approved`. The marker is a light signal, not hard enforcement:
+
+- The `lazy-review.scan` routine's frontmatter filter excludes `spec_imported: true` docs (`"not_in": [true]`) — they never enter the review loop, so the plugin never proposes editing them.
+- `spec.doctor` reports a doc that drifted from its cached upstream copy as a WARN finding, report-only.
+- Nothing prevents a hand-edit (no chmod, no pre-commit hook) — the marker plus the scan-filter exclusion is the entire enforcement surface.
+
+A re-import never overwrites a doc whose content already differs from the cached upstream copy (drift) — only a byte-identical or previously-unseen asset lands or updates.
+
+## Part 5 — Wizard-question explanation standard
 
 Every `AskUserQuestion` call issued by a `spec.*` skill MUST be authored as a full-context block so a user seeing the field for the first time can answer without reading any other doc. Short one-line questions ("Language?", "Workflow overrides?") are forbidden — they force the user to guess what is being asked.
 

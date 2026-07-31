@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fde68a"
 ---
 # lazycortex-core
 
@@ -62,7 +62,7 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 | `lazy-core.agent-models` | Interactively assign model tiers (haiku/sonnet/opus/default) to every dispatchable subagent missing from `lazy.settings.json`, and prune entries whose plugin agent no longer exists. Auto-routes each entry to its structurally-correct scope: `_user.*` → global file, `_project.*` → project file, `_builtin.*` → global (override with `--scope=project\|global`). Non-interactive executors (`lazy-core.autosetup`) auto-apply the curated tiers from `default-tiers.json`, apply the prune, and report the rest as needs-interactive. Cheap, standalone, idempotent — safe to re-run. Invoked directly or by `lazy-core.optimize` Phase 7. |
 | `lazy-core.agent-models-seed` | Install-time helper: seed the `agent_models.lazycortex` group of a consumer's `lazy.settings.json` with the canonical model tiers for one plugin's shipped subagents, read from `lazycortex-core`'s `default-tiers.json` (the single source of truth). Invoked by a plugin's install skill via Skill dispatch — never operator-facing. |
 | `lazy-core.audit` | Quick read-only audit of what gets loaded into conversation context at startup plus skill-writing, agent-writing, rule-writing, and logging compliance. Shows sizes, loading behavior, optimization opportunities, Execution-Discipline preamble presence, no-Optional headings, narrative-padding heuristics, rule-file frontmatter/size/code-block/scope enforcement, and logging-rule installation state. No changes made. |
-| `lazy-core.doctor` | Health check for Claude Code project configuration. Verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, checks that installed plugins are at the latest marketplace version, and delegates to sibling audit skills (lazy-guard.check-public, lazy-log.audit) when they apply. Reports issues and offers targeted fixes. Run periodically or when something feels off. |
+| `lazy-core.doctor` | Health check for Claude Code project configuration. Verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, checks that installed plugins are at the latest marketplace version, and delegates to sibling audit skills (lazy-guard.check-public, per-plugin audits) when they apply. Reports issues and offers targeted fixes. Run periodically or when something feels off. |
 | `lazy-core.git-status` | Read-only inspect of the lazy-core.git staging lock. Prints holder, age, liveness, and whether the lock is currently breakable. No state mutation. |
 | `lazy-core.git-unlock` | Manually break the lazy-core.git staging lock. Asks before acting (AskUserQuestion). Use only when /lazy-core.git-status shows a lock that the hook's break-the-lock heuristics will not auto-break. |
 | `lazy-core.install` | Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, syncs authoring templates into `.claude/templates/core/`, bootstraps the scaffold registry, seeds runtime defaults, registers experts (always — they are dispatch-routing config, not daemon-only), and — behind two remembered gates (project-level `daemon.enabled`, per-checkout `daemon.run_here`) — sets up the daemon routines + supervisor. Idempotent and quiet on re-run — every decision is persisted and never re-asked; an enabled plugin installs its whole surface. Detects install scope automatically. |
@@ -106,7 +106,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [setup-routine](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-routine.md) — Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
 - [setup-runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-runtime.md) — Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover if the working tree or a remote sync halts it.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/troubleshooting.md) — Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Non-obvious answers on install/setup, audit/doctor/optimize/checkup, expert runtime, memory, routines, git staging, and MCP permissions.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git staging, and MCP permissions.
 
 (`mebius-san` resolves from `.guard-waivers.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
@@ -149,7 +149,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Hook | Trigger | Description |
 |---|---|---|
-| `lazy-core.git-guard` | `Bash`, `mcp__git__git_add`, `mcp__git__git_commit`, `mcp__git__git_reset`, `Stop`, `SubagentStop` | Pre/PostToolUse + Stop/SubagentStop hook: serialize git staging across Claude Code sessions and refuse to end a turn with a non-empty git index. |
+| `lazy-core.git-guard` | `Bash`, `mcp__git__git_add`, `mcp__git__git_commit`, `mcp__git__git_reset`, `Stop`, `SubagentStop` | Pre/PostToolUse + Stop/SubagentStop hook guarding the shared git index against agent sessions. |
 | `lazy-core.model-router` | `Agent` | PreToolUse hook — route Agent dispatches to a configured model. |
 | `lazy-guard.check-public` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: scan staged git changes for secrets, PII, and infrastructure leaks before committing to a public repo (or to the public subtree of a partially-public repo). |
 | `lazy-guard.settings` | `Edit\|Write` | PreToolUse hook: guard Claude Code settings files against dangerous changes. |

@@ -508,6 +508,10 @@ def _resolve_status(exit_code: int, error: str | None) -> tuple[str, str | None]
   # waiver: cross-module daemon error tag, not an internal key
   if error == "timeout":
     return ("timeout", "timeout")
+  # waiver: cross-module daemon error-tag prefix, not an internal key
+  if error is not None and error.startswith("external_dir_broken"):
+    # waiver: cross-module daemon error tag, not an internal key
+    return ("error", "external_dir_broken")
   # waiver: cross-module daemon error tag, not an internal key
   if error == "git_pre_failed":
     return ("error", "git_pre_failed")

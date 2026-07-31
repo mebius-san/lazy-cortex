@@ -41,44 +41,44 @@ Outcome: `collected` (asked) or `read-from-record` (reused a persisted class's p
 
 ## Phase 3 — Collect writer groups
 
-Pipeline-фазы (главные писатели и историк) и секционные writer'ы собираются отдельно. Каждый question-блок — отдельный `AskUserQuestion` call, и каждый пропускается, если значение уже записано в in-memory settings (read-first).
+Pipeline phases (main writers and the historian) and section writers are collected separately. Each question block is its own `AskUserQuestion` call, and each is skipped when the value is already present in the in-memory settings (read-first).
 
 ### 3a — Main writers
 
-Если `experts.main` уже заполнен — переиспользуй его молча (read-first). Иначе `AskUserQuestion` (multi-select из реестра экспертов в корневом `experts:` каталоге; preserve order): *"Кто будет главными писателями документа (могут быть несколько; запускаются цепочкой)?"*
+If `experts.main` is already populated — reuse it silently (read-first). Otherwise `AskUserQuestion` (multi-select over the expert registry in the root `experts:` catalog; preserve order): *"Who are the document's main writers (several allowed; they run as a chain)?"*
 
-Добавь в in-memory settings: `experts.main = [{"name": ..., "repo": ".", "role": "main"}]` (один объект на каждый выбранный экспертный профиль; `role` — свободная строка, которую агент получит в `request.json.role`).
+Add to the in-memory settings: `experts.main = [{"name": ..., "repo": ".", "role": "main"}]` (one object per selected expert profile; `role` is a free-form string the agent receives in `request.json.role`).
 
 ### 3b — Historian
 
-Если `experts.history` уже записан — переиспользуй молча (read-first). Иначе `AskUserQuestion` (single-select из реестра; default `review.historian`): *"Кто будет историком (пишет # History секцию)?"*
+If `experts.history` is already recorded — reuse it silently (read-first). Otherwise `AskUserQuestion` (single-select over the registry; default `review.historian`): *"Who is the historian (writes the # History section)?"*
 
-Добавь: `experts.history = {"name": ...}`.
+Add: `experts.history = {"name": ...}`.
 
 ### 3c — Sections (loop)
 
-Если секционные writer'ы (`experts.validation` / `experts.terminal`) уже записаны для этого класса — переиспользуй их молча и пропусти цикл (read-first). Иначе цикл по секциям — каждая итерация строго через отдельные `AskUserQuestion` вызовы:
+If section writers (`experts.validation` / `experts.terminal`) are already recorded for this class — reuse them silently and skip the loop (read-first). Otherwise loop over sections — every iteration strictly through separate `AskUserQuestion` calls:
 
-1. `AskUserQuestion`: *"Добавить ещё одну секцию?"* Варианты: «Добавить», «Готово».
-2. Если «Готово» — выйти из цикла.
-3. Если «Добавить»:
-   a. `AskUserQuestion`: *"К какому типу относится секция?"* Варианты:
-      - **`validation`** — post-approve проверка; секция блокирует finalize при наличии content'а (revert-to-main); стирается в финале.
-      - **`terminal`** — post-approve операторский выбор; не блокирует finalize; переживает финализацию.
-   b. `AskUserQuestion` (свободный текст): *"Введи section-id (стабильный идентификатор, формат `^[a-z][a-z0-9_-]*$`, например `final_check` или `routing`)"*. Валидация на месте: проверь регулярное выражение `^[a-z][a-z0-9_-]*$`. Если не подходит — переспроси. Проверь уникальность section-id в пределах класса (через обе umbrella'ы — `validation` и `terminal`). Если уже есть — переспроси.
-   c. `AskUserQuestion` (свободный текст): *"Заголовок H1 для этой секции (произвольная строка, например `Final check` или `Маршрутизация`)"*.
-   d. `AskUserQuestion`: *"Где разместить секцию относительно свободного тела оператора?"* Варианты:
-      - **`top`** — секция показывается ВЫШЕ свободного тела (после баннера/статуса).
-      - **`bottom`** — секция показывается НИЖЕ свободного тела (перед `# History`).
-   e. `AskUserQuestion` (single-select из реестра): *"Кто пишет в эту секцию?"*.
-   f. Добавь в in-memory settings: `experts.<umbrella>.<section-id> = {"name": ..., "repo": ".", "role": <umbrella>, "section": <заголовок из шага c>, "position": <top|bottom>}` (`role` по умолчанию — имя umbrella'ы: `validation` или `terminal`; операторы, ведущие специализированный персона-роутинг, могут заменить значение на любую другую строку — агент получит её в `request.json.role`).
+1. `AskUserQuestion`: *"Add another section?"* Options: "Add", "Done".
+2. On "Done" — exit the loop.
+3. On "Add":
+   a. `AskUserQuestion`: *"Which type is this section?"* Options:
+      - **`validation`** — post-approve check; a section with content blocks finalize (revert-to-main); erased at finalization.
+      - **`terminal`** — post-approve operator choice; does not block finalize; survives finalization.
+   b. `AskUserQuestion` (free text): *"Enter the section-id (stable identifier, format `^[a-z][a-z0-9_-]*$`, e.g. `final_check` or `routing`)"*. Validate in place against `^[a-z][a-z0-9_-]*$`; re-ask on a mismatch. Check section-id uniqueness within the class (across both umbrellas — `validation` and `terminal`); re-ask on a duplicate.
+   c. `AskUserQuestion` (free text): *"H1 heading for this section (any string, e.g. `Final check` or `Routing`)"*.
+   d. `AskUserQuestion`: *"Where does the section sit relative to the operator's free body?"* Options:
+      - **`top`** — the section renders ABOVE the free body (after the banner/status).
+      - **`bottom`** — the section renders BELOW the free body (before `# History`).
+   e. `AskUserQuestion` (single-select over the registry): *"Who writes into this section?"*
+   f. Add to the in-memory settings: `experts.<umbrella>.<section-id> = {"name": ..., "repo": ".", "role": <umbrella>, "section": <heading from step c>, "position": <top|bottom>}` (`role` defaults to the umbrella name — `validation` or `terminal`; operators running specialized persona routing may replace it with any other string — the agent receives it in `request.json.role`).
 4. Goto 1.
 
 Outcome: `collected` (asked) or `read-from-record` (every writer group reused from a persisted class).
 
 ## Phase 4 — Pick edit_marker_style
 
-Если `review.edit_marker_style` уже записан — переиспользуй молча (read-first). Иначе `AskUserQuestion`: four options — `simple`, `diff`, `criticmarkup`, `html`. Write the chosen value into `review.edit_marker_style`.
+If `review.edit_marker_style` is already recorded — reuse it silently (read-first). Otherwise `AskUserQuestion`: four options — `simple`, `diff`, `criticmarkup`, `html`. Write the chosen value into `review.edit_marker_style`.
 
 Outcome: `picked` (asked) or `read-from-record` (reused the persisted style).
 

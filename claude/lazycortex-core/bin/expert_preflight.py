@@ -9,7 +9,10 @@ hanging. The dynamic probe emulates the real expert launch by building the
 command line through `expert_pump.build_expert_argv` — the same builder the
 pump uses — but with a trivial prompt that does no real work, so a broken
 `mcp_config` (a server that times out at init, needs auth, or fails to spawn)
-is surfaced fast instead of eating a live routine's wall timeout.
+is surfaced fast instead of eating a live routine's wall timeout. Alongside the
+per-expert verdicts it reports the checkout-level conditions that make a launch
+harmful rather than broken: an inbox already driven by another daemon on this
+host, and a daemon gate too coarse to name the machine it was answered on.
 
 Emits a JSON verdict document to stdout; the `lazy-runtime.preflight` skill owns
 the log write, the operator-facing table, and any settings fix. This bin never
@@ -34,7 +37,7 @@ from expert_runtime import resolve_agent_model
 from lazy_settings import load_section
 # waiver: ReferenceError is reference_resolver's domain exception, not the builtin
 from reference_resolver import resolve, ReferenceError  # pylint: disable=redefined-builtin
-from constants import HooksKey, JobConfigKey, RoutineKey, SettingsFile, SettingsKey
+from constants import HooksKey, JobConfigKey, RoutineKey, RoutineType, SettingsFile, SettingsKey
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -43,7 +46,7 @@ if TYPE_CHECKING:
 
 # Routine types whose `expert` key names an expert this preflight validates.
 # `subprocess` is excluded: it always dispatches a `command`, never an expert.
-_EXPERT_ROUTINE_TYPES = frozenset({ "inbox", "schedule", "git", "md-scan" })
+_EXPERT_ROUTINE_TYPES = frozenset({ RoutineType.INBOX, "schedule", "git", "md-scan" })
 # The type discriminator's default when a routine omits `type`.
 _DEFAULT_ROUTINE_TYPE = "subprocess"
 # The singular protocol key a routine may carry instead of the `protocols` list.
@@ -115,6 +118,7 @@ class RKey:
     HOOKS_ENABLED: The effective allow-list of lazycortex hook short names the spawn opts into (empty = all off).
     VERDICT: The `ok` / `fail` verdict for the expert.
     FIXES: The proposed-fix list for a failing expert.
+    REPO: The repository-level finding list, shared by every expert in the checkout.
     LEVEL: The severity of a static finding.
     MESSAGE: The human-readable text of a static finding.
     EXIT: The probe subprocess exit code.
@@ -137,6 +141,7 @@ class RKey:
   HOOKS_ENABLED = "hooks_enabled"
   VERDICT = "verdict"
   FIXES = "fixes"
+  REPO = "repo"
   LEVEL = "level"
   MESSAGE = "message"
   EXIT = "exit"
@@ -318,6 +323,90 @@ def _routine_protocols_for_expert(repo: Path, expert: str) -> list[str]:
   return out
 
 
+def _inbox_dir_checks(repo: Path, expert: str) -> list[dict]:
+  """
+  Validate that every declared inbox this expert is dispatched from resolves on disk.
+
+  An inbox routine whose directory is declared as externally sourced but absent or dangling
+  cannot dispatch anything, so the expert behind it is not launchable in this checkout. An
+  inbox that is simply not created yet is left alone — only a declared path is an error.
+
+  Args:
+    repo: Repository root whose routine registry and declaration are read.
+    expert: Bare local expert name whose dispatching routines are scanned.
+
+  Returns:
+    One `fail` finding per unresolvable declared inbox; empty when every one resolves.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  from external_dirs import is_declared
+  findings: list[dict] = []
+  routines = load_section(_settings_path(repo), SettingsKey.ROUTINES)
+  for name, cfg in routines.items():
+    # guard: skip the _version sentinel and any non-dict routine value
+    if not isinstance(cfg, dict):
+      continue
+    # guard: only an inbox routine has a directory to resolve
+    if cfg.get(RoutineKey.TYPE) != RoutineType.INBOX:
+      continue
+    routine_expert = cfg.get(RoutineKey.EXPERT)
+    # guard: routine does not name a string expert
+    if not isinstance(routine_expert, str):
+      continue
+    bare, _repo_key = _strip_repo_suffix(routine_expert)
+    # guard: routine dispatches a different expert
+    if bare != expert:
+      continue
+    rel = cfg.get(RoutineKey.INBOX_DIR)
+    # guard: a routine without a string inbox path is caught by schema validation, not here
+    if not isinstance(rel, str) or not rel:
+      continue
+    # guard: the inbox resolves — nothing to report
+    if (repo / rel).exists():
+      continue
+    # guard: an undeclared inbox may simply not be created yet
+    if not is_declared(repo, rel):
+      continue
+    findings.append(_finding(
+      Level.FAIL,
+      f"routine '{name}' inbox_dir '{rel}' does not resolve — the declared external "
+      f"directory is missing or dangling in this checkout",
+    ))
+  return findings
+
+
+def _repo_checks(repo: Path) -> list[dict]:
+  """
+  Validate that this checkout owns the inboxes it is about to drive.
+
+  Launchability is not only a property of one expert's config: a checkout whose inbox is already
+  driven by another daemon on this host dispatches every file twice, and a checkout that gates
+  the daemon on a bare boolean while sourcing directories from a synced path cannot tell the
+  machines that gate reaches apart. Both make a launch actively harmful rather than merely
+  broken, so they belong in the same verdict document.
+
+  Args:
+    repo: Repository root whose inbox ownership and daemon gate are read.
+
+  Returns:
+    One finding per contested inbox (`fail`) and per under-specified gate (`warn`); empty when
+    the checkout owns every inbox it scans.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  from inbox_guard import check_inbox_collision, check_run_here_specificity
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  from constants import InboxGuardKey
+  findings = [
+    _finding(Level.FAIL, f"inbox ownership: {f[InboxGuardKey.DETAIL]}")
+    for f in check_inbox_collision(repo)
+  ]
+  findings.extend(
+    _finding(Level.WARN, f"daemon gate: {f[InboxGuardKey.DETAIL]}")
+    for f in check_run_here_specificity(repo)
+  )
+  return findings
+
+
 def _finding(level: str, message: str) -> dict:
   """
   Build one static-check finding dict.
@@ -338,9 +427,10 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
 
   Verifies the expert is registered, its agent reference resolves, each declared
   aspect and each dispatching-routine protocol resolves, each `mcp_config` path
-  exists and parses as JSON, any pinned model is a recognized tier, and an explicit
+  exists and parses as JSON, any pinned model is a recognized tier, an explicit
   model resolves for the expert either via a pinned model or an `agent_models` entry
-  for its agent. Missing or unresolvable required references and an unresolved model
+  for its agent, and every declared inbox directory it is dispatched from resolves
+  on disk. Missing or unresolvable required references and an unresolved model
   are `fail`; an unknown model tier is a soft `warn`.
 
   Args:
@@ -408,6 +498,7 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
         f"{_MSG_UNPINNED_MODEL}: set experts.{expert}.model or add an agent_models entry for '{agent_ref}'",
       ))
 
+  findings.extend(_inbox_dir_checks(repo, expert))
   return findings
 
 
@@ -560,6 +651,7 @@ def _derive_plugin_dirs(repo: Path) -> tuple[str, bool]:
   """
   dirs: list[str] = []
   # Dev-vault sources take precedence (matches lazy.runtime.sh --dev-mode).
+  # waiver: dev-vault plugin-tree dirname, fixed by the repo layout, not a domain key
   dev_claude = Path(repo) / "claude"
   # guard: not a dev vault — skip the in-repo source scan
   if dev_claude.is_dir():
@@ -951,8 +1043,9 @@ def preflight(repo: Path, *, expert: str | None, probe: bool) -> dict:
     probe: When True, run the dynamic launch probe per expert; when False, static only.
 
   Returns:
-    The full verdict document: `experts` (per-expert results), `skipped_cross_repo`
-    (unvalidated `expert@<repo>` targets), and a one-line `summary`.
+    The full verdict document: `experts` (per-expert results), `repo` (checkout-level
+    findings), `skipped_cross_repo` (unvalidated `expert@<repo>` targets), and a one-line
+    `summary`.
   """
   repo = Path(repo)
   targets, skipped = collect_target_experts(repo)
@@ -962,13 +1055,17 @@ def preflight(repo: Path, *, expert: str | None, probe: bool) -> dict:
     skipped = []
 
   results = [ evaluate_expert(repo, name, probe = probe) for name in targets ]
+  repo_findings = _repo_checks(repo)
   failed = sum(1 for r in results if r[RKey.VERDICT] == Verdict.FAIL)
   mode = "static-only" if not probe else "static+probe"
   summary = f"{len(results)} expert(s) checked ({mode}); {failed} failing, {len(results) - failed} ok"
   if skipped:
     summary += f"; {len(skipped)} cross-repo target(s) skipped"
+  if repo_findings:
+    summary += f"; {len(repo_findings)} repo-level finding(s)"
   return {
     "experts": results,
+    RKey.REPO: repo_findings,
     "skipped_cross_repo": skipped,
     "summary": summary,
   }
@@ -985,12 +1082,17 @@ def _cli(argv: list[str]) -> int:
     Process exit code: 0 on a completed run (verdict travels in the JSON),
     2 on an argument error.
   """
+  # waiver: argparse CLI signature and help strings, not domain keys
   parser = argparse.ArgumentParser(
     prog = "expert_preflight",
+    # waiver: argparse CLI help string, not a domain key
     description = "Validate that routine-dispatched experts are launchable.",
   )
+  # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--cwd", default = None, help = "Repository root (default: $LAZY_REPO_ROOT or cwd)")
+  # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--expert", default = None, help = "Evaluate a single expert by bare name")
+  # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--no-probe", action = "store_true", help = "Run static checks only (no spawn)")
   args = parser.parse_args(argv)
 

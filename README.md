@@ -25,7 +25,7 @@ Each plugin addresses one of these pains without forcing you to adopt the others
 
 Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-model routing + settings management)
 
-Ships 28 skills, 8 agents, 2 commands, 10 rules, and 5 hooks.
+Ships 28 skills, 8 agents, 5 hooks.
 
 See [`claude/lazycortex-core/`](claude/lazycortex-core/) for details.
 
@@ -33,7 +33,7 @@ See [`claude/lazycortex-core/`](claude/lazycortex-core/) for details.
 
 Format-agnostic diagram engine: /lazy-diagram.draw dispatcher + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
-Ships 4 skills, 2 agents, 1 command, and 1 rule.
+Ships 4 skills, 2 agents.
 
 Requires: lazycortex-core
 
@@ -43,7 +43,7 @@ See [`claude/lazycortex-diagram/`](claude/lazycortex-diagram/) for details.
 
 Generic lifecycle experts (interpreter, designer, planner, implementer, debugger, reviewer, tester) plus a fiction-writer agent, a starter set of domain aspects (claude-plugin, game-dev, dotfiles, obsidian-plugin, data-pipeline, sci-fi, fantasy), and two cross-cutting aspects (discipline, tech-writing). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
 
-Ships 1 skill, 8 agents, and 1 command.
+Ships 1 skill, 8 agents.
 
 Requires: lazycortex-core
 
@@ -53,7 +53,7 @@ See [`claude/lazycortex-experts/`](claude/lazycortex-experts/) for details.
 
 Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
-Ships 4 skills and 1 command.
+Ships 4 skills.
 
 Requires: lazycortex-core
 
@@ -63,7 +63,7 @@ See [`claude/lazycortex-observe/`](claude/lazycortex-observe/) for details.
 
 Obsidian vault bootstrap and configuration management for Claude Code
 
-Ships 7 skills, 1 agent, 1 command, and 1 hook.
+Ships 7 skills, 1 agent, 1 hook.
 
 Requires: lazycortex-core
 
@@ -73,7 +73,7 @@ See [`claude/lazycortex-obsidian/`](claude/lazycortex-obsidian/) for details.
 
 Python coding discipline as a plugin: shared rules + reference guidelines + chk/tst checkers + PostToolUse hook + docstring-writer/test-writer agents + canonical file template. Installs once per repo via /lazy-python.install.
 
-Ships 3 skills, 2 agents, 1 command, 3 rules, and 1 hook.
+Ships 3 skills, 2 agents, 1 hook.
 
 Requires: lazycortex-core
 
@@ -83,7 +83,7 @@ See [`claude/lazycortex-python/`](claude/lazycortex-python/) for details.
 
 Pure-Python source-side review CLI. Drives mechanical doc-review state machine (parse / approval-marker sync / dispatch); experts run via lazycortex-core's expert runtime queue.
 
-Ships 8 skills, 2 agents, and 1 command.
+Ships 8 skills, 2 agents.
 
 Requires: lazycortex-core
 
@@ -93,7 +93,7 @@ See [`claude/lazycortex-review/`](claude/lazycortex-review/) for details.
 
 Specification and design skills for Claude Code
 
-Ships 23 skills, 1 agent, and 1 command.
+Ships 24 skills, 1 agent.
 
 Requires: lazycortex-core, lazycortex-diagram
 
@@ -103,7 +103,7 @@ See [`claude/lazycortex-specs/`](claude/lazycortex-specs/) for details.
 
 Maintains a curated, LLM-navigable semantic wiki over a markdown+code base — summaries, hierarchical topic tags, and glossed See-also links, kept in sync via git-watch and weekly full-scan routines.
 
-Ships 5 skills, 3 agents, 1 command, and 1 rule.
+Ships 5 skills, 3 agents.
 
 Requires: lazycortex-core
 
@@ -113,13 +113,13 @@ See [`claude/lazycortex-wiki/`](claude/lazycortex-wiki/) for details.
 
 - **Claude Code** — the plugins use skills, agents, hooks, and the plugin marketplace system.
 - **git** — hooks and logging depend on git repos. Installing in a non-git directory degrades gracefully but loses most value.
-- **Python 3** — for hook scripts bundled with plugins that install hooks (e.g. `lazycortex-core`, `lazycortex-obsidian`, `lazycortex-python`).
+- **Python 3** — for hook scripts bundled with plugins that install hooks (e.g. `lazycortex-core`, `lazycortex-obsidian`).
 
 ## Quick start
 
 1. Add the marketplace and install the plugins you want (see Installation below).
 2. Run `/reload-plugins` to activate them (no restart needed).
-3. For each installed plugin, run its install skill once per project: `/lazy-core.install`, `/lazy-diagram.install`, etc. This drops the plugin's rule templates into `.claude/rules/` and sets up any log/changelog scaffolding.
+3. For each installed plugin, run its install skill once per project: `/lazy-core.install`, `/lazy-python.install`, etc. This drops the plugin's rule templates into `.claude/rules/` and sets up any log/changelog scaffolding.
 4. Invoke skills via slash commands. Hooks activate automatically.
 
 ## Installation

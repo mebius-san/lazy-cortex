@@ -4,6 +4,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.20.0 — 2026-07-30 UTC
+
+- New `external_dirs` support: declare a working directory that lives outside the repo tree (symlinked in); the daemon diagnoses broken or missing links and repairs them without touching operator content, with on-demand restore/audit.
+- Preflight now fails fast when a declared inbox doesn't resolve, and the daemon refuses to run two instances against the same physical inbox — catches misconfiguration before it silently breaks routing.
+- Hardened the external-dir path per review: a broken external dir fails its tick cleanly instead of crash-looping and closes its incident on the first clean tick after; declared paths that climb outside the repo are dropped; inbox-ownership reports no longer show invented path suffixes.
+- Faster daemon ticks: the repo file walk now runs once via `git ls-files`, the markdown-scan walk is shared across checks, and command dispatch is skipped when the parent directory hasn't changed.
+- Fixed doctor check 11b (logging-waiver validation), silently broken since the lazy-log plugin merged into core; install-failure pointers now correctly point to `/lazy-core.install`.
+- Incident reports now surface real subprocess stderr/stdout instead of a blank detail, and a stale "git remote unavailable" halt is automatically re-probed and cleared once the remote answers.
+
 ### 5.19.1 — 2026-07-29 UTC
 
 - An ordinary commit whose message body spans several paragraphs is no longer refused by the git guard. The guard could not read a message containing a blank line and fell back to denying the command, so the only commit form that worked was the heredoc workaround.
@@ -464,6 +473,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.6.0 — 2026-07-30 UTC
+
+- New `/spec.import` skill imports exported spec designs from another repo, read-only — fetches by ref, lets you pick which exported assets to land, and auto-registers the import only when something was actually exported.
+- Import runs are now resilient: ref switches on an already-cached checkout are handled, a bad entry in `spec.imports[]` no longer aborts the whole run, and `spec.doctor`'s drift check for imported docs no longer false-positives.
+- `handoff.stop_after` now reliably drops post-stop docs from the scaffolded layout, fixing a default mismatch between the scaffolder and the option.
+
 ### 3.5.2 — 2026-07-28 UTC
 
 - Fixed asset creation being refused at the précis step under lazycortex-core 5.19.0: it staged the folder-note before committing it, which the git guard's new pathspec discipline rejects. It now names the folder-note in the commit pathspec instead, leaving your index alone.
@@ -708,6 +723,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 5.2.7 — 2026-07-30 UTC
+
+- `lazy-review.configure` setup skill is now fully in English — phases 3–4 were previously left half in Russian.
+
 ### 5.2.6 — 2026-07-26 UTC
 
 - Fixed protected-section duplication during document reassembly — repeated rewrites could double up sections tagged `#protected/...` (1→2→4 instances across specs/core docs); affected documents now self-heal to a single instance on the next write.
@@ -764,6 +783,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).
 
 ## lazycortex-observe
+
+### 0.7.5 — 2026-07-30 UTC
+
+- Runtime dashboard: removed the Halt events and Queue tables (the whole middle row) to keep the view focused on the metrics that matter.
 
 ### 0.7.4 — 2026-07-26 UTC
 

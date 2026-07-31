@@ -186,8 +186,8 @@ def desired_state(
     2. open `#review/question` or `#review/concern` → ACTION_NEEDED
     3. consumer's `domain_ready` predicate False → ACTION_NEEDED
     4. `approved == True` → phase-aware:
-         - `review_phase in {"validators", "terminals"}` → `IN_PROCESS`. Validators (Стадия 5) and
-           terminals (Стадия 6) are post-approve barriers that run BEFORE finalize; the caller passes
+         - `review_phase in {"validators", "terminals"}` → `IN_PROCESS`. Validators (stage 5) and
+           terminals (stage 6) are post-approve barriers that run BEFORE finalize; the caller passes
            a matching `waiting_context` to `replace_banner` so the rendered title reads "Waiting:
            validators" / "Waiting: terminals". Without this branch the generic post-tick repaint
            paints "Waiting: finalize" while validators or terminals are still in flight, which

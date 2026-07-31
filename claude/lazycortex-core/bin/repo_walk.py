@@ -16,10 +16,10 @@ class RepoWalk:
   """
   Repo file enumeration with git-ignore-aware exclusion.
 
-  Excludes any path git would ignore — `.git/info/exclude`, every `.gitignore`,
-  and the repo's `.lazyignore` wired as `core.excludesFile`. `--no-index` makes
-  the check apply to tracked paths too, so a tracked directory listed in
-  `.lazyignore` is still excluded from the walk.
+  Excludes any path git would ignore — `.git/info/exclude`, every `.gitignore`, and the repo's
+  `.lazyignore` wired as `core.excludesFile`. A tracked path listed in `.lazyignore` is still
+  excluded from the walk. Outside a git repository, enumeration falls back to walking the full
+  directory tree, excluding only `.git`.
   """
 
   _NUL = "\x00"
@@ -51,34 +51,60 @@ class RepoWalk:
       return set()
     return { p for p in proc.stdout.split(self._NUL) if p }
 
+  def _git_list(self) -> list[str] | None:
+    """
+    Enumerate candidate repo-relative paths in one `git ls-files` call.
+
+    Lists tracked plus untracked-non-ignored paths, honouring the standard
+    ignore stack and the repo `.lazyignore` wired as `core.excludesFile`.
+
+    Returns:
+      Ordered, de-duplicated repo-relative POSIX paths, or `None` when git
+      is unavailable or the directory is not a repository.
+    """
+    cmd = [ "git" ]
+    # guard: a .lazyignore exists — add it as the global excludes source
+    if self._excludes.is_file():
+      cmd += [ "-c", f"core.excludesFile={self._excludes}" ]
+    cmd += [ "ls-files", "-co", "--exclude-standard", "-z" ]
+    proc = subprocess.run(
+      cmd, cwd = str(self._repo),
+      capture_output = True, text = True, check = False,
+    )
+    # guard: not a git repo / git failure — signal the caller to fall back
+    if proc.returncode != 0:
+      return None
+    # dedupe while keeping order: `ls-files -c` repeats a path once per merge stage
+    return list(dict.fromkeys( p for p in proc.stdout.split(self._NUL) if p ))
+
   def iter_files(self) -> Iterator[Path]:
     """
     Yield every non-ignored file path under the repository root.
 
-    Walks the repository tree using `os.walk`, pruning `.git` and any directory
-    that git's ignore engine (including `.lazyignore`) marks as excluded.
-    Individual files within non-ignored directories are also filtered through
-    the same ignore check before being yielded.
+    A tracked path listed in `.lazyignore` is still excluded. Outside a git repository, the
+    walk falls back to the full directory tree, excluding only `.git`.
 
     Yields:
       Absolute `Path` objects for each file that survives the ignore filters.
     """
     repo = self._repo
-    for base, dirs, files in os.walk(str(repo)):
-      # guard: never descend into git internals
-      dirs[ : ] = [ d for d in dirs if d != self._GIT_DIR ]
-      dir_rels = [ (Path(base) / d).relative_to(repo).as_posix() for d in dirs ]
-      ignored_dirs = self._ignored(dir_rels)
-      # prune ignored subdirs in place so os.walk does not descend into them
-      dirs[ : ] = [
-        d for d in dirs
-        if (Path(base) / d).relative_to(repo).as_posix() not in ignored_dirs
-      ]
-      file_rels = [ (Path(base) / f).relative_to(repo).as_posix() for f in files ]
-      ignored_files = self._ignored(file_rels)
-      for f in files:
-        full = Path(base) / f
-        # guard: file excluded by the git ignore stack / .lazyignore
-        if full.relative_to(repo).as_posix() in ignored_files:
-          continue
-        yield full
+    rels = self._git_list()
+    # guard: git enumeration unavailable — walk everything except git internals
+    if rels is None:
+      for base, dirs, files in os.walk(str(repo)):
+        dirs[ : ] = [ d for d in dirs if d != self._GIT_DIR ]
+        for f in files:
+          yield Path(base) / f
+      return
+    # one batch check: `ls-files -c` lists tracked paths even when the ignore stack
+    # excludes them (a tracked dir in `.lazyignore`) — `--no-index` filters those out
+    ignored = self._ignored(rels)
+    for rel in rels:
+      # guard: tracked path excluded by the git ignore stack / .lazyignore
+      if rel in ignored:
+        continue
+      full = repo / rel
+      # guard: index entry with no worktree file (staged delete, submodule)
+      if not full.is_file():
+        continue
+      yield full
