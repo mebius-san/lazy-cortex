@@ -388,6 +388,7 @@ class Doctor:
   # Check identifiers (canonical names).
   CHECK_ORPHAN_TOPIC    = "orphan-topic"
   CHECK_BROKEN_SEE_ALSO = "broken-see-also"
+  CHECK_PATH_BASE       = "see-also-path-base"
   CHECK_BROKEN_REPO_KEY = "broken-repo-key"
   CHECK_INDEX_DESYNC    = "index-desync"
   CHECK_MISSING_SUMMARY = "missing-summary"
@@ -489,6 +490,15 @@ class Doctor:
         elif f[_FK_CHECK] == self.CHECK_STALE_GLOSS:
           self._apply_refresh_gloss(f)
           f[_FK_APPLIED] = True
+
+      # Base rewrites run last: every other per-line repair matches on the target string
+      # as currently written, so rewriting the base first would make those matches miss.
+      for f in all_findings:
+        # guard: not a base-rewrite finding
+        if f[_FK_CHECK] != self.CHECK_PATH_BASE:
+          continue
+        self._apply_rebase_see_also(f)
+        f[_FK_APPLIED] = True
 
       # Run index rebuild once at the end when any orphan/desync fix was requested.
       if needs_index_rebuild:
@@ -607,16 +617,36 @@ class Doctor:
         # Local relative link.
         abs_target = (node_dir / target).resolve()
         if not abs_target.is_file():
-          f = _finding(
-            check    = self.CHECK_BROKEN_SEE_ALSO,
-            severity = SEV_FAIL,
-            message  = f"see-also target '{target}' does not exist",
-            node     = rel,
-            fixable  = True,
-          )
-          f[_FK_TARGET] = target
-          findings.append(f)
-          continue
+          # The target may be written against a coarser base (scope root, repo root) by
+          # an older curator run. Such a link is repairable by rewriting its base, not by
+          # dropping the line — the edge itself is sound.
+          rebased = _nodes.resolve_see_also_target(target, self._repo / rel)
+          if rebased is not None:
+            f = _finding(
+              check    = self.CHECK_PATH_BASE,
+              severity = SEV_WARN,
+              message  = (
+                f"see-also target '{target}' is written against a non-canonical base "
+                f"(resolves to '{rebased.relative_to(self._repo).as_posix()}')"
+              ),
+              node     = rel,
+              fixable  = True,
+            )
+            f[_FK_TARGET]   = target
+            f[_FK_NODE_OBJ] = node
+            findings.append(f)
+            abs_target = rebased
+          else:
+            f = _finding(
+              check    = self.CHECK_BROKEN_SEE_ALSO,
+              severity = SEV_FAIL,
+              message  = f"see-also target '{target}' does not exist",
+              node     = rel,
+              fixable  = True,
+            )
+            f[_FK_TARGET] = target
+            findings.append(f)
+            continue
         # Stale gloss check for local target.
         findings += self._check_stale_gloss_for_target(
           node      = node,
@@ -1040,6 +1070,36 @@ class Doctor:
       _drop_see_also_line(node, target)
     else:
       _drop_code_see_also_line(node, target)
+
+  def _apply_rebase_see_also(self, finding: dict) -> None:
+    """
+    Rewrite the node's See-also targets to the canonical node-relative base.
+
+    Re-reads the node from disk (a gloss refresh in the same run may have rewritten it)
+    and re-applies its current items — `apply_link` normalises every target on write, so
+    one call repairs every non-canonical line on the node and is a no-op once canonical.
+
+    Args:
+      finding: The finding dict; must carry `"node"` (rel path).
+    """
+    rel = finding.get(_FK_NODE, "")
+    # guard: missing node path
+    if not rel or rel == "-":
+      return
+    abs_path = self._repo / rel
+    # guard: file absent
+    if not abs_path.is_file():
+      return
+    node = _nodes.node_for(abs_path)
+    # guard: unrecognised type
+    if node is None:
+      return
+    if isinstance(node, _nodes.MarkdownNode):
+      inner = node.see_also_inner or ""
+      items = [ ln.strip() for ln in inner.splitlines() if ln.strip().startswith("- ") ]
+    else:
+      items = list(node.see_also)
+    node.apply_link(see_also_lines = items)
 
   def _apply_refresh_gloss(self, finding: dict) -> None:
     """

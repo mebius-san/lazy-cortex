@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Run integrity checks across a wiki scope — orphan topics, broken links, missing summaries, stale glosses, unknown axes, and overlapping scopes — with optional auto-repair.
-last_regen: 2026-07-16
+last_regen: 2026-07-31
 no_diagram: true
 source_skills:
   - lazy-wiki.doctor
@@ -26,9 +26,9 @@ You invoke `/wiki.doctor` with an optional scope id. Omit the id and the skill a
 
 Phase 1 is always read-only — nothing is written. The `lazycortex-wiki doctor` command prints per-scope findings grouped by severity, tagging each fixable finding so you can see what automated repair is available. Phase 2 presents those findings to you: per-scope counts by severity and a short list of check name, affected node, and message.
 
-Findings fall into two categories. Fixable checks (`orphan-topic`, `index-desync`, `broken-see-also`, `stale-gloss`) have automated repairs the skill can apply. Report-only checks (`broken-repo-key`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`) require your own action — they surface a problem but the right resolution depends on your intent, so the skill does not rewrite your content for them.
+Findings fall into two categories. Fixable checks (`orphan-topic`, `index-desync`, `see-also-path-base`, `broken-see-also`, `stale-gloss`) have automated repairs the skill can apply. Report-only checks (`broken-repo-key`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`) require your own action — they surface a problem but the right resolution depends on your intent, so the skill does not rewrite your content for them.
 
-If fixable findings exist, the skill asks whether to apply the repairs. On confirmation it passes `--apply` to the same command: the topic index is rebuilt, broken See-also lines are dropped, and stale glosses are refreshed. Applying a fix only touches the lines that need it — the rest of a node's See-also section is left exactly as it was. Each fix is reported individually. If you decline, the read-only audit result stands and no files are modified.
+If fixable findings exist, the skill asks whether to apply the repairs. On confirmation it passes `--apply` to the same command: the topic index is rebuilt, broken See-also lines are dropped, See-also links written against a non-canonical path base are rewritten to the canonical form, and stale glosses are refreshed. Applying a fix only touches the lines that need it — the rest of a node's See-also section is left exactly as it was. Each fix is reported individually. If you decline, the read-only audit result stands and no files are modified.
 
 You'll see fewer `broken-see-also` findings than you might expect from deleted nodes specifically: deleting a wiki node now prunes every See-also line pointing at it automatically, either through the background daemon (if it's running) or the next `/wiki.relink` (if it isn't) — no audit run required. A `broken-see-also` finding here usually means the target was renamed or moved rather than deleted, or that the automatic pruning hasn't run yet.
 
