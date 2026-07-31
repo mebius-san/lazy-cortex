@@ -204,8 +204,9 @@ def enumerate_local_daemons(platform: str | None = None) -> list[dict]:
 
   Walks the platform's supervisor-unit directory, extracts each unit's repo root, and joins
   it with the repo's merged `daemon.metrics` settings (tracked file plus local overlay).
-  Units that cannot be read or parsed, and repos that no longer exist on disk, are skipped
-  with a one-line warning on stderr.
+  Units that cannot be read or parsed, repos that no longer exist on disk, and repos whose
+  settings will not parse are skipped with a one-line warning on stderr. None of the repos
+  walked here belongs to the caller, so one unreadable neighbour never fails the enumeration.
 
   Args:
     platform: Optional `sys.platform` override; defaults to the current platform.
@@ -234,7 +235,11 @@ def enumerate_local_daemons(platform: str | None = None) -> list[dict]:
     if not (repo_root / SettingsFile.REL).is_file():
       sys.stderr.write(f"daemon_registry: skipping unit for missing repo {root_str}: {name}\n")
       continue
-    daemon_cfg = load_section(repo_root / SettingsFile.REL, SettingsKey.DAEMON)
+    try:
+      daemon_cfg = load_section(repo_root / SettingsFile.REL, SettingsKey.DAEMON)
+    except (OSError, ValueError) as e:
+      sys.stderr.write(f"daemon_registry: skipping unit with unreadable settings {root_str}: {e}\n")
+      continue
     metrics_cfg = daemon_cfg.get(DaemonKey.METRICS) or {}
     rows.append({
       RegistryRow.REPO_ID: _repo_id_from_unit_name(name, platform),

@@ -55,8 +55,6 @@ JSON `error` object.
 """
 from __future__ import annotations
 
-from typing import NoReturn
-
 import argparse
 import datetime as _dt
 import json
@@ -68,7 +66,7 @@ from pathlib import Path
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from typing import NoReturn
 
 
 _BIN = Path(__file__).resolve().parent

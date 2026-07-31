@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Non-obvious answers on install/setup, audit/doctor/optimize/checkup, expert runtime, memory, routines, git staging, and MCP permissions.
-last_regen: 2026-07-29
+summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git staging, and MCP permissions.
+last_regen: 2026-07-30
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -9,7 +9,6 @@ source_skills:
   - lazy-core.doctor
   - lazy-core.optimize
   - lazy-core.setup
-  - lazy-core.checkup
   - lazy-core.agent-models
   - lazy-core.git-status
   - lazy-core.git-unlock
@@ -68,21 +67,13 @@ A **patch bump** (e.g. `1.0.0` → `1.0.1`) is safe to drop in with no action �
 
 ## What's the difference between `/lazy-core.audit`, `/lazy-core.doctor`, and `/lazy-core.optimize`?
 
-`/lazy-core.audit` is a read-only startup-context and compliance scan: it shows what actually loads into context (rule sizes, loading behavior), checks skill/agent/rule authoring compliance (Execution-Discipline preamble, no-Optional headings, narrative padding), and reports the expert-runtime config. It makes no changes.
+`/lazy-core.audit` is a read-only startup-context and compliance scan: it shows what actually loads into context (rule sizes, loading behavior), checks skill/agent/rule authoring compliance (Execution-Discipline preamble, no-Optional headings, narrative padding), checks help-doc coverage and staleness against each plugin's README scenarios, and reports the expert-runtime config across twelve sub-checks. It makes no changes.
 
-`/lazy-core.doctor` is the broader health check: it verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, confirms every installed plugin is at the latest marketplace version, and delegates to sibling audit skills (`lazy-guard.check-public`, `lazy-log.audit`) when they apply. Unlike audit, it offers targeted fixes you can accept interactively.
+`/lazy-core.doctor` is the broader health check: it verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, confirms every installed plugin is at the latest marketplace version, and delegates to sibling audit skills (`lazy-guard.check-public`, per-plugin audits) when they apply. Unlike audit, it offers targeted fixes you can accept interactively, plus a per-warning waive loop.
 
 `/lazy-core.optimize` is action-oriented: it slims oversized rule files (moving reference material into agent definitions) and audits global `settings.json` for project-specific entries that should move to local settings. Run it when startup feels slow or after adding new rules/agents — audit and doctor tell you something is off, optimize is one of the skills that fixes it.
 
 Run `/lazy-core.audit` for a quick read on context footprint, `/lazy-core.doctor` when something in the config feels broken and you want fixes offered, and `/lazy-core.optimize` specifically to shrink startup context.
-
----
-
-## What does `/lazy-core.checkup` add on top of `/lazy-core.audit` and `/lazy-core.doctor`?
-
-`/lazy-core.checkup` is a single entry point that runs `/lazy-core.audit` and `/lazy-core.doctor` (in report-only mode) for you, merges every finding from both — plus whatever sibling plugin audits doctor delegates to — into one table grouped by plugin and sorted by severity, and then asks once which mutating fix-flow to run: `/lazy-core.optimize`, the doctor's interactive fix loop, or nothing. It does not implement any scan logic itself; it is pure orchestration over the skills you would otherwise run one at a time.
-
-Reach for `/lazy-core.checkup` when you want one combined report across every audit this plugin coordinates instead of reading `/lazy-core.audit` and `/lazy-core.doctor` output separately and cross-referencing them yourself. Reach for the individual skills directly when you only care about one of the two (a quick context-footprint check, or just the doctor's currency check).
 
 ---
 
@@ -108,7 +99,7 @@ Always use `/lazy-core.agent-models`. The skill enforces structural routing rule
 
 The only time hand-editing `lazy.settings.json` is appropriate is when you are deliberately overriding a tier for a single project (using `/lazy-core.agent-models --scope=project`) and you want to inspect or revert the exact entry afterward. Even then, use the skill for the write and only read the file to verify.
 
-When `/lazy-core.agent-models` runs as part of `/lazy-core.autosetup`'s non-interactive chain (no wizard, no user channel), only the curated batch behaves the same as an interactive run: entries whose dispatch string is a key in `default-tiers.json` still auto-apply at their template tier, because a plugin-shipped default is a recorded decision, not a guess. Everything else — agents with no curated default — is left missing and reported `needs-interactive`; a normal interactive run of the skill picks those up afterward.
+When `/lazy-core.agent-models` runs as part of a non-interactive rollout chain (no wizard, no user channel), only the curated batch behaves the same as an interactive run: entries whose dispatch string is a key in `default-tiers.json` still auto-apply at their template tier, because a plugin-shipped default is a recorded decision, not a guess. Everything else — agents with no curated default — is left missing and reported `needs-interactive`; a normal interactive run of the skill picks those up afterward.
 
 The skill also prunes automatically: any configured entry whose plugin agent file has since been deleted (the plugin is still installed, but its cache no longer has that agent stem) is removed with no prompt, in both interactive and non-interactive runs — a tier for a deleted agent is dead config, not a decision. If a pruned dispatch string is still referenced by an expert's `agent` field, the skill leaves that expert entry alone and reports a warning instead of guessing; you decide whether to repoint or remove it.
 
@@ -126,7 +117,7 @@ Run a plugin's install skill directly only when you want to re-sync exactly one 
 
 It uses a 3-bucket classifier applied per tool, not per server. Read-shaped verbs (`get_*`, `list_*`, `search*`, `status*`, and similar) and low-risk writes that create easily-undone content go to `permissions.allow` — no prompt. Irreversible or hard-to-recover verbs (`delete_*`, `remove_*`, `reset`, `checkout`, force-pushes) go to `permissions.ask` — always prompt. Everything else — medium-risk tools like `git_commit` — is skipped entirely: neither list, so Claude Code's built-in per-call prompt still applies and you decide in the moment. A tool you've already pinned to a bucket yourself is never re-classified or moved by a later run.
 
-When `/lazy-guard.allow-mcp` runs inside `/lazy-core.autosetup`'s non-interactive chain, it never guesses at a preference. Additions at a scope that's already inferable from existing entries apply silently — that's a mechanical extension of a trust decision you already made interactively. Anything that would reverse a prior `allow` choice, resolve an ambiguous or undetermined scope, or decide whether to install the SessionStart preload hook at all is left untouched and reported `needs-interactive`, waiting for you to run the skill yourself.
+When `/lazy-guard.allow-mcp` runs inside a non-interactive rollout chain, it never guesses at a preference. Additions at a scope that's already inferable from existing entries apply silently — that's a mechanical extension of a trust decision you already made interactively. Anything that would reverse a prior `allow` choice, resolve an ambiguous or undetermined scope, or decide whether to install the SessionStart preload hook at all is left untouched and reported `needs-interactive`, waiting for you to run the skill yourself.
 
 By default the skill writes to the gitignored `settings.local.json` at the appropriate scope (global for servers defined in `~/.mcp.json`, project for servers defined in `./.mcp.json`) rather than the tracked `settings.json`, because permission choices are personal and shouldn't leak into commits teammates inherit. It always shows the planned diff — allow adds, ask adds, skipped tools — before writing.
 
@@ -168,7 +159,7 @@ Optional fields — `source` (array of input file paths), `context` (array of co
 
 ## What happens if I dispatch a job for an expert that is not registered?
 
-`/lazy-expert.dispatch-job` loads `lazy.settings.json[experts]` and looks up the expert name you provided. If the key is absent, the skill aborts with "`<expert_name>` is not registered in `lazy.settings.json[experts]`" — no job directory is created. Register the expert first via `/lazy-core.install` (expert wizard, Step 11) or, if the expert was recently added by enabling a plugin, re-run `/lazy-core.setup` to pick it up, then re-dispatch.
+`/lazy-expert.dispatch-job` loads `lazy.settings.json[experts]` and looks up the expert name you provided. If the key is absent, the skill aborts with "`<expert_name>` is not registered in `lazy.settings.json[experts]`" — no job directory is created. Register the expert first via `/lazy-core.install` (expert wizard) or, if the expert was recently added by enabling a plugin, re-run `/lazy-core.setup` to pick it up, then re-dispatch.
 
 ---
 
@@ -211,7 +202,7 @@ Only the named hooks run for that expert's spawns; every other lazycortex hook s
 
 ## How do I check that an expert is configured correctly before it runs?
 
-Run `/lazy-runtime.preflight` (optionally `/lazy-runtime.preflight <expert-name>` to check just one). The skill enumerates every routine-dispatched expert, runs static config checks (does the agent resolve, do the declared aspects and protocols exist, is `mcp_config` a valid path), then emulates the real launch with a trivial no-op prompt — the same command line the daemon would use, including any declared `mcp_config` servers — and reports whether each MCP server connects cleanly or hangs, needs auth, or fails to spawn.
+Run `/lazy-runtime.preflight` (optionally `/lazy-runtime.preflight <expert-name>` to check just one). The skill enumerates every routine-dispatched expert, runs static config checks (does the agent resolve, do the declared aspects and protocols exist, is `mcp_config` a valid path, does a declared inbox actually resolve on this checkout), then emulates the real launch with a trivial no-op prompt — the same command line the daemon would use, including any declared `mcp_config` servers — and reports whether each MCP server connects cleanly or hangs, needs auth, or fails to spawn.
 
 Run it before wiring a new expert or a new MCP server into a live routine, or any time a routine's expert jobs keep timing out without a clear reason. When it finds a broken config, it proposes a concrete fix — drop an offending server, correct a bad `mcp_config` path, or print the exact `claude mcp login` command to run by hand — and applies the fix only after you confirm.
 
@@ -331,38 +322,6 @@ Two skills covered in this block accept `--dry-run`:
 - `/lazy-core.agent-models` — walks the wizard and reports what tier assignments would be written, without touching either `lazy.settings.json` file.
 
 In both cases, `--dry-run` is purely read-only: no files are created or modified, and the skill exits after the preview. It is safe to run at any time and does not require undoing anything afterward.
-
----
-
-## Why is my new skill, rule, or agent forced into a template?
-
-The `lazy-core.scaffold` rule is always-loaded and fires whenever you create a new file whose path matches the scaffold registry. For skills and commands it points to `skill-template.md`; for agents to `agent-template.md`; for rules to `rule-template.md`. Each template carries the Execution-Discipline preamble (for skills and agents), mandatory frontmatter, and an authoring-notes block you delete before saving.
-
-The reason templates are mandatory rather than optional is that every artifact class has structural requirements enforced by `lazy-core.audit`: skills need the `TaskCreate` preamble so skipped phases stay visible, agents need `tools:` allowlists and `model: inherit`, rules need either `paths:` or an `always_loaded:` waiver. Starting from memory reliably misses at least one of these, and the audit finding surfaces after the artifact is already in use. Starting from the template makes the requirement visible on the first edit, before any code runs.
-
----
-
-## Why does Claude refuse to write to `~/.claude/` by default?
-
-The `lazy-core.hygiene` rule (always-loaded) sets project-local scope as the default for every artifact — skills, agents, hooks, rules, and config. Writing to `~/.claude/` without an explicit request violates this rule because global artifacts affect every project on the machine: a rule added globally loads into every session, a permission entry allowed globally persists after the project context is gone, and MCP server configs placed globally expose that server everywhere.
-
-The rule is enforced by `lazy-core.audit` and `lazy-core.doctor`. It does not make global writes impossible — it makes them require an explicit instruction ("add this globally" or "this is a cross-project artifact"). When you give that instruction, writes to `~/.claude/` proceed normally. The same rule also enforces dot-namespace naming for every artifact (`namespace.name`, not a flat name like `logging`), the settings split between tracked `settings.json` and gitignored `settings.local.json`, and narrowest-scope MCP placement (project `.mcp.json` unless the server is truly universal).
-
----
-
-## Do plugins share settings, or is each plugin's configuration independent?
-
-Each plugin installs its own rule templates and may seed its own section of `lazy.settings.json` (for agent-model routing), but all plugins share the same `settings.json` / `settings.local.json` pair and the same `.guard-waivers.json`. `/lazy-core.setup` runs every plugin's installer in dependency order (core first, then others alphabetically, then post-install cross-cutters) so that later plugins can rely on templates and settings keys seeded by earlier ones. Plugin-owned rule files in `.claude/rules/` are identified by their dot-namespace prefix (e.g. `lazy-core.*`, `lazy-guard.*`), which lets `/lazy-core.install` do orphan detection without touching rules from other plugins or user-authored rules.
-
----
-
-## What is the difference between a protocol and an aspect?
-
-A **protocol** is routine-side config that defines the request/response contract for the jobs a routine dispatches — the `kind` enum, `role` vocabulary, field shapes, and outcome enum. Different routines can dispatch jobs against the same protocol.
-
-An **aspect** is expert-side config that shapes how the expert acts on top of its protocol. The same protocol can be paired with different aspects across experts. For example, two experts could share the same doc-review protocol but only one carries `lazy-memory.persona-aspect` (added via `/lazy-memory.mark-persona`) to keep notes between runs. Protocols and aspects are listed in parallel in the expert's user-message prompt — the expert reads both before acting.
-
-Protocols themselves are attached to a routine at the point the routine is registered with `/lazy-routine.register` (or by the plugin's own install flow, for a plugin-shipped routine) — you don't attach a protocol to a routine after the fact by hand-editing `lazy.settings.json`.
 
 ---
 

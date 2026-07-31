@@ -240,7 +240,7 @@ Scope: `lazy.settings.json[experts]`, the flat `lazy.settings.json[daemon]` and 
 
 **Path layout constant**: plugin cache lives under `$HOME/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>`.
 
-Perform these 7 sub-checks in order:
+Perform these 12 sub-checks in order:
 
 **D1 — `lazy.settings.json[experts]` schema**
 
@@ -399,6 +399,44 @@ If all three signals indicate stopped/stale/absent → `[WARN] runtime daemon ap
 
 If none of the three probes run (e.g. not on macOS, no runtime configured) → skip silently.
 
+**D11 — External working directories**
+
+Run:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from external_dirs import check
+from pathlib import Path
+import json
+print(json.dumps(check(Path('.')), ensure_ascii=False))
+"
+```
+
+Empty list → emit nothing (the repo declares no external directories; this is the common case). Otherwise, one finding per non-`ok` row:
+
+- `[FAIL]` status `dangling` / `missing` / `wrong_target` — `external dir <path> is <status> | <source>`; `fix: run /lazy-core.doctor and accept Fix L4, or re-run /lazy-core.install`.
+- `[WARN]` status `unconfigured` — `external dirs declared but no source root on record for this checkout | .claude/lazy.settings.local.json`; `fix: re-run /lazy-core.install and answer the external-dirs question`.
+- `[WARN]` status `not_a_symlink` — `external dir <path> holds real content, not a link | <path>`; no automatic fix: whether that content is authoritative is the operator's call.
+- `[WARN]` status `source_missing` — `external dir <path> has no source at <source> | <source>`; `fix: mount / restore the source, or correct external_dirs.root`.
+- `[WARN]` any row whose `gitignored` is false — `external dir <path> is not gitignored — linked content would dirty the tree and halt the daemon | .gitignore`; `fix: add <path> to .gitignore`.
+
+**D12 — Shared-inbox ownership**
+
+Run:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from inbox_guard import check_inbox_collision, check_run_here_specificity
+from pathlib import Path
+import json
+p = Path('.')
+print(json.dumps(check_inbox_collision(p) + check_run_here_specificity(p), ensure_ascii=False))
+"
+```
+
+- `[FAIL]` kind `inbox_collision` — `<detail>`; `fix: set daemon.run_here false in one of the two checkouts` (never auto-applied — which checkout drives it is the operator's decision).
+- `[WARN]` kind `run_here_ambiguous` — `<detail>`; `fix: replace daemon.run_here true with a host list`.
+
 ### Structured report shape (Agents A, B, C — unchanged)
 
 ```
@@ -467,9 +505,22 @@ plugins_scanned: <n>  warn: <m>
 - [WARN] note carries tag but is not listed in tag file
 - [INFO] expert is persona but has not written memory yet
 
+### external_dirs
+- [FAIL] external dir <path> is <status> | <source>
+- [WARN] external dirs declared but no source root on record for this checkout | .claude/lazy.settings.local.json
+- [WARN] external dir <path> holds real content, not a link | <path>
+- [WARN] external dir <path> has no source at <source> | <source>
+- [WARN] external dir <path> is not gitignored — linked content would dirty the tree and halt the daemon | .gitignore
+
+### inbox_ownership
+- [FAIL] <detail>
+- [WARN] <detail>
+
 ### summary
 pass: <n>  warn: <n>  fail: <n>
 ```
+
+The `external_dirs` and `inbox_ownership` groups are omitted entirely when they carry no findings — a repo that declares no external directories is the common case.
 
 ## Phase 3 — Render
 
@@ -593,7 +644,11 @@ Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings
 
 **Memory hygiene** — one line per `[FAIL]` or `[WARN]` from D10. INFO findings (persona-but-empty) appear only when the full report would otherwise be empty.
 
-**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D7 findings).
+**External dirs** — one line per `[FAIL]` or `[WARN]` from D11. Omit the section when D11 produced no findings.
+
+**Inbox ownership** — one line per `[FAIL]` or `[WARN]` from D12. Omit the section when D12 produced no findings.
+
+**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D12 findings).
 
 ### Logging compliance
 

@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 CURRENT_VERSIONS = {
   "agent_models": 1,
   "daemon": 2,
+  "external_dirs": 1,
   "routines": 2,
   "experts": 1,
   "git": 1,

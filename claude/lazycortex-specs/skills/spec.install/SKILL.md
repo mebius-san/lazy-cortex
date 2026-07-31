@@ -35,7 +35,7 @@ Bash(PYTHONPATH=<core-bin> python3 -c "from lazy_settings import load_tracked_se
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 11 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 12 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. Canonical list (titles verbatim):
    - `Step 1 — Detect install scope`
@@ -45,6 +45,7 @@ This skill has 11 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 5 — Register the gate-tick routine`
    - `Step 6 — Wire the request-handler runtime`
    - `Step 6.5 — Seed agent-model tiers`
+   - `Step 6.6 — Register the import-pull routine`
    - `Step 7 — Offer first product registration`
    - `Step 8 — Register the plugin-CLI Bash allow-pattern`
    - `Step 9 — Verify`
@@ -314,7 +315,7 @@ No validators are wired — the WTR doc is approved by the operator directly thr
 
 ### 6f. Sync `lazy-review.scan` paths (MANDATORY when 6e classes are added)
 
-`lazy-review.scan` is the md-scan routine the daemon uses to discover review-active files. Its `paths:` sieve is deliberately coarse — one scope-root mask per scope; filename/depth precision lives in `review.classes[].paths` (dispatch-time routing) and the routine's frontmatter filter. The two masks to ensure are `<vault_root>/requests/*.md` and `<vault_root>/<spec_path_prefix>/products/**/*.md`, where `<vault_root>` is the `spec.vault_root` setting (default `specs`); when it is `.`, omit the prefix. **Warning:** `**`-bearing sieve masks are matched anchored at the repo root (unlike class `paths`, which the dispatcher matches right-anchored), so each mask MUST carry the `<vault_root>` prefix — a mask missing it matches nothing under the default `specs/` layout. When `routines["lazy-review.scan"]` is present, normalize it: (1) ensure both masks above are in `paths`; (2) remove every legacy filename-suffixed mask those coarse masks subsume, in BOTH shapes — with or without the `<vault_root>` prefix; (3) inside `filter.frontmatter` set `review_active` to `{"in": [true], "not_in": []}` (drop the legacy `null` leg); (4) set `interval_sec` to `60` when it still carries the legacy `5` (minute cadence for coarse scans; an operator-chosen value other than 5 stays untouched). When the routine is absent (daemon-disabled project), skip silently. Idempotent; the 6e classes need no per-doc-kind sieve entries — the coarse prefix mask covers every depth under the products tree.
+`lazy-review.scan` is the md-scan routine the daemon uses to discover review-active files. Its `paths:` sieve is deliberately coarse — one scope-root mask per scope; filename/depth precision lives in `review.classes[].paths` (dispatch-time routing) and the routine's frontmatter filter. The two masks to ensure are `<vault_root>/requests/*.md` and `<vault_root>/<spec_path_prefix>/products/**/*.md`, where `<vault_root>` is the `spec.vault_root` setting (default `specs`); when it is `.`, omit the prefix. **Warning:** `**`-bearing sieve masks are matched anchored at the repo root (unlike class `paths`, which the dispatcher matches right-anchored), so each mask MUST carry the `<vault_root>` prefix — a mask missing it matches nothing under the default `specs/` layout. When `routines["lazy-review.scan"]` is present, normalize it: (1) ensure both masks above are in `paths`; (2) remove every legacy filename-suffixed mask those coarse masks subsume, in BOTH shapes — with or without the `<vault_root>` prefix; (3) inside `filter.frontmatter` set `review_active` to `{"in": [true], "not_in": []}` (drop the legacy `null` leg); (4) set `interval_sec` to `60` when it still carries the legacy `5` (minute cadence for coarse scans; an operator-chosen value other than 5 stays untouched); (5) inside `filter.frontmatter` add `"spec_imported": {"not_in": [true]}` if absent — a doc landed by `/spec.import` carries `spec_imported: true` and must never enter the review loop (it is a read-only copy of an already-approved upstream design); a doc without the key still matches, since the clause only excludes an explicit `true`. When the routine is absent (daemon-disabled project), skip silently. Idempotent; the 6e classes need no per-doc-kind sieve entries — the coarse prefix mask covers every depth under the products tree.
 
 Outcome: `wiring-applied:<N>` where N is 0..7 (the four 6a–6d blocks plus the two 6e classes plus the 6f paths sync).
 
@@ -347,6 +348,31 @@ Fold the primitive's returned report block verbatim into this skill's Step 9 rep
 - **`no-entries`** — the SOT lists no `lazycortex-specs:` agents → report it plainly (a maintainer must extend `default-tiers.json`); not an abort.
 
 Step outcome: `seeded` (any entry added) or `unchanged`.
+
+## Step 6.6: Register the import-pull routine
+
+Cross-repo design handoff (a spec-repo pulled by this dev-repo via `/spec.import`) can run unattended on a schedule instead of the operator remembering to invoke the skill. This step registers that schedule routine via `/lazy-routine.register` — it does NOT hand-write the routine JSON into settings, and it does NOT configure `spec.imports[]` itself (that is `/spec.product-config` / a hand-edit of the `spec` settings section).
+
+**Read first — register only when imports are configured.** Run `Bash(lazycortex-core settings-get spec)` and inspect `imports`. An absent section or an empty/missing `imports` array means no spec-repo is configured to pull from — a schedule routine with nothing to do is dead weight, so skip silently with outcome `skipped-no-imports-configured` and continue to Step 7. Only when `imports` is a non-empty array does this step proceed. No question — the presence of configured imports is genuine project state, not a choice this step re-asks.
+
+**Daemon gate.** Read the tracked `daemon.enabled` flag first (see § Daemon gate). If `False` → skip this registration silently, outcome `skipped-daemon-disabled`. If `unset` / `True` and `imports` is non-empty → proceed.
+
+Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool, passing a `cfg` dict so the wizard runs programmatically (no per-field prompts). The exact routine:
+
+```json
+{
+  "name": "spec.import-pull",
+  "cfg": {
+    "type": "schedule",
+    "every": "30m",
+    "command": ["lazycortex-specs", "import-specs"]
+  }
+}
+```
+
+The daemon resolves `command[0]` (`lazycortex-specs`) to the plugin's bin script and runs `lazycortex-specs import-specs` on the configured cadence — the same primitive `/spec.import` invokes manually; both share one implementation, so a scheduled pull and a manual run behave identically.
+
+If `/lazy-routine.register` reports the routine is already registered, accept its outcome (`unchanged` / `present`) — do not force-overwrite. Outcome: `routine-registered`, `routine-already-present`, `skipped-no-imports-configured`, or `skipped-daemon-disabled`.
 
 ## Step 7: Offer first product registration
 
@@ -391,6 +417,7 @@ Outcome: `cli-allow-added` or `cli-allow-already-present`.
   - Step 5 outcome (`routine-registered`, `routine-already-present`, or `skipped-daemon-disabled`)
   - Step 6 outcome (`wiring-applied:<N>`, `wiring-applied:<N> (daemon-disabled)`, or `skipped-user-scope`)
   - Step 6.5 outcome (`seeded` or `unchanged`), with the primitive's report block folded in verbatim; surface `sot-missing` / `no-entries` if returned
+  - Step 6.6 outcome (`routine-registered`, `routine-already-present`, `skipped-no-imports-configured`, or `skipped-daemon-disabled`)
   - Step 7 outcome (`registered: <compound-key>` or `skipped-per-user-choice`)
 
 ## Step 10: Log the run

@@ -1,6 +1,6 @@
 ---
 name: lazy-core.doctor
-description: "Health check for Claude Code project configuration. Verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, checks that installed plugins are at the latest marketplace version, and delegates to sibling audit skills (lazy-guard.check-public, lazy-log.audit) when they apply. Reports issues and offers targeted fixes. Run periodically or when something feels off."
+description: "Health check for Claude Code project configuration. Verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, checks that installed plugins are at the latest marketplace version, and delegates to sibling audit skills (lazy-guard.check-public, per-plugin audits) when they apply. Reports issues and offers targeted fixes. Run periodically or when something feels off."
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash(python3 *), mcp__*__recall, mcp__*__retain
 ---
 # Project Health Check
@@ -211,7 +211,7 @@ Parse each returned block by splitting on `## scan:` headings. Deduplicate findi
 
 For every finding after merge, the coordinator attaches three internal fields. Agents don't emit them — the coordinator derives them from the finding's title + path. These fields never appear in the printed report; they're used only by Phase 2.7 and the logs.
 
-- **`check_id`** — a stable slug of the form `<area>.<rule>` that identifies the check the finding came from (e.g. `rules.broken-artifact-reference`, `rules.oversize`, `rules.unscoped-no-waiver`, `agents.filename-no-dot`, `agents.frontmatter-malformed`, `skills.name-dir-mismatch`, `commands.filename-no-dot`, `settings.tracked-owns-permissions`, `memory.not-indexed`, `memory.oversize`, `claude-md.path-missing`, `budget.always-loaded-warn`, `budget.always-loaded-fail`, `hooks.import-undeclared`, `mcp.entry-wildcard`, `mcp.destructive-in-allow`, `paths.user-home-abs`, `paths.user-home-subdir`, `paths.project-prefix`, `paths.claude-home-for-local`). The coordinator maintains an explicit title→slug table; new titles must be added to the table with their slug before shipping.
+- **`check_id`** — a stable slug of the form `<area>.<rule>` that identifies the check the finding came from (e.g. `rules.broken-artifact-reference`, `rules.oversize`, `rules.unscoped-no-waiver`, `agents.filename-no-dot`, `agents.frontmatter-malformed`, `skills.name-dir-mismatch`, `commands.filename-no-dot`, `settings.tracked-owns-permissions`, `memory.not-indexed`, `memory.oversize`, `claude-md.path-missing`, `budget.always-loaded-warn`, `budget.always-loaded-fail`, `hooks.import-undeclared`, `mcp.entry-wildcard`, `mcp.destructive-in-allow`, `paths.user-home-abs`, `paths.user-home-subdir`, `paths.project-prefix`, `paths.claude-home-for-local`, `runtime.external-dir-broken`, `runtime.inbox-collision`). The coordinator maintains an explicit title→slug table; new titles must be added to the table with their slug before shipping.
 - **`scope`** — one of `project` / `personal` / `ambiguous`. Derived from the finding's primary path:
   - path inside the repo (no leading `~`, no `/Users/…`) → `project`
   - path under `$HOME/.claude/**` or `$HOME/.mcp.json` → `personal`
@@ -363,10 +363,10 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 - *Run condition*: `.guard-waivers.json` exists at the repo root.
 - *On invoke*: fold guard's summary (category × severity counts, waivered count) and FAIL/WARN findings into a **Guard** subsection.
 
-**11b. Logging coverage** → `lazy-log.audit`
+**11b. Logging coverage** — inline, via `lazy-core.audit` Phase 1 checks
 - *Availability*: `lazycortex-core` meets the canonical signal set above.
-- *Run condition*: always — `lazy-log.audit` is shipped by `lazycortex-core` and runs unconditionally when the plugin is enabled.
-- *On invoke*: fold audit findings into a **Logging** subsection.
+- *Run condition*: always — the logging compliance checks live in `lazy-core.audit` Phase 1 and apply whenever the plugin is enabled.
+- *On invoke*: run the L1–L4 logging compliance checks from `lazy-core.audit` Phase 1 inline (do NOT dispatch a separate skill — execute the same logic described there). Fold findings into a **Logging** subsection.
 
 **11c. Diagram coverage** → `lazy-diagram.audit`
 - *Availability*: `lazycortex-diagram` meets the canonical signal set above.
@@ -385,8 +385,8 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 
 **11f. Expert runtime** — inline, via `lazy-core.audit` Agent D findings
 - *Availability*: always (expert-runtime checks are part of `lazycortex-core` itself — no separate plugin probe needed).
-- *Run condition*: `.claude/lazy.settings.json` contains a non-empty `experts` section OR a `lazy-core.runtime` section. Skip if neither is present (no expert runtime configured — silent skip, no report entry).
-- *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D10 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).
+- *Run condition*: `.claude/lazy.settings.json` contains a non-empty `experts` section, a `lazy-core.runtime` section, **or a non-empty `external_dirs.paths` list**. Skip if none is present (no expert runtime configured — silent skip, no report entry). Test the `paths` list, never the section: a settings migration stamps a `{"_version": 1}` stub for every known section into every repo, so "non-empty section" would match everywhere and defeat the skip.
+- *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D12 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).
 
 ## Phase 4 — Present + fix + waive
 
@@ -426,7 +426,7 @@ Apply all auto-fixable? [y/N]
 After the report, ask the user which fixes to apply. Apply only confirmed fixes. Then enter the **per-WARN waive loop** described in 4a below. Fixes available in-coordinator:
 
 - Rules oversized → suggest running `/lazy-core.optimize`; don't auto-slim here.
-- Rule drift / orphans → direct the user to run the owning plugin's install skill (`/<namespace>.install`, e.g. `/lazy-log.install` for `lazy-log.*` rules). Do NOT auto-overwrite here — the install skill's per-rule `AskUserQuestion` is the sanctioned reconciliation flow.
+- Rule drift / orphans → direct the user to run the owning plugin's install skill (`/<namespace>.install`; `lazy-log.*` rules are owned by `/lazy-core.install`). Do NOT auto-overwrite here — the install skill's per-rule `AskUserQuestion` is the sanctioned reconciliation flow.
 - Missing rules frontmatter → add `---\ndescription: ...\npaths:\n  - "<glob>"\n---` (YAML block-list per Claude Code docs) for scoped rules, or `---\ndescription: ...\nalways_loaded: <one-line reason>\n---` for rules that must load every turn.
 - Rule lacks scope AND waiver → ask the user, per rule, whether the rule is legitimately always-loaded. If yes, add `always_loaded: <reason>` (reason must be substantive — one line explaining *why* every turn needs it, not `true`). If no, add a `paths:` block-list narrowing it to the folders where it applies. Show the proposed frontmatter diff before writing. Never auto-pick a scope — only the user knows the rule's true audience.
 - Inline-array `paths:` shape (FAIL from `lazy-core.audit` rule-writing check 3) → in-place migration to canonical YAML block-list. Parse the existing `paths: ["a", "b", ...]` line, preserve all globs verbatim (including quote style), rewrite as a key on its own line followed by one `  - "<glob>"` per array element. The conversion is mechanical (no semantic change) but always show the diff before writing — the rule file is loaded into context for whoever's editing files in its scope, so even a YAML-shape change deserves explicit user confirmation. Apply per-rule via `AskUserQuestion`; batch only on explicit "apply all" from the user.
@@ -444,7 +444,7 @@ After the report, ask the user which fixes to apply. Apply only confirmed fixes.
 
 ### Loop runtime fix offers
 
-These three fix offers are conditional on findings from Phase 3 § 11e. Each is offered via `AskUserQuestion` only when the corresponding finding is present in the Loop runtime subsection.
+These five fix offers are conditional on findings from Phase 3 § 11f. Each is offered via `AskUserQuestion` only when the corresponding finding is present in the Loop runtime subsection.
 
 **Fix L1 — Daemon stalled** (trigger: D10 WARN "runtime daemon appears stale")
 
@@ -495,6 +495,27 @@ Report: `unregistered routine: <name>`. If `unregister_routine` raises (e.g. set
 
 Offer Fix L3 per-routine when multiple routines are unresolvable — one `AskUserQuestion` per routine. Do not batch them silently.
 
+**Fix L4 — External directory broken** (trigger: D11 FAIL, status `missing` / `dangling` / `wrong_target`)
+
+`AskUserQuestion`: "<N> declared external director(y/ies) do not resolve in this checkout (<comma-joined paths>). Re-link them from `external_dirs.root`?"
+
+Options: `Re-link`, `Skip`.
+
+On Re-link:
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from external_dirs import apply
+from pathlib import Path
+for r in apply(Path('.')):
+  print(f\"{r['path']}: {r['action']}\")
+")
+```
+Report one line per path. `not_a_symlink` and `source_missing` rows are never offered here — real content and an absent source are reported only.
+
+**Fix L5 — Shared inbox** (trigger: D12 FAIL `inbox_collision`)
+
+Report only, no fix offer: print the conflicting `other_repo` and state that one of the two checkouts must set `daemon.run_here: false` (or pin a host list). Doctor does not choose which checkout drives a shared inbox.
+
 For any finding surfaced by a delegated audit (Guard / Logging), direct the user to run that sibling skill for fixes. Doctor never auto-fixes issues owned by sibling audits.
 
 ### 4a. Per-WARN waive loop
@@ -537,7 +558,7 @@ On confirmation, resolve the backend via the Phase 2.7a priority ladder using th
 - **Fix L2 fails with "Permission denied" on rmtree** — the job directory has restricted permissions (e.g. created by a different user or process). Doctor surfaces the error; the user must remove the directory manually.
 - **Fix L3 "unregister_routine" raises "settings file not writable"** — `.claude/lazy.settings.json` is read-only or the process lacks write permission → fix file permissions, then re-run `/lazy-core.doctor`.
 - **Fix L3 offered but routine reappears on next doctor run** — the settings write completed but the installed plugin's default-routines bootstrap re-added the entry. Re-run `/lazy-core.install` with the `skip expert-pump routine` option, or add the routine to a local exclusion list in `lazy.settings.json`.
-- **Phase 3 § 11e skipped unexpectedly** — neither an `experts` section nor a `lazy-core.runtime` section was found in `lazy.settings.json`. If expert runtime is configured but the file is in a non-standard location, run `/lazy-core.audit` directly to surface Agent D findings without the skip guard.
+- **Phase 3 § 11f skipped unexpectedly** — none of an `experts` section, a `lazy-core.runtime` section, or a non-empty `external_dirs.paths` list was found in `lazy.settings.json`. If expert runtime is configured but the file is in a non-standard location, run `/lazy-core.audit` directly to surface Agent D findings without the skip guard.
 
 ## Logging
 

@@ -658,3 +658,51 @@ The daemon watches its own loaded `.py` source and restarts at an iteration boun
   - Under a supervisor (`LAZYCORTEX_SUPERVISED=1`, exported by the launchd plist / systemd unit) → clean `SystemExit(0)`; the supervisor relaunches the process with fresh code. The systemd unit uses `Restart=always` (not `on-failure`) so the clean exit-0 still relaunches; launchd's `KeepAlive` relaunches on any exit.
   - Unsupervised → `os.execv` replaces the process image with a fresh interpreter.
 - The restart happens at the iteration boundary, after any commit has landed and outside the halt path, so it never interrupts mid-commit work or masks a halt the operator still needs to recover from. In-flight worktree tasks (§ 13) survive the restart because the registry and worktrees persist on disk and the next iteration's poll re-attaches them.
+
+---
+
+## 15. `external_dirs` — externally-sourced working directories
+
+A repository whose working directories are partly untracked declares them across both settings layers. The split follows what travels: the list is a property of the project and rides along with every clone; the location is a property of the machine.
+
+Tracked `lazy.settings.json`:
+
+```json
+{
+  "external_dirs": {
+    "_version": 1,
+    "paths": ["Data", "-Inbox", "-config"]
+  }
+}
+```
+
+Gitignored `lazy.settings.local.json`:
+
+```json
+{
+  "external_dirs": {
+    "root": "~/box/Project",
+    "declined": false
+  }
+}
+```
+
+| Field | Layer | Meaning |
+|---|---|---|
+| `paths` | tracked | Repo-relative paths sourced from outside the repository. |
+| `root` | local | Absolute path the declared paths are linked from on this machine. `~` and `$VAR` expand on read; a relative value is anchored to the repository root, never to the reading process's working directory. |
+| `declined` | local | Records that the operator chose not to configure a source, so install never re-asks. |
+
+Each declared path resolves to `<root>/<path>`. A declared entry that climbs out of the repository (`../…`) is dropped on read: the list is tracked and travels with every clone, while repair creates directories and plants symlinks, so only paths the repository contains are ever acted on.
+
+A path is diagnosed as one of `ok`, `missing`, `dangling`, `wrong_target`, `not_a_symlink`, `source_missing`, or `unconfigured`. Exactly three are repaired by re-linking — `missing`, `dangling`, and `wrong_target`, and the last two only while the source exists. `ok` is already correct and left `unchanged`; `not_a_symlink`, `source_missing`, `unconfigured`, and a `dangling` link whose source is gone are reported to the operator and left untouched. Real content occupying a declared path is never removed. A repair the filesystem refuses is reported like any other unrepairable state, with the reason appended to the observed status, and the remaining paths are still repaired.
+
+An absent or empty section is the default and changes no behaviour. Three consequences of a non-empty section:
+
+- An `inbox` routine whose `inbox_dir` is declared and does not resolve fails its tick with `exit = -1` and the error tag `external_dir_broken: <path>`, which folds into the routine's own `routine:<name>` incident and carries the metric label `reason="external_dir_broken"`. An **undeclared** missing inbox stays a silent idle tick, unchanged.
+- `daemon.run_here` must be a host list rather than a bare `true`: a checkout reachable through a synced path carries its gitignored overlay to every machine holding that path, and a bare boolean reads as answered on all of them. Install offers to pin the list to the current host; audit reports the bare boolean as a warning until it is pinned.
+- Install refuses to put a supervisor on a checkout whose inbox another daemon on this host already drives, and skips the supervisor, sandbox, and metrics steps entirely rather than installing them and reporting afterwards.
+
+**The inbox-ownership halt is not gated on this section.** Every daemon checks at startup whether another checkout on the host resolves an inbox routine to the same physical directory, including a repository that declares no external directories at all — the collision is reachable through any symlink, not only a declared one. Where it fires the condition is real: two daemons over one inbox import every document twice.
+
+That halt is symmetric and permanent. Both checkouts raise it at their own next start, and removing the stray supervisor unit does not release the survivor — the halt is persisted state, and only a dirty-tree halt auto-clears. Decide which checkout drives the inbox, set `daemon.run_here: false` (or a host list) in the other, then run `/lazy-runtime.recover` in the one that should keep going. The check runs once per daemon start, so a collision created while a daemon is already running is seen by the newly started daemon, not by the incumbent.

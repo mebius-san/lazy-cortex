@@ -36,6 +36,7 @@ _SUB_FLIP_GATE = "flip-gate"
 _SUB_GATE_TICK = "gate-tick"
 _SUB_SCAFFOLD_ASSET = "scaffold-asset"
 _SUB_RENDER_CONTAINER_STATS = "render-container-stats"
+_SUB_IMPORT_SPECS = "import-specs"
 # waiver: usage string -- help text printed to stderr; not a domain constant
 _USAGE = (
     "usage: lazycortex-specs <subcommand> [args...]\n"
@@ -48,6 +49,7 @@ _USAGE = (
     "  scaffold-asset <product> <category> <slug>  deterministic scaffold of a new asset folder\n"
     "  apply-request <file>           deterministic post-finalize apply transition for a request file\n"
     "  render-container-stats <note>  recompute a container note's stats region\n"
+    "  import-specs [--cwd DIR]        pull exported designs from configured spec-repos\n"
 )
 
 
@@ -97,6 +99,10 @@ def main(argv: list[str]) -> int:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import summary_render  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
     return summary_render.main(rest)
+  if sub == _SUB_IMPORT_SPECS:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import import_specs  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return import_specs.main(rest)
   sys.stderr.write(f"unknown subcommand: {sub}\n")
   return 2
 

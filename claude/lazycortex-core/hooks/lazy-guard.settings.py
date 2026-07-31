@@ -538,6 +538,7 @@ if __name__ == "__main__":
   # noinspection PyBroadException
   try:
     main()
+  # waiver: hook must never fail the tool call it observes — any crash degrades to a silent no-op
   except Exception:
     pass
   sys.exit(0)

@@ -34,6 +34,7 @@ Bash(LAZY_REPO_ROOT="$PWD" python3 "${CLAUDE_PLUGIN_ROOT}/bin/expert_preflight.p
 Parse the JSON on stdout. Its shape:
 
 - `experts[]` — one entry per validated expert: `name`, `static[]` (`{level, message}`), `dynamic` (or `null` when the probe was skipped), `verdict` (`ok` / `fail`), `fixes[]`.
+- `repo[]` — checkout-level findings (`{level, message}`) that apply to every expert here: an inbox another daemon on this host already drives (`fail`), and a `daemon.run_here` gate too coarse to name the machine it was answered on (`warn`).
 - `skipped_cross_repo[]` — `expert@<repo>` targets not validated (this preflight only checks local-repo experts).
 - `summary` — one-line count.
 
@@ -45,7 +46,14 @@ Outcome: `preflight-run` or `no-targets` (empty `experts[]`).
 
 ## Step 2 — Render verdict table
 
-If `experts[]` is empty: print "No expert-shape routines carry a local expert to validate." plus any `skipped_cross_repo` entries, and skip to Step 4 with outcome `no-targets`.
+Render `repo[]` first, above the table — it is not per-expert, and a `fail` there means every expert below is launchable into a harmful state. One line per finding, prefixed with its `level`:
+
+- `fail` on inbox ownership — another checkout on this host drives the same physical inbox, so every file would be dispatched twice. This is not one of the fixes Step 3 applies: which checkout drives a shared inbox is the operator's decision. Print the finding and state that one of the two must set `daemon.run_here: false` (or pin a host list), then re-run.
+- `warn` on the daemon gate — `daemon.run_here` is a bare `true` in a checkout that sources directories from outside git, so a synced overlay reads it as answered on every machine holding the path. Direct the operator to `/lazy-core.install`, which offers to pin it to this host.
+
+When `repo[]` is empty, print nothing for it.
+
+If `experts[]` is empty: print "No expert-shape routines carry a local expert to validate." plus any `repo[]` findings and any `skipped_cross_repo` entries, and skip to Step 4 with outcome `no-targets`.
 
 Otherwise render one markdown table row per expert:
 
@@ -59,7 +67,7 @@ Otherwise render one markdown table row per expert:
 
 Below the table, note any expert whose `dynamic.best_effort_plugin_dirs` is true: "plugin-dir resolution was best-effort for <expert> — a probe-only failure there may be a false negative; re-run under the daemon or with `LAZYCORTEX_PLUGIN_DIRS` set to confirm." List `skipped_cross_repo` targets as unvalidated.
 
-Outcome: `table-shown` or `no-targets`.
+Outcome: `table-shown`, `table-shown-repo-blocked` (any `fail` in `repo[]`), or `no-targets`.
 
 ## Step 3 — Confirm + apply fixes
 
@@ -158,3 +166,4 @@ input: "<--expert <name> | --no-probe | none>"
 - **A probe reports every server `timed-out` at once** — the probe hit its 90s wall budget (the whole spawn hung, not one server) → confirm `claude` is on PATH and authenticated (`claude -p "hi"` by hand), then re-run.
 - **"plugin-dir resolution was best-effort"** in the table — the preflight ran interactively with no `LAZYCORTEX_PLUGIN_DIRS` and derived plugin dirs from the repo + cache → a probe-only failure may be a false negative; re-run under the daemon or export `LAZYCORTEX_PLUGIN_DIRS` and confirm.
 - **A fix cannot be applied because the tree is mid-merge / rebase** — the skill refuses to write a settings change it cannot commit → finish the git transaction, then re-run `/lazy-runtime.preflight` to apply the fix.
+- **Every expert reports `ok` but a `fail` line sits above the table** — the experts are individually launchable; the checkout is not, because another daemon on this host already drives one of its inboxes → set `daemon.run_here: false` in the checkout that must not drive it, then re-run.

@@ -53,6 +53,10 @@ Every section is a flat top-level key whose dict carries an `_version: int` fiel
   "routines": {
     "_version": 2,
     "lazy-expert.pump": { ... }
+  },
+  "external_dirs": {
+    "_version": 1,
+    "paths": [ ... ]
   }
 }
 ```

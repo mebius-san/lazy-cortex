@@ -33,8 +33,6 @@ from __future__ import annotations
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # pylint: disable=import-error,wrong-import-position
 
-from typing import NoReturn
-
 import argparse
 import datetime as _dt
 import json
@@ -46,7 +44,7 @@ import spec_paths
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from typing import NoReturn
 
 
 class _K:
@@ -63,6 +61,9 @@ class _K:
   SPEC_SOURCE_DOCS = "spec_source_docs"
   ICONIZE_ICON = "iconize_icon"
   ICONIZE_COLOR = "iconize_color"
+  HANDOFF = "handoff"
+  STOP_AFTER = "stop_after"
+  GATE_DESIGN_DONE = "spec_design_done"
   # Filenames
   FOLDER_NOTE_TMPL = "asset-note.md"
   DESIGN_MD = "design.md"
@@ -263,21 +264,28 @@ def _layout(category: str, record: dict) -> list[str]:
   """
   Return the list of authored-doc filenames for the given category.
 
-  Built-in categories use the fixed layout. Operator-defined categories use the
-  default `design.md` + `plan.md` shape until extended.
+  Built-in categories use the fixed layout; operator-defined categories use the
+  default `design.md` + `plan.md` shape. A product carrying a `handoff` block
+  with `stop_after: spec_design_done` scaffolds only the design-role doc — the
+  post-stop docs (`plan.md`) belong to the consuming dev-repo.
 
   Args:
     category: Asset category key.
-    record: Product record (reserved for operator-defined layout extensions).
+    record: Product record (reads the optional `handoff` block).
 
   Returns:
     List of authored-doc filenames (excludes the folder-note).
   """
-  # guard: record reserved for operator-defined layout hooks
-  _ = record
   if category in _Category.BUILTIN_LAYOUT:
-    return _Category.BUILTIN_LAYOUT[category]
-  return _Category.DEFAULT_LAYOUT
+    full = _Category.BUILTIN_LAYOUT[category]
+  else:
+    full = _Category.DEFAULT_LAYOUT
+  handoff = record.get(_K.HANDOFF)
+  # guard: no handoff block, or an explicit/defaulted stop past design — full layout applies
+  if (not isinstance(handoff, dict)
+      or (handoff.get(_K.STOP_AFTER) or _K.GATE_DESIGN_DONE) != _K.GATE_DESIGN_DONE):
+    return full
+  return [ d for d in full if d != _K.PLAN_MD ]
 
 
 def _icon_color(category: str, record: dict) -> tuple[str, str]:

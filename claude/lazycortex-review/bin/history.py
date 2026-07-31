@@ -33,14 +33,13 @@ from __future__ import annotations
 # pylint: disable=import-error,deprecated-module
 
 import re
-from pathlib import Path
 
 import frontmatter as _fm
 import parser as _parser
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  from pathlib import Path
 
 
 HISTORIAN_TAG = "#expert/lazy-review-historian"

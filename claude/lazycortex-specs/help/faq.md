@@ -1,9 +1,13 @@
 ---
 chapter_type: faq
-summary: Answers to common questions about products, assets, gates, code sync, releases, requests, and source links in lazycortex-specs.
-last_regen: 2026-07-26
+summary: Answers to common questions about products, assets, gates, code sync, releases, requests, cross-repo imports, and source links in lazycortex-specs.
+last_regen: 2026-07-30
 no_diagram: true
 source_skills:
+  - spec.install
+  - spec.product-config
+  - spec.import
+  - spec.doctor
   - spec.create-asset
   - spec.create-feature
   - spec.create-change
@@ -19,21 +23,17 @@ source_skills:
   - spec.resolve-repo
   - spec.resolve-dependency
   - spec.source-url
-  - spec.request-router
-  - spec.request-classify
-  - spec.request-find-candidates
+  - spec.refresh-sources
   - spec.request-attach
   - spec.request-spawn
-  - spec.install
-  - spec.product-config
-  - spec.doctor
-  - spec.help
+  - spec.request-classify
+  - spec.request-find-candidates
 ---
 # Frequently asked questions
 
 ## Do I need to run anything before registering my first product?
 
-Yes — run `/spec.install` once per project (or once globally, if you want the plugin available everywhere). It ensures the per-category template-override directories exist, seeds the repo's authoring language (asks only if none is on record), registers the `spec.gate-tick` daemon routine so asset gates advance automatically, and wires the requests-inbox runtime (open / apply routines, the `spec.request-router` expert, and its review class) at project scope. It's idempotent — re-running it is always safe and never overwrites config you've customized since. At the end it offers to chain straight into `/spec.product-config` so you can register your first product in the same pass, or you can skip and run that separately whenever you're ready.
+Yes — run `/spec.install` once per project (or once globally, if you want the plugin available everywhere). It ensures the per-category template-override directories exist, seeds the repo's authoring language (asks only if none is on record), registers the `spec.gate-tick` daemon routine so asset gates advance automatically, and wires the requests-inbox runtime (open / apply routines, the request-routing expert, and its review class) at project scope. It's idempotent — re-running it is always safe and never overwrites config you've customized since. At the end it offers to chain straight into `/spec.product-config` so you can register your first product in the same pass, or you can skip and run that separately whenever you're ready.
 
 ---
 
@@ -73,7 +73,7 @@ Once a category exists on the product, `/spec.create-asset` scales its clarifyin
 
 Every asset has five flat boolean gates on its status folder-note: `spec_design_done`, `spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, and `spec_released`. They form a strict linear ladder — each gate requires every earlier gate to be true before it can be flipped on.
 
-The first two (`spec_design_done`, `spec_plan_done`) are **derived**: the daemon's `spec.gate-tick` routine ticks each asset's status folder-note roughly once a minute and auto-flips them the moment the corresponding doc (`design.md` or `bug.md`, then `plan.md`) reaches `spec_stage: approved`. The last three are **human-signal** gates: on its tick, `spec.gate-tick` drops a `[!ready]` callout in the asset's `# Gates` section prompting you to flip the gate once the external condition (deploy landed, tests are green, branch merged) is actually met — and if that condition later regresses, the next tick rewrites the callout to an "readiness withdrawn" notice instead of leaving a stale prompt. To flip any gate manually, run `/spec.flip-gate <asset> <gate>`; the skill confirms with you before running the primitive, which enforces the ladder precondition and refuses cleanly if it isn't satisfied.
+The first two (`spec_design_done`, `spec_plan_done`) are **derived**: the daemon's `spec.gate-tick` routine ticks each asset's status folder-note roughly once a minute and auto-flips them the moment the corresponding doc (`design.md` or `bug.md`, then `plan.md`) reaches `spec_stage: approved`. The last three are **human-signal** gates: on its tick, `spec.gate-tick` drops a `[!ready]` callout in the asset's `# Gates` section prompting you to flip the gate once the external condition (deploy landed, tests are green, branch merged) is actually met — and if that condition later regresses, the next tick rewrites the callout to a readiness-withdrawn notice instead of leaving a stale prompt. To flip any gate manually, run `/spec.flip-gate <asset> <gate>`; the skill confirms with you before running the primitive, which enforces the ladder precondition and refuses cleanly if it isn't satisfied.
 
 ---
 
@@ -118,17 +118,25 @@ For squash-merges, where the ancestor check comes back false, pass `--force-merg
 
 ---
 
+## Can I pull specs from another repo instead of writing everything locally?
+
+Yes, if the upstream repo has configured a `handoff` product and this repo has a matching `spec.imports[]` entry pointing at it. Run `/spec.import` to fetch every configured entry, land each qualifying asset's approved authored docs into this repo read-only (marked `spec_imported: true`), auto-register any product the upstream repo declared but this one hasn't seen yet, and print a summary table of imported / unchanged / drift / skipped counts. It's the manual counterpart to a `spec.import-pull` daemon routine that runs the same underlying pull on a schedule once configured — running the skill by hand or waiting for the routine produces identical results.
+
+The imported copy is frozen at the moment of handoff: if the upstream doc changes afterward, the next run reports that asset as drift rather than silently overwriting your local copy — compare the two and decide by hand whether to adopt the change. If an asset's category has no matching templates in this repo, it's reported as skipped; register the category with `/spec.add-asset-category` first, then re-run.
+
+---
+
 ## What is the requests inbox and how does an idea become an asset?
 
 The vault-root `requests/` folder is the intake inbox. Run `/spec.create-request` with a raw idea; the skill asks three to five wizard questions to clarify scope, outcome, and constraints, then writes a body-only Markdown file at `requests/<slug>.md` — it never sets frontmatter itself, that lands automatically once the request enters the review loop.
 
-Once the request body is approved during review, the `spec.request-router` agent takes over: it classifies the request, searches the vault for existing entities it could attach to, and always surfaces its proposed routing — spawn a new asset, attach to an existing one, or both — as an explicit confirmation you tick before it settles. You can also edit the proposed routing block directly instead of just accepting or rejecting it. The whole pipeline runs without you hand-editing any frontmatter.
+Once the request body is approved during review, the routing step takes over: it classifies the request (`/spec.request-classify`), searches the vault for existing entities it could attach to (`/spec.request-find-candidates`), and always surfaces its proposed routing — spawn a new asset, attach to an existing one, or both — as an explicit confirmation you tick before it settles. You can also edit the proposed routing block directly instead of just accepting or rejecting it. The whole pipeline runs without you hand-editing any frontmatter.
 
 ---
 
 ## The requests pipeline mentions classify / find-candidates / attach / spawn — do I ever run those myself?
 
-Normally no — `spec.request-router` calls them for you once a request's body is approved in review: it classifies the body (`spec.request-classify`), searches for existing attach targets (`spec.request-find-candidates`), then either attaches to an existing entity (`spec.request-attach`) or spawns a brand-new one (`spec.request-spawn`) once you confirm the routing.
+Normally no — the routing step calls them for you once a request's body is approved in review: it classifies the body (`spec.request-classify`), searches for existing attach targets (`spec.request-find-candidates`), then either attaches to an existing entity (`spec.request-attach`) or spawns a brand-new one (`spec.request-spawn`) once you confirm the routing.
 
 Each is also a standalone primitive you can invoke directly if you want manual control — for example to re-classify a request after editing it, or to attach a request to a specific entity without waiting for the router's ranking. `spec.request-attach` and `spec.request-spawn` are idempotent on the request side: re-running with the same request/target pair is a safe no-op rather than a duplicate append.
 
@@ -139,6 +147,14 @@ Each is also a standalone primitive you can invoke directly if you want manual c
 Every source URL in the spec system is built by the `spec.source-url` primitive from a known-forges table (GitHub, GitLab, Bitbucket, Gitea, Forgejo, SourceHut) — never inlined as a hard-coded `/blob/<branch>/<path>`. Run `/spec.doctor <product>` to find links that were not produced that way; it reports every source link whose format doesn't match, or whose branch segment doesn't match the file's pin or the repo default.
 
 If the underlying repo record is missing or the remote's hostname isn't recognized, `spec.resolve-repo` — the primitive `spec.source-url` calls to get the repo's base URL and forge — aborts with a message describing the gap. Fix the repo record by running `/spec.product-config` (it writes the `repos` entry), then re-run the sync or creation skill that emits the source links.
+
+---
+
+## I hand-edited a doc's `spec_source_docs` frontmatter but the body's Sources section still shows the old list. How do I sync it?
+
+Run `/spec.refresh-sources <file-path>` on that doc. Frontmatter (`spec_source_docs`, `spec_source_requests`) is the source of truth; the body's `# Sources` section — its `## Docs` and `## Requests` bullet lists — is only ever a projection of it, and hand-editing frontmatter doesn't automatically rewrite the body. The skill re-projects both sub-sections, preserving any gloss you've added to an existing bullet (matched by the wikilink target) and dropping bullets whose wikilink no longer appears in frontmatter. It also regenerates the `# Summary` précis for the doc's asset note and its containing category / product-root notes, and refreshes their stats.
+
+You only need this after a manual frontmatter edit — every skill that writes `spec_source_docs` / `spec_source_requests` itself (`spec.request-attach`, `spec.request-spawn`) keeps the body in sync as part of the same write.
 
 ---
 
@@ -159,9 +175,3 @@ Re-run `/spec.doctor <product> --apply` — the fix loop offers to strip the obs
 ## A dependency in my product record points at a product or repo key that no longer exists. What do I do?
 
 `spec.resolve-dependency` refuses with a clear error naming the missing key rather than silently dropping or guessing at it. Run `/spec.product-config` on the product — its dependency step lets you review, extend, or correct the `dependencies` list; it never removes an entry you don't explicitly touch, so you can fix just the stale one.
-
----
-
-## Is there a quick way to see every skill this plugin ships, without opening the help docs?
-
-Yes — run `/spec.help`. It prints a one-screen cheatsheet grouped by area (bootstrap, authoring, gates & lifecycle, request processing, sync & validation, primitives) with a one-line description per skill, plus links to the full walkthroughs, troubleshooting, and FAQ chapters. It's a static reference — no tools run, nothing is logged — so it's the fastest way to recall a skill's name or check what a primitive does before diving into the longer docs.

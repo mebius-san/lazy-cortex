@@ -26,6 +26,10 @@ from pathlib import Path
 
 from lazy_settings import load_tracked_section, save_section
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
 
 def _resolve_settings_path(cwd: Path | str | None) -> Path:
   """
@@ -43,6 +47,7 @@ def _resolve_settings_path(cwd: Path | str | None) -> Path:
     root = Path(cwd)
   else:
     root = Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
+  # waiver: canonical settings-file location, fixed by the lazy.settings contract, not a domain key
   return root / ".claude" / "lazy.settings.json"
 
 
@@ -52,7 +57,7 @@ def settings_get(section: str, *, cwd: Path | str | None = None) -> dict:
 
   The tracked layer is read without the local overlay, so the returned value is the
   exact on-disk section a subsequent write would round-trip. A section absent from the
-  file (or a missing file) yields the `_version`-stamped empty stub that
+  file (or a missing file) yields the version-stamped empty stub that
   `load_tracked_section` produces.
 
   Args:
@@ -90,6 +95,7 @@ def settings_set(section: str, value: object, *, cwd: Path | str | None = None) 
   """
   # guard: a section is always a JSON object — reject scalars / arrays before touching disk
   if not isinstance(value, dict):
+    # waiver: naming the rejected JSON type in a CLI error message; no class registry exists here
     raise ValueError(f"section value must be a JSON object, got {type(value).__name__}")
   save_section(_resolve_settings_path(cwd), section, value)
   return { "status": "written", "section": section }
@@ -105,8 +111,11 @@ def cmd_settings_get(argv: list[str]) -> int:
   Returns:
     Process exit code: 0 on success, 2 on argument error.
   """
+  # waiver: argparse CLI signature and help strings, not domain keys
   parser = argparse.ArgumentParser(prog = "lazycortex-core settings-get")
+  # waiver: argparse CLI signature, not a domain key
   parser.add_argument("section")
+  # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--cwd", default = None, help = "Repository root (default: $LAZY_REPO_ROOT or cwd)")
   args = parser.parse_args(argv)
   print(json.dumps(settings_get(args.section, cwd = args.cwd)))
@@ -123,8 +132,11 @@ def cmd_settings_set(argv: list[str]) -> int:
   Returns:
     Process exit code: 0 on success, 1 on malformed / non-object stdin, 2 on argument error.
   """
+  # waiver: argparse CLI signature and help strings, not domain keys
   parser = argparse.ArgumentParser(prog = "lazycortex-core settings-set")
+  # waiver: argparse CLI signature, not a domain key
   parser.add_argument("section")
+  # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--cwd", default = None, help = "Repository root (default: $LAZY_REPO_ROOT or cwd)")
   args = parser.parse_args(argv)
   try:

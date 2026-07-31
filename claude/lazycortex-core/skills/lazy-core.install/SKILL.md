@@ -9,7 +9,7 @@ Bootstrap the plugin in the right scope: copy every rule template shipped by the
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 20 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 21 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 0 — Verify Python ≥ 3.12 (floor)`
@@ -27,6 +27,7 @@ This skill has 20 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 10.5 — Bootstrap .memory/ directory`
    - `Step 11 — Register expert candidates`
    - `Step 12 — Bootstrap expert-pump routine`
+   - `Step 12.5 — Restore externally-sourced working directories`
    - `Step 13 — Gate 2 (run_here) + daemon supervisor install`
    - `Step 13.5 — Configure expert-spawn sandbox in .runtime/sandbox.settings.json`
    - `Step 13.6 — Provision metrics (port + repo label + scrape-targets file)`
@@ -552,9 +553,125 @@ bootstrap_default_routines(Path('<repo-root>'))
 
 State **registered** if the routine was added; **already-present** if it was already there; **skipped-no-experts** if condition 1 was false.
 
+## Step 12.5: Restore externally-sourced working directories
+
+A repository may declare working directories it does not carry in git — bulk data, an inbox, secrets — in the tracked `external_dirs.paths` list. A fresh clone has the declaration but not the directories; each checkout records where they come from on this machine in its own gitignored overlay under `external_dirs.root`. Without that, a declared inbox never resolves and its routine can never dispatch.
+
+This step runs **before** Step 13 installs a supervisor, for two reasons: the links must exist before the inbox-ownership check below can see which physical directory this checkout actually scans, and a contested inbox must block the supervisor install rather than be discovered after it. A refusal here is preventive only while nothing has been installed yet.
+
+Read the state first — never ask what is already on record:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from external_dirs import declared_paths, source_root
+from lazy_settings import load_local_only_section
+from pathlib import Path
+p = Path('<repo-root>')
+paths = declared_paths(p)
+declined = load_local_only_section(p / '.claude/lazy.settings.json', 'external_dirs').get('declined')
+if not paths:
+  print('no-declaration')
+elif source_root(p) is not None:
+  print('configured')
+elif declined:
+  print('declined')
+else:
+  print('unconfigured')
+"
+```
+
+- Output `no-declaration` → state **no-declaration** and continue to the ownership guard below. Do NOT ask. (Optionally, when the repo registers an `inbox` routine whose `inbox_dir` is absent from the tree, report it as an INFO line in Step 14 so the operator knows the option exists — still no question.)
+- Output `configured` → apply silently and report the per-path outcome. Do NOT ask.
+- Output `declined` → state **declined-on-record** and continue to the ownership guard below. Do NOT ask.
+- Output `unconfigured` → ask **once**:
+
+```
+AskUserQuestion:
+  header: "External dirs"
+  question: "This repo declares <N> working director(y/ies) it does not carry in git (<comma-joined paths>). Where are they on this machine?"
+  description: "Recorded for THIS checkout in its own gitignored `lazy.settings.local.json` as `external_dirs.root` — the absolute path the declared paths are linked from (e.g. the interactive copy of this project). 'Leave as is' records the decision so this is never asked again; the declared directories stay absent and any routine that needs one fails loudly on its next tick."
+  options: ["Link them from a source root — I'll give the absolute path", "Leave as is — don't ask again"]
+```
+
+On the first option, ask one follow-up for the absolute path, then persist and apply:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_local_only_section, save_local_section
+from pathlib import Path
+p = Path('<repo-root>/.claude/lazy.settings.json')
+sec = load_local_only_section(p, 'external_dirs')
+sec['root'] = '<operator-supplied absolute path>'
+save_local_section(p, 'external_dirs', sec)
+"
+```
+
+On `Leave as is`, write `sec['declined'] = True` through the same primitive and skip the apply.
+
+Then, for `configured` and for a freshly-supplied root, apply the repair and print one line per path:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from external_dirs import apply
+from pathlib import Path
+for r in apply(Path('<repo-root>')):
+  print(f\"{r['path']}: {r['action']} (was {r['status']})\")
+"
+```
+
+`apply` never removes a real directory: a declared path occupied by operator content is reported as `skipped (was not_a_symlink)` and left alone. A path the filesystem refused to link is reported the same way, with the reason appended to the `was …` status. Surface every `skipped` line in Step 14 — those states need a human.
+
+The repair outcome comes from the actions, not from the probe: **linked** when any record is `linked` or `relinked`, **unchanged** when every record is `unchanged` or `skipped`. (`configured` is the probe's word for "a source root is on record", never a step outcome.)
+
+### 12.5a. Inbox ownership — refuse a collision, offer to pin an ambiguous gate
+
+Two daemons over one physical inbox import every document twice, and the duplicate is not automatically reversible. Run both guards, and treat them differently — they carry different severities and different fixes:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from inbox_guard import check_inbox_collision, check_run_here_specificity
+from pathlib import Path
+p = Path('<repo-root>')
+for f in check_inbox_collision(p):
+  print('collision: ' + f['detail'])
+for f in check_run_here_specificity(p):
+  print('ambiguous: ' + f['detail'])
+"
+```
+
+**Any `collision` line is a refusal, not a warning.** State **inbox-conflict**, print the lines verbatim, and tell the operator that one of the two checkouts must set `daemon.run_here: false` (the other one is named in the finding). Then skip Steps 13, 13.5, and 13.6 entirely — no supervisor is installed for a contested inbox — and mark this step failed in Step 14. Which checkout drives a shared inbox is the operator's decision, so never resolve it here.
+
+**An `ambiguous` line with no collision is a one-question conversion, not a refusal.** A bare `daemon.run_here: true` is what every install before this feature recorded, so refusing it would stop the first consumer to adopt the feature on their first re-run. Ask once:
+
+```
+AskUserQuestion:
+  header: "Pin run_here?"
+  question: "This repo sources working directories from outside git, so its gitignored overlay travels to every machine holding that path — and `daemon.run_here: true` reads as answered on all of them. Pin it to this host (<hostname>)?"
+  description: "Rewrites `daemon.run_here` in THIS checkout's gitignored `lazy.settings.local.json` from `true` to a one-entry host list naming <hostname>. Every other machine reaching the same synced path then skips the daemon install and tears down any supervisor unit it already has, instead of starting a second daemon over the same inbox. 'Leave as is' keeps the bare boolean; the condition is re-reported on every audit until it is pinned."
+  options: ["Pin to this host", "Leave as is"]
+```
+
+On **Pin to this host**, derive the hostname the same way Step 13's gate compares it (`socket.gethostname().split('.')[0].lower()`) and persist:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_local_only_section, save_local_section
+from pathlib import Path
+import socket
+p = Path('<repo-root>/.claude/lazy.settings.json')
+sec = load_local_only_section(p, 'daemon')
+sec['run_here'] = [ socket.gethostname().split('.')[0].lower() ]
+save_local_section(p, 'daemon', sec)
+"
+```
+
+State **run-here-pinned**; Step 13 reads the new host list and proceeds normally. On **Leave as is**, state **run-here-ambiguous-kept** and continue — this matches the WARN severity `/lazy-core.audit` D12 assigns the same condition.
+
+Outcome: `no-declaration` / `linked` / `unchanged` / `declined-on-record` / `run-here-pinned` / `run-here-ambiguous-kept` / `inbox-conflict`.
+
 ## Step 13: Gate 2 (run_here) + daemon supervisor install
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), inherit the same outcome and skip this step.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), or Step 12.5 stated `inbox-conflict`, inherit the same outcome and skip this step.
 
 Whether the daemon runs for **this checkout** (this working copy of the project) (Gate 2) is a per-checkout decision, recorded once in THIS checkout's own gitignored local overlay (`daemon.run_here`) and honoured silently on every re-run. It is NOT per-machine: a machine may hold several checkouts of the same project, each with its own `.claude/lazy.settings.local.json`, and the daemon runs only on the checkout(s) where `run_here` is true. Read it first; ask only when nothing is on record.
 
@@ -698,7 +815,7 @@ Never touch a unit whose `<REPO_ID>` differs — that id belongs to another chec
 
 ## Step 13.5: Configure expert-spawn sandbox in .runtime/sandbox.settings.json
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), OR Step 13 stated `run-here-declined` or `not-this-host`, inherit the skip with outcome `skipped-not-run-here` and move to Step 14 — there is no daemon running here to sandbox.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), OR Step 12.5 stated `inbox-conflict`, OR Step 13 stated `run-here-declined` or `not-this-host`, inherit the skip with outcome `skipped-not-run-here` and move to Step 14 — there is no daemon running here to sandbox.
 
 Otherwise, the runtime daemon spawns `claude -p --permission-mode dontAsk` subprocesses for every expert job, passing `--settings <repo-root>/.runtime/sandbox.settings.json`. The sandbox scope lives in that daemon-owned runtime file — NOT in `.claude/settings.local.json` — because `.claude/settings.local.json` is loaded by EVERY Claude session in the checkout, so a `sandbox.enabled: true` there would also confine the operator's interactive session (e.g. breaking `git push` over SSH, which the sandbox's HTTP/HTTPS proxy cannot carry). `--settings` is passed only on the spawn, so the sandbox reaches the expert subprocess and never the interactive session.
 
@@ -762,7 +879,7 @@ One line combining the sandbox-file state, the permissions-file state, and the m
 
 ## Step 13.6: Provision metrics (port + repo label + scrape-targets file)
 
-If Step 13 ended in `run-here-declined` or `not-this-host` (or was skipped), inherit the outcome and state **skipped-not-run-here** — metrics are provisioned only for checkouts that actually run the daemon on this machine.
+If Step 12.5 ended in `inbox-conflict`, or Step 13 ended in `run-here-declined` or `not-this-host` (or was skipped), inherit the outcome and state **skipped-not-run-here** — metrics are provisioned only for checkouts that actually run the daemon on this machine.
 
 Read-first, like every gate in this skill:
 
@@ -844,6 +961,7 @@ Report to the user:
 - Expert registration outcome (Step 11)
 - lazycortex-core agent-model tier seed outcome (Step 11 §1b, via `lazy-core.agent-models-seed`)
 - Expert-pump routine registration outcome (Step 12)
+- External working-directory outcome (Step 12.5), including every `skipped (was …)` line, the `run_here` pin decision, and any `inbox-conflict` refusal
 - Daemon supervisor install outcome (Step 13)
 - Sandbox/permissions merge outcome (Step 13.5)
 - Metrics provisioning outcome (Step 13.6)
@@ -872,6 +990,10 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Step 13 fails: `systemctl --user enable --now` error** — the service unit was written but `systemctl` returned a non-zero exit code → run `systemctl --user status lazy-core-runtime-<REPO_ID>.service` to inspect the error, then correct and re-enable manually.
 - **Daemon never starts for this checkout after install** — Gate 2 (`daemon.run_here`) is `false` in this checkout's gitignored `lazy.settings.local.json`, so no supervisor was installed → edit the flag to `true` (or delete it) and re-run `/lazy-core.install` to install the supervisor for this checkout.
 - **A second machine started its own daemon for the same checkout** — the checkout sits on a file-synced path (Dropbox, iCloud, Syncthing), so the gitignored overlay carrying `daemon.run_here: true` was synced to that machine and its install honoured the flag → set `daemon.run_here` to a host list naming only the machine that should run it (`["nexus"]`) and re-run `/lazy-core.install` on the other machine; it removes the stray supervisor unit instead of installing one.
+- **A declared external directory stays absent after install** — the checkout has no `external_dirs.root` on record and the operator answered "Leave as is", so `declined` is set in the local overlay and Step 12.5 never asks again → delete `external_dirs.declined` from `.claude/lazy.settings.local.json` and re-run `/lazy-core.install` to be asked once more.
+- **Step 12.5 reports `inbox-conflict` and no supervisor is installed** — another checkout on this host registers an inbox routine that resolves to the same physical directory, so both daemons would dispatch every file twice → set `daemon.run_here: false` in the checkout that must not drive it (or pin `run_here` to a host list), then re-run.
+- **Both checkouts' daemons are halted with `inbox_collision` and removing one supervisor does not release the other** — the halt is symmetric and permanent by design: each daemon raises it at its own startup, and the halt block is state, not a live probe. Nothing auto-clears it (only a dirty-tree halt does) → decide which checkout drives the inbox, set `daemon.run_here: false` in the other, then run `/lazy-runtime.recover` in the survivor to clear its halt block.
+- **A declared external directory is reported `skipped (was missing: PermissionError …)`** — the filesystem refused the link (a read-only parent, a slot held by another process); the remaining declared paths were still repaired → fix the permission and re-run `/lazy-core.install`, or accept Fix L4 in `/lazy-core.doctor`.
 - **Re-run never asks about the daemon again** — both gates are already on record (`daemon.enabled` in tracked settings, `daemon.run_here` in the local overlay); this is the intended quiet-on-re-run behaviour → to revisit a decision, edit or delete the relevant flag and re-run.
 
 ## Notes

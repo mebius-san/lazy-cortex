@@ -27,8 +27,8 @@ from worktree_tasks import WorktreeTaskManager
 from code_fingerprint import CodeFingerprint
 from constants import (
   DaemonKey, GitConfigKey, HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase,
-  JobCollectKey, JobConfigKey, JobStatus, PluginFile, RoutineKey, SettingsFile, SettingsKey, StateKey,
-  TickResultKey, WorktreeEntryKey, WorktreeResult, WorktreeResultKey,
+  IncidentState, InboxGuardKey, JobCollectKey, JobConfigKey, JobStatus, PluginFile, RoutineKey, SettingsFile,
+  SettingsKey, StateKey, TickResultKey, WorktreeEntryKey, WorktreeResult, WorktreeResultKey,
 )
 
 from typing import TYPE_CHECKING
@@ -512,6 +512,41 @@ def _halt_daemon(
   })
 
 
+def _halt_on_inbox_collision(repo_root: Path) -> bool:
+  """
+  Halt the daemon when another checkout on this host drives the same physical inbox.
+
+  Two daemons over one inbox duplicate every dispatch from the first tick, and the duplicated
+  work is not automatically reversible, so the daemon refuses to drive it.
+
+  Notes:
+    - The check runs once, at startup, and the halt is symmetric and permanent: both checkouts
+      halt, and removing the other supervisor unit does not release the survivor — that needs
+      an explicit recover. A collision created while a daemon is already running is invisible
+      to it until its next start; the newly started daemon is the one that sees it and halts.
+    - The return value reports whether a halt was raised, for a caller that wants to branch on
+      it; the startup path ignores it, because a halted daemon still enters the loop so
+      halt-ignoring routines can triage the halt.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is about to drive.
+
+  Returns:
+    True when a halt was raised; False when no collision was found.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  from inbox_guard import check_inbox_collision
+  collisions = check_inbox_collision(repo_root)
+  # guard: no other daemon shares an inbox with this checkout
+  if not collisions:
+    return False
+  detail = "; ".join(str(c[InboxGuardKey.DETAIL]) for c in collisions)
+  state = runtime_state.load(repo_root)
+  # waiver: daemon error/trigger token, not an internal key
+  _halt_daemon(repo_root, state, HaltReason.INBOX_COLLISION, "run", detail)
+  return True
+
+
 def _emit_halt_metric_if_available(reason: str, triggered_by: str) -> None:
   """
   Record a halt to the metrics module when available and enabled.
@@ -591,7 +626,8 @@ def _classify_routine_error(err: str) -> str:
   maps to `config_violation` so the daemon can escalate to the class-1 halt path.
 
   Returns:
-    One of `config_violation`, `timeout`, `git_pre_failed`, `git_post_failed`, or `error`.
+    One of `config_violation`, `external_dir_broken`, `timeout`, `git_pre_failed`,
+    `git_post_failed`, or `error`.
   """
   e = err.lower()
   # guard: settings-invariant violation — escalate to class-1 halt path (GAP B)
@@ -599,6 +635,11 @@ def _classify_routine_error(err: str) -> str:
   if "config_violation" in e or "compute_inputs_failed" in e:
     # waiver: daemon error/trigger token, not an internal key
     return "config_violation"
+  # guard: a broken declared external dir is its own cause — the fix is a symlink, not a retry
+  # waiver: daemon error/trigger token, not an internal key
+  if "external_dir_broken" in e:
+    # waiver: daemon error/trigger token, not an internal key
+    return "external_dir_broken"
   # guard: timeout is the most specific signal
   # waiver: daemon error/trigger token, not an internal key
   if "timeout" in e:
@@ -614,6 +655,56 @@ def _classify_routine_error(err: str) -> str:
     return "git_post_failed"
   # waiver: daemon error/trigger token, not an internal key
   return "error"
+
+
+def _open_incident_keys(repo_root: Path) -> set[str]:
+  """
+  Collect the key of every incident currently in the open state.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is driving.
+
+  Returns:
+    The open incidents' keys; empty when nothing is open.
+  """
+  return {
+    str(row.get(IncidentKey.INCIDENT))
+    for row in error_ledger.incidents(repo_root, state = IncidentState.OPEN)
+    if row.get(IncidentKey.INCIDENT)
+  }
+
+
+def _resolve_routine_incident(repo_root: Path, name: str, open_keys: set[str] | None = None) -> None:
+  """
+  Close the open incident of one routine after a successful tick.
+
+  A routine incident is opened from a failed tick but has no closing event of its own, so a
+  transient failure — a source that came back, a remote that recovered — otherwise stays open
+  forever. An incident escalated to `needs_operator` is left untouched: once a human is in the
+  loop, closing it is their call.
+
+  Notes:
+    - Deciding whether anything is open costs one pass over the whole incident journal, whose
+      length grows with the retention window rather than with the number of open incidents.
+      A caller closing several routines in one pass reads the open set once and passes it in;
+      without it this reads the journal itself.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is driving.
+    name: Routine name whose incident axis is closed.
+    open_keys: Pre-read set of open incident keys; read from the ledger when omitted.
+  """
+  key = f"routine:{name}"
+  known = _open_incident_keys(repo_root) if open_keys is None else open_keys
+  # guard: nothing open on this axis — a resolved event would invent an incident
+  if key not in known:
+    return
+  error_ledger.resolve(
+    # waiver: daemon error/trigger token, not an internal key
+    repo_root, key, resolution = "auto_recovered",
+    kind = IncidentKind.ROUTINE_ERROR, actor = IncidentActor.DAEMON,
+    routine = name,
+  )
 
 
 def _maybe_prune_errors(repo_root: Path) -> None:
@@ -765,7 +856,11 @@ def _run_iteration(repo_root: Path) -> None:
 
   now = time.time()
   halted_this_iter = False
-  for name, routine_cfg in due_routines(now, registry, last_run, system_stuck = system_stuck):
+  due = due_routines(now, registry, last_run, system_stuck = system_stuck)
+  # one incident-journal pass per iteration instead of one per clean tick: the pass is O(journal
+  # length), so reading it per tick would scale every routine's cost with the retention window
+  open_incidents = _open_incident_keys(repo_root) if due else set()
+  for name, routine_cfg in due:
     # `isolate: true` routines run their unit of work on a dedicated task branch in an in-tree
     # worktree instead of writing directly. Route them to the manager; everything else stays on the
     # existing direct-write `dispatch_routine` path, completely unchanged.
@@ -798,6 +893,9 @@ def _run_iteration(repo_root: Path) -> None:
         _halt_daemon(repo_root, state, "config_violation", name, detail[:200])
         halted_this_iter = True
         break
+    else:
+      # a clean tick closes whatever the previous failed tick opened on this routine's axis
+      _resolve_routine_incident(repo_root, name, open_incidents)
     _advance_last_run(repo_root, name)
 
     # tree was clean at iteration start; any dirt now is the routine's own output that didn't make
@@ -1213,6 +1311,11 @@ def run(repo_root: Path) -> None:
     # iteration boundary; `changed()` only fires once a change is stable across two consecutive reads
     fp = CodeFingerprint(roots = _plugin_roots())
     fp.snapshot()
+    # refuse to drive a shared inbox — a second daemon on it duplicates every import. Inside the
+    # startup guard because it reads the settings of every OTHER checkout registered on this host:
+    # a neighbour's unreadable file must land in the ledger, never kill this process before the
+    # supervisor's restart policy turns it into a silent crash loop.
+    _halt_on_inbox_collision(repo_root)
   except Exception as e:
     # waiver: daemon error/trigger token, not an internal key
     _record_daemon_error(repo_root, "startup_exception", e)

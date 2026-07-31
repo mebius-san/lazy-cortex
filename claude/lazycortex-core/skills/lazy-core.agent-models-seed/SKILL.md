@@ -47,7 +47,7 @@ Read and parse the SOT JSON. Select every key under `defaults` whose string begi
 
 ### Apply per-key semantics
 
-Read the target settings file. If missing or unparseable, treat it as `{"version": 1, "agent_models": {}}`. Ensure `agent_models.lazycortex` exists as an object (create empty `{}` if absent — never overwrite existing content, never touch other groups such as `lazycortex-log:*` seeded by a sibling install).
+Read the target settings file. If missing or unparseable, treat it as `{"version": 1, "agent_models": {}}`. Ensure `agent_models.lazycortex` exists as an object (create empty `{}` if absent — never overwrite existing content, never touch other groups such as `_project` or `_user`).
 
 For each `(dispatch, tier)` in the seed set:
 

@@ -53,12 +53,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import banner as _banner
 from keys import Action, Outcome, Phase
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  pass
+  import banner as _banner
 
 
 # An ExpertRef is (dispatch_name, role_label).

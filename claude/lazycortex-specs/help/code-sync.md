@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Keep a product spec aligned with its source repo — pull in-flight code changes into the tech doc and rebase branch pins after a merge.
-last_regen: 2026-07-26
+last_regen: 2026-07-30
 diagram_spec:
   anchor: "How the two skills relate"
   request: "Decision-tree showing when to reach for spec.sync-with-code vs spec.finalize-branch and what each produces — inputs are 'code changed since last sync' and 'branch just merged or deleted'; outputs are tech-doc updates, gate proposals, pin rewrites, and spec_released proposals."
@@ -69,4 +69,3 @@ flowchart TD
   class runFinalizeBranch success
   class noActionNeeded success
 ```
-</content>

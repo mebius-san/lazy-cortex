@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fde68a"
 ---
 # lazycortex-specs
 
@@ -24,7 +24,7 @@ The plugin manages *structure* and *lifecycle*, not the prose — authoring stay
 - **code-sync** — Keep specs aligned with the source repo across commits and branch merges. Members: spec.sync-with-code, spec.finalize-branch.
 - **source-links** — Resolve repos, dependencies, and forge-correct source URLs. Members: spec.resolve-repo, spec.resolve-dependency, spec.source-url.
 - **requests** — Ingest free-form requests and route them into the spec tree. Members: spec.request-router, spec.request-classify, spec.request-find-candidates, spec.request-attach, spec.request-spawn.
-- **install-and-audit** — Bootstrap, configure a product, and audit a spec in this repo. Members: spec.install, spec.product-config, spec.doctor, spec.help.
+- **install-and-audit** — Bootstrap, configure a product, pull cross-repo design handoffs, and audit a spec in this repo. Members: spec.install, spec.product-config, spec.import, spec.doctor, spec.help.
 
 ## Walkthroughs
 
@@ -67,6 +67,7 @@ Requires these plugins from the same marketplace:
 | `spec.finalize-branch` | Use after merging or deleting a source-repo branch to rebase any specs pinned to that branch back to the repo's default branch — walks every `spec_source_branches` frontmatter entry in the vault, applies the shared Pin Reconciliation primitive, refuses to rewrite unmerged pins, and proposes `spec_released` for assets whose pinned docs covered the now-merged branch. |
 | `spec.flip-gate` | Flip one asset progression gate (spec_design_done / spec_plan_done / spec_develop_done / spec_tests_passing / spec_released) true→false or back, by subprocessing the flip-gate primitive. Confirms the flip with one wizard question unless invoked --auto. |
 | `spec.gate-tick` | Script-only md-scan worker that advances one asset's gates per tick — auto-flips the next derived gate, drops a readiness callout for the next human-signal gate, or withdraws a stale readiness callout. Dispatched per-file by the daemon; performs no Claude calls. |
+| `spec.import` | Pull-based cross-repo design handoff — fetch every configured `spec.imports[]` entry, land each `handoff` product's approved assets read-only (`spec_imported: true`), auto-register missing products, and report the run as a summary table. Non-interactive; the manual counterpart to the `spec.import-pull` daemon routine, both driving the same primitive. |
 | `spec.install` | Bootstrap the lazycortex-specs plugin for the current project (or globally). Ensures the per-category template-override dirs exist (`.claude/templates/spec.feature/`, `spec.change/`, `spec.bug/`, `spec.product/`, `spec.request/`), reads-or-seeds the repo default language into the plugin-owned `spec` settings section, registers the `spec.gate-tick` md-scan routine so the daemon advances asset gates, wires the request-handler runtime (md-scan routines + experts + review class) at project scope, and offers to register the first product via `spec.product-config`. Daemon-routine registrations honor the tracked `daemon.enabled` gate; install scope is derived; file writes follow the absent/merge/conflict policy. Idempotent — safe to re-run. |
 | `spec.product-config` | Use when creating a new product in the spec system OR editing an existing product's registration — unified wizard that collects answers via AskUserQuestion, writes the product record into lazy.settings.json[products][<compound-key>], scaffolds the on-disk folder tree + operator-zone folder-notes with iconize icons, generates or reuses the shared vault-wide behavior-keyed review classes (one per doc-kind, right-anchored wildcard globs spanning every product and asset category; a product with divergent experts gets a per-product override), and auto-detects code dependencies. Edit mode adds source to a design-only product, extends dependencies, or switches language/icon without clobbering asset_categories. |
 | `spec.refresh-sources` | Re-project a spec doc's body `# Sources` sub-sections from frontmatter — `## Requests` from `spec_source_requests`, `## Docs` from `spec_source_docs` — preserving any operator-authored glosses on existing wikilink lines (matched by wikilink target). Then regenerates the `# Summary` précis for the asset note and affected container notes (category, product root), and refreshes container stats. Use after manually editing a doc's `spec_source_docs` / `spec_source_requests` frontmatter to bring the body back in sync. |
@@ -87,13 +88,13 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [authoring](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/authoring.md) — Create spec assets of any category — features, changes, bugs, and operator-defined kinds — and capture raw ideas into the requests inbox.
 - [code-sync](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/code-sync.md) — Keep a product spec aligned with its source repo — pull in-flight code changes into the tech doc and rebase branch pins after a merge.
 - [gates](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/gates.md) — Drive an asset's readiness gates and per-file doc stages from creation through release using a two-layer progression model.
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/install-and-audit.md) — Bootstrap the plugin, register products, audit spec health, and discover all available skills — the starting point before any authoring work begins.
+- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/install-and-audit.md) — Bootstrap the plugin, register products, pull cross-repo design handoffs, audit spec health, and discover skills.
 - [requests](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/requests.md) — Ingest free-form requests and route them into the right place in the spec tree — classify, find candidates, then attach or spawn.
 - [source-links](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/source-links.md) — Resolve repos, dependencies, and build forge-correct source URLs so every spec link stays accurate regardless of where code is hosted.
 - [asset-to-release](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/walkthroughs/asset-to-release.md) — Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
 - [new-product-from-code](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/walkthroughs/new-product-from-code.md) — Register a product bound to an existing codebase, generate its design and tech docs from source, then scaffold the first feature.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/troubleshooting.md) — Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/faq.md) — Answers to common questions about products, assets, gates, code sync, releases, requests, and source links in lazycortex-specs.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/faq.md) — Answers to common questions about products, assets, gates, code sync, releases, requests, cross-repo imports, and source links in lazycortex-specs.
 
 (`mebius-san` resolves from `.guard-waivers.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
@@ -137,6 +138,7 @@ Invoke skills with slash commands:
 /spec.finalize-branch
 /spec.flip-gate
 /spec.gate-tick
+/spec.import
 /spec.install
 /spec.product-config
 /spec.refresh-sources

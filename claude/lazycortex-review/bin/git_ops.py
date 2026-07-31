@@ -52,7 +52,6 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from errors import GitOpsError
 from keys import BotIdentity, JobKey, Phase, Trailer
@@ -60,6 +59,7 @@ from keys import BotIdentity, JobKey, Phase, Trailer
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from collections.abc import Mapping, Sequence
+  from pathlib import Path
 
 
 # -------------------------------------------------------- data structures

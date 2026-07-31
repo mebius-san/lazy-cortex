@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
-last_regen: 2026-07-23
+last_regen: 2026-07-30
 diagram_spec:
   anchor: "How the journey flows"
   request: "Sequence diagram showing the five-skill lifecycle of one asset: spec.create-asset scaffolds and authors the asset, spec.set-stage marks the design approved and then the plan approved, spec.flip-gate advances each gate (spec_design_done through spec_tests_passing), spec.sync-with-code reconciles code reality and proposes spec_develop_done, spec.finalize-branch rebases branch pins and proposes spec_released."
@@ -38,7 +38,7 @@ After completing this journey you have:
 
 Run `/spec.create-asset <product> <category> <slug>`, where `<product>` is the compound key for your registered product, `<category>` is `feature`, `change`, `bug`, or an operator-defined category, and `<slug>` is a lowercase-with-hyphens name for this asset.
 
-`spec.create-asset` opens a wizard (2–5 questions, one at a time) to gather scope, behavior, and edge-case detail for the category. After you answer, it scaffolds the asset folder at `<spec_path>/<category>/<slug>/`, authors `design.md` (starting at `draft` stage) and `plan.md` (starting at `empty` stage), fills in the folder-note's `# Summary` précis, and draws the primary behavioral diagram in `design.md`. The folder-note (`<slug>.md`) is created with all five gates at `false` and a `# History` H1 section carrying a scaffold entry.
+`spec.create-asset` opens a wizard (2–5 questions, one at a time) to gather scope, behavior, and edge-case detail for the category. After you answer, it scaffolds the asset folder at `<spec_path>/<category>/<slug>/`, authors `design.md` (starting at `draft` stage) and `plan.md` (starting at `empty` stage), fills in the folder-note's `# Summary` précis, and draws the primary behavioral diagram(s) for the layout — one `flow` diagram in `design.md` for a feature or change, or a `flow` plus a `sequence` diagram in `bug.md` for a bug. The folder-note (`<slug>.md`) is created with all five gates at `false` and a `# History` H1 section carrying a scaffold entry.
 
 `design.md` describes the intended behavior only — it never writes in "not yet supported" or half-built code paths as if they were spec limitations. If a section feels narrower than you expected, that's an explicit scope decision from the wizard answers, not a reflection of what the code currently does.
 

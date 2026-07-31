@@ -31,13 +31,13 @@ A skill, agent, or command may opt out by declaring a non-empty string in frontm
 
     logging-waiver: "<concrete one-line reason>"
 
-- The value must be a concrete reason. `true` / `yes` / `""` are rejected as `FAIL` by `lazy-log.audit`.
+- The value must be a concrete reason. `true` / `yes` / `""` are rejected as `FAIL` by `lazy-core.audit`.
 - Waivered artifacts are silently skipped — no log file written, no audit listing.
 - Patterns / suggested reasons: see `${CLAUDE_PLUGIN_ROOT}/references/lazy-log.waiver-candidates.md`.
 
 **Class-level exemption (no per-file frontmatter required):** agents dispatched by a coordinator skill via `Agent(subagent_type: ...)` and returning a structured findings block do NOT log; the coordinator owns the log.
 
-**Log dir name MUST be the artifact's filename** (`<skill>` from `<skill>/SKILL.md`, `<name>` from `<name>.md`) — never a phase / task / dispatch description. Self-named subagent dirs (`task-N`, `expert-runtime-X`, etc.) violate this; `lazy-log.audit` flags them.
+**Log dir name MUST be the artifact's filename** (`<skill>` from `<skill>/SKILL.md`, `<name>` from `<name>.md`) — never a phase / task / dispatch description. Self-named subagent dirs (`task-N`, `expert-runtime-X`, etc.) violate this; `lazy-core.audit` flags them.
 
 ## Distill cadence
 

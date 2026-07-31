@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover if the working tree or a remote sync halts it.
-last_regen: 2026-07-28
+last_regen: 2026-07-30
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, answers yes to the runtime-daemon wizard, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh, daemon starts and polls .experts/.jobs/ on interval, user checks .runtime/state.json for a recent last_run; (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks a cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
@@ -29,6 +29,8 @@ After completing this walkthrough you have a running runtime daemon that polls f
 ### Step 1 — Install and start the daemon
 
 Run `/lazy-core.install` inside the repo and answer **Yes** to the runtime-daemon wizard. The wizard's full sequence — what it writes to `lazy.settings.json`, the expert-discovery scan, the daemon-supervisor offer, the expert-spawn sandbox question, the git-guard flags it now seeds into `lazy.settings.json` (`git.enabled`, `git.pathspec_enabled`, `git.mutex_enabled`), and the optional Prometheus metrics endpoint — is covered in the **Install, audit, and maintain lazycortex-core** block chapter; work through Steps there before continuing here. Come back once the wizard has finished.
+
+If this repo declares externally-sourced working directories (e.g. a shared inbox it does not carry in git) via `external_dirs.paths`, the wizard resolves them before it touches the supervisor. On a fresh checkout it asks once where they live on this machine and remembers the answer for every future run. It also refuses to install a supervisor when two checkouts would end up driving the same physical inbox directory — it names the other checkout and asks you to set `daemon.run_here: false` on one of them before continuing. If the ownership is merely ambiguous (a synced checkout with a bare `run_here: true`) rather than an outright collision, it offers to pin `run_here` to this host's name instead so the daemon never accidentally runs twice over the same inbox.
 
 If you chose a supervisor during install, the daemon is already running — skip to Step 2. Otherwise start it by hand from the repo root:
 

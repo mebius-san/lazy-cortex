@@ -139,6 +139,7 @@ class RoutineKey:
     BRANCH: The watched branch for a `git` routine.
     IGNORE_HALT: The flag letting a routine tick even while the daemon is halted.
     ISOLATE: The flag routing a routine's work through an isolated worktree.
+    INBOX_DIR: The repo-relative directory an inbox routine scans.
   """
 
   NAME = "name"
@@ -152,6 +153,7 @@ class RoutineKey:
   BRANCH = "branch"
   IGNORE_HALT = "ignore_halt"
   ISOLATE = "isolate"
+  INBOX_DIR = "inbox_dir"
 
 
 # ----------------------------------------------------------------------------------------
@@ -172,6 +174,7 @@ class DaemonKey:
     GIT: The git-integration sub-configuration block.
     CLEANUP_RUNTIME_LOG_AFTER: The runtime-log retention window.
     POLLING_INTERVAL_SEC: The main-loop polling cadence in seconds.
+    RUN_HERE: The per-checkout gate deciding whether the daemon runs for this working copy.
   """
 
   METRICS = "metrics"
@@ -186,6 +189,7 @@ class DaemonKey:
   GIT = "git"
   CLEANUP_RUNTIME_LOG_AFTER = "cleanup_runtime_log_after"
   POLLING_INTERVAL_SEC = "polling_interval_sec"
+  RUN_HERE = "run_here"
 
 
 # ----------------------------------------------------------------------------------------
@@ -271,6 +275,7 @@ class SettingsKey:
     REPOS: The cross-repo target registry section name.
     HOOKS: The lifecycle-hook enablement section name.
     LEGACY_VERSION: The pre-split root-level version key migrations fold away.
+    EXTERNAL_DIRS: The externally-sourced working-directory declaration section name.
   """
 
   VERSION = "_version"
@@ -281,6 +286,7 @@ class SettingsKey:
   REPOS = "repos"
   HOOKS = "hooks"
   LEGACY_VERSION = "version"
+  EXTERNAL_DIRS = "external_dirs"
 
 
 # ----------------------------------------------------------------------------------------
@@ -574,6 +580,7 @@ class HaltReason:
     GIT_PULL_DIVERGED: A pre-tick pull found diverged history.
     GIT_PUSH_FAILED: A post-tick push could not complete.
     GIT_REMOTE_UNAVAILABLE: The git remote could not be reached.
+    INBOX_COLLISION: Another checkout on this host drives the same physical inbox.
   """
 
   UNCOMMITTED_CHANGES = "uncommitted_changes"
@@ -581,6 +588,7 @@ class HaltReason:
   GIT_PULL_DIVERGED = "git_pull_diverged"
   GIT_PUSH_FAILED = "git_push_failed"
   GIT_REMOTE_UNAVAILABLE = "git_remote_unavailable"
+  INBOX_COLLISION = "inbox_collision"
 
 
 # ----------------------------------------------------------------------------------------
@@ -967,3 +975,129 @@ class WorktreeResult:
   PR_DEFERRED = "pr_deferred"
   AT_CAPACITY = "at_capacity"
   UNKNOWN = "unknown"
+
+
+# ----------------------------------------------------------------------------------------
+class ExternalDirsKey:
+  """
+  Keys in the `external_dirs` section across both settings layers.
+
+  Attributes:
+    PATHS: The tracked list of repo-relative paths that live outside the repository.
+    ROOT: The local-overlay absolute path the declared paths point at.
+    DECLINED: The local-overlay flag recording that the operator declined to configure a source.
+  """
+
+  PATHS = "paths"
+  ROOT = "root"
+  DECLINED = "declined"
+
+
+# ----------------------------------------------------------------------------------------
+class ExternalDirStatus:
+  """
+  Closed-set diagnosis tokens for one declared external directory.
+
+  Attributes:
+    OK: A symlink pointing at the declared source, whose source exists.
+    MISSING: Nothing in the declared slot while the source is available.
+    DANGLING: A symlink whose target does not exist.
+    WRONG_TARGET: A live symlink pointing somewhere other than the declared source.
+    NOT_A_SYMLINK: Operator content occupying the declared slot.
+    SOURCE_MISSING: Nothing in the slot and no source to link to.
+    UNCONFIGURED: Paths declared while no source root is on record for this checkout.
+  """
+
+  OK = "ok"
+  MISSING = "missing"
+  DANGLING = "dangling"
+  WRONG_TARGET = "wrong_target"
+  NOT_A_SYMLINK = "not_a_symlink"
+  SOURCE_MISSING = "source_missing"
+  UNCONFIGURED = "unconfigured"
+
+
+# ----------------------------------------------------------------------------------------
+class ExternalDirFindingKey:
+  """
+  Keys in one external-directory finding or repair record.
+
+  Attributes:
+    PATH: The declared repo-relative path the record describes.
+    STATUS: The diagnosis token from `ExternalDirStatus`.
+    SOURCE: The absolute source path, or None when no source root is on record.
+    GITIGNORED: Whether git ignores the declared path in this repository.
+    ACTION: The repair outcome from `ExternalDirAction`, present on repair records only.
+  """
+
+  PATH = "path"
+  STATUS = "status"
+  SOURCE = "source"
+  GITIGNORED = "gitignored"
+  ACTION = "action"
+
+
+# ----------------------------------------------------------------------------------------
+class ExternalDirAction:
+  """
+  Closed-set repair outcomes for one declared external directory.
+
+  Attributes:
+    LINKED: A missing symlink was created.
+    RELINKED: An existing symlink was re-pointed at the declared source.
+    UNCHANGED: The declared path already pointed at its source.
+    SKIPPED: The state was left untouched and reported to the operator instead.
+  """
+
+  LINKED = "linked"
+  RELINKED = "relinked"
+  UNCHANGED = "unchanged"
+  SKIPPED = "skipped"
+
+
+# ----------------------------------------------------------------------------------------
+class RoutineType:
+  """
+  Routine-type discriminator values read by callers outside the type registry.
+
+  Attributes:
+    INBOX: The inbox-scanning routine type.
+  """
+
+  INBOX = "inbox"
+
+
+# ----------------------------------------------------------------------------------------
+class InboxGuardKind:
+  """
+  Closed-set finding kinds of the shared-inbox ownership guard.
+
+  Attributes:
+    COLLISION: Two checkouts on this host drive one physical inbox.
+    RUN_HERE_AMBIGUOUS: A checkout declaring external dirs gates the daemon on a bare boolean.
+  """
+
+  COLLISION = "inbox_collision"
+  RUN_HERE_AMBIGUOUS = "run_here_ambiguous"
+
+
+# ----------------------------------------------------------------------------------------
+class InboxGuardKey:
+  """
+  Keys in one shared-inbox guard finding.
+
+  Attributes:
+    KIND: The finding kind from `InboxGuardKind`.
+    ROUTINE: The local routine whose inbox is contested.
+    INBOX: The canonical absolute path both checkouts resolve to.
+    OTHER_REPO: The absolute repo root of the other checkout driving the same inbox.
+    OTHER_ROUTINE: The routine name the other checkout scans it under.
+    DETAIL: A one-line human-readable description.
+  """
+
+  KIND = "kind"
+  ROUTINE = "routine"
+  INBOX = "inbox"
+  OTHER_REPO = "other_repo"
+  OTHER_ROUTINE = "other_routine"
+  DETAIL = "detail"

@@ -97,6 +97,7 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/spec.layout-protocol.md`, `${CLAUDE_PLUGIN
 - **Required sections** — feature/change `design.md` carries a non-empty Requirements/Changes section; `bug.md` carries non-empty `## Repro steps`, `## Observed behavior`, `## Expected behavior`. Missing → FAIL.
 - **`spec_stage` closed set + tag mirror** — every authored doc (`design`, `tech`, `plan`, `bug`) carries `spec_stage` in the closed set `{empty, draft, approved, rejected, cancelled}` AND a `spec/<stage>` tag in `tags:` mirroring it in lock-step (per `spec.lifecycle-protocol.md` → status mirror tag; `spec.set-stage` is the only writer of both). FAIL on: missing `spec_stage`; value outside the set (including the removed `review` / `done` / `wtr`); missing/stale/duplicate `spec/*` tag. The fix is `spec.set-stage <doc> <current-stage>` (re-syncs the tag), or `spec.set-stage <doc> draft|approved` to map a removed value.
 - **Cancellability** — `spec_stage: cancelled` on `design.md` (feature/change mandatory doc) or `bug.md` (bug mandatory doc) is FAIL, always. `tech.md` / `plan.md` may be `cancelled`.
+- **Imported-doc drift (WARN, report-only)** — a doc carrying `spec_imported: true` was landed by `/spec.import` as a frozen, read-only copy of an already-approved upstream design. Resolve the cached upstream copy by product compound-key + category + slug, never by path: for the `spec.imports[]` entry that landed this doc, the fetched checkout lives at `.experts/.spec-imports/<url-slug>/` (the importer's own gitignored clone cache, `<url-slug>` derived from that entry's `git_url`); inside that checkout, resolve its OWN content-root (its `spec.vault_root`, which need not match this repo's) and read `<its-content-root>/<upstream-product's-spec_path>/<category-folder>/<slug>/<doc>` — the upstream product is looked up by the same compound-key as the local doc's owning product, since the two repos' `spec_path` values are allowed to differ. Before comparing, strip the `spec_imported: true` frontmatter line from both copies — the importer only stamps that line locally, so comparing the raw text WARNs on every clean import even with zero drift. A remaining difference is drift: either the upstream repo changed the asset after handoff, or the local copy was hand-edited despite the read-only marker. Report the finding; do NOT offer a `--apply` fix — there is no canonical reconciliation (adopt upstream vs. keep the local copy is the operator's call). When no cache directory exists for that import (never imported via `/spec.import` on this checkout, or the cache was cleared), skip the check silently for that doc.
 
 ### Agent D — status folder-notes + gates + per-file stages + folders + intake
 
@@ -209,6 +210,7 @@ scan: Check 8 cross-reference — <PASS|WARN> (<N> findings)
 - [ ] Missing category description: `<spec_path>/characters/characters.md` has no `description`
 - [ ] Icon drift: `<spec_path>/features/features.md` `iconize_icon: <X>` ≠ config default `LiRocket`
 - [ ] Rejected doc: `features/<feat>/design.md` is `spec_stage: rejected` (unfinished review)
+- [ ] Imported-doc drift: `features/<feat>/design.md` (`spec_imported: true`) differs from the cached upstream copy under `.experts/.spec-imports/` — report-only, no auto-fix
 
 ### Info
 - N source files, M routes, K assets documented
@@ -221,7 +223,7 @@ scan: Check 8 cross-reference — <PASS|WARN> (<N> findings)
 
 After the report, in **read-only mode (no `--apply`)** stop here — the report is the deliverable. State clearly that no files were changed and that re-running with `--apply` enables fixes.
 
-In **`--apply` mode**, walk the errors and warnings and, **per finding**, call `AskUserQuestion` (one question per fix) before writing. State the exact file, the specific issue, and what the fix concretely does. Typical fixes:
+In **`--apply` mode**, walk the errors and warnings and, **per finding**, call `AskUserQuestion` (one question per fix) before writing. Skip every finding on a doc carrying `spec_imported: true` — no fix type (drift reconciliation, wikilink rewrite, header/breadcrumb rewrite, or any other) may touch it under `--apply`; report it and move on (see Key rules). For every other finding, state the exact file, the specific issue, and what the fix concretely does. Typical fixes:
 
 - Rewrite a bare wikilink to path-qualified form.
 - Strip a forbidden source URL / `source_branches:` from a role that may not carry it (move the URL into the tech file when the user confirms).
@@ -250,6 +252,7 @@ When `--apply` writes fixes, the audit trail is the per-doc `# History` entries 
 - **`iconize_*` is config-derived** — managed icon/color on every folder-note must match `products[<key>].icon` (product), `asset_categories[<name>].icon` (category), or the built-in default (feature→LiRocket / change→LiRefreshCcw / bug→LiBug / requests→LiInbox); drift is a warning.
 - **Naming, folder structure, header section, wikilink format, gates, per-file stages, and request schema** are owned by `${CLAUDE_PLUGIN_ROOT}/references/` — this skill enforces but never inlines them.
 - **Layout/body-shape findings are report-only — no `--apply` auto-migrate** — findings about stray repo-root `requests/`, content outside `vault_root`, or old-shape note bodies (missing protected sections, old title H1) are flagged but MUST NOT trigger an `--apply` action that moves, relocates, or rewrites existing content. The operator resolves these manually.
+- **`spec_imported: true` docs are exempt from every `--apply` rewrite, always** — any finding on a doc carrying `spec_imported: true` (drift against its cached upstream copy, a bare/missing-display wikilink, a header/breadcrumb mismatch, or any other Agent A/C finding) is report-only; `--apply` MUST NOT rewrite such a doc under any fix type. The doc is a frozen, read-only copy of an already-approved upstream design — reconciling it (adopt upstream vs. keep local) is the operator's call, not a mechanical fix this skill can safely automate.
 
 ## Logging
 

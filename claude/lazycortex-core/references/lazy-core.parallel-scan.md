@@ -1,5 +1,5 @@
 ---
-description: Coordinator-plus-parallel-Explore pattern for heavy skills that do multiple independent scans before user interaction. Referenced by lazy-core.doctor, lazy-guard.check-public, lazy-core.audit, lazy-log.audit, and the tool.* wrappers.
+description: Coordinator-plus-parallel-Explore pattern for heavy skills that do multiple independent scans before user interaction. Referenced by lazy-core.doctor, lazy-guard.check-public, lazy-core.audit, and the tool.* wrappers.
 ---
 # Parallel Scan Coordinator Pattern
 
