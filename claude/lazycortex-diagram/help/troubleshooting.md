@@ -2,9 +2,7 @@
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-diagram skills — symptoms, likely causes, and fixes.
 last_regen: 2026-05-08
-diagram_spec:
-  anchor: "Diagnostic flowchart"
-  request: "Decision-tree routing failures across lazycortex-diagram skills. Top-level branch on which skill is failing: install vs draw vs fix. Install branch splits on 'plugin not installed' vs 'cache empty'. Draw branch splits on input validation failures (target_file not found, anchor not found, empty request, unsupported format) vs kind-resolution failures (no-kind-fits-request) vs scheme failures (scheme-not-found) vs template-compatibility failure (format-not-supported-for-kind) vs drawer-agent failures (failed:<reason>, split-into-N, skipped-below-threshold). Fix branch splits on no-fence-under-anchor, cannot-infer-format, cannot-infer-kind, and then the same scheme/drawer-agent leaves shared with the draw branch. Each leaf labels the troubleshooting entry that resolves it."
+no_diagram: true
 source_skills:
   - lazy-diagram.draw
   - lazy-diagram.fix
@@ -160,6 +158,3 @@ source_skills:
 
 **Fix**: Pin `kind=<one>` from the candidate list shown in the failure message and re-run `/lazy-diagram.fix`.
 
----
-
-## Diagnostic flowchart

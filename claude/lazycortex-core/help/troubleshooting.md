@@ -4,7 +4,7 @@ summary: Common failure modes across lazycortex-core skills — symptoms, likely
 last_regen: 2026-07-30
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "diagnostic decision tree routing lazycortex-core troubleshooting entries by observed symptom. Top-level branch on symptom group: install-or-setup → sub-branch on python-floor-not-met / plugin-not-installed / cache-empty / tiers-missing / settings-unwritable / supervisor-template-missing / launchctl-or-systemctl-error / logs-runtime-file-exists / daemon-run-here-syncs-across-machines / setup-migration-failed / setup-child-failed / metrics-port-conflict / audit-invalid-json / audit-expert-reference-unresolved / audit-routine-path-stale / doctor-systemd-unit-missing / doctor-job-cleanup-permission-denied / doctor-routine-reappears / scaffold-local-registry-missing / scaffold-local-core-cli-unresolved / scaffold-sync-collision; agent-models → sub-branch on invalid-scope-flag / tier-ignored-bad-value / floor-env-ignored / duplicate-key / daemon-scope-mismatch / non-interactive-needs-interactive; mcp-or-security → sub-branch on server-not-found / server-not-loaded / permission-loop / mark-public-fail-unresolved / gh-not-installed / non-interactive-needs-interactive / chained-commit-not-scanned; hook-not-firing → hook-not-firing; git-coordination → sub-branch on staging-lock-refused-or-stuck / pathspec-refused; expert-runtime → sub-branch on experts-not-init / payload-missing-fields / expert-not-registered / collect-status-missing / collect-response-malformed / collect-status-pending-for-cancelled / cancel-job-not-found / invalid-status-filter / expert-key-mismatch / expert-spawn-hangs-or-times-out / expert-unpinned-model / preflight-no-expert-routes / preflight-all-servers-timeout / preflight-plugin-dirs-best-effort / preflight-fix-blocked-by-transaction; routines → sub-branch on routine-name-format / routine-conflict / routine-unknown-type / routine-missing-field / routine-inbox-not-gitignored / routine-settings-unwritable / pump-protected / offer-protocols-no-relevant-candidates / offer-protocols-routine-absent; daemon-or-runtime → sub-branch on daemon-stale / daemon-never-starts / recover-still-dirty / recover-commit-needs-message / state-unparseable / remote-halt-refires-after-backoff-exhausted / post-push-hook-silent-failure; memory → sub-branch on memory-not-persona / memory-frontmatter-invalid / memory-consolidate-scope / memory-dir-absent / reflect-not-persona / reflect-no-sources / persona-expert-unknown; log-clean → sub-branch on log-dir-absent / log-resolver-failed / chained-commit-not-recorded."
+  request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor, scaffold registry, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, unpinned models), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.agent-models
@@ -787,93 +787,42 @@ New sessions pick up the consolidated hook from `lazycortex-core` cleanly.
 ```mermaid
 %%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart TD
-  symptomObserved{Observed symptom group?}
+  symptomGroup{Which symptom group is the reader in?}
 
-  symptomObserved -->|install or setup| installOrSetup{Which install issue?}
-  symptomObserved -->|agent models| agentModels{Which agent-model issue?}
-  symptomObserved -->|mcp or security| mcpOrSecurity{Which MCP or security issue?}
-  symptomObserved -->|hook not firing| hookNotFiring[Outcome: hook-not-firing]
-  symptomObserved -->|git coordination| gitCoordination{Which git-coordination issue?}
-  symptomObserved -->|expert runtime| expertRuntime{Which expert-runtime issue?}
-  symptomObserved -->|routines| routines{Which routine issue?}
-  symptomObserved -->|daemon or runtime| daemonOrRuntime{Which daemon-or-runtime issue?}
-  symptomObserved -->|memory| memory{Which memory issue?}
-  symptomObserved -->|log clean| logClean{Which log-clean issue?}
+  installOrSetup[Install-or-setup: Python floor, plugin cache, settings writes, daemon supervisor, scaffold registry, audit and doctor findings]
+  agentModels[Agent-models: tier routing, scope flags, floor env, duplicate keys]
+  mcpOrSecurity[Mcp-or-security: allow-mcp server resolution, mark-public gates, pre-commit hook]
+  gitCoordination[Git-coordination: staging lock, pathspec discipline]
+  expertRuntime[Expert-runtime: dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, unpinned models]
+  routines[Routines: register and unregister, name format, protocol offers]
+  daemonOrRuntime[Daemon-or-runtime: stale daemon, halts and recovery, remote-sync backoff, post-push hook]
+  memory[Memory: persona marking, note frontmatter, index and reflect sources]
+  logClean[Log-clean: log dir resolution, commit recording]
+  migration[Migration: moving off the retired lazycortex-log plugin]
 
-  installOrSetup -->|python floor| pythonFloorNotMet[Outcome: python-floor-not-met]
-  installOrSetup -->|plugin missing| pluginNotInstalled[Outcome: plugin-not-installed]
-  installOrSetup -->|settings write fails| settingsUnwritable[Outcome: settings-unwritable]
-  installOrSetup -->|setup child fails| setupChildFailed[Outcome: setup-child-failed]
-
-  agentModels -->|bad scope flag| invalidScopeFlag[Outcome: invalid-scope-flag]
-  agentModels -->|bad tier value| tierIgnoredBadValue[Outcome: tier-ignored-bad-value]
-  agentModels -->|duplicate key| duplicateKey[Outcome: duplicate-key]
-
-  mcpOrSecurity -->|server absent| serverNotLoaded[Outcome: server-not-loaded]
-  mcpOrSecurity -->|repeated prompts| permissionLoop[Outcome: permission-loop]
-  mcpOrSecurity -->|mark-public fails| markPublicFailUnresolved[Outcome: mark-public-fail-unresolved]
-
-  gitCoordination -->|lock refused| stagingLockRefusedOrStuck[Outcome: staging-lock-refused-or-stuck]
-  gitCoordination -->|pathspec refused| pathspecRefused[Outcome: pathspec-refused]
-
-  expertRuntime -->|not registered| expertNotRegistered[Outcome: expert-not-registered]
-  expertRuntime -->|malformed response| collectResponseMalformed[Outcome: collect-response-malformed]
-  expertRuntime -->|spawn hangs| expertSpawnHangsOrTimesOut[Outcome: expert-spawn-hangs-or-times-out]
-
-  routines -->|bad name format| routineNameFormat[Outcome: routine-name-format]
-  routines -->|conflict| routineConflict[Outcome: routine-conflict]
-  routines -->|missing field| routineMissingField[Outcome: routine-missing-field]
-
-  daemonOrRuntime -->|never starts| daemonNeverStarts[Outcome: daemon-never-starts]
-  daemonOrRuntime -->|still dirty| recoverStillDirty[Outcome: recover-still-dirty]
-  daemonOrRuntime -->|backoff exhausted| remoteHaltRefiresAfterBackoffExhausted[Outcome: remote-halt-refires-after-backoff-exhausted]
-
-  memory -->|not persona| memoryNotPersona[Outcome: memory-not-persona]
-  memory -->|no sources| reflectNoSources[Outcome: reflect-no-sources]
-  memory -->|bad frontmatter| memoryFrontmatterInvalid[Outcome: memory-frontmatter-invalid]
-
-  logClean -->|dir absent| logDirAbsent[Outcome: log-dir-absent]
-  logClean -->|resolver failed| logResolverFailed[Outcome: log-resolver-failed]
+  symptomGroup -->|install or setup| installOrSetup
+  symptomGroup -->|agent models| agentModels
+  symptomGroup -->|mcp or security| mcpOrSecurity
+  symptomGroup -->|git coordination| gitCoordination
+  symptomGroup -->|expert runtime| expertRuntime
+  symptomGroup -->|routines| routines
+  symptomGroup -->|daemon or runtime| daemonOrRuntime
+  symptomGroup -->|memory| memory
+  symptomGroup -->|log clean| logClean
+  symptomGroup -->|migration| migration
 
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
-  class symptomObserved guard
-  class installOrSetup guard
-  class agentModels guard
-  class mcpOrSecurity guard
-  class gitCoordination guard
-  class expertRuntime guard
-  class routines guard
-  class daemonOrRuntime guard
-  class memory guard
-  class logClean guard
-
-  class hookNotFiring success
-  class pythonFloorNotMet success
-  class pluginNotInstalled success
-  class settingsUnwritable success
-  class setupChildFailed success
-  class invalidScopeFlag success
-  class tierIgnoredBadValue success
-  class duplicateKey success
-  class serverNotLoaded success
-  class permissionLoop success
-  class markPublicFailUnresolved success
-  class stagingLockRefusedOrStuck success
-  class pathspecRefused success
-  class expertNotRegistered success
-  class collectResponseMalformed success
-  class expertSpawnHangsOrTimesOut success
-  class routineNameFormat success
-  class routineConflict success
-  class routineMissingField success
-  class daemonNeverStarts success
-  class recoverStillDirty success
-  class remoteHaltRefiresAfterBackoffExhausted success
-  class memoryNotPersona success
-  class reflectNoSources success
-  class memoryFrontmatterInvalid success
-  class logDirAbsent success
-  class logResolverFailed success
+  class symptomGroup guard
+  class installOrSetup success
+  class agentModels success
+  class mcpOrSecurity success
+  class gitCoordination success
+  class expertRuntime success
+  class routines success
+  class daemonOrRuntime success
+  class memory success
+  class logClean success
+  class migration success
 ```
