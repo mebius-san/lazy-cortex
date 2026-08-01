@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-07-30
+last_regen: 2026-08-01
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor, scaffold registry, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, unpinned models), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -153,6 +153,94 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## `/lazy-core.install` Step 7 fails: `.gitignore` unwritable
+
+**Symptom**: `/lazy-core.install` fails at Step 7 with an error about `.gitignore` being unwritable.
+
+**Likely cause**: The bootstrap step hit a permission or I/O error while appending the standard ignore lines to `.gitignore` at the repo root — the file or its parent directory is read-only for your current user.
+
+**Fix**: Check permissions on `.gitignore` and the repo root, then re-run `/lazy-core.install`. The step is idempotent — retrying after fixing permissions completes cleanly.
+
+---
+
+## `/lazy-core.install` Step 9c reports `git: skipped-no-branch`
+
+**Symptom**: Step 9c of `/lazy-core.install` reports `git: skipped-no-branch` in its summary, and the daemon sets up no remote git sync for this checkout.
+
+**Likely cause**: The checkout is on a detached `HEAD` — there is no current branch for the daemon to track, so Step 9c has nothing to derive `daemon.git.base_branch` from.
+
+**Fix**: Check out a branch (`git checkout <branch>`), then re-run `/lazy-core.install`. Until then the daemon does no remote sync at all — it neither commits nor pushes on your behalf.
+
+---
+
+## The daemon commits but never pushes
+
+**Symptom**: The runtime daemon is enabled and clearly running — routine output lands as commits in your checkout — but those commits never show up on the remote, and nothing ever complains about it.
+
+**Likely cause**: Earlier versions of `/lazy-core.install` seeded `daemon.git` as `null` and nothing else ever filled it in, so a daemon-enabled repo with no remote-sync configuration silently committed locally forever. Install now derives both fields when the block is absent — `base_branch` from the checkout's current branch, `remote_sync: pull_push` when an `origin` remote exists — but a repo installed under the older behaviour keeps its already-recorded `git: null` block, since the derivation only fills an absent block and never overwrites a value already on record.
+
+**Fix**: Add a remote if you don't have one yet (`git remote add origin <url>`). If `.claude/lazy.settings.json` still shows `daemon.git` as literally `null`, delete the block so install has something to derive into, then re-run `/lazy-core.install`. `/lazy-core.audit` also flags a daemon-enabled repo whose `git` block is null or missing `base_branch`, and `/lazy-core.doctor` offers a fix to apply the same derivation directly.
+
+---
+
+## `/lazy-core.install` Step 11 expert wizard skips or flags a candidate
+
+**Symptom**: While registering experts, `/lazy-core.install` Step 11 either shows no candidates at all, or lists one flagged `parse-error` or `protocol-unresolvable` instead of offering it for registration.
+
+**Likely cause ("no candidates found")**: No agent file carrying `expert_protocol:` frontmatter was found under any of the three discovery scopes — there is genuinely nothing to register yet, and the wizard skips itself automatically.
+
+**Likely cause (`parse-error`)**: A candidate agent file's frontmatter is malformed YAML, so the wizard cannot read its declared protocol.
+
+**Likely cause (`protocol-unresolvable`)**: The candidate's `expert_protocol:` value points at a reference the resolver cannot find — the protocol file is missing, or the plugin that ships it isn't installed.
+
+**Fix ("no candidates")**: No action needed — install any plugin that ships an expert agent and re-run.
+
+**Fix (`parse-error`)**: Fix the malformed frontmatter in the flagged agent file, then re-run `/lazy-core.install` to pick it up.
+
+**Fix (`protocol-unresolvable`)**: Verify the protocol file exists at the referenced path, or reinstall the plugin that should ship it (`/plugin update <plugin>@lazycortex`), then re-run `/lazy-core.install`.
+
+---
+
+## A declared external directory stays absent after install
+
+**Symptom**: You declared an external working directory during `/lazy-core.install`, but the slot in your checkout never gets a symlink and nothing else complains about it.
+
+**Likely cause**: This checkout has no `external_dirs.root` on record and you answered "Leave as is" when Step 12.5 asked — the wizard records `declined` in the checkout's local overlay and never re-asks.
+
+**Fix**: Delete `external_dirs.declined` from `.claude/lazy.settings.local.json`, then re-run `/lazy-core.install` to be asked once more.
+
+---
+
+## A declared external directory is reported "skipped (was missing: PermissionError …)"
+
+**Symptom**: `/lazy-core.install` reports one declared external directory as skipped with a `PermissionError`, while the rest of your declared directories repair normally.
+
+**Likely cause**: The filesystem refused to create the symlink for that one slot — a read-only parent directory, or the slot already held by another process.
+
+**Fix**: Fix the permission on the parent directory (or free the slot), then re-run `/lazy-core.install` — or accept the equivalent fix offer (Fix L4) the next time you run `/lazy-core.doctor`.
+
+---
+
+## `/lazy-core.install` Step 12.5 reports `inbox-conflict` and no supervisor is installed
+
+**Symptom**: `/lazy-core.install` reaches Step 12.5, reports `inbox-conflict`, and does not install the daemon supervisor for this checkout.
+
+**Likely cause**: Another checkout already registered on this host runs an inbox routine that resolves to the same physical directory as one you're about to register here. Installing a second supervisor would mean two daemons dispatching every file in that inbox twice.
+
+**Fix**: Decide which checkout should actually drive that inbox. In the checkout that should not, set `daemon.run_here: false` in `.claude/lazy.settings.local.json` (or pin `run_here` to a host list that excludes this machine), then re-run `/lazy-core.install`.
+
+---
+
+## Both checkouts' daemons are halted with `inbox_collision`
+
+**Symptom**: Two checkouts on the same host both have their daemons halted with reason `inbox_collision`, and removing the supervisor from one checkout does not clear the halt in the other.
+
+**Likely cause**: The guard is symmetric and permanent by design — each daemon detects the collision independently at its own startup and raises its own halt block, which is state rather than a live probe. Nothing auto-clears it; only a dirty-tree halt self-clears.
+
+**Fix**: Decide which checkout should drive the shared inbox. In the checkout that should not, set `daemon.run_here: false`. Then run `/lazy-runtime.recover` in the surviving checkout to clear its halt block explicitly — removing the losing checkout's supervisor alone does not do this for you.
+
+---
+
 ## `/lazy-core.setup` stops at Step 0: settings migration errored
 
 **Symptom**: Running `/lazy-core.setup` halts immediately with a message like "failed: `<stderr>`" in its Step 0 line, and the Step 6 report shows Steps 1–5 with outcome `aborted-by-migration-failure`. No child skills run.
@@ -172,6 +260,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Fix**: Read the reason listed per failed child in the setup report. Address the root cause for each (the other entries in this guide cover the most common child failure modes). Then re-run `/lazy-core.setup` — it is idempotent, so children that already succeeded will complete cleanly again and previously-failed ones will be retried.
 
 ---
+
+---
+
+## `/lazy-core.setup` ran a child skill you didn't expect
+
+**Symptom**: `/lazy-core.setup` runs, and among the plugins it installed or reconfigured is one you didn't intend to touch this time.
+
+**Likely cause**: `/lazy-core.setup` has no top-level per-plugin confirmation — it discovers every applicable `<namespace>.install` skill among enabled plugins and runs the whole chain in one pass.
+
+**Fix**: Run `/lazy-core.setup --dry-run` first to preview the full plan before committing to it. If a specific plugin should be skipped going forward, disable that plugin, then re-run `/lazy-core.setup` — every child is idempotent, so re-running after a partial or unwanted pass is safe.
 
 ## `/lazy-core.scaffold-local` fails: registry missing, core CLI unresolved, or entry not found
 
@@ -284,6 +382,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Fix (reappears)**: If you don't want the routine at all, re-run `/lazy-core.install` and decline the relevant routine at the prompt (where the install flow offers one), rather than removing it after the fact via `/lazy-core.doctor`.
 
 ---
+
+---
+
+## `/lazy-core.doctor` skips its expert-runtime section even though experts are configured
+
+**Symptom**: Running `/lazy-core.doctor` skips its expert-runtime health section entirely, even though `lazy.settings.json` clearly has experts configured.
+
+**Likely cause**: The skip guard for this section only fires when it finds none of an `experts` section, a `lazy-core.runtime` section, or a non-empty `external_dirs.paths` list — if your settings file stores this configuration somewhere non-standard, the guard misses it.
+
+**Fix**: Run `/lazy-core.audit` directly — Agent D surfaces the same expert-runtime findings without the skip guard, so you can confirm what doctor missed.
 
 ## `/lazy-core.agent-models` fails with "invalid --scope value"
 
@@ -491,6 +599,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+---
+
+## `/lazy-runtime.preflight` reports every expert `ok` but a `fail` line sits above the table
+
+**Symptom**: `/lazy-runtime.preflight` reports every individual expert as `ok`, but a `fail` line appears above the per-expert table and the overall run does not pass.
+
+**Likely cause**: Each expert is individually launchable, but the checkout as a whole is not — another daemon already registered on this host drives one of the same inboxes this checkout would use, so starting this checkout's daemon would double-dispatch every file that lands there.
+
+**Fix**: Set `daemon.run_here: false` in the checkout that must not drive the shared inbox (`.claude/lazy.settings.local.json`), then re-run `/lazy-runtime.preflight` to confirm.
+
 ## `/lazy-expert.dispatch-job` fails: experts directory not initialised
 
 **Symptom**: Running `/lazy-expert.dispatch-job` produces an error like "`.experts/` not initialised — run `/lazy-core.install` first."
@@ -628,6 +746,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Fix for cause 1**: Run `/lazy-core.doctor`. When it reports the daemon as stalled, accept the "Restart via supervisor" fix offer (Fix L1). If `launchctl kickstart` fails with "No such process", the plist is not loaded — run `launchctl load ~/Library/LaunchAgents/com.lazycortex.runtime.<repo-name>.plist` manually, then re-run `/lazy-core.install` to re-register the supervisor if needed.
 
 **Fix for cause 2**: Wait one polling cycle (5 seconds by default), then re-run `/lazy-core.doctor` to confirm the daemon is now live.
+
+---
+
+## `/lazy-runtime.recover` reports "Daemon is not halted. Nothing to recover."
+
+**Symptom**: You run `/lazy-runtime.recover` expecting to clear a halt, but it reports the daemon was never halted in the first place.
+
+**Likely cause**: The daemon's state file did not actually carry a `daemon_halted` block when the skill ran — whatever prompted you to run recovery (a stale status page, a cached daemon-status view) no longer matches the daemon's current state.
+
+**Fix**: No action needed. Confirm the current state directly with `cat .runtime/state.json`, or re-run `/lazy-core.doctor` to get a fresh liveness read.
 
 ---
 

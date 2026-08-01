@@ -1027,6 +1027,7 @@ class ExternalDirFindingKey:
     STATUS: The diagnosis token from `ExternalDirStatus`.
     SOURCE: The absolute source path, or None when no source root is on record.
     GITIGNORED: Whether git ignores the declared path in this repository.
+    IGNORE_RULE: The ignore-coverage token from `ExternalDirIgnore`.
     ACTION: The repair outcome from `ExternalDirAction`, present on repair records only.
   """
 
@@ -1034,7 +1035,25 @@ class ExternalDirFindingKey:
   STATUS = "status"
   SOURCE = "source"
   GITIGNORED = "gitignored"
+  IGNORE_RULE = "ignore_rule"
   ACTION = "action"
+
+
+# ----------------------------------------------------------------------------------------
+class ExternalDirIgnore:
+  """
+  Closed-set ignore-coverage tokens for one declared external directory.
+
+  Attributes:
+    IGNORED: The declared path as it stands is ignored — nothing dirties the tree.
+    DIR_ONLY: An ignore rule covers the name as a directory only, so the symlink planted in
+      the slot stays visible to git and an anchored slashless rule is missing.
+    ABSENT: No ignore rule covers the name in any form.
+  """
+
+  IGNORED = "ignored"
+  DIR_ONLY = "dir_only"
+  ABSENT = "absent"
 
 
 # ----------------------------------------------------------------------------------------

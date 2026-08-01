@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
+
+# waiver: flat sibling import inside the plugin's bin/ dir — resolved at runtime via PYTHONPATH, not by pylint
+from constants import DaemonKey, GitConfigKey, SettingsFile, SettingsKey  # pylint: disable=import-error
+# waiver: flat sibling import inside the plugin's bin/ dir — resolved at runtime via PYTHONPATH, not by pylint
+from lazy_settings import load_tracked_section, save_section  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -410,6 +416,70 @@ def detect_install_scope(
   scopes = { entry.get("scope") for entry in entries }
   # waiver: external Claude Code install scope value
   return "project" if "project" in scopes else "user"
+
+
+def bootstrap_daemon_git(repo: Path | str) -> str:
+  """
+  Seed the `daemon.git` block of the repository's tracked settings from the checkout itself.
+
+  Both fields are derived, never asked: `base_branch` is the branch currently checked out,
+  and `remote_sync` is `"pull_push"` when the checkout has an `origin` remote — a daemon
+  that commits routine output into a checkout nobody else reads must publish it, and a
+  checkout without a remote has nowhere to publish to. `post_push_hook` stays operator
+  territory and is never seeded. Absent-only: a block already carrying content is left
+  untouched, so an operator's hand-written configuration survives every re-run.
+
+  Args:
+    repo: Path to the repository root.
+
+  Returns:
+    `"seeded"` when the block was written, `"kept-local"` when a non-empty block was
+    already on record, `"skipped-no-branch"` when the checkout has no branch to ride
+    (not a repository, or a detached `HEAD`).
+  """
+  repo = Path(repo)
+  branch = _git_capture(repo, [ "rev-parse", "--abbrev-ref", "HEAD" ])
+  # guard: no branch to ride — not a repo, or a detached HEAD the daemon must not check out
+  if branch is None or branch == "HEAD":
+    # waiver: install-phase outcome token, not a reusable domain key
+    return "skipped-no-branch"
+
+  settings = repo / SettingsFile.REL
+  section = load_tracked_section(settings, SettingsKey.DAEMON)
+  # guard: an operator-written block is authoritative — never overwrite what is already there
+  if section.get(DaemonKey.GIT):
+    # waiver: install-phase outcome token, not a reusable domain key
+    return "kept-local"
+
+  block = { GitConfigKey.BASE_BRANCH: branch }
+  if _git_capture(repo, [ "remote", "get-url", "origin" ]) is not None:
+    block[GitConfigKey.REMOTE_SYNC] = "pull_push"
+
+  section[DaemonKey.GIT] = block
+  save_section(settings, SettingsKey.DAEMON, section)
+  # waiver: install-phase outcome token, not a reusable domain key
+  return "seeded"
+
+
+def _git_capture(repo: Path, args: list[str]) -> str | None:
+  """
+  Run a read-only git command in `repo` and return its stripped stdout.
+
+  Args:
+    repo: Working directory the command runs in.
+    args: Git arguments, without the leading `git`.
+
+  Returns:
+    The command's stripped stdout, or `None` when git is absent or exited non-zero.
+  """
+  try:
+    done = subprocess.run([ "git", *args ], cwd = repo, capture_output = True, text = True, check = False)
+  except OSError:
+    return None
+  # guard: non-zero exit means the fact is unavailable, not empty
+  if done.returncode != 0:
+    return None
+  return done.stdout.strip() or None
 
 
 def bootstrap_memory_dir(repo: Path | str) -> str:

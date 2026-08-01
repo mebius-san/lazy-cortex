@@ -60,6 +60,8 @@ The `errors` key (nested under the flat `daemon` section) is optional and tunes 
 | `post_push_hook` | string | Optional. Shell command run via `sh -c` (cwd = repo root) after each post-iteration push that actually advances `origin/<base_branch>`. Absent or empty = disabled. Fully isolated: non-zero exit, timeout, or spawn failure is journaled and never affects the tick. |
 | `post_push_timeout_sec` | int | Optional. Wall-clock cap on the post-push hook process. Default `30`. On expiry the hook is killed and the timeout journaled. |
 
+`base_branch` and `remote_sync` are seeded by `lazy-core.install` from the checkout itself — the current branch, and `"pull_push"` when an `origin` remote exists. The block is written only when absent or `null`, so a hand-tuned one survives re-installs; `post_push_hook` is never seeded. A daemon-enabled repo whose `git` block stays `null` is a `lazy-core.audit` D3 finding.
+
 **Pre-iteration ops** (when `daemon.git.remote_sync` is `"pull"` or `"pull_push"`):
 
 1. `git checkout <base_branch>` (plain checkout — NOT `-B`; the base branch is never reset to HEAD).
@@ -696,6 +698,8 @@ Gitignored `lazy.settings.local.json`:
 Each declared path resolves to `<root>/<path>`. A declared entry that climbs out of the repository (`../…`) is dropped on read: the list is tracked and travels with every clone, while repair creates directories and plants symlinks, so only paths the repository contains are ever acted on.
 
 A path is diagnosed as one of `ok`, `missing`, `dangling`, `wrong_target`, `not_a_symlink`, `source_missing`, or `unconfigured`. Exactly three are repaired by re-linking — `missing`, `dangling`, and `wrong_target`, and the last two only while the source exists. `ok` is already correct and left `unchanged`; `not_a_symlink`, `source_missing`, `unconfigured`, and a `dangling` link whose source is gone are reported to the operator and left untouched. Real content occupying a declared path is never removed. A repair the filesystem refuses is reported like any other unrepairable state, with the reason appended to the observed status, and the remaining paths are still repaired.
+
+Alongside the status, each declared path carries an ignore verdict: `ignored`, `dir_only`, or `absent`. The distinction exists because a repaired slot holds a symlink, which git classifies as a file, while the ordinary `.gitignore` form for a working directory (`Data/`) matches directories only — so a repository whose ignore rules look complete still sees every linked path, its tree is dirty, and the daemon halts on its first tick. `dir_only` names exactly that case and is fixed by adding the anchored slashless line (`/Data`) next to the existing one, never by replacing it; `absent` means no rule covers the name in any form. Install proposes the missing lines after the repair and appends them only with the operator's confirmation, since `.gitignore` is tracked; audit reports the two cases separately and `lazy-core.autocheckup` reports rather than applies.
 
 An absent or empty section is the default and changes no behaviour. Three consequences of a non-empty section:
 

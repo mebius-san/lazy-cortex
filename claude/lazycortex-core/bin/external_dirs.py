@@ -18,6 +18,7 @@ from pathlib import Path
 from constants import (
   ExternalDirAction,
   ExternalDirFindingKey,
+  ExternalDirIgnore,
   ExternalDirsKey,
   ExternalDirStatus,
   SettingsFile,
@@ -27,6 +28,11 @@ from constants import (
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
+
+
+# a parent that no repository contains, used to ask the directory form of an ignore question about
+# a name whose own slot git can no longer resolve through
+_PROBE_PARENT = ".lazycortex-ignore-probe"
 
 
 def _section(repo: Path) -> dict:
@@ -120,6 +126,33 @@ def source_root(repo: Path | str) -> Path | None:
   return expanded
 
 
+def _check_ignore(repo: Path | str, pathname: str) -> int:
+  """
+  Ask git whether the ignore rules of a repository cover one pathname.
+
+  Args:
+    repo: Repository root the check runs in.
+    pathname: Pathname to test, handed to git after the `--` separator so a leading dash is
+      read as part of the name rather than as an option.
+
+  Returns:
+    The exit status git reported — 0 when a rule matches, 1 when none does, 128 outside a
+    working tree — and 1 when git could not be run at all.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import subprocess
+  try:
+    # waiver: git plumbing invocation, not a domain constant
+    proc = subprocess.run(
+      ["git", "check-ignore", "-q", "--", pathname],
+      cwd = str(repo), capture_output = True, check = False,
+    )
+  except OSError:
+    # waiver: inline numeric/default literal, not a domain constant
+    return 1
+  return proc.returncode
+
+
 def is_gitignored(repo: Path | str, rel: str) -> bool:
   """
   Report whether git ignores one repo-relative path in a repository.
@@ -133,22 +166,102 @@ def is_gitignored(repo: Path | str, rel: str) -> bool:
     outside a working tree there is nothing linked content could dirty. False when the path is
     tracked, unmatched, or git is unavailable.
   """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import subprocess
-  try:
-    # waiver: git plumbing invocation, not a domain constant
-    proc = subprocess.run(
-      ["git", "check-ignore", "-q", "--", rel],
-      cwd = str(repo), capture_output = True, check = False,
-    )
-  except OSError:
-    return False
+  code = _check_ignore(repo, rel)
   # guard: `check-ignore` exits 128 outside a working tree — reporting that as "not ignored" would
   # raise a dirty-tree warning about a tree that does not exist
   # waiver: inline numeric/default literal, not a domain constant
-  if proc.returncode == 128:
+  if code == 128:
     return True
-  return proc.returncode == 0
+  return code == 0
+
+
+def ignore_state(repo: Path | str, rel: str) -> str:
+  """
+  Report how far the ignore rules of a repository reach around one declared path.
+
+  Notes:
+    - A rule written with a trailing slash matches directories only, while a repaired slot holds
+      a symlink, which git classifies as a file. Testing the same name in both forms tells a
+      missing rule apart from a rule that cannot reach what the repair plants.
+    - The verdict describes the name, not the slot: a declared path absent from the tree is
+      classified the same way it will be once the repair creates the link.
+    - Once the link exists git refuses any pathname that traverses it, so the directory form of
+      the question is asked again about the same name under a parent that does not exist. A
+      directory rule anchored to the repository root is out of reach of that second form and
+      reads as no rule at all; the line the operator is offered is the same either way.
+
+  Args:
+    repo: Repository root the check runs in.
+    rel: Repo-relative declared path to test against the ignore rules.
+
+  Returns:
+    One token from `ExternalDirIgnore`.
+  """
+  # guard: the path as it stands is covered, whichever rule form did it
+  if is_gitignored(repo, rel):
+    return ExternalDirIgnore.IGNORED
+  name = str(rel).rstrip("/")
+  code = _check_ignore(repo, f"{name}/")
+  # guard: the pathname leads through the planted symlink, which git refuses to resolve
+  # waiver: inline numeric/default literal, not a domain constant
+  if code == 128:
+    code = _check_ignore(repo, f"{_PROBE_PARENT}/{name}/")
+  if code == 0:
+    return ExternalDirIgnore.DIR_ONLY
+  return ExternalDirIgnore.ABSENT
+
+
+def ignore_fix_lines(repo: Path | str) -> list[str]:
+  """
+  List the `.gitignore` lines a repository still needs for its declared external directories.
+
+  Notes:
+    - Every proposed line is anchored to the repository root, so it covers the declared slot
+      and never a same-named path at a deeper level.
+
+  Args:
+    repo: Repository root whose declaration and ignore rules are read.
+
+  Returns:
+    One line per declared path git would still see, in declaration order; empty when every
+    declared path is already covered.
+  """
+  repo = Path(repo)
+  return [ f"/{rel}" for rel in declared_paths(repo)
+           if ignore_state(repo, rel) != ExternalDirIgnore.IGNORED ]
+
+
+def append_ignore_lines(repo: Path | str, lines: list[str]) -> list[str]:
+  """
+  Append ignore lines to the `.gitignore` of a repository, leaving every existing line alone.
+
+  Notes:
+    - A line already present verbatim is not written twice, so a repeated pass is a no-op.
+      The comparison is exact: a directory-only rule for the same name is a different line and
+      does not suppress the anchored one, which is the whole point of adding it.
+    - The file is created when it does not exist yet.
+
+  Args:
+    repo: Repository root whose `.gitignore` is extended.
+    lines: Ignore lines to record, each already in the form it should carry in the file.
+
+  Returns:
+    The lines actually appended, in the given order; empty when the file already carried them all.
+  """
+  # waiver: filesystem filename idiom, not a domain constant
+  path = Path(repo) / ".gitignore"
+  # waiver: stdlib encoding idiom
+  existing = path.read_text(encoding = "utf-8") if path.exists() else ""
+  present = { line.strip() for line in existing.splitlines() }
+  fresh = [ line for line in lines if line.strip() not in present ]
+  # guard: nothing new to record — leave the file byte-identical
+  if not fresh:
+    return []
+  separator = "" if existing.endswith("\n") or not existing else "\n"
+  body = "".join(f"{line}\n" for line in fresh)
+  # waiver: stdlib encoding idiom
+  path.write_text(f"{existing}{separator}{body}", encoding = "utf-8")
+  return fresh
 
 
 def _link_target(link: Path) -> Path:
@@ -220,6 +333,7 @@ def check(repo: Path | str) -> list[dict]:
         ExternalDirFindingKey.STATUS: ExternalDirStatus.UNCONFIGURED,
         ExternalDirFindingKey.SOURCE: None,
         ExternalDirFindingKey.GITIGNORED: is_gitignored(repo, rel),
+        ExternalDirFindingKey.IGNORE_RULE: ignore_state(repo, rel),
       })
       continue
     source = root / rel
@@ -228,6 +342,7 @@ def check(repo: Path | str) -> list[dict]:
       ExternalDirFindingKey.STATUS: _status_for(repo / rel, source),
       ExternalDirFindingKey.SOURCE: str(source),
       ExternalDirFindingKey.GITIGNORED: is_gitignored(repo, rel),
+      ExternalDirFindingKey.IGNORE_RULE: ignore_state(repo, rel),
     })
   return findings
 

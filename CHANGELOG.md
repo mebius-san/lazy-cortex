@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.20.2 — 2026-08-01 UTC
+
+- `/lazy-core.install` now catches `.gitignore` rules that only cover a linked external directory as a directory (`Data/`), which can't match the symlink the repair plants — it offers to append the missing anchored line, fixing daemons that halted with `uncommitted_changes` even though `.gitignore` looked complete. `/lazy-core.audit` reports the gap as its own warning instead of lumping it with "not gitignored at all".
+- `/lazy-core.install` now derives a daemon-enabled repo's `git` block (`base_branch`, `remote_sync`) from the checkout instead of leaving it `null` — no more repos that silently never push their daemon's commits. `/lazy-core.doctor` and `/lazy-core.audit` gained a matching fix/check for installs that predate this.
+- Cleaned up the lazycortex-core troubleshooting page: removed a stray leftover line and simplified the diagnostic flowchart to a top-level router instead of one that had started silently drifting out of sync.
+
 ### 5.20.0 — 2026-07-30 UTC
 
 - New `external_dirs` support: declare a working directory that lives outside the repo tree (symlinked in); the daemon diagnoses broken or missing links and repairs them without touching operator content, with on-demand restore/audit.
