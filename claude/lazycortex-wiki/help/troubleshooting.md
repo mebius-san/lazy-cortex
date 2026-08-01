@@ -2,10 +2,7 @@
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
 last_regen: 2026-08-01
-diagram_spec:
-  anchor: "Diagnostic flowchart"
-  request: "Decision tree rooted on which skill or routine produced the symptom; first branch splits on install failures vs. configure failures vs. query failures vs. relink failures vs. doctor failures vs. dangling-link sync issues; install leaves: plugin-not-enabled, core-not-installed, cache-empty, no-routines-registered; configure leaves: wiki-section-missing, scope-id-invalid, paths-empty, topics-index-blank; query leaves: no-scopes-configured, no-material-matched; relink leaves: unknown-scope, anchor-lost, curator-error, empty-commit; doctor leaves: unknown-scope, no-scopes-configured; sync leaf: dangling-see-also-link → see Troubleshooting entry on lingering See-also links after a node delete; each leaf points to the troubleshooting entry that resolves it"
-  kind_hint: decision-tree
+no_diagram: true
 source_skills:
   - lazy-wiki.install
   - lazy-wiki.configure
@@ -183,6 +180,3 @@ source_skills:
 
 **Fix**: With a running daemon, wait for the next poll (roughly a minute) — the deletion is pruned and committed on its own. Without a daemon, run `/wiki.relink <scope-id>`, whose pruning step drops links to any deleted nodes as part of the normal relink pass. You can also run `/wiki.doctor <scope-id>` and confirm the fixable "broken See-also" finding, which drops the dangling lines directly.
 
----
-
-## Diagnostic flowchart
