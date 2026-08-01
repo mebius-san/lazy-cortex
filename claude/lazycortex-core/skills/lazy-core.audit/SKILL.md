@@ -350,7 +350,8 @@ Validate the returned sections (`daemon_version` / `routines_version` are the cu
 
 - **`daemon` section.** When the section carries only `_version` (no daemon keys), it is not configured — `[INFO] daemon section absent — daemon not configured (git-sync off or routines-only repo) | .claude/lazy.settings.json` and skip the remaining daemon checks. Otherwise:
   - `daemon._version` must equal `daemon_version` (current `CURRENT_VERSIONS['daemon']`, presently 2). Wrong value or absent → `[FAIL] daemon section _version mismatch (expected <daemon_version>) | .claude/lazy.settings.json`.
-  - The `daemon` section must contain: `git` (string or bool), `polling_interval_sec` (positive int), `cleanup_completed_after` (string or int), `cleanup_failed_after` (string or int), `cleanup_dead_after` (string or int). Any missing key → `[FAIL] daemon section missing key(s): <list> | .claude/lazy.settings.json`.
+  - The `daemon` section must contain: `git` (object or null), `polling_interval_sec` (positive int), `cleanup_completed_after` (string or int), `cleanup_failed_after` (string or int), `cleanup_dead_after` (string or int). Any missing key → `[FAIL] daemon section missing key(s): <list> | .claude/lazy.settings.json`.
+  - When `daemon.enabled` is true, the `git` block must be a non-empty object carrying `base_branch` (the sole required field per `lazy-core.runtime-schema`). A `null` / absent block → `[FAIL] daemon.enabled is true but daemon.git is null — the daemon rides no branch and never syncs with origin, so routine output stays unpublished in this checkout | .claude/lazy.settings.json`; `fix: re-run /lazy-core.install (Step 9c derives it), or accept Fix L6 in /lazy-core.doctor`. A block present but missing `base_branch` → `[FAIL] daemon.git missing required field base_branch | .claude/lazy.settings.json` with the same fix. A block carrying `base_branch` but no `remote_sync` is **not** a finding — a checkout without an `origin` remote gets exactly that shape, and an operator may drop `remote_sync` deliberately.
   - Each `cleanup_*_after` value must parse as `<N>d` (days), `<N>h` (hours), or a raw non-negative integer (seconds). Anything else → `[FAIL] daemon.<key> has malformed value '<value>' (expected <N>d / <N>h / int) | .claude/lazy.settings.json` — D6 below would otherwise silently fail to parse and apply a default.
 - **`routines` section.** The section IS the routines map (each key is a routine name; `_version` is the lone reserved key). `routines._version` must equal `routines_version` (current `CURRENT_VERSIONS['routines']`, presently 2). Wrong value or absent → `[FAIL] routines section _version mismatch (expected <routines_version>) | .claude/lazy.settings.json`. The section must be a dict — a non-dict value → `[FAIL] routines section is not a dict | .claude/lazy.settings.json`.
 - When D1 found at least one expert AND `routines` does not contain a `lazy-expert.pump` entry → `[WARN] experts configured but lazy-expert.pump routine absent from routines | .claude/lazy.settings.json`.
@@ -418,7 +419,10 @@ Empty list → emit nothing (the repo declares no external directories; this is 
 - `[WARN]` status `unconfigured` — `external dirs declared but no source root on record for this checkout | .claude/lazy.settings.local.json`; `fix: re-run /lazy-core.install and answer the external-dirs question`.
 - `[WARN]` status `not_a_symlink` — `external dir <path> holds real content, not a link | <path>`; no automatic fix: whether that content is authoritative is the operator's call.
 - `[WARN]` status `source_missing` — `external dir <path> has no source at <source> | <source>`; `fix: mount / restore the source, or correct external_dirs.root`.
-- `[WARN]` any row whose `gitignored` is false — `external dir <path> is not gitignored — linked content would dirty the tree and halt the daemon | .gitignore`; `fix: add <path> to .gitignore`.
+- `[WARN]` any row whose `ignore_rule` is `absent` — `external dir <path> is not gitignored — linked content would dirty the tree and halt the daemon | .gitignore`; `fix: add /<path> to .gitignore`.
+- `[WARN]` any row whose `ignore_rule` is `dir_only` — `external dir <path> is covered by a directory-only ignore rule, which cannot match the symlink the repair plants | .gitignore`; `fix: add /<path> to .gitignore next to the existing <path>/ line — do not replace it`.
+
+Read the verdict from `ignore_rule`, never from `gitignored` alone: a repo whose `.gitignore` already carries `<path>/` reads as not-ignored the moment the slot holds a symlink, and telling that operator to "add `<path>`" points at a line already in the file. The `gitignored` boolean stays in the row for callers that only need "does this dirty the tree"; the two findings above are what the operator acts on.
 
 **D12 — Shared-inbox ownership**
 
@@ -511,6 +515,7 @@ plugins_scanned: <n>  warn: <m>
 - [WARN] external dir <path> holds real content, not a link | <path>
 - [WARN] external dir <path> has no source at <source> | <source>
 - [WARN] external dir <path> is not gitignored — linked content would dirty the tree and halt the daemon | .gitignore
+- [WARN] external dir <path> is covered by a directory-only ignore rule, which cannot match the symlink the repair plants | .gitignore
 
 ### inbox_ownership
 - [FAIL] <detail>

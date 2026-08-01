@@ -444,7 +444,7 @@ After the report, ask the user which fixes to apply. Apply only confirmed fixes.
 
 ### Loop runtime fix offers
 
-These five fix offers are conditional on findings from Phase 3 § 11f. Each is offered via `AskUserQuestion` only when the corresponding finding is present in the Loop runtime subsection.
+These six fix offers are conditional on findings from Phase 3 § 11f. Each is offered via `AskUserQuestion` only when the corresponding finding is present in the Loop runtime subsection.
 
 **Fix L1 — Daemon stalled** (trigger: D10 WARN "runtime daemon appears stale")
 
@@ -515,6 +515,24 @@ Report one line per path. `not_a_symlink` and `source_missing` rows are never of
 **Fix L5 — Shared inbox** (trigger: D12 FAIL `inbox_collision`)
 
 Report only, no fix offer: print the conflicting `other_repo` and state that one of the two checkouts must set `daemon.run_here: false` (or pin a host list). Doctor does not choose which checkout drives a shared inbox.
+
+**Fix L6 — `daemon.git` unconfigured** (trigger: D3 FAIL "daemon.enabled is true but daemon.git is null" or "daemon.git missing required field base_branch")
+
+`AskUserQuestion`: "The daemon is enabled but `daemon.git` carries no `base_branch`, so it rides no branch and never syncs with origin — routine commits stay in this checkout. Derive the block from this checkout?"
+
+Options: `Derive`, `Skip`.
+
+The derived values are shown in the question description before the write: `base_branch` = the current branch, `remote_sync` = `pull_push` when an `origin` remote exists (omitted otherwise).
+
+On Derive:
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_install_phases import bootstrap_daemon_git
+from pathlib import Path
+print(bootstrap_daemon_git(Path('.')))
+")
+```
+Report the receipt verbatim: `seeded`, `kept-local`, or `skipped-no-branch`. `kept-local` here means the block acquired content between the scan and the fix — re-run the audit rather than writing again.
 
 For any finding surfaced by a delegated audit (Guard / Logging), direct the user to run that sibling skill for fixes. Doctor never auto-fixes issues owned by sibling audits.
 

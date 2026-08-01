@@ -368,22 +368,25 @@ When `is_git = true`, continue straight to 9c and run Steps 10–13.5.
 
 The runtime daemon reads its config from **flat top-level section keys** — `runtime_daemon.py` calls `load_section(path, "daemon")` and `load_section(path, "routines")` directly, and `expert_runtime.register_routine` writes the flat `routines` section. Seed those two sections (never a nested `lazy-core.runtime` object — nothing reads that shape).
 
-Seed the default daemon keys with `setdefault` (so 9b's `enabled` flag and any existing values are preserved — never overwrite) and seed an empty `routines` section when absent:
+Seed the default daemon keys with `setdefault` (so 9b's `enabled` flag and any existing values are preserved — never overwrite), seed an empty `routines` section when absent, and derive the `daemon.git` block from the checkout:
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
 import json
+from lazy_install_phases import bootstrap_daemon_git
 from lazy_settings import load_tracked_section, save_section
 from pathlib import Path
-p = Path('<repo-root>/.claude/lazy.settings.json')
+root = Path('<repo-root>')
+p = root / '.claude/lazy.settings.json'
 sec = load_tracked_section(p, 'daemon')
 before = dict(sec)
-for k, v in {'git': None, 'polling_interval_sec': 5, 'cleanup_completed_after': '7d',
+for k, v in {'polling_interval_sec': 5, 'cleanup_completed_after': '7d',
              'cleanup_failed_after': '30d', 'cleanup_dead_after': '7d',
              'stream_idle_timeout_sec': 90, 'stream_max_retries': 3}.items():
     sec.setdefault(k, v)
 save_section(p, 'daemon', sec)
 print('daemon: bootstrapped' if sec != before else 'daemon: already-present')
+print('git: ' + bootstrap_daemon_git(root))
 raw = json.loads(p.read_text()) if p.exists() else {}
 if 'routines' not in raw:
     save_section(p, 'routines', {})
@@ -393,7 +396,11 @@ else:
 "
 ```
 
-State **bootstrapped** if any default key or the routines section was newly written; **already-present** if everything was already present; **skipped-not-in-git-repo** or **skipped-daemon-disabled** if 9a/9b chose to skip.
+`daemon.git` is **derived, never asked** — `base_branch` is the checkout's current branch, and `remote_sync` is `"pull_push"` when the checkout has an `origin` remote. A daemon commits routine output into its own checkout; without a push that output reaches no other consumer, and a runtime checkout outside any file-sync has no second delivery channel. A checkout without `origin` gets `base_branch` alone and never pushes. `post_push_hook` is operator territory and is never seeded. The block is written only when absent or `null`, so a hand-tuned block survives every re-run — including one that deliberately omits `remote_sync`.
+
+This runs at 9c, not next to Step 13: `daemon.git` is tracked project config that every checkout shares, while Step 13's `run_here` gate is per-checkout. Gating the block on `run_here` would leave it unseeded on exactly the checkouts that clone the repo and expect the config to travel with it.
+
+State **bootstrapped** if any default key or the routines section was newly written; **already-present** if everything was already present; **skipped-not-in-git-repo** or **skipped-daemon-disabled** if 9a/9b chose to skip. Report the `daemon.git` outcome verbatim from the receipt: **seeded**, **kept-local**, or **skipped-no-branch** (detached `HEAD` — re-run after checking out a branch).
 
 ## Step 10: Bootstrap experts directory
 
@@ -623,6 +630,50 @@ for r in apply(Path('<repo-root>')):
 
 The repair outcome comes from the actions, not from the probe: **linked** when any record is `linked` or `relinked`, **unchanged** when every record is `unchanged` or `skipped`. (`configured` is the probe's word for "a source root is on record", never a step outcome.)
 
+Then check that git cannot see what the repair just planted. Run this **after** the apply, never before it — a declared path that is not in the tree yet is classified the same way it will be once the link exists, but the operator can only be shown a real diff against a real slot:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from external_dirs import check, ignore_fix_lines
+from pathlib import Path
+p = Path('<repo-root>')
+for row in check(p):
+  print(f\"{row['path']}: {row['ignore_rule']}\")
+print('proposed: ' + ' '.join(ignore_fix_lines(p)) if ignore_fix_lines(p) else 'proposed: none')
+"
+```
+
+`proposed: none` → state **ignores-ok** and continue. Otherwise every proposed line is anchored (`/Data`, not `Data`) so it covers the declared slot and no same-named path deeper in the tree, and the two `ignore_rule` values need different explanations to the operator:
+
+- `absent` — no rule covers the name at all.
+- `dir_only` — a rule covers the name as a directory (`Data/`), and the repair planted a symlink, which git classifies as a file. The existing line is not wrong and is not touched; the anchored slashless line is added next to it.
+
+`.gitignore` is a tracked file, so this is never a silent write. Ask once, quoting the exact lines:
+
+```
+AskUserQuestion:
+  header: "Ignore links?"
+  question: "git can see the external director(y/ies) just linked (<comma-joined paths>). Append <N> line(s) to .gitignore?"
+  description: "Appends exactly: <the proposed lines, one per line, each with its reason — 'no rule' or 'existing <path>/ rule matches directories only, not the symlink'>. Existing lines are left untouched. Declining leaves the links visible to git: the working tree stays dirty and a daemon on this checkout halts with `uncommitted_changes` on its first tick."
+  options: ["Append the lines", "Leave .gitignore as is"]
+```
+
+On **Append the lines**:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from external_dirs import append_ignore_lines, ignore_fix_lines
+from pathlib import Path
+p = Path('<repo-root>')
+for line in append_ignore_lines(p, ignore_fix_lines(p)):
+  print('appended: ' + line)
+"
+```
+
+State **ignores-updated** and report the appended lines in Step 14. `.gitignore` is left modified and uncommitted — the operator commits it with whatever else this install changed.
+
+On **Leave .gitignore as is**, state **ignores-declined** and carry one WARN line into Step 14 naming each still-visible path and the consequence: the tree stays dirty and the daemon halts on its first tick.
+
 ### 12.5a. Inbox ownership — refuse a collision, offer to pin an ambiguous gate
 
 Two daemons over one physical inbox import every document twice, and the duplicate is not automatically reversible. Run both guards, and treat them differently — they carry different severities and different fixes:
@@ -667,7 +718,7 @@ save_local_section(p, 'daemon', sec)
 
 State **run-here-pinned**; Step 13 reads the new host list and proceeds normally. On **Leave as is**, state **run-here-ambiguous-kept** and continue — this matches the WARN severity `/lazy-core.audit` D12 assigns the same condition.
 
-Outcome: `no-declaration` / `linked` / `unchanged` / `declined-on-record` / `run-here-pinned` / `run-here-ambiguous-kept` / `inbox-conflict`.
+Outcome: `no-declaration` / `linked` / `unchanged` / `declined-on-record` / `ignores-ok` / `ignores-updated` / `ignores-declined` / `run-here-pinned` / `run-here-ambiguous-kept` / `inbox-conflict`. The repair outcome and the ignore-coverage outcome are both stated — `linked, ignores-updated` is a normal pair.
 
 ## Step 13: Gate 2 (run_here) + daemon supervisor install
 
@@ -955,13 +1006,13 @@ Report to the user:
 - Per-key `git` flag seed outcome (Step 6.5), including the pathspec behaviour-change note when `pathspec_enabled` was newly written
 - `.logs/` directory + `.lazyignore` seed bootstrap outcome (Step 7)
 - Hook migration outcome (Step 8): one line per settings path (`migrated` or `no-stale-entries`)
-- Runtime bootstrap outcome (Step 9)
+- Runtime bootstrap outcome (Step 9), including the `daemon.git` derivation outcome (`seeded` / `kept-local` / `skipped-no-branch`)
 - Experts directory bootstrap outcome (Step 10)
 - `.memory/` directory bootstrap outcome (Step 10.5)
 - Expert registration outcome (Step 11)
 - lazycortex-core agent-model tier seed outcome (Step 11 §1b, via `lazy-core.agent-models-seed`)
 - Expert-pump routine registration outcome (Step 12)
-- External working-directory outcome (Step 12.5), including every `skipped (was …)` line, the `run_here` pin decision, and any `inbox-conflict` refusal
+- External working-directory outcome (Step 12.5), including every `skipped (was …)` line, the ignore-coverage outcome with each appended `.gitignore` line (or, on `ignores-declined`, the WARN naming every path git can still see), the `run_here` pin decision, and any `inbox-conflict` refusal
 - Daemon supervisor install outcome (Step 13)
 - Sandbox/permissions merge outcome (Step 13.5)
 - Metrics provisioning outcome (Step 13.6)
@@ -980,6 +1031,8 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Step 6 fails: "default-tiers.json missing or invalid"** — `lazy-core.agent-models/default-tiers.json` cannot be read or parsed → reinstall `lazycortex-core` to restore the file, then re-run.
 - **Step 7 fails: `.logs/` or `.runtime/` not a directory** — a file by either of those names already exists at the repo root → remove or rename it, then re-run.
 - **Step 7 fails: `.gitignore` unwritable** — `bootstrap_logs_dir` raised a permission or I/O error → check permissions on the repo root, then re-run.
+- **Step 9c reports `git: skipped-no-branch`** — the checkout is on a detached `HEAD`, so there is no branch for the daemon to ride → `git checkout <branch>`, then re-run; until then the daemon does no remote sync.
+- **The daemon commits but never pushes** — `daemon.git` carries `base_branch` without `remote_sync`, which is what a checkout with no `origin` remote gets → add the remote (`git remote add origin <url>`), delete the `git` block from `.claude/lazy.settings.json`, and re-run to have it re-derived.
 - **Step 8 fails: settings.json malformed JSON** — one of the four standard settings paths contains invalid JSON → fix the file manually, then re-run.
 - **Step 9 fails: settings file unwritable** — `lazy_settings.save_section` raises a permission or I/O error when writing the flat `daemon` / `routines` sections into `.claude/lazy.settings.json` → check file permissions on `.claude/lazy.settings.json` and the `.claude/` directory, then re-run.
 - **Step 11 wizard: "no candidates found"** — no agent files with `expert_protocol:` frontmatter were found under any of the three discovery scopes → no experts are available to register; the wizard skips automatically.
@@ -991,6 +1044,7 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Daemon never starts for this checkout after install** — Gate 2 (`daemon.run_here`) is `false` in this checkout's gitignored `lazy.settings.local.json`, so no supervisor was installed → edit the flag to `true` (or delete it) and re-run `/lazy-core.install` to install the supervisor for this checkout.
 - **A second machine started its own daemon for the same checkout** — the checkout sits on a file-synced path (Dropbox, iCloud, Syncthing), so the gitignored overlay carrying `daemon.run_here: true` was synced to that machine and its install honoured the flag → set `daemon.run_here` to a host list naming only the machine that should run it (`["nexus"]`) and re-run `/lazy-core.install` on the other machine; it removes the stray supervisor unit instead of installing one.
 - **A declared external directory stays absent after install** — the checkout has no `external_dirs.root` on record and the operator answered "Leave as is", so `declined` is set in the local overlay and Step 12.5 never asks again → delete `external_dirs.declined` from `.claude/lazy.settings.local.json` and re-run `/lazy-core.install` to be asked once more.
+- **The daemon halts with `uncommitted_changes` right after install, and `git status` lists the external directories** — the links are visible to git: either Step 12.5 stated `ignores-declined`, or `.gitignore` covers the names as directories only (`Data/`) while the slots hold symlinks → re-run `/lazy-core.install` and accept the ignore-coverage question, which appends the anchored slashless lines (`/Data`) next to the existing ones.
 - **Step 12.5 reports `inbox-conflict` and no supervisor is installed** — another checkout on this host registers an inbox routine that resolves to the same physical directory, so both daemons would dispatch every file twice → set `daemon.run_here: false` in the checkout that must not drive it (or pin `run_here` to a host list), then re-run.
 - **Both checkouts' daemons are halted with `inbox_collision` and removing one supervisor does not release the other** — the halt is symmetric and permanent by design: each daemon raises it at its own startup, and the halt block is state, not a live probe. Nothing auto-clears it (only a dirty-tree halt does) → decide which checkout drives the inbox, set `daemon.run_here: false` in the other, then run `/lazy-runtime.recover` in the survivor to clear its halt block.
 - **A declared external directory is reported `skipped (was missing: PermissionError …)`** — the filesystem refused the link (a read-only parent, a slot held by another process); the remaining declared paths were still repaired → fix the permission and re-run `/lazy-core.install`, or accept Fix L4 in `/lazy-core.doctor`.

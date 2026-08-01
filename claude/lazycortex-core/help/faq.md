@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git staging, and MCP permissions.
-last_regen: 2026-07-30
+summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git staging, MCP permissions, and change-history search.
+last_regen: 2026-08-01
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -28,6 +28,11 @@ source_skills:
   - lazy-memory.reflect
   - lazy-memory.mark-persona
   - lazy-log.clean
+  - lazy-log.distill
+  - lazy-log.recall
+  - lazy-log.timeline
+  - lazy-log.summary
+  - lazy-log.bullets
 ---
 # FAQ
 
@@ -344,3 +349,21 @@ The staging-window mutex is the previous default and is now dormant on a fresh i
 ## What does `/lazy-log.clean` do with old run-log folders?
 
 It classifies every subdirectory under `./.logs/claude/` against the live set of skill/agent/command names. Folders matching a canonical name are left alone; folders that look like a renamed or typo'd canonical name are offered for merge; folders matching a known anonymous pattern (`task-N`, `plan-execute-N`, and similar) are batched into one prompt per pattern instead of one prompt per folder; everything else is reviewed individually. For each orphan you choose per-folder: leave it, delete it, or distill its substantive content into memory first and then delete it. Nothing on disk changes until every prompt has been answered — the skill is read-first and applies all approved actions in one final pass.
+
+---
+
+## What's the difference between `lazy-log.recall`, `lazy-log.timeline`, and `lazy-log.summary`?
+
+All three search the same sources — `.logs/changelog.md`, run logs under `.logs/claude/`, raw commits in `.logs/commits.jsonl`, git log, and project memory — but return different shapes. `lazy-log.recall` answers a specific question ("why was X changed?" or "when did we touch Y?") with a ranked table of top matches and the git SHAs you need to `git show`. `lazy-log.timeline` takes a date range or topic — or both — and returns a chronological, day-by-day listing; it's the "what happened when" view, and defaults to the last 7 days if you give no range. `lazy-log.summary` aggregates every match for a topic into a multi-paragraph narrative clustered by sub-theme (design decisions, implementation phases, issues encountered, follow-up work) rather than by date — reach for it when you want "the whole story" of a feature or refactor, not a specific answer or a timeline. All three cite git SHAs so you can `git show <sha>` for the exact change, and all three flag gaps or ambiguity rather than guessing.
+
+---
+
+## Does `.logs/changelog.md` update itself, or do I need to run something?
+
+It updates itself under normal use. Per the change-history logging rule, `lazy-log.distill` runs automatically after a meaningful commit, throttled to once per 4 hours so a burst of commits in one session doesn't trigger repeated re-runs — a same-day re-run rewrites that day's paragraph in place (merging in the new commits) instead of appending a duplicate fragment. You can also invoke it on demand at any time; include `force` or `manual catch-up` in the prompt to bypass the throttle. Entries are grouped theme-first (by Conventional-commits scope, falling back to keyword clustering), and the theme most recently touched bumps to the top of the file.
+
+---
+
+## What does `lazy-log.bullets` produce, and how is it different from `lazy-log.distill`?
+
+`lazy-log.distill` writes for internal use — theme-first prose in `.logs/changelog.md` covering everything, chore and refactor commits included. `lazy-log.bullets` writes for people installing your plugin: give it a plugin directory, a commit range, a new version, and a date, and it drops internal-only commits (chore, style, test, docs-sync) and rewrites the survivors as outcome-led bullets grouped by scope, returning a ready-to-paste `### <version> — <date> UTC` release block. It only generates the block — prepending it to `CHANGELOG.public.md` is left to whichever release flow dispatched it.
