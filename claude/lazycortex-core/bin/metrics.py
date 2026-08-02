@@ -23,7 +23,7 @@ import re
 import subprocess
 import threading
 import time
-from wsgiref.simple_server import make_server
+from wsgiref.simple_server import WSGIRequestHandler, make_server
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import (  # pylint: disable=import-error
@@ -802,6 +802,33 @@ def _wsgi_app(environ: dict, start_response: Callable[..., object]) -> list[byte
   return [ body ]
 
 
+class _QuietRequestHandler(WSGIRequestHandler):
+  """
+  Request handler for the exposition endpoint that keeps scrapes out of the process's stderr.
+
+  Scope:
+    - Identical to the stdlib handler in every respect except the per-request access line, which is
+      dropped rather than written.
+
+  Notes:
+    - The endpoint is scraped on a fixed interval forever, and the supervisor captures the daemon's
+      stderr to a file nobody rotates, so one access line per scrape is an unbounded write of
+      information already carried by the exposition document itself.
+    - Warnings and errors the stdlib raises through `log_error` are untouched and still surface.
+  """
+
+  # waiver: the parameter name is the stdlib handler's own signature, kept verbatim so the override
+  # stays substitutable; renaming it to dodge the builtin shadowing would diverge from the base class
+  def log_message(self, format: str, *args: object) -> None:  # pylint: disable=redefined-builtin
+    """
+    Discard one access-log line.
+
+    Args:
+      format: Printf-style template the stdlib handler would have written.
+      args: Values the template interpolates.
+    """
+
+
 def expose(bind: str = "127.0.0.1", port: int = 9464) -> WSGIServer:
   """
   Start a background HTTP server that serves the Prometheus exposition document.
@@ -820,7 +847,7 @@ def expose(bind: str = "127.0.0.1", port: int = 9464) -> WSGIServer:
   # guard: refuse to expose metrics that have not been initialized
   if not is_enabled():
     raise RuntimeError("metrics.expose() called before metrics.init()")
-  server = make_server(bind, port, _wsgi_app)
+  server = make_server(bind, port, _wsgi_app, handler_class = _QuietRequestHandler)
   # waiver: fixed background-thread name, not a domain constant
   thread = threading.Thread(target = server.serve_forever, name = "lazycortex-metrics", daemon = True)
   thread.start()

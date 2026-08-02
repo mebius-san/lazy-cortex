@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.20.3 — 2026-08-02 UTC
+
+- Fixed unbounded log growth on the runtime daemon: metrics scrape requests no longer flood the access log, the daily journal no longer records routine ticks that did nothing, every dated `.logs/` journal (not just the built-in ones) is swept on the retention schedule, and oversized supervisor capture files are trimmed in place instead of growing forever.
+
 ### 5.20.2 — 2026-08-01 UTC
 
 - `/lazy-core.install` now catches `.gitignore` rules that only cover a linked external directory as a directory (`Data/`), which can't match the symlink the repair plants — it offers to append the missing anchored line, fixing daemons that halted with `uncommitted_changes` even though `.gitignore` looked complete. `/lazy-core.audit` reports the gap as its own warning instead of lumping it with "not gitignored at all".

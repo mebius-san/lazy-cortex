@@ -36,7 +36,7 @@ The `daemon` key is optional. When absent, no git ops are performed and `polling
 | `cleanup_dead_after` | duration string | `"7d"` | Age after which a DEAD-marked stuck job dir is deleted. DEAD jobs are marked by `expert_pump._detect_dead_jobs` when their PID file references a dead process; the forensic window before cleanup matches `cleanup_completed_after` by default. |
 | `stream_idle_timeout_sec` | int | `90` | Seconds of stdout silence from a `claude -p` expert spawn before it is treated as a frozen stream, its process group killed, and the spawn re-tried. |
 | `stream_max_retries` | int | `3` | Maximum number of in-memory re-spawns on stream-idle-stall before the job is left with a transient error for the next tick. Separate from the on-disk `attempts` counter. |
-| `cleanup_runtime_log_after` | duration string | `"30d"` | Age after which a per-day `.logs/lazy-core/runtime/<date>.jsonl` file is deleted. `tokens.jsonl` and `jobs.jsonl` are append-only and not subject to this retention — operators rotate them manually. |
+| `cleanup_runtime_log_after` | duration string | `"30d"` | Age after which a dated `<YYYY-MM-DD>.jsonl` journal is deleted. The hourly sweep walks all of `.logs/`, so a journal written by any plugin (`.logs/lazy-review/runs/…`, and whatever a future plugin adds) is retained on the same window without registering itself. Journals with no date in the name — `tokens.jsonl`, `jobs.jsonl`, `commits.jsonl` — are append-only ledgers whose age says nothing about which lines are still wanted; operators rotate those. |
 | `loop_detect_window` | int | `threshold * 4` | Number of recent commits to inspect for the per-(author, file) loop-detection heuristic. Must be ≥ `loop_detect_threshold`. Larger values give better accuracy at the cost of a slightly slower `git log` query. |
 
 Duration strings: a number followed by a unit suffix — `s`, `m`, `h`, or `d` (e.g. `"30d"`, `"12h"`, `"300s"`).
@@ -237,6 +237,10 @@ Per-routine record shape:
 ```
 
 `error` is present only on exception-level failures (timeout, resolve failure, unexpected exception). `exit` is `-1` on those failures; `stdout_tail` / `stderr_tail` may be absent. `error` is absent on normal subprocess completion (even if exit != 0).
+
+A tick that did nothing is not journaled. Every routine runs every few seconds, so recording quiet ticks would add thousands of identical lines a day and bury the ones that matter. A tick is quiet when it exited zero, reported no error, ran under 1.5 s, and reported no dispatched work — whether that count arrives as a `dispatched_count` result field or inside the stdout tail. Metrics still count the tick, so rates and latencies stay complete.
+
+**Supervisor captures.** On macOS the launch agent redirects the daemon's stdout and stderr to `.logs/lazy-core/runtime/launchd.out.log` and `launchd.err.log`. Neither carries a date, both are held open for the life of the daemon, and nothing else writes them, so the hourly sweep trims a capture in place once it passes 1 MB, keeping the last 256 KB from the first whole line onward. Deleting them instead would leave the supervisor writing to an unlinked inode while the visible file stayed empty. On Linux the unit has no file redirect — stdout and stderr go to the systemd journal, which journald rotates.
 
 ---
 
