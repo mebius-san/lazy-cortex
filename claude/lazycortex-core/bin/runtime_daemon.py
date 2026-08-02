@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -68,6 +69,13 @@ _GIT_TRANSPORT_MARKERS = (
 DEFAULT_POST_PUSH_TIMEOUT_SEC = 30
 # Hourly throttle for runtime-log + worktree cleanup (seconds).
 _CLEANUP_INTERVAL_SEC = 3600
+# Filename shape every dated journal in this ecosystem writes, wherever under `.logs/` it lives.
+_DATED_LOG_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.jsonl$")
+# Supervisor stdout/stderr captures — no date in the name, and the supervisor holds their fd open.
+_CAPTURE_LOG_NAMES = frozenset({ "launchd.err.log", "launchd.out.log" })
+# Size at which a supervisor capture is trimmed, and the tail kept when it is.
+_CAPTURE_LOG_MAX_BYTES = 1024 * 1024
+_CAPTURE_LOG_TAIL_BYTES = 256 * 1024
 # A tick faster than this with no work done is treated as quiet (not log-worthy).
 _QUIET_TICK_MAX_SEC = 1.5
 # Dirty-tree halt messages truncate the path list to this many lines.
@@ -1845,12 +1853,17 @@ def _parse_duration(s: str) -> float:
 
 def _cleanup_runtime_logs(repo_root: Path, max_age: str) -> None:
   """
-  Delete dated runtime log files older than the configured retention window.
+  Delete dated log files older than the retention window and trim the supervisor's capture files.
 
   Notes:
-    - Operates on `.logs/lazy-core/runtime/<date>.jsonl` files only.
-    - `tokens.jsonl` is intentionally exempted because it has no date in its name and is rotated
-      manually by operators.
+    - Every `<YYYY-MM-DD>.jsonl` anywhere under `.logs/` is subject to the window, so a plugin that
+      writes its own dated journal is retained without registering itself here.
+    - Journals with no date in the name (`tokens.jsonl`, `jobs.jsonl`, `commits.jsonl`) are exempt:
+      they are append-only ledgers whose age says nothing about which lines are still wanted, and
+      operators rotate them.
+    - A supervisor capture is trimmed in place rather than deleted. The supervisor holds its file
+      descriptor open for the life of the daemon, so unlinking would leave it writing to an inode
+      no one can read while the visible file stays empty.
     - Files removed by a concurrent cleanup are silently skipped.
 
   Args:
@@ -1858,26 +1871,61 @@ def _cleanup_runtime_logs(repo_root: Path, max_age: str) -> None:
     max_age: Retention duration as a short literal accepted by `_parse_duration` (e.g. `30d`).
   """
   # waiver: filesystem path idiom, not a domain constant
-  log_dir = repo_root / ".logs/lazy-core/runtime"
+  log_root = repo_root / ".logs"
   # guard: nothing to clean
-  if not log_dir.exists():
+  if not log_root.exists():
     return
   threshold = time.time() - _parse_duration(max_age)
-  for entry in os.listdir(log_dir):
-    # guard: skip non-jsonl files
-    # waiver: filesystem path idiom, not a domain constant
-    if not entry.endswith(".jsonl"):
-      continue
-    # guard: skip the tokens log
-    # waiver: filesystem path idiom, not a domain constant
-    if entry == "tokens.jsonl":
-      continue
-    f = log_dir / entry
-    try:
-      if f.stat().st_mtime < threshold:
-        f.unlink()
-    except FileNotFoundError:  # raced with another cleanup
-      continue
+  for dirpath, _dirnames, filenames in os.walk(log_root):
+    for entry in filenames:
+      f = Path(dirpath) / entry
+      if entry in _CAPTURE_LOG_NAMES:
+        _trim_capture_log(f)
+        continue
+      # guard: an undated journal carries no retention signal in its name
+      if not _DATED_LOG_RE.match(entry):
+        continue
+      try:
+        if f.stat().st_mtime < threshold:
+          f.unlink()
+      except FileNotFoundError:  # raced with another cleanup
+        continue
+
+
+def _trim_capture_log(path: Path) -> None:
+  """
+  Shrink one oversized supervisor capture file in place, keeping its most recent lines.
+
+  Notes:
+    - Below the cap the file is left untouched, so a quiet daemon never rewrites it.
+    - The kept tail starts at the first line boundary inside the window, so the file never opens
+      mid-line.
+
+  Args:
+    path: Absolute path of the capture file to trim.
+  """
+  try:
+    size = path.stat().st_size
+  except OSError:
+    return
+  # guard: still under the cap — nothing to reclaim
+  if size <= _CAPTURE_LOG_MAX_BYTES:
+    return
+  try:
+    # waiver: stdlib idiom, not a domain constant
+    with path.open("r+b") as f:
+      f.seek(size - _CAPTURE_LOG_TAIL_BYTES)
+      tail = f.read()
+      # waiver: stdlib idiom, not a domain constant
+      cut = tail.find(b"\n")
+      # guard: the window opened mid-line — drop the partial one
+      if cut != -1:
+        tail = tail[cut + 1:]
+      f.seek(0)
+      f.write(tail)
+      f.truncate()
+  except OSError:
+    return
 
 
 def _is_no_op_log(result: dict) -> bool:
@@ -1907,6 +1955,10 @@ def _is_no_op_log(result: dict) -> bool:
   # guard: long runs are always logged
   if result.get(TickResultKey.DURATION_SEC, 0) > _QUIET_TICK_MAX_SEC:
     return False
+  # guard: the tick reported its own dispatch count and it dispatched nothing — the same no-op the
+  # stdout scan below catches when the count arrives as a JSON tail instead of a result field
+  if result.get(TickResultKey.DISPATCHED_COUNT) == 0:
+    return True
   # waiver: small internal subkey, not a reusable domain key
   stdout = result.get("stdout_tail") or ""
   name = result.get(TickResultKey.NAME) or ""
