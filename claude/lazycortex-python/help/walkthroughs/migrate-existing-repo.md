@@ -9,11 +9,13 @@ diagram_spec:
 source_skills:
   - lazy-python.install
   - chk
+  - tst
+  - review.py
   - lazy-python.code-reviewer
 ---
 # Adopt the plugin in a repo with pre-existing Python that drifted from the canon
 
-This walkthrough is for anyone bringing `lazycortex-python` into a repo that already has Python files — code written before the plugin existed, imported from another project, or accumulated without a consistent discipline layer. The install wires up the checker stack without touching your existing source; `chk-py all -q` then inventories every violation the canon sees against your tree — including the guideline-review pass no deterministic tool can run — so you can work through them in small, committed chunks rather than one enormous diff. By the end, every checker passes, a guideline review has been dispatched and rendered clean, and the PostToolUse hook prevents new drift from silently accumulating.
+This walkthrough is for anyone bringing `lazycortex-python` into a repo that already has Python files — code written before the plugin existed, imported from another project, or accumulated without a consistent discipline layer. The install wires up the checker stack without touching your existing source; `chk-py all -q` then inventories every violation the canon sees against your tree — including the guideline-review pass no deterministic tool can run — so you can work through them in small, committed chunks rather than one enormous diff. By the end, every checker passes, `tst-py` confirms your existing tests still run clean, a guideline review has been dispatched and rendered clean, and the PostToolUse hook prevents new drift from silently accumulating.
 
 ## Outcome
 
@@ -21,9 +23,9 @@ After this walkthrough you have:
 
 - The full plugin wired: rule mirrors, `cli/chk-py` / `cli/tst-py` wrappers, `pyproject.toml` checker sections, overlay stubs, scaffold template, and PostToolUse hook live.
 - A baseline `chk-py all` run with every pre-existing violation captured in its output — nothing hidden, nothing auto-fixed.
-- Each violation batch committed as a separate, passing checkpoint so `git log` reflects coherent units of remediation work.
+- Each violation batch committed as a separate, passing checkpoint so `git log` reflects coherent units of remediation work, with `tst-py` confirming the batch didn't silently break an existing test.
 - A guideline review dispatched against the remediated tree via `lazy-python.code-reviewer` and rendered clean — the clauses no checker can prove (comment purpose, naming semantics, overlay-specific rules) confirmed alongside the deterministic checks.
-- A clean `chk-py all -q` exit on the final tree — the repo is now on the same footing as a green-field install.
+- A clean `chk-py all -q` exit on the final tree, with `tst-py` green — the repo is now on the same footing as a green-field install.
 
 ## What you need
 
@@ -61,11 +63,19 @@ Run the checker stack against the entire tree:
 
 On first run the venv resolver creates `.venv/` at the repo root and installs `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` — this takes 30–60 seconds. Subsequent runs are fast.
 
-`chk-py all` runs the seven-step gate in order: `pcf` (style critical-fail) → `toi` (test-of-intent) → `cmp` (py_compile syntax check) → `mypy` → `ruff` → `pylint` → `review` (guideline review). The `-q` flag suppresses per-file progress and shows only violations and the final summary. The first six steps are deterministic checkers; `review` is different — it builds a manifest of every file in scope and names the `lazy-python.code-reviewer` agent to catch what no AST walk can prove (comment purpose, naming semantics, your overlay's own clauses). `review` always exits 0 within `all` so a pending review never blocks the rest of the gate from reporting clean — it prints a manifest path instead of a verdict.
+`chk-py all` runs the seven-step gate in order: `pcf` (style critical-fail) → `toi` (test-of-intent) → `cmp` (py_compile syntax check) → `mypy` → `ruff` → `pylint` → `review` (guideline review). The `-q` flag suppresses per-file progress and shows only violations and the final summary. The first six steps are deterministic checkers; `review` is different — it builds a manifest of every file in scope and names the `lazy-python.code-reviewer` agent to catch what no AST walk can prove (comment purpose, naming semantics, your overlay's own clauses). `review` exits `2` while a review is pending, so the gate stays red until you dispatch the agent it names and render its findings — it prints a manifest path instead of a verdict, and that manifest is work still owed.
 
 Save the full output — it is your remediation queue. Do not start fixing yet; complete the inventory first so you know the scope before touching any file.
 
 **What to expect in a drifted repo**: `pcf` and `ruff` typically surface the most findings — missing or malformed docstrings, import-block ordering, line-length overruns, and bare `except` clauses. If Step 1's migration note applies to your repo and you skipped uncommenting the `[tool.pcf]` examples, expect `pcf` to also flag every class that used the old `Generation Rules` / `Value Ranges` sections or the old `_field_filters` escape hatch — go back to Step 1 and declare them before continuing. `mypy` surfaces type annotation gaps. `pylint` adds naming and complexity findings. `review` will name a lot of scope on a first pass across a whole pre-existing tree — expect it to flag missing purpose comments, mismatched naming prefixes, and any overlay clauses your repo has already accumulated in `docs/guidelines/`. A repo with a few dozen Python files may produce hundreds of lines of output; that is normal and expected.
+
+Also run the existing test suite once, before any remediation, so you know its starting state:
+
+```bash
+./cli/tst-py -q
+```
+
+Called without a module argument, `tst-py` runs every module's tests. Note any pre-existing failures now — those are not something this walkthrough introduces, and you don't want to chase them down mid-remediation thinking you caused them.
 
 ### Step 3 — Audit the install (optional but recommended)
 
@@ -91,9 +101,10 @@ After each batch:
 
 ```bash
 ./cli/chk-py all -q
+./cli/tst-py -q
 ```
 
-Confirm the batch clears the targeted checker without introducing new violations in others. Then commit:
+Confirm the batch clears the targeted checker without introducing new violations elsewhere, and that `tst-py` still reports the same (or better) pass/fail state as your Step 2 baseline — a batch that turns `chk-py` green while breaking a previously-passing test is not done. Then commit:
 
 ```bash
 git commit -am "fix(<scope>): remediate <checker> violations"
@@ -115,9 +126,10 @@ Once all violation batches are committed:
 
 ```bash
 ./cli/chk-py all -q
+./cli/tst-py -q
 ```
 
-Confirm the six deterministic steps report clean and the `review` step shows no outstanding manifest — every batch's guideline review from Step 4 should already be rendered and passing. Then run the audit one more time to confirm the installation invariants still hold after all the edits:
+Confirm the six deterministic checker steps report clean, `tst-py` shows every test passing (no new failures relative to your Step 2 baseline), and the `review` step shows no outstanding manifest — every batch's guideline review from Step 4 should already be rendered and passing. Then run the audit one more time to confirm the installation invariants still hold after all the edits:
 
 ```
 /lazy-python.audit
@@ -129,7 +141,7 @@ All 11 checks should show `PASS` or `WARN` (only the PyCharm `pch` check is expe
 
 The install is idempotent — re-running `/lazy-python.install` after any future plugin update overwrites only what changed (rule mirrors, wrapper scripts, any missing `pyproject.toml` sections) and leaves your consumer sections and overlay stubs untouched. Re-running is the recommended upgrade path, not a manual diff.
 
-`chk-py all` is the routine pre-commit gate going forward. The PostToolUse hook covers the inner loop — every `.py` edit surfaces `pcf.py` violations inline so drift is caught at the moment it is introduced rather than at commit time. `lazy-python.code-reviewer` is now registered as the `python.code-reviewer` expert as well as being dispatchable via `chk-py review`, so the same guideline-review pass you ran during remediation is available going forward through either path.
+`chk-py all` (paired with `tst-py` for the test layer) is the routine pre-commit gate going forward. The PostToolUse hook covers the inner loop — every `.py` edit surfaces `pcf.py` violations inline so drift is caught at the moment it is introduced rather than at commit time. `lazy-python.code-reviewer` is now registered as the `python.code-reviewer` expert as well as being dispatchable via `chk-py review`, so the same guideline-review pass you ran during remediation is available going forward through either path.
 
 If you added project-specific conventions during remediation — naming patterns, docstring shape requirements, module-level invariants — capture them in `docs/guidelines/coding_guidelines.md` (or the matching topic overlay). Writer agents read the overlay on every dispatch, and `lazy-python.code-reviewer` reads it too, so project conventions flow into both generated code and review findings without repetition. The **add-project-overlay** walkthrough covers that in full.
 
@@ -141,40 +153,30 @@ To verify the installation stays healthy over time, run `/lazy-python.audit` at 
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant install as lazy-python.install
-  participant chkPy as chk-py
-  participant reviewer as lazy-python.code-reviewer
+  participant installSkill as lazy-python.install
+  participant repoConfig as Repo Config
+  participant chkPyGate as chk-py Gate
+  participant codeReviewer as lazy-python.code-reviewer
 
-  user->>install: invoke /lazy-python.install
-  install->>install: mirror rules
-  install->>install: deploy wrappers
-  install->>install: detect PyCharm
-  install->>install: bootstrap pyproject.toml
-  install->>install: scaffold overlay
-  install->>install: sync scaffold template
-  install->>install: record python.env_source
-  install->>install: seed agent-model tiers
-  install->>install: register code-reviewer expert
-  install-->>user: log install complete
-  user->>chkPy: run chk-py all -q
-  loop seven-step gate
-    chkPy->>chkPy: pcf check
-    chkPy->>chkPy: toi check
-    chkPy->>chkPy: cmp check
-    chkPy->>chkPy: mypy check
-    chkPy->>chkPy: ruff check
-    chkPy->>chkPy: pylint check
-    chkPy->>reviewer: dispatch review phase
+  user->>installSkill: /lazy-python.install
+  installSkill->>repoConfig: mirror rules, deploy wrappers, detect PyCharm
+  alt PyCharm present
+    installSkill->>repoConfig: bootstrap pyproject.toml with tool.pch
   end
-  chkPy-->>user: report existing violations
-  loop fix and commit cycle
-    user->>user: fix violations in chunks
-    user->>reviewer: dispatch code-reviewer
-    reviewer-->>chkPy: findings
-    user->>chkPy: chk-py review --render
-    chkPy-->>user: rendered findings
-    user->>user: commit chunk
+  installSkill->>repoConfig: scaffold overlay and sync scaffold template
+  alt multiple bootstrap-script candidates
+    installSkill->>user: disambiguate python.env_source
+    user-->>installSkill: chosen bootstrap script
   end
-  user->>chkPy: run chk-py all
-  chkPy-->>user: exit clean
+  installSkill->>repoConfig: record python.env_source, seed agent-model tiers, register code-reviewer expert, log install run
+  user->>chkPyGate: chk-py all -q
+  chkPyGate->>chkPyGate: run pcf, toi, cmp, mypy, ruff, pylint, review
+  chkPyGate-->>user: surface existing violations and name lazy-python.code-reviewer for review phase
+  loop until chk-py all exits clean
+    user->>codeReviewer: dispatch review
+    codeReviewer-->>user: render findings
+    user->>repoConfig: fix violations in chunk and commit
+    user->>chkPyGate: chk-py all -q
+  end
+  chkPyGate-->>user: chk-py all exits clean
 ```

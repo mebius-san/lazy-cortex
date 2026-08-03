@@ -7,9 +7,15 @@ source_skills:
   - lazy-python.install
   - lazy-python.audit
   - lazy-python.check-style
+  - chk
+  - tst
+  - review.py
   - lazy-python.docstring-writer
   - lazy-python.test-writer
   - lazy-python.code-reviewer
+  - lazy-python.style
+  - lazy-python.docstrings
+  - lazy-python.tests
 ---
 # Frequently asked questions
 
@@ -47,7 +53,7 @@ Check 11 warns when no usable venv is found and bootstrapping one is not possibl
 
 ## How does `chk-py` decide which Python environment to use?
 
-Every `chk-py` and `tst-py` invocation resolves the venv chain first, in order: an already-activated `$VIRTUAL_ENV`, then `<repo>/.venv`, then a path configured under `[tool.lazy-python]` in `pyproject.toml`, then the plugin-local fallback venv created or augmented on first run. Once a venv is active, the wrappers separately check `python.env_source` in `.claude/lazy.settings.json` — if it names a repo-specific bootstrap script, that script is sourced in the same shell before any checker or `pytest` runs, so provider credentials or secret-path exports your project depends on are in place first.
+Every `chk-py` and `tst-py` invocation resolves the venv chain first, in order: an already-activated `$VIRTUAL_ENV`, then `<repo>/.venv`, then a path configured under `[tool.lazy-python]` in `pyproject.toml`, then the plugin-local fallback venv created or augmented on first run. Once a venv is active, the wrappers separately check `python.env_source` in `.claude/lazy.settings.json` — if it names a repo-specific bootstrap script, that script is sourced in the same shell before any checker or `pytest` runs, so provider credentials or secret-path exports your project depends on are in place first. The `review` subcommand is the one exception — it skips the venv resolver entirely, since it is pure stdlib by design, so the guideline-review phase also works from pre-commit hooks and CI runners that never set up a venv.
 
 `python.env_source` is not something you set by hand: `/lazy-python.install` Step 7 detects a recognised bootstrap script (`cli/env`, `.env.sh`, or `scripts/env.sh`) in your repo and records it automatically. Zero or one candidate is handled silently; if more than one is found, install asks once which script to use. A value already on record is never re-asked or overwritten, and no audit check inspects it — recording `python.env_source` is an install-time convenience, not a verified invariant.
 
@@ -67,7 +73,13 @@ No. The plugin enforces running all style and type validation through `chk-py`. 
 
 ## `chk-py all` finished but printed a "review" step at the end. What is that?
 
-That is the guideline-review phase. `chk-py review` builds a manifest of the modified files and the canon/overlay layers, then prints the dispatch directive for the `lazy-python.code-reviewer` agent — a judgement pass over clauses no checker AST-walk can prove (comment purpose and density, `# guard:` semantics, naming-prefix correctness, useless intermediate variables, docstring-vs-code contract drift, suppression hygiene). Dispatch the agent against that manifest; it writes a findings document (FAIL / WARN / INFO) and never edits your code itself. `chk-py review --render <findings.json>` renders a findings file the agent already produced.
+That is the guideline-review phase, the seventh and final step of `chk-py all`. Unlike the other six checks, `review.py` does not run a deterministic tool against your code — it resolves the scope (your current working-tree diff plus untracked files, or explicit paths you pass), collects every applicable canon and overlay layer, and writes a manifest under `.runtime/lazy-python/review/` in your project. It then prints that manifest path and names the `lazy-python.code-reviewer` agent to dispatch against it — a judgement pass over clauses no checker AST-walk can prove (comment purpose and density, `# guard:` semantics, naming-prefix correctness, useless intermediate variables, docstring-vs-code contract drift, suppression hygiene). Dispatch the agent against that manifest; it writes a findings document (FAIL / WARN / INFO) and never edits your code itself. `chk-py review --render <findings.json>` renders the findings the agent already produced, and is what actually clears the gate.
+
+---
+
+## `chk-py all` is failing with `review: PENDING` even though every other check is clean. How do I clear it?
+
+A pending review now fails the gate instead of passing silently past it: `review.py` exits a distinct `PENDING` code (2) whenever the scope has changed since its last review and nobody has decided it yet. Dispatch the `lazy-python.code-reviewer` agent against the manifest path printed just above the `PENDING` line, then run `chk-py review --render <findings.json>` — that render step is what actually clears the gate, and it exits non-zero itself if the agent found a `FAIL`. If you genuinely cannot dispatch an agent in that context — a nested writer agent, a scripted sweep — set `CHK_REVIEW=skip` for that single invocation; it exits 0 but records no decision, so the same scope is still pending the next time anyone runs `chk-py all` against it. For CI or automation where the `claude` CLI is installed but no one is present to dispatch manually, set `CHK_REVIEW=headless` instead — `review.py` dispatches the reviewer agent itself through the CLI and renders its findings in the same run. Neither flag is a substitute for an actual review decision; a scope that has not changed since its last real review reuses those findings rather than re-manifesting.
 
 ---
 

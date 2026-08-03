@@ -927,6 +927,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 2.2.0 — 2026-08-03 UTC
+
+- `chk-py all` now fails when a guideline review is pending but hasn't been read — set `CHK_REVIEW=skip` to bypass a single run.
+- Review manifests moved out of the log tree into `.runtime/`.
+
 ### 2.1.0 — 2026-08-03 UTC
 
 - New `chk review` phase runs a guideline review beyond what deterministic checks can catch — purpose comments, logical-block boundaries, naming semantics, and project overlay rules — via a new code-reviewer agent. It never blocks the `chk all` pipeline (always exits 0); run `chk review --render` to see findings, which does fail on a genuine FAIL. Unchanged scopes reuse their prior verdict instead of re-reviewing.

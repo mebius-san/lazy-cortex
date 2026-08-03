@@ -170,8 +170,10 @@ elif [ "$cmd" = "toi" ]; then
 
 # guideline review — builds the manifest and prints the agent dispatch directive.
 # Pure stdlib, so it deliberately skips ensure_venv: the phase must also work from
-# pre-commit and CI. It never calls an LLM unless CHK_REVIEW=headless is set, and
-# exits 0 so a pending review cannot break `all`.
+# pre-commit and CI. It never calls an LLM unless CHK_REVIEW=headless is set. A
+# pending review exits 2 and so fails `all` — the phase is decided by dispatching
+# the agent or by an operator waiver, never by ignoring it. CHK_REVIEW=skip opts
+# a run out of the phase for callers that cannot act on a pending review.
 elif [ "$cmd" = "review" ]; then
   python3 "$script_dir/review.py" "${mods[@]}"
 
