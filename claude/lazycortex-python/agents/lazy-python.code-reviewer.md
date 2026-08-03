@@ -93,7 +93,7 @@ When a clause states its own severity ("MANDATORY", "FAIL", "never without appro
 
 Read the manifest JSON named in the dispatch prompt. It carries `files` (the review scope), `guidelines` (the layers to read), and `findings_path` (where your output goes).
 
-If no manifest was supplied, take the file list from the prompt, discover the layers yourself in the precedence order above, and write findings next to the other review artifacts under `.logs/lazy-python/review/`.
+If no manifest was supplied, take the file list from the prompt, discover the layers yourself in the precedence order above, and write findings next to the other review artifacts under `.runtime/lazy-python/review/`.
 
 Outcome: `manifest-read` or `prompt-scope`.
 

@@ -7,7 +7,9 @@ and renders the agent's findings in the same shape the other checkers use.
 
 The script never calls the agent itself unless CHK_REVIEW=headless is set — it is
 part of the check pipeline, which also runs from pre-commit and CI where no LLM
-is available.
+is available. A review that has been manifested but not yet reviewed exits with
+PENDING_EXIT so it cannot pass unnoticed; CHK_REVIEW=skip opts a run out of the
+phase entirely, for callers that are in no position to act on a pending review.
 """
 
 from __future__ import annotations
@@ -37,7 +39,10 @@ Finding: TypeAlias = dict[str, object]
 REVIEWER_AGENT = 'lazycortex-python:lazy-python.code-reviewer'
 
 # repo-relative directory holding manifests and findings
-REVIEW_DIR = Path('.logs') / 'lazy-python' / 'review'
+REVIEW_DIR = Path('.runtime') / 'lazy-python' / 'review'
+
+# exit code of a review that is manifested but not yet decided, distinct from a FAIL finding
+PENDING_EXIT = 2
 
 # guideline layers as (directory, filename pattern), outermost (canon) first
 CANON_LAYER = ('references', 'lazy-python.*-guidelines.md')
@@ -394,8 +399,13 @@ def cmd_review(repo: Path, plugin_root: Path, paths: list[str]) -> int:
     paths: Explicit paths, or empty for the current diff.
 
   Returns:
-    Process exit code — always 0 unless headless rendering reports a blocker.
+    Process exit code — PENDING_EXIT while the review is undecided, 1 on a FAIL finding, else 0.
   """
+  # guard: an explicit opt-out keeps the phase out of nested runs that cannot act on a pending review
+  if os.environ.get('CHK_REVIEW') == 'skip':
+    print('review: SKIPPED — CHK_REVIEW=skip')
+    return 0
+
   files = resolve_scope(repo, paths)
 
   # guard: nothing changed, the phase has no work
@@ -422,8 +432,10 @@ def cmd_review(repo: Path, plugin_root: Path, paths: list[str]) -> int:
   print(f'review: dispatch agent {REVIEWER_AGENT} with that manifest, '
         f'then render its findings:')
   print(f'review:   chk-py review --render {findings_path.relative_to(repo)}')
+  print('review: a pending review is unfinished work — dispatch the agent, or ask the operator '
+        'to waive this scope. Rerun with CHK_REVIEW=skip only once that decision is recorded.')
 
-  return 0
+  return PENDING_EXIT
 
 
 def main() -> None:

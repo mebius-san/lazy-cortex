@@ -7,6 +7,9 @@ diagram_spec:
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads); agent writes test file covering all 7 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module; agent logs the run. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
 source_skills:
   - lazy-python.test-writer
+  - lazy-python.testing-guidelines
+  - tst
+  - chk
 ---
 # Generate tests that cover all seven Paranoid-Testing categories for a new class
 
@@ -89,7 +92,7 @@ The agent then runs its eight ordered steps:
 4. **Write tests** — writes the test file covering all 7 Paranoid-Testing categories (see Step 4 below for what that means). Outcome: `<N>-tests-written`.
 5. **Add class and method docstrings** — ensures every test class starts with `"Test unit for "` and every test method starts with `"Test that "`. Outcome: `done` or `already-present`.
 6. **Handle implementation-vs-spec mismatches** — if a test correctly reflects documented behavior but the implementation does not satisfy it yet, the agent adds a `# FAILS: <reason>` comment above that method and reports the divergence. It does not delete the test or fix production code. Outcome: `none` or `<N>-mismatches-flagged`.
-7. **Verify with toolchain** — runs `chk-py all <test_file>.py -q`, then `chk-py all -q` for the full project, then `tst-py <module> -q`. Outcome: `clean` or `<N>-violations-fixed`.
+7. **Verify with toolchain** — runs `CHK_REVIEW=skip chk-py all <test_file>.py -q`, then `CHK_REVIEW=skip chk-py all -q` for the full project, then `tst-py <module> -q`. The agent always sets `CHK_REVIEW=skip` on both `chk-py` calls — a pending guideline review exits `2` and the agent has no way to dispatch `lazy-python.code-reviewer` or decide the verdict mid-run, so that decision is left to you (see Step 6). Outcome: `clean` or `<N>-violations-fixed`.
 8. **Log the run** — writes a structured log to `.logs/claude/lazy-python.test-writer/`. Outcome: `logged`.
 
 Watch for the Step 3 outcome line. It tells you the exact test targets the agent found — if the count is lower than you expect, the missing targets are likely undocumented methods.
@@ -141,6 +144,8 @@ If your project aggregates its suites through re-export shims (a `test_all.py` t
 
 If your project has no such shims, no key ever repeats and the line never prints — the run behaves exactly as before.
 
+The agent's own verification skips the guideline-review phase both times it runs `chk-py all` (Step 3, outcome 7), so that phase — the seventh step of `chk-py all` — is still pending once the agent finishes. Before you commit, run `chk-py all -q` yourself without `CHK_REVIEW=skip`: it prints a manifest path and names the `lazy-python.code-reviewer` agent to dispatch against the new test file. Once that agent reports and you render its findings with `chk-py review --render <findings.json>`, the gate closes for real. Skipping this step leaves the guideline layer — the rules no AST-based checker can prove, like naming semantics and your own overlay clauses — unchecked on the file the agent just wrote.
+
 A green run with no `# FAILS:` comments means the class is fully covered and the implementation satisfies its contract. A run with `# FAILS:` comments means the agent found divergences between the docstring contract and the implementation — these need your attention before the tests can be considered passing.
 
 ### Step 7 — Iterate as the class evolves
@@ -171,29 +176,24 @@ Track `docs/guidelines/testing_guidelines.md` in version control. When a teammat
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant testWriter as Test Writer Agent
-  participant canon as Plugin Canon
-  participant overlay as Project Overlay
-  participant targetClass as Target Class
-  participant toolchain as Toolchain
+  participant testWriter as lazy-python.test-writer
+  participant docs as Guideline Docs
+  participant testFile as Test File
+  participant chkPy as chk-py
+  participant tstPy as tst-py
 
   user->>testWriter: invoke lazy-python.test-writer for target class
-  testWriter->>canon: read testing-guidelines and checking-guidelines
-  canon-->>testWriter: canon rules returned
-  testWriter->>overlay: read testing_guidelines.md and checking_guidelines.md
-  overlay-->>testWriter: overlay rules returned
-  testWriter->>overlay: read CLAUDE.md Testing section
-  overlay-->>testWriter: CLAUDE.md testing rules returned
-  testWriter->>targetClass: identify test targets
-  targetClass-->>testWriter: init paths, public methods, properties, guarantees, exceptions, operator overloads
-  Note over testWriter: writes test file covering all 7 Paranoid-Testing categories
-  loop per test file
-    testWriter->>toolchain: chk-py file
-    toolchain-->>testWriter: file check result
-  end
-  testWriter->>toolchain: chk-py all
-  toolchain-->>testWriter: all-files check result
-  testWriter->>toolchain: tst-py module
-  toolchain-->>testWriter: module test result
-  Note over testWriter: logs the run
+  testWriter->>docs: read plugin canon - testing-guidelines, checking-guidelines
+  docs-->>testWriter: canon rules
+  testWriter->>docs: read project overlay - testing_guidelines.md, checking_guidelines.md, CLAUDE.md Testing section
+  docs-->>testWriter: overlay rules
+  Note over testWriter: identify test targets - init paths, public methods, properties, documented guarantees, exceptions, operator overloads
+  testWriter->>testFile: write test file covering all 7 Paranoid-Testing categories
+  testWriter->>chkPy: chk-py per file
+  chkPy-->>testWriter: per-file check result
+  testWriter->>chkPy: chk-py all
+  chkPy-->>testWriter: all-check result
+  testWriter->>tstPy: tst-py on the module
+  tstPy-->>testWriter: test results
+  Note over testWriter: log the run
 ```

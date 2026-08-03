@@ -1,15 +1,18 @@
 ---
 chapter_type: troubleshooting
-summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, and writer agents.
+summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
 last_regen: 2026-08-03
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Decision-tree routing install/audit/check-style/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-locate-plugin-post-bump); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-major-upgrade (D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions) needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
+  request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-locate-plugin-post-bump); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-major-upgrade (D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions) needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; review branch splits on chk-py-all-exits-2-pending-review (dispatch lazy-python.code-reviewer against the printed manifest, then render) vs render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
   kind_hint: decision-tree
 source_skills:
   - lazy-python.install
   - lazy-python.audit
   - lazy-python.check-style
+  - chk
+  - tst
+  - review.py
   - lazy-python.docstring-writer
   - lazy-python.test-writer
   - lazy-python.code-reviewer
@@ -88,7 +91,7 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Likely cause**: PyCharm is not installed, or its `inspect.sh` script is not on `$PATH`. The `pch` component of the aggregator depends on this script to run PyCharm's offline inspections.
 
-**Fix**: The rest of the checker stack (`pcf`, `toi`, `mypy`, `pylint`, `pytest`, `ruff`) is unaffected. Install PyCharm and ensure its `bin/inspect.sh` is on `$PATH` if full `pch` coverage is needed. Until then, `check6 WARN` is expected and safe to ignore.
+**Fix**: The rest of the checker stack (`pcf`, `toi`, `mypy`, `pylint`, `pytest`, `ruff`, `review`) is unaffected. Install PyCharm and ensure its `bin/inspect.sh` is on `$PATH` if full `pch` coverage is needed. Until then, `check6 WARN` is expected and safe to ignore.
 
 ---
 
@@ -109,6 +112,26 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 **Likely cause**: Two resolvers run back-to-back before every `chk-py` / `tst-py` invocation. `_ensure_venv.sh` picks the Python venv first (active `$VIRTUAL_ENV`, then `<repo>/.venv`, then a `pyproject.toml`-configured path, then a fallback bootstrap). Immediately after, `_ensure_env.sh` sources whichever script is on record as `python.env_source`. `/lazy-python.install` Step 7 records that key automatically when it finds exactly one candidate bootstrap script (`cli/env`, `.env.sh`, `scripts/env.sh`) — but when a repo ships more than one candidate and nothing is recorded yet, the value stays unset until you disambiguate, and any checker run in the meantime sources none of them (or picks up stray state from your shell instead).
 
 **Fix**: Re-run `/lazy-python.install`. If `python.env_source` has not been recorded yet, Step 7 detects the multiple candidates and asks — via `AskUserQuestion`, naming each script — which one your project actually uses (with a `skip` option). Pick the correct script; the install records it, and every subsequent `chk-py` / `tst-py` run sources it automatically alongside the resolved venv. A value already on record is never silently replaced — the disambiguation only fires when nothing is recorded yet, so if the repo's bootstrap script layout changed since the last recorded choice, confirm which script your project intends before re-running.
+
+---
+
+## `chk-py all` fails even though every checker step passed
+
+**Symptom**: `chk-py all -q` (or `/lazy-python.check-style` Step 4 / Step 6) ends with a non-zero exit. The `[7/7] review` step prints `review: PENDING — <N> file(s) in scope` plus a manifest path, even though the six preceding steps (`pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint`) all reported clean.
+
+**Likely cause**: `chk-py all` runs a seventh phase — the guideline-review gate (`chk-py review`, backed by `bin/review.py`). It writes a manifest of the changed files plus every applicable guideline layer (canon, overlay, scoped rules, project notes) and exits `2` until that exact scope has been reviewed by the `lazy-python.code-reviewer` agent. This is by design, not a bug: the checkers only prove what an AST can prove, and the review phase covers the guideline clauses no script can check.
+
+**Fix**: Dispatch the `lazy-python.code-reviewer` agent against the manifest path printed in the output, then render its findings with the `chk-py review --render <findings.json>` command the output also prints. Re-run `chk-py all -q` — an unchanged scope reuses the previous findings instead of re-manifesting (keyed on a hash of the reviewed files' content). If you cannot dispatch the agent in the current context, surface the pending scope to the operator and ask what to do with it. `CHK_REVIEW=skip` opts a single run out of the phase for callers that cannot act on it (the shipped docstring and test writers use it internally) — it records no decision and must never be used to wave through a review the operator has not explicitly waived.
+
+---
+
+## `chk-py review --render` still exits non-zero after the findings are rendered
+
+**Symptom**: After dispatching `lazy-python.code-reviewer` and running `chk-py review --render <findings.json>`, the command prints one or more `fail:`-severity lines followed by `Found blocking guideline issues: <N> finding(s)`, and exits `1`.
+
+**Likely cause**: The reviewer recorded at least one `FAIL`-severity finding — a violated guideline clause the deterministic checkers cannot see, such as an unapproved test-assertion change, a checker-relaxing suppression without a `# waiver:` reason, or a docstring that contradicts the code it documents. A `WARN`-only review (missing purpose comments, naming mismatches, useless locals) does not block; only a `FAIL` does.
+
+**Fix**: Apply the fix the finding names — in the code the finding cites, never by editing the findings document itself. Re-run `chk-py all -q`: because the file content changed, the scope key changes too, so the review phase re-manifests and needs a fresh `lazy-python.code-reviewer` dispatch against the new scope before it can pass.
 
 ---
 
