@@ -12,7 +12,7 @@ The PostToolUse check-style hook auto-registers from the plugin's `hooks/hooks.j
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Mirror plugin rules into .claude/rules/`
@@ -23,6 +23,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 6 — Sync scaffold templates via lazy-core.scaffold-sync`
    - `Step 7 — Record python.env_source when a project env script is present`
    - `Step 7.5 — Seed agent-model tiers`
+   - `Step 7.6 — Register the code-reviewer expert`
    - `Step 8 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they emit an explicit outcome (`installed`, `unchanged`, `merged`, `wrappers-deployed-2`, `already-present`, …).
 3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
@@ -169,7 +170,7 @@ Outcome: `env-source-already-set` / `env-source-no-candidate` / `env-source-reco
 
 ## Step 7.5: Seed agent-model tiers
 
-Seed the `agent_models.lazycortex` group with this plugin's shipped subagents (`lazy-python.docstring-writer`, `lazy-python.test-writer`) by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-python:`-prefix filter, and the non-destructive per-key semantics (absent→add, equal→unchanged, different→kept-local). No inline tier logic here. Scope is `project` — lazycortex-python is per-repo tooling (see "Decisions are remembered" above), so the primitive targets `<repo-root>/.claude/lazy.settings.json`.
+Seed the `agent_models.lazycortex` group with this plugin's shipped subagents (`lazy-python.docstring-writer`, `lazy-python.test-writer`, `lazy-python.code-reviewer`) by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-python:`-prefix filter, and the non-destructive per-key semantics (absent→add, equal→unchanged, different→kept-local). No inline tier logic here. Scope is `project` — lazycortex-python is per-repo tooling (see "Decisions are remembered" above), so the primitive targets `<repo-root>/.claude/lazy.settings.json`.
 
 Dispatch:
 
@@ -183,6 +184,18 @@ Fold the primitive's returned report block verbatim into this skill's Report. Su
 - **`no-entries`** — the SOT lists no `lazycortex-python:` agents → report it plainly (a maintainer must extend `default-tiers.json`); not an abort.
 
 Outcome: `seeded` (any entry added) or `unchanged`.
+
+## Step 7.6: Register the code-reviewer expert
+
+Register `lazy-python.code-reviewer` as an expert in `<consumer>/.claude/lazy.settings.json` so the review phase is dispatchable from the expert runtime as well as from `chk-py review`. The entry is additive and never overwrites one already on record — the operator's expert config is authoritative.
+
+Run:
+
+```
+Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase7 ${CLAUDE_PROJECT_DIR})
+```
+
+Outcome: `expert-registered: python.code-reviewer` (added) or `expert-already-registered` (left untouched).
 
 ## Step 8: Log the run
 

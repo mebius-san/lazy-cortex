@@ -1,16 +1,17 @@
 ---
 chapter_type: block
 summary: Project-specific guideline files in docs/guidelines/ plus [tool.pcf] declarations in pyproject.toml let you extend the project-neutral canon per repo.
-last_regen: 2026-07-13
+last_regen: 2026-08-03
 no_diagram: true
 source_skills:
   - lazy-python.install
   - lazy-python.docstring-writer
   - lazy-python.test-writer
+  - lazy-python.code-reviewer
 ---
 # Per-repo overlay guidelines
 
-Every Python project has conventions that belong to it alone — a base test class, a copyright header format, a custom docstring section for domain-specific fields, internal naming prefixes. The overlay convention is how you supply those specifics without forking the plugin or editing files it owns. You add content to `docs/guidelines/` files and, where the rule is mechanical rather than prose, to `[tool.pcf]` in `pyproject.toml`. Writer agents read canon first, then overlay, on every dispatch; overlay rules win on conflict.
+Every Python project has conventions that belong to it alone — a base test class, a copyright header format, a custom docstring section for domain-specific fields, internal naming prefixes. The overlay convention is how you supply those specifics without forking the plugin or editing files it owns. You add content to `docs/guidelines/` files and, where the rule is mechanical rather than prose, to `[tool.pcf]` in `pyproject.toml`. Writer and reviewer agents read canon first, then overlay, on every dispatch; overlay rules win on conflict.
 
 When `/lazy-python.install` runs its Step 5, it scaffolds four stub files under `docs/guidelines/` with placeholder headers. You fill them in. The plugin never touches these files again after the initial scaffold — they are yours to maintain.
 
@@ -20,13 +21,15 @@ When `/lazy-python.install` runs its Step 5, it scaffolds four stub files under 
 
 **`lazy-python.test-writer`** is a test engineer agent that writes unit test files following the Paranoid-Testing strategy (seven categories: happy path, wrong/invalid arguments, boundary values, error conditions, state transitions, operator overloading, and documented guarantees). On every dispatch it reads four layers before writing: the canonical `lazy-python.testing-guidelines.md` and `lazy-python.checking-guidelines.md` from the plugin, then your project's `docs/guidelines/testing_guidelines.md` and `docs/guidelines/checking_guidelines.md` overlays. The base test class your project requires, the aggregate test file patterns, the log-level suppression helper, and any project-specific test placement rules all live in the overlay and take effect automatically on the next dispatch.
 
+**`lazy-python.code-reviewer`** is a guideline-review agent dispatched by the `chk-py review` phase (or directly, against an explicit file list) to catch what no automated checker can prove — comment purpose, guard-clause semantics, naming, useless intermediate variables, docstring-versus-code contract, and any overlay clause the canon doesn't state. Before writing a single finding it reads four guideline layers in strict precedence order: the plugin's canon, then your project's `docs/guidelines/*.md` overlay, then any `.claude/rules/*.md` scoped to Python files, then `CLAUDE.md` / `.claude/CLAUDE.md` project notes — each layer overriding the one before it on conflict. When your overlay contradicts the canon, the agent treats the overlay as authoritative and never reports the overridden canon clause as a violation.
+
 ## How they work together
 
-The two agents share the same overlay infrastructure but draw from different topic files. `lazy-python.docstring-writer` reads the `documenting_guidelines.md` overlay; `lazy-python.test-writer` reads `testing_guidelines.md` and `checking_guidelines.md`. The `coding_guidelines.md` overlay (copyright headers, naming rules, import ordering) is read by both agents as a background layer from the consumer's `CLAUDE.md` `## Documenting` / `## Testing` sections if you place shared project-wide notes there.
+The three agents share the same overlay infrastructure but draw from different scopes. `lazy-python.docstring-writer` reads the `documenting_guidelines.md` overlay; `lazy-python.test-writer` reads `testing_guidelines.md` and `checking_guidelines.md`. `lazy-python.code-reviewer` casts a wider net than either writer: rather than one or two topic files, it reads every file under `docs/guidelines/`, plus any Python-scoped `.claude/rules/*.md`, plus your project notes — so a rule you wrote in `.claude/rules/` that scopes itself to `**/*.py` reaches the reviewer during a review pass even though neither writer agent would ever see it. The `coding_guidelines.md` overlay (copyright headers, naming rules, import ordering) is read by both writer agents as a background layer from the consumer's `CLAUDE.md` `## Documenting` / `## Testing` sections if you place shared project-wide notes there, and by the reviewer as part of its `docs/guidelines/` sweep.
 
 The practical workflow: fill in the overlay stub for the topic you care about, add any matching `[tool.pcf]` declaration to `pyproject.toml` if the rule is mechanical, then dispatch the relevant agent. The agent picks up your additions immediately — no flag, no re-install, no changes to the prompt. If you later tighten or extend a rule, re-run the agent against the affected files; it re-reads the overlay on every dispatch and its output will reflect the updated spec.
 
-Neither agent requires the overlay to be present. When `docs/guidelines/` does not exist or a topic file is missing, the agent proceeds with the project-neutral canon alone. The stubs created by `/lazy-python.install` Step 5 are intentionally minimal — add only what differs from the canon.
+Neither writer agent requires the overlay to be present. When `docs/guidelines/` does not exist or a topic file is missing, the writer proceeds with the project-neutral canon alone. `lazy-python.code-reviewer` behaves the same way — an empty or missing `docs/guidelines/` tree just means its `overlay` guideline layer is empty, and it reviews against canon only. The stubs created by `/lazy-python.install` Step 5 are intentionally minimal — add only what differs from the canon.
 
 ## When you'd use this
 
@@ -37,6 +40,7 @@ Neither agent requires the overlay to be present. When `docs/guidelines/` does n
 - Your project needs an extra class-docstring section beyond the built-in set (Summary, Scope, Responsibilities, Guarantees, Subclassing, Notes, Type Parameters, Attributes) — for example, to document generation rules for a data-set-initializer class or field-level semantics that don't fit `Attributes:`. You declare it once in `[tool.pcf] extra_docstring_sections` and describe its content rules in the overlay; `lazy-python.docstring-writer` then writes it on every dispatch.
 - Your project has private attributes or `@property` methods that should legitimately appear in a class's `Attributes:` section — you declare the marker attribute(s) that exempt a class via `[tool.pcf] d2_exempt_marker_attrs` and document the convention in the overlay.
 - Your project exposes a log-level suppression helper or a test generator import path that `lazy-python.test-writer` should use in every test file.
+- You want a guideline clause enforced during code review — block-comment discipline, naming semantics, structural placement rules specific to your project — without writing a new automated checker. State it once in the overlay and `lazy-python.code-reviewer`'s "overlay-specific clauses" checklist item picks it up on every review dispatch.
 
 ## How it fits together
 
@@ -60,7 +64,9 @@ This follows the same File-sync policy `/lazy-python.install` applies to every a
 
 **How `lazy-python.test-writer` uses the overlay.** Step 1 of the agent reads `lazy-python.testing-guidelines.md` and `lazy-python.checking-guidelines.md` from the plugin, then attempts to read `${CLAUDE_PROJECT_DIR}/docs/guidelines/testing_guidelines.md` and `${CLAUDE_PROJECT_DIR}/docs/guidelines/checking_guidelines.md`. The overlay is the only place to declare your project's base test class, aggregate test file patterns, and log-level helper — if the overlay is silent, the agent falls back to the generic `<YourBaseTest>` placeholder and asks you. The `## Testing` section of `CLAUDE.md` serves as a third layer for project-wide notes.
 
-**How the checker uses it.** `chk-py` applies the mechanical rules from `pyproject.toml` plus the configured checker stack, including whatever `[tool.pcf] extra_docstring_sections`, `d2_exempt_marker_attrs`, and `private_name_allowlist` you've declared. The overlay guideline files are prose conventions for writer agents, not checker config. If you introduce a project-specific rule that needs mechanical enforcement beyond the docstring-section machinery, add the corresponding setting to `pyproject.toml` directly (the `[tool.ruff]`, `[tool.mypy]`, or `[tool.pylint]` sections that `/lazy-python.install` bootstrapped).
+**How `lazy-python.code-reviewer` uses the overlay.** The `chk-py review` phase builds a manifest before dispatch that lists every guideline layer explicitly, canon first: `canon` (the plugin's `references/lazy-python.*-guidelines.md`), `overlay` (every file under `docs/guidelines/`, not just the topic that matches the changed files), `rules` (any `.claude/rules/*.md` whose frontmatter scopes it to Python — either `always_loaded` or a `.py` glob), and `project_notes` (`CLAUDE.md` / `.claude/CLAUDE.md`, when present). The agent reads all four layers in that order before applying its review checklist. When the overlay contradicts the canon, the overlay wins and the canon clause is never reported as a violation; a checklist item exists specifically to catch clauses your overlay adds that the canon doesn't carry at all.
+
+**How the checker uses it.** `chk-py` applies the mechanical rules from `pyproject.toml` plus the configured checker stack, including whatever `[tool.pcf] extra_docstring_sections`, `d2_exempt_marker_attrs`, and `private_name_allowlist` you've declared. The overlay guideline files are prose conventions for writer and reviewer agents, not checker config. If you introduce a project-specific rule that needs mechanical enforcement beyond the docstring-section machinery, add the corresponding setting to `pyproject.toml` directly (the `[tool.ruff]`, `[tool.mypy]`, or `[tool.pylint]` sections that `/lazy-python.install` bootstrapped).
 
 **Conflict resolution.** When the overlay repeats a rule from the canon with a different value, the overlay wins. When it adds a new rule not present in the canon, that rule applies in addition. There is no syntax for "delete a canon rule" — to neutralise a canon rule, override it with the exception you want to allow and document the reason in a comment.
 
@@ -80,8 +86,10 @@ This follows the same File-sync policy `/lazy-python.install` applies to every a
 
 **Adding a project-specific naming rule.** Add a named section to the relevant overlay file. The heading structure does not need to match the canon — agents read the whole file and merge the rules — but clear section names (matching the canon's style) make the intent unambiguous and reduce the chance of misinterpretation.
 
+**Adding a rule the checkers can't enforce.** If the convention is judgement-based rather than mechanical (a naming nuance, a structural placement rule, a phrasing convention), it belongs in the overlay prose, not in `pyproject.toml`. `lazy-python.code-reviewer` picks it up as an overlay-specific clause on its next dispatch — no separate registration step.
+
 **Scaffolding the stubs if they are missing.** If the `docs/guidelines/` files were never created — for example, you installed the plugin before Step 5 was added — re-run `/lazy-python.install`. The install wizard is idempotent; Step 5 skips any stub file that already exists and creates only the missing ones. It will not create a stub if all four are already present.
 
 ## Where this fits
 
-The overlay files are scaffolded by the `install-and-audit` block's `/lazy-python.install` Step 5. The canon they extend lives in the `discipline` block — the five reference guidelines (`coding-guidelines`, `documenting-guidelines`, `testing-guidelines`, `checking-guidelines`, `guidelines-index`) that writer agents load before reading your overlay. The `agents` block is where `lazy-python.docstring-writer` and `lazy-python.test-writer` live; their full dispatch discipline is described in the agents block article. The `add-project-overlay` walkthrough covers the end-to-end flow: scaffold stubs, fill them in, and confirm the delta appears in the next writer-agent dispatch.
+The overlay files are scaffolded by the `install-and-audit` block's `/lazy-python.install` Step 5. The canon they extend lives in the `discipline` block — the five reference guidelines (`coding-guidelines`, `documenting-guidelines`, `testing-guidelines`, `checking-guidelines`, `guidelines-index`) that writer and reviewer agents load before reading your overlay. The `agents` block is where `lazy-python.docstring-writer` and `lazy-python.test-writer` live; their full dispatch discipline is described in the agents block article. `lazy-python.code-reviewer` is dispatched from the `checkers` block's `chk-py review` phase — its full ten-item checklist and severity model live in the agents block article. The `add-project-overlay` walkthrough covers the end-to-end flow: scaffold stubs, fill them in, and confirm the delta appears in the next writer-agent dispatch.

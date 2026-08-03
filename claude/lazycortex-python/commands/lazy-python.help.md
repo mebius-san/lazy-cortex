@@ -7,7 +7,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 ---
 
-**lazycortex-python** — Python coding discipline as a plugin. Ships three path-scoped rules, five reference guidelines, `chk-py`/`tst-py` checker wrappers, a PostToolUse hook, docstring-writer and test-writer agents, and a canonical file template. Install once per repo via `/lazy-python.install`.
+**lazycortex-python** — Python coding discipline as a plugin. Ships three path-scoped rules, five reference guidelines, `chk-py`/`tst-py` checker wrappers, a PostToolUse hook, docstring-writer / test-writer / code-reviewer agents, and a canonical file template. Install once per repo via `/lazy-python.install`.
 
 **Skills** (invoke as `/<name>` or via Skill tool):
 
@@ -19,6 +19,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 - `lazy-python.docstring-writer` — adds or fixes docstrings on classes, methods, and properties; reads canonical guidelines + project overlay on every dispatch.
 - `lazy-python.test-writer` — writes pytest test files covering all seven Paranoid-Testing categories; reads canonical testing + checking guidelines + project overlay. Never modifies production code.
+- `lazy-python.code-reviewer` — reviews new or changed code against the canon plus the project overlay — the guideline layer no checker can prove. Runs as the `chk-py review` phase of the check pipeline; reports findings only, never edits code.
 
 **Rules** (loaded automatically):
 

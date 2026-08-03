@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 5.20.4 — 2026-08-03 UTC
+
+- New `lazy-python.code-reviewer` agent gets a default model tier (opus) in the canonical model-tier table, so a fresh install seeds it consistently instead of falling back to the harness default.
+
 ### 5.20.3 — 2026-08-02 UTC
 
 - Fixed unbounded log growth on the runtime daemon: metrics scrape requests no longer flood the access log, the daily journal no longer records routine ticks that did nothing, every dated `.logs/` journal (not just the built-in ones) is swept on the retention schedule, and oversized supervisor capture files are trimmed in place instead of growing forever.
@@ -860,6 +864,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 0.7.2 — 2026-08-03 UTC
+
+- The `implementer` agent now verifies every task against the repo's own checkers, its full test suite, and (when the language plugin ships one) a guideline-review agent before calling the task done — and it never relaxes a check just to force a green run.
+
 ### 0.7.1 — 2026-07-23 UTC
 
 - Install now seeds the expert agents' model tiers from the shared canonical catalog instead of a bundled copy.
@@ -918,6 +926,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 2.1.0 — 2026-08-03 UTC
+
+- New `chk review` phase runs a guideline review beyond what deterministic checks can catch — purpose comments, logical-block boundaries, naming semantics, and project overlay rules — via a new code-reviewer agent. It never blocks the `chk all` pipeline (always exits 0); run `chk review --render` to see findings, which does fail on a genuine FAIL. Unchanged scopes reuse their prior verdict instead of re-reviewing.
+- New canonical guideline rules: no useless intermediate variables, a purpose comment on every code block, append-only import blocks, a test-edit approval policy, and a standing prohibition on relaxing a checker without approval. Repos can now declare `python.check_cmd` / `python.test_cmd` once for every agent to reuse.
 
 ### 2.0.9 — 2026-07-28 UTC
 

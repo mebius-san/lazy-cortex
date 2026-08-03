@@ -25,6 +25,12 @@ conventions.
 - **Think before coding.** Before writing any code, ask: "Is there a simpler way?" If yes, use it.
 - **Do not create unnecessary intermediate objects.** For example, don't use `dict(iterator)` when you can iterate directly; don't copy via `export_dict()` when a new empty instance suffices.
 - **No local aliases for built-in accessors.** Never assign `inst = self.__dict__` or similar aliases for `self.__dict__`, `self.__class__`, etc. Use the original accessor directly everywhere. **Exception:** capturing `self.__class__` for `super()` calls inside nested functions is allowed because Python requires an explicit class reference in that context.
+- **No useless intermediate variables.** Never assign to a local what is used exactly once — inline the expression at its single use site. Never alias trivial in-memory accessors (properties, `get_*()`-style getters with no I/O) into a local at all, even for repeated use — call them inline each time (`self.proto.x if self.proto else …`, never `proto = self.proto` first). A local is justified ONLY for:
+  - an expensive result (I/O, DB, heavy compute) used more than once;
+  - loop-invariant hoisting of non-trivial work;
+  - a genuinely complex multi-step expression — then a comment says what it holds;
+  - an access chain reaching **two or more objects deep** (`self._place.place_grid`, `entity_data.state_b.position`) that is read more than once, and especially inside a loop — there the alias shortens every use site and saves the repeated walk.
+  A local that must stay for any other reason carries a `# waiver: <reason>` line above it, since a bare `local = <accessor>` reads as a violation.
 
 ### Communication Rules
 - **Always answer "why" questions before making any edits.** When the user asks "why did you do X?", explain first, then wait for approval before changing code.
@@ -93,7 +99,7 @@ conventions.
 - Always use exactly 2 blank lines between any top-level function and other code.
 - Always use exactly 2 blank lines between any class method and other code (explicit override of PEP 8).
 - Use 1 blank line between import groups and within methods/functions.
-- Use 1 blank line between logical sections within methods/functions.
+- Use exactly 1 blank line between consecutive logical blocks inside a method or function body. A block is a comment-led group of statements — a guard, a resolution step, a build/emit step; each is separated from the next by a blank line, never packed together. This applies to a block added inside an existing method, not only to a method written from scratch. See `## Comments` in `lazy-python.documenting-guidelines.md` for the purpose comment every block carries.
 - Exception (nested definitions only): Inside the body of a class or a method, place exactly 1 blank line between the parent's docstring and the immediately following nested def/class definition. This exception applies only within the same enclosing block to separate the parent docstring from the nested definition. It does not apply to top‑level method boundaries, where the "exactly 2 blank lines between methods" rule remains in force.
 - Non-cumulative rule: These blank line rules are mutually exclusive for any single boundary. Do not apply multiple rules to the same code fragment in sequence. For example, the "2 blank lines between methods" rule and the "1 blank line between a parent docstring and a nested definition" rule must never be combined to create 3 blank lines. Always choose the single applicable rule for the given context.
 - Overload stubs: Use exactly 1 blank line between consecutive `@overload` decorated function stubs, and exactly 1 blank line between the last `@overload` stub and the actual implementation. This rule applies regardless of the "2 blank lines between methods" rule. See the Overload Stubs Pattern section below.
@@ -370,6 +376,7 @@ if TYPE_CHECKING:
 - When importing from a sibling subpackage, import from its `__init__.py` (the package), not from individual files inside it:
   - **WRONG:** `from .gcl.sec_manager import SecretStoreGcl` — reaches into the subpackage's internal file.
   - **RIGHT:** `from .gcl import SecretStoreGcl` — imports via the subpackage's public `__init__.py`.
+- When adding a name from a package the file already imports from, add it to the existing `from <pkg> import (...)` block — never open a second import line for the same package.
 - Group multiple imports from the same module in a single blocķ.
   - For imports from the main project package or for the local package imports always use multi-line with parentheses except for one item imports.
   - For standard library and third-party imports always use single-line imports.

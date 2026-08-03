@@ -44,6 +44,33 @@ After making code changes, **always** verify in this exact order:
 
 Do not run tests before lint and type-check are clean — typing errors mask test failures and create wasted iteration.
 
+4. **Guideline review**: run the reviewer phase after the tests pass — it covers what no checker can (comment density, block structure, naming semantics, guideline conformance):
+   ```bash
+   ./cli/chk-py review
+   ```
+   See `## Guideline review phase` below.
+
+## Never disable or relax checker rules without explicit approval (MANDATORY)
+
+Silently switching off a check instead of fixing the violations it reports is a serious violation. Never add, extend, or modify anything that suppresses or weakens the checker pipeline without the user's explicit approval, given for that exact change, in the current conversation:
+
+- `[tool.pcf]` / `[tool.toi]` overrides, `check_* = false`, `exclude` / `ignore` lists in `pyproject.toml`;
+- pylint / mypy / ruff per-path or per-directory overrides;
+- disabling a hook, a checker phase, or a whole subcommand.
+
+This extends the per-line suppression rule (`# type: ignore`, `# noqa`, `# pylint: disable`, `# waiver:` all require approval) to whole-file and whole-directory scopes, where the damage is worse — every future violation in that scope is silently skipped.
+
+When a checker complains: fix the root cause. If the code is right and the checker is wrong, propose a narrowly-scoped waiver and ask. Existing suppressions are not precedent and must not be replicated.
+
+## Guideline review phase
+
+`chk review` is the LLM-side counterpart to the deterministic checkers. `pcf` and `toi` validate what an AST walk can prove; the review phase validates what it cannot — purpose comments on every block, logical-block separation, naming semantics by prefix, guideline conformance of new or changed code.
+
+- `chk review` builds a manifest (changed files + every applicable guideline layer) and prints the dispatch directive for the `lazy-python.code-reviewer` agent. It does not call the agent itself, exits 0, and therefore never blocks `chk all`, pre-commit, or CI.
+- Default scope with no arguments: the current diff against `HEAD` plus untracked `*.py`. With arguments: the given paths.
+- The agent writes its findings back as JSON; `chk review --render <findings.json>` prints them in the same severity format as `pcf` and exits non-zero on the highest severity found. A `FAIL` finding blocks the commit exactly as a `pcf` FAIL does; a `WARN` does not.
+- `CHK_REVIEW=headless` makes `chk review` invoke the agent itself (`claude -p`) and render in one pass — for CI, opt-in, never the default.
+
 ## Ruff
 
 - Fast linter written in Rust; covers most format rules plus a large slice of pylint / pyflakes / isort.
@@ -163,3 +190,21 @@ Set `python.env_source` in the repo's `.claude/lazy.settings.json` to the bootst
 - Key set but the file is missing → the runner aborts non-zero, naming the key and the resolved path, rather than running in a half-configured environment. Fix the path or remove the key.
 
 The script is a repo-declared file sourced into the runner's shell — the same trust boundary as running the repo's own tests and `conftest` code; it adds no new trust surface.
+
+## Project runners (`python.check_cmd`, `python.test_cmd`)
+
+A repo that ships its own check / test aggregator declares it once, so every agent and skill invokes the project's runner instead of the plugin wrappers:
+
+```json
+{
+  "python": {
+    "check_cmd": "./cli/chk",
+    "test_cmd": "./cli/tst"
+  }
+}
+```
+
+- **Both keys are optional.** Absent → `chk-py` / `tst-py` are used, which is the default for a repo with no aggregator of its own.
+- **A declared runner is authoritative.** It replaces the wrapper at every step of the Verification order, including the `review` phase (`<check_cmd> review`). A local aggregator carries project configuration the plugin wrapper does not see; falling back to `chk-py` when `check_cmd` is set produces misleading results.
+- **The subcommand vocabulary is unchanged** — a project runner is expected to accept the same verbs (`all`, `pcf`, `toi`, `review`, …), delegating to the plugin where it has no implementation of its own.
+- These keys supersede runner declarations written in prose in a project rule or a `docs/guidelines/*.md` overlay; when both exist, they must name the same command.

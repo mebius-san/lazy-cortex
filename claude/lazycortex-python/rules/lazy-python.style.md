@@ -24,18 +24,22 @@ Critical Python-discipline reminders for any `.py` file. Read the full canon at 
 - **`# noinspection` must be standalone** — never append text after the inspection name (PyCharm ignores the directive otherwise); put the explanation on a separate `#` line below.
 - **TypeAliases go with TypeVars** — in module section 3 (after `TYPE_CHECKING` block), not inline or near classes.
 - **`__init__` block separation**: when `super().__init__()` coexists with other code, it must be its own commented block, separated by blank lines.
+- **Every code block carries a purpose comment** — a block is any chunk after a blank line inside a body, including a lone trailing `return x`; `# waiver:` is not a purpose comment.
+- **No useless intermediate variables** — inline anything used once; never alias a trivial accessor. Justified only for expensive results reused, loop-invariant hoisting, complex multi-step expressions, or an access chain two or more objects deep read more than once.
+- **Read the full guides before adding an entity or refactoring** — before adding a class, enum, module, or package, and before any move / rename / split / restructure, read `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.coding-guidelines.md` plus the applicable project overlays. The trigger is the act itself, never your own judgement of whether the change is "trivial" — self-assessed triviality is exactly how placement rules get violated. These reminders and the scaffold templates are not a substitute for the guides and may lag behind them; on conflict the guides win.
 
 Full rules + rationale + examples: `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.coding-guidelines.md`.
 
 ## Verification Order
 
-Run after every batch of Python edits. The three steps escalate from per-file fast feedback to whole-project gating to test execution; do not skip ahead.
+Run after every batch of Python edits. The four steps escalate from per-file fast feedback to whole-project gating to test execution to guideline review; do not skip ahead.
 
-**Project-runner precedence.** If a project rule or a `docs/guidelines/*.md` overlay declares its own test/check runner, that runner replaces `chk-py` / `tst-py` at every step below — invoke the project's runner instead of the plugin wrappers. The order and intent of the steps are unchanged; only the command differs.
+**Project-runner precedence.** `.claude/lazy.settings.json` may declare `python.check_cmd` / `python.test_cmd` — when either key is set, that command replaces `chk-py` / `tst-py` at every step below. A project rule or a `docs/guidelines/*.md` overlay declaring its own runner has the same effect. The order and intent of the steps are unchanged; only the command differs.
 
 1. **`chk-py all <file>.py -q`** — per-file style/type sweep (pcf + toi + cmp + mypy + ruff + pylint). Run after editing one or two files; for a module-wide refactor (>3 files in the same dir) run `chk-py all <module-dir>/ -q` instead. This is your inner loop — fix every violation before moving on.
 2. **`chk-py all -q`** — whole-project sweep. Run after the per-file step is clean to catch cross-file regressions (broken imports, removed APIs, dangling type references). No further work until this is clean.
 3. **`tst-py <module> -q`** — pytest for the affected module(s). Run **only** after both checker steps are clean — running tests on a project with style/type breakage wastes time on noise. Pass the bare module name (e.g. `core`, `rpg`), not a path and not `.py`. Without an argument runs all modules.
+4. **`chk-py review`** — guideline review of the change by the `lazy-python.code-reviewer` agent. Covers what `pcf` and `toi` cannot prove from an AST: purpose comments on every block, logical-block separation, naming semantics, conformance to the project overlay. The command prints a manifest and a dispatch directive and exits 0 — **you** dispatch the agent it names, then render its findings with `chk-py review --render <findings.json>`. A `FAIL` finding blocks the commit exactly as a `pcf` FAIL does. Skipping this step because "the checkers are green" is a violation: the checkers do not cover these rules.
 
 Full check semantics + config keys: `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.checking-guidelines.md`.
 
@@ -43,4 +47,5 @@ Full check semantics + config keys: `${CLAUDE_PLUGIN_ROOT}/references/lazy-pytho
 
 - **Never run `mypy` / `pylint` / `ruff` directly** — all style/type validation goes through `chk-py`. The aggregator orchestrates the canonical pipeline (`pcf` + `toi` + `cmp` + `mypy` + `ruff` + `pylint`) in the correct order with shared config; calling tools individually skips earlier phases and produces misleading findings. (`pch` is a separate, slower manual check — `chk-py pch <file>` — not part of the `all` gate.)
 - **Never run `pytest` directly** — use `tst-py`. The wrapper applies project pytest args, sets up the venv, and prints a stable summary; raw `pytest` bypasses all of that.
+- **Never disable or relax a checker rule without explicit user approval given in this conversation for that exact change** — `[tool.pcf]` / `[tool.toi]` overrides, `check_* = false`, `exclude` / `ignore` lists, per-path pylint/mypy/ruff overrides, disabling a hook or a checker phase. This extends the per-line suppression rule to whole-file and whole-directory scope, where every future violation is silently skipped too. Fix the root cause; if the code is right and the checker is wrong, propose a narrow waiver and ask. Existing suppressions are not precedent.
 - **Always pass `-q` to `chk-py` / `tst-py`** — without `-q`, desktop notifications fire and per-file output is too verbose for the context window. `-q` is mandatory for any automated invocation.

@@ -8,9 +8,11 @@
 # (python.env_source in .claude/lazy.settings.json) so import-time env reads work.
 #
 # Subcommands:
-#   all        run the canonical pipeline: pcf, toi, cmp, mypy, ruff, pylint
+#   all        run the canonical pipeline: pcf, toi, cmp, mypy, ruff, pylint, review
 #   pcf        Python code format check (shipped: bin/pcf.py)
 #   toi        type-only imports check (shipped: bin/toi.py)
+#   review     guideline review phase (shipped: bin/review.py) — builds the manifest for the
+#              lazy-python.code-reviewer agent; renders its findings with --render
 #   cmp        py_compile syntax / bytecode-compile check
 #   mypy       run mypy type checks
 #   rf         run ruff checks
@@ -51,9 +53,11 @@ function print_help()
   echo "usage: chk <subcommand> [module ...]"
   echo
   echo "subcommands:"
-  echo "  all        run all checks in sequence (pcf, toi, cmp, mypy, ruff, pylint)"
+  echo "  all        run all checks in sequence (pcf, toi, cmp, mypy, ruff, pylint, review)"
   echo "  pcf        Python code format check"
   echo "  toi        list type-only imports"
+  echo "  review     guideline review of the current diff (prints the agent dispatch directive)"
+  echo "             --render <findings.json> renders findings the reviewer agent produced"
   echo "  cmp        run py_compile checks"
   echo "  mypy       run mypy type checks"
   echo "  rf         run ruff checks"
@@ -107,28 +111,32 @@ if [ "$cmd" = "all" ]; then
 
   export CHK_BATCH_MODE=1
 
-  echo ">>> [1/6] pcf - Python code format check"
+  echo ">>> [1/7] pcf - Python code format check"
   "$script_dir/chk" pcf "${mods[@]}"
   echo
 
-  echo ">>> [2/6] toi - type-only imports check"
+  echo ">>> [2/7] toi - type-only imports check"
   "$script_dir/chk" toi "${mods[@]}"
   echo
 
-  echo ">>> [3/6] cmp - py_compile check"
+  echo ">>> [3/7] cmp - py_compile check"
   "$script_dir/chk" cmp "${mods[@]}"
   echo
 
-  echo ">>> [4/6] mypy - mypy type check"
+  echo ">>> [4/7] mypy - mypy type check"
   "$script_dir/chk" mypy "${mods[@]}"
   echo
 
-  echo ">>> [5/6] rf - ruff check"
+  echo ">>> [5/7] rf - ruff check"
   "$script_dir/chk" rf "${mods[@]}"
   echo
 
-  echo ">>> [6/6] pylint - pylint check"
+  echo ">>> [6/7] pylint - pylint check"
   "$script_dir/chk" pylint "${mods[@]}"
+  echo
+
+  echo ">>> [7/7] review - guideline review (agent phase)"
+  "$script_dir/chk" review "${mods[@]}"
   echo
 
 # mypy type checks (excludes read from pyproject.toml)
@@ -159,6 +167,13 @@ elif [ "$cmd" = "toi" ]; then
   for mod in "${mods[@]}"; do
     python3 "$script_dir/toi.py" "$mod"
   done
+
+# guideline review — builds the manifest and prints the agent dispatch directive.
+# Pure stdlib, so it deliberately skips ensure_venv: the phase must also work from
+# pre-commit and CI. It never calls an LLM unless CHK_REVIEW=headless is set, and
+# exits 0 so a pending review cannot break `all`.
+elif [ "$cmd" = "review" ]; then
+  python3 "$script_dir/review.py" "${mods[@]}"
 
 # PyCharm offline code inspections — opt-in per repo via a `[tool.pch]` section
 # in pyproject.toml. pch spins up a headless IDE (minutes) and needs PyCharm

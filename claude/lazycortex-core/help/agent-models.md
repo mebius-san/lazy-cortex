@@ -1,10 +1,11 @@
 ---
 chapter_type: block
 summary: Assign model tiers to every agent in your vault, prune dead entries for deleted agents, and route dispatches automatically.
-last_regen: 2026-07-29
+last_regen: 2026-08-03
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
+  - lazy-core.agent-models-seed
 ---
 # Per-agent model routing
 
@@ -15,7 +16,7 @@ This block gives you two things: an interactive wizard that assigns each agent a
 ## When you'd use this
 
 - After a fresh install, when `/lazy-core.audit` reports that `agent_models` entries are missing for discovered agents.
-- After installing a new LazyCortex plugin — most of its shipped agents are pre-seeded with curated tiers automatically at install time, so this wizard only needs to cover the rest.
+- After installing a new LazyCortex plugin — most of its shipped agents are pre-seeded with curated tiers automatically at install time (every plugin's install runs the same shared seeding step behind the scenes), so this wizard only needs to cover the rest.
 - After authoring a new project-local agent in `.claude/agents/`.
 - When you want a project-specific model tier that overrides your global default for a particular agent.
 - When previewing what routing entries would be written before committing to them.
@@ -51,7 +52,7 @@ When this wizard runs without you at the keyboard — for example when `lazy-cor
 
 **Changing an existing tier.** `/lazy-core.agent-models` never overwrites existing entries; it only adds missing ones. To override a tier that is already set globally, run `/lazy-core.agent-models --scope=project` — the project entry shadows the global one. To remove that project-level override and fall back to the global tier, delete the entry from `./.claude/lazy.settings.json` via `/lazy-core.optimize` Phase 7, which re-prompts for any entries that go missing after cleanup.
 
-**Relationship to install.** Every plugin's own install skill pre-seeds curated tiers for the agents it ships — `/lazy-core.install` seeds `_builtin` defaults, and other plugins' installs seed their own agents' curated tiers the same non-interactive way. `/lazy-core.agent-models` fills the remaining per-agent entries — anything not curated, plus your own project agents — across all discovered sources interactively. They do not overlap — install handles the bootstrap, this wizard handles everything discovered afterwards.
+**Relationship to install.** Every plugin's own install skill pre-seeds curated tiers for the agents it ships, through the same shared seeding step every LazyCortex plugin install calls — it reads the identical curated-tiers table this wizard uses, so a tier never drifts between the two paths. An entry already seeded that way, or one already set to `default`, doesn't reappear in the wizard's missing list. `/lazy-core.agent-models` fills the remaining per-agent entries — anything not curated, plus your own project agents — across all discovered sources interactively. They do not overlap — install handles the bootstrap, this wizard handles everything discovered afterwards.
 
 **After an automated rollout.** If a repo was brought current by `lazy-core.autosetup` rather than by you running the install chain by hand, expect only the curated-default agents to already have tiers. Run `/lazy-core.agent-models` yourself afterward to finish routing the rest — it picks up exactly where the automated run left off.
 

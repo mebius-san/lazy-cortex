@@ -429,6 +429,11 @@ these conventions.
 - Always explain why the code exists, not just what it does.
 - Add comments to clarify complex logic, algorithms, or transformations.
 - Split long or multistep methods into logical sections and comment each section’s purpose.
+- **Every code block starts with a purpose comment.** A block is any chunk of code that follows a blank separator line inside a function or method body. Its FIRST line must be a purpose comment (`# <what this block is for>`). This applies to every block, including a single trailing `return x` after a blank line.
+  - A `# waiver: ...` line is NOT a purpose comment — it exempts a checker rule, nothing more. When a block needs both, the purpose comment goes first, the waiver below it, then the code.
+  - Do not verify this with line-count heuristics ("no more than N uncommented lines") — check every block start after a blank line.
+  - Complex logic (branching decisions, math, data reshaping, batching, protocol interplay) is commented in detail — explain the why, not a restatement of the code.
+  - Applies to production, tests, and test stubs/fakes equally. No checker enforces this — its absence from checker output is not compliance.
 - Use inline comments only when the intent is not obvious.
 - Never leave more than five consecutive lines of code inside functions or methods without a comment.
 - Do not comment on self-explanatory code (e.g. library imports or simple assignments).
