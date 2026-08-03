@@ -80,6 +80,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Agent | Description |
 |---|---|
+| `lazy-python.code-reviewer` | Use this agent when reviewing new or changed Python code against the `lazy-python.*` guidelines plus the project's own overlay — the guideline layer no checker can prove. Runs as the `chk-py review` phase of the check pipeline; reports findings only, never edits code. |
 | `lazy-python.docstring-writer` | Use this agent when adding or fixing docstrings on classes, methods, or properties in a Python codebase that adopts the `lazy-python.*` documentation conventions. Reads canonical guidelines from the plugin plus the project overlay on every dispatch. |
 | `lazy-python.test-writer` | Use this agent when writing unit tests for a class or module in a Python codebase that adopts the `lazy-python.*` testing conventions. Reads canonical testing and checking guidelines from the plugin plus the project overlay on every dispatch. Never modifies production code — only writes test files. |
 

@@ -11,6 +11,7 @@ Phases:
   phase4 — probe for PyCharm inspect.sh CLI (pch prereq)
   phase5 — scaffold project overlay guidelines under docs/guidelines/
   phase6 — record python.env_source when the repo ships an env-bootstrap script
+  phase7 — register the code-reviewer agent as an expert in lazy.settings.json
 
 Scaffold-template sync (formerly phase6) is no longer a phase here — the install
 skill's Step 6 dispatches `lazycortex-core:lazy-core.scaffold-sync`, which copies
@@ -400,6 +401,75 @@ class Phase6EnvSource:
     self.settings.write_text(json.dumps(data, indent = 2) + "\n", encoding = "utf-8")
 
 
+# ----------------------------------------------------------------------------------------
+class Phase7Expert:
+  """
+  Install phase that registers the code-reviewer agent as an expert in the consumer's
+  `lazy.settings.json`, so the review phase is dispatchable from the expert runtime as well
+  as from the check pipeline.
+
+  Notes:
+    - An entry already on record is left untouched, whatever its shape.
+    - The entry is additive: every other expert and section is preserved verbatim.
+
+  Attributes:
+    consumer_dir: Root directory of the consumer repository being installed into.
+    settings: Path to the consumer's `.claude/lazy.settings.json` file.
+  """
+
+  EXPERT_KEY = "python.code-reviewer"
+  EXPERT_ENTRY = {
+    "agent": "lazycortex-python:lazy-python.code-reviewer",
+    "aspects": ["lazycortex-core:lazy-memory.persona-aspect"],
+    "git_author": {
+      "name": "Python Code Reviewer",
+      "email": "python.code-reviewer@lazycortex.local",
+    },
+  }
+
+  def __init__(self, *, consumer_dir: Path) -> None:
+    self.consumer_dir: Path = consumer_dir
+    self.settings: Path = consumer_dir / ".claude/lazy.settings.json"
+
+  def run(self) -> int:
+    """
+    Register the reviewer expert when it is absent and emit an outcome word.
+
+    Returns:
+      0 always; the registration is additive and cannot fail the install.
+    """
+    data = self._load()
+    experts = data.get("experts")
+    # guard: preserve a settings file that carries no experts section yet
+    if not isinstance(experts, dict):
+      experts = {}
+
+    # guard: an entry on record is the operator's — never rewrite it
+    if self.EXPERT_KEY in experts:
+      print("expert-already-registered")
+      return 0
+
+    experts[self.EXPERT_KEY] = dict(self.EXPERT_ENTRY)
+    data["experts"] = experts
+    self.settings.parent.mkdir(parents = True, exist_ok = True)
+    self.settings.write_text(json.dumps(data, indent = 2) + "\n", encoding = "utf-8")
+
+    print(f"expert-registered: {self.EXPERT_KEY}")
+    return 0
+
+  def _load(self) -> dict:
+    """
+    Read the consumer's tracked settings file, tolerating an absent or empty file.
+
+    Returns:
+      The parsed settings mapping, or an empty mapping when the file is missing or blank.
+    """
+    # guard: absent settings file → empty mapping (first-write path)
+    if not self.settings.exists():
+      return {}
+    return json.loads(self.settings.read_text(encoding = "utf-8") or "{}")
+
+
 def main() -> int:
   """
   Dispatch a single named phase against a consumer repository directory.
@@ -420,6 +490,7 @@ def main() -> int:
     "phase4": Phase4Pch,
     "phase5": Phase5Overlay,
     "phase6": Phase6EnvSource,
+    "phase7": Phase7Expert,
   }
   handler = phases.get(phase)
   if handler is None:

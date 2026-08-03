@@ -73,7 +73,7 @@ See [`claude/lazycortex-obsidian/`](claude/lazycortex-obsidian/) for details.
 
 Python coding discipline as a plugin: shared rules + reference guidelines + chk/tst checkers + PostToolUse hook + docstring-writer/test-writer agents + canonical file template. Installs once per repo via /lazy-python.install.
 
-Ships 3 skills, 2 agents, 1 hook.
+Ships 3 skills, 3 agents, 1 hook.
 
 Requires: lazycortex-core
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, tests, and the checker stack.
-last_regen: 2026-07-14
+last_regen: 2026-08-03
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -9,8 +9,7 @@ source_skills:
   - lazy-python.check-style
   - lazy-python.docstring-writer
   - lazy-python.test-writer
-  - chk
-  - tst
+  - lazy-python.code-reviewer
 ---
 # Frequently asked questions
 
@@ -36,7 +35,7 @@ One or more of the mirrored rule files under `.claude/rules/lazy-python.*.md` ha
 
 ## `/lazy-python.audit` warns about PyCharm inspect.sh (Check 6). Is that a problem?
 
-Not for most of the checker stack. `pch.py` (the PyCharm inspection phase) requires `inspect.sh` from a PyCharm installation, but the other phases — `pcf`, `toi`, `cmp`, `mypy`, `ruff`, and `pylint` — run without it. `pch` is also not part of the `chk-py all` gate; it is a separate, slower manual subcommand (`chk-py pch <file>`). If you do not have PyCharm installed, Check 6 will always be `WARN` and `chk-py pch` will be unavailable. The rest of the pipeline remains fully functional.
+Not for most of the checker stack. `pch.py` (the PyCharm inspection phase) requires `inspect.sh` from a PyCharm installation, but the other phases — `pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint`, and `review` — run without it. `pch` is also not part of the `chk-py all` gate; it is a separate, slower manual subcommand (`chk-py pch <file>`). If you do not have PyCharm installed, Check 6 will always be `WARN` and `chk-py pch` will be unavailable. The rest of the pipeline remains fully functional.
 
 ---
 
@@ -56,13 +55,25 @@ Every `chk-py` and `tst-py` invocation resolves the venv chain first, in order: 
 
 ## When should I use `/lazy-python.check-style` versus the PostToolUse hook?
 
-The PostToolUse hook runs `pcf.py` automatically on every `.py` edit and surfaces violations inline in the next turn — it is your fast inner loop. `/lazy-python.check-style` is the deeper six-step review you invoke before committing: it adds a manual pass over semantic issues the automated checkers cannot see (docstring quality, contract consistency, guard-clause coverage, special-comment preservation) and runs the full `chk-py all` sweep plus `tst-py` to gate the change. Use the hook continuously and `/lazy-python.check-style` at the end of a meaningful edit batch.
+The PostToolUse hook runs `pcf.py` automatically on every `.py` edit and surfaces violations inline in the next turn — it is your fast inner loop. `/lazy-python.check-style` is the deeper seven-step review you invoke before committing: it adds a manual pass over semantic issues the automated checkers cannot see (docstring quality, contract consistency, guard-clause coverage, special-comment preservation), then dispatches the full `chk-py all` sweep (which itself ends with the `review` phase) plus `tst-py` to gate the change. Use the hook continuously and `/lazy-python.check-style` at the end of a meaningful edit batch.
 
 ---
 
 ## Can I run `mypy`, `pylint`, or `ruff` directly instead of `chk-py`?
 
-No. The plugin enforces running all style and type validation through `chk-py`. The aggregator runs `pcf`, `toi`, `cmp`, `mypy`, `ruff`, and `pylint` in the correct order with shared config from `pyproject.toml`; calling any one tool directly skips earlier phases and can produce misleading results. Similarly, use `tst-py` rather than raw `pytest` — the wrapper applies project-wide pytest args and uses the correct venv.
+No. The plugin enforces running all style and type validation through `chk-py`. The aggregator runs `pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint`, and `review` in the correct order with shared config from `pyproject.toml`; calling any one tool directly skips earlier phases and can produce misleading results. Similarly, use `tst-py` rather than raw `pytest` — the wrapper applies project-wide pytest args and uses the correct venv.
+
+---
+
+## `chk-py all` finished but printed a "review" step at the end. What is that?
+
+That is the guideline-review phase. `chk-py review` builds a manifest of the modified files and the canon/overlay layers, then prints the dispatch directive for the `lazy-python.code-reviewer` agent — a judgement pass over clauses no checker AST-walk can prove (comment purpose and density, `# guard:` semantics, naming-prefix correctness, useless intermediate variables, docstring-vs-code contract drift, suppression hygiene). Dispatch the agent against that manifest; it writes a findings document (FAIL / WARN / INFO) and never edits your code itself. `chk-py review --render <findings.json>` renders a findings file the agent already produced.
+
+---
+
+## Does `lazy-python.code-reviewer` duplicate what `pcf` / `mypy` / `ruff` / `pylint` already check?
+
+No — by design it refuses to. The agent's whole job is guideline clauses no deterministic checker can prove: whether a comment explains the right thing, whether a `# guard:` marker is on an actual defensive early-exit rather than an ordinary branch, whether a docstring's `Args:`/`Returns:`/`Raises:` still match the real signature, whether a suppression comment (`# type: ignore`, `# noqa`, `# pylint: disable`) carries a real `# waiver:` reason. If a finding duplicates something `pcf` or `ruff` would already have flagged, that is a bug in the agent's output, not an expected overlap.
 
 ---
 
@@ -112,9 +123,15 @@ No. Per the Golden Rule in `lazy-python.test-writer`: if a test correctly reflec
 
 ---
 
+## The code-reviewer agent flagged a violation, but our overlay explicitly allows it. Is that a bug?
+
+Yes, and it shouldn't happen if the overlay is being read correctly. The agent reads four layers in precedence order — canon, project overlay, project `.claude/rules/*.md`, then `CLAUDE.md` — and a later layer overrides an earlier one on conflict. If the overlay contradicts the canon, the overlay wins and the canon clause must not be reported as a finding. Check that your overlay file still opens with its canonical `# Project additions to <topic>` header (see the next question) — a missing header is the most common reason an override gets missed.
+
+---
+
 ## How do I add project-specific style or testing rules without touching the plugin?
 
-Use the overlay convention. The four overlay stubs under `docs/guidelines/` (`coding_guidelines.md`, `documenting_guidelines.md`, `testing_guidelines.md`, `checking_guidelines.md`) are where you add project-specific additions. Each overlay file opens with a `# Project additions to <topic>` header that the writer agents and `/lazy-python.check-style` recognise. Rules in an overlay override the corresponding canon rule on conflict; they extend it otherwise. If the overlay stubs are missing, re-run `/lazy-python.install` — Phase 5 scaffolds them without overwriting any existing content.
+Use the overlay convention. The four overlay stubs under `docs/guidelines/` (`coding_guidelines.md`, `documenting_guidelines.md`, `testing_guidelines.md`, `checking_guidelines.md`) are where you add project-specific additions. Each overlay file opens with a `# Project additions to <topic>` header that the writer agents, the code-reviewer agent, and `/lazy-python.check-style` recognise. Rules in an overlay override the corresponding canon rule on conflict; they extend it otherwise. If the overlay stubs are missing, re-run `/lazy-python.install` — Phase 5 scaffolds them without overwriting any existing content.
 
 ---
 

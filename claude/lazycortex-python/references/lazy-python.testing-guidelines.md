@@ -7,6 +7,12 @@ Test structure, naming, assertions, coverage, and test patterns
 for Python projects that adopt these conventions.
 
 
+## Editing Existing Tests (test-edit policy)
+- **Mechanical adaptation to a user-approved contract change is allowed without asking**: signature / parameter updates, tuple-to-dataclass unpack changes, constructor-argument updates, renames following a production rename. Assertions must stay semantically identical; the reviewer verifies the edit is genuinely mechanical.
+- **Changing what a test asserts, weakening an assertion, or deleting a test requires explicit, contemporaneous user approval naming the test.** A failing assertion means production drifted from the contract: fix the code, not the test — unless the user approved the contract change and the test edit follows from it.
+- Adding new test files is always allowed.
+
+
 ## Test Directory Structure and file naming
 - Mirror the source code structure in the test directory, examples:
   - `src/core/entity/entity.py` → `tests/core/entity/entity.py`

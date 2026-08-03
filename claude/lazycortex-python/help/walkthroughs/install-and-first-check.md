@@ -1,10 +1,10 @@
 ---
 chapter_type: walkthrough
-summary: Install lazycortex-python, then run chk-py all -q directly to build the project venv and prove the six-step gate is clean.
-last_regen: 2026-07-14
+summary: Install lazycortex-python, then run chk-py all -q directly to build the project venv and prove the seven-step gate is clean.
+last_regen: 2026-08-03
 diagram_spec:
   anchor: "Install-and-first-check flow"
-  request: "Sequence diagram: user runs /lazy-python.install (quiet 8-step wizard, detail out of scope here) → user runs cli/chk-py all -q from a terminal → the shared venv resolver probes $VIRTUAL_ENV, then <project>/.venv, then a configured path, finds none, creates a project-local .venv and installs mypy/pylint/pytest/ruff plus the pytest-clarity/pytest-sugar plugins → the six-step gate runs in order: pcf, toi, cmp, mypy, ruff, pylint → all six report clean on the still-untouched repo → user runs cli/tst-py -q to confirm the same venv's pytest works → pytest completes with no failures."
+  request: "Sequence diagram: user runs /lazy-python.install (quiet 8-step wizard, detail out of scope here) → user runs cli/chk-py all -q from a terminal → the shared venv resolver probes $VIRTUAL_ENV, then <project>/.venv, then a configured path, finds none, creates a project-local .venv and installs mypy/pylint/pytest/ruff plus the pytest-clarity/pytest-sugar plugins → the seven-step gate runs in order: pcf, toi, cmp, mypy, ruff, pylint, review → the first six report clean on the still-untouched repo, and review (pure stdlib, no venv needed) prints its manifest + dispatch directive and exits 0 without calling an LLM from a bare terminal → user runs cli/tst-py -q to confirm the same venv's pytest works → pytest completes with no failures."
   kind_hint: sequence
 source_skills:
   - lazy-python.install
@@ -21,8 +21,8 @@ After this walkthrough you have:
 
 - The plugin installed — rule mirrors, `cli/chk-py` / `cli/tst-py` wrappers, bootstrapped `pyproject.toml` sections, and overlay stubs all in place (see the **install-and-audit** block article for the full wizard).
 - A project-local `.venv` at the repo root with `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` installed, built automatically the first time you invoke either wrapper.
-- A completed `chk-py all -q` run reporting all six steps clean, and a completed `tst-py -q` run confirming the same venv's pytest works.
-- Confidence that the venv resolver and the six-step gate are correctly wired before you start relying on them for real edits.
+- A completed `chk-py all -q` run reporting all seven steps clean — the six automated checkers plus the guideline-review phase's manifest — and a completed `tst-py -q` run confirming the same venv's pytest works.
+- Confidence that the venv resolver and the seven-step gate are correctly wired before you start relying on them for real edits.
 
 ## What you need
 
@@ -43,7 +43,7 @@ This is a quiet, mostly prompt-free install — the only two prompts it can ever
 
 **Verification gate**: the install ends with a one-line-per-step report. Confirm every line shows an outcome word (`installed`, `wrappers-deployed-2 + gitignore-ensured`, `pyproject-bootstrapped + pch-skipped-no-pycharm`, etc.) with no `ERROR`. Once that report is clean, `./cli/chk-py` and `./cli/tst-py` exist at the repo root and are executable.
 
-### Step 2 — Run the six-step gate and let it build the venv
+### Step 2 — Run the seven-step gate and let it build the venv
 
 From a plain terminal at the repo root:
 
@@ -51,9 +51,11 @@ From a plain terminal at the repo root:
 ./cli/chk-py all -q
 ```
 
-`chk-py` is the rendered wrapper around the plugin's shared `chk` aggregator. `all` runs six checks in order — `pcf` (code format), `toi` (type-only imports), `cmp` (`py_compile` syntax check), `mypy`, `ruff`, `pylint` — against `.` by default. Before the first check runs, the shared venv resolver probes for a usable venv in this order: an already-activated `$VIRTUAL_ENV`, an existing `<repo>/.venv`, then a `[tool.lazy-python] venv` path configured in `pyproject.toml`. On a freshly installed repo none of those exist yet, so the resolver falls back to creating `<repo>/.venv` with `uv venv --python 3.12` and installing `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` into it — never wiping a pre-existing venv, only adding what's missing.
+`chk-py` is the rendered wrapper around the plugin's shared `chk` aggregator. `all` runs seven checks in order — `pcf` (code format), `toi` (type-only imports), `cmp` (`py_compile` syntax check), `mypy`, `ruff`, `pylint`, and `review` (guideline review phase) — against `.` by default. Before the first check runs, the shared venv resolver probes for a usable venv in this order: an already-activated `$VIRTUAL_ENV`, an existing `<repo>/.venv`, then a `[tool.lazy-python] venv` path configured in `pyproject.toml`. On a freshly installed repo none of those exist yet, so the resolver falls back to creating `<repo>/.venv` with `uv venv --python 3.12` and installing `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` into it — never wiping a pre-existing venv, only adding what's missing.
 
-**Verification gate**: expect this run to take roughly 30–60 seconds the first time (venv creation + package installs); every later run reuses the venv and is fast. The output prints `>>> [N/6] <step> - ...` for each of the six checks. On a clean tree you should see all six report success with no `ERROR`, no `py_compile errors detected`, and no violation lines. If a check does report findings, those are real issues against your existing code, not an install problem — work through them (or point `chk-py all -q <path>` at a single known-clean file first to confirm the plumbing) before treating the checker stack as verified.
+The seventh step, `review`, is different from the first six: it builds a manifest of changed Python files plus every applicable guideline layer (canon references, project overlay, project rules), then prints a dispatch directive naming the `lazy-python.code-reviewer` agent. It is pure stdlib and skips the venv entirely, so it also works from pre-commit and CI. From a bare terminal it never calls an LLM — it just prints the directive and exits 0, so a pending review never blocks `all`. A Claude Code session is what actually dispatches the agent against that directive and renders the findings back with `chk-py review --render <findings.json>`.
+
+**Verification gate**: expect this run to take roughly 30–60 seconds the first time (venv creation + package installs); every later run reuses the venv and is fast. The output prints `>>> [N/7] <step> - ...` for each of the seven steps. On a clean tree you should see the first six report success with no `ERROR`, no `py_compile errors detected`, and no violation lines, and the seventh (`review`) print its manifest and exit 0 with no findings rendered yet — that's expected from a bare terminal, not a gap. If a check does report findings, those are real issues against your existing code, not an install problem — work through them (or point `chk-py all -q <path>` at a single known-clean file first to confirm the plumbing) before treating the checker stack as verified.
 
 ### Step 3 — Confirm the shared venv also serves pytest
 
@@ -67,7 +69,7 @@ From a plain terminal at the repo root:
 
 ## After you're done
 
-`chk-py all -q` is the routine gate to run before committing any real edit — pair it with `/lazy-python.check-style` when you also want the manual-review categories (docstring quality, naming, structural rules) that the automated checkers can't see. `tst-py -q` (or `tst-py <module> -q` to scope to one `tests/<module>/` directory) is the routine test pass once you have tests to run.
+`chk-py all -q` is the routine gate to run before committing any real edit — pair it with `/lazy-python.check-style` when you want the `review` step's manifest actually dispatched and its findings rendered inline (the manual skill runs inside a Claude Code session, so it can dispatch the `lazy-python.code-reviewer` agent where a bare terminal cannot). `tst-py -q` (or `tst-py <module> -q` to scope to one `tests/<module>/` directory) is the routine test pass once you have tests to run.
 
 The venv you built in Step 2 persists at the repo root and is reused by every future `chk-py` / `tst-py` / `check-style` run — it's only rebuilt if you delete it, and re-running the resolver only adds missing tools, never removes anything. If you ever suspect the install itself has drifted (missing wrapper, stale rule mirror, broken venv resolution) rather than the checker findings themselves, `/lazy-python.audit` — covered in the install-and-audit block article — is the read-only diagnostic to reach for before re-running install.
 
@@ -77,25 +79,28 @@ The venv you built in Step 2 persists at the repo root and is reused by every fu
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant cli as CLI
-  participant venvResolver as Venv Resolver
-  participant gate as Six-Step Gate
-  participant pytest as Pytest
+  participant venvResolver as Shared Venv Resolver
+  participant gate as Seven-Step Gate
+  participant pytest as pytest
 
-  user->>cli: /lazy-python.install (quiet 8-step wizard)
-  cli-->>user: wizard complete
-  user->>cli: cli/chk-py all -q
-  cli->>venvResolver: resolve shared venv
-  Note over venvResolver: probe $VIRTUAL_ENV, then <project>/.venv, then configured path - none found
+  user->>user: run /lazy-python.install (quiet 8-step wizard)
+  user->>venvResolver: run cli/chk-py all -q
+  venvResolver->>venvResolver: probe $VIRTUAL_ENV
+  venvResolver->>venvResolver: probe project .venv
+  venvResolver->>venvResolver: probe configured path
+  Note over venvResolver: no existing venv found
   venvResolver->>venvResolver: create project-local .venv
   venvResolver->>venvResolver: install mypy, pylint, pytest, ruff, pytest-clarity, pytest-sugar
-  venvResolver-->>cli: venv ready
-  cli->>gate: run pcf, toi, cmp, mypy, ruff, pylint in order
-  gate-->>cli: all six report clean
-  cli-->>user: chk-py all -q clean
-  user->>cli: cli/tst-py -q
-  Note over cli,venvResolver: same shared venv reused
-  cli->>pytest: run pytest -q
-  pytest-->>cli: no failures
-  cli-->>user: tst-py -q passed
+  venvResolver-->>gate: hand off venv
+  gate->>gate: run pcf
+  gate->>gate: run toi
+  gate->>gate: run cmp
+  gate->>gate: run mypy
+  gate->>gate: run ruff
+  gate->>gate: run pylint
+  Note over gate: pcf, toi, cmp, mypy, ruff, pylint report clean
+  gate->>gate: run review (stdlib only, no venv)
+  gate-->>user: print manifest + dispatch directive, exit 0
+  user->>pytest: run cli/tst-py -q
+  pytest-->>user: report no failures
 ```
