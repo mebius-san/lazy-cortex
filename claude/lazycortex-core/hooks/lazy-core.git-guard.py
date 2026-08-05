@@ -25,6 +25,7 @@ Hook satisfies the lazy-core.hook-writing § 1-8 contract:
   § 4 no-dirty-tree · § 5 no-foreign-staged · § 6 auto-commit loop guard
   § 7 transactional skip · § 8 logging
 """
+
 from __future__ import annotations
 # waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # deferred imports below module code; position intentional (ruff E402 noqa guards it)
@@ -46,13 +47,13 @@ if TYPE_CHECKING:
 _HOOK_DIR = Path(__file__).resolve().parent
 _BIN_DIR = _HOOK_DIR.parent / "bin"
 sys.path.insert(0, str(_BIN_DIR))
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import staging_lock  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import git_cmdline  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import hook_gate  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from constants import HookKey, HookName  # noqa: E402
 
 
@@ -264,6 +265,7 @@ def main() -> int:
     return 0
   session_id = staging_lock.resolve_session_id()
 
+  # dispatch by lifecycle phase — Pre takes the lock, Post may release it
   if is_post:
     return _handle_post(repo, session_id, verb)
   return _handle_pre(repo, session_id, verb, cfg)
@@ -343,6 +345,7 @@ def _handle_pre_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
   Returns:
     Always 0; refusals are signaled via the emitted JSON payload.
   """
+  # MCP branch: these tools cannot carry a pathspec, so only the harmless verb survives
   if tool_name in _MCP_INDEX_TOOLS:
     verb = tool_name.rsplit("_", 1)[-1]
     # guard: reset only ever removes entries — the operator may need it mid-session
@@ -352,6 +355,7 @@ def _handle_pre_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
     _emit_deny(_DENY_MCP)
     return 0
 
+  # Bash branch: every git invocation in the command line is judged on its own
   # waiver: external-format tool-input field name, not an internal key
   command = tool_input.get("command", "")
   segments = git_cmdline.parse_segments(command)
@@ -410,9 +414,9 @@ def _pathspec_violation(repo: Path, segment: git_cmdline.GitSegment) -> str | No
   # it, not this one's. A publish mirror or a sibling clone is not this operator's index.
   if segment.repo_dir is not None and not _targets_this_repo(repo, segment.repo_dir):
     return None
+  # guard: an `add` is legal only as intent-to-add — staging content claims the operator's index
   # waiver: git CLI vocabulary, not a domain constant
   if segment.verb == "add":
-    # guard: intent-to-add registers the path without staging its content
     return None if not git_cmdline.adds_content(segment) else _DENY_ADD
   # guard: both verbs stage as a side effect
   if segment.verb in _AUTO_STAGING_VERBS:
@@ -471,7 +475,8 @@ def _git_dir(cwd: Path) -> Path | None:
   Resolve the absolute path of the git directory governing `cwd`.
 
   Args:
-    cwd: Operator working directory reported by Claude Code at Stop event time.
+    cwd: Directory to resolve from — the repository root on the PreToolUse path, or the
+      operator working directory reported by Claude Code at Stop event time.
 
   Returns:
     Absolute `Path` to the git dir (`.git`, a linked worktree dir, or a custom GIT_DIR), or None
@@ -513,7 +518,8 @@ def _staged_paths(cwd: Path) -> list[str]:
   Return the list of repo-relative paths currently in the git index.
 
   Args:
-    cwd: Operator working directory reported by Claude Code at Stop event time.
+    cwd: Directory to check — the repository root on the PreToolUse path, or the operator
+      working directory reported by Claude Code at Stop event time.
 
   Returns:
     List of staged paths in the order reported by `git diff --cached --name-only`. Empty list
@@ -543,6 +549,7 @@ def _handle_stop(payload: dict) -> int:
   Returns:
     Always 0; the block is signaled via the emitted JSON payload.
   """
+  # the operator cwd is the only repo reference a Stop payload carries
   cwd = Path(payload.get("cwd") or ".").resolve()
   git_dir = _git_dir(cwd)
   # guard: not inside a git repository
@@ -551,12 +558,15 @@ def _handle_stop(payload: dict) -> int:
   # guard: mid merge / rebase / cherry-pick / revert
   if _mid_operation(git_dir):
     return 0
+
   # Respect the same per-repo kill-switch as the PreTool / PostTool branches.
   # waiver: git CLI vocabulary, not domain constants
   r = _git_at(cwd, "rev-parse", "--show-toplevel")
   # guard: cannot resolve repo root — fail open
   if r.returncode != 0:
     return 0
+
+  # this nag belongs to the mutex row alone — every other configuration ends the turn freely
   repo = Path(r.stdout.strip()).resolve()
   cfg = staging_lock.load_config(repo)
   # guard: guard disabled for this repo
@@ -569,21 +579,27 @@ def _handle_stop(payload: dict) -> int:
   # guard: mutex row disabled too
   if not cfg.mutex_enabled:
     return 0
+
+  # only work this session staged is worth nagging about
   staged = _staged_paths(cwd)
   # guard: index is already clean
   if not staged:
     return 0
+  lock = staging_lock.inspect(repo)
   # guard: staged content isn't this session's — a peer session or a manual/terminal stage owns
   # it, so ending this turn isn't leaving OUR work hanging. The Stop nag only fires when the
   # session that staged is the one about to stop.
-  lock = staging_lock.inspect(repo)
   if lock is None or lock.session_id != staging_lock.resolve_session_id():
     return 0
+
+  # bounded preview so a large index doesn't flood the operator-facing message
   preview = staged[: 10]
   more = len(staged) - len(preview)
   file_list = "\n".join(f"  {p}" for p in preview)
   if more > 0:
     file_list += f"\n  ... and {more} more"
+
+  # block the turn and name the three ways out
   reason = (
     "lazy-core.git-guard: staged files detected at end of turn. The turn must not end with "
     "anything in the git index — commit or unstage before stopping.\n\n"

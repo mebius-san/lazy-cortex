@@ -202,7 +202,8 @@ def ignore_state(repo: Path | str, rel: str) -> str:
     return ExternalDirIgnore.IGNORED
   name = str(rel).rstrip("/")
   code = _check_ignore(repo, f"{name}/")
-  # guard: the pathname leads through the planted symlink, which git refuses to resolve
+  # 128 means the pathname led through the planted symlink, which git refuses to resolve — re-ask
+  # the same question under a parent that does not exist
   # waiver: inline numeric/default literal, not a domain constant
   if code == 128:
     code = _check_ignore(repo, f"{_PROBE_PARENT}/{name}/")
@@ -406,7 +407,7 @@ def apply(repo: Path | str) -> list[dict]:
     link = repo / rel
     relinked = link.is_symlink()
     try:
-      # guard: only a symlink is ever removed — never a real directory
+      # clear the slot before planting: only a symlink is ever removed — never a real directory
       if relinked:
         link.unlink()
       link.parent.mkdir(parents = True, exist_ok = True)

@@ -40,13 +40,13 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import banner as _banner  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import body as _body  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import ReviewKey  # noqa: E402
 
 

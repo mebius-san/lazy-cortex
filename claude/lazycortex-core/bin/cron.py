@@ -69,7 +69,7 @@ def _parse_field(spec: str, lo: int, hi: int) -> set[int]:
   out: set[int] = set()
   # walk the comma-separated pieces; each piece independently contributes values to the union
   for piece in spec.split(","):
-    # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+    # waiver: the loop variable is deliberately rebound — each field is normalised in place before parsing
     piece = piece.strip()  # noqa: PLW2901
     # guard: empty piece is a syntax error
     if not piece:
@@ -110,6 +110,8 @@ def _parse_field(spec: str, lo: int, hi: int) -> set[int]:
     if start > end:
       raise CronError(f"start > end in {piece!r}")
 
+    # the field is matched by value, not by expression, so every piece is banked as the
+    # concrete set it stands for and overlapping pieces fold together
     out.update(range(start, end + 1, step))
 
   # guard: a field that expands to no values is unsatisfiable

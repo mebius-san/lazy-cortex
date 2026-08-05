@@ -26,9 +26,13 @@ import time
 from wsgiref.simple_server import WSGIRequestHandler, make_server
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import error_ledger  # pylint: disable=import-error
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import (  # pylint: disable=import-error
-  JobFile, JobLogOutcome, JobMarker, JobOutcome, JobResponseKey, JobStatus, MetricLabel, MetricStateKey,
+  IncidentKey, IncidentKind, IncidentPhase, JobLogOutcome, JobMarker, JobStatus, MetricLabel, MetricStateKey,
 )
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from job_response import classify_response, read_response  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -143,6 +147,17 @@ class _Counter:
       _validate_label_value(label, label_values[label])
     key = tuple(label_values[name] for name in self.labelnames)
     self.values[key] = self.values.get(key, 0.0) + amount
+
+
+  def clear(self) -> None:
+    """
+    Remove every recorded series, resetting the counter to its pre-observation state.
+
+    A counter is monotonic against a stable source; when the source itself is rewritten
+    (a pruned journal), the accumulated series describes events that are gone and must be
+    rebuilt rather than continued.
+    """
+    self.values = {}
 
 
   def render(self) -> list[str]:
@@ -332,6 +347,9 @@ class _Histogram:
 _state: dict = {}
 
 
+# waiver: test-only surface, kept deliberately — the metric series live in one module-level dict
+# that outlives a single test, and the alternative is a registry object threaded through every
+# record_* signature. Not worth that churn for one private reset.
 def _reset_for_tests() -> None:
   """
   Discard every metric series and registered configuration recorded by `init`.
@@ -372,12 +390,14 @@ def init(repo_label: str, version: str, daemon_name: str) -> None:
   _validate_label_value(MetricLabel.VERSION, version)
   _validate_label_value(MetricLabel.DAEMON_NAME, daemon_name)
 
+  # latch the label values every later record_* call stamps onto its samples
   _state[MetricStateKey.INITIALIZED] = True
   _state[MetricStateKey.REPO] = repo_label
   _state[MetricStateKey.VERSION] = version
   _state[MetricStateKey.DAEMON_NAME] = daemon_name
   _state[MetricStateKey.LOCK] = threading.Lock()
 
+  # register every metric family up front so a scrape before the first tick still exposes them
   _state[MetricStateKey.TICKS] = _Counter(
     # waiver: external Prometheus metric name and HELP text, not internal keys
     "lazycortex_runtime_routine_ticks_total",
@@ -476,7 +496,15 @@ def init(repo_label: str, version: str, daemon_name: str) -> None:
     "Wall-clock duration of one expert job attempt in seconds.",
     ("repo", "expert"),
   )
+  _state[MetricStateKey.INCIDENTS] = _Counter(
+    # waiver: external Prometheus metric name, not a domain constant
+    "lazycortex_runtime_incidents_total",
+    # waiver: external Prometheus HELP text, not a domain constant
+    "Incidents opened in the error ledger, by kind and cause.",
+    ("repo", "kind", "cause"),
+  )
 
+  # the two constant series carry no per-tick data, so they are set once at init
   _state[MetricStateKey.UP].set(None, 1)
   _state[MetricStateKey.BUILD_INFO].set(
     { MetricLabel.REPO: repo_label, MetricLabel.VERSION: version, MetricLabel.DAEMON_NAME: daemon_name }, 1,
@@ -486,6 +514,8 @@ def init(repo_label: str, version: str, daemon_name: str) -> None:
   _state[MetricStateKey.TOKEN_OFFSET] = 0
   # jobs_offset is populated by aggregate_jobs_from_log on each scrape
   _state[MetricStateKey.JOBS_OFFSET] = 0
+  # incidents_offset is populated by aggregate_incidents_from_ledger on each scrape
+  _state[MetricStateKey.INCIDENTS_OFFSET] = 0
 
 
 def _resolve_status(exit_code: int, error: str | None) -> tuple[str, str | None]:
@@ -556,6 +586,7 @@ def record_tick(
   repo = _state[MetricStateKey.REPO]
   status, reason = _resolve_status(exit_code, error)
 
+  # every series touched by one tick moves under a single lock hold
   with _state[MetricStateKey.LOCK]:
     _state[MetricStateKey.TICKS].inc(
       { MetricLabel.REPO: repo, MetricLabel.ROUTINE: routine, MetricLabel.STATUS: status })
@@ -679,7 +710,7 @@ def _registry_for(name: str) -> _Counter | _Gauge | _Histogram | None:
   for key in (
     "ticks", "runs", "errors", "tokens", "duration", "last_tick",
     "queue_depth", "up", "daemon_halted", "build_info", "halt_count", "dirty_tree",
-    "expert_jobs", "expert_job_duration",
+    "expert_jobs", "expert_job_duration", "incidents",
   ):
     metric = _state.get(key)
     if metric is not None and metric.name == name:
@@ -763,7 +794,7 @@ def render() -> bytes:
   for key in (
     "up", "build_info", "ticks", "runs", "errors", "tokens",
     "duration", "last_tick", "queue_depth",
-    "expert_jobs", "expert_job_duration",
+    "expert_jobs", "expert_job_duration", "incidents",
     "daemon_halted", "halt_count", "dirty_tree",
   ):
     metric = _state.get(key)
@@ -921,6 +952,7 @@ def set_queue_depth_from_filesystem(repo_root: Path) -> None:
     _state[MetricStateKey.QUEUE_DEPTH].clear()
     return
 
+  # the queue depth is recounted from the job dirs rather than tracked incrementally
   counts: dict[tuple[str, str], int] = {}
   for expert_dir in base.iterdir():
     # guard: skip non-directory entries beside expert dirs
@@ -937,6 +969,7 @@ def set_queue_depth_from_filesystem(repo_root: Path) -> None:
       state = _classify_job_state(job_dir)
       counts[(expert, state)] = counts.get((expert, state), 0) + 1
 
+  # republish the gauge from scratch so (expert, state) pairs that vanished stop being exported
   repo = _state[MetricStateKey.REPO]
   with _state[MetricStateKey.LOCK]:
     _state[MetricStateKey.QUEUE_DEPTH].clear()
@@ -952,11 +985,12 @@ def _classify_job_state(job_dir: Path) -> str:
 
   Mirrors `expert_runtime._job_status` so the metric matches the runtime's own
   view of each job. Possible return values: `queued`, `active`, `dead`, `done`,
-  `failed`. The filesystem signatures consulted are:
+  `deferred`, `failed`. The filesystem signatures consulted are:
 
   - DEAD marker present                                  → dead
-  - DONE marker + response.json with outcome == "error"  → failed
-  - DONE marker present                                  → done
+  - DONE marker + response reporting a finished outcome  → done
+  - DONE marker + response reporting `deferred`          → deferred
+  - DONE marker + any other response                     → failed
   - READY marker + PID file (no DEAD, no response.json)  → active
   - READY marker only (no PID file)                      → queued
   - none of the above                                    → queued (fallback)
@@ -967,19 +1001,16 @@ def _classify_job_state(job_dir: Path) -> str:
   Returns:
     The closed-set state label for the job.
   """
+  # guard: DEAD outranks every other marker — a job the runtime abandoned is nothing else
   if (job_dir / JobMarker.DEAD).exists():
     return JobStatus.DEAD
+  # guard: a finished job is classified by its response rather than by the marker alone
   if (job_dir / JobMarker.DONE).exists():
-    resp_path = job_dir / JobFile.RESPONSE
-    if resp_path.exists():
-      try:
-        outcome = json.loads(resp_path.read_text()).get(JobResponseKey.OUTCOME)
-        if outcome == JobOutcome.ERROR:
-          return JobStatus.FAILED
-      except json.JSONDecodeError:
-        # malformed response.json — treat as a generic done
-        pass
-    return JobStatus.DONE
+    # only an explicit finished outcome counts as done; a missing, malformed, or
+    # outcome-less response is a failure the dashboard must show, not hide, and
+    # postponed work gets its own state so it cannot hide inside either bucket
+    return classify_response(read_response(job_dir))
+  # guard: READY without DEAD or DONE is still in the queue — only a PID file makes it active
   if (job_dir / JobMarker.READY).exists():
     if (job_dir / JobMarker.PID).exists():
       return JobStatus.ACTIVE
@@ -1064,7 +1095,8 @@ def aggregate_tokens_from_log(repo_root: Path) -> None:
 # token-log offset above).
 
 _JOB_LOG_OUTCOMES = frozenset({
-  JobLogOutcome.DONE, JobLogOutcome.FAILED, JobLogOutcome.DEAD, JobLogOutcome.ERROR,
+  JobLogOutcome.DONE, JobLogOutcome.FAILED, JobLogOutcome.DEFERRED, JobLogOutcome.DEAD,
+  JobLogOutcome.ERROR,
 })
 
 
@@ -1121,3 +1153,87 @@ def aggregate_jobs_from_log(repo_root: Path) -> None:
         )
     offset = f.tell()
   _state[MetricStateKey.JOBS_OFFSET] = offset
+
+
+# --- Incident aggregation -----------------------------------------------------
+
+# Incidents are appended to <repo>/.runtime/errors.jsonl by the error ledger. Only the
+# event that opens an incident is counted: the later triage / resolution events describe
+# the same incident and would inflate the rate a dashboard alerts on.
+
+# derived from the vocabulary class rather than re-listed, so a kind added there reaches
+# the counter instead of being silently dropped by a stale copy
+_INCIDENT_KINDS = frozenset(
+  value for name, value in vars(IncidentKind).items()
+  if not name.startswith("_") and isinstance(value, str)
+)
+
+
+def aggregate_incidents_from_ledger(repo_root: Path) -> None:
+  """
+  Fold newly opened error-ledger incidents into the incident counter.
+
+  Consumes only journal entries appended since the previous call, so repeated scrapes
+  never double-count an incident. Without this the ledger is visible to `error-list` and
+  to an operator reading the journal, but invisible to a dashboard, which is where an
+  autonomous runtime's failures have to surface.
+
+  Notes:
+    - Retention rewrites the journal in place, dropping aged events. A journal shorter
+      than the previous read position is therefore a rewrite, not a truncation error: the
+      counter is rebuilt from the surviving events rather than resumed from a position
+      that no longer exists. The series steps down at that point, which every rate and
+      increase query already handles as a counter reset.
+    - Malformed lines, non-opening phases, unknown kinds, and entries whose cause falls
+      outside the closed label character set are skipped silently, so neither a corrupt
+      journal suffix nor a caller-invented cause poisons the counter or its cardinality.
+
+  Args:
+    repo_root: Absolute path to the repository root.
+  """
+  # guard: metrics are off — skip the journal read entirely
+  if not is_enabled():
+    return
+
+  # the ledger owns the journal path; a repo that never failed has no file at all
+  journal = repo_root / error_ledger.JOURNAL_REL
+  # guard: no journal yet — nothing has failed in this repo
+  if not journal.exists():
+    return
+
+  # resume where the previous scrape stopped so nothing is counted twice
+  offset = _state.get(MetricStateKey.INCIDENTS_OFFSET, 0)
+  repo = _state[MetricStateKey.REPO]
+
+  # a journal that shrank was rewritten by retention — the stored position points into a
+  # file that no longer exists, so rebuild the series from what survived the prune
+  if journal.stat().st_size < offset:
+    _state[MetricStateKey.INCIDENTS].clear()
+    offset = 0
+
+  # read the journal as bytes so the offset checkpoint survives multi-byte causes
+  # waiver: stdlib file-mode idiom
+  with journal.open("rb") as f:
+    f.seek(offset)
+    for raw in f:
+      try:
+        # waiver: stdlib encoding idiom
+        rec = json.loads(raw.decode("utf-8"))
+      except (UnicodeDecodeError, json.JSONDecodeError):
+        # malformed line — skip without poisoning the counter
+        continue
+      # guard: only the opening event counts as one incident
+      if rec.get(IncidentKey.PHASE) != IncidentPhase.OPENED:
+        continue
+      kind = rec.get(IncidentKey.KIND) or ""
+      cause = rec.get(IncidentKey.CAUSE) or ""
+      # guard: closed-vocabulary checks reject unknown kinds and unsafe cause values
+      if kind not in _INCIDENT_KINDS or not _LABEL_VALUE_RE.match(cause):
+        continue
+      _state[MetricStateKey.INCIDENTS].inc(
+        { MetricLabel.REPO: repo, MetricLabel.KIND: kind, MetricLabel.CAUSE: cause },
+      )
+    offset = f.tell()
+
+  # checkpoint the read so the next scrape starts past everything counted here
+  _state[MetricStateKey.INCIDENTS_OFFSET] = offset

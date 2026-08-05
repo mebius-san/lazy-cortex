@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-08-01
+last_regen: 2026-08-05
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor, scaffold registry, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, unpinned models), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -24,6 +24,7 @@ source_skills:
   - lazy-guard.allow-mcp
   - lazy-guard.check-public
   - lazy-log.clean
+  - lazy-log.distill
   - lazy-memory.index
   - lazy-memory.mark-persona
   - lazy-memory.reflect
@@ -670,6 +671,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: The expert agent wrote an invalid JSON response, or a crash mid-write left `response.json` in a truncated state. The collect skill reads this file directly and raises `json.JSONDecodeError` if it cannot parse it.
 
 **Fix**: Inspect the file at `.experts/.jobs/<expert>/<job_id>/response.json` directly to see what the expert wrote. If the file is corrupt, the job cannot be recovered — cancel it with `/lazy-expert.cancel-job` and re-dispatch with the same payload.
+
+---
+
+## A job never reaches `done`, and an inbox stops draining
+
+**Symptom**: A job dispatched to an expert never settles — `/lazy-expert.collect-job` keeps reporting `pending`, then eventually `failed`. If the job came from an `inbox`-type routine, new files stop moving out of that routine's input directory entirely; they just pile up.
+
+**Likely cause**: The expert's `response.json` never wrote an `outcome` field. The runtime treats `outcome` as the one field every expert response must carry, and a response missing it is rejected outright rather than accepted. The first rejection keeps the job queued — the bad response is discarded, and the next spawn is told what was wrong with the previous attempt. A second response that still omits `outcome` fails the job for good and opens a `job_error` incident on the repo's error ledger. The usual root cause is a protocol file (`.claude/references/*-protocol.md`) that tells its expert to write some status field of its own — `status`, `state` — in place of `outcome`. Every job dispatched under that protocol hits the same rejection, and because a routine's queue is worked one job at a time, a stuck expert pauses the routine feeding it — for an inbox routine, that shows up as the input directory no longer draining.
+
+**Fix**: Run `/lazy-core.doctor` — its expert-runtime section names the offending protocol file directly, as a `protocol_envelope` finding ("protocol `<name>` overrides the response envelope: `<detail>`"). Edit that protocol file so its response-shape section documents `outcome` (with whichever values your protocol needs) instead of a rival `status`/`state` field. A job that already failed with a `job_error` incident does not retry itself — once the protocol is fixed, re-dispatch it with `/lazy-expert.dispatch-job`.
 
 ---
 

@@ -185,7 +185,7 @@ class WorktreeTaskManager:
     branch = entry[WorktreeEntryKey.BRANCH]
     if entry[WorktreeEntryKey.ALLOW_MERGE]:
       outcome = self._try_merge(branch)
-      # guard: merge degraded to PR on conflict — fall through to PR path
+      # guard: the merge landed — clean up and return; any other outcome falls through to the PR path
       if outcome[WorktreeResultKey.RESULT] == WorktreeResult.MERGED:
         self._cleanup(work_id, entry, delete_branch = True)
         return outcome

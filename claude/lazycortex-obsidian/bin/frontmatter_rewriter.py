@@ -116,6 +116,7 @@ def rewrite_frontmatter(text: str, *, icon: str | None, color: str | None) -> st
   else:
     new = "---\n" + new_block + "---\n" + rest
 
+  # the reassembled document is the result; callers compare it with the input to detect a no-op
   return new if new != text else text
 
 

@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from typing import overload
 
-from constants import JobCollectKey, JobConfigKey, JobStatus, RoutineKey, StateKey, TickResultKey
+from constants import (
+  JobCollectKey, JobConfigKey, JobErrorCategory, JobStatus, RoutineKey, StateKey, TickResultKey,
+)
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -24,6 +26,16 @@ if TYPE_CHECKING:
 
 
 VALID_TYPES = { "subprocess", "inbox", "schedule", "git", "md-scan" }
+
+# how long a transient-error inbox bundle stays parked before it is retired for a retry —
+# matches the doctor's dead-job takeover threshold so both retry paths age out together
+TRANSIENT_RETRY_AGE_SEC = 3600.0
+
+# default window a deferred inbox bundle stays parked before its input is re-dispatched.
+# A deferral waits on the world changing by hand (an operator creating the record the
+# import needs), so the default is a day rather than the transient path's hour; a routine
+# overrides it with `deferred_retry_sec`.
+DEFERRED_RETRY_AGE_SEC = 86400.0
 
 
 def _resolve_cross_repo_target(repo: Path, expert: str) -> tuple[str, Path, dict]:
@@ -75,7 +87,9 @@ SCHEMAS = {
   },
   "inbox": {
     "required": { "inbox_dir", "interval_sec" },
-    "optional": { "command", "expert", "request", "timeout_sec", "filter" },
+    "optional": {
+      "command", "expert", "request", "timeout_sec", "filter", "deferred_retry_sec",
+    },
   },
   "schedule": {
     "required": { "cron" },
@@ -234,6 +248,7 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
       f"Valid: {sorted(VALID_TYPES)}."
     )
 
+  # the type's schema splits the field vocabulary this routine is allowed to carry
   schema = SCHEMAS[rtype]
   # waiver: internal schema-dict subkey, single-source set in SCHEMAS
   required = schema["required"]
@@ -241,6 +256,7 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
   optional = schema["optional"]
   allowed = required | optional | COMMON_ALLOWED
 
+  # the declared fields are checked against the schema in both directions
   keys = set(cfg)
   missing = required - keys
   # guard: required field(s) absent — closed-set rejection
@@ -249,6 +265,7 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
       f"routine '{name}' (type={rtype}): missing required field(s): {sorted(missing)}"
     )
 
+  # a field outside the schema is rejected rather than ignored
   unknown = keys - allowed
   # guard: caller passed an undeclared field — closed-set rejection
   if unknown:
@@ -256,13 +273,16 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
       f"routine '{name}' (type={rtype}): unknown field(s): {sorted(unknown)}"
     )
 
+  # the command/expert pair carries its own cross-field rule
   _validate_command_or_expert(name, cfg, rtype)
 
+  # the optional flags are type-checked before any consumer reads them
   for flag in ( "isolate", "allow_merge" ):
     # guard: isolate/allow_merge, when present, must be booleans
     if flag in cfg and not isinstance(cfg[flag], bool):
       raise RoutineConfigError(f"routine '{name}': '{flag}' must be a boolean")
 
+  # the optional filter sub-mapping is validated key by key
   # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
   flt = cfg.get("filter")
   if flt is not None:
@@ -294,6 +314,7 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
     if fn is not None and not isinstance(fn, bool):
       raise RoutineConfigError(f"routine '{name}': 'filter.folder_note' must be a boolean")
 
+  # a git routine carries a watch mode drawn from a closed set
   # waiver: routine-type token, single-source set in VALID_TYPES/SCHEMAS, not a reusable cross-module key
   if rtype == "git":
     # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
@@ -305,6 +326,7 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
         f"Valid: {sorted(VALID_GIT_WATCH)}."
       )
 
+  # an md-scan routine carries the path globs its scan is bounded by
   # waiver: routine-type token, single-source set in VALID_TYPES/SCHEMAS, not a reusable cross-module key
   if rtype == "md-scan":
     # guard: paths must be a list of globs
@@ -485,6 +507,75 @@ def _render_template(template: object, values: dict) -> object:
   return template
 
 
+def _is_retryable_transient(done_job: dict) -> bool:
+  """
+  Decide whether a finished inbox bundle is a spawn fault worth re-dispatching.
+
+  True for a failed bundle whose error category marks a spawn-level fault and
+  that finished longer than `TRANSIENT_RETRY_AGE_SEC` ago; false for a success,
+  for any other error category, and for a fault too recent to have outlived the
+  outage that caused it.
+
+  Args:
+    done_job: One finished-bundle descriptor as returned by `completed_dedup_jobs`.
+
+  Returns:
+    `True` when the bundle should be retired so its input re-dispatches.
+  """
+  # ponytail: unbounded retry — one re-dispatch per TRANSIENT_RETRY_AGE_SEC for as long as the
+  # spawn keeps faulting; add an attempt counter in the bundle if the churn ever costs anything
+  return (
+    done_job[JobCollectKey.STATUS] != JobStatus.DONE
+    and done_job.get(JobCollectKey.CATEGORY) == JobErrorCategory.TRANSIENT
+    and done_job.get(JobCollectKey.AGE_SEC, 0.0) >= TRANSIENT_RETRY_AGE_SEC
+  )
+
+
+def _remove_harness_artifacts(inbox_dir: Path) -> None:
+  """
+  Remove empty harness bookkeeping directories from an inbox folder.
+
+  The inbox is an operator-facing folder, often synced or shared outside the harness, so leftover
+  bookkeeping directories must not accumulate there. A directory still holding real content is left
+  untouched.
+
+  Notes:
+    - Failures are ignored; the cleanup is best-effort and never raises.
+
+  Args:
+    inbox_dir: Path-like reference to the routine's configured inbox directory.
+  """
+  # innermost first, so the parent becomes removable in the same pass; a directory that still
+  # holds anything real fails rmdir and survives, which is the wanted behaviour
+  for rel in (".claude/.cc-writes", ".claude"):
+    try:
+      (inbox_dir / rel).rmdir()
+    except OSError:
+      pass
+
+
+def _is_returnable_deferral(done_job: dict, *, window_sec: float) -> bool:
+  """
+  Decide whether a deferred inbox bundle has waited long enough to be re-dispatched.
+
+  A deferral parks its input untouched and waits on something outside the runtime —
+  typically an operator creating the record the work needs. Retiring the bundle at
+  once would re-spawn against the same unchanged world every tick, so the input is
+  returned to the queue only after the configured window has elapsed.
+
+  Args:
+    done_job: One finished-bundle descriptor as returned by `completed_dedup_jobs`.
+    window_sec: Seconds a deferred bundle stays parked before its input returns.
+
+  Returns:
+    `True` when the bundle is deferred and older than the window.
+  """
+  return (
+    done_job[JobCollectKey.STATUS] == JobStatus.DEFERRED
+    and done_job.get(JobCollectKey.AGE_SEC, 0.0) >= window_sec
+  )
+
+
 def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   """
   Scan `cfg["inbox_dir"]` and dispatch one job per non-hidden file found.
@@ -495,13 +586,24 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
       dispatch pass. The reconcile pass drains succeeded jobs by unlinking the
       input file and consuming the bundle; failed jobs are left parked — the
       unconsumed bundle's dedup key blocks re-dispatch until an operator
-      triages the dead letter. The dispatch pass submits one job per remaining
-      file, keyed on the file's absolute path via `dedup_key` and the `{file}`
-      placeholder in `request`. The inbox is the source of truth; the file is
-      never copied into the job bundle.
+      triages the dead letter. Two kinds of parked bundle age out instead of
+      waiting for a triage: a transient failure, once older than
+      `TRANSIENT_RETRY_AGE_SEC`, and a deferral, once older than the routine's
+      `deferred_retry_sec` (default `DEFERRED_RETRY_AGE_SEC`). Both are retired
+      without draining the input, so the same tick re-dispatches the file. The
+      dispatch pass submits one job per remaining file, keyed on the file's
+      absolute path via `dedup_key` and the `{file}` placeholder in `request`.
+      The inbox is the source of truth; the file is never copied into the job
+      bundle.
     - `command`: spawn `command + [<absolute-path-to-inbox-file>]` as a
       blocking subprocess per file. The file stays in the inbox until the
-      consumer command moves or deletes it — the routine never removes it.
+      consumer command moves or deletes it — the routine never removes the
+      input file itself.
+
+  Notes:
+    - On every tick over an existing inbox directory, removes empty harness bookkeeping
+      directories left inside that folder; a directory still holding real content is left
+      untouched. This removal targets only those bookkeeping directories, never the input file.
 
   Args:
     repo: Path-like reference to the repository.
@@ -542,6 +644,10 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
       TickResultKey.NOTE: "inbox_dir does not exist",
     }
 
+  # the inbox is an operator-facing folder (often Dropbox-synced) — harness bookkeeping dirs
+  # left behind by an agent that touched it must not accumulate there
+  _remove_harness_artifacts(inbox_dir)
+
   # sorted for deterministic dispatch order
   candidates = []
   for entry in sorted(inbox_dir.iterdir()):
@@ -577,6 +683,7 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
       kept.append(entry)
     candidates = kept
 
+  # a command routine runs a subprocess, an expert routine dispatches a job per file
   use_command = RoutineKey.COMMAND in cfg
   if use_command:
     # waiver: inline numeric/default literal, not a domain constant
@@ -623,6 +730,7 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
       "dispatched_count": dispatched,
     }
 
+  # the expert branch renders one request per candidate file
   expert = cfg[RoutineKey.EXPERT]
   request_template = cfg["request"]
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
@@ -630,13 +738,31 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   protocols = _routine_protocols(cfg)
   bare_expert, target_repo, xrepo_kwargs = _resolve_cross_repo_target(repo, expert)
 
+  # how long a deferred bundle waits before its input is offered to the queue again
+  # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
+  deferred_window = float(cfg.get("deferred_retry_sec", DEFERRED_RETRY_AGE_SEC))
+
   # Reconcile finished work against the inbox. The input file is never copied
   # into the job bundle (only its path is passed), so the inbox is the single
   # source of truth: a succeeded job drains its input here; a failed job is
   # left parked — its bundle stays DONE-but-unconsumed so the dedup key keeps
-  # the file from re-dispatching (a dead-letter the operator triages).
+  # the file from re-dispatching (a dead-letter the operator triages). Success
+  # means an explicit finished outcome in the response — anything less counts
+  # as failed, because the input is destroyed here and nowhere else. Two parked
+  # shapes age out on their own instead: a stale transient error (the spawn
+  # faulted rather than the work) and a deferral (the expert postponed the work
+  # and left the input alone). Both are retired without draining the input, so
+  # the loop below re-dispatches the same file on this very tick.
   for done_job in completed_dedup_jobs(target_repo, bare_expert):
-    # guard: failed job — leave the input parked behind its dead-letter bundle
+    # guard: stale transient failure — retire the bundle so the input re-dispatches
+    if _is_retryable_transient(done_job):
+      consume_job(target_repo, bare_expert, done_job[JobCollectKey.JOB_ID], **xrepo_kwargs)
+      continue
+    # guard: the deferral has waited out its window — offer the input to the queue again
+    if _is_returnable_deferral(done_job, window_sec = deferred_window):
+      consume_job(target_repo, bare_expert, done_job[JobCollectKey.JOB_ID], **xrepo_kwargs)
+      continue
+    # guard: failed or still-waiting deferred job — leave the input parked behind its bundle
     if done_job[JobCollectKey.STATUS] != JobStatus.DONE:
       continue
     try:
@@ -647,6 +773,7 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
       pass
     consume_job(target_repo, bare_expert, done_job[JobCollectKey.JOB_ID], **xrepo_kwargs)
 
+  # every surviving candidate becomes one dispatched job
   dispatched = 0
   for f in candidates:
     # guard: reconcile (or an external actor) drained this file — nothing to send
@@ -672,6 +799,7 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
       continue
     dispatched += 1
 
+  # the tick result reports how many jobs went out this pass
   return {
     TickResultKey.NAME: name, TickResultKey.EXIT: 0,
     TickResultKey.DURATION_SEC: time.time() - started,
@@ -706,6 +834,7 @@ def dispatch_schedule(repo: Path, name: str, cfg: dict) -> dict:
   from pathlib import Path
   started = time.time()
 
+  # a command routine delegates straight to the subprocess dispatcher
   if RoutineKey.COMMAND in cfg:
     # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
     from runtime_daemon import dispatch_subprocess
@@ -714,6 +843,7 @@ def dispatch_schedule(repo: Path, name: str, cfg: dict) -> dict:
       sub_cfg[RoutineKey.TIMEOUT_SEC] = cfg[RoutineKey.TIMEOUT_SEC]
     return dispatch_subprocess(Path(repo), name, sub_cfg)
 
+  # the expert branch renders the request template against the current time
   expert = cfg[RoutineKey.EXPERT]
   # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
   request_template = cfg["request"]
@@ -812,12 +942,13 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   started = time.time()
   repo = Path(repo)
 
+  # the watched git dir may sit below the repo root the routine is registered in
   # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
   work_dir = (repo / cfg.get("repo_dir", ".")).resolve()
   # remote is vestigial — read but unused (remote sync is daemon-level)
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+  # waiver: the read is the point — it documents the config field this routine consumes, and the subscript validates its presence
   _remote = cfg.get("remote", "origin")  # noqa: F841
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+  # waiver: the read is the point — it documents the config field this routine consumes, and the subscript validates its presence
   _branch = cfg[RoutineKey.BRANCH]  # noqa: F841
   watch = cfg["watch"]
   # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
@@ -829,6 +960,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
     # waiver: one-off routine-outcome note/reason token, not an internal key
     return _err(name, started, "not_a_git_repo", f"{work_dir} is not a git repo")
 
+  # current HEAD is the upper bound of the range this tick scans
   try:
     head_sha = subprocess.check_output(
       [ "git", "rev-parse", "HEAD" ],
@@ -838,6 +970,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
     # waiver: one-off routine-outcome note/reason token, not an internal key
     return _err(name, started, "rev_parse_failed", str(e))
 
+  # the last-seen sha is per-routine state carried across ticks
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import runtime_state
   state = runtime_state.load(repo)
@@ -866,6 +999,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
     # waiver: one-off routine-outcome note/reason token, not an internal key
     return _ok(name, started, dispatched_count = 0, note = "force_push_baseline_reset")
 
+  # the watch mode decides what a single item is (a commit, a path, a rename pair)
   items = _compute_git_items(work_dir, last_seen, head_sha, watch, path_filter)
 
   # Optional composite filter — same matcher md-scan / inbox use. Items carrying a
@@ -900,6 +1034,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
       kept.append(item)
     items = kept
 
+  # a command routine receives the items as a subprocess payload, not as jobs
   if RoutineKey.COMMAND in cfg:
     # waiver: inline numeric/default literal, not a domain constant
     timeout_sec = cfg.get(RoutineKey.TIMEOUT_SEC, 300)
@@ -935,6 +1070,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
       rendered = _render_template(request_template, item)
       dispatch_job(target_repo, bare_expert, rendered, protocols = protocols, **xrepo_kwargs)
 
+  # the scanned range is closed by advancing the last-seen sha to HEAD
   runtime_state.update(
     repo,
     lambda s: s.setdefault(StateKey.GIT_WATCH, {}).setdefault(name, {}).update({StateKey.LAST_SEEN_SHA: head_sha})
@@ -1057,6 +1193,7 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str,
   rng = f"{last_seen}..{head_sha}"
   pathspec = [ "--", path_filter ] if path_filter else []
 
+  # commit-level watches read the range straight from the log
   # waiver: git CLI/output vocabulary, not a domain constant
   if watch == "new_commits":
     out = subprocess.check_output(
@@ -1082,6 +1219,7 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str,
           })
     return items
 
+  # file-level watches read a name-status diff instead of the log
   if watch in ("new_files", "changed_files", "deleted_files"):
     # use diff --name-status for added/modified/deleted classification
     out = subprocess.check_output(
@@ -1110,6 +1248,7 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str,
         items.append({ "path": path, "status": status, "sha": sha })
     return items
 
+  # renames need the rename-detection pass to pair the old and new path
   # waiver: git CLI/output vocabulary, not a domain constant
   if watch == "renamed_files":
     out = subprocess.check_output(
@@ -1132,6 +1271,7 @@ def _compute_git_items(work_dir: Path, last_seen: str, head_sha: str,
           })
     return items
 
+  # every watch value is handled above, so reaching here means the config is invalid
   raise RoutineConfigError(f"unknown git watch value: {watch!r}")
 
 
@@ -1374,6 +1514,7 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   started = time.time()
   repo = Path(repo)
 
+  # the scan is bounded by the declared globs and the optional frontmatter filter
   # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
   paths_globs = cfg["paths"]
   # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
@@ -1415,6 +1556,7 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
   # Deterministic order (was implicit via `sorted(glob(...))` before).
   candidates.sort()
 
+  # per-outcome tallies the tick reports back to the daemon
   dispatched = 0
   skipped = 0
   unchanged = 0
@@ -1433,6 +1575,7 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
       TickResultKey.ERROR: "frontmatter_parser module unavailable",
     }
 
+  # the two dispatch paths need different setup — an expert job, or a resolved consumer command
   use_command = RoutineKey.COMMAND in cfg
   if not use_command:
     # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
@@ -1471,6 +1614,7 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
     next_state: dict = {}
     sig_memo: dict[str, str] = {}
 
+  # each candidate is re-read and re-filtered here — the glob only narrowed the field
   for f in candidates:
     try:
       # waiver: stdlib idiom, not a domain constant
@@ -1553,7 +1697,7 @@ def dispatch_md_scan(repo: Path, name: str, cfg: dict) -> dict:
       })
       continue
 
-  # guard: command shape — persist the change-detection state when it moved
+  # persist the change-detection state on the command path, and only when it actually moved
   # waiver: scan_state/next_state are set in the use_command else-branch, used under the same guard
   # pylint: disable=possibly-used-before-assignment
   if use_command and next_state != scan_state:

@@ -101,9 +101,9 @@ def reapply(
     # guard: a required key absent from both overlay and operator frontmatter means classification failed — fail rather than commit silently
     if _missing:
       raise ValueError(f"missing required frontmatter keys: {sorted(_missing)}")
-# Defensive normalize: drop ```diff fences that only wrap whitespace
-# differences (Bug 28). Writer's whitespace reflow does not earn a
-# diff-block — the operator should see the paragraph raw.
+  # Defensive normalize: drop ```diff fences that only wrap whitespace
+  # differences (Bug 28). Writer's whitespace reflow does not earn a
+  # diff-block — the operator should see the paragraph raw.
   agent_body = _edit_markup.drop_whitespace_only_diff_fences(agent_body)
 
   # Section-writer body-drift check — diagnostic only, never blocks.
@@ -122,6 +122,7 @@ def reapply(
         owned_expert=owned_expert_flat,
     )
 
+  # the reassembled document is what lands back on disk
   text = _body.reassemble(
       operator_text=operator_text,
       agent_body=agent_body,

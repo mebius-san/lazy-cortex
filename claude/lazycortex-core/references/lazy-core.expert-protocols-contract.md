@@ -149,9 +149,11 @@ Standard field semantics:
 }
 ```
 
-`outcome=error` is a reserved value across all protocols. Protocols may not define a `kind` or `outcome` value named `error`.
+`outcome=error` and `outcome=deferred` are reserved values across all protocols; protocols may not define a `kind` or `outcome` value named either. `error` marks a failure. `deferred` marks work the expert deliberately postponed with every input left untouched — a consumer that drains an input on success must not drain it on a deferral, and must not count it as a failure either. The inbox routine parks a deferred bundle and returns its input to the queue once the bundle outlives the routine's `deferred_retry_sec` window.
 
-**Validation:** the pump does not validate `response.json` against a schema. A syntactically malformed `response.json` is treated as `{}` and the job is still marked `DONE` — `lazy-expert.collect-job` will then return `status=done` with an empty response and no error signal. Protocol-defined `result` array enforcement (e.g. "outcome=edited requires result[]") is the consumer's responsibility, not the pump's.
+**Ownership:** the envelope above — `outcome`, `result`, `error` — belongs to this contract, not to any protocol. A protocol **extends** it: it declares which values `outcome` takes and adds fields of its own (§ 4.7). A protocol **never** renames an envelope field. Prescribing a private status key (`"status": "done"`) in place of `outcome` is the one failure that cannot be caught by reading the response: the runtime sees no discriminator, and every failure the expert reports through the private key reads as a success. Protocol files should not restate the envelope at all — it already reaches every expert through the runtime contract in its system prompt.
+
+**Validation:** the pump requires `outcome`. A `response.json` that is missing, malformed, or carries no `outcome` fails the job's success gate: the attempt is rejected, the unusable payload discarded, and the bundle re-spawned once with the reason fed back into the prompt. A second violation of the same bundle is treated as deterministic — the job is closed with `outcome: error, category: logical` and a `job_error` incident. Success is never inferred from silence, so a consumer that keeps its source artifact outside the bundle (the inbox routine) destroys an input only against an explicit non-error outcome. Protocol-defined `result` array enforcement (e.g. "outcome=edited requires result[]") remains the consumer's responsibility, not the pump's.
 
 ---
 

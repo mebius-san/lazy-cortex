@@ -37,8 +37,14 @@ class RelinkPlanner:
   """
   Plan a daemon-free relink pass over one wiki scope.
 
-  Construct with the repo root, scope id, and scope-config dict, then call
-  `plan` to get the mode, anchor, and the classify / link / drop path sets.
+  Determines which scope nodes must be reclassified, re-linked, or dropped, by
+  comparing the current working tree against the scope's last synced anchor.
+
+  Attributes:
+    MODE_INITIAL: Plan mode used when no anchor exists yet, covering the whole scope.
+    MODE_INCREMENTAL: Plan mode used when the anchor is a reachable ancestor of HEAD.
+    MODE_ANCHOR_LOST: Plan mode used when the anchor is unreachable and content
+      hashes decide the plan instead.
   """
 
   # Plan modes.
@@ -106,6 +112,7 @@ class RelinkPlanner:
     if not self._anchor_reachable(synced_sha):
       return self._plan_anchor_lost(synced_sha)
 
+    # anchor is usable — plan from the git delta since it
     return self._plan_incremental(synced_sha)
 
   # ── mode builders ───────────────────────────────────────────────────────────
@@ -180,6 +187,7 @@ class RelinkPlanner:
     classify: list[str] = []
     drop: list[str] = []
 
+    # split the git delta into nodes to re-curate and nodes that left the scope
     for status, rel in self._diff_name_status(synced_sha):
       abs_path = (self._repo / rel).resolve()
       if status == self._STATUS_DELETE:
@@ -202,6 +210,7 @@ class RelinkPlanner:
           continue
         classify.append(str(abs_path))
 
+    # git orders the delta by its own rules — sort so the plan is reproducible
     classify.sort()
     drop.sort()
     return {
@@ -275,6 +284,7 @@ class RelinkPlanner:
     if proc.returncode != 0:
       return []
 
+    # unpack the porcelain into (status, path) pairs the planner can consume
     out: list[tuple[str, str]] = []
     for line in proc.stdout.splitlines():
       # guard: skip blank lines

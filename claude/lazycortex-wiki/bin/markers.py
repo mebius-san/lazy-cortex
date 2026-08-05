@@ -27,6 +27,11 @@ class Markers:
 
   Wiki owns the inner content; everything outside the markers is operator
   territory and is preserved byte-for-byte.
+
+  Attributes:
+    SEE_ALSO_MARKER_ID: Marker identifier for the canonical See-also managed region.
+    SEE_ALSO_HEADING: Heading text for the canonical See-also section.
+    SEE_ALSO_PROTECTED_TAG: Owner tag marking the See-also section as a protected cross-plugin region.
   """
 
   # Marker-id for the canonical See-also section.
@@ -97,12 +102,13 @@ class Markers:
     if start not in text or end not in text:
       return text
 
+    # bound the managed region so everything outside it survives the rewrite
     start_idx = text.index(start)
     end_idx = text.index(end, start_idx)
 
     # Advance past the start marker and its trailing newline
     after_start = start_idx + len(start)
-    # guard: if there's a newline immediately after the start marker, consume it
+    # consume the newline after the start marker so the marker keeps its own line
     if after_start < len(text) and text[after_start] == "\n":
       after_start += 1
 
@@ -113,6 +119,7 @@ class Markers:
     else:
       inner_block = ""
 
+    # splice the new content in, leaving both markers and the surrounding document intact
     return text[:after_start] + inner_block + text[end_idx:]
 
   # ──────────────────────────────────────────────────────────────────────────
@@ -139,12 +146,14 @@ class Markers:
     if start not in text or end not in text:
       return None
 
+    # walk past the start marker to the first byte the caller actually owns
     start_idx = text.index(start)
     after_start = start_idx + len(start)
-    # guard: consume the newline immediately after the start marker
+    # consume the newline after the start marker so it is not read as content
     if after_start < len(text) and text[after_start] == "\n":
       after_start += 1
 
+    # hand back the span between the markers, normalised the way a write leaves it
     end_idx = text.index(end, start_idx)
     return text[after_start:end_idx].strip("\n")
 
@@ -187,6 +196,7 @@ class Markers:
     else:
       inner_block = ""
 
+    # assemble the whole section so later runs find the heading, tag and markers
     section = (
       f"\n{self.SEE_ALSO_HEADING}\n"
       f"{self.SEE_ALSO_PROTECTED_TAG}\n"

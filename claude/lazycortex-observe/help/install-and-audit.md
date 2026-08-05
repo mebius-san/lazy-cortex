@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Install, verify health, and tear down the lazycortex-observe metrics shipper on any host.
-last_regen: 2026-07-12
+last_regen: 2026-08-05
 no_diagram: true
 source_skills:
   - lazy-observe.install
@@ -40,3 +40,5 @@ If doctor reports a `FAIL not-installed`, the next step is always `/lazy-observe
 ## Where this fits
 
 This block lives at the boundary between the lazycortex-observe plugin and your host infrastructure. The lazycortex-core daemon must be running with `metrics.enabled: true` before install makes sense — see the Quick Start section of the plugin README for the one-time core-side setting change. Because install and doctor both derive their scrape set from lazycortex-core's own daemon registry, a host running several repos' daemons at once is covered by a single shipper (or a single scrape-targets file in integrate mode) with no per-daemon setup step. Once the shipper is up, the dashboard and alert rule files shipped under `claude/lazycortex-observe/dashboards/` and `claude/lazycortex-observe/alerts/` are the observer-side complement; doctor's WAL and remote_write checks close the loop between the agent on your machine and the dashboards in your observer.
+
+The alert rules file added three alerts on top of the original set: one fires when an expert finishes a job with any outcome other than done, one fires when bundles sit parked in a failed, deferred, or dead state for more than half an hour, and one fires on a freshly opened incident in the error ledger. The dashboard's per-period flow tables gained a Deferred column next to Failed and Dead so a parked-but-not-yet-failed bundle is visible before it ages into an alert. Neither change is picked up automatically — reload Prometheus (`SIGHUP` or the reload endpoint, per your Prometheus deployment) to pick up the new rules, and re-import `claude/lazycortex-observe/dashboards/lazycortex-runtime.json` into Grafana to pick up the new column. Install and doctor are unaffected; this is a rule-file and dashboard-file update only, not a shipper change.

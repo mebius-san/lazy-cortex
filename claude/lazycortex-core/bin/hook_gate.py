@@ -20,6 +20,7 @@ The interactive block-list read fails open: any resolution error resolves to "no
 a hook still runs. Silencing a hook is always an explicit act, never an accident of a missing or
 malformed settings file.
 """
+
 from __future__ import annotations
 # waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # pylint: disable=import-error,wrong-import-position
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
 
 _BIN_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_BIN_DIR))
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from constants import EnvVar, HooksKey, SettingsFile, SettingsKey  # noqa: E402
 
 
@@ -84,7 +85,7 @@ def _disabled_hooks() -> frozenset[str]:
   # noinspection PyBroadException
   try:
     # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+    # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
     import lazy_settings  # type: ignore  # noqa: E402
     section = lazy_settings.load_section(settings_path, SettingsKey.HOOKS)
   except Exception:

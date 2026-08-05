@@ -21,12 +21,27 @@ class CodeFingerprint:
   """
 
   def __init__(self, *, roots: list[Path] | None = None, paths: list[Path] | None = None) -> None:
+    """
+    Create a fingerprint tracker scoped to the given plugin roots or an explicit path list.
+
+    Args:
+      roots: Plugin source directories under which loaded `.py` modules are tracked.
+      paths: Explicit file list to track instead of discovering modules under `roots`;
+        intended for tests.
+    """
     self._roots = [ Path(r).resolve() for r in ( roots or [] ) ]
     self._explicit = [ Path(p) for p in paths ] if paths is not None else None
     self._base: dict[str, str] = {}
     self._pending: dict[str, str] | None = None
 
   def _tracked_paths(self) -> list[Path]:
+    """
+    Resolve the current set of source file paths this instance tracks.
+
+    Returns:
+      The explicit path list when one was supplied at construction, otherwise every loaded
+      module's file path that lives under a watched plugin root.
+    """
     # guard: explicit override (tests) — use it verbatim
     if self._explicit is not None:
       return list(self._explicit)
@@ -37,12 +52,19 @@ class CodeFingerprint:
       if not f:
         continue
       p = Path(f).resolve()
-      # guard: module not under a watched plugin root
+      # only modules living under a watched plugin root are our own code
       if any(str(p).startswith(str(r)) for r in self._roots):
         out.append(p)
     return out
 
   def _hashes(self) -> dict[str, str]:
+    """
+    Compute the current content hash of every tracked source file.
+
+    Returns:
+      Mapping from absolute file path string to its SHA-256 hex digest. A tracked path that
+      cannot be read is omitted rather than raising.
+    """
     out: dict[str, str] = {}
     for p in self._tracked_paths():
       try:

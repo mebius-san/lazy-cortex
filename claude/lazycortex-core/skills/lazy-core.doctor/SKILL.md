@@ -386,7 +386,7 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 **11f. Expert runtime** — inline, via `lazy-core.audit` Agent D findings
 - *Availability*: always (expert-runtime checks are part of `lazycortex-core` itself — no separate plugin probe needed).
 - *Run condition*: `.claude/lazy.settings.json` contains a non-empty `experts` section, a `lazy-core.runtime` section, **or a non-empty `external_dirs.paths` list**. Skip if none is present (no expert runtime configured — silent skip, no report entry). Test the `paths` list, never the section: a settings migration stamps a `{"_version": 1}` stub for every known section into every repo, so "non-empty section" would match everywhere and defeat the skip.
-- *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D12 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).
+- *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D13 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).
 
 ## Phase 4 — Present + fix + waive
 
@@ -444,7 +444,7 @@ After the report, ask the user which fixes to apply. Apply only confirmed fixes.
 
 ### Loop runtime fix offers
 
-These six fix offers are conditional on findings from Phase 3 § 11f. Each is offered via `AskUserQuestion` only when the corresponding finding is present in the Loop runtime subsection.
+These seven fix offers are conditional on findings from Phase 3 § 11f. Each is offered via `AskUserQuestion` only when the corresponding finding is present in the Loop runtime subsection.
 
 **Fix L1 — Daemon stalled** (trigger: D10 WARN "runtime daemon appears stale")
 
@@ -533,6 +533,23 @@ print(bootstrap_daemon_git(Path('.')))
 ")
 ```
 Report the receipt verbatim: `seeded`, `kept-local`, or `skipped-no-branch`. `kept-local` here means the block acquired content between the scan and the fix — re-run the audit rather than writing again.
+
+**Fix L7 — Sandbox scope misses a resolved location** (trigger: D13 FAIL / WARN)
+
+`AskUserQuestion`: "The expert-spawn sandbox does not cover <N> location(s) its own allowlist resolves to (<comma-joined paths>). Confined spawns fail every write there with `Operation not permitted`. Record them?"
+
+Options: `Record`, `Skip`.
+
+On Record:
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from sandbox_scope import sync
+from pathlib import Path
+r = sync(Path('.'))
+print(f\"changed={r['changed']} added_write={r['added_write']}\")
+")
+```
+Report the receipt verbatim. The file is gitignored daemon state, so there is nothing to commit. The sync appends only what is missing and never drops a recorded entry.
 
 For any finding surfaced by a delegated audit (Guard / Logging), direct the user to run that sibling skill for fixes. Doctor never auto-fixes issues owned by sibling audits.
 

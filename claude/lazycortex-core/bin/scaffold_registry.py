@@ -7,6 +7,7 @@ Parses / renders / surgical splices the rigid 3-level YAML mapping
 (plugin -> template-path -> [globs]) without a YAML library, and exposes
 upsert / remove / list / validate as the `lazycortex-core scaffold` subcommand.
 """
+
 from __future__ import annotations
 
 import json
@@ -494,6 +495,7 @@ def main(argv: list[str]) -> int:
       sparser.add_argument("--entries", required = True)
   args = arg_parser.parse_args(argv)
 
+  # a missing registry file is a valid starting state for every subcommand below
   exists = os.path.exists(args.registry)
   # waiver: argparse CLI signature, not a domain key
   if args.cmd == "upsert":
@@ -515,6 +517,7 @@ def main(argv: list[str]) -> int:
     _atomic_write(args.registry, new_md)
     return _emit({"status": "registered", "plugin": args.plugin})
 
+  # `remove` — drop one plugin's block from the registry
   # waiver: argparse CLI signature, not a domain key
   if args.cmd == "remove":
     if not exists:
@@ -527,6 +530,7 @@ def main(argv: list[str]) -> int:
     _atomic_write(args.registry, new_md)
     return _emit({"status": "removed", "plugin": args.plugin})
 
+  # `list` — emit the parsed registry as JSON
   # waiver: argparse CLI signature, not a domain key
   if args.cmd == "list":
     if exists:
@@ -536,6 +540,7 @@ def main(argv: list[str]) -> int:
       md = _MINIMAL
     return _emit({"status": "ok", "registry": parse_registry_block(md)})
 
+  # `validate` — report the registry's own findings without touching it
   # waiver: argparse CLI signature, not a domain key
   if args.cmd == "validate":
     if exists:
@@ -545,6 +550,7 @@ def main(argv: list[str]) -> int:
       md = _MINIMAL
     return _emit({"status": "ok", "findings": validate(md)})
 
+  # argparse rejects unknown subcommands, so reaching here is a programming error
   return 1
 
 

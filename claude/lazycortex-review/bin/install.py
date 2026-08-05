@@ -31,7 +31,7 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import Paths, ReviewKey  # noqa: E402  # pylint: disable=wrong-import-position
 
 
@@ -113,6 +113,12 @@ _DEFAULT_SETTINGS = {
 
 
 def _ensure_dirs(repo: Path) -> list[str]:
+  """
+  Create any required review directories under `repo` that don't already exist.
+
+  Returns:
+    Repo-relative paths of the directories that were created.
+  """
   created: list[str] = []
   for rel in _REQUIRED_DIRS:
     d = repo / rel
@@ -123,6 +129,14 @@ def _ensure_dirs(repo: Path) -> list[str]:
 
 
 def _ensure_settings(repo: Path) -> dict:
+  """
+  Merge the default lazy-review settings into `repo`'s `.claude` settings file.
+
+  Existing top-level and nested keys are left untouched; only missing keys are added.
+
+  Returns:
+    A dict with the settings file path and the list of keys that were added.
+  """
   settings_dir = repo / Paths.CLAUDE_DIR
   settings_dir.mkdir(parents=True, exist_ok=True)
   settings_path = settings_dir / Paths.SETTINGS_FILE
@@ -136,7 +150,7 @@ def _ensure_settings(repo: Path) -> dict:
       existing[top_key] = top_value
       added.append(top_key)
       continue
-  # Merge nested defaults conservatively.
+    # Merge nested defaults conservatively.
     if isinstance(top_value, dict) and isinstance(existing[top_key], dict):
       for k, v in top_value.items():
         if k not in existing[top_key]:

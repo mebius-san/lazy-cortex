@@ -1,22 +1,22 @@
 ---
 chapter_type: block
 summary: Ingest free-form requests and route them into the right place in the spec tree — classify, find candidates, then attach or spawn.
-last_regen: 2026-07-21
+last_regen: 2026-08-05
 diagram_spec:
   anchor: "How the block flows"
   request: "Flow diagram showing the requests block pipeline: spec.request-router orchestrates — it calls spec.request-classify (returns a class token), then spec.request-find-candidates (returns a ranked candidate list). Based on the candidates score, the flow branches: high-confidence match goes to spec.request-attach (attaches to an existing entity); no match goes to spec.request-spawn (scaffolds a new entity then delegates to spec.request-attach). Show operator confirmation step between router output and apply."
 source_skills:
-  - spec.request-router
+  - spec.create-request
+  - spec.request-attach
   - spec.request-classify
   - spec.request-find-candidates
-  - spec.request-attach
   - spec.request-spawn
 ---
 # Requests
 
 When you or a collaborator have an idea, bug report, or design brief that doesn't yet have a home in the spec tree, the requests block handles the journey from raw text to a properly-attributed entry in the right asset. You drop a request into the content root's `requests/` inbox, the block works out what it is and where it belongs, and the result is either a new entity scaffolded from the request body or an existing entity enriched with the request's content — with a review cycle opened on every doc that changed.
 
-The block covers five members: `spec.request-router` (the review-loop specialist that orchestrates classification and routing), `spec.request-classify` (the classifier primitive), `spec.request-find-candidates` (the vault search primitive), `spec.request-attach` (the primitive that distributes body content into a target entity), and `spec.request-spawn` (the primitive that scaffolds a new entity and hands it immediately to attach).
+The block covers five members: `spec.create-request` (the intake skill that captures a raw idea into the vault-wide `requests/` inbox), `spec.request-classify` (the classifier primitive), `spec.request-find-candidates` (the vault search primitive), `spec.request-attach` (the primitive that distributes body content into a target entity), and `spec.request-spawn` (the primitive that scaffolds a new entity and hands it immediately to attach). Once a request enters the review cycle, the `spec.request-router` agent orchestrates classification and candidate search automatically and surfaces the routing decision for your confirmation.
 
 ## When you'd use this
 

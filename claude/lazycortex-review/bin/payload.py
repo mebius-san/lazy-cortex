@@ -145,10 +145,10 @@ def build_request(
     raise PayloadError(
         f"unknown mode: {mode!r}; allowed: {sorted(_VALID_MODES)}"
     )
-# `kind` is no longer written to the request — see module
-# docstring. It survives as a build-time sanity input
-# (`_OUTCOMES_BY_KIND` enum gate) and as a validate_response
-# parameter, both driven by the dispatcher's local context.
+  # `kind` is no longer written to the request — see module
+  # docstring. It survives as a build-time sanity input
+  # (`_OUTCOMES_BY_KIND` enum gate) and as a validate_response
+  # parameter, both driven by the dispatcher's local context.
   request: dict = {
       JobKey.MODE: mode,
       JobKey.ROLE: role,
@@ -198,11 +198,11 @@ def validate_response(response: Mapping, *, kind: str) -> None:
         f"allowed: {sorted(valid)}"
     )
   if outcome in _OUTCOMES_REQUIRING_RESULT:
-      # Unified output transport: every writer (main / section /
-      # repair) returns `result: ["path"]`. Main writers write the
-      # full document body; section writers write only the section
-      # body (no H1 heading, no ownership tag — the dispatcher emits
-      # both itself).
+    # Unified output transport: every writer (main / section /
+    # repair) returns `result: ["path"]`. Main writers write the
+    # full document body; section writers write only the section
+    # body (no H1 heading, no ownership tag — the dispatcher emits
+    # both itself).
     result = response.get(JobKey.RESULT)
     if not isinstance(result, list) or not result:
       raise PayloadError(

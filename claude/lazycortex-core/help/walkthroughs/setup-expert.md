@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-07-29
+last_regen: 2026-08-05
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -21,7 +21,7 @@ Think of experts as named coworkers on your async team. You hand one a task, it 
 After this walkthrough you have:
 
 - At least one dispatched job with a collected result you can read.
-- A working mental model of the queue's status values, so you know when to check back.
+- A working mental model of the queue's status values, so you know when to check back — including the difference between a job that failed and one the expert deliberately postponed.
 
 ## What you need
 
@@ -117,8 +117,9 @@ The output is a table with `expert`, `job_id`, `status`, and `age_sec` columns. 
 | `active` | Daemon is running the expert agent for this job right now |
 | `cancelled` | Job was cancelled via `/lazy-expert.cancel-job` — its bundle stays on disk for forensics |
 | `dead` | Daemon wrote a `DEAD` marker — job stalled or was interrupted |
-| `done` | Expert finished with a successful outcome; result is ready |
-| `failed` | Expert finished but reported an error outcome |
+| `done` | Expert finished and its response reports an explicit, non-error, non-deferred outcome |
+| `deferred` | Expert finished but reported the reserved `deferred` outcome — it deliberately postponed the work and left its inputs untouched. Appears in an unfiltered listing; it is neither `done` nor `failed`. |
+| `failed` | Expert finished but its response reports an error outcome — or omits an outcome entirely, is empty, or fails to parse. A finished job is only `done` when it explicitly says so; anything else counts as `failed` |
 
 The `age_sec` column counts seconds since the relevant marker's modification time — useful for spotting jobs that have been sitting a long time.
 
@@ -140,7 +141,13 @@ result files (Read these to retrieve output):
   - .experts/.jobs/designer/<job_id>/result/<file>
 ```
 
-Open the listed result files to read the expert's output. If status comes back as `pending`, the daemon has not finished yet — wait a polling cycle and re-run `/lazy-expert.collect-job`. If it comes back as `failed`, the skill prints the error message from `response.json`. If status is `missing`, the `job_id` or `expert_name` is wrong — verify against the output from Step 2.
+Open the listed result files to read the expert's output. If status comes back as `pending`, the daemon has not finished yet — wait a polling cycle and re-run `/lazy-expert.collect-job`.
+
+If status comes back as `failed`, the skill prints the error message from `response.json` when the expert set one. A response that never explicitly reported a finished outcome — missing, empty, or unreadable — has no error field to show; inspect `.experts/.jobs/designer/<job_id>/response.json` directly to see what the expert actually wrote.
+
+If status comes back as `deferred`, the expert deliberately postponed the work rather than finishing or failing it, and left every input untouched — this is not a failure, and there is no result file to read. Check `response.json` for the reason, then re-dispatch a fresh `/lazy-expert.dispatch-job` for the same task when you're ready to retry; a job you dispatched directly has no automatic retry.
+
+If status is `missing`, the `job_id` or `expert_name` is wrong — verify against the output from Step 2.
 
 If `/lazy-expert.list-jobs` shows the job as `dead` but `/lazy-expert.collect-job` returns `pending`, the daemon stalled before writing the DONE marker — the job needs to be re-dispatched or recovered. Run `/lazy-runtime.recover` to clear any daemon halt, then re-dispatch the job.
 

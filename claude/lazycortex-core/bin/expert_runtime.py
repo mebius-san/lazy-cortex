@@ -19,9 +19,12 @@ import time
 import uuid
 from pathlib import Path
 
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from job_response import classify_response, read_response
+
 from constants import (
   HooksKey, IncidentActor, IncidentKey, IncidentKind, IncidentPhase, JobCollectKey, JobConfigKey, JobFile,
-  JobIODir, JobMarker, JobOutcome, JobRequestKey, JobResponseKey, JobStatus, RemoteTrackerKey, RepoDir,
+  JobIODir, JobMarker, JobRequestKey, JobResponseKey, JobStatus, RemoteTrackerKey, RepoDir,
   RoutineKey, SettingsFile, SettingsKey,
 )
 
@@ -128,6 +131,9 @@ def dispatch_job(
       short-circuits to `already-queued` on a pre-existing match.
     dispatched_from: Override of the dispatching repository path; the
       current working directory is used when omitted.
+    can_commit_in_repo: Override for whether the spawned agent may commit in the target
+      repository; the per-expert `can_commit_in_repo` default from `lazy.settings.json` is
+      used when omitted.
 
   Returns:
     `{job_id, queue_path}` on a fresh dispatch, or
@@ -168,6 +174,7 @@ def dispatch_job(
   # expert surfaces at dispatch time rather than after partial setup
   expert_entry = _resolve_expert_entry(repo, expert)
 
+  # the bundle slot: a caller-supplied id keeps dispatches addressable, otherwise mint one
   job_id = job_id or uuid.uuid4().hex[:12]
   d = _job_dir(repo, expert, job_id)
   # park any prior DEAD bundle at the same slot before reusing it — without
@@ -238,6 +245,7 @@ def dispatch_job(
   }
   (d / JobFile.CONFIG).write_text(json.dumps(cfg_blob, indent = 2))
 
+  # request.json is the caller payload plus the dedup key, so a later dispatch can match against it
   out_payload = dict(payload)
   if dedup_key is not None:
     out_payload[JobRequestKey.DEDUP_KEY] = dedup_key
@@ -273,6 +281,7 @@ def dispatch_job(
         json.dumps(tracker_payload, indent = 2)
       )
 
+  # the caller gets the handle it needs to poll or consume this job later
   return { "job_id": job_id, "queue_path": str(d) }
 
 
@@ -405,8 +414,10 @@ def collect_job(repo: Path, expert: str, job_id: str) -> dict:
   Returns:
     `{status: "missing"}` when the bundle directory does not exist,
     `{status: "pending"}` when the pump has not produced `DONE`,
-    `{status: "failed", response}` when the response outcome is `error`,
-    or `{status: "done", response}` otherwise.
+    `{status: "done", response}` when the response explicitly reports a
+    finished outcome, `{status: "deferred", response}` when it reports the
+    reserved deferred outcome, or `{status: "failed", response}` otherwise —
+    including a response that violates the envelope by omitting `outcome`.
   """
   d = _job_dir(repo, expert, job_id)
   # guard: caller may poll before the bundle has been queued
@@ -415,9 +426,8 @@ def collect_job(repo: Path, expert: str, job_id: str) -> dict:
   # guard: pump has not finished processing yet
   if not (d / JobMarker.DONE).exists():
     return { JobCollectKey.STATUS: JobStatus.PENDING }
-  resp = json.loads((d / JobFile.RESPONSE).read_text()) if (d / JobFile.RESPONSE).exists() else {}
-  status = JobStatus.FAILED if resp.get(JobResponseKey.OUTCOME) == JobOutcome.ERROR else JobStatus.DONE
-  return { JobCollectKey.STATUS: status, JobCollectKey.RESPONSE: resp }
+  resp = read_response(d)
+  return { JobCollectKey.STATUS: classify_response(resp), JobCollectKey.RESPONSE: resp }
 
 
 def list_jobs(
@@ -431,8 +441,12 @@ def list_jobs(
   Enumerate jobs in a repository's queue, optionally including remote trackers.
 
   Status enum: `queued` (READY only, no PID), `active` (READY + PID),
-  `done` (DONE without error outcome), `failed` (DONE with error outcome),
+  `done` (DONE with a response reporting a finished outcome), `deferred`
+  (DONE with the reserved deferred outcome — postponed work, input untouched),
+  `failed` (DONE with any other response, error or envelope-violating),
   `dead` (DEAD marker present), `cancelled` (CANCELLED marker present).
+  A deferred bundle answers neither the `done` nor the `failed` filter; ask
+  for `deferred` explicitly to list postponed work.
   Bundles in none of these shapes are skipped.
 
   When `include_remote` is true, every tracker under
@@ -524,8 +538,8 @@ def _job_status(jdir: Path) -> str | None:
     jdir: Path to the bundle directory to classify.
 
   Returns:
-    `"cancelled"`, `"dead"`, `"failed"`, `"done"`, `"active"`, or
-    `"queued"` when the bundle matches one of the recognised marker
+    `"cancelled"`, `"dead"`, `"failed"`, `"deferred"`, `"done"`, `"active"`,
+    or `"queued"` when the bundle matches one of the recognised marker
     shapes, or None when the bundle is in an unrecognised shape.
   """
   # cancellation is a terminal operator decision — it outranks every other marker
@@ -534,15 +548,7 @@ def _job_status(jdir: Path) -> str | None:
   if (jdir / JobMarker.DEAD).exists():
     return JobStatus.DEAD
   if (jdir / JobMarker.DONE).exists():
-    resp_path = jdir / JobFile.RESPONSE
-    if resp_path.exists():
-      try:
-        outcome = json.loads(resp_path.read_text()).get(JobResponseKey.OUTCOME)
-        if outcome == JobOutcome.ERROR:
-          return JobStatus.FAILED
-      except json.JSONDecodeError:
-        pass
-    return JobStatus.DONE
+    return classify_response(read_response(jdir))
   if (jdir / JobMarker.READY).exists():
     if (jdir / JobMarker.PID).exists():
       return JobStatus.ACTIVE
@@ -657,7 +663,7 @@ def _kill_group(pid: int) -> None:
     except (ProcessLookupError, PermissionError):
       return
     time.sleep(_KILL_POLL_SEC)
-  # guard: SIGTERM ignored within the grace window — force-kill the whole group
+  # the grace window expired with the group still alive — SIGTERM was ignored, escalate to SIGKILL
   try:
     os.killpg(pgid, signal.SIGKILL)
   except (ProcessLookupError, PermissionError):
@@ -791,23 +797,29 @@ def completed_dedup_jobs(repo: Path, expert: str) -> list[dict]:
 
   Returns one entry per bundle whose `DONE` marker is present, that has not
   been consumed, and that is not marked dead, carrying its `job_id`, its
-  `dedup_key`, and its `status` (`done` for a success outcome, `failed` for
-  an error outcome). In-flight bundles, dead bundles, already-consumed
-  bundles, and bundles without a dedup key are omitted.
+  `dedup_key`, its `status` (`done` only when the response explicitly reports
+  a finished outcome, `deferred` when it reports the reserved deferred
+  outcome, `failed` for every other response), the error `category` of a
+  failed bundle, and the `age_sec` elapsed since the bundle finished.
+  In-flight bundles, dead bundles, already-consumed bundles, and bundles
+  without a dedup key are omitted.
 
   A dispatcher that keeps the source artifact outside the bundle (the inbox
   routine) reconciles finished work against its input store with this: drain
   the input whose job succeeded, leave the input whose job failed parked
   behind its still-unconsumed bundle so the dedup key keeps it from being
-  re-dispatched.
+  re-dispatched. Success is never inferred from silence — a response that
+  omits its outcome counts as failed, so an input is destroyed only against
+  an explicit success. The category and the age let such a dispatcher
+  separate a permanent dead-letter from a spawn-level fault worth retrying.
 
   Args:
     repo: Absolute path to the repository that hosts the job queue.
     expert: Expert name as registered in `lazy.settings.json[experts]`.
 
   Returns:
-    A list of `{job_id, dedup_key, status}` dicts in directory-iteration
-    order.
+    A list of `{job_id, dedup_key, status, category, age_sec}` dicts in
+    directory-iteration order.
   """
   out: list[dict] = []
   edir = Path(repo) / JOBS_BASE / expert
@@ -839,18 +851,16 @@ def completed_dedup_jobs(repo: Path, expert: str) -> list[dict]:
     # guard: only keyed bundles are reconcilable against an external input store
     if dedup_key is None:
       continue
-    resp_file = jdir / JobFile.RESPONSE
-    outcome = None
-    if resp_file.exists():
-      try:
-        outcome = json.loads(resp_file.read_text()).get(JobResponseKey.OUTCOME)
-      except (OSError, json.JSONDecodeError):
-        outcome = None
-    status = JobStatus.FAILED if outcome == JobOutcome.ERROR else JobStatus.DONE
+    resp = read_response(jdir)
+    error = resp.get(JobResponseKey.ERROR)
+    category = error.get(JobResponseKey.CATEGORY) if isinstance(error, dict) else None
+    # the DONE marker is stamped when the pump wrote the response — the bundle's finish time
     out.append({
       JobCollectKey.JOB_ID:    jdir.name,
       JobCollectKey.DEDUP_KEY: dedup_key,
-      JobCollectKey.STATUS:    status,
+      JobCollectKey.STATUS:    classify_response(resp),
+      JobCollectKey.CATEGORY:  category,
+      JobCollectKey.AGE_SEC:   max(0.0, time.time() - (jdir / JobMarker.DONE).stat().st_mtime),
     })
   return out
 

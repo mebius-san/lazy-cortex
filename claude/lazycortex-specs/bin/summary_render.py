@@ -154,7 +154,7 @@ def _is_requests_inbox(container_dir: Path) -> bool:
       continue
     if _read_request_status(entry.read_text()) is not None:
       has_request_file = True
-  # guard: a 'requests'-named container with no asset subfolders is an inbox even when empty
+  # a 'requests'-named container with no asset subfolders is an inbox even when empty
   # waiver: magic literal 'requests' -- the inbox folder name is a fixed protocol token
   return has_request_file or dir_name == "requests"
 
@@ -228,7 +228,7 @@ def render_container_stats(container_dir: Path) -> str:
       (_BUCKET_NOT_STARTED, "not started"), (_BUCKET_CANCELLED, "cancelled"),
   ]
   for key, label in labels:
-    # guard: omit zero-count segments to keep the line short
+    # emit only non-zero buckets to keep the line short
     if buckets[key]:
       segs.append(f"{buckets[key]} {label}")
   return " · ".join(segs)
@@ -244,8 +244,9 @@ def apply_container_stats(note_path: Path) -> bool:
   Returns:
     True when the file content changed.
   """
-  # guard: a note without the stats markers is not a managed container summary
+  # the marker pair decides whether this note is a managed container summary
   text = note_path.read_text()
+  # guard: no stats markers, nothing this function owns
   if _STATS_START not in text or _STATS_END not in text:
     return False
   line = render_container_stats(note_path.parent)

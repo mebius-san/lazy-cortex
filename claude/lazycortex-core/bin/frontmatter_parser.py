@@ -34,6 +34,7 @@ def parse_frontmatter(text: str) -> dict:
   if not text:
     return {}
 
+  # frontmatter is only frontmatter when the very first line opens the fence
   lines = text.splitlines()
   # guard: missing opening fence
   if not lines or lines[0].strip() != "---":
@@ -54,6 +55,7 @@ def parse_frontmatter(text: str) -> dict:
   result: dict = {}
   current_key: str | None = None
 
+  # one pass over the block: every line is either a list item for the previous key or a new key
   for raw in block:
     stripped = raw.lstrip()
     indent = len(raw) - len(stripped)
@@ -84,6 +86,7 @@ def parse_frontmatter(text: str) -> dict:
       result[key] = _coerce_scalar(value)
       current_key = key
 
+  # a block with no parseable key yields an empty mapping, never an error
   return result
 
 

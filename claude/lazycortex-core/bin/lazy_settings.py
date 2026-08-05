@@ -60,6 +60,7 @@ CURRENT_VERSIONS = {
   "wiki": 1,
 }
 
+
 def _migrations(section_key: str) -> dict[int, Callable[[dict], dict]]:
   """
   Return the migration ladder for a given section key.
@@ -80,6 +81,7 @@ def _migrations(section_key: str) -> dict[int, Callable[[dict], dict]]:
   except ModuleNotFoundError:
     return {}
 
+
 def migrate_root_version_to_section_version(raw: dict) -> dict:
   """
   Move a legacy root-level `version` field down to each section's per-section version key.
@@ -91,7 +93,7 @@ def migrate_root_version_to_section_version(raw: dict) -> dict:
     The same dict with the root `version` removed and its value propagated into each section
     that did not already declare its own per-section version.
   """
-  # guard: nothing to migrate when no legacy root version is present
+  # a legacy root version is present — lift it into every section that lacks its own
   if SettingsKey.LEGACY_VERSION in raw:
     legacy = raw.pop(SettingsKey.LEGACY_VERSION)
     # propagate legacy version into every section that has no per-section version yet
@@ -250,7 +252,7 @@ def load_section(path: Path | str, section_key: str) -> dict:
   if not local_section:
     return tracked
   merged = _deep_merge_claude(tracked, local_section)
-  # guard: top-level merge of two dict layers always yields a dict
+  # a merge of two dict layers is always a dict; the fallback keeps the declared return type honest
   return merged if isinstance(merged, dict) else {}
 
 
@@ -277,6 +279,8 @@ def migrate_all(path: Path | str) -> dict[str, tuple[int, int]]:
   Raises:
     OSError: If the migrated tracked file cannot be written back to disk.
     json.JSONDecodeError: If the tracked file is not valid JSON.
+    KeyError: If a section's ladder has no step for a version the file is sitting on, so the
+      walk to the current version cannot complete.
   """
   path = Path(path)
   result: dict[str, tuple[int, int]] = {}
@@ -302,6 +306,10 @@ def migrate_all(path: Path | str) -> dict[str, tuple[int, int]]:
     ladder = _migrations(k)
     # walk the ladder one step at a time, stamping the new version after each migration
     while cur < target:
+      # guard: a gap in the ladder cannot be walked — name the section and version rather
+      # than letting a bare KeyError reach the daemon
+      if cur not in ladder:
+        raise KeyError(f"section {k!r}: no migration step from version {cur} (target {target})")
       section = ladder[cur](section)
       cur += 1
       section[SettingsKey.VERSION] = cur
@@ -338,6 +346,7 @@ def save_section(path: Path | str, section_key: str, section: dict) -> None:
   raw[section_key] = section
   _atomic_write(path, raw)
 
+
 def save_local_section(path: Path | str, section_key: str, section: dict) -> None:
   """
   Persist one section to the gitignored local-overlay file beside the tracked settings file.
@@ -361,6 +370,7 @@ def save_local_section(path: Path | str, section_key: str, section: dict) -> Non
   raw = json.loads(local_path.read_text(encoding = "utf-8") or "{}") if local_path.exists() else {}
   raw[section_key] = section
   _atomic_write(local_path, raw)
+
 
 def _atomic_write(path: Path, data: dict) -> None:
   """
@@ -408,10 +418,14 @@ def _cli() -> None:
     # waiver: one-off human-facing usage message
     print("usage: lazy_settings.py migrate [path]", file = sys.stderr)
     sys.exit(2)
+
+  # run every ladder against the requested file, defaulting to the repo-local settings path
   target = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(".claude/lazy.settings.json")
   upgraded = migrate_all(target)
   total = len(CURRENT_VERSIONS)
   up_to_date = total - len(upgraded)
+
+  # one-line summary for the operator, with a per-section breakdown only when something moved
   if not upgraded:
     print(f"migrated: 0 sections ({up_to_date} up-to-date)")
   else:

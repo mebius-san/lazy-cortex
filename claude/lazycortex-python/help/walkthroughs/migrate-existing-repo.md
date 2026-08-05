@@ -1,16 +1,15 @@
 ---
 chapter_type: walkthrough
 summary: Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation across the seven-step gate (including guideline review), and fix them in committed chunks.
-last_regen: 2026-08-03
+last_regen: 2026-08-05
 diagram_spec:
   anchor: "Migration flow"
   request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install runs its ordered steps fully automatically (mirror rules, deploy wrappers, detect PyCharm, bootstrap pyproject.toml with [tool.pch] when PyCharm present, scaffold overlay, sync scaffold template, record python.env_source with a one-time disambiguation prompt only when multiple bootstrap-script candidates exist, seed agent-model tiers, register the code-reviewer expert, log) → user runs chk-py all -q → seven-step gate (pcf, toi, cmp, mypy, ruff, pylint, review) surfaces existing violations and names lazy-python.code-reviewer for the review phase → user fixes violations in chunks and commits iteratively, dispatching the code-reviewer and rendering its findings, until chk-py all exits clean"
   kind_hint: sequence
 source_skills:
   - lazy-python.install
-  - chk
-  - tst
-  - review.py
+  - lazy-python.check-style
+  - lazy-python.docstring-writer
   - lazy-python.code-reviewer
 ---
 # Adopt the plugin in a repo with pre-existing Python that drifted from the canon
@@ -94,8 +93,10 @@ Work through the violation queue in logical batches rather than one enormous com
 1. **Syntax and critical style (`pcf` / `cmp` findings)** — These gate the other checkers; clear them first. A `pcf` violation blocks the whole `chk-py all` run from advancing past the first step cleanly.
 2. **Type annotations (`mypy` findings)** — Group by module or class; one commit per module keeps the diff readable.
 3. **Import ordering and minor style (`ruff` findings)** — Usually mechanical; `ruff` can auto-fix many of these. Run `ruff check --fix <path>` for the mechanical subset, review the diff, then let `pcf` confirm the critical-fail layer still passes.
-4. **Naming, complexity, and docstrings (`pylint` / `pcf` docstring findings)** — Most labour-intensive; work file by file. Use `/lazy-python.docstring-writer` to generate canonical docstrings for classes and methods rather than hand-authoring them — the agent reads the canon and your overlay before writing.
+4. **Naming, complexity, and docstrings (`pylint` / `pcf` docstring findings)** — Most labour-intensive; work file by file. Use `/lazy-python.docstring-writer` to generate canonical docstrings for classes and methods rather than hand-authoring them — the agent reads the canon and your overlay before writing, and never touches code, only docstrings.
 5. **Guideline review (`review` findings)** — Once the deterministic checkers are quiet on a batch, dispatch `lazy-python.code-reviewer` against `chk-py review`'s manifest for that batch. It reports comment-density, naming-semantics, and overlay-clause findings the earlier checkers cannot see, at `FAIL` / `WARN` / `INFO` severity. Fix what it reports, then run `chk-py review --render <findings.json>` to confirm the batch is clean before moving on.
+
+**Alternative for a mixed batch**: instead of stepping through the checker-by-checker grouping above by hand, invoke `/lazy-python.check-style` once you've touched a batch of files (it identifies them itself via `git diff`). It reads canon + overlay, walks a six-category manual review (docstring quality, contract consistency, guard-clause comments, method organisation, naming, structural rules — the semantic checks `chk-py` alone can't fully catch), then runs `chk-py` + `tst-py` for that batch, applies minimal targeted fixes for what it and the automated gate found, and re-verifies before reporting. It pauses and asks before touching anything under `tests/**`. It is a good fit when a batch spans several of the checker categories above rather than one narrow slice — you get one skill invocation instead of a manual chk-py + docstring-writer + fix loop. It does not replace Step 5's guideline-review dispatch — that pass is dispatched separately, either via `chk-py review` or as part of your normal pre-commit gate.
 
 After each batch:
 
@@ -141,7 +142,7 @@ All 11 checks should show `PASS` or `WARN` (only the PyCharm `pch` check is expe
 
 The install is idempotent — re-running `/lazy-python.install` after any future plugin update overwrites only what changed (rule mirrors, wrapper scripts, any missing `pyproject.toml` sections) and leaves your consumer sections and overlay stubs untouched. Re-running is the recommended upgrade path, not a manual diff.
 
-`chk-py all` (paired with `tst-py` for the test layer) is the routine pre-commit gate going forward. The PostToolUse hook covers the inner loop — every `.py` edit surfaces `pcf.py` violations inline so drift is caught at the moment it is introduced rather than at commit time. `lazy-python.code-reviewer` is now registered as the `python.code-reviewer` expert as well as being dispatchable via `chk-py review`, so the same guideline-review pass you ran during remediation is available going forward through either path.
+`chk-py all` (paired with `tst-py` for the test layer) is the routine pre-commit gate going forward. The PostToolUse hook covers the inner loop — every `.py` edit surfaces `pcf.py` violations inline so drift is caught at the moment it is introduced rather than at commit time. `/lazy-python.check-style` is the routine tool for a meaningful edit batch — manual review plus the automated gate in one invocation. `lazy-python.code-reviewer` is now registered as the `python.code-reviewer` expert as well as being dispatchable via `chk-py review`, so the same guideline-review pass you ran during remediation is available going forward through either path.
 
 If you added project-specific conventions during remediation — naming patterns, docstring shape requirements, module-level invariants — capture them in `docs/guidelines/coding_guidelines.md` (or the matching topic overlay). Writer agents read the overlay on every dispatch, and `lazy-python.code-reviewer` reads it too, so project conventions flow into both generated code and review findings without repetition. The **add-project-overlay** walkthrough covers that in full.
 

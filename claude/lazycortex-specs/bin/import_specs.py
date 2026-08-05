@@ -34,6 +34,47 @@ if TYPE_CHECKING:
 class _K:
   """
   String constants for the importer.
+
+  Attributes:
+    HANDOFF: The product-kind discriminator marking a product as eligible for handoff.
+    STOP_AFTER: Settings key naming the gate a product must pass before its assets are exported.
+    DEFAULT_STOP: The gate name used when a product declares no explicit `stop_after`.
+    PRODUCTS: Settings key holding the product registry.
+    STAGE: Frontmatter key naming a doc's lifecycle stage.
+    APPROVED: The stage value a doc must carry to be eligible for export.
+    GIT_DIR: The `.git` entry checked to detect a repo checkout.
+    SPEC_PATH: Settings key naming a product's spec directory.
+    ASSET_CATEGORIES: Settings key holding a product's category definitions.
+    MD_SUFFIX: The markdown file extension.
+    SPEC_SECTION: Settings key naming the spec-repo import configuration block.
+    IMPORTS: Settings key holding the list of configured spec-repo import entries.
+    GIT_URL: Settings key naming an import entry's remote URL.
+    `REF`: Settings key naming an import entry's branch or ref.
+    ONLY_PRODUCTS: Settings key restricting an import entry to a subset of product keys.
+    IMPORTED: Frontmatter key marking a landed doc as read-only-imported.
+    CACHE_DIR: Repo-relative path of the gitignored spec-repo fetch cache.
+    SETTINGS_REL: Repo-relative path of the settings file.
+    GITIGNORE: The `.gitignore` filename checked and updated for the fetch cache.
+    BIN_SEGMENT: Path segment locating a plugin's `bin/` directory.
+    CORE_PLUGIN: Plugin name used to resolve the `lazycortex-core` CLI.
+    CATEGORY_FOLDER: Key naming an asset's category folder.
+    CATEGORY: Key naming an asset's category.
+    SLUG: Key naming an asset's slug.
+    DOCS: Key naming an asset's list of doc entries.
+    NAME: Key naming a doc entry's filename.
+    TEXT: Key naming a doc entry's body text.
+    OUTCOME_IMPORTED: Outcome token for a newly landed asset.
+    OUTCOME_UNCHANGED: Outcome token for an existing asset whose local copy matches the import.
+    OUTCOME_DRIFT: Outcome token for an existing asset whose local copy diverged from the import.
+    OUTCOME_SKIPPED: Outcome token for an asset that was not landed.
+    OUTCOME_SKIPPED_NO_TEMPLATES: Outcome token for an asset skipped because scaffolding refused it.
+    DRIFT_ASSETS: Result key listing assets reported with drift.
+    AUTO_REGISTERED: Result key listing product keys auto-registered this run.
+    ERRORS: Result key listing per-entry error records.
+    PROG_IMPORT: CLI program name shown in `--help` output.
+    ARG_CWD: CLI flag overriding the repo root.
+    SOURCE: Settings key naming a fetched product record's source identifier.
+    DEPENDENCIES: Settings key naming a fetched product record's declared dependencies.
   """
 
   HANDOFF = "handoff"
@@ -242,7 +283,7 @@ def _write_products(dev_repo: Path, products: dict) -> None:
     if cand.is_file():
       cli = cand
       break
-  # guard: dev-vault sibling fallback when the daemon env is absent
+  # fall back to the dev-vault sibling layout when the daemon env is absent
   if cli is None:
     sib = Path(__file__).resolve().parents[2] / _K.CORE_PLUGIN / _K.BIN_SEGMENT / _K.CORE_PLUGIN
     cli = sib if sib.is_file() else None
@@ -310,7 +351,7 @@ def _land_asset(dev_repo: Path, key: str, record: dict, asset: dict) -> tuple[st
       with contextlib.redirect_stdout(buf):
         rc = scaffold_asset.main(argv)
     except SystemExit as exc:
-      # guard: scaffold's own error path exits rather than returning; treat non-int codes as failure
+      # scaffold's own error path exits rather than returning; treat non-int codes as failure
       rc = exc.code if isinstance(exc.code, int) else 1
     # guard: scaffold refused (e.g. operator category without templates)
     if rc != 0:
@@ -393,13 +434,18 @@ def run(dev_repo: Path) -> dict:
     Summary dict: counts per outcome, the per-drift asset list, the product
     keys auto-registered this run, and the per-entry error list.
   """
+  # the import entries are the only source of what this run reaches for
   settings = json.loads((dev_repo / _K.SETTINGS_REL).read_text())
   entries = (settings.get(_K.SPEC_SECTION) or {}).get(_K.IMPORTS) or []
+
+  # counters and lists accumulate across every entry, and become the summary returned below
   imported = unchanged = drift = skipped = 0
   drift_assets: list[str] = []
   auto_registered: list[str] = []
   errors: list[dict] = []
   changed: list[Path] = []
+
+  # one checkout per entry, then every handed-off product inside it
   cache = dev_repo / _K.CACHE_DIR
   for entry in entries:
     try:
@@ -411,10 +457,13 @@ def run(dev_repo: Path) -> dict:
         # be premature (registration and landing happen together)
         if not assets:
           continue
+        # an unknown product auto-registers here, which mutates settings and joins the commit set
         dev_rec, registered = _ensure_product(dev_repo, key, rec)
         if registered:
           auto_registered.append(key)
           changed.append(dev_repo / _K.SETTINGS_REL)
+
+        # each landed asset feeds exactly one outcome counter
         for asset in assets:
           outcome, target = _land_asset(dev_repo, key, dev_rec, asset)
           if outcome == _K.OUTCOME_IMPORTED:
@@ -428,11 +477,15 @@ def run(dev_repo: Path) -> dict:
           else:
             skipped += 1
     except (OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
-      # guard: one bad entry (unreachable git_url, malformed settings) must not
-      # abort entries that already fetched fine
+      # record one bad entry (unreachable git_url, malformed settings) and carry on, so it
+      # cannot abort entries that already fetched fine
       errors.append({ _K.GIT_URL: entry.get(_K.GIT_URL), "error": str(exc)[:200] })
+
+  # the cache dir must stay untracked, so a fresh ignore entry joins the commit set too
   if _ensure_gitignore(dev_repo):
     changed.append(dev_repo / _K.GITIGNORE)
+
+  # one commit over everything this run touched, then the caller gets the tallies
   _commit_run(dev_repo, changed)
   return { _K.OUTCOME_IMPORTED: imported, _K.OUTCOME_UNCHANGED: unchanged,
            _K.OUTCOME_DRIFT: drift, _K.OUTCOME_SKIPPED: skipped,

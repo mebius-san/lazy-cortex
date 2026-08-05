@@ -53,12 +53,31 @@ _H1_RE = re.compile(r"^# (.+?)\s*$", re.MULTILINE)
 
 
 def _split_frontmatter(text: str) -> tuple[str, str]:
+  """
+  Split full document text into its frontmatter block and body.
+
+  Args:
+    text: Full document text including frontmatter.
+
+  Returns:
+    A tuple of the frontmatter text (including delimiters) and the remaining body text.
+  """
   _meta, body = _fm.parse(text)
   fm_text = text[: len(text) - len(body)]
   return fm_text, body
 
 
 def _find_history_span(body: str) -> tuple[int, int] | None:
+  """
+  Locate the `# History` section within `body` by its ownership tag.
+
+  Args:
+    body: Document body text to search, excluding frontmatter.
+
+  Returns:
+    A tuple of the section's start and end character offsets, or `None` if no section owned
+    by the historian is present.
+  """
   matches = list(_H1_RE.finditer(body))
   for i, m in enumerate(matches):
     start = m.start()
@@ -180,14 +199,14 @@ def insert_entry(
   if i < len(lines) and lines[i].strip() == HISTORIAN_TAG:
     head_lines.append(lines[i])
     i += 1
-# Skip leading blank line(s) between header and existing entries —
-# we'll re-emit separators ourselves to keep layout stable.
+  # Skip leading blank line(s) between header and existing entries —
+  # we'll re-emit separators ourselves to keep layout stable.
   while i < len(lines) and lines[i].strip() == "":
     i += 1
-# Parse remaining lines into entries: each entry is one
-# `### YYYY-MM-DD HH:MM` heading + its body lines (until next
-# heading or EOF). Pre-heading orphans (shouldn't appear after
-# `repair` runs, but tolerated) are dropped silently.
+  # Parse remaining lines into entries: each entry is one
+  # `### YYYY-MM-DD HH:MM` heading + its body lines (until next
+  # heading or EOF). Pre-heading orphans (shouldn't appear after
+  # `repair` runs, but tolerated) are dropped silently.
   entries: list[tuple[str, list[str]]] = []
   cur_ts: str | None = None
   cur_block: list[str] = []
@@ -323,15 +342,15 @@ def repair(text: str) -> str:
   if i < len(lines) and lines[i].startswith("# "):
     out_lines.append(lines[i])
     i += 1
-# Keep the historian's ownership tag line if present.
+  # Keep the historian's ownership tag line if present.
   if i < len(lines) and lines[i].strip() == HISTORIAN_TAG:
     out_lines.append(lines[i])
     i += 1
-# Keep leading blank lines.
+  # Keep leading blank lines.
   while i < len(lines) and lines[i].strip() == "":
     out_lines.append(lines[i])
     i += 1
-# Walk entries; orphan paragraph = content before any heading we've seen.
+  # Walk entries; orphan paragraph = content before any heading we've seen.
   current_block: list[str] = []
   has_seen_heading = False
   for line in lines[i:]:

@@ -17,6 +17,7 @@ The output object carries:
 Missing sources are silently skipped — the script tolerates absent directories and unreadable
 or malformed JSON without failing.
 """
+
 from __future__ import annotations
 
 import json
@@ -189,6 +190,7 @@ def harvest_root(
       if reason is not None:
         waivered[name] = reason
 
+  # hand back the per-kind name sets accumulated across every artifact directory
   return found
 
 
@@ -330,6 +332,7 @@ def main() -> int:
   aggregate: dict[ str, set[str] ] = { "skill": set(), "agent": set(), "command": set() }
   waivered: dict[str, str] = {}
 
+  # every root below is resolved relative to the repository the script was invoked in
   repo = repo_root()
 
   # scan in-repo plugin sources first so authoring overrides win on tie
@@ -358,9 +361,11 @@ def main() -> int:
     # waiver: internal counter/summary dict subkey, single-source set in this script
     counters["global_root"] = 1
 
+  # project the accumulated sets into stable, sorted lists so the JSON is diff-friendly
   by_kind = { kind: sorted(names) for kind, names in aggregate.items() }
   canonical = sorted(set().union(*aggregate.values()))
 
+  # assemble the wire payload: the merged names plus a per-root tally the caller can sanity-check
   output = {
     "canonical": canonical,
     "by_kind": by_kind,

@@ -1,10 +1,11 @@
 ---
 chapter_type: block
 summary: Wire the lazycortex-diagram engine's CSS snippets and click-to-zoom plugin into your Obsidian vault so mermaid and ASCII diagrams render correctly in Reading Mode.
-last_regen: 2026-06-10
+last_regen: 2026-08-05
 no_diagram: true
 source_skills:
   - lazy-obsidian.diagram-install
+  - lazy-obsidian.update-plugin
 ---
 # Diagram rendering
 

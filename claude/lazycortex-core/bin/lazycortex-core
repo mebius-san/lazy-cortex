@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, doctor-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, lookup-expert, scaffold, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols, detect-scope, daemon-list, metrics-alloc-port, metrics-scrape-file")
+         "Subcommands: expert-pump-once, doctor-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, lookup-expert, scaffold, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols, detect-scope, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit")
 
 
 def _cmd_consume_job(argv: list[str]) -> int:
@@ -416,6 +416,47 @@ def _cmd_metrics_scrape_file(argv: list[str]) -> int:
     return 0
 
 
+def _cmd_sandbox_sync(argv: list[str]) -> int:
+    """Record the expert-spawn sandbox scope for a repo and print the sync result.
+
+    The repo root is always granted read+write. Every entry — recorded, passed,
+    or the root itself — also contributes the location it resolves to through
+    symlinks, plus the targets of the symlinks directly inside it: macOS checks
+    the resolved path, so an unresolved entry grants nothing where the data lives.
+
+    Output JSON: ``{"path", "present", "enabled", "added_read", "added_write", "changed"}``.
+    A recorded ``enabled`` is never overwritten — a ``false`` comes back in the
+    result for the caller to act on.
+    """
+    import argparse, json
+    from sandbox_scope import sync
+    p = argparse.ArgumentParser(prog="lazycortex-core sandbox-sync")
+    p.add_argument("--repo-root", required=True, help="absolute path of the repo whose sandbox scope is recorded")
+    p.add_argument("--allow-read", action="append", default=[], help="extra readable path (repeatable)")
+    p.add_argument("--allow-write", action="append", default=[], help="extra writable path (repeatable)")
+    a = p.parse_args(argv)
+    print(json.dumps(sync(Path(a.repo_root), read=a.allow_read, write=a.allow_write), ensure_ascii=False))
+    return 0
+
+
+def _cmd_sandbox_audit(argv: list[str]) -> int:
+    """Report which resolved locations the recorded sandbox scope fails to grant.
+
+    Read-only companion to ``sandbox-sync``: prints
+    ``{"path", "present", "enabled", "missing_read", "missing_write"}``. A
+    non-empty ``missing_write`` means confined spawns will fail every write
+    through that symlink with ``Operation not permitted``. Exits 0 either way —
+    the verdict travels in the JSON.
+    """
+    import argparse, json
+    from sandbox_scope import audit
+    p = argparse.ArgumentParser(prog="lazycortex-core sandbox-audit")
+    p.add_argument("--repo-root", required=True, help="absolute path of the repo whose sandbox scope is audited")
+    a = p.parse_args(argv)
+    print(json.dumps(audit(Path(a.repo_root)), ensure_ascii=False))
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) < 2:
         print(USAGE, file=sys.stderr); return 2
@@ -474,6 +515,10 @@ def main() -> int:
         return _cmd_metrics_alloc_port(sys.argv[2:])
     elif sub == "metrics-scrape-file":
         return _cmd_metrics_scrape_file(sys.argv[2:])
+    elif sub == "sandbox-sync":
+        return _cmd_sandbox_sync(sys.argv[2:])
+    elif sub == "sandbox-audit":
+        return _cmd_sandbox_audit(sys.argv[2:])
     else:
         print(f"unknown subcommand: {sub}\n{USAGE}", file=sys.stderr); return 2
 

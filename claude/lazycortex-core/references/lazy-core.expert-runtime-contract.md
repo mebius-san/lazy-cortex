@@ -1,5 +1,5 @@
 ---
-version: 1.1.0
+version: 2.0.0
 description: Universal contract loaded into every expert run by lazycortex-core's expert pump. Read alongside your expert-specific protocol.
 ---
 # Expert Runtime Contract
@@ -66,13 +66,13 @@ Write `response.json` (path given in your user message):
 
 ```json
 {
-  "outcome": "<protocol-defined-string>" | "error",
+  "outcome": "<protocol-defined-string>" | "error" | "deferred",
   "result":  [...],
   "error":   { "category": "...", "message": "..." }
 }
 ```
 
-- `outcome` is **protocol-defined**: the protocol you implement declares an enum of success values (e.g. `edited`, `confirmed`, `empty`, `summarized`). The string `"error"` is the only reserved universal value across all protocols and signals failure. Do NOT write `"ok"` — that's not in any current protocol's enum; consumers either accept the protocol-defined string or branch on `"error"`.
+- `outcome` is **mandatory, and its name is not negotiable**. A protocol declares which *values* it takes (e.g. `edited`, `confirmed`, `empty`, `summarized`) — never a different field. If the protocol you were handed prescribes some other status key, write `outcome` anyway and report the contradiction in your response; a response without `outcome` is rejected and re-dispatched to you, and work you report as finished through any other key is read as a failure. Two values are reserved universally across all protocols: `"error"` signals failure, and `"deferred"` signals work you deliberately did not do — you left every input exactly as you found it and expect to be asked again later. Never report `deferred` after touching, moving, or consuming an input. Do NOT write `"ok"` — that's not in any current protocol's enum; consumers either accept the protocol-defined string or branch on `"error"`.
 - On a success outcome (any protocol-defined value), `result` is the array of artifact descriptors per your protocol. Omit when your protocol's outcome doesn't carry artifacts (e.g. `confirmed` / `empty`).
 - On `outcome: "error"`, `error.category` is one of your protocol's error categories. `error.message` is human-readable detail.
 

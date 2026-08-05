@@ -53,9 +53,11 @@ def allocate_port(repo_root: Path, registry: list[dict] | None = None) -> dict:
   Pick a metrics port for the given repo: its recorded one when present, else the first free.
 
   A repo already registered with metrics enabled keeps its recorded port even when the port
-  is currently bound — the listener is that repo's own running daemon. For a new allocation
-  the scan walks `MetricsNet.PORT_BASE..PORT_CEIL`, skipping ports recorded by other daemons
-  and ports that fail a live bind probe.
+  is currently bound — the listener is that repo's own running daemon. A recorded port that
+  another registered daemon records as well is not reused: a port that arrived by config copy
+  rather than by allocation is not the repo's to keep, so the asking repo is moved to a free
+  one. For a new allocation the scan walks `MetricsNet.PORT_BASE..PORT_CEIL`, skipping ports
+  recorded by other daemons and ports that fail a live bind probe.
 
   Args:
     repo_root: Absolute path of the repo the port is allocated for.
@@ -71,12 +73,20 @@ def allocate_port(repo_root: Path, registry: list[dict] | None = None) -> dict:
   registry = registry if registry is not None else enumerate_local_daemons()
   repo_key = str(Path(repo_root).resolve())
   taken: set[int] = set()
+  recorded: int | None = None
   for row in registry:
-    # guard: the repo's own registered port is reused verbatim, busy or not — it is ours
-    if str(Path(row[RegistryRow.REPO_ROOT]).resolve()) == repo_key and row[RegistryRow.METRICS_ENABLED]:
-      return { _PORT_KEY: row[RegistryRow.PORT], _REUSED_KEY: True }
-    if row[RegistryRow.METRICS_ENABLED]:
-      taken.add(row[RegistryRow.PORT])
+    # guard: a daemon with metrics off holds no port
+    if not row[RegistryRow.METRICS_ENABLED]:
+      continue
+    # guard: the repo's own row supplies the reuse candidate, never a taken port
+    if str(Path(row[RegistryRow.REPO_ROOT]).resolve()) == repo_key:
+      recorded = row[RegistryRow.PORT]
+      continue
+    taken.add(row[RegistryRow.PORT])
+
+  # guard: the repo's own recorded port is reused verbatim, busy or not — unless a second daemon records it too
+  if recorded is not None and recorded not in taken:
+    return { _PORT_KEY: recorded, _REUSED_KEY: True }
   for port in range(MetricsNet.PORT_BASE, MetricsNet.PORT_CEIL + 1):
     # guard: ports recorded by other daemons are off the table even when currently unbound
     if port in taken:

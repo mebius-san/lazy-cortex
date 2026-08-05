@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-last_regen: 2026-07-26
+last_regen: 2026-08-05
 diagram_spec:
   anchor: "How registration and pickup flow"
   request: "Sequence diagram showing the user running /lazy-routine.register, the skill writing lazy.settings.json, the daemon picking up the new routine on its next cycle without restart, and the user later running /lazy-routine.unregister to remove it. Include the built-in protection check for lazy-expert.pump."
@@ -39,7 +39,7 @@ Every type also takes one of two dispatch shapes:
 The validator enforces exactly-one of the two dispatch shapes. Choose the type, then you will be asked for the type-specific fields followed by the dispatch shape question.
 
 - **subprocess** — fire on a fixed interval (e.g. every 300 seconds). Required: `interval_sec`. Good for lint sweeps, data refreshes, and any periodic invocation.
-- **inbox** — watch a directory and fire once per file found. With `expert + request` the file's path is passed to the expert (`{file}` template + `dedup_key`) — the inbox stays the single source of truth. A succeeded job drains its input on the next tick; a failed job is left parked as a dead letter, and its dedup key blocks re-dispatch until you clear it. With `command`, the file stays in the inbox until the consumer command moves or deletes it. Required: `inbox_dir`, `interval_sec`.
+- **inbox** — watch a directory and fire once per file found. With `expert + request` the file's path is passed to the expert (`{file}` template + `dedup_key`) — the inbox stays the single source of truth. A succeeded job drains its input on the next tick; a failed job is left parked as a dead letter, and its dedup key blocks re-dispatch until you clear it. When the expert reports the reserved `deferred` outcome instead — work it cannot finish until something outside the runtime changes — the bundle is parked the same way, but ages out on its own: once it has waited `deferred_retry_sec`, the next tick offers the same untouched file back to the queue, no manual triage needed. With `command`, the file stays in the inbox until the consumer command moves or deletes it. Required: `inbox_dir`, `interval_sec`. Optional: `deferred_retry_sec` (seconds a deferred bundle stays parked before retry; default one day).
 - **schedule** — fire once per cron boundary (5-field cron expression). Required: `cron`. Use when wall-clock timing matters more than a fixed cadence.
 - **git** — watch local HEAD for new commits, new files, changed files, deleted files, or renamed files; fire once per item. Required: `watch`, `interval_sec`. The `branch` and `remote` fields are vestigial — the watch always targets local HEAD regardless of their values, and remote sync is the daemon's own job. The wizard may surface them for schema compatibility; leave them blank or skip them.
 - **md-scan** — scan markdown files matching vault-relative globs, filter by frontmatter values, and fire once per match. Files are edited in place by the consumer — no move. Required: `paths` (list of globs), `interval_sec`. A plain glob (e.g. `requests/*.md`) matches only direct children of that directory; a glob containing `**` (e.g. `requests/**/*.md`) matches recursively across any number of nested directories, including zero — use it for a coarse scope-root sieve and let the `filter` narrow it down. Optional: `filter` (composite filter block, e.g. `{"frontmatter": {"key": {"in": [...], "not_in": [...]}}}`) — a `null` value in the `in` list matches files where the key is absent or explicitly null, which is useful for picking up files that have never been processed; an absent `filter` matches all files.
@@ -57,7 +57,7 @@ Command:      ["python3", "bin/review_tick.py"]
 interval_sec: 300
 ```
 
-For an `inbox` routine the wizard additionally checks whether `inbox_dir` is gitignored. If it is not, it offers to append the path to `.gitignore` — accept this. Inbox routines remove a file from the directory once its dispatched job succeeds; a tracked inbox directory would then dirty the working tree and trip the daemon's halt protection.
+For an `inbox` routine the wizard additionally checks whether `inbox_dir` is gitignored. If it is not, it offers to append the path to `.gitignore` — accept this. Inbox routines remove a file from the directory once its dispatched job succeeds; a tracked inbox directory would then dirty the working tree and trip the daemon's halt protection. If your expert can report the reserved `deferred` outcome for this routine's work, set `deferred_retry_sec` to match how long you expect the blocking condition to take to resolve — the default of one day is a sensible starting point for anything that waits on a human or an external process.
 
 For an `md-scan` routine the wizard asks for the glob list, the optional frontmatter filter dict, and the dispatch shape. Use a `**` segment in a glob (e.g. `requests/**/*.md`) when the routine should sieve an entire directory tree rather than one flat directory. A `null` value in the filter's `in` list matches files where the key is absent — useful for picking up files that have never been processed (e.g. `{"frontmatter": {"request_status": {"in": [null, "draft"], "not_in": []}}}`).
 
@@ -89,7 +89,7 @@ If the daemon has halted on a dirty working tree, run `/lazy-runtime.recover` to
 
 ### Step 5 — Verify the routine fires
 
-For `subprocess` routines, watch for the command's output in the daemon's log (the standard output of `./run.sh`). For `inbox`, `git`, and `md-scan` routines the daemon dispatches agent jobs — run `/lazy-expert.list-jobs` to confirm jobs are appearing after the first cycle fires.
+For `subprocess` routines, watch for the command's output in the daemon's log (the standard output of `./run.sh`). For `inbox`, `git`, and `md-scan` routines the daemon dispatches agent jobs — run `/lazy-expert.list-jobs` to confirm jobs are appearing after the first cycle fires. For an `inbox` routine whose expert can defer, `/lazy-expert.list-jobs` also shows a `deferred` job status while a bundle waits out its `deferred_retry_sec` window — its input file is untouched in the inbox during that wait.
 
 ### Step 6 — Remove the routine when no longer needed
 

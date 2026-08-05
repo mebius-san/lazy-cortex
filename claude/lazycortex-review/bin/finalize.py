@@ -41,15 +41,15 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import body as _body  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import edit_markup as _edit_markup  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import git_ops as _git_ops  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import JobKey, Paths, ResultValue, ReviewKey, Style  # noqa: E402
 
 
@@ -129,17 +129,23 @@ def finalize_text(
     Finalized document text with review-machinery markers, transient frontmatter
     keys, and non-preserved expert sections removed, and `review_result` stamped.
   """
+  # split the document once; every step below rewrites either the frontmatter text or the body
   meta, body = _fm.parse(text)
   fm_text = text[: len(text) - len(body)]
+
   # Lift foreign `#protected/<owner>/...` sections out before the body-wide passes so their
   # bytes (including any inner HTML markers a `strip_markers(style="html")` pass would eat)
   # survive finalize verbatim; restored after the status callout is stamped. They are owned
   # by another plugin (the cross-plugin protected-section contract), not by review.
   body, _protected_sections = _body.split_out_protected_sections(body)
+
+  # erase the inline review machinery — edit markers, the waiting banner, the approve
+  # checkbox line and the system callouts — none of it belongs to a finalized document
   body = _edit_markup.strip_markers(body, style=style)
   body = _BANNER_RE.sub("", body, count=1)
   body = _APPROVE_LINE_RE.sub("", body)
   body = _SYSTEM_CALLOUT_RE.sub("", body)
+
   # Drop section-writer artefacts (Routing, Final check, Implementation
   # risks, …) — every H1 with `#expert/<flat>/<section-id>` ownership
   # tag whose section-id is NOT in `preserve_section_ids`. History is
@@ -151,12 +157,14 @@ def finalize_text(
   # ids declared in `preserve_section_ids` survive — the post-
   # finalize transition strips them once its work is done.
   body = _body.strip_owned_h1_sections(body, preserve_section_ids=preserve_section_ids)
+
   # Bug 88: validator sections preserved under `with_concerns` survive
   # as plain prose — strip their `#expert/<flat>/<section-id>` ownership-
   # tag line so the finalized document carries no review-machinery tags
   # (heading + concern content kept verbatim).
   if normalize_section_ids:
     body = _body.strip_ownership_tag(body, section_ids=normalize_section_ids)
+
   # Bug 36: stamp a visible terminal-state status callout above the
   # first H1 so the operator sees what the review concluded the
   # moment they open the document — without having to read frontmatter
@@ -171,52 +179,58 @@ def finalize_text(
   status = _status_callout_for_finalize(meta, with_concerns=with_concerns)
   if status is not None:
     body = _body.upsert_status_callout(body, **status)
+
   # Restore the foreign protected sections lifted before the body-wide passes (verbatim).
   body = _body.restore_protected_sections(body, _protected_sections)
-# Spec § Stage 7: strip ALL `review_*` keys from frontmatter. The
-# finalized document carries no review-machinery metadata — the
-# status callout above documents the outcome for humans, and the
-# consumer's apply transition (if any) sets its own status fields.
-# Order: status-callout decision was made above using the original
-# `meta` dict (still has `review_approved` / `review_approved_with_concerns`),
-# so the strip below is safe to run after.
-# Idempotent: if the doc was already finalized (none of these keys
-# present), every unset_field is a no-op and the function returns
-# input bytes unchanged — the CLI's `already finalized` branch
-# detects via input == output.
+
+  # Spec § Stage 7: strip ALL `review_*` keys from frontmatter. The
+  # finalized document carries no review-machinery metadata — the
+  # status callout above documents the outcome for humans, and the
+  # consumer's apply transition (if any) sets its own status fields.
+  # Order: status-callout decision was made above using the original
+  # `meta` dict (still has `review_approved` / `review_approved_with_concerns`),
+  # so the strip below is safe to run after.
+  # Idempotent: if the doc was already finalized (none of these keys
+  # present), every unset_field is a no-op and the function returns
+  # input bytes unchanged — the CLI's `already finalized` branch
+  # detects via input == output.
   for key in [k for k in meta if k.startswith(ReviewKey.PREFIX) and k != ReviewKey.RESULT]:
     fm_text = _fm.unset_field(fm_text, key)
-# Drop the YAML frontmatter block entirely when no keys remain
-# between the fences. A finalized review doc whose original
-# frontmatter held only `review_*` keys ends up with `---\n---`
-# after the unset loop — that empty block is visual noise.
-# Consumer docs that carry non-review keys (`spec_role`,
-# `request_status`, `tags`, etc.) keep their non-empty
-# frontmatter unchanged. When emptied, `set_field` below
-# re-synthesizes a clean `---\nreview_result: <value>\n---`
-# block.
+
+  # Drop the YAML frontmatter block entirely when no keys remain
+  # between the fences. A finalized review doc whose original
+  # frontmatter held only `review_*` keys ends up with `---\n---`
+  # after the unset loop — that empty block is visual noise.
+  # Consumer docs that carry non-review keys (`spec_role`,
+  # `request_status`, `tags`, etc.) keep their non-empty
+  # frontmatter unchanged. When emptied, `set_field` below
+  # re-synthesizes a clean `---\nreview_result: <value>\n---`
+  # block.
   if _fm.is_empty(fm_text):
     fm_text = ""
-# Stamp the terminal `review_result` outcome — the apply-gate
-# discriminator that downstream md-scan routines key off
-# (e.g. `spec.request-handler` apply mode triggers on
-# `review_result: [approved, approved-with-concerns]`). Written
-# LAST so it survives the `review_*` prefix strip above. The open
-# transition unsets this key when a doc re-enters the review
-# loop, so its presence is a reliable signal of "review just
-# closed". Stamp only when there is actual review evidence —
-# either a fresh finalize (`review_approved` was in meta) or an
-# idempotent re-run on an already-stamped doc. A doc with neither
-# was never in the review loop; finalize is a no-op on it (input
-# bytes == output bytes).
+
+  # Stamp the terminal `review_result` outcome — the apply-gate
+  # discriminator that downstream md-scan routines key off
+  # (e.g. `spec.request-handler` apply mode triggers on
+  # `review_result: [approved, approved-with-concerns]`). Written
+  # LAST so it survives the `review_*` prefix strip above. The open
+  # transition unsets this key when a doc re-enters the review
+  # loop, so its presence is a reliable signal of "review just
+  # closed". Stamp only when there is actual review evidence —
+  # either a fresh finalize (`review_approved` was in meta) or an
+  # idempotent re-run on an already-stamped doc. A doc with neither
+  # was never in the review loop; finalize is a no-op on it (input
+  # bytes == output bytes).
   if ReviewKey.APPROVED in meta:
     result_value = ResultValue.APPROVED_WITH_CONCERNS if with_concerns else ResultValue.APPROVED
     fm_text = _fm.set_field(fm_text, ReviewKey.RESULT, result_value)
   elif meta.get(ReviewKey.RESULT, "").strip() in (ResultValue.APPROVED, ResultValue.APPROVED_WITH_CONCERNS):
-      # Idempotent re-run — preserve existing key (set_field call is
-      # a byte-identical no-op when the value already matches).
+    # Idempotent re-run — preserve existing key (set_field call is
+    # a byte-identical no-op when the value already matches).
     existing = meta[ReviewKey.RESULT].strip()
     fm_text = _fm.set_field(fm_text, ReviewKey.RESULT, existing)
+
+  # reassemble the two halves the steps above rewrote independently
   return fm_text + body
 
 
@@ -258,6 +272,12 @@ def _status_callout_for_finalize(meta: dict, *, with_concerns: bool = False) -> 
 
 
 def _commit_final(repo: Path, file_path: Path) -> str:
+  """
+  Commit the finalized state of `file_path` under the review bot identity.
+
+  Returns:
+    Full SHA of the new commit.
+  """
   return _git_ops.commit_final(
       repo, file_path,
       author={"name": "lazy-review", "email": "lazy-review@bot.invalid"},

@@ -52,13 +52,10 @@ Field notes:
 
 ## Response shape (`response.json`)
 
-```json
-{
-  "outcome": "<comma-separated values from the outcome enum below>",
-  "result":  ["result/<file>"],
-  "error":   {"category": "logical | transient | technical", "message": "..."}
-}
-```
+The response envelope — `outcome`, `result`, `error` — belongs to the expert-runtime contract and already reaches every expert through its system prompt. Do NOT restate it here, and never rename its fields: a protocol that prescribes a status field of its own makes the runtime read every failure as a success. Declare only what is yours:
+
+- the values `outcome` takes — see `## Outcome by kind` below;
+- any extra fields beyond the envelope.
 
 `outcome=error` is reserved across all protocols — never define a `kind` or non-error `outcome` value named `error`.
 

@@ -74,6 +74,7 @@ def list_matching(base: Path, pattern: str) -> list[Path]:
   if not base.is_dir():
     return []
 
+  # a stable order keeps the manifests built from this listing reproducible
   return sorted(base / name for name in os.listdir(base)
                 if fnmatch.fnmatch(name, pattern) and (base / name).is_file())
 
@@ -92,6 +93,7 @@ def list_python_tree(base: Path) -> list[Path]:
   for root, _dirs, names in os.walk(base):
     found.extend(Path(root) / name for name in names if name.endswith('.py'))
 
+  # os.walk yields directories in arbitrary order — sort so callers see one stable tree
   return sorted(found)
 
 
@@ -117,6 +119,7 @@ def run_git(repo: Path, *args: str) -> list[str]:
   if out.returncode != 0:
     return []
 
+  # blank lines carry no path, they would poison the scope
   return [line for line in out.stdout.splitlines() if line]
 
 
@@ -150,6 +153,7 @@ def resolve_scope(repo: Path, paths: list[str]) -> list[str]:
   changed = run_git(repo, 'diff', '--name-only', 'HEAD')
   changed += run_git(repo, 'ls-files', '--others', '--exclude-standard')
 
+  # a path can appear in both git queries, and a deleted file still shows up in the diff
   return sorted({ name for name in changed
                   if name.endswith('.py') and (repo / name).is_file() })
 
@@ -169,14 +173,17 @@ def rule_applies(text: str) -> bool:
   if not text.startswith(FRONTMATTER_FENCE):
     return False
 
+  # find where the frontmatter ends so only the declared scope is inspected, never the body
   closing = text.find(f'\n{FRONTMATTER_FENCE}', len(FRONTMATTER_FENCE))
 
   # guard: unterminated frontmatter, treat the rule as unscoped
   if closing < 0:
     return False
 
+  # the scope declaration is whatever sits between the two fences
   front = text[len(FRONTMATTER_FENCE):closing]
 
+  # an always-loaded rule governs every file; otherwise a Python glob must be declared
   return 'always_loaded' in front or '.py' in front
 
 
@@ -215,6 +222,7 @@ def collect_guidelines(repo: Path, plugin_root: Path) -> dict[str, list[str]]:
   if notes:
     layers['project_notes'] = notes
 
+  # insertion order is canon-first, which is the precedence the reviewer must read them in
   return layers
 
 
@@ -235,6 +243,7 @@ def scope_key(repo: Path, files: list[str]) -> str:
     digest.update(name.encode('utf-8'))
     digest.update((repo / name).read_bytes())
 
+  # the digest is the cache key — identical content means the scope is already reviewed
   return digest.hexdigest()
 
 
@@ -253,6 +262,7 @@ def find_cached(review_dir: Path, key: str) -> Path | None:
   if not review_dir.is_dir():
     return None
 
+  # newest first — a scope reviewed twice keeps the latest verdict, and unreadable files are skipped
   for found in reversed(list_matching(review_dir, '*.findings.json')):
     try:
       data = json.loads(found.read_text(encoding = 'utf-8'))
@@ -261,6 +271,7 @@ def find_cached(review_dir: Path, key: str) -> Path | None:
     if data.get('scope_key') == key:
       return found
 
+  # no stored document covers this scope, it has to be reviewed anew
   return None
 
 
@@ -283,6 +294,7 @@ def load_findings(path: Path) -> list[Finding]:
     print(f'review: cannot read findings from {path}: {error}', file = sys.stderr)
     raise SystemExit(1) from error
 
+  # a document carrying no findings is a clean review, not a malformed one
   return data.get('findings') or []
 
 
@@ -301,6 +313,7 @@ def print_findings(findings: list[Finding]) -> int:
     print('Success: no guideline issues found')
     return 0
 
+  # render every finding in the shape the other checkers use, tracking the worst severity seen
   worst = 0
   for item in findings:
     severity = str(item.get('severity', 'WARN')).upper()
@@ -309,11 +322,13 @@ def print_findings(findings: list[Finding]) -> int:
     rule = item.get('rule', 'guideline')
     print(f"{location}: {severity.lower()}: [{rule}] {item.get('message', '')}")
 
+  # a single FAIL anywhere in the set has to block the pipeline
   counts = f'{len(findings)} finding(s)'
   if worst >= SEVERITY_RANK['FAIL']:
     print(f'Found blocking guideline issues: {counts}')
     return 1
 
+  # only INFO/WARN survived — surface them without failing the run
   print(f'Found non-blocking guideline issues: {counts}')
   return 0
 
@@ -335,9 +350,11 @@ def write_manifest(repo: Path, plugin_root: Path, files: list[str], key: str) ->
   review_dir = repo / REVIEW_DIR
   review_dir.mkdir(parents = True, exist_ok = True)
 
+  # the shared timestamp is what pairs a manifest with the findings file written back for it
   manifest_path = review_dir / f'{stamp}.json'
   findings_path = review_dir / f'{stamp}.findings.json'
 
+  # the manifest carries everything the reviewer needs, so it discovers nothing on its own
   manifest = {
     'generated': datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC'),
     'repo': str(repo),
@@ -348,6 +365,7 @@ def write_manifest(repo: Path, plugin_root: Path, files: list[str], key: str) ->
   }
   manifest_path.write_text(json.dumps(manifest, indent = 2) + '\n', encoding = 'utf-8')
 
+  # the caller needs both paths to print the dispatch directive and the render command
   return manifest_path, findings_path
 
 
@@ -378,6 +396,7 @@ def dispatch_headless(repo: Path, manifest_path: Path) -> int:
     print('review: headless dispatch failed', file = sys.stderr)
     return 1
 
+  # the manifest is authoritative about where the findings land — never recompute that path
   manifest = json.loads(manifest_path.read_text(encoding = 'utf-8'))
   findings_path = repo / manifest['findings_path']
 
@@ -386,6 +405,7 @@ def dispatch_headless(repo: Path, manifest_path: Path) -> int:
     print(f'review: agent wrote no findings at {findings_path}', file = sys.stderr)
     return 1
 
+  # headless runs render the verdict themselves, there is no operator step in between
   return print_findings(load_findings(findings_path))
 
 
@@ -406,6 +426,7 @@ def cmd_review(repo: Path, plugin_root: Path, paths: list[str]) -> int:
     print('review: SKIPPED — CHK_REVIEW=skip')
     return 0
 
+  # the scope decides everything downstream — the key, the manifest, and whether a cache hit applies
   files = resolve_scope(repo, paths)
 
   # guard: nothing changed, the phase has no work
@@ -413,6 +434,7 @@ def cmd_review(repo: Path, plugin_root: Path, paths: list[str]) -> int:
     print('review: SKIPPED — no changed Python files in scope')
     return 0
 
+  # content key identifies this exact scope for the cache lookup that follows
   key = scope_key(repo, files)
 
   # an unchanged scope keeps the findings of its previous review
@@ -421,12 +443,14 @@ def cmd_review(repo: Path, plugin_root: Path, paths: list[str]) -> int:
     print(f'review: scope unchanged since {cached.name} — reusing findings')
     return print_findings(load_findings(cached))
 
+  # a scope nobody has reviewed yet needs a fresh manifest for the agent to pick up
   manifest_path, findings_path = write_manifest(repo, plugin_root, files, key)
 
   # headless mode is the only path where this script talks to an agent itself
   if os.environ.get('CHK_REVIEW') == 'headless':
     return dispatch_headless(repo, manifest_path)
 
+  # no agent available here — hand the operator the dispatch and render directives verbatim
   print(f'review: PENDING — {len(files)} file(s) in scope')
   print(f'review: manifest {manifest_path.relative_to(repo)}')
   print(f'review: dispatch agent {REVIEWER_AGENT} with that manifest, '
@@ -435,6 +459,7 @@ def cmd_review(repo: Path, plugin_root: Path, paths: list[str]) -> int:
   print('review: a pending review is unfinished work — dispatch the agent, or ask the operator '
         'to waive this scope. Rerun with CHK_REVIEW=skip only once that decision is recorded.')
 
+  # an undecided review must not pass as success, hence a code of its own
   return PENDING_EXIT
 
 
@@ -450,12 +475,14 @@ def main() -> None:
                       help = 'plugin root holding the canonical guidelines')
   args = parser.parse_args()
 
+  # the review is always scoped to the repo the caller runs in, never to the plugin's own tree
   repo = Path.cwd().resolve()
 
   # render mode only reads an existing document, it never builds a manifest
   if args.render:
     sys.exit(print_findings(load_findings(Path(args.render))))
 
+  # default action — manifest the current scope and report whether the review is still pending
   sys.exit(cmd_review(repo, Path(args.plugin_root).resolve(), args.paths))
 
 

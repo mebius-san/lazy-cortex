@@ -337,7 +337,7 @@ Scans `inbox_dir` each tick. The input file is never copied into the job bundle 
 
 `expert + request` sub-shape — two passes per tick:
 
-1. **Reconcile** finished work via `completed_dedup_jobs`: for every prior job keyed on an inbox path, if it **succeeded** (`outcome` ≠ `error`) drain the input (`unlink`, best-effort — the expert may have filed it away itself on success) and mark the bundle `CONSUMED`; if it **failed** leave the input parked — the bundle stays `DONE`-but-unconsumed so its dedup key keeps the file from re-dispatching. This is a **dead-letter**: the failed input sits in the inbox with its bundle's forensics retained for the operator to triage; it is not retried automatically (a crashed/`DEAD` job is the doctor's retry path, not this one).
+1. **Reconcile** finished work via `completed_dedup_jobs`: for every prior job keyed on an inbox path, if it **succeeded** (`outcome` ≠ `error`) drain the input (`unlink`, best-effort — the expert may have filed it away itself on success) and mark the bundle `CONSUMED`; if it **failed** leave the input parked — the bundle stays `DONE`-but-unconsumed so its dedup key keeps the file from re-dispatching. This is a **dead-letter**: the failed input sits in the inbox with its bundle's forensics retained for the operator to triage; it is not retried automatically (a crashed/`DEAD` job is the doctor's retry path, not this one). **Exception — a stale transient failure:** a bundle whose error `category` is `transient` (the spawn faulted, not the work) and that finished more than `TRANSIENT_RETRY_AGE_SEC` (1 h) ago is marked `CONSUMED` **without** draining the input, so pass 2 of the same tick re-dispatches the file. Retries repeat at that cadence for as long as the spawn keeps faulting.
 2. **Dispatch** every remaining non-hidden, non-dir, non-symlink file: render `request` (substitute `{file}` with the file's **absolute path** in any string value) and dispatch one job keyed on that path (`dedup_key = <path>`), so an in-flight or parked file is never dispatched twice.
 
 The expert reads the file at the given path in place. It may move or delete the input **only as its last action on success** — see `lazy-core.expert-runtime-contract.md` ("What you must not touch"). On any failure the original must stay put: it is the only copy left to reprocess.
@@ -537,6 +537,18 @@ hooks:
 
 `hooks.disabled` reads the tracked value with the local overlay merged on top, so a personal silence can live in the gitignored `lazy.settings.local.json`. The block-list read fails open — a missing or malformed settings file silences nothing. Third-party operator hooks (e.g. `warp`) do not read this variable; they are already shed by `--setting-sources` — a separate layer.
 
+### Filesystem sandbox — resolved paths only
+
+Every expert spawn is confined by `.runtime/sandbox.settings.json` (daemon-owned, gitignored, passed as `--settings`; absent file = unconfined spawn). The confinement is checked against the path the OS **resolves**, not the path the allowlist spells: an entry naming a directory reached through a symlink permits nothing where the data actually lives, and every write there fails with `Operation not permitted` while the recorded config still reads as correct.
+
+So the file is written by CLI, never by hand:
+
+```
+lazycortex-core sandbox-sync --repo-root <repo> [--allow-read <path>]... [--allow-write <path>]...
+```
+
+The repo root is granted read+write implicitly; whatever is writable is also readable. Each entry — recorded, passed, or the root — contributes the location it resolves to, plus the targets of the symlinks directly inside it (the `external_dirs` slots of § 15). Recorded entries are never dropped or reordered and a recorded `enabled` is never overwritten, so the call is idempotent; `enabled: false` comes back in the result for the caller to act on. `sandbox-audit --repo-root <repo>` is the read-only companion: it reports `missing_read` / `missing_write` — locations the recorded entries resolve to but do not grant. `/lazy-runtime.preflight` folds that audit into its checkout-level findings (`fail` on write, `warn` on read), so a symlink that moves after install surfaces as a finding instead of as a run of jobs failing on every write.
+
 ---
 
 ## 12. Metrics
@@ -574,7 +586,7 @@ Restart the daemon to flip enablement on or off. Settings are reloaded inside th
 Several checkouts can each run their own daemon on one machine; every metrics-enabled daemon needs its own port. The pieces that make this hands-off:
 
 - **Registry** — the supervisor units themselves (`com.lazycortex.runtime.<REPO_ID>.plist` / `lazy-core-runtime-<REPO_ID>.service`) are the source of truth for "all daemons on this host". `lazycortex-core daemon-list` prints them joined with each repo's `daemon.metrics` settings.
-- **Port allocation** — `lazycortex-core metrics-alloc-port --repo-root <path>` hands out the first free port from 9464 upward, skipping ports recorded by other daemons and ports that fail a live bind probe; a repo's already-recorded port is reused. The install skill runs this when enabling metrics.
+- **Port allocation** — `lazycortex-core metrics-alloc-port --repo-root <path>` hands out the first free port from 9464 upward, skipping ports recorded by other daemons and ports that fail a live bind probe; a repo's already-recorded port is reused, unless a second registered daemon records the same one — a port that arrived by config copy rather than by allocation is not the repo's to keep, and the asking checkout is moved. The install skill runs this when enabling metrics.
 - **Scrape targets file** — `lazycortex-core metrics-scrape-file` writes `${XDG_CONFIG_HOME:-~/.config}/lazycortex/scrape-targets.json` in Prometheus `file_sd` format: one `{"targets": ["127.0.0.1:<port>"], "labels": {"repo": "<label>"}}` entry per metrics-enabled daemon, nothing else (no paths, no hostnames). Point an existing Prometheus at it once with `file_sd_configs` and new daemons appear without further edits.
 - **Port conflict at startup** — when the configured port is already bound, the daemon records a `daemon_error` incident with cause `metrics_port_conflict` (naming the holder: pid, command, and the owning repo when it is another registered daemon) and **keeps running without metrics**. A taken port never restart-loops the dispatch engine; the fix is re-running the install's metrics step (or editing the local-overlay port) and restarting the daemon.
 
@@ -705,7 +717,9 @@ A path is diagnosed as one of `ok`, `missing`, `dangling`, `wrong_target`, `not_
 
 Alongside the status, each declared path carries an ignore verdict: `ignored`, `dir_only`, or `absent`. The distinction exists because a repaired slot holds a symlink, which git classifies as a file, while the ordinary `.gitignore` form for a working directory (`Data/`) matches directories only — so a repository whose ignore rules look complete still sees every linked path, its tree is dirty, and the daemon halts on its first tick. `dir_only` names exactly that case and is fixed by adding the anchored slashless line (`/Data`) next to the existing one, never by replacing it; `absent` means no rule covers the name in any form. Install proposes the missing lines after the repair and appends them only with the operator's confirmation, since `.gitignore` is tracked; audit reports the two cases separately and `lazy-core.autocheckup` reports rather than applies.
 
-An absent or empty section is the default and changes no behaviour. Three consequences of a non-empty section:
+An absent or empty section is the default and changes no behaviour. Four consequences of a non-empty section:
+
+- The expert sandbox must grant the location each declared slot points at, not the slot itself (§ 11, *Filesystem sandbox*). `sandbox-sync` derives those locations from the planted symlinks, so it runs after the repair, and `sandbox-audit` catches a source root that moves later.
 
 - An `inbox` routine whose `inbox_dir` is declared and does not resolve fails its tick with `exit = -1` and the error tag `external_dir_broken: <path>`, which folds into the routine's own `routine:<name>` incident and carries the metric label `reason="external_dir_broken"`. An **undeclared** missing inbox stays a silent idle tick, unchanged.
 - `daemon.run_here` must be a host list rather than a bare `true`: a checkout reachable through a synced path carries its gitignored overlay to every machine holding that path, and a bare boolean reads as answered on all of them. Install offers to pin the list to the current host; audit reports the bare boolean as a warning until it is pinned.

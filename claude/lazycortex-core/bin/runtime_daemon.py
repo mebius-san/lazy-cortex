@@ -124,7 +124,7 @@ def set_plugin_dirs(dirs: list[Path]) -> None:
     dirs: Plugin source directories to register, in caller-preferred order. Each entry should be the
       root of a plugin source tree containing `.claude-plugin/` and `bin/`.
   """
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+  # waiver: a genuine module-level rebind, not a false positive — this is the one writer of that cache
   global _PLUGIN_DIRS  # noqa: PLW0603  # pylint: disable=global-statement
   _PLUGIN_DIRS = [ Path(d).resolve() for d in dirs ]
   # arguments are not ref-resolved (pass-through JSON values), but flow through to <jdir>/config.json
@@ -633,6 +633,10 @@ def _classify_routine_error(err: str) -> str:
   Any error text from a plugin CLI tagged with `compute_inputs_failed` or `config_violation`
   maps to `config_violation` so the daemon can escalate to the class-1 halt path.
 
+  Args:
+    err: Failure description text produced for a failed routine tick, as returned by
+      `_routine_error_detail`.
+
   Returns:
     One of `config_violation`, `external_dir_broken`, `timeout`, `git_pre_failed`,
     `git_post_failed`, or `error`.
@@ -793,6 +797,7 @@ def _run_iteration(repo_root: Path) -> None:
   # halt cleared before this reconcile shipped) otherwise stays pinned in Grafana until a restart.
   _reconcile_halt_metric(state)
 
+  # the registry and its last-run ledger drive every dispatch decision taken below
   settings_path = repo_root / SettingsFile.REL
   daemon = load_section(settings_path, SettingsKey.DAEMON)
   registry = load_section(settings_path, SettingsKey.ROUTINES)
@@ -822,6 +827,7 @@ def _run_iteration(repo_root: Path) -> None:
     _maybe_prune_errors(repo_root)
     runtime_state.update(repo_root, lambda s: s.__setitem__(StateKey.LAST_CLEANUP_AT, time.time()))
 
+  # the pre-iteration git step brings the tree current before any routine runs
   try:
     _git_pre(repo_root, daemon.get(DaemonKey.GIT))
   except GitPullDiverged as e:
@@ -862,6 +868,7 @@ def _run_iteration(repo_root: Path) -> None:
   if mgr is not None:
     _poll_worktree_tasks(repo_root, mgr)
 
+  # select the routines whose interval has elapsed, with the stuck-system filter applied
   now = time.time()
   halted_this_iter = False
   due = due_routines(now, registry, last_run, system_stuck = system_stuck)
@@ -942,6 +949,7 @@ def _run_iteration(repo_root: Path) -> None:
       halted_this_iter = True
       break
 
+  # a halted iteration leaves the tree alone rather than pushing partial work
   if not halted_this_iter:
     try:
       _git_post(repo_root, daemon.get(DaemonKey.GIT))
@@ -1117,7 +1125,7 @@ def _plugin_roots() -> list[Path]:
   roots: list[Path] = []
   env = os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "")
   for part in env.split(os.pathsep):
-    # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+    # waiver: the loop variable is deliberately rebound — each line is normalised in place before use
     part = part.strip()  # noqa: PLW2901
     if part:
       roots.append(Path(part).resolve())
@@ -1677,6 +1685,7 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
     return
   branch = git_cfg[GitConfigKey.BASE_BRANCH]
 
+  # every attempt re-fetches: the operator may have moved origin since the previous one
   for _attempt in range(POST_TICK_MAX_PUSH_ATTEMPTS):
     _run_git_remote(repo_root, [ "fetch", "origin", branch ])
     local = _run_git_capture(repo_root, [ "rev-parse", "HEAD" ])
@@ -1686,10 +1695,11 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
     if local == remote:
       return
 
+    # the merge-base tells which of the three history shapes this attempt is dealing with
     base = _run_git_capture(repo_root, [ "merge-base", "HEAD", f"origin/{branch}" ])
 
+    # local is strictly ahead of origin (no operator commits in the gap) → fast-forward push
     if base == remote:
-      # local is strictly ahead of origin (no operator commits in the gap) → fast-forward push
       try:
         _run_git_remote(repo_root, [ "push", "origin", branch ])
       except subprocess.CalledProcessError as e:
@@ -1702,10 +1712,10 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
       _run_post_push_hook(repo_root, git_cfg, branch, old_sha = remote)
       return
 
+    # guard: origin moved forward but contains nothing of ours — our local HEAD became an ancestor
+    # of origin between our fetch and now; extremely unlikely but possible if another process
+    # already rebased + pushed for us. Just fall through to "no work".
     if base == local:
-      # origin moved forward but contains nothing of ours — our local HEAD became an ancestor of
-      # origin between our fetch and now; extremely unlikely but possible if another process
-      # already rebased + pushed for us. Just fall through to "no work".
       return
 
     # histories diverged within the tick (operator pushed a commit while the routine was running);
@@ -1737,6 +1747,7 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
     _run_post_push_hook(repo_root, git_cfg, branch, old_sha = remote)
     return
 
+  # every attempt was consumed without publishing — the caller turns this into a daemon halt
   raise GitPushFailed(
     f"push to origin/{branch} failed after {POST_TICK_MAX_PUSH_ATTEMPTS} attempts"
   )
@@ -1768,6 +1779,7 @@ def dispatch_subprocess(repo_root: Path, name: str, cfg: dict) -> dict:
   """
   started = time.time()
 
+  # an expert routine queues a job instead of running a subprocess
   if RoutineKey.EXPERT in cfg:
     # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
     from expert_runtime import dispatch_job
@@ -1798,6 +1810,7 @@ def dispatch_subprocess(repo_root: Path, name: str, cfg: dict) -> dict:
         TickResultKey.ERROR: f"dispatch_job failed: {e}",
       }
 
+  # a command routine resolves its binary through the plugin-dir registry and blocks on it
   try:
     argv = resolve_routine_command(cfg[RoutineKey.COMMAND])
     timeout = cfg.get(RoutineKey.TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC)
@@ -2019,7 +2032,7 @@ def _log_routine_result(repo_root: Path, result: dict) -> None:
 
 def _emit_tick_metrics_if_available(repo_root: Path, result: dict) -> None:
   """
-  Record tick, queue-depth, and token-aggregation metrics when the metrics module is enabled.
+  Record tick, queue-depth, token, job, and incident metrics when the metrics module is enabled.
 
   Notes:
     - The metrics module is opt-in; when it is not installed or not enabled, the call returns
@@ -2048,6 +2061,7 @@ def _emit_tick_metrics_if_available(repo_root: Path, result: dict) -> None:
   metrics.set_queue_depth_from_filesystem(repo_root)
   metrics.aggregate_tokens_from_log(repo_root)
   metrics.aggregate_jobs_from_log(repo_root)
+  metrics.aggregate_incidents_from_ledger(repo_root)
 
 
 if __name__ == "__main__":

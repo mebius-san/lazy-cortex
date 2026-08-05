@@ -41,7 +41,7 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402
     BOOL_TRUE,
     FLIP_GATE_NAME,
@@ -57,7 +57,7 @@ from spec_keys import (  # noqa: E402
     Stage,
     StageKey,
 )
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from summary_render import parent_container_note, apply_container_stats  # noqa: E402
 
 
@@ -198,7 +198,7 @@ def _collect_stages(asset_dir: Path) -> dict:
   stages: dict = {}
   for name in ("design.md", "bug.md", "plan.md"):
     stage = _sibling_stage(asset_dir, name)
-    # guard: only record siblings that exist
+    # record only the siblings that actually exist on disk
     if stage is not None:
       stages[name] = stage
   return stages
@@ -284,7 +284,7 @@ def _write_log(
   date_str = ts.strftime("%Y-%m-%d %H:%M:%S UTC")
   log_dir = _repo_root(cwd) / LOG_ROOT / LOG_CLAUDE / FLIP_GATE_NAME
   log_dir.mkdir(parents = True, exist_ok = True)
-  # guard: record the plan-review follow-up line only when the follow-up applied
+  # the plan-review follow-up line is written only when the follow-up applied
   plan_line = f"- plan.md review auto-open: {plan_review}\n" if plan_review is not None else ""
   body = (
       "---\n"
@@ -451,20 +451,29 @@ def _commit_flip(asset_dir: Path, note: Path, gate: str, value: bool) -> None:
     gate: The gate key that was flipped.
     value: The boolean value the gate was set to.
   """
+  # an empty toplevel means there is no repo to commit into
   top = _git_field(asset_dir, ["rev-parse", "--show-toplevel"], "")
   # guard: asset is not inside a git repository — skip commit (test-fixture path); the file
   # write above remains and is the entire mutation the bare-fixture caller observes
   if not top:
     return
+
+  # the flipped folder-note is the base of the commit set
   repo = Path(top)
   add_paths = [str(note)]
+
+  # the parent container's stats line goes stale on a flip, so refresh it and carry it along
   parent = parent_container_note(asset_dir)
   if parent is not None and apply_container_stats(parent):
     add_paths.append(str(parent))
+
+  # stage the whole set first so the commit below lands atomically
   subprocess.run(
       ["git", "add", "--", *add_paths],
       cwd = str(repo), check = True, capture_output = True,
   )
+
+  # commit under the dedicated bot identity so the operator's authorship stays untouched
   subject = f"{FLIP_GATE_NAME}: {gate} → {str(value).lower()} on {asset_dir.name}"
   subprocess.run(
       [
@@ -540,16 +549,21 @@ def _commit_promote_to_draft(asset_dir: Path, plan: Path, note: Path) -> None:
     plan: The plan.md path that was rewritten.
     note: The asset's status folder-note path that was appended.
   """
+  # an empty toplevel means there is no repo to commit into
   top = _git_field(asset_dir, ["rev-parse", "--show-toplevel"], "")
   # guard: asset is not inside a git repository — skip commit (test-fixture path); the file
   # writes above remain and are the entire mutation the bare-fixture caller observes
   if not top:
     return
+
+  # stage the promoted plan and the appended folder-note together so the commit is atomic
   repo = Path(top)
   subprocess.run(
       ["git", "add", "--", str(plan), str(note)],
       cwd = str(repo), check = True, capture_output = True,
   )
+
+  # commit under the dedicated bot identity so the operator's authorship stays untouched
   subject = (
       f"{FLIP_GATE_NAME}: {plan.name} spec_stage "
       f"{Stage.EMPTY}→{Stage.DRAFT} on {asset_dir.name}"
@@ -596,12 +610,16 @@ def flip_gate(
     `{"status": "flipped", "gate": gate, "value": <bool>}` on success, or
     `{"status": "refused", "gate": gate, "reason": <message>}` when refused.
   """
+  # the status folder-note's frontmatter carries every gate this function can flip
   note = asset_dir / f"{asset_dir.name}.md"
   text = note.read_text()
   fm_values, fm_end = _parse_frontmatter(text)
+
   # guard: a cancelled asset refuses every flip, on or off
   if _is_true(fm_values, Gate.SPEC_CANCELLED):
     return {FlipResult.STATUS: FlipResult.REFUSED, "gate": gate, "reason": "asset is cancelled"}
+
+  # only a forward flip is gated by the precondition table; switching off is always allowed
   stages = _collect_stages(asset_dir)
   value = not off
   if not off and not preconditions_met(asset_dir, gate, fm_values, stages):
@@ -610,6 +628,8 @@ def flip_gate(
         "gate": gate,
         "reason": f"precondition not met for {gate}",
     }
+
+  # the flip lands in the frontmatter, its audit trail in the body's callout and history sections
   fm_text = _set_bool(text[:fm_end], gate, value)
   body = text[fm_end:]
   date_str = _today(today)
@@ -619,17 +639,23 @@ def flip_gate(
   hist = f"- {date_str} — {FLIP_GATE_NAME} · {gate} → {str(value).lower()}"
   body = _append_under_heading(body, Section.HISTORY, hist)
   note.write_text(fm_text + body)
+
   # Atomic commit of the folder-note edit under the flip-gate bot identity. Without this the
   # daemon's next iteration trips its dirty-tree guard and silently skips every routine until
   # the operator commits by hand. The commit happens BEFORE `_auto_open_plan_review` so the
   # follow-up review-open subprocess sees a clean tree (it does its own commit on top).
   _commit_flip(asset_dir, note, gate, value)
+
+  # the post-flip frontmatter drives the plan-review follow-up decision
   fm_after, _ = _parse_frontmatter(fm_text)
   result = {FlipResult.STATUS: FlipResult.FLIPPED, "gate": gate, "value": value}
   plan_review = _auto_open_plan_review(asset_dir, gate, off, fm_after)
-  # guard: fold the follow-up status into the result only when it applies
+
+  # fold the follow-up status into the result only when the follow-up applied
   if plan_review is not None:
     result[PlanReview.KEY] = plan_review
+
+  # the run log records the flip and its follow-up, then the caller gets the outcome
   _write_log(asset_dir, gate, value, reason, plan_review = plan_review)
   return result
 

@@ -99,6 +99,21 @@ def _run_git(
     env: Mapping[str, str] | None = None,
     capture: bool = True,
 ) -> str:
+  """
+  Run a `git` command against `repo` and return its stripped stdout.
+
+  Args:
+    repo: Absolute path to the repository root.
+    args: Positional `git` arguments, in order.
+    env: Extra environment variables to overlay on the current process environment.
+    capture: Whether to capture stdout/stderr; when `False`, output is inherited.
+
+  Returns:
+    The command's stdout with surrounding whitespace stripped.
+
+  Raises:
+    GitOpsError: If the `git` command exits with a non-zero status.
+  """
   cmd = ["git", "-C", str(repo), *args]
   try:
     proc = subprocess.run(
@@ -121,6 +136,16 @@ def _build_message(
     subject: str,
     trailers: Sequence[tuple[str, str]],
 ) -> str:
+  """
+  Assemble a commit message from a subject line and trailer key-value pairs.
+
+  Args:
+    subject: Commit subject line.
+    trailers: Trailer key-value pairs appended after a blank line separating them from the subject.
+
+  Returns:
+    The formatted commit message, terminated by a newline.
+  """
   parts = [subject]
   if trailers:
     parts.append("")  # blank line separating body from trailers
@@ -164,8 +189,8 @@ def _add_and_commit(
     # waiver: git CLI vocabulary
     _run_git(repo, "add", "--", str(path.relative_to(repo)))
   elif path is not None:
-      # `allow_empty` paired with a path means "stage it if anything
-      # changed; allow empty if nothing did".
+    # `allow_empty` paired with a path means "stage it if anything
+    # changed; allow empty if nothing did".
     # waiver: git CLI vocabulary
     _run_git(repo, "add", "--", str(path.relative_to(repo)))
   commit_args = [*_author_flags(author), "commit", "-q", "-m", message_text]
@@ -435,9 +460,9 @@ def _parse_trailers(body: str) -> dict[str, str]:
     i -= 1
   if not collected:
     return {}
-# Must be preceded by a blank-line separator AND by at least one
-# non-empty content line before that blank (otherwise the
-# "trailers" are really the whole body).
+  # Must be preceded by a blank-line separator AND by at least one
+  # non-empty content line before that blank (otherwise the
+  # "trailers" are really the whole body).
   if i < 0 or lines[i].strip() != "":
     return {}
   return dict(reversed(collected))
@@ -471,7 +496,7 @@ def history_for_file(repo: Path, path: Path) -> list[CommitRecord]:
   # Records are separated by the record-separator byte (0x1e); inside
   # one record, fields are separated by NUL (0x00).
   for chunk in out.split("\x1e"):
-    # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+    # waiver: the loop variable is deliberately rebound — each chunk is normalised in place before use
     chunk = chunk.strip("\n")  # noqa: PLW2901
     # guard: the record-separator split yields an empty trailing chunk — skip it rather than emit an empty record
     if not chunk:

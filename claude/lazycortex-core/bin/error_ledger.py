@@ -168,8 +168,9 @@ def record(repo: Path, event: dict) -> None:  # type: ignore[type-arg]
       ev[_F_DETAIL] = (ev.get(_F_DETAIL) or "")[:200]
       line = json.dumps(ev, ensure_ascii = False, separators = (",", ":"))
     path = Path(repo) / JOURNAL_REL
-    # guard: crash-loop dedupe — a repeat of the last journal line within the window adds no fold signal
+    # the last journal line is the baseline the dedupe window compares against
     prev = _last_event(path)
+    # guard: crash-loop dedupe — a repeat of the last journal line within the window adds no fold signal
     if (prev is not None
         and all(prev.get(k) == ev.get(k) for k in _DEDUP_KEYS)
         and time.time() - _event_unix(prev) < _DEDUP_WINDOW_SEC):
@@ -344,7 +345,7 @@ def incidents(repo: Path, *, state: str = _ST_ALL, since: str | None = None) -> 
     # guard: state filter — skip if caller restricted to a specific state
     if state not in (_ST_ALL, st):
       continue
-    # guard: --since cursor — ULIDs sort lexicographically by time, drop anything not newer
+    # ULIDs sort lexicographically by time, so the last event's id doubles as the cursor value
     last_id = last.get(_F_ID, "")
     # guard: skip incidents at or before the since-cursor
     if since is not None and isinstance(last_id, str) and last_id <= since:

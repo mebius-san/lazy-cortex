@@ -37,7 +37,7 @@ _FENCE_LINE = re.compile(r"^---[ \t]*$", re.MULTILINE)
 # ----------------------------------------------------------------- helpers
 
 
-def _find_fences(text: str) -> tuple[int, int] | None:
+def _find_fences(text: str) -> tuple[int, int, int] | None:
   """
   Return the byte offsets of the frontmatter fences, or `None` if none exist.
 
@@ -55,24 +55,30 @@ def _find_fences(text: str) -> tuple[int, int] | None:
   Raises:
     ParseError: If an opening fence exists but no matching closing fence is found.
   """
+  # guard: no opening fence on the first line → the document carries no frontmatter
   if not text.startswith("---\n") and text != "---" and not text.startswith("---\r\n"):
     return None
-# Locate the closing fence as the next `---`-only line after the opening fence.
+
+  # locate the closing fence as the next `---`-only line after the opening fence
   after_open = len("---\n") if text.startswith("---\n") else len("---\r\n")
   rest = text[after_open:]
   match = _FENCE_LINE.search(rest)
+  # guard: an opening fence with no closing fence is malformed, not "no frontmatter"
   if match is None:
     raise ParseError(
         "frontmatter opening fence has no matching closing fence",
         text_excerpt=text[:200],
     )
+
+  # translate the match back into offsets over the original text
   close_start = after_open + match.start()
   close_end = after_open + match.end()
   # The fence may be followed by `\n` (typical) or end-of-file.
   if close_end < len(text) and text[close_end] == "\n":
     close_end += 1
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
-  return (after_open, close_start, close_end)  # type: ignore[return-value]
+
+  # the three offsets every caller slices frontmatter and body apart with
+  return (after_open, close_start, close_end)
 
 
 def _serialise_scalar(value: object) -> str:
@@ -177,8 +183,7 @@ def parse(text: str) -> tuple[dict[str, str], str]:
   span = _find_fences(text)
   if span is None:
     return ({}, text)
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
-  open_end, close_start, close_end = span  # type: ignore[misc]
+  open_end, close_start, close_end = span
   block = text[open_end:close_start]
   body = text[close_end:]
   meta: dict[str, str] = {}
@@ -213,23 +218,22 @@ def set_field(text: str, key: str, value: object) -> str:
   rendered = f"{key}: {_serialise_scalar(value)}"
   span = _find_fences(text)
   if span is None:
-      # Document has no frontmatter at all — synthesize one.
+    # Document has no frontmatter at all — synthesize one.
     return f"---\n{rendered}\n---\n{text}"
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
-  open_end, close_start, _close_end = span  # type: ignore[misc]
+  open_end, close_start, _close_end = span
   block = text[open_end:close_start]
   existing = _key_block_span(block, key)
   if existing is None:
-      # Append before the closing fence, preserving the block's
-      # trailing newline if any.
+    # Append before the closing fence, preserving the block's
+    # trailing newline if any.
     if block and not block.endswith("\n"):
       new_block = block + "\n" + rendered + "\n"
     else:
       new_block = block + rendered + "\n"
     return text[:open_end] + new_block + text[close_start:]
-# Replace the whole existing entry (header + any continuation lines)
-# with a single-line scalar form. Preserve the entry's trailing
-# newline so the closing fence stays on its own line.
+  # Replace the whole existing entry (header + any continuation lines)
+  # with a single-line scalar form. Preserve the entry's trailing
+  # newline so the closing fence stays on its own line.
   start, end = existing
   suffix = "\n" if end > 0 and block[end - 1] == "\n" else ""
   new_block = block[:start] + rendered + suffix + block[end:]
@@ -257,8 +261,7 @@ def is_empty(text: str) -> bool:
   span = _find_fences(text)
   if span is None:
     return False
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
-  open_end, close_start, _close_end = span  # type: ignore[misc]
+  open_end, close_start, _close_end = span
   block = text[open_end:close_start]
   return all(not line.strip() for line in block.split("\n"))
 
@@ -279,8 +282,7 @@ def unset_field(text: str, key: str) -> str:
   span = _find_fences(text)
   if span is None:
     return text
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
-  open_end, close_start, _close_end = span  # type: ignore[misc]
+  open_end, close_start, _close_end = span
   block = text[open_end:close_start]
   existing = _key_block_span(block, key)
   if existing is None:

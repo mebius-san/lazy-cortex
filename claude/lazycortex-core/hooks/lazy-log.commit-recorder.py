@@ -37,9 +37,9 @@ if TYPE_CHECKING:
 # Resolve the sibling bin/ dir so the enablement gate is importable.
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import hook_gate  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from constants import HookName  # noqa: E402
 
 
@@ -67,8 +67,8 @@ def get_commit_info() -> dict | None:
   except (subprocess.CalledProcessError, FileNotFoundError):
     return None
 
+  # sha, iso-date, author, subject — joined by NUL so subjects containing tabs survive intact
   try:
-    # sha, iso-date, author, subject — joined by NUL so subjects containing tabs survive intact
     raw = subprocess.check_output(
       [ "git", "log", "-1", "--pretty=format:%H%x00%cI%x00%an <%ae>%x00%s" ],
       stderr = subprocess.DEVNULL,
@@ -79,6 +79,7 @@ def get_commit_info() -> dict | None:
   except (subprocess.CalledProcessError, ValueError, FileNotFoundError):
     return None
 
+  # branch the commit landed on; a detached HEAD or missing git leaves it blank
   try:
     branch = subprocess.check_output(
       [ "git", "rev-parse", "--abbrev-ref", "HEAD" ],
@@ -88,6 +89,7 @@ def get_commit_info() -> dict | None:
   except (subprocess.CalledProcessError, FileNotFoundError):
     branch = ""
 
+  # commit body below the subject line — trailers and prose the distiller later reads
   try:
     body = subprocess.check_output(
       [ "git", "log", "-1", "--pretty=format:%b" ],
@@ -122,6 +124,7 @@ def get_commit_info() -> dict | None:
       total_ins += ins
       total_del += dl
 
+  # one flat record per commit — the shape the ledger line is serialised from
   return {
     "root": root,
     "sha": sha,
@@ -220,6 +223,7 @@ def main() -> None:
   if not hook_gate.is_enabled(HookName.COMMIT_RECORDER):
     return
 
+  # the hook payload names the tool call that just finished
   try:
     payload = json.load(sys.stdin)
   except (json.JSONDecodeError, ValueError):
@@ -229,11 +233,13 @@ def main() -> None:
   if not should_run(payload):
     return
 
+  # read the commit straight from git rather than trusting the command line
   info = get_commit_info()
   # guard: no commit metadata available (not in a repo, no HEAD, or git missing)
   if info is None:
     return
 
+  # the repo root locates the ledger and is dropped from the record itself
   # waiver: one-off commit-record schema field name, not a reusable domain key
   root = info.pop("root")
   # waiver: filesystem path idiom (run-log directory), not a domain constant
@@ -243,6 +249,7 @@ def main() -> None:
   except OSError:
     return
 
+  # the ledger downstream distill and recall read from
   # waiver: filesystem filename idiom (commit-ledger file), not a domain constant
   path = os.path.join(logs_dir, "commits.jsonl")
 
@@ -262,6 +269,7 @@ def main() -> None:
   except FileNotFoundError:
     pass
 
+  # append one JSON line; a write failure degrades to a missing entry, never a failed commit
   try:
     with open(path, "a", encoding = "utf-8") as f:
       f.write(json.dumps(info) + "\n")

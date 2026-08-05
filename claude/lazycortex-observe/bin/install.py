@@ -636,6 +636,7 @@ class _Template:
     # loop stack: each frame collects body fragments and replays them per iteration on endfor
     loop_stack: list[dict] = []
 
+    # walk the source left to right, emitting the literal text between two directives
     pos = 0
     for m in self._RE.finditer(self.src):
       chunk = self.src[pos:m.start()]
@@ -714,11 +715,13 @@ class _Template:
     """
     active = stack[-1][0]
 
+    # a new conditional frame is active only when its parent is active and the test passes
     # waiver: single-dict-literal key (template engine internal), not a cross-module key
     if directive.startswith("if "):
       cond = self._truthy(directive[3:]) if active else False
       stack.append((cond, cond))
 
+    # elif re-tests only while no earlier branch of this frame has been taken
     # waiver: single-dict-literal key (template engine internal), not a cross-module key
     elif directive.startswith("elif "):
       _prev_active, branch_taken = stack[-1]
@@ -730,6 +733,7 @@ class _Template:
       else:
         stack[-1] = (False, branch_taken)
 
+    # else activates only when every earlier branch of this frame was skipped
     # waiver: single-dict-literal key (template engine internal), not a cross-module key
     elif directive == "else":
       _prev_active, branch_taken = stack[-1]
@@ -739,10 +743,12 @@ class _Template:
       elif parent_active:
         stack[-1] = (True, True)
 
+    # endif closes the frame its matching if opened
     # waiver: single-dict-literal key (template engine internal), not a cross-module key
     elif directive == "endif":
       stack.pop()
 
+    # for buffers its body instead of emitting it, so endfor can replay it per item
     # waiver: single-dict-literal key (template engine internal), not a cross-module key
     elif directive.startswith("for "):
       # `for item in seq`
@@ -761,6 +767,7 @@ class _Template:
         # waiver: single-dict-literal key (template engine internal), not a cross-module key
         loop_stack.append({ "var": m.group(1), "seq": [], "body": [], "active": False })
 
+    # endfor replays the buffered body once per sequence item
     # waiver: single-dict-literal key (template engine internal), not a cross-module key
     elif directive == "endfor":
       frame = loop_stack.pop()

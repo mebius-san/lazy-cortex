@@ -62,7 +62,7 @@ When the overlay contradicts the canon, the overlay wins and the canon clause is
 
 Walk every item for every file under review. Each is a clause no checker enforces.
 
-1. **Comment density and purpose.** Every block after a blank line inside a body starts with a purpose comment — including a lone trailing `return x`. A `# waiver:` line is not a purpose comment. Complex logic (branching decisions, math, reshaping, batching, protocol interplay) is explained, not restated. Applies to production, tests, and stubs equally.
+1. **Comment substance.** `pcf`'s `check_block_comments` already proves a comment sits on the first line of every block, so do not re-report its absence unless the checker is disabled for the file. Your half is whether the comment earns its line: a restatement of the code below it (`# return the result` above `return result`), a label that names the syntax rather than the intent, or a stale comment describing something the block no longer does is a finding. Complex logic (branching decisions, math, reshaping, batching, protocol interplay) is explained, not restated. Applies to production, tests, and stubs equally.
 2. **Logical-block structure.** Blank lines separate logical blocks; sequential blocks are not packed together, and a single logical step is not split across blank lines for no reason.
 3. **`# guard:` semantics.** The marker labels a defensive early-exit only — a branch whose body leaves the current scope (`return` / `continue` / `break` / `raise` / an always-raising call). An accumulation branch, an ordinary `if`/`else`, or a path-selection branch carrying `# guard:` is a finding, and so is a guard branch missing it.
 4. **Naming semantics.** Method prefixes match behaviour per the canon's prefix table (`is_`/`has_`/`can_`/`check_` for pure booleans, `fetch_`/`query_` for network, `list_` for generators, `_async` suffix for `async def`, `db_`/`repo_` for storage, and so on). Cardinality matches the return type. Names are within the length budget without cryptic abbreviations.
@@ -76,7 +76,7 @@ Walk every item for every file under review. Each is a clause no checker enforce
 # Severity
 
 - **FAIL** — blocks the commit. A violated MANDATORY clause, a suppression or checker relaxation without approval, an unapproved test-assertion change, a docstring that contradicts the code.
-- **WARN** — should be fixed, does not block. Ordinary guideline violations: missing purpose comments, block-structure problems, naming mismatches, useless locals.
+- **WARN** — should be fixed, does not block. Ordinary guideline violations: hollow purpose comments, block-structure problems, naming mismatches, useless locals.
 - **INFO** — worth knowing, no action implied.
 
 When a clause states its own severity ("MANDATORY", "FAIL", "never without approval"), that severity wins over this table.
@@ -135,8 +135,8 @@ Write JSON to `findings_path`:
       "file": "src/core/entity.py",
       "line": 42,
       "severity": "WARN",
-      "rule": "comment-density",
-      "message": "block starting at this line has no purpose comment"
+      "rule": "comment-substance",
+      "message": "purpose comment restates the code below it instead of stating why the block exists"
     }
   ]
 }

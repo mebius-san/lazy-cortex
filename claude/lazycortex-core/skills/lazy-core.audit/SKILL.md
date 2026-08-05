@@ -240,7 +240,7 @@ Scope: `lazy.settings.json[experts]`, the flat `lazy.settings.json[daemon]` and 
 
 **Path layout constant**: plugin cache lives under `$HOME/.claude/plugins/cache/<registry>/<plugin>/<version>/bin/<plugin>`.
 
-Perform these 12 sub-checks in order:
+Perform these 14 sub-checks in order:
 
 **D1 — `lazy.settings.json[experts]` schema**
 
@@ -430,16 +430,53 @@ Run:
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
-from inbox_guard import check_inbox_collision, check_run_here_specificity
+from inbox_guard import check_inbox_collision
 from pathlib import Path
 import json
-p = Path('.')
-print(json.dumps(check_inbox_collision(p) + check_run_here_specificity(p), ensure_ascii=False))
+print(json.dumps(check_inbox_collision(Path('.')), ensure_ascii=False))
 "
 ```
 
 - `[FAIL]` kind `inbox_collision` — `<detail>`; `fix: set daemon.run_here false in one of the two checkouts` (never auto-applied — which checkout drives it is the operator's decision).
-- `[WARN]` kind `run_here_ambiguous` — `<detail>`; `fix: replace daemon.run_here true with a host list`.
+
+**D13 — Sandbox scope resolves**
+
+Run:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from sandbox_scope import audit
+from pathlib import Path
+import json
+print(json.dumps(audit(Path('.')), ensure_ascii=False))
+"
+```
+
+`present: false` → emit nothing (no sandbox file, so expert spawns run unconfined). `enabled: false` → emit nothing (confinement is off; the allowlist neither grants nor denies). Otherwise:
+
+- `[FAIL]` each entry of `missing_write` — `sandbox allowWrite does not cover <path>, which its own entries resolve to | .runtime/sandbox.settings.json`; `fix: run lazycortex-core sandbox-sync --repo-root "$PWD"`.
+- `[WARN]` each entry of `missing_read` — `sandbox allowRead does not cover <path> | .runtime/sandbox.settings.json`; same fix.
+
+The confinement is checked against the resolved path, so an allowlist entry naming a directory reached through a symlink grants nothing where the data lives: every write there fails with `Operation not permitted` while the recorded config still reads as correct. The sync appends only what is missing and drops nothing.
+
+**D14 — Protocol response envelope**
+
+`outcome` / `error` / `result` belong to `lazy-core.expert-runtime-contract.md`; a protocol declares the *values* `outcome` takes, never a status key of its own. A protocol that prescribes one disarms the runtime silently — the expert obeys the protocol over the system prompt, the response carries no discriminator, and every failure it reports classifies as success. Run:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from protocol_envelope import audit
+from pathlib import Path
+import json
+print(json.dumps(audit(Path('.')), ensure_ascii=False))
+"
+```
+
+The audit scans `.claude/references/*-protocol.md` (plus the same directory under `\$HOME/.claude/`), skipping the meta-contract itself. For every entry returned:
+
+- `[FAIL] protocol <name> overrides the response envelope: <detail> | <path>`; `fix: delete the envelope block from the protocol and declare only the outcome values under \`## Outcome by kind\`; the envelope reaches the expert through the runtime contract`.
+
+No entries → emit nothing.
 
 ### Structured report shape (Agents A, B, C — unchanged)
 
@@ -520,6 +557,9 @@ plugins_scanned: <n>  warn: <m>
 ### inbox_ownership
 - [FAIL] <detail>
 - [WARN] <detail>
+
+### protocol_envelope
+- [FAIL] protocol <name> overrides the response envelope: <detail> | <path>
 
 ### summary
 pass: <n>  warn: <n>  fail: <n>
@@ -653,7 +693,9 @@ Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings
 
 **Inbox ownership** — one line per `[FAIL]` or `[WARN]` from D12. Omit the section when D12 produced no findings.
 
-**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D12 findings).
+**Sandbox scope** — one line per `[FAIL]` or `[WARN]` from D13. Omit the section when D13 produced no findings.
+
+**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D13 findings).
 
 ### Logging compliance
 

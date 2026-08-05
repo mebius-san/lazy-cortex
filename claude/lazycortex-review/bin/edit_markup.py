@@ -38,6 +38,12 @@ _SIMPLE_RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
 
 
 def _strip_simple(text: str) -> str:
+  """
+  Fold `simple`-style edit-annotation markup into plain text.
+
+  Returns:
+    The input text with deletions, comments, and insertion wrappers resolved.
+  """
   for pattern, repl in _SIMPLE_RULES:
     text = pattern.sub(repl, text)
   return text
@@ -56,13 +62,22 @@ _DIFF_FENCE_RE = re.compile(
 
 
 def _resolve_diff_block(block_body: str) -> str:
+  """
+  Resolve one `diff` fence body into its final text, without cross-fence cancellation.
+
+  Args:
+    block_body: Raw text between the opening and closing `diff` fences.
+
+  Returns:
+    The resolved text with deletion-marked lines dropped and other marker prefixes removed.
+  """
   out_lines: list[str] = []
   for raw in block_body.splitlines():
-      # A diff line is a 1-char marker ("-"/"+"/"!"/" ") optionally followed
-      # by " " + content. A BARE marker (no trailing space) is that marker on
-      # an empty line — a deleted / inserted blank line — and folds like its
-      # content form (Bug 102): "-" drops; "+"/"!" keep an empty line. raw[2:]
-      # already yields "" for a 1-char marker, so the append needs no special-case.
+    # A diff line is a 1-char marker ("-"/"+"/"!"/" ") optionally followed
+    # by " " + content. A BARE marker (no trailing space) is that marker on
+    # an empty line — a deleted / inserted blank line — and folds like its
+    # content form (Bug 102): "-" drops; "+"/"!" keep an empty line. raw[2:]
+    # already yields "" for a 1-char marker, so the append needs no special-case.
     # guard: a deletion-marked diff line is dropped from the resolved output — skip before any append
     if raw == "-" or raw.startswith("- "):
       continue  # deletion accepted
@@ -75,7 +90,7 @@ def _resolve_diff_block(block_body: str) -> str:
     if raw.startswith("  "):
       out_lines.append(raw[2:])
       continue
-  # Anything else (e.g. unknown marker): keep verbatim.
+    # Anything else (e.g. unknown marker): keep verbatim.
     out_lines.append(raw)
   return "\n".join(out_lines)
 
@@ -99,28 +114,28 @@ def _parse_fence_body(block_body: str) -> tuple[list[tuple[bool, str]], list[str
   output_lines: list[tuple[bool, str]] = []
   deletions: list[str] = []
   for raw in block_body.splitlines():
-      # A diff line is a 1-char marker ("-"/"+"/"!"/" ") optionally followed
-      # by " " + content. A BARE marker (no trailing space) is that marker on
-      # an empty line — a deleted / inserted blank line — and folds like its
-      # content form (Bug 102): "-" drops; "+"/"!" keep an empty line. raw[2:]
-      # already yields "" for a 1-char marker, so the append needs no special-case.
-    # guard: a deletion-marked diff line is captured for cross-fence cancellation, then dropped from this fence's output
+    # A diff line is a 1-char marker ("-"/"+"/"!"/" ") optionally followed
+    # by " " + content. A BARE marker (no trailing space) is that marker on
+    # an empty line — a deleted / inserted blank line — and folds like its
+    # content form (Bug 102): "-" drops; "+"/"!" keep an empty line. raw[2:]
+    # already yields "" for a 1-char marker, so the append needs no special-case.
+    # a deletion-marked diff line is captured for cross-fence cancellation, then dropped from this fence's output
     if raw == "-" or raw.startswith("- "):
       deletions.append(raw[2:])
       continue
-    # guard: an insertion-marked diff line is appended as a cancellable emission
+    # an insertion-marked diff line is appended as a cancellable emission
     if raw == "+" or raw.startswith("+ "):
       output_lines.append((True, raw[2:]))
       continue
-    # guard: an emphasis-marked diff line is appended as a cancellable emission (same semantics as +)
+    # an emphasis-marked diff line is appended as a cancellable emission (same semantics as +)
     if raw == "!" or raw.startswith("! "):
       output_lines.append((True, raw[2:]))
       continue
-    # guard: a context line is appended as NOT cancellable (kept verbatim, never targeted by a cross-fence `-`)
+    # a context line is appended as NOT cancellable (kept verbatim, never targeted by a cross-fence `-`)
     if raw.startswith("  "):
       output_lines.append((False, raw[2:]))
       continue
-  # Anything else (e.g. unknown marker): keep verbatim, treat as cancellable.
+    # Anything else (e.g. unknown marker): keep verbatim, treat as cancellable.
     output_lines.append((True, raw))
   return output_lines, deletions
 
@@ -155,7 +170,7 @@ def _strip_diff(text: str) -> str:
   cancelled: set[tuple[int, int]] = set()
   for later_idx, (_, deletions) in enumerate(parsed):
     for del_content in deletions:
-        # Find the earliest prior fence with a still-live cancellable emission matching this deletion.
+      # Find the earliest prior fence with a still-live cancellable emission matching this deletion.
       matched = False
       for earlier_idx in range(later_idx):
         emissions = parsed[earlier_idx][0]
@@ -237,9 +252,9 @@ def drop_whitespace_only_diff_fences(text: str) -> str:
         plus_lines.append(raw[2:])
         minus_lines.append(raw[2:])
     if _normalize_ws("\n".join(minus_lines)) == _normalize_ws("\n".join(plus_lines)):
-        # Whitespace-only fence: emit resolved text directly.
+      # Whitespace-only fence: emit resolved text directly.
       return _resolve_diff_block(body)
-  # Real content change: keep the fence intact.
+    # Real content change: keep the fence intact.
     return match.group(0)
   return _DIFF_FENCE_RE.sub(repl, text)
 
@@ -262,6 +277,12 @@ _CRITIC_RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
 
 
 def _strip_criticmarkup(text: str) -> str:
+  """
+  Fold `criticmarkup`-style edit-annotation markup into plain text.
+
+  Returns:
+    The input text with substitutions, insertions, deletions, comments, and highlights resolved.
+  """
   for pattern, repl in _CRITIC_RULES:
     text = pattern.sub(repl, text)
   return text
@@ -283,6 +304,12 @@ _HTML_RULES: list[tuple[re.Pattern[str], Callable[[re.Match[str]], str]]] = [
 
 
 def _strip_html(text: str) -> str:
+  """
+  Fold `html`-style edit-annotation markup into plain text.
+
+  Returns:
+    The input text with comments, deletions, insertions, and highlights resolved.
+  """
   for pattern, repl in _HTML_RULES:
     text = pattern.sub(repl, text)
   return text
@@ -314,6 +341,12 @@ _BLANK_RUN_RE = re.compile(r"\n{3,}")
 
 
 def _collapse_blank_runs(text: str) -> str:
+  """
+  Collapse any run of three or more consecutive newlines to a single paragraph break.
+
+  Returns:
+    The input text with excess blank-line runs normalized.
+  """
   return _BLANK_RUN_RE.sub("\n\n", text)
 
 

@@ -34,7 +34,7 @@ Bash(LAZY_REPO_ROOT="$PWD" python3 "${CLAUDE_PLUGIN_ROOT}/bin/expert_preflight.p
 Parse the JSON on stdout. Its shape:
 
 - `experts[]` — one entry per validated expert: `name`, `static[]` (`{level, message}`), `dynamic` (or `null` when the probe was skipped), `verdict` (`ok` / `fail`), `fixes[]`.
-- `repo[]` — checkout-level findings (`{level, message}`) that apply to every expert here: an inbox another daemon on this host already drives (`fail`), and a `daemon.run_here` gate too coarse to name the machine it was answered on (`warn`).
+- `repo[]` — checkout-level findings (`{level, message}`) that apply to every expert here: an inbox another daemon on this host already drives (`fail`), a sandbox allowlist that does not cover a location its own entries resolve to (`fail` for write, `warn` for read), and a `daemon.run_here` gate too coarse to name the machine it was answered on (`warn`).
 - `skipped_cross_repo[]` — `expert@<repo>` targets not validated (this preflight only checks local-repo experts).
 - `summary` — one-line count.
 
@@ -49,6 +49,8 @@ Outcome: `preflight-run` or `no-targets` (empty `experts[]`).
 Render `repo[]` first, above the table — it is not per-expert, and a `fail` there means every expert below is launchable into a harmful state. One line per finding, prefixed with its `level`:
 
 - `fail` on inbox ownership — another checkout on this host drives the same physical inbox, so every file would be dispatched twice. This is not one of the fixes Step 3 applies: which checkout drives a shared inbox is the operator's decision. Print the finding and state that one of the two must set `daemon.run_here: false` (or pin a host list), then re-run.
+- `fail` on sandbox `allowWrite` — a confined spawn is checked against the resolved path, so an entry reached through a symlink permits nothing where the data lives and every write there fails with `Operation not permitted`. The finding carries the repair: `lazycortex-core sandbox-sync --repo-root <repo>`. Offer it as a Step 3 fix; it adds the resolved locations and never drops a recorded entry.
+- `warn` on sandbox `allowRead` — same cause on the read side; same repair.
 - `warn` on the daemon gate — `daemon.run_here` is a bare `true` in a checkout that sources directories from outside git, so a synced overlay reads it as answered on every machine holding the path. Direct the operator to `/lazy-core.install`, which offers to pin it to this host.
 
 When `repo[]` is empty, print nothing for it.
@@ -71,7 +73,7 @@ Outcome: `table-shown`, `table-shown-repo-blocked` (any `fail` in `repo[]`), or 
 
 ## Step 3 — Confirm + apply fixes
 
-For each expert with `verdict == "fail"`, walk its `fixes[]` in order. **One `AskUserQuestion` per fix — never batch.** If no expert failed, mark this step `skipped` with outcome `all-ok`.
+Offer the repo-level `sandbox` fix first when `repo[]` carries one, then, for each expert with `verdict == "fail"`, walk its `fixes[]` in order. **One `AskUserQuestion` per fix — never batch.** With no sandbox finding and no failing expert, mark this step `skipped` with outcome `all-ok`.
 
 Branch on each fix's `kind`:
 
@@ -120,11 +122,21 @@ Ask via `AskUserQuestion`:
 
 On any **pin**: write the tier as an `agent_models` entry for the expert's `agent` dispatch string into the project `.claude/lazy.settings.json` (group = the agent's plugin domain — plugin name up to the first `-`, e.g. `lazycortex`; `_project` for project-local agents) via `lazy_settings.load_section` + `save_section` (same Bash/python pattern as `lazy-core.agent-models` Step 8). Commit per this step's settings-write rules. Outcome `model-pinned`. On **leave**: outcome `kept-per-user-choice`.
 
+### repo-level `sandbox` finding — allowlist misses a resolved location
+
+Not an entry in any expert's `fixes[]` — it comes from `repo[]` and is offered once, before the per-expert fixes. Ask via `AskUserQuestion`:
+
+> The expert-spawn sandbox does not cover `<path>`, which its own allowlist resolves to. Confined spawns fail every write there with `Operation not permitted`. Record the resolved locations?
+> - **record** (Recommended) — run `lazycortex-core sandbox-sync`; it appends only what is missing and drops nothing.
+> - **leave** — no change; every job writing through that symlink keeps failing.
+
+On **record**: `Bash(lazycortex-core sandbox-sync --repo-root "$PWD")`. The file is gitignored daemon state, so there is nothing to commit. Outcome `sandbox-synced`. On **leave**: outcome `kept-per-user-choice`.
+
 **Settings writes.** All mutations go through a careful `Edit` on the exact JSON file — never a blind overwrite. This repo ships no dedicated settings-writer CLI for surgical `experts.<expert>.mcp_config` edits (the `settings-set` CLI replaces a whole section, which would clobber sibling experts), so a scoped `Edit` on the JSON is the correct tool. NEVER mutate any settings file without a confirmed `yes` from the fix's `AskUserQuestion`.
 
 Because a settings edit dirties a tracked file, commit it in the same execution: `git add .claude/lazy.settings.json` (plus any edited MCP-config file) and `git commit -m "fix(runtime): preflight drop/repair <expert> mcp_config"` — see `lazy-core.skill-writing § 6`. If the tree cannot be committed cleanly (transactional git state), do not write — report the finding and let the operator apply the fix.
 
-Outcome: `dropped`, `path-fixed`, `login-instructed`, `model-pinned`, `kept-per-user-choice`, or `all-ok`.
+Outcome: `dropped`, `path-fixed`, `login-instructed`, `model-pinned`, `sandbox-synced`, `kept-per-user-choice`, or `all-ok`.
 
 ## Step 4 — Report
 
@@ -167,3 +179,4 @@ input: "<--expert <name> | --no-probe | none>"
 - **"plugin-dir resolution was best-effort"** in the table — the preflight ran interactively with no `LAZYCORTEX_PLUGIN_DIRS` and derived plugin dirs from the repo + cache → a probe-only failure may be a false negative; re-run under the daemon or export `LAZYCORTEX_PLUGIN_DIRS` and confirm.
 - **A fix cannot be applied because the tree is mid-merge / rebase** — the skill refuses to write a settings change it cannot commit → finish the git transaction, then re-run `/lazy-runtime.preflight` to apply the fix.
 - **Every expert reports `ok` but a `fail` line sits above the table** — the experts are individually launchable; the checkout is not, because another daemon on this host already drives one of its inboxes → set `daemon.run_here: false` in the checkout that must not drive it, then re-run.
+- **Jobs fail with `Operation not permitted` while the config looks correct** — the sandbox allowlist names a directory reached through a symlink, and confinement is checked against the resolved path → accept the `sandbox` fix in Step 3, or run `lazycortex-core sandbox-sync --repo-root "$PWD"` by hand.
