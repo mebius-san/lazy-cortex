@@ -50,6 +50,51 @@ if TYPE_CHECKING:
 class _K:
   """
   String/int constants used by the scaffolder.
+
+  Attributes:
+    PRODUCTS: Settings key holding the product registry.
+    SPEC_PATH: Settings key naming a product's spec directory.
+    ASSET_CATEGORIES: Settings key holding a product's operator-defined category definitions.
+    ICON: Key naming a category's icon.
+    COLOR: Key naming a category's optional icon color.
+    SPEC_SOURCE_DOCS: Frontmatter key listing a folder-note's authored sibling docs.
+    ICONIZE_ICON: Frontmatter key carrying the folder-note's icon.
+    ICONIZE_COLOR: Frontmatter key carrying the folder-note's optional icon color.
+    HANDOFF: Key naming a product's handoff configuration block.
+    STOP_AFTER: Key naming the gate at which a handoff product's layout stops.
+    GATE_DESIGN_DONE: The gate name at which a handoff product scaffolds only the design-role doc.
+    FOLDER_NOTE_TMPL: Filename of the folder-note template.
+    DESIGN_MD: Filename of the design doc.
+    PLAN_MD: Filename of the plan doc.
+    BUG_MD: Filename of the bug-layout design-side doc.
+    DESIGN_STEM: Filename stem of the design doc, for sibling wikilinks.
+    BUG_STEM: Filename stem of the bug doc, for sibling wikilinks.
+    TECH_STEM: Filename stem of the tech doc, for sibling wikilinks.
+    CLAUDE_DIR: The `.claude` directory segment.
+    SETTINGS_FILE: Filename of the settings file.
+    TEMPLATES_DIR: The templates directory segment.
+    HISTORY_HEADING: The `# History` heading appended to a folder-note.
+    DOCS_MARKER_START: Opening HTML marker delimiting the folder-note's sibling-docs block.
+    DOCS_MARKER_END: Closing HTML marker delimiting the folder-note's sibling-docs block.
+    CAT_LOGICAL: The error category for invalid-input failures.
+    OUTCOME_ERROR: Outcome token for a failed scaffold.
+    OUTCOME_SUCCESS: Outcome token for a completed scaffold.
+    STAGE_DRAFT: The doc-stage value for a doc awaiting approval.
+    STAGE_EMPTY: The doc-stage value for a scaffolded but unwritten doc.
+    CANONICAL_PATH_MIN_PARTS: Minimum segment count a `spec_path` must have to carry a subsystem prefix.
+    PRODUCTS_SEGMENT: The `products` path segment identifying the canonical `spec_path` shape.
+    PROG: CLI program name shown in `--help` output.
+    ARG_PRODUCT: CLI positional argument name for the product compound-key.
+    ARG_CATEGORY: CLI positional argument name for the asset category.
+    ARG_SLUG: CLI positional argument name for the asset slug.
+    ARG_CWD: CLI flag overriding the repo root.
+    HELP_PRODUCT: CLI help text for the product argument.
+    HELP_CATEGORY: CLI help text for the category argument.
+    HELP_SLUG: CLI help text for the slug argument.
+    HELP_CWD: CLI help text for the `--cwd` flag.
+    OUT_FILE: Output JSON key naming a produced doc's repo-relative path.
+    OUT_STAGE: Output JSON key naming a produced doc's initial stage.
+    GIT_DIR: The `.git` entry checked to detect a repo checkout.
   """
 
   # Settings + frontmatter keys
@@ -113,6 +158,12 @@ class _K:
 class _Category:
   """
   Built-in asset categories and their fixed folder + doc-set + icon mapping.
+
+  Attributes:
+    BUILTIN_FOLDERS: Mapping of built-in category keys to their on-disk folder names.
+    BUILTIN_LAYOUT: Mapping of built-in category keys to their authored-doc filename lists.
+    BUILTIN_ICONS: Mapping of built-in category keys to their default icon names.
+    DEFAULT_LAYOUT: Authored-doc filename list used for operator-defined categories.
   """
 
   BUILTIN_FOLDERS = { "feature": "features", "change": "changes", "bug": "bugs" }
@@ -499,12 +550,15 @@ def main(argv: list[str]) -> int:
   Returns:
     Process exit code: `0` on success, `1` on logical error, `2` on argparse failure.
   """
+  # the three positionals name the asset; --cwd pins the repo the daemon runs against
   parser = argparse.ArgumentParser(prog=_K.PROG)
   parser.add_argument(_K.ARG_PRODUCT, help=_K.HELP_PRODUCT)
   parser.add_argument(_K.ARG_CATEGORY, help=_K.HELP_CATEGORY)
   parser.add_argument(_K.ARG_SLUG, help=_K.HELP_SLUG)
   parser.add_argument(_K.ARG_CWD, default=None, help=_K.HELP_CWD)
   args = parser.parse_args(argv)
+
+  # the product record supplies every category-scaled decision the scaffold needs
   repo = Path(args.cwd).resolve() if args.cwd else _repo_root(Path.cwd())
   record = _resolve_product(repo, args.product)
   folder = _category_folder(args.category, record)
@@ -512,12 +566,17 @@ def main(argv: list[str]) -> int:
   icon, color = _icon_color(args.category, record)
   product_tag = _product_tag(record)
   subsystem = _subsystem(record).capitalize() or args.product.capitalize()
+
+  # scaffolding onto an existing folder would silently overwrite authored docs
   spec_path = record[_K.SPEC_PATH]
   content_root = spec_paths.spec_content_root(repo)
   target_folder = content_root / spec_path / folder / args.slug
+  # guard: target folder already there, refuse rather than merge into it
   if target_folder.exists():
     _fail(_K.CAT_LOGICAL, f"target folder already exists: {target_folder}")
   target_folder.mkdir(parents=True, exist_ok=False)
+
+  # the status folder-note carries the iconize block that paints the folder in the explorer
   tokens = { "product": args.product, "product_tag": product_tag,
              "subsystem": subsystem, "slug": args.slug }
   note_template = _resolve_template(repo, args.category, args.product, _K.FOLDER_NOTE_TMPL)
@@ -525,6 +584,8 @@ def main(argv: list[str]) -> int:
   note_text = _inject_iconize(note_text, icon, color)
   note_path = target_folder / f"{args.slug}.md"
   note_path.write_text(note_text)
+
+  # one doc per layout entry, each seeded with its cross-reference block and default stage
   produced: list[dict] = []
   for doc in layout:
     tmpl_path = _resolve_template(repo, args.category, args.product, doc)
@@ -535,6 +596,8 @@ def main(argv: list[str]) -> int:
     doc_path.write_text(doc_text)
     produced.append({ _K.OUT_FILE: str(doc_path.relative_to(repo)),
                       _K.OUT_STAGE: _DOC_DEFAULT_STAGE.get(doc, _K.STAGE_EMPTY) })
+
+  # the folder-note history records the scaffold plus every doc's initial stage
   today = _dt.datetime.now(_dt.UTC).date().isoformat()
   history_lines = [
       f"{today} — spec.create-asset · scaffolded {args.category} "
@@ -546,6 +609,8 @@ def main(argv: list[str]) -> int:
         f"spec_stage empty→{p[_K.OUT_STAGE]}"
     )
   _append_history(note_path, history_lines)
+
+  # repo-relative paths in the result so the calling skill can quote them straight back
   print(json.dumps({
       "outcome": _K.OUTCOME_SUCCESS,
       "folder": str(target_folder.relative_to(repo)),

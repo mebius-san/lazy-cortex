@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
-last_regen: 2026-07-25
+last_regen: 2026-08-05
 no_diagram: true
 source_skills:
   - lazy-observe.install
@@ -93,6 +93,16 @@ Run `/lazy-observe.doctor`. It performs seven checks in sequence without touchin
 ## Doctor reports `FAIL no-lazycortex-series` even though the endpoint is up. What's happening?
 
 The `/metrics` endpoint is serving data from the lazycortex-core daemon, but no routine has dispatched yet in this session, so the daemon hasn't produced any `lazycortex_runtime_*` samples. Wait for the first tick — once Claude Code runs a skill or the daemon's own heartbeat fires, samples will appear. Re-run `/lazy-observe.doctor` after the first activity and Step 4 should clear to `PASS`.
+
+---
+
+## What's the `lazycortex_runtime_incidents_total` series, and what do the new alerts watch?
+
+`lazycortex_runtime_incidents_total` (labeled by `repo`, `kind`, and `cause`) counts incidents opened in the runtime's error ledger — the same journal `lazycortex-core error-list` reads from. It ships alongside the job outcome series (`lazycortex_runtime_expert_jobs_total`) and queue-depth series (`lazycortex_runtime_queue_depth`) you already had; there's nothing to configure — `/lazy-observe.install` picks it up on the next install or re-render, and the dashboard and alert rule files ship it out of the box.
+
+This release also tightens what counts as a finished job: the runtime is fail-closed, so an expert response that's missing `outcome`, carries an unrecognized value, or otherwise doesn't prove the work completed is now counted `failed` rather than `done` in `expert_jobs_total`. Silence from an expert is a failure, not a free pass.
+
+Three alerts in `claude/lazycortex-observe/alerts/lazycortex-runtime.rules.yml` watch this: `LazyCortexExpertJobsFailing` fires when a job on a repo/expert finishes with any outcome other than `done` in the last 15 minutes; `LazyCortexDeadLetterQueueGrowing` fires when bundles sit parked in `failed`, `deferred`, or `dead` state for 30+ minutes; `LazyCortexIncidentsOpening` fires when the error ledger opens a new incident, by kind and cause, in the last 15 minutes. All three annotations point you at `lazycortex-core error-list --repo <repo>` to triage.
 
 ---
 

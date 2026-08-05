@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+import fnmatch
 import json
 import os
 import re
@@ -126,8 +127,11 @@ class Check2ReferencesResolve:
     if not rules_dir.exists():
       return {"severity": "WARN", "message": "consumer .claude/rules/ does not exist — run /lazy-python.install"}
     cited: set[str] = set()
-    for rule_file in rules_dir.glob("lazy-python.*.md"):
-      cited.update(self.PATTERN.findall(rule_file.read_text()))
+    for entry in sorted(os.listdir(rules_dir)):
+      # guard: only the plugin's own mirrored rules cite reference paths
+      if not fnmatch.fnmatch(entry, "lazy-python.*.md"):
+        continue
+      cited.update(self.PATTERN.findall((rules_dir / entry).read_text()))
     missing = [ref for ref in cited if not (PLUGIN_ROOT / "references" / ref).exists()]
     if missing:
       return {"severity": "FAIL", "message": f"unresolved reference paths: {missing}"}
@@ -260,7 +264,7 @@ class Check5Pyproject:
       Finding dict with `severity` (PASS, WARN, or FAIL) and a `message` string.
     """
     pyproject = self.consumer_dir / "pyproject.toml"
-    # guard:
+    # guard: no pyproject.toml at all, so no checker stack can be configured
     if not pyproject.exists():
       return {"severity": "FAIL", "message": "pyproject.toml not found in consumer root"}
     try:
@@ -376,7 +380,7 @@ class Check8Scaffold:
       Finding dict with `severity` (PASS or WARN) and a `message` string.
     """
     rule = self.consumer_dir / self.RULE_REL
-    # guard:
+    # guard: the mirrored rule file is absent, so the install never ran here
     if not rule.exists():
       return {
         "severity": "WARN",
@@ -545,7 +549,7 @@ class Check11Venv:
       The value as a string, or an empty string if the file is absent, unparseable, or the key is missing.
     """
     pyproject = self.consumer_dir / "pyproject.toml"
-    # guard:
+    # guard: no pyproject.toml, so the key cannot be configured
     if not pyproject.exists():
       return ""
     try:
@@ -553,7 +557,7 @@ class Check11Venv:
     except tomllib.TOMLDecodeError:
       return ""
     value = data.get("tool", {}).get("lazy-python", {}).get(key)
-    # guard:
+    # guard: key absent from the section, report it as unset
     if value is None:
       return ""
     if isinstance(value, bool):
@@ -599,9 +603,11 @@ class Check11Venv:
       return {"severity": "WARN",
               "message": "no venv found AND bootstrap-fallback = false (consumer must configure)"}
 
+    # guard: the fallback builds the venv with uv, so its absence makes the fallback a dead end
     if not shutil.which("uv"):
       return {"severity": "WARN", "message": "no venv found AND uv missing — fallback won't work on first chk-py"}
 
+    # no venv yet, but nothing blocks the fallback from creating one
     return {"severity": "PASS", "message": "no venv yet; fallback creates <consumer>/.venv on first chk-py"}
 
 

@@ -61,6 +61,7 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
   kept: list[Item] = []
   deselected: list[Item] = []
 
+  # the same test reached through a re-export shim collects twice, keyed identically
   for item in items:
     func = getattr(item, "function", None)
     cls = getattr(item, "cls", None)
@@ -90,6 +91,7 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
   if not deselected:
     return
 
+  # the duplicates are deselected through the hook so reporters see a consistent session
   config.hook.pytest_deselected(items = deselected)
   items[:] = kept
   config.stash[DEDUP_COUNT] = len(deselected)
@@ -113,4 +115,5 @@ def pytest_terminal_summary(terminalreporter: TerminalReporter, config: Config) 
   if not count:
     return
 
+  # the summary line tells the reader why the collected count dropped
   terminalreporter.write_line(f"[lazy-python] deduplicated {count} re-exported test items")

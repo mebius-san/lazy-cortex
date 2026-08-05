@@ -111,17 +111,20 @@ def resolve_see_also_target(target: str, node_path: Path) -> Path | None:
   if target.startswith(_CROSS_REPO_PREFIX):
     return None
 
+  # the canonical base is the node's own directory — try it before widening
   node_dir = node_path.resolve().parent
   candidate = (node_dir / target).resolve()
   # guard: already written against the canonical base
   if candidate.is_file():
     return candidate
 
+  # widening is bounded by the repository, so a node outside one has nowhere to go
   repo = _repo_root_for(node_path)
   # guard: node lives outside any repository — no coarser base to try
   if repo is None:
     return None
 
+  # an older curator run may have written the target against a coarser base
   for base in node_dir.parents:
     # guard: walked above the repo root — stop widening
     if base != repo and repo not in base.parents:
@@ -174,6 +177,7 @@ def normalize_see_also_line(line: str, node_path: Path) -> str:
     canonical = normalize_see_also_target(target, node_path)
     return raw.replace(f"({match.group(1)})", f"({canonical})", 1)
 
+  # a bare-path item carries no link syntax, so the substitution leaves it untouched
   return _SEE_ALSO_LINK_RE.sub(_rewrite, line)
 
 
@@ -221,6 +225,7 @@ def _find_fences(text: str) -> tuple[int, int, int] | None:
   if not (text.startswith(("---\n", "---\r\n")) or text == "---"):
     return None
 
+  # search for the closing fence past the opening one, honouring either line ending
   after_open = len("---\r\n") if text.startswith("---\r\n") else len("---\n")
   rest = text[after_open:]
   match = _FENCE_RE.search(rest)
@@ -228,9 +233,10 @@ def _find_fences(text: str) -> tuple[int, int, int] | None:
   if match is None:
     return None
 
+  # re-anchor the match offsets onto the full document
   close_start = after_open + match.start()
   close_end = after_open + match.end()
-  # guard: consume the newline that follows the closing fence
+  # take the newline after the closing fence into the span so the body starts clean
   if close_end < len(text) and text[close_end] == "\n":
     close_end += 1
   return after_open, close_start, close_end
@@ -270,12 +276,14 @@ def _key_block_span(block: str, key: str) -> tuple[int, int] | None:
   if match is None:
     return None
 
+  # the entry runs from its header line to the newline that ends it
   start = match.start()
   cursor = block.find("\n", match.end())
   # guard: key is on the last line with no trailing newline
   if cursor == -1:
     return start, len(block)
 
+  # indented continuation lines belong to the same logical entry — swallow them
   cursor += 1
   while cursor < len(block):
     next_nl = block.find("\n", cursor)
@@ -286,6 +294,7 @@ def _key_block_span(block: str, key: str) -> tuple[int, int] | None:
       break
     cursor = (line_end + 1) if next_nl != -1 else line_end
 
+  # the span is what a caller replaces to rewrite the whole entry at once
   return start, cursor
 
 
@@ -451,10 +460,12 @@ def _set_scalar_field(text: str, key: str, value: str) -> str:
   if span is None:
     return f"---\n{rendered}\n---\n{text}"
 
+  # every edit happens inside the fences; the body text is spliced back untouched
   open_end, close_start, _ = span
   block = text[open_end:close_start]
   existing = _key_block_span(block, key)
 
+  # an absent key is appended, a present one is replaced whole
   if existing is None:
     # Append before the closing fence
     if block and not block.endswith("\n"):
@@ -495,10 +506,12 @@ def _set_tags_field(text: str, new_tags: list[str]) -> str:
     block_yaml = _render_tags_block(new_tags)
     return f"---\n{block_yaml}---\n{text}"
 
+  # every edit happens inside the fences; the body text is spliced back untouched
   open_end, close_start, _ = span
   block = text[open_end:close_start]
   existing = _key_block_span(block, _KEY_TAGS)
 
+  # an empty list means the key goes away entirely, not an empty sequence
   if not new_tags:
     # guard: no tags and no existing key — nothing to change
     if existing is None:
@@ -508,6 +521,7 @@ def _set_tags_field(text: str, new_tags: list[str]) -> str:
     new_block = block[:start] + block[end:]
     return text[:open_end] + new_block + text[close_start:]
 
+  # the same rendered sequence serves both the append and the replace path
   rendered = _render_tags_block(new_tags)
   # Rendered block already ends with `\n` so no extra suffix needed
   if existing is None:
@@ -517,6 +531,7 @@ def _set_tags_field(text: str, new_tags: list[str]) -> str:
       new_block = block + rendered
     return text[:open_end] + new_block + text[close_start:]
 
+  # swap the old entry for the new one, leaving neighbouring keys exactly as they were
   start, end = existing
   # Preserve any whitespace suffix so subsequent keys stay on their own lines
   tail = block[end:]
@@ -579,10 +594,12 @@ def _set_block_seq_field(text: str, key: str, new_values: list[str]) -> str:
     block_yaml = _render_block_seq(key, new_values)
     return f"---\n{block_yaml}---\n{text}"
 
+  # every edit happens inside the fences; the body text is spliced back untouched
   open_end, close_start, _ = span
   block = text[open_end:close_start]
   existing = _key_block_span(block, key)
 
+  # an empty list means the key goes away entirely, not an empty sequence
   if not new_values:
     # guard: no values and no existing key — nothing to change
     if existing is None:
@@ -591,6 +608,7 @@ def _set_block_seq_field(text: str, key: str, new_values: list[str]) -> str:
     new_block = block[:start] + block[end:]
     return text[:open_end] + new_block + text[close_start:]
 
+  # the same rendered sequence serves both the append and the replace path
   rendered = _render_block_seq(key, new_values)
   # Rendered block already ends with `\n` so no extra suffix needed
   if existing is None:
@@ -600,6 +618,7 @@ def _set_block_seq_field(text: str, key: str, new_values: list[str]) -> str:
       new_block = block + rendered
     return text[:open_end] + new_block + text[close_start:]
 
+  # swap the old entry for the new one, leaving neighbouring keys exactly as they were
   start, end = existing
   tail = block[end:]
   new_block = block[:start] + rendered + tail
@@ -623,6 +642,7 @@ def _get_scalar_field(text: str, key: str) -> str | None:
   if span is None:
     return None
 
+  # only the frontmatter block can hold the key
   open_end, close_start, _ = span
   block = text[open_end:close_start]
   existing = _key_block_span(block, key)
@@ -630,6 +650,7 @@ def _get_scalar_field(text: str, key: str) -> str | None:
   if existing is None:
     return None
 
+  # a scalar lives on the header line, after the colon — continuation lines are not one
   start, end = existing
   entry = block[start:end]
   header_line = entry.split("\n")[0]
@@ -658,6 +679,7 @@ def _get_array_field(text: str, key: str) -> list[str]:
   if span is None:
     return []
 
+  # only the frontmatter block can hold the key
   open_end, close_start, _ = span
   block = text[open_end:close_start]
   existing = _key_block_span(block, key)
@@ -665,6 +687,7 @@ def _get_array_field(text: str, key: str) -> list[str]:
   if existing is None:
     return []
 
+  # the shared parser handles both the block-sequence and inline-flow shapes
   start, end = existing
   entry = block[start:end]
   return _parse_tags_block(entry)
@@ -995,17 +1018,10 @@ class MarkdownNode:
     """
     Write all three wiki-managed regions in one atomic pass.
 
-    The operation is idempotent: applying identical `wiki_summary`, `topics`,
-    `connectors`, and `see_also_lines` twice produces byte-identical file
-    content on the second call.
-
-    Steps:
-
-    1. Set `wiki_summary` to the given string.
-    2. Merge `topics` into `tags:` — replace only the `wiki/`-prefixed subset,
-       preserving every non-`wiki/` tag in its original relative order.
-    3. Replace the `wiki_connectors` block with the given phrases.
-    4. Graft the `# See also` section via `Markers.ensure_see_also`.
+    Guarantees:
+      - Applying identical `wiki_summary`, `topics`, `connectors`, and `see_also_lines`
+        twice produces byte-identical file content on the second call.
+      - Non-`wiki/`-prefixed tags survive untouched; only the `wiki/*` subset is replaced.
 
     Args:
       wiki_summary: One-line summary string (no newlines).
@@ -1030,20 +1046,14 @@ class MarkdownNode:
     """
     Write the classify-phase managed regions: `wiki_summary`, `wiki/*` tags, `wiki_connectors`.
 
-    Leaves the `# See also` section (and any other body content)
-    untouched.  The operation is idempotent — applying identical
-    `wiki_summary`, `topics`, and `connectors` twice produces byte-identical
-    file content on the second call.
+    Leaves the `# See also` section (and any other body content) untouched.
 
-    Specifically:
-
-    1. Set `wiki_summary` to the given string.
-    2. Merge `topics` into `tags:` — replace only the `wiki/`-prefixed
-       subset, preserving every non-`wiki/` tag in its original order.
-    3. Replace the `wiki_connectors` block (when `connectors` is given).
-
-    `wiki_connectors` is a managed region excluded from `source_hash`, so a
-    connectors-only change never perturbs the recorded `wiki_src_hash`.
+    Guarantees:
+      - Applying identical `wiki_summary`, `topics`, and `connectors` twice produces
+        byte-identical file content on the second call.
+      - Non-`wiki/`-prefixed tags survive untouched; only the `wiki/*` subset is replaced.
+      - A connectors-only change never perturbs the recorded `wiki_src_hash`, since
+        `wiki_connectors` is excluded from `source_hash`.
 
     Args:
       wiki_summary: One-line summary string (no newlines).
@@ -1070,13 +1080,14 @@ class MarkdownNode:
     text = _set_tags_field(text, merged)
 
     # Step 3 — wiki_connectors (managed block, excluded from source_hash)
-    # guard: only rewrite the block when the caller supplied connectors
+    # a None means "leave the block as it is"; an empty list means "clear it"
     if connectors is not None:
       text = _set_block_seq_field(text, _KEY_CONNECTORS, connectors)
 
     # Step 4 — wiki_src_hash (backstop for incremental relink on anchor loss)
     text = _set_scalar_field(text, _KEY_SRC_HASH, src_hash)
 
+    # all four steps land in a single write, so the file is never seen half-applied
     self._text = text
     self._path.write_text(text, encoding = _ENCODING)
 
@@ -1089,15 +1100,12 @@ class MarkdownNode:
     Write the link-phase managed region: the `# See also` section.
 
     Leaves `wiki_summary`, `wiki/*` tags, and all other content untouched.
-    The operation is idempotent — applying identical `see_also_lines` twice
-    produces byte-identical file content on the second call.
 
-    Specifically: grafts the `# See also` section via
-    `Markers.ensure_see_also`.
-
-    Every link target is normalised to the canonical node-directory-relative base
-    before it is written, so a target copied from `topics.md` (whose links are
-    relative to the index directory) or spelled repo-relative lands correctly.
+    Guarantees:
+      - Applying identical `see_also_lines` twice produces byte-identical file content
+        on the second call.
+      - Every link target is normalised to the canonical node-directory-relative base,
+        so a target copied from `topics.md` or spelled repo-relative lands correctly.
 
     Args:
       see_also_lines: Ready-to-graft markdown list-item strings for the
@@ -1116,12 +1124,14 @@ class MarkdownNode:
       pre = text[:close_end]
       body = text[close_end:]
 
+    # rebase every target onto this node's directory, then graft the managed section
     inner = "\n".join(
       normalize_see_also_line(line, self._path) for line in see_also_lines
     )
     body = self._markers.ensure_see_also(body, inner)
     text = pre + body
 
+    # frontmatter and body go back to disk as one document
     self._text = text
     self._path.write_text(text, encoding = _ENCODING)
 
@@ -1320,8 +1330,9 @@ def _locate_header_end(lines: list[str], prefix: str) -> int:
     # guard: stop at blank line or non-comment line
     if not stripped or not stripped.startswith(prefix):
       break
-    # guard: stop if this is already a wiki open tag (shouldn't happen on fresh files)
+    # a wiki tag in the header run means the header already ended here
     inner = _strip_comment_prefix(line.rstrip("\n").rstrip("\r"), prefix)
+    # guard: stop if this is already a wiki open tag (shouldn't happen on fresh files)
     if inner is not None and inner.strip() == _WIKI_OPEN_TAG:
       break
     i += 1
@@ -1429,6 +1440,7 @@ def _parse_wiki_block(
   in_see_also = False
   block_comment = prefix == _BLOCK_COMMENT_SENTINEL
 
+  # the delimiter lines themselves are not field content
   interior = [ raw.rstrip("\n").rstrip("\r") for raw in lines[start + 1:end] ]
   # Block-comment interior lines carry no comment prefix but may share a common
   # leading indent (an indented `/* … */` block).  Dedent by that common base so
@@ -1439,7 +1451,9 @@ def _parse_wiki_block(
     indents = [ len(e) - len(e.lstrip()) for e in interior if e.strip() ]
     base_indent = min(indents) if indents else 0
 
+  # one pass over the interior: each line is either a field header or a see-also item
   for line in interior:
+    # the two comment styles reach their payload differently
     if block_comment:
       content = line[base_indent:].rstrip()
     else:
@@ -1460,7 +1474,7 @@ def _parse_wiki_block(
         see_also_list.append(item)
       continue
 
-    # field header lines
+    # field header lines — any of them ends an open see-also run
     if content.startswith(_FH_SUMMARY):
       in_see_also = False
       val = content[len(_FH_SUMMARY):].strip()
@@ -1507,6 +1521,7 @@ def _parse_wiki_block(
   if in_see_also or _FK_SEE_ALSO in fields:
     fields[_FK_SEE_ALSO] = see_also_list
 
+  # absent fields stay absent — the caller distinguishes "unset" from "empty"
   return fields
 
 
@@ -1535,38 +1550,46 @@ def _render_wiki_block_lines(
   block_comment = prefix == _BLOCK_COMMENT_SENTINEL
   out: list[str] = []
 
+  # a block-comment language opens the wrapper on the tag line itself
   if block_comment:
     out.append(f"/* {_WIKI_OPEN_TAG}")
   else:
     out.append(_build_wiki_line(_WIKI_OPEN_TAG, prefix))
 
+  # inside a block comment the interior needs no prefix; a line-comment file does
   def _line(content: str) -> str:
     if block_comment:
       return content
     return _build_wiki_line(content, prefix)
 
+  # emit the curated fields in a fixed order so a re-render is byte-stable
   summary = fields.get(_FK_SUMMARY)
   if summary:
     out.append(_line(f"{_FH_SUMMARY} {summary}"))
 
+  # topics and connectors render as comma-joined single lines
   topics = fields.get(_FK_TOPICS)
   if topics and isinstance(topics, list):
     out.append(_line(f"{_FH_TOPICS} {', '.join(topics)}"))
 
+  # connectors ride alongside topics as free-form linking hints
   connectors = fields.get(_FK_CONNECTORS)
   if connectors and isinstance(connectors, list):
     out.append(_line(f"{_FH_CONNECTORS} {', '.join(connectors)}"))
 
+  # the hash anchors incremental relink when the git anchor is lost
   src_hash = fields.get(_FK_SRC_HASH)
   if src_hash:
     out.append(_line(f"{_FH_SRC_HASH} {src_hash}"))
 
+  # an empty-but-present see-also still emits its header, marking the node as linked
   see_also = fields.get(_FK_SEE_ALSO)
   if see_also is not None:
     out.append(_line(_FH_SEE_ALSO))
     for item in (see_also if isinstance(see_also, list) else []):
       out.append(_line(f"  - {item}"))
 
+  # the operator pin fields all render the same way — one header, one value
   for field_key, field_hdr in [
     (_FK_PINNED_TOPICS,    _FH_PINNED_TOPICS),
     (_FK_UNRELATED_TOPICS, _FH_UNRELATED_TOPICS),
@@ -1577,11 +1600,13 @@ def _render_wiki_block_lines(
     if val:
       out.append(_line(f"{field_hdr} {val}"))
 
+  # close the wrapper the same way it was opened
   if block_comment:
     out.append(f"{_WIKI_CLOSE_TAG} */")
   else:
     out.append(_build_wiki_line(_WIKI_CLOSE_TAG, prefix))
 
+  # newline-free lines — the writer owns line endings
   return out
 
 
@@ -1606,7 +1631,7 @@ def _code_source_for_hash(lines: list[str], prefix: str) -> str:
   else:
     start, end = span
     after = end + 1
-    # guard: drop one trailing blank separator the writer adds after the block
+    # the writer adds a blank separator after the block — exclude it from the hash too
     if after < len(lines) and lines[after].strip() == "":
       after += 1
     kept = lines[:start] + lines[after:]
@@ -1844,6 +1869,7 @@ class CodeNode:
       _code_source_for_hash(self._lines, self._prefix).encode(self._ENCODING)
     ).hexdigest()[:_SRC_HASH_LEN]
 
+    # merge onto the existing block so fields this phase does not own survive
     current = self._read_block() or {}
     current[_FK_SUMMARY] = wiki_summary
     # Code topics are stored BARE (`<axis>/<value>`) — strip the `wiki/` prefix
@@ -1853,7 +1879,7 @@ class CodeNode:
       t[len(_WIKI_TAG_PREFIX):] if t.startswith(_WIKI_TAG_PREFIX) else t
       for t in topics
     ]
-    # guard: only rewrite connectors when the caller supplied them
+    # a None means "leave connectors as they are"; an empty list clears them
     if connectors is not None:
       current[_FK_CONNECTORS] = connectors
     current[_FK_SRC_HASH] = src_hash
@@ -1934,13 +1960,14 @@ class CodeNode:
     # Ensure a blank separator line after the block (before code)
     block_with_nl.append("\n")
 
+    # an existing block is replaced in place; a fresh one is inserted after the header
     span = _find_wiki_block(self._lines, self._prefix)
     if span is not None:
       start, end = span
       # Replace lines[start:end+1] with the new block lines
       # Preserve the separator blank line that may already follow the block
       after_block = end + 1
-      # guard: skip a blank line that was already the separator to avoid doubling
+      # consume the existing separator so the rewrite does not double it
       if after_block < len(self._lines) and self._lines[after_block].strip() == "":
         after_block += 1
       new_lines = self._lines[:start] + block_with_nl + self._lines[after_block:]
@@ -1948,6 +1975,7 @@ class CodeNode:
       insert_at = _locate_header_end(self._lines, self._prefix)
       new_lines = self._lines[:insert_at] + block_with_nl + self._lines[insert_at:]
 
+    # keep the in-memory view and the file in step after the write
     self._lines = new_lines
     self._text = "".join(new_lines)
     self._path.write_text(self._text, encoding = self._ENCODING)

@@ -42,7 +42,7 @@ def _resolve_settings_path(cwd: Path | str | None) -> Path:
   Returns:
     Path to `<cwd>/.claude/lazy.settings.json` under the resolved working directory.
   """
-  # guard: explicit --cwd wins; otherwise mirror the dispatcher's LAZY_REPO_ROOT-or-cwd convention
+  # pick the repo root: explicit --cwd wins, otherwise the dispatcher's LAZY_REPO_ROOT-or-cwd convention
   if cwd is not None:
     root = Path(cwd)
   else:

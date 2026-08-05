@@ -14,7 +14,7 @@ Critical Python-discipline reminders for any `.py` file. Read the full canon at 
 - **Spaces inside brackets**: `[ 1, 2 ]`, `{ key: val }`, `{ **dict }`.
 - **`__init__` keyword-only rule**: all params with defaults must be after `*`.
 - **No bare `type`** or **`Any`** in annotations (waiver required to exempt).
-- **No module-level functions** — code lives on classes; module-level is for constants, imports, and class definitions only.
+- **Prefer classes over module-level functions** — a recommendation, not a ban. Reach for a class when the functions share state, a namespace, or a lifecycle; a flat module of functions is legitimate for a standalone script or worker that has none of those. Never create a class whose only purpose is to hold unrelated functions.
 - **No local imports** — all imports at module level (exception: deferred-import libs per project settings).
 - **No `typing.cast()`** — use `isinstance` and explicit narrowing instead.
 - **Guard clauses**: every guard `if` needs `# guard:` comment on the preceding line.
@@ -24,7 +24,7 @@ Critical Python-discipline reminders for any `.py` file. Read the full canon at 
 - **`# noinspection` must be standalone** — never append text after the inspection name (PyCharm ignores the directive otherwise); put the explanation on a separate `#` line below.
 - **TypeAliases go with TypeVars** — in module section 3 (after `TYPE_CHECKING` block), not inline or near classes.
 - **`__init__` block separation**: when `super().__init__()` coexists with other code, it must be its own commented block, separated by blank lines.
-- **Every code block carries a purpose comment** — a block is any chunk after a blank line inside a body, including a lone trailing `return x`; `# waiver:` is not a purpose comment.
+- **Every code block carries a purpose comment** — a block is any chunk after a blank line inside a body, including a lone trailing `return x`; `# waiver:` is not a purpose comment. `pcf` proves the comment is there; the review phase judges whether it says anything.
 - **No useless intermediate variables** — inline anything used once; never alias a trivial accessor. Justified only for expensive results reused, loop-invariant hoisting, complex multi-step expressions, or an access chain two or more objects deep read more than once.
 - **Read the full guides before adding an entity or refactoring** — before adding a class, enum, module, or package, and before any move / rename / split / restructure, read `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.coding-guidelines.md` plus the applicable project overlays. The trigger is the act itself, never your own judgement of whether the change is "trivial" — self-assessed triviality is exactly how placement rules get violated. These reminders and the scaffold templates are not a substitute for the guides and may lag behind them; on conflict the guides win.
 
@@ -39,7 +39,7 @@ Run after every batch of Python edits. The four steps escalate from per-file fas
 1. **`chk-py all <file>.py -q`** — per-file style/type sweep (pcf + toi + cmp + mypy + ruff + pylint). Run after editing one or two files; for a module-wide refactor (>3 files in the same dir) run `chk-py all <module-dir>/ -q` instead. This is your inner loop — fix every violation before moving on.
 2. **`chk-py all -q`** — whole-project sweep. Run after the per-file step is clean to catch cross-file regressions (broken imports, removed APIs, dangling type references). No further work until this is clean.
 3. **`tst-py <module> -q`** — pytest for the affected module(s). Run **only** after both checker steps are clean — running tests on a project with style/type breakage wastes time on noise. Pass the bare module name (e.g. `core`, `rpg`), not a path and not `.py`. Without an argument runs all modules.
-4. **`chk-py review`** — guideline review of the change by the `lazy-python.code-reviewer` agent. Covers what `pcf` and `toi` cannot prove from an AST: purpose comments on every block, logical-block separation, naming semantics, conformance to the project overlay. The command prints a manifest and a dispatch directive and **exits 2 while the review is pending**, so it fails `chk-py all` until the review is decided. **You** dispatch the agent it names, then render its findings with `chk-py review --render <findings.json>`. A `FAIL` finding blocks the commit exactly as a `pcf` FAIL does. Skipping this step because "the checkers are green" is a violation: the checkers do not cover these rules.
+4. **`chk-py review`** — guideline review of the change by the `lazy-python.code-reviewer` agent. Covers what `pcf` and `toi` cannot prove from an AST: whether a purpose comment states a purpose rather than restating the code, logical-block separation, naming semantics, conformance to the project overlay. The command prints a manifest and a dispatch directive and **exits 2 while the review is pending**, so it fails `chk-py all` until the review is decided. **You** dispatch the agent it names, then render its findings with `chk-py review --render <findings.json>`. A `FAIL` finding blocks the commit exactly as a `pcf` FAIL does. Skipping this step because "the checkers are green" is a violation: the checkers do not cover these rules.
 
 Full check semantics + config keys: `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.checking-guidelines.md`.
 

@@ -1,20 +1,19 @@
 ---
 chapter_type: troubleshooting
-summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, and tag pages.
-last_regen: 2026-06-10
+summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, and plugin updates.
+last_regen: 2026-08-05
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin / gen-tag-pages); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
+  request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
   kind_hint: decision-tree
 source_skills:
   - lazy-obsidian.install
-  - lazy-obsidian.audit
-  - lazy-obsidian.diagram-install
-  - lazy-obsidian.iconize-config
   - lazy-obsidian.iconize-install
+  - lazy-obsidian.iconize-config
   - lazy-obsidian.iconize-sync
+  - lazy-obsidian.diagram-install
   - lazy-obsidian.update-plugin
-  - lazy-obsidian.gen-tag-pages
+  - lazy-obsidian.audit
 ---
 # Troubleshooting
 
@@ -145,16 +144,6 @@ source_skills:
 **Likely cause**: The Obsidian community registry was unreachable, or `mermaid-popup` was not found in it at the time of install.
 
 **Fix**: The CSS snippets (`mermaid-fit.css`, `ascii-fit.css`) are already installed and working — diagram rendering is fully functional without click-to-zoom. When network access is restored, run `/lazy-obsidian.update-plugin mermaid-popup` to install the plugin, or install it via Obsidian's Community Plugins UI. Re-running `/lazy-obsidian.diagram-install` later is also safe (idempotent).
-
----
-
-## Tag pages don't generate: missing template error
-
-**Symptom**: Running `/lazy-obsidian.gen-tag-pages` stops immediately with: "Missing tag-page template at `.claude/templates/obsidian.tag-page-template.md`. Run `/lazy-obsidian.install` to scaffold the default from the plugin."
-
-**Likely cause**: `/lazy-obsidian.install` has not been run for this repo yet, or was run at global scope rather than project scope (the tag-page template is a project-only artifact).
-
-**Fix**: Run `/lazy-obsidian.install` at project scope. The skill scaffolds the template to `.claude/templates/obsidian.tag-page-template.md`. After that, re-run `/lazy-obsidian.gen-tag-pages`.
 
 ---
 

@@ -37,6 +37,7 @@ DEFAULT_CONFIG = {
   'check_docstring_content': True,
   'check_line_length': True,
   'check_code_format': True,
+  'check_block_comments': True,
   'check_assert': True,
   'check_magic_literal': True,
   # extra docstring-content patterns rejected as banned (substring match, any section).
@@ -82,6 +83,7 @@ def load_config(start_path: str | None = None) -> dict:
   current = Path(start_path).resolve()
   pyproject_path = None
 
+  # walk up to the filesystem root so a nested source dir still finds the project config
   while current != current.parent:
     candidate = current / 'pyproject.toml'
     if candidate.exists():
@@ -100,6 +102,7 @@ def load_config(start_path: str | None = None) -> dict:
     except (OSError, tomllib.TOMLDecodeError):
       pass
 
+  # hand back the merged config so callers never see a partially-populated dict
   return config
 
 
@@ -123,6 +126,7 @@ def resolve_config_for_file(base_config: dict,
   if not overrides:
     return base_config
 
+  # override patterns are authored repo-relative, so the file must be expressed the same way
   rel_path = os.path.relpath(file_path, project_root)
 
   # start with base config excluding the overrides key
@@ -134,6 +138,7 @@ def resolve_config_for_file(base_config: dict,
     if rel_path.startswith(prefix + '/') or rel_path == prefix:
       effective.update(override_values)
 
+  # the merged result replaces the base config for this one file only
   return effective
 
 
@@ -194,6 +199,11 @@ WAIVER_RE = re.compile(r'#\s*waiver:\s*\S')
 
 # regex matching a TMP marker comment (with or without colon)
 TMP_RE = re.compile(r'#\s*TMP\b')
+
+# regex matching a tooling-directive comment that never counts as a block's purpose comment
+DIRECTIVE_COMMENT_RE = re.compile(
+  r'^#\s*(?:waiver:|noinspection\b|type:|noqa\b|pylint:|fmt:)'
+)
 
 
 _BROAD_EXCEPTION_NAMES = {"Exception", "BaseException"}
@@ -298,6 +308,7 @@ def _has_waiver(source_lines: list[str], lineno: int) -> bool:
   if _has_class_level_waiver(source_lines, lineno):
     return True
 
+  # no waiver anywhere in range -- the caller's finding stands
   return False
 
 
@@ -342,12 +353,14 @@ def _has_class_level_waiver(source_lines: list[str], lineno: int) -> bool:
   if not stripped or stripped.startswith('#'):
     return False
 
+  # indentation is the only cue available for locating the enclosing class body
   current_indent = len(line) - len(line.lstrip())
 
   # guard: top-level lines can't be in a class body
   if current_indent < 2:
     return False
 
+  # a class body sits exactly one 2-space level in from its `class` header
   class_indent = current_indent - 2
 
   # scan upward to find the enclosing class definition
@@ -361,6 +374,7 @@ def _has_class_level_waiver(source_lines: list[str], lineno: int) -> bool:
       scan -= 1
       continue
 
+    # indentation of the scanned line decides which scope it belongs to
     scan_indent = len(scan_line) - len(scan_line.lstrip())
 
     # guard: def/async def at current indent → inside a method, not class body
@@ -381,8 +395,10 @@ def _has_class_level_waiver(source_lines: list[str], lineno: int) -> bool:
       if not scan_stripped.startswith('class '):
         return False
 
+    # keep walking upward toward the enclosing class header
     scan -= 1
 
+  # scanned to the top of the file without meeting an enclosing class
   return False
 
 
@@ -404,11 +420,13 @@ def _check_class_def_waiver(source_lines: list[str], class_idx: int) -> bool:
   class_indent = len(source_lines[class_idx]) - len(source_lines[class_idx].lstrip())
   body_indent = class_indent + 2
 
+  # start below the class header, tracking docstring state so prose is not read as code
   scan = class_idx + 1
   in_docstring = False
   docstring_delim: str | None = None
   past_docstring = False
 
+  # walk the class body top-down until the scope ends or a waiver turns up
   while scan < len(source_lines):
     line = source_lines[scan]
     stripped = line.strip()
@@ -452,8 +470,10 @@ def _check_class_def_waiver(source_lines: list[str], class_idx: int) -> bool:
     if line_indent == body_indent and stripped.startswith('#') and WAIVER_RE.search(line):
       return True
 
+    # keep walking down the class body looking for a waiver
     scan += 1
 
+  # class body ended with no waiver at body indent
   return False
 
 
@@ -619,6 +639,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
       # assume third-party for unknown
       return ImportBlockType.THIRD_PARTY
 
+    # neither node shape matched -- fall back to the least disruptive block
     return ImportBlockType.STDLIB
 
 
@@ -723,6 +744,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
             "wildcard import outside __init__.py"
           ))
 
+    # descend into the node so nested constructs are still visited
     self.generic_visit(node)
 
 
@@ -855,6 +877,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
           if any(alias.name == '*' for alias in node.names):
             wildcard_import_lines.add(ln)
 
+    # replay the imports in source order and flag any backwards step between blocks
     for lineno, block_type, _node in self.imports:
       # skip TYPE_CHECKING block contents for order check (they have their own rules)
       if block_type == ImportBlockType.TYPE_CHECKING:
@@ -877,6 +900,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
             current_block_type = max(current_block_type, block_type)
             continue
 
+        # the message names both blocks so the reader sees which order was expected
         expected = ImportBlockType.NAMES.get(current_block_type, 'unknown')
         actual = ImportBlockType.NAMES.get(block_type, 'unknown')
         self.issues.append((
@@ -884,6 +908,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
           f"import block order violation: {actual} import after {expected} block"
         ))
 
+      # the highest block seen so far is the floor every later import must clear
       current_block_type = max(current_block_type, block_type)
 
 
@@ -911,12 +936,14 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
           for skip_ln in range(ln, n.end_lineno + 1):
             type_checking_lines.add(skip_ln)
 
+    # seed the pairwise walk with the first import as the initial predecessor
     prev_line, prev_block, prev_node = main_imports[0]
 
     # track end line for multi-line imports
     def get_end_line(import_node: ast.Import | ast.ImportFrom, start_line: int) -> int:
       return import_node.end_lineno if import_node.end_lineno else start_line
 
+    # compare each import against its predecessor to police the block boundaries
     for lineno, block_type, node in main_imports[1:]:
       # check blank lines between different blocks
       if block_type != prev_block:
@@ -932,6 +959,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
             has_type_checking_between = True
             break
 
+        # a TYPE_CHECKING block between two imports owns the spacing, not this rule
         if has_type_checking_between:
           # skip the blank line check when TYPE_CHECKING is between blocks
           prev_line = lineno
@@ -961,6 +989,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
             f"import block (expected 1)"
           ))
 
+      # the current import becomes the reference point for the next one
       prev_line = lineno
       prev_block = block_type
       prev_node = node
@@ -978,6 +1007,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     typing_imports = [(ln, n) for ln, bt, n in self.imports
                       if bt == ImportBlockType.TYPING and isinstance(n, ast.ImportFrom)]
 
+    # a TYPE_CHECKING name folded into a wider typing import defeats the separation rule
     for lineno, import_node in typing_imports:
       # guard: import_node must be ImportFrom (pre-filtered above)
       if not isinstance(import_node, ast.ImportFrom):
@@ -1094,6 +1124,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
       # assume third-party for unknown
       return ImportBlockType.THIRD_PARTY
 
+    # unrecognised node shape -- treat as third-party so ordering stays permissive
     return ImportBlockType.THIRD_PARTY
 
 
@@ -1128,6 +1159,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     def get_end_line(import_node: ast.Import | ast.ImportFrom, start_line: int) -> int:
       return import_node.end_lineno if import_node.end_lineno else start_line
 
+    # the same one-blank-line boundary rule applies inside the TYPE_CHECKING block
     for lineno, node in tc_imports[1:]:
       block_type = self._classify_type_checking_import(node)
 
@@ -1158,6 +1190,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
             f"import block inside TYPE_CHECKING (expected 1)"
           ))
 
+      # the current import becomes the reference point for the next one
       prev_line = lineno
       prev_block = block_type
       prev_node = node
@@ -1187,9 +1220,11 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     # classify each import and track the highest block type seen so far
     highest_block = self._classify_type_checking_import(tc_imports[0][1])
 
+    # a block type lower than the highest seen means the ordering was broken
     for lineno, node in tc_imports[1:]:
       block_type = self._classify_type_checking_import(node)
 
+      # a block below the highest seen means the ordering was broken at this import
       if block_type < highest_block:
         self.issues.append((
           lineno,
@@ -1240,6 +1275,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
       start_line = node.lineno
       end_line = node.end_lineno or node.lineno
 
+      # a multi-item import that fits on one line never used the required parenthesised form
       if start_line == end_line:
         # single-line import with multiple items - violation!
         module = node.module or ''
@@ -1250,6 +1286,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
         else:
           module_str = module
 
+        # the message lists the imported names so the fix is mechanical
         names = [alias.name for alias in node.names]
         self.issues.append((
           lineno,
@@ -1257,6 +1294,37 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
           f"'from {module_str} import {', '.join(names)}'"
         ))
 
+
+  def _skip_module_docstring(self, header_end_line: int) -> int:
+    """
+    Advance a header end-line past a module docstring that follows it.
+
+    Args:
+      header_end_line: 1-indexed line where the leading comment block ends.
+
+    Returns:
+      The 1-indexed line where the docstring closes, or `header_end_line` unchanged
+      when no docstring follows the header.
+    """
+    idx = header_end_line
+    while idx < len(self.source_lines) and not self.source_lines[idx].strip():
+      idx += 1
+
+    # guard: nothing there, or what is there does not open a docstring
+    if idx >= len(self.source_lines):
+      return header_end_line
+    opener = self.source_lines[idx].strip()
+    fence = next((f for f in ('"""', "'''") if opener.startswith(f)), None)
+    if fence is None:
+      return header_end_line
+
+    # a one-line docstring closes on its own line; otherwise scan forward for the closing fence
+    if len(opener) > len(fence) and opener.endswith(fence):
+      return idx + 1
+    for scan in range(idx + 1, len(self.source_lines)):
+      if fence in self.source_lines[scan]:
+        return scan + 1
+    return header_end_line
 
   def _check_copyright_spacing(self) -> None:
     """
@@ -1285,6 +1353,10 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     # guard: copyright header found
     if copyright_end_line == 0:
       return
+
+    # a classless module may open with a module docstring between the header and the imports;
+    # the spacing rule applies below it, so advance the header end past it
+    copyright_end_line = self._skip_module_docstring(copyright_end_line)
 
     # count blank lines between the copyright end and first import
     blank_count = 0
@@ -1352,6 +1424,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     if self.is_init_file:
       return
 
+    # the import is mandatory, so its absence is reported against the file header
     if not self.has_future_annotations:
       self.issues.append((
         1,
@@ -1370,6 +1443,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     if self.is_init_file:
       return
 
+    # the block is mandatory, so its absence is reported against the file header
     if not self.has_type_checking_block:
       self.issues.append((
         1,
@@ -1393,6 +1467,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     future_import_line: int | None = None
     first_non_future_non_wildcard_line: int | None = None
 
+    # sort the imports into the three roles the position rule is expressed in
     for lineno, block_type, node in self.imports:
       # guard: skip TYPE_CHECKING block imports
       if block_type == ImportBlockType.TYPE_CHECKING:
@@ -1568,6 +1643,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     self._check_parent_module_imports()
     self._check_trailing_blank_lines()
 
+    # report in source order so the caller can print findings top-down
     return sorted(self.issues, key = lambda x: x[0])
 
 
@@ -1587,7 +1663,9 @@ class CodeFormatAnalyzer:
                is_init_file: bool = False,
                check_line_length: bool = True,
                check_indentation: bool = True,
-               check_assert: bool = True):
+               check_assert: bool = True,
+               check_block_comments: bool = True,
+               tree: ast.AST | None = None):
     """
     Initialize the CodeFormatAnalyzer.
 
@@ -1598,6 +1676,8 @@ class CodeFormatAnalyzer:
       check_line_length: whether to check line length.
       check_indentation: whether to check indentation.
       check_assert: whether to check for assert statements.
+      check_block_comments: whether to check purpose comments on code blocks.
+      tree: parsed module AST; the block-comment check is skipped without it.
     """
     self.source_lines = source_lines
     self.max_line_length = max_line_length
@@ -1605,6 +1685,8 @@ class CodeFormatAnalyzer:
     self.check_line_length = check_line_length
     self.check_indentation = check_indentation
     self.check_assert = check_assert
+    self.check_block_comments = check_block_comments
+    self.tree = tree
     self.issues: list[tuple[int, str]] = []
 
 
@@ -1617,6 +1699,7 @@ class CodeFormatAnalyzer:
     in_docstring = False
     docstring_delimiter = None
 
+    # the limit covers code only, so docstring state is tracked while scanning
     for idx, line in enumerate(self.source_lines):
       line_num = idx + 1
       stripped = line.strip()
@@ -1702,9 +1785,11 @@ class CodeFormatAnalyzer:
     # this is a simplified check - full check would require AST analysis
     named_arg_pattern = re.compile(r'[a-zA-Z_][a-zA-Z0-9_]*=[^=]')
 
+    # docstring prose carries `name=value` shapes, so scan state must exclude it
     in_docstring = False
     docstring_delimiter = None
 
+    # only executable call lines are candidates; definitions and assignments are filtered out
     for idx, line in enumerate(self.source_lines):
       line_num = idx + 1
       stripped = line.strip()
@@ -1768,6 +1853,7 @@ class CodeFormatAnalyzer:
     in_docstring = False
     docstring_delimiter = None
 
+    # class and method boundaries are recovered from indentation as the scan advances
     for idx, line in enumerate(self.source_lines):
       line_num = idx + 1
       stripped = line.strip()
@@ -1827,6 +1913,7 @@ class CodeFormatAnalyzer:
                   f"expected 2 blank lines before method (found {blank_count})"
                 ))
 
+      # the current line becomes the reference point for the next blank-line run
       prev_non_blank_line = line_num
       blank_count = 0
 
@@ -1885,6 +1972,7 @@ class CodeFormatAnalyzer:
     in_docstring = False
     docstring_delimiter = None
 
+    # suppression directives are textual, so the scan is line-based rather than AST-based
     for idx, line in enumerate(self.source_lines):
       line_num = idx + 1
       stripped = line.strip()
@@ -1909,6 +1997,7 @@ class CodeFormatAnalyzer:
         if _has_waiver(self.source_lines, line_num):
           continue
 
+        # an unwaived suppression is reported with the directive text it carried
         self.issues.append((
           line_num,
           f"error suppression comment found: '{match.group().strip()}'"
@@ -1926,6 +2015,7 @@ class CodeFormatAnalyzer:
     # match exactly two backticks that aren't preceded or followed by another backtick
     double_bt_pattern = re.compile(r'(?<!\x60)\x60\x60(?!\x60)')
 
+    # double backticks are reStructuredText, wrong in this project's markdown flavour
     for idx, line in enumerate(self.source_lines):
       line_num = idx + 1
       if double_bt_pattern.search(line):
@@ -1949,6 +2039,7 @@ class CodeFormatAnalyzer:
     lines = self.source_lines
     total = len(lines)
 
+    # every `if` is examined for the guard shape, then for the marker that must precede it
     for idx, line in enumerate(lines):
       stripped = line.strip()
       leading = len(line) - len(line.lstrip())
@@ -1970,6 +2061,7 @@ class CodeFormatAnalyzer:
       if next_idx >= total:
         continue
 
+      # the first body line and its indent decide whether this `if` has the guard shape
       next_stripped = lines[next_idx].strip()
       next_leading = len(lines[next_idx]) - len(lines[next_idx].lstrip())
 
@@ -1983,6 +2075,7 @@ class CodeFormatAnalyzer:
         or next_stripped.startswith(('return None  #', 'raise ', 'continue  #'))
       )
 
+      # a single-statement body and a raise-only body are the two recognised guard shapes
       is_guard = False
       if is_single_guard:
         # verify this is a single-statement body (next line returns to same or lower indent)
@@ -1993,7 +2086,7 @@ class CodeFormatAnalyzer:
           is_guard = True
         else:
           after_leading = len(lines[after_idx]) - len(lines[after_idx].lstrip())
-          # guard: single-stmt when the next line is back at or below `if` indent, or is elif/else
+          # single-stmt body when the next line is back at or below the `if` indent, or is elif/else
           if after_leading <= leading or lines[after_idx].strip().startswith(('elif ', 'else:')):
             is_guard = True
       else:
@@ -2028,15 +2121,16 @@ class CodeFormatAnalyzer:
           last_body_idx = scan_idx
           scan_idx += 1
 
+        # only the body's own last line decides, so nested sub-blocks do not qualify
         last_stripped = lines[last_body_idx].strip()
         last_leading = len(lines[last_body_idx]) - len(lines[last_body_idx].lstrip())
-        # guard: only `raise` at the body's own indentation qualifies, with no control-flow,
+        # only `raise` at the body's own indentation qualifies, with no control-flow,
         # and at least one real code statement before the raise (not just comments)
         if (last_stripped.startswith('raise ')
             and last_leading == next_leading
             and not has_control_flow
             and real_stmt_count > 0):
-          # guard: if followed by elif/else, this is a branch, not a guard
+          # a trailing elif/else makes this a branch, not a guard
           if scan_idx < total and lines[scan_idx].strip().startswith(('elif ', 'else:')):
             pass
           else:
@@ -2066,10 +2160,132 @@ class CodeFormatAnalyzer:
       if found_guard_comment:
         continue
 
+      # the finding anchors on the `if` line the marker should have preceded
       self.issues.append((
         idx + 1,
         "possible guard clause without '# guard:' comment on the preceding line"
       ))
+
+
+  def _collect_block_linenos(self, node: ast.AST, out: list[int]) -> None:
+    """
+    Collect the start line of every statement belonging to one function body.
+
+    Descends through compound statements (`if` / `for` / `try` / `match` and their
+    clause bodies) so a chunk nested inside a branch is a block like any other, but
+    stops at a nested `def` / `class`: those carry their own docstring and are walked
+    as their own body.
+
+    Args:
+      node: statement or clause node whose children are collected.
+      out: accumulator receiving one 1-based line number per statement found.
+    """
+    # every child statement opens a candidate block; clause nodes only forward their body
+    for child in ast.iter_child_nodes(node):
+      # guard: a nested scope is skipped whole; its body is scanned on its own pass
+      if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        continue
+      if isinstance(child, ast.stmt):
+        # an `elif` continues the `if` above it and opens no block of its own
+        if not self._is_clause_header(child.lineno):
+          out.append(child.lineno)
+        self._collect_block_linenos(child, out)
+      elif isinstance(child, (ast.ExceptHandler, ast.match_case)):
+        self._collect_block_linenos(child, out)
+
+
+  def _is_clause_header(self, lineno: int) -> bool:
+    """
+    Check whether a line continues the statement above it rather than starting a block.
+
+    Args:
+      lineno: 1-based source line number to inspect.
+
+    Returns:
+      `True` when the line opens a clause of an enclosing statement (`elif`, `else`,
+      `except`, `finally`, `case`) or continues a bracketed expression.
+    """
+    # guard: line numbers past the source end carry no text to judge
+    if lineno < 1 or lineno > len(self.source_lines):
+      return False
+
+    # a clause keyword or a closing bracket means the statement above is still open
+    return self.source_lines[lineno - 1].strip().startswith(
+      ('elif ', 'elif(', 'else:', 'except', 'finally:', 'case ', ')', ']', '}')
+    )
+
+
+  def _check_block_comments(self) -> None:
+    """
+    Check that every code block inside a function body opens with a purpose comment.
+
+    A block is the chunk of code that follows a blank separator line inside a function
+    or method body; its first non-empty line must be a comment stating what the block is
+    for. Tooling directives (`# waiver:`, `# noqa`, `# type:`, `# pylint:`, `# fmt:`,
+    `# noinspection`) do not qualify — they exempt a rule rather than state a purpose.
+
+    The opening block of a body is exempt (the docstring already states its purpose), and
+    a clause header (`except` / `else` / `elif` / `finally` / `case`) or a continuation
+    line of a multi-line call never opens a block, since neither starts a statement.
+    """
+    # guard: without the parsed tree there is no way to tell function bodies apart
+    if self.tree is None:
+      return
+
+    # a nested function is reached by the walk on its own, so each body is scanned once
+    for node in ast.walk(self.tree):
+      # guard: the rule covers function and method bodies only
+      if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        continue
+
+      # the docstring is prose, not a block, so the body starts below it
+      body = node.body
+      first = body[0]
+      has_docstring = (
+        isinstance(first, ast.Expr)
+        and isinstance(first.value, ast.Constant)
+        and isinstance(first.value.value, str)
+      )
+      body = body[1:] if has_docstring else body
+      # guard: a body of nothing but a docstring has no block to check
+      if not body:
+        continue
+
+      # every statement of the body, and of the branches nested inside it, is a block candidate
+      linenos: list[int] = []
+      for stmt in body:
+        # guard: a nested scope is skipped whole; its body is scanned on its own pass
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+          continue
+        linenos.append(stmt.lineno)
+        self._collect_block_linenos(stmt, linenos)
+
+      # the body's opening statement is exempt — the docstring above it carries its purpose
+      opening_lineno = body[0].lineno
+
+      # each statement is a block start only when a blank line separates it from the code above
+      for lineno in linenos:
+        # guard: the opening statement of the body is exempt
+        if lineno == opening_lineno:
+          continue
+        # walk up the contiguous comment lines that head this statement
+        top = lineno - 1
+        while top - 1 >= 0 and self.source_lines[top - 1].strip().startswith('#'):
+          top -= 1
+        # guard: no blank separator above → the statement continues the block above it
+        if top - 1 < 0 or self.source_lines[top - 1].strip():
+          continue
+        head = self.source_lines[top].strip()
+        # guard: the block already opens with a purpose comment
+        if (head.startswith('#')
+            and head.lstrip('#').strip()
+            and not DIRECTIVE_COMMENT_RE.match(head)):
+          continue
+        self.issues.append((
+          top + 1,
+          "code block without a purpose comment on its first line "
+          "(a waiver or a tooling directive is not a purpose comment)"
+        ))
 
 
   def _check_typing_cast(self) -> None:
@@ -2083,6 +2299,7 @@ class CodeFormatAnalyzer:
     qualified_cast_re = re.compile(r'\btyping\.cast\s*\(')
     bare_cast_re = re.compile(r'\bcast\s*\(')
 
+    # the bare `cast(...)` form only means anything once the symbol was imported
     in_docstring = False
     docstring_delimiter = None
     has_cast_import = False
@@ -2093,6 +2310,7 @@ class CodeFormatAnalyzer:
         has_cast_import = True
         break
 
+    # second pass reports the call sites, skipping prose, strings, and waived lines
     for idx, line in enumerate(self.source_lines):
       line_num = idx + 1
       stripped = line.strip()
@@ -2164,9 +2382,11 @@ class CodeFormatAnalyzer:
     # obj.__class__.__name__, self._val_cls.__name__, etc.)
     attr_name_re = re.compile(r'\w\s*\.\s*__name__')
 
+    # docstrings legitimately mention `__name__`, so prose is tracked and skipped
     in_docstring = False
     docstring_delimiter = None
 
+    # the qualified `type(obj)` form is reported separately from plain attribute access
     for idx, line in enumerate(self.source_lines):
       line_num = idx + 1
       stripped = line.strip()
@@ -2231,10 +2451,12 @@ class CodeFormatAnalyzer:
     separator_re = re.compile(r'^# -{10,}$')
     expected = '# ' + '-' * 88
 
+    # only lines already shaped like a separator are measured against the canonical width
     for idx, line in enumerate(self.source_lines):
       line_num = idx + 1
       stripped = line.rstrip()
 
+      # only separator lines carry a required shape; everything else is ordinary code
       if separator_re.match(stripped):
         # guard: waiver present
         if _has_waiver(self.source_lines, line_num):
@@ -2272,9 +2494,11 @@ class CodeFormatAnalyzer:
     # strip single-line string literals to avoid matching inside strings
     string_strip_re = re.compile(r'''f?r?b?"[^"]*"|f?r?b?'[^']*' '''.strip())
 
+    # annotations are matched textually, so docstring prose must stay out of the scan
     in_docstring = False
     docstring_delimiter = None
 
+    # each code line is stripped of strings and comments before the shape match
     for idx, line in enumerate(self.source_lines):
       line_num = idx + 1
       stripped = line.strip()
@@ -2308,7 +2532,7 @@ class CodeFormatAnalyzer:
       code = string_strip_re.sub('""', line)
       code = code.split('#')[0]
 
-      # guard: exclude isinstance(x, type) calls
+      # isinstance(x, type) is a runtime check, not an annotation -- strip it before matching
       if isinstance_re.search(code):
         code = isinstance_re.sub('', code)
 
@@ -2359,11 +2583,13 @@ class CodeFormatAnalyzer:
     # strip single-line string literals
     string_strip_re = re.compile(r'''f?r?b?"[^"]*"|f?r?b?'[^']*' '''.strip())
 
+    # the dunder exemption needs the enclosing function, so scan state carries it too
     in_docstring = False
     docstring_delimiter = None
     current_func_name = ''
     current_func_indent = -1
 
+    # every `Any` token is judged against the exemptions before it becomes a finding
     for idx, line in enumerate(self.source_lines):
       line_num = idx + 1
       stripped = line.strip()
@@ -2417,7 +2643,7 @@ class CodeFormatAnalyzer:
       if _has_waiver(self.source_lines, line_num):
         continue
 
-      # guard: *args: Any / **kwargs: Any — auto-exempt
+      # *args: Any / **kwargs: Any are auto-exempt -- drop them and re-test what is left
       if kwargs_args_exempt_re.search(code):
         code_remaining = kwargs_args_exempt_re.sub('', code)
         # guard: no remaining Any after removing exempt *args/**kwargs
@@ -2428,6 +2654,7 @@ class CodeFormatAnalyzer:
       if current_func_name.startswith('__') and current_func_name.endswith('__'):
         continue
 
+      # the annotation survived every exemption above, so it is a real finding
       self.issues.append((
         line_num,
         "'Any' in type annotation is forbidden"
@@ -2447,6 +2674,7 @@ class CodeFormatAnalyzer:
     in_docstring = False
     docstring_delimiter = None
 
+    # only a statement-leading assert counts; prose and waived lines are skipped
     for idx, line in enumerate(self.source_lines):
       line_num = idx + 1
       stripped = line.strip()
@@ -2476,6 +2704,7 @@ class CodeFormatAnalyzer:
       if _has_waiver(self.source_lines, line_num):
         continue
 
+      # the assert carried no waiver, so it is reported
       self.issues.append((
         line_num,
         "assert statement found -- assert is stripped by python -O;"
@@ -2499,6 +2728,8 @@ class CodeFormatAnalyzer:
     self._check_error_suppression()
     self._check_double_backticks()
     self._check_guard_comments()
+    if self.check_block_comments:
+      self._check_block_comments()
     self._check_typing_cast()
     self._check_raw_dunder_name()
     self._check_separator_format()
@@ -2511,6 +2742,7 @@ class CodeFormatAnalyzer:
     # disabled: complex to get right without full AST
     # self._check_blank_lines_between_methods()
 
+    # report in source order so the caller can print findings top-down
     return sorted(self.issues, key = lambda x: x[0])
 
 
@@ -2672,7 +2904,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
         pos = len(self.sections_order)
       self.sections_order.insert(pos, name)
       style_sets[style].add(name)
-      # guard: definition sections are name/description label lists -- D9 skips them
+      # definition sections are name/description label lists -- D9 skips them
       # like the built-in definition sections (Attributes, Args, Raises, Type Parameters)
       if style == 'definition':
         self.d9_skip_sections.add(name)
@@ -2697,14 +2929,17 @@ class DocstringAnalyzer(ast.NodeVisitor):
     if not node.body:
       return None, None
 
+    # a docstring can only be the body's first statement, and only as an expression
     first_stmt = node.body[0]
     if not isinstance(first_stmt, ast.Expr):
       return None, None
 
+    # only a plain string constant counts; other expressions are not docstrings
     expr_value = first_stmt.value
     if isinstance(expr_value, ast.Constant) and isinstance(expr_value.value, str):
       return expr_value.value, first_stmt.lineno
 
+    # first statement was an expression but not a string -- no docstring here
     return None, None
 
 
@@ -2755,6 +2990,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
     current_content: list[str] = []
     section_start_line = 0
 
+    # a section runs from its header to the next, so content accumulates between hits
     for idx, line in enumerate(lines):
       stripped = line.strip()
 
@@ -2771,6 +3007,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
           section_start_line = idx
           break
 
+      # a line that opened no section belongs to the section currently being collected
       if not is_section and current_section is not None:
         current_content.append(line)
 
@@ -2778,6 +3015,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
     if current_section is not None:
       sections.append((current_section, section_start_line, current_content))
 
+    # hand the sections back in source order, which the order check relies on
     return sections
 
 
@@ -2796,6 +3034,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
     section_names = [sec[0] for sec in sections]
     expected_indices = []
 
+    # map each present section onto its canonical rank; unknown names carry no ordering
     for sec_name in section_names:
       if sec_name in self.sections_order:
         expected_indices.append(self.sections_order.index(sec_name))
@@ -2881,6 +3120,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
     if base_indent is None:
       return
 
+    # only labels at the base indent are definition names -- deeper lines are continuations
     for idx, line in enumerate(content):
       stripped = line.strip()
       # guard: skip empty lines
@@ -2968,6 +3208,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
     if not is_property:
       return
 
+    # a property documents through its Summary, so these three sections are always wrong
     lines = docstring.split('\n')
     forbidden = ['Args:', 'Returns:', 'Yields:']
     for idx, line in enumerate(lines):
@@ -3254,7 +3495,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
       if stripped.endswith(':') and stripped[:-1] in self.sections_order:
         in_exempt = False
         continue
-      # guard: line is inside a ref-exempt section
+      # collect every line that falls inside a ref-exempt section
       if in_exempt:
         skip.add(idx)
     return skip
@@ -3370,8 +3611,8 @@ class DocstringAnalyzer(ast.NodeVisitor):
         continue
       m = _DOCSTRING_MARKERS_RE.search(line)
       if m:
-        # guard: skip backtick-wrapped marker literals (meta-references to the
-        # marker syntax in checker/rule docstrings, not actual marker usages).
+        # detect backtick-wrapped marker literals -- meta-references to the marker
+        # syntax in checker/rule docstrings, not actual marker usages.
         before = line[: m.start()]
         after = line[m.end():]
         wrapped = (
@@ -3464,11 +3705,13 @@ class DocstringAnalyzer(ast.NodeVisitor):
       return
     self._visited_nodes.add(node_id)
 
+    # every downstream check needs both the text and its source anchor
     docstring, start_line = self._get_docstring_info(node)
     # guard: node has docstring
     if docstring is None or start_line is None:
       return
 
+    # messages name the host so a finding is traceable without the line number
     node_name = node.name
 
     # check line length (if enabled)
@@ -3500,7 +3743,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
       # and noun-phrase scope/return-tuple lists. Step chains in practice trip
       # D5 banned phrases or `_check_impl_details` reliably enough.
       self._check_marker_in_docstring(docstring, start_line, node_name)
-      # guard: D9 only fires on caller-facing hosts; private classes/methods
+      # D9 only fires on caller-facing hosts; private classes/methods
       # are implementer-facing, so private-name references are legitimate prose.
       if not node_name.startswith('_'):
         self._check_private_names_in_narrative(docstring, start_line, node_name)
@@ -3699,9 +3942,10 @@ def _load_project_identifiers(project_root: str) -> frozenset[str]:
   if cached is not None:
     return cached
 
+  # collect NAME tokens project-wide so a member-name literal can be validated
   idents: set[str] = set()
   for dirpath, dirnames, filenames in os.walk(project_root):
-    # guard: prune excluded dirs so os.walk does not descend into them (e.g., .venv, __pycache__)
+    # prune excluded dirs in place so os.walk does not descend into them (e.g., .venv, __pycache__)
     dirnames[:] = [ d for d in dirnames if d not in HARDCODED_EXCLUDES ]
     for fname in filenames:
       # guard: only Python source files
@@ -3717,6 +3961,7 @@ def _load_project_identifiers(project_root: str) -> frozenset[str]:
       except (OSError, tokenize.TokenError, SyntaxError):
         continue
 
+  # freeze and memoize -- the scan is expensive and the tree does not change mid-run
   frozen = frozenset(idents)
   _PROJECT_IDENTIFIERS_CACHE[project_root] = frozen
   return frozen
@@ -3758,6 +4003,7 @@ def _collect_waivered_tails_from_tree(tree: ast.Module, source_lines: list[str])
   """
   tails: set[str] = set()
 
+  # locate the strict tag lines first; without one there is nothing to attribute
   tag_lines: list[int] = []
   for idx, line in enumerate(source_lines, start = 1):
     if _CALLERS_WAIVER_STRICT_RE.match(line):
@@ -3766,6 +4012,7 @@ def _collect_waivered_tails_from_tree(tree: ast.Module, source_lines: list[str])
   if not tag_lines:
     return tails
 
+  # map every callable body to its span so a tag resolves to the innermost owner
   funcs: list[tuple[int, int, str, str | None]] = []
 
   def _walk(node: ast.AST, cls_name: str | None) -> None:
@@ -3778,8 +4025,10 @@ def _collect_waivered_tails_from_tree(tree: ast.Module, source_lines: list[str])
     for child in ast.iter_child_nodes(node):
       _walk(child, new_cls)
 
+  # populate the span table before any tag is resolved against it
   _walk(tree, None)
 
+  # the innermost body containing the tag owns it -- the smallest span wins
   for lineno in tag_lines:
     candidates = [ f for f in funcs if f[0] <= lineno <= f[1] ]
     # guard: stray tag at non-function position -- ignored here, reported by validator
@@ -3788,10 +4037,11 @@ def _collect_waivered_tails_from_tree(tree: ast.Module, source_lines: list[str])
     innermost = min(candidates, key = lambda f: f[1] - f[0])
     _start, _end, fname, cname = innermost
     tails.add(fname)
-    # guard: constructor waivers also exempt calls via the class name (ArgumentSpec(...))
+    # constructor waivers also exempt calls via the class name (ArgumentSpec(...))
     if fname == '__init__' and cname is not None:
       tails.add(cname)
 
+  # these tails let call sites inline literals the callee declared its callers may pass
   return tails
 
 
@@ -3812,9 +4062,10 @@ def _load_waivered_callable_tails(project_root: str) -> frozenset[str]:
   if cached is not None:
     return cached
 
+  # aggregate every module's waivers -- a call site may live in a different file
   tails: set[str] = set()
   for dirpath, dirnames, filenames in os.walk(project_root):
-    # guard: prune excluded dirs (e.g., .venv, __pycache__)
+    # prune excluded dirs in place (e.g., .venv, __pycache__)
     dirnames[:] = [ d for d in dirnames if d not in HARDCODED_EXCLUDES ]
     for fname in filenames:
       # guard: only Python source files
@@ -3835,6 +4086,7 @@ def _load_waivered_callable_tails(project_root: str) -> frozenset[str]:
         continue
       tails.update(_collect_waivered_tails_from_tree(tree, source.splitlines()))
 
+  # freeze and memoize -- the project-wide scan must run once per root
   frozen = frozenset(tails)
   _WAIVERED_TAILS_CACHE[project_root] = frozen
   return frozen
@@ -3859,6 +4111,7 @@ def _collect_waivered_classes_from_tree(tree: ast.Module, source_lines: list[str
   """
   classes: set[str] = set()
 
+  # locate the strict tag lines first; without one there is nothing to attribute
   tag_lines: list[int] = []
   for idx, line in enumerate(source_lines, start = 1):
     if _CALLERS_WAIVER_STRICT_RE.match(line):
@@ -3884,8 +4137,10 @@ def _collect_waivered_classes_from_tree(tree: ast.Module, source_lines: list[str
     for child in ast.iter_child_nodes(node):
       _walk(child)
 
+  # populate the span table before any tag is resolved against it
   _walk(tree)
 
+  # the innermost scope owns the tag; only class-scope ownership is collected here
   for lineno in tag_lines:
     candidates = [ n for n in nodes if n[0] <= lineno <= n[1] ]
     # guard: tag outside any scope -- reported by validator, ignored here
@@ -3893,10 +4148,11 @@ def _collect_waivered_classes_from_tree(tree: ast.Module, source_lines: list[str
       continue
     innermost = min(candidates, key = lambda n: n[1] - n[0])
     _start, _end, name, kind = innermost
-    # guard: class-scope only -- function-scope handled by the tails collector
+    # collect class-scope tags only -- function-scope is handled by the tails collector
     if kind == 'class':
       classes.add(name)
 
+  # these class names let formatter-style call chains inline literals
   return classes
 
 
@@ -3918,9 +4174,10 @@ def _load_waivered_classes(project_root: str) -> frozenset[str]:
   if cached is not None:
     return cached
 
+  # aggregate every module's class-scope waivers -- callers live in other files
   classes: set[str] = set()
   for dirpath, dirnames, filenames in os.walk(project_root):
-    # guard: prune excluded dirs (e.g., .venv, __pycache__)
+    # prune excluded dirs in place (e.g., .venv, __pycache__)
     dirnames[:] = [ d for d in dirnames if d not in HARDCODED_EXCLUDES ]
     for fname in filenames:
       # guard: only Python source files
@@ -3941,6 +4198,7 @@ def _load_waivered_classes(project_root: str) -> frozenset[str]:
         continue
       classes.update(_collect_waivered_classes_from_tree(tree, source.splitlines()))
 
+  # freeze and memoize -- the project-wide scan must run once per root
   frozen = frozenset(classes)
   _WAIVERED_CLASSES_CACHE[project_root] = frozen
   return frozen
@@ -4076,10 +4334,10 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
     Args:
       node: the root AST node (typically the module).
     """
-    # guard: annotate parents only on the root invocation (module has no parent)
+    # annotate parents only on the root invocation (module has no parent)
     if not hasattr(node, 'parent'):
       self._annotate_parents(node)
-      # guard: per-module tag-validation runs once, at the root entry
+      # per-module tag-validation runs once, at the root entry
       if isinstance(node, ast.Module):
         self._validate_callers_waivers(node)
     super().visit(node)
@@ -4099,6 +4357,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
     # waiver: ast.AST has no declared `parent_field` slot so direct assignment fails mypy
     setattr(root, 'parent_field', None)  # noqa: B010
 
+    # ast nodes carry no upward link, so every context check downstream needs this pass
     for parent in ast.walk(root):
       for field_name, value in ast.iter_fields(parent):
         if isinstance(value, list):
@@ -4136,7 +4395,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
     if isinstance(value, (int, float)) and value in self.trivial_numbers:
       return
 
-    # guard: string that is empty, in the trivial set, punctuation-only, or a format template
+    # string exemptions: empty, trivial, punctuation-only, or a format template
     if isinstance(value, str):
       # guard: empty string
       if not value:
@@ -4189,6 +4448,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
       ))
       return
 
+    # nothing exempted the literal -- report it as magic
     self.issues.append((
       node.lineno,
       self._format_message(value),
@@ -4308,6 +4568,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
         end = getattr(last, 'end_lineno', last.lineno) or last.lineno
         class_body_ranges.append((start, end))
 
+    # the two failure texts are built once and reused across every offending line
     misplaced_msg = (
       "misplaced pcf-external-callers-may-inline-literals waiver"
       " -- must be a standalone comment line inside a function/method body,"
@@ -4317,11 +4578,12 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
       "pcf-external-callers-may-inline-literals waiver must have a non-empty reason after `--`"
     )
 
+    # a tag that is malformed or out of scope grants nothing, so it is reported
     for idx, line in enumerate(self.source_lines, start = 1):
       # guard: quick filter -- skip lines without the tag token
       if _CALLERS_WAIVER_ANY_RE.search(line) is None:
         continue
-      # guard: inline trailing tag (line does not start with a '#' comment)
+      # an inline trailing tag (line does not start with a '#' comment) is misplaced
       stripped = line.lstrip()
       if not stripped.startswith('#'):
         self.issues.append((idx, misplaced_msg))
@@ -4418,6 +4680,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
       if tail in _ATTR_NAME_BUILTINS:
         return True
 
+    # no name-reference context matched -- the literal is judged as an ordinary value
     return False
 
 
@@ -4455,6 +4718,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
           return True
       cur = getattr(cur, 'parent', None)
 
+    # no TMP marker on the literal's own line or above any of its ancestors
     return False
 
 
@@ -4502,6 +4766,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
       other = parent.right if field_name == 'left' else parent.left
       return not isinstance(other, ast.Constant)
 
+    # any other position (plain assignment, container element) is not a flagging context
     return False
 
 
@@ -4582,16 +4847,19 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
     if not isinstance(node.value, str):
       return False
 
+    # a docstring is recognised by position, which takes the parent chain to establish
     parent = getattr(node, 'parent', None)
     # guard: docstring value lives under an Expr statement
     if not (isinstance(parent, ast.Expr) and getattr(node, 'parent_field', None) == 'value'):
       return False
 
+    # only a module, class, or function body can host a docstring
     grandparent = getattr(parent, 'parent', None)
     # guard: docstring Expr is the first body element of a module/class/function
     if not isinstance(grandparent, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
       return False
 
+    # the string is a docstring only when it is that body's very first statement
     return bool(grandparent.body) and grandparent.body[0] is parent
 
 
@@ -4613,13 +4881,15 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
     if not (isinstance(node.value, str) and node.value in _ENV_BOOL_STRINGS):
       return False
 
+    # the idiom is a comparison, so the literal must sit on one side of a Compare
     parent = getattr(node, 'parent', None)
     # guard: literal must be a comparator of a Compare node
     if not (isinstance(parent, ast.Compare) and node in parent.comparators):
       return False
 
+    # normalisation calls wrap the env read, so unwrap them before testing the receiver
     left = parent.left
-    # guard: LHS must be an env-var read call (or a `.lower()` / `.strip()` chain on one)
+    # unwrap `.lower()` / `.strip()` chains so the LHS env-var read is reachable
     while isinstance(left, ast.Call) and isinstance(left.func, ast.Attribute) \
         and left.func.attr in ('lower', 'upper', 'strip', 'lstrip', 'rstrip'):
       left = left.func.value
@@ -4640,6 +4910,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
     cur = getattr(node, 'parent', None)
     child = node
 
+    # a skip can be declared anywhere above the literal, so the whole chain is walked
     while cur is not None:
       # Call-based skips (apply only when we came up directly through the Call)
       if isinstance(cur, ast.Call) and self._call_skips_literal(cur, child, cur_field):
@@ -4670,10 +4941,12 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
       if getattr(cur, 'parent_field', None) == 'decorator_list':
         return True
 
+      # step one level up, keeping the field name that linked the two nodes
       child = cur
       cur_field = getattr(cur, 'parent_field', None)
       cur = getattr(cur, 'parent', None)
 
+    # reached the module root with no exempting ancestor
     return False
 
 
@@ -4717,7 +4990,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
 
     # regex calls: pattern/replacement strings are not magic
     if tail in _REGEX_FUNC_NAMES and isinstance(call.func, ast.Attribute):
-      # guard: the attribute chain must start at `re`
+      # only the stdlib `re` module qualifies -- a same-named method elsewhere does not
       root = call.func.value
       if isinstance(root, ast.Name) and root.id == 're':
         return True
@@ -4770,6 +5043,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
       if isinstance(child.value, str) and child.value in _ENV_BOOL_STRINGS:
         return True
 
+    # the call target matched none of the exempt forms
     return False
 
 
@@ -4812,6 +5086,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
     if isinstance(parent, ast.ClassDef) and parent_field == 'body':
       return True
 
+    # outside a class body the target's own name is what marks the assignment constant
     targets: list[ast.expr] = list(assign.targets) if isinstance(assign, ast.Assign) else [ assign.target ]
     for tgt in targets:
       if isinstance(tgt, ast.Name):
@@ -4819,7 +5094,7 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
         # guard: dunder name (e.g., __slots__, __all__, __version__)
         if ident.startswith('__') and ident.endswith('__'):
           return True
-        # guard: ALL_CAPS constant (allow leading underscore, e.g., _CORE_CLASS_PREFIX)
+        # ALL_CAPS constant, allowing a leading underscore (e.g., _CORE_CLASS_PREFIX)
         letters = ident.lstrip('_')
         if letters and letters == letters.upper() and any(ch.isalpha() for ch in letters):
           return True
@@ -4894,9 +5169,11 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
   with open(path, 'r', encoding = 'utf-8') as f:
     source = f.read()
 
+  # the analyzers need both views: line text for comment scans, AST for structure
   source_lines = source.splitlines()
   tree = ast.parse(source, filename = path)
 
+  # findings from every enabled analyzer accumulate into one list
   all_issues: list[tuple[int, str]] = []
 
   # check if this is an __init__.py file
@@ -4985,10 +5262,13 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
       is_init_file = is_init_file,
       check_line_length = check_code_line_length,
       check_indentation = True,
-      check_assert = bool(config.get('check_assert', True))
+      check_assert = bool(config.get('check_assert', True)),
+      check_block_comments = bool(config.get('check_block_comments', True)),
+      tree = tree,
     )
     all_issues.extend(code_analyzer.analyze())
 
+  # merge the per-analyzer findings into a single source-ordered report
   return sorted(all_issues, key = lambda x: x[0])
 
 
@@ -5013,6 +5293,7 @@ def walk_dir(root: str,
   # combine hardcoded and user-provided exclusions
   all_excludes = HARDCODED_EXCLUDES + exclude_substrings
 
+  # per-folder overrides are keyed off the project root, not the directory scanned
   project_root = config.get('_project_root', root) if config else root
 
   # recursively walk directory and process all .py files
@@ -5032,6 +5313,7 @@ def walk_dir(root: str,
         except SyntaxError as err:
           print(f'[!] Syntax error in {path}: {err}', file = sys.stderr)
 
+  # the count travels with the findings so the caller can print a summary
   return all_issues, files_processed
 
 
@@ -5083,6 +5365,7 @@ def main() -> None:
     config_excludes = [ e for e in config_excludes
                         if e not in target_parts ]
 
+  # CLI excludes extend the config list rather than replacing it
   exclude_substrings = config_excludes
   if args.exclude:
     exclude_substrings.extend(args.exclude)

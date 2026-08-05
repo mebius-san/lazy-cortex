@@ -41,8 +41,9 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import Bucket, JobKey, Phase, ReviewKey, Trailer  # noqa: E402
 # waiver: deferred sibling imports follow the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import start as _start  # noqa: E402
@@ -99,15 +100,16 @@ def open_submit(
       meta.get(ReviewKey.PHASE) == Bucket.AWAITING_OPERATOR
       and all(_d._flatten(n) in current_done_flat for n in main_writers)
   )
-  # guard: caller resolves the class before invoking; if class_cfg is absent here
-  # the bootstrap was idempotent (already opted-in) and the document is mid-cycle
-  # — nothing to settle.
+  # a prior run already applied the leapfrog, so the bootstrapped content stands as-is
   if already_settled:
     new_text = bootstrapped
   else:
     repo = _repo_root_for(file_path)
     settings = _d.load_settings(repo)
     class_cfg = _d._class_for_file(settings, repo, file_path)
+    # caller resolves the class before invoking; if class_cfg is absent here
+    # the bootstrap was idempotent (already opted-in) and the document is mid-cycle
+    # — nothing to settle.
     if class_cfg is None:
       new_text = bootstrapped
     else:
@@ -125,32 +127,6 @@ def open_submit(
   if new_text == text:
     return False
   return True
-
-
-def _flatten(name: str) -> str:
-  """
-  Normalize an expert name to the flat form stored in `review_main_done`.
-
-  Args:
-    name: Expert name, possibly containing dots or slashes.
-
-  Returns:
-    Name with dots and slashes replaced by hyphens.
-  """
-  return name.replace(".", "-").replace("/", "-")
-
-
-def _serialize_done(names: list[str]) -> str:
-  """
-  Render the bracketed inline list that `review_main_done` stores.
-
-  Args:
-    names: Flat expert names to serialize.
-
-  Returns:
-    Bracketed comma-separated string, e.g. `[a, b]` or `[]` when empty.
-  """
-  return "[" + ", ".join(names) + "]"
 
 
 def _resolve_main_writers(file_path: Path, expert: str | None) -> list[str] | None:

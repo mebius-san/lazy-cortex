@@ -37,9 +37,9 @@ if TYPE_CHECKING:
 # Resolve the sibling bin/ dir so the enablement gate is importable.
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import hook_gate  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from constants import HookName  # noqa: E402
 
 
@@ -112,10 +112,12 @@ def classify_path(file_path: str, cwd: str = "") -> dict:
   else:
     resolved = file_path
 
+  # canonicalise so symlinked `.claude` dirs classify the same as real ones
   resolved = os.path.realpath(resolved)
   basename = os.path.basename(resolved)
   parent = os.path.basename(os.path.dirname(resolved))
 
+  # a settings file is recognised by filename plus its `.claude` parent; scope comes from where it lives
   # waiver: filesystem path/filename idioms (Claude Code settings layout), not domain constants
   is_settings = parent == ".claude" and basename in ( "settings.json", "settings.local.json" )
   # waiver: filesystem filename idiom, not a domain constant
@@ -123,6 +125,7 @@ def classify_path(file_path: str, cwd: str = "") -> dict:
   is_global = resolved.startswith(GLOBAL_CLAUDE + os.sep) or os.path.dirname(resolved) == GLOBAL_CLAUDE
   is_global_local = is_global and is_local
 
+  # hand back every flag the caller branches on plus the resolved path
   return {
     "is_settings": is_settings,
     "is_global": is_global,
@@ -341,6 +344,7 @@ def check_blocked_allow_patterns(new_text: str) -> str | None:
   if not check_text:
     return None
 
+  # first match wins — one reason is enough to veto the write
   for pattern, reason in BLOCKED_ALLOW_PATTERNS:
     if re.search(pattern, check_text):
       return reason
@@ -364,6 +368,7 @@ def check_critical_deny_removal(old_text: str | None, new_text: str) -> str | No
   if not old_text:
     return None
 
+  # a rule present before and gone after is a removal, whatever else the edit changed
   for rule in CRITICAL_DENY_RULES:
     if rule in old_text and rule not in new_text:
       return f"Removing critical deny rule '{rule}' weakens safety. This rule prevents destructive operations."
@@ -405,6 +410,7 @@ def collect_warnings(old_text: str | None, new_text: str) -> list[str]:
     if flag in new_text and (old_text is None or flag not in old_text):
       warnings.append(f"'{flag}' detected: {msg}")
 
+  # every advisory condition collected in one pass — the caller renders them together
   return warnings
 
 
@@ -433,6 +439,7 @@ def generate_auto_context(old_text: str | None, new_text: str) -> str | None:
   if not added or len(added) > AUTO_CONTEXT_MAX:
     return None
 
+  # spell out each grant so Claude stops re-asking for what it already has
   lines = [ "Settings updated. New permissions granted:" ]
   for p in sorted(added):
     lines.append(f"  - {p}")
@@ -465,9 +472,11 @@ def main() -> None:
   if not hook_gate.is_enabled(HookName.SETTINGS_GUARD):
     sys.exit(0)
 
+  # the hook payload carries the Edit/Write call about to be applied
   raw = sys.stdin.read()
   payload = json.loads(raw)
 
+  # pull out the target file and the tool identity the branches below key on
   # waiver: external-format hook-payload and tool-input field names, not internal keys
   tool_input = payload.get("tool_input", {})
   # waiver: external-format tool-input field name, not an internal key
@@ -501,6 +510,7 @@ def main() -> None:
 
   # Check deny removal first — deletions have empty new_text but non-empty old_text
   deny_removal = check_critical_deny_removal(old_text, new_text)
+  # guard: a critical deny rule is being dropped — veto the write
   if deny_removal:
     output_block(deny_removal)
 
@@ -510,12 +520,14 @@ def main() -> None:
 
   # Block checks
   blocked = check_blocked_allow_patterns(new_text)
+  # guard: an allow entry matches a blocked pattern — veto the write
   if blocked:
     output_block(blocked)
 
   # Warning + auto-context
   messages = []
 
+  # advisories are collected together so one system message carries them all
   warnings = collect_warnings(old_text, new_text)
   leak = check_tracked_permissions_leak(classification, old_text, new_text)
   if leak:
@@ -524,13 +536,16 @@ def main() -> None:
     # waiver: one-off human-facing message
     messages.append("Settings guardian warnings:\n" + "\n".join(f"  - {w}" for w in warnings))
 
+  # newly granted permissions ride along so Claude stops re-asking for them
   context = generate_auto_context(old_text, new_text)
   if context:
     messages.append(context)
 
+  # guard: something to surface — allow the write and hand the text to Claude
   if messages:
     output_allow_with_message("\n\n".join(messages))
 
+  # nothing to say: silent allow
   sys.exit(0)
 
 

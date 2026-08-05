@@ -265,7 +265,7 @@ def _all_known_protocols(repo: Path) -> list[str]:
     if name == SettingsKey.VERSION or not isinstance(cfg, dict):
       continue
     for p in _routine_protocols(cfg):
-      # guard: deduplicate while preserving first-seen order
+      # deduplicate while preserving first-seen order
       if p not in seen:
         seen.append(p)
   return seen

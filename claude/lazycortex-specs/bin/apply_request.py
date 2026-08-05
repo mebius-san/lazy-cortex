@@ -75,15 +75,89 @@ if str(_BIN) not in sys.path:
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # pylint: disable=import-error,wrong-import-position
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from summary_render import apply_container_stats  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_paths import find_settings_root, spec_content_root  # noqa: E402
 
 
 class _K:
   """
   String / int constants used by the apply worker.
+
+  Attributes:
+    SPEC_ROLE: Frontmatter key naming a file's spec-role discriminator.
+    REQUEST_STATUS: Frontmatter key naming a request's lifecycle status.
+    REQUEST_CLASS: Frontmatter key naming a request's routed classification.
+    REVIEW_RESULT: Frontmatter key naming a doc's terminal review outcome.
+    REVIEW_ACTIVE: Frontmatter key marking a doc as opted into the review loop.
+    REVIEW_ROUND: Frontmatter key naming a doc's current review round.
+    REVIEW_APPROVED: Frontmatter key naming a doc's whole-document approval flag.
+    TAGS: Frontmatter key holding a file's tag list.
+    SPEC_SOURCE_REQUESTS: Frontmatter key listing the requests that populated a doc.
+    STATUS_DRAFT: The pre-terminal `request_status` value.
+    STATUS_ACCEPTED: The accepted terminal `request_status` value.
+    STATUS_REJECTED: The rejected terminal `request_status` value.
+    CLASS_UNKNOWN: The unclassified `request_class` value.
+    ROLE_REQUEST: The canonical `spec_role` value for a request file.
+    REVIEW_APPROVED_VAL: The clean-approval `review_result` value.
+    REVIEW_APPROVED_WITH_CONCERNS: The approved-with-concerns `review_result` value.
+    TAG_PREFIX: Prefix of the request-status mirror tag.
+    DESIGN_MD: Filename of the design doc.
+    BUG_MD: Filename of the bug-layout design-side doc.
+    PLAN_MD: Filename of the plan doc.
+    FEATURE_KIND: The feature asset kind.
+    CHANGE_KIND: The change asset kind.
+    BUG_KIND: The bug asset kind.
+    CLAUDE_DIR: The `.claude` directory segment.
+    SETTINGS_FILE: Filename of the settings file.
+    PRODUCTS: Settings key holding the product registry.
+    SPEC_PATH: Settings key naming a product's spec directory.
+    GIT_DIR: The `.git` entry checked to detect a repo checkout.
+    REQUESTS_DIR: Directory segment holding request files.
+    REQUESTS_NOTE: Filename of the requests folder-note.
+    ROUTING_H1: Heading marking a request's routing section.
+    HISTORY_H1: Heading marking a file's history log section.
+    ROUTING_DECISION_OPEN: Opening marker of an embedded routing-decision comment.
+    ROUTING_DECISION_CLOSE: Closing marker of an embedded HTML comment.
+    DECISION_VERB_SPAWN: The routing-decision verb for a spawn target.
+    DECISION_VERB_ATTACH: The routing-decision verb for an attach target.
+    SOURCES_H1: Heading marking a doc's sources section.
+    SOURCES_TAG: Protected-section tag guarding a doc's sources section.
+    REQUESTS_H2: Sub-heading marking a doc's requests projection.
+    REQUESTS_MARKER_START: Opening marker delimiting a doc's requests projection.
+    REQUESTS_MARKER_END: Closing marker delimiting a doc's requests projection.
+    SOURCE_REQUESTS_H2: Sub-heading marking a folder-note's source-requests list.
+    HISTORY_H2: Sub-heading marking a doc's history log.
+    CALLOUT_SUCCESS: The callout text stamped on an accepted request.
+    CALLOUT_WARNING: The callout text stamped on a rejected request.
+    STATUS_TAG_PATTERN: Regex pattern matching an existing status tag to replace.
+    REJECT_HINT: Recovery-hint text appended to a rejection callout.
+    REJECT_REASON_DEFAULT: Default rejection reason when routing names no target.
+    GIT: The git executable name.
+    PROG: CLI program name shown in `--help` output.
+    CLI_LAZYCORTEX_SPECS: Plugin name used to resolve the `lazycortex-specs` CLI.
+    CLI_LAZYCORTEX_REVIEW: Plugin name used to resolve the `lazycortex-review` CLI.
+    ENV_PLUGIN_DIRS: Env var listing plugin dirs to walk for CLI resolution.
+    BIN_DIR: Per-plugin `bin/` subdir holding a CLI binary.
+    MD_SUFFIX: The markdown file extension.
+    BOT_NAME_DEFAULT: Default git author name for the apply-transition commit.
+    BOT_EMAIL_DEFAULT: Default git author email for the apply-transition commit.
+    ARG_FILE: CLI positional argument name for the request file.
+    ARG_AUTHOR_NAME: CLI flag overriding the commit author name.
+    ARG_AUTHOR_EMAIL: CLI flag overriding the commit author email.
+    REVIEW_START_IDEMPOTENT_MARK: Substring identifying an already-active review start as a no-op.
+    ERR_NO_PRODUCTS: Error message used when a spawn target needs products but none are registered.
+    CAT_LOGICAL: The error category for invalid-input failures.
+    OUTCOME_SUCCESS: Outcome token for a completed apply transition.
+    OUTCOME_ERROR: Outcome token for a failed apply transition.
+    OUTCOME_TERMINAL_SKIP: Outcome token for a no-op on an already-terminal request.
+    OUTCOME_NO_ROUTING_SKIP: Outcome token for a no-op on a request with no routing section.
+    CANONICAL_PATH_MIN_PARTS: Minimum segment count a `spec_path` must have to carry a subsystem prefix.
+    PRODUCTS_SEGMENT: The `products` path segment identifying the canonical `spec_path` shape.
+    CLASS_ENUM: The closed set of valid `request_class` verdicts.
+    KIND_FOLDER: Mapping of built-in asset kinds to their on-disk folder names.
+    KIND_LAYOUT: Mapping of built-in asset kinds to their authored-doc filename lists.
   """
 
   # Frontmatter keys
@@ -405,7 +479,7 @@ def _parse_routing(body: str) -> tuple[str | None, list[tuple[str, str]], list[s
       routing_text,
   ):
     pair = ( sm.group(1).lower(), sm.group(2) )
-    # guard: dedupe against the prose-form pass above
+    # collect only pairs the prose-form pass above has not already recorded
     if pair not in seen_spawn:
       seen_spawn.add(pair)
       spawn.append(pair)
@@ -423,7 +497,7 @@ def _parse_routing(body: str) -> tuple[str | None, list[tuple[str, str]], list[s
     folder = parts[-2]
     kind = { "features": "feature", "changes": "change", "bugs": "bug" }[folder]
     pair = ( kind, slug )
-    # guard: dedupe against the prose-form passes above
+    # collect only pairs the prose-form passes above have not already recorded
     if pair not in seen_spawn:
       seen_spawn.add(pair)
       spawn.append(pair)
@@ -432,7 +506,7 @@ def _parse_routing(body: str) -> tuple[str | None, list[tuple[str, str]], list[s
   for wm in re.finditer(r"\[\[([^\]|]+?)(?:\|[^\]]*?)?\]\]", routing_text):
     target = wm.group(1).strip()
     parts = target.split("/")
-    # guard: folder-note shape is "<...>/<slug>/<slug>" — last two segments must match
+    # collect only fresh folder-note links, whose shape is "<...>/<slug>/<slug>"
     if len(parts) >= 2 and parts[-1] == parts[-2] and target not in seen_attach:
       seen_attach.add(target)
       attach.append(target)
@@ -586,7 +660,7 @@ def _sweep_request_tag(fm_text: str, new_tag_member: str) -> str:
   added = False
   for line in existing.splitlines(keepends = True):
     stripped = line.strip()
-    # guard: skip empty lines inside the block
+    # guard: not a `- ` list member, keep the line verbatim and move on
     if not stripped.startswith("- "):
       kept.append(line)
       continue
@@ -834,10 +908,13 @@ class _Attach:
       `# Sources` container and `## Requests` sub-section are created on demand
       when absent.
     """
+    # the dated bullet is the projection's unit, and doubles as the idempotence key below
     today = _today_iso()
     new_bullet = f"- [[{request_wikilink}|{request_display}]] — {today}"
     start_marker = _K.REQUESTS_MARKER_START
     end_marker = _K.REQUESTS_MARKER_END
+
+    # an existing marker pair means the projection is already in place, so append inside it
     if start_marker in body and end_marker in body:
       pat = re.compile(
           rf"({re.escape(start_marker)}\n)(.*?)(\n?{re.escape(end_marker)})",
@@ -846,11 +923,14 @@ class _Attach:
       m = pat.search(body)
       if m:
         block = m.group(2)
+        # guard: bullet already projected, a re-run must not duplicate it
         if new_bullet in block:
           return body
         new_block = block.rstrip("\n")
         new_block = (new_block + "\n" if new_block else "") + new_bullet
         return body[:m.start(2)] + new_block + body[m.end(2):]
+
+    # no marker pair yet, so the whole container and sub-section are created around the bullet
     container = "\n".join([
         "",
         _K.SOURCES_H1,
@@ -920,6 +1000,17 @@ class _FolderNote:
 class _Apply:
   """
   Top-level apply orchestrator. Owns the routing parse → enact → stamp → commit pipeline.
+
+  Attributes:
+    file_path: Absolute path to the request markdown file being applied.
+    repo: Repository root containing the request file.
+    author_name: Git author name used for the atomic commit.
+    author_email: Git author email used for the atomic commit.
+    specs_cli: Resolved path to the sibling `lazycortex-specs` CLI.
+    review_cli: Resolved path to the sibling `lazycortex-review` CLI.
+    populated_docs: Docs that received body distribution during this run.
+    spawn_folder_notes: Folder-notes created by enacting a spawn target during this run.
+    attach_folder_notes: Folder-notes populated by enacting an attach target during this run.
   """
 
   def __init__(self, *, file_path: Path, author_name: str, author_email: str) -> None:
@@ -1120,28 +1211,59 @@ class _Apply:
     body = _insert_status_callout(body, callout)
     self.file_path.write_text(fm_text + body)
 
+  def _touched_paths(self, inbox: Path) -> list[str]:
+    """
+    Collect the repo-relative paths this apply pass is responsible for.
+
+    Args:
+      inbox: The requests folder-note, whose container stats are refreshed on every pass.
+
+    Returns:
+      Repo-relative path strings — the request file, the inbox note when present, each
+      populated document, each attach target, and the whole folder of each spawned asset.
+    """
+    paths = [ self.file_path ]
+    if inbox.is_file():
+      paths.append(inbox)
+    paths.extend(self.populated_docs)
+    paths.extend(self.attach_folder_notes)
+    # a spawn scaffolds a whole asset folder, so the folder — not just its note — is the unit
+    paths.extend(note.parent for note in self.spawn_folder_notes)
+
+    # the same path can arrive from several sources, and git rejects a duplicated pathspec
+    seen: list[str] = []
+    for path in paths:
+      rel = str(path.resolve().relative_to(self.repo))
+      if rel not in seen:
+        seen.append(rel)
+    return seen
+
   def _commit(self, *, subject: str) -> None:
     """
-    Stage every modified path and commit under the bot identity in one atomic step.
+    Stage the paths this pass touched and commit them under the bot identity in one atomic step.
 
     Args:
       subject: One-line commit subject describing the staged diff.
     """
+    # the inbox stats line goes stale on every apply, so refresh it before it joins the commit set
     inbox = spec_content_root(find_settings_root(self.file_path.parent)) / _K.REQUESTS_DIR / _K.REQUESTS_NOTE
     if inbox.is_file():
       apply_container_stats(inbox)
+
+    # never `git add -A` — the worktree belongs to the operator and may carry unrelated work
     add_res = subprocess.run(
-        [ _K.GIT, "add", "-A" ],
+        [ _K.GIT, "add", "--", *self._touched_paths(inbox) ],
         cwd = str(self.repo),
         capture_output = True,
         text = True,
         check = False,
     )
+    # guard: staging failed, the commit below would snapshot the wrong set
     if add_res.returncode != 0:
       _fail(_K.CAT_LOGICAL,
             f"git add failed: exit={add_res.returncode} stderr={add_res.stderr.strip()[:240]}")
-    # guard: nothing to commit — every step was a no-op (idempotent re-run on
-    # terminal state); skip the commit step to keep the tree clean
+
+    # an idempotent re-run on terminal state stages nothing, so ask git whether anything landed
     status_res = subprocess.run(
         [ _K.GIT, "diff", "--cached", "--quiet" ],
         cwd = str(self.repo),
@@ -1150,6 +1272,8 @@ class _Apply:
     # guard: empty staged diff — nothing to commit on this apply pass
     if status_res.returncode == 0:
       return
+
+    # commit under the request bot's identity so the operator's authorship stays untouched
     commit_res = subprocess.run(
         [
             _K.GIT,
@@ -1163,6 +1287,7 @@ class _Apply:
         text = True,
         check = False,
     )
+    # guard: a failed commit leaves the tree dirty and would halt the daemon silently
     if commit_res.returncode != 0:
       _fail(_K.CAT_LOGICAL,
             f"git commit failed: exit={commit_res.returncode} "
@@ -1175,6 +1300,7 @@ class _Apply:
     Returns:
       Exit code: `0` on success or idempotent terminal-state skip; `1` on logical error.
     """
+    # the frontmatter status decides whether this pass has anything left to do
     text = self.file_path.read_text()
     values, fm_end = _parse_frontmatter(text)
     status = values.get(_K.REQUEST_STATUS)
@@ -1183,6 +1309,8 @@ class _Apply:
     if status in ( _K.STATUS_ACCEPTED, _K.STATUS_REJECTED ):
       print(json.dumps({ "outcome": _K.OUTCOME_SUCCESS, "skip": _K.OUTCOME_TERMINAL_SKIP }))
       return 0
+
+    # the `# Routing` section the router wrote is the whole instruction set for this pass
     body = text[fm_end:]
     cls, spawn_targets, attach_targets, _ = _parse_routing(body)
     request_class = cls or values.get(_K.REQUEST_CLASS) or _K.CLASS_UNKNOWN
@@ -1190,6 +1318,8 @@ class _Apply:
     # first H1 in the raw body before strip). Read from `_request_content_block` which already
     # filters out `# Routing` and `# History` sections.
     request_display = _request_h1_title(_request_content_block(body))
+
+    # a routing section naming no target has nothing to apply, so the request is rejected outright
     resolved_wikilinks: list[str] = []
     if not spawn_targets and not attach_targets:
       self._stamp_request_file(
@@ -1204,6 +1334,8 @@ class _Apply:
       print(json.dumps({ "outcome": _K.OUTCOME_SUCCESS, "result": _K.STATUS_REJECTED,
                          "request_class": request_class }))
       return 0
+
+    # a spawn target scaffolds its asset first, then receives the request body like any attach
     for kind, slug in spawn_targets:
       folder_note = self._spawn(kind, slug)
       rel = folder_note.relative_to(self.repo).with_suffix("")
@@ -1211,14 +1343,20 @@ class _Apply:
       populated = self._attach_to_folder_note(folder_note, body, request_display)
       self.populated_docs.extend(populated)
       self.spawn_folder_notes.append(folder_note)
+
+    # an attach target already exists, so only the body projection applies
     for target in attach_targets:
       folder_note = self._resolve_attach_folder_note(target)
       resolved_wikilinks.append(target)
       populated = self._attach_to_folder_note(folder_note, body, request_display)
       self.populated_docs.extend(populated)
       self.attach_folder_notes.append(folder_note)
+
+    # every doc that received content enters the review loop
     for doc in self.populated_docs:
       self._open_review(doc)
+
+    # the stamp records where the request landed, and the commit makes the whole pass atomic
     self._stamp_request_file(
         request_class = request_class,
         request_status = _K.STATUS_ACCEPTED,
@@ -1229,6 +1367,8 @@ class _Apply:
     self._commit(
         subject = f"apply: stamp accepted + strip Routing on {rel_path}",
     )
+
+    # the counts let the calling routine report what this pass produced
     print(json.dumps({
         "outcome": _K.OUTCOME_SUCCESS,
         "result": _K.STATUS_ACCEPTED,
@@ -1257,7 +1397,7 @@ def main(argv: list[str]) -> int:
   parser.add_argument(_K.ARG_AUTHOR_EMAIL, default = _K.BOT_EMAIL_DEFAULT)
   args = parser.parse_args(argv)
   file_path: Path = args.file
-  # guard: argparse hands relative paths straight through; resolve to absolute
+  # argparse hands relative paths straight through, so resolve to absolute here
   if not file_path.is_absolute():
     file_path = file_path.resolve()
   # guard: filesystem path idiom — markdown file extension check

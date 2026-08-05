@@ -55,7 +55,7 @@ class GlobMatcher:
     Returns:
       True on a match, False otherwise.
     """
-    # guard: compile and cache the regex on first use for this pattern
+    # compile once per pattern — the same globs are re-tested for every walked file
     if pattern not in self._cache:
       self._cache[pattern] = self._compile(pattern)
     return bool(self._cache[pattern].match(rel_posix))
@@ -182,6 +182,7 @@ def _parse_frontmatter(text: str) -> dict:
   if close_idx is None:
     return {}
 
+  # collect the scalar keys and the block-sequence items that hang off them
   result: dict = {}
   current_key: str | None = None
   for raw in lines[1:close_idx]:
@@ -294,6 +295,11 @@ class ScopeResolver:
   _PATHS_KEY = "paths"
   _EXCLUDE_PATHS_KEY = "exclude_paths"
   _FILTER_KEY = "filter"
+  _TOPICS_INDEX_KEY = "topics_index"
+  _DEFAULT_TOPICS_INDEX = "wiki/topics.md"
+  _WIKI_ROLE_KEY = "wiki_role"
+  _TOPICS_INDEX_ROLE = "topics-index"
+  _MD_SUFFIX = ".md"
   _GIT_DIR = ".git"
   _ENCODING = "utf-8"
 
@@ -342,6 +348,10 @@ class ScopeResolver:
     """
     Return the first scope whose `paths` globs match and no `exclude_paths` glob matches.
 
+    A topics index — the scope's configured `topics_index` path, or any file carrying
+    `wiki_role: topics-index` — is never a node and always resolves to `None`, regardless of
+    `exclude_paths`.
+
     When that home scope declares a `filter` and the node fails it (e.g. the node carries
     `review_active: true` and the filter denies it), this returns `None` — the node is treated
     as out of scope for now and re-enters once the frontmatter flag clears.
@@ -375,12 +385,17 @@ class ScopeResolver:
     except ValueError:
       return None
 
+    # the frontmatter filter reads the file, so it needs the absolute location
     abs_path = path if path.is_absolute() else self._repo / path
     scopes = self.load_scopes()
     for scope_id, cfg in scopes.items():
       # guard: path does not belong to this scope
       if not self._matches_scope(rel_posix, cfg):
         continue
+      # guard: the node is a generated topics index, not a curated document — it belongs to
+      # build-index, which rewrites it wholesale, so no curator may ever be dispatched on it
+      if self._is_topics_index(cfg, rel_posix, abs_path):
+        return None
       # guard: the home scope's frontmatter filter rejects this node (e.g. it carries
       # review_active: true) — treat it as out of scope so process-file skips it without
       # dispatching the curator. First path-match wins, mirroring the no-filter path.
@@ -402,16 +417,20 @@ class ScopeResolver:
       cfg: A single scope-config dict (the value side of a `wiki.scopes` entry).
 
     Returns:
-      Sorted list of absolute `Path` objects for all matching, non-excluded files.
+      Sorted list of absolute `Path` objects for the scope's curated nodes — files matching a
+      `paths` glob, minus those an `exclude_paths` glob names, minus the topics index, minus
+      whatever the scope's optional `filter` rejects.
     """
     paths_globs: list[str] = cfg.get(self._PATHS_KEY) or []
     exclude_globs: list[str] = cfg.get(self._EXCLUDE_PATHS_KEY) or []
 
+    # overlapping globs can name the same file twice — dedupe on the resolved path
     seen_abs: set[Path] = set()
     candidates: list[Path] = []
 
+    # one walk of the repo serves every glob in the scope
     for base, dirs, files in os.walk(str(self._repo)):
-      # guard: never descend into git internals
+      # prune git internals from the walk
       dirs[ : ] = [ d for d in dirs if d != self._GIT_DIR ]
       for fname in files:
         full = Path(base) / fname
@@ -427,16 +446,58 @@ class ScopeResolver:
           # guard: excluded by an exclude_paths pattern
           if any(self._matcher.match(rel, ep) for ep in exclude_globs):
             break
+          # guard: the scope's own generated topics index is never one of its nodes
+          if self._is_topics_index(cfg, rel, full):
+            break
           seen_abs.add(ap)
-          # guard: must be a real file and pass the scope's optional frontmatter filter — a
+          # collect only real files that clear the scope's optional frontmatter filter — a
           # filtered node (e.g. review_active: true) drops out of the index entirely, so other
           # nodes do not link to it while the flag is set.
           if ap.is_file() and self._passes_filter(cfg, full):
             candidates.append(ap)
           break
 
+    # walk order is filesystem-dependent — sort so callers get a stable enumeration
     candidates.sort()
     return candidates
+
+  # ------------------------------------------------------------------
+  def _is_topics_index(self, cfg: dict, rel_posix: str, abs_path: Path) -> bool:
+    """
+    Return True when the node is a wiki-owned topics index rather than a curated document.
+
+    Two independent signals, either of which is enough: the path equals the scope's own
+    `topics_index` (or the default when the key is absent), or the file's frontmatter carries
+    `wiki_role: topics-index`. The marker covers a renamed index and an index belonging to a
+    sibling scope that happens to fall under this scope's globs. The exclusion is built in — it
+    never depends on the operator remembering to list the index in `exclude_paths`.
+
+    Notes:
+      - The path signal costs nothing; the marker signal reads the file, so every markdown
+        candidate of a repo walk is opened once.
+      - A node that also faces a scope `filter` is read twice per walk. Both reads are
+        frontmatter-only in intent but pull the whole file.
+
+    Args:
+      cfg: The scope-config dict whose `topics_index` path is compared against the node.
+      rel_posix: Repo-relative POSIX path string of the node under evaluation.
+      abs_path: Absolute path to the node file whose frontmatter is inspected.
+
+    Returns:
+      True when the node is a topics index; False otherwise.
+    """
+    # guard: the scope's own index path — no read needed
+    if PurePath(cfg.get(self._TOPICS_INDEX_KEY) or self._DEFAULT_TOPICS_INDEX).as_posix() == rel_posix:
+      return True
+    # guard: only markdown carries the role marker
+    if abs_path.suffix != self._MD_SUFFIX:
+      return False
+    # ponytail: one frontmatter read per markdown candidate; cache by mtime if a walk ever drags
+    try:
+      text = abs_path.read_text(encoding = self._ENCODING)
+    except OSError:
+      return False
+    return _parse_frontmatter(text).get(self._WIKI_ROLE_KEY) == self._TOPICS_INDEX_ROLE
 
   # ------------------------------------------------------------------
   def _passes_filter(self, cfg: dict, abs_path: Path) -> bool:

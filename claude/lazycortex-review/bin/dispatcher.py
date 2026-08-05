@@ -74,7 +74,7 @@ def _resolve_core_cli() -> Path:
     cli = Path(d) / Paths.BIN_DIR / Plugin.CORE
     if cli.is_file():
       return cli
-# Stage 2 — plugin cache. Layout: <cache>/<registry>/lazycortex-core/<version>/bin/lazycortex-core.
+  # Stage 2 — plugin cache. Layout: <cache>/<registry>/lazycortex-core/<version>/bin/lazycortex-core.
   cache = Path.home() / Paths.PLUGIN_CACHE
   if cache.is_dir():
     plugin_dirs = [
@@ -331,36 +331,36 @@ def _core_lookup_expert(target_repo: Path, name: str) -> dict | None:
   return entry
 
 
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import banner as _banner  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import body as _body  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import edit_markup as _edit_markup  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import finalize as _finalize  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import git_ops as _git_ops  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import hashlib as _hashlib  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import history as _history  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import (  # noqa: E402
     Action, Bucket, CommitterKind, CoreCommand, EnvVar, ErrorCause, JobFile, JobKey, JobStatus,
     Kind, Outcome, Paths, Phase, Plugin, Position, ReviewKey, Role, Style,
 )
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import parser as _parser  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import payload as _payload  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import reapply as _reapply  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import state_machine as _sm  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from errors import ParseError  # noqa: E402
 
 
@@ -445,6 +445,7 @@ def validate_experts_emails(experts_tbl: dict) -> None:
     else:
       email_to_owner[email] = name
 
+  # every defect found above is reported together rather than one at a time
   problems: list[str] = []
   if missing:
     problems.append(
@@ -478,7 +479,7 @@ def _participating_bot_emails(experts_tbl: dict, class_cfg: dict) -> set[str]:
   participants: set[str] = set()
   for group_key, members in (class_cfg.get(JobKey.EXPERTS) or {}).items():
     if group_key == Phase.HISTORY:
-        # history is a single writer object {"name": ...}, not a list.
+      # history is a single writer object {"name": ...}, not a list.
       if isinstance(members, dict) and members.get(JobKey.NAME):
         participants.add(members[JobKey.NAME])
       continue
@@ -630,7 +631,7 @@ def _to_int(value: int | str | None, default: int = 0) -> int:
     return default
   if isinstance(value, int) and not isinstance(value, bool):
     return value
-# remaining: str (a stray bool falls through to the default)
+  # remaining: str (a stray bool falls through to the default)
   if isinstance(value, str):
     try:
       return int(value.strip())
@@ -712,6 +713,7 @@ def _chain_state(
   last_committer_kind: str | None = None  # "human" | "expert" | "final" | "bot"
   last_contentful_sha: str | None = None
 
+  # the history is walked newest-first until the last contentful commit is classified
   for record in history:
     trailers = record.trailers
     phase, _expert, _round = _git_ops.parse_phase_trailer(trailers)
@@ -750,8 +752,10 @@ def _chain_state(
       last_contentful_sha = record.sha
       break
 
+  # only a human touch re-opens operator-driven transitions
   last_commit_is_human = last_committer_kind == CommitterKind.HUMAN
 
+  # the two fields together are everything the state machine reads from the chain
   return _ChainState(
       last_commit_is_human=last_commit_is_human,
       last_contentful_sha=last_contentful_sha,
@@ -842,16 +846,16 @@ def _resolve_wire_role(
     for bucket, fallback in (("validation", "validator"), ("terminal", "terminal")):
       slot = (experts.get(bucket) or {}).get(section_id)
       if slot:
-          # Production schema: slot is a writer-object dict.
-          # Some test fixtures pre-date the dict normalisation
-          # and pass a list of writer-objects — first entry
-          # wins in that case.
+        # Production schema: slot is a writer-object dict.
+        # Some test fixtures pre-date the dict normalisation
+        # and pass a list of writer-objects — first entry
+        # wins in that case.
         writer = slot[0] if isinstance(slot, list) and slot else slot
         role = writer.get(JobKey.ROLE) if isinstance(writer, dict) else None
         return role if role else fallback
-# Unconfigured bucket — surface the canonical placeholder so
-# the dispatcher's commit / phase machinery keeps a meaningful
-# string rather than the section-id.
+    # Unconfigured bucket — surface the canonical placeholder so
+    # the dispatcher's commit / phase machinery keeps a meaningful
+    # string rather than the section-id.
     return Phase.SECTION
   return section_id
 
@@ -887,7 +891,7 @@ def _resolve_fm_policy(
       if slot:
         entry = slot[0] if isinstance(slot, list) and slot else slot
         break
-# guard: undeclared expert (or non-dict slot) writes no frontmatter
+  # guard: undeclared expert (or non-dict slot) writes no frontmatter
   if not isinstance(entry, dict):
     return set(), set()
   fm = entry.get(JobKey.FRONTMATTER) or {}
@@ -1000,6 +1004,7 @@ def compute_inputs(
     meta = {}
     parse_failed = True
 
+  # the three reserved keys carry the review's own state across ticks
   review_active = _to_bool(meta.get(ReviewKey.ACTIVE))
   review_round = _to_int(meta.get(ReviewKey.ROUND), default=1)
   approved = _to_bool(_read_review_approved(meta))
@@ -1020,6 +1025,7 @@ def compute_inputs(
   )
   concerns_decision_threshold = max(concerns_decision_threshold, 1)
 
+  # the writer sets come from the class config, with the per-document override applied
   main_writers = _effective_main_writers(class_cfg, meta)
   section_writers_full = _gather_section_writers(class_cfg)
 
@@ -1043,6 +1049,7 @@ def compute_inputs(
     if _ov_email:
       bot_emails.add(_ov_email)
 
+  # a document that failed to parse has no trustworthy history to classify
   history = _git_ops.history_for_file(repo, file_path) if not parse_failed else []
   chain = _chain_state(
       history=history,
@@ -1065,7 +1072,7 @@ def compute_inputs(
         n for n in main_writers if _flatten(n) not in main_done_flat
     ]
 
-# Banner state.
+  # Banner state.
   current_banner = _banner.extract(_body_text) if not parse_failed else None
   body_for_gates = _body_text if not parse_failed else ""
 
@@ -1163,6 +1170,7 @@ def compute_inputs(
       and not approved_with_concerns_active
   )
 
+  # an operator block is read from the body, which only a parseable document has
   if not parse_failed:
     operator_blocked = _has_operator_block(
         _body_text, terminal_owners=terminal_owners,
@@ -1203,10 +1211,10 @@ def compute_inputs(
   else:
     desired = _banner.State.IN_PROCESS  # no body to inspect
 
-# Detect a ticked approve checkbox in body. The operator's `- [x]`
-# tick lives inside the Ready banner. Captured here so the state
-# machine can mirror it into frontmatter `approved: true` before
-# the next banner-repaint strips the entire Ready callout.
+  # Detect a ticked approve checkbox in body. The operator's `- [x]`
+  # tick lives inside the Ready banner. Captured here so the state
+  # machine can mirror it into frontmatter `approved: true` before
+  # the next banner-repaint strips the entire Ready callout.
   approve_ticked = (
       not parse_failed
       and not approved
@@ -1260,9 +1268,9 @@ def compute_inputs(
   # happens to match desired (e.g. an external trigger already put
   # the banner in place).
   if not parse_failed:
-      # Tag-first: presence keys on the historian ownership tag, not a
-      # literal `# History` heading (a content H1 titled History is not
-      # the historian's section).
+    # Tag-first: presence keys on the historian ownership tag, not a
+    # literal `# History` heading (a content H1 titled History is not
+    # the historian's section).
     history_section_present = _parser.find_history(_body_text) is not None
   else:
     history_section_present = True  # don't trigger bootstrap on unparseable docs
@@ -1400,12 +1408,12 @@ def _has_operator_block(
     owned_text = _body._extract_section_by_flat_name(body_no_fences, ignore_owned_by)
     if owned_text is not None:
       body_no_fences = body_no_fences.replace(owned_text, "")
-# Terminal sections use the apply-after-tick gesture (Bug 31): the
-# operator's `- [x]` may live ANYWHERE in the section (bare list
-# item OR ticked option inside a callout). The callout itself is a
-# documentation reminder of what was asked; the tick is the answer.
-# If any tick exists in the section, drop the whole section so its
-# callouts don't block the chain.
+  # Terminal sections use the apply-after-tick gesture (Bug 31): the
+  # operator's `- [x]` may live ANYWHERE in the section (bare list
+  # item OR ticked option inside a callout). The callout itself is a
+  # documentation reminder of what was asked; the tick is the answer.
+  # If any tick exists in the section, drop the whole section so its
+  # callouts don't block the chain.
   for owner in (terminal_owners or set()):
     # guard: the caller's own section is excluded from the block scan
     if owner == ignore_owned_by:
@@ -1416,12 +1424,12 @@ def _has_operator_block(
       continue
     if re.search(r"^\s*-\s*\[x\]", section_text, re.MULTILINE):
       body_no_fences = body_no_fences.replace(section_text, "")
-# For everything else (main-body callouts, validation H1 sections):
-# spec § Top banner line 578 / § Stage 6 line 264 — callout is
-# answered when there is `- [x]` INSIDE its own body. Per-callout
-# granularity, not per-section. Drop answered callouts so the
-# blocking regex only sees the ones still waiting on an operator
-# tick.
+  # For everything else (main-body callouts, validation H1 sections):
+  # spec § Top banner line 578 / § Stage 6 line 264 — callout is
+  # answered when there is `- [x]` INSIDE its own body. Per-callout
+  # granularity, not per-section. Drop answered callouts so the
+  # blocking regex only sees the ones still waiting on an operator
+  # tick.
   body_no_fences = _strip_answered_callouts(body_no_fences)
   return bool(
       re.search(r"^>\s*\[!question\][^\n]*#review/question", body_no_fences, re.MULTILINE)
@@ -1453,14 +1461,14 @@ def _strip_answered_callouts(body: str) -> str:
       out.append(lines[i])
       i += 1
       continue
-  # Found a callout opening — scan its continuation lines (every
-  # contiguous `>`-prefixed line).
+    # Found a callout opening — scan its continuation lines (every
+    # contiguous `>`-prefixed line).
     j = i + 1
     while j < len(lines) and lines[j].startswith(">"):
       j += 1
     block = "\n".join(lines[i:j])
     if re.search(r"^>\s*-\s*\[x\]", block, re.MULTILINE):
-        # Answered — drop it.
+      # Answered — drop it.
       pass
     else:
       out.extend(lines[i:j])
@@ -1543,14 +1551,14 @@ def _reconstruct_phase(  # pylint: disable=unused-argument
   """
   section_writers_full = _gather_section_writers(class_cfg)
   if not approved:
-      # guard: chain exhausted, operator's turn — keep the round closed.
+    # guard: chain exhausted, operator's turn — keep the round closed.
     if _has_operator_block(body):
       return Bucket.AWAITING_OPERATOR, None
     return Phase.MAIN, []
-# Approved → a post-approve barrier phase. Pick validators when the
-# class has any validators still without a landed section; else
-# terminals when terminals remain; else default to the first
-# non-empty barrier bucket.
+  # Approved → a post-approve barrier phase. Pick validators when the
+  # class has any validators still without a landed section; else
+  # terminals when terminals remain; else default to the first
+  # non-empty barrier bucket.
   has_validators = any(pa and not term for (_n, _s, _t, pa, term, _p) in section_writers_full)
   has_terminals = any(pa and term for (_n, _s, _t, pa, term, _p) in section_writers_full)
   validator_section_present = any(
@@ -1564,7 +1572,7 @@ def _reconstruct_phase(  # pylint: disable=unused-argument
     return Bucket.TERMINALS, None
   if has_validators:
     return Bucket.VALIDATORS, None
-# No post-approve writers at all → straight to finalize next tick.
+  # No post-approve writers at all → straight to finalize next tick.
   return "finalizing", None
 
 
@@ -1592,36 +1600,34 @@ def apply_action(
   edit_marker_style = (
       settings.get(JobKey.REVIEW, {}).get(JobKey.EDIT_MARKER_STYLE, Style.SIMPLE)
   )
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
-  _experts_tbl = experts_table(settings)  # noqa: F841
-
   if action.kind == Outcome.SKIP:
-      # spec § Class 3 (file parse failure): when repair attempts are exhausted and the file is
-      # still unparseable, register the file with the core error ledger as `broken`. Pre-check
-      # via `error-list` so a repeated tick on the same broken file does not append a new event
-      # every time — the folder collapses by incident anyway, but skipping the emit keeps the
-      # journal lean until the file-body [!error] callout + frontmatter exclusion lands.
-      # The callout/exclusion side is a deliberate follow-up; this closes the ledger half.
+    # spec § Class 3 (file parse failure): when repair attempts are exhausted and the file is
+    # still unparseable, register the file with the core error ledger as `broken`. Pre-check
+    # via `error-list` so a repeated tick on the same broken file does not append a new event
+    # every time — the folder collapses by incident anyway, but skipping the emit keeps the
+    # journal lean until the file-body [!error] callout + frontmatter exclusion lands.
+    # The callout/exclusion side is a deliberate follow-up; this closes the ledger half.
     if inputs.parse_failed and inputs.repair_attempts_remaining == 0:
       _record_broken_to_ledger(repo, file_path)
     return summary
 
+  # approve: the operator's body tick becomes the frontmatter approval flag
   if action.kind == Action.APPROVE_MIRROR:
-      # Mirror the operator's `- [x] approve the whole document` tick
-      # (which lives inside the Ready banner body) into the frontmatter
-      # approval flag (`review_approved: true`). Atomic-tick: bundle
-      # the banner-repaint (Ready → Waiting) AND the edit-marker
-      # fold-down in the same bot commit — the banner-tick invariant
-      # allows multiple mechanical actions in one bot commit (just not
-      # mixed with expert commits).
-      #
-      # Why the fold-down here: operator approved the document AS IS,
-      # so any pre-approve edit-markers (`\`\`\`diff` fences for style
-      # `diff`, ==add==/~~rm~~ for `simple`, etc.) become accepted
-      # final text. The validator/terminal that fires next must see the
-      # clean baseline; otherwise it reviews scaffolding instead of
-      # content. (Finalize also strips markers — this is the same
-      # transform, applied earlier in the post-approve lifecycle.)
+    # Mirror the operator's `- [x] approve the whole document` tick
+    # (which lives inside the Ready banner body) into the frontmatter
+    # approval flag (`review_approved: true`). Atomic-tick: bundle
+    # the banner-repaint (Ready → Waiting) AND the edit-marker
+    # fold-down in the same bot commit — the banner-tick invariant
+    # allows multiple mechanical actions in one bot commit (just not
+    # mixed with expert commits).
+    #
+    # Why the fold-down here: operator approved the document AS IS,
+    # so any pre-approve edit-markers (`\`\`\`diff` fences for style
+    # `diff`, ==add==/~~rm~~ for `simple`, etc.) become accepted
+    # final text. The validator/terminal that fires next must see the
+    # clean baseline; otherwise it reviews scaffolding instead of
+    # content. (Finalize also strips markers — this is the same
+    # transform, applied earlier in the post-approve lifecycle.)
     fm_text = text[: len(text) - len(body)]
     fm_text = _write_review_approved(fm_text, True)
     # Enter the post-approve barrier (spec § Stage 5). The explicit
@@ -1647,17 +1653,17 @@ def apply_action(
           body, style=edit_marker_style,
       )
     except ValueError:
-        # Unknown style — passthrough (defensive; same fallback as
-        # the historian source pre-strip).
+      # Unknown style — passthrough (defensive; same fallback as
+      # the historian source pre-strip).
       body_after_strip = body
-  # Bug 88: strip the RESOLVED validator-owned sections from the
-  # previous revert-cycle. Operator approved AS IS, so the validator
-  # sections the main writer already lifted into body are stale —
-  # drop them by ownership (preserve terminal-owned sections like
-  # `# Routing` + operator body + `# History`). The next
-  # validator barrier writes fresh sections. The resolved sections
-  # still carry their 2-part `#expert/…` tag and are caught by
-  # ownership here.
+    # Bug 88: strip the RESOLVED validator-owned sections from the
+    # previous revert-cycle. Operator approved AS IS, so the validator
+    # sections the main writer already lifted into body are stale —
+    # drop them by ownership (preserve terminal-owned sections like
+    # `# Routing` + operator body + `# History`). The next
+    # validator barrier writes fresh sections. The resolved sections
+    # still carry their 2-part `#expert/…` tag and are caught by
+    # ownership here.
     _terminal_ids = {sid for (_n, sid, _t, pa, term, _p) in _swf if pa and term}
     body_after_strip = _body.strip_owned_h1_sections(
         body_after_strip, preserve_section_ids=_terminal_ids,
@@ -1691,12 +1697,13 @@ def apply_action(
       summary[JobKey.HISTORY_KICK_ERROR] = str(exc)
     return summary
 
+  # approve-with-concerns: same mirror, but the concerns flag rides along
   if action.kind == Action.APPROVE_WITH_CONCERNS_MIRROR:
-      # Bug 44 redesign: operator ticked `- [x] approve with concerns`
-      # on the CONCERNS_DECISION pause banner. Mirror the choice into
-      # frontmatter so the next tick's state machine sees the active
-      # flag and dispatches finalize with `with_concerns=True`,
-      # which preserves validation-owned H1 sections in the body.
+    # Bug 44 redesign: operator ticked `- [x] approve with concerns`
+    # on the CONCERNS_DECISION pause banner. Mirror the choice into
+    # frontmatter so the next tick's state machine sees the active
+    # flag and dispatches finalize with `with_concerns=True`,
+    # which preserves validation-owned H1 sections in the body.
     fm_text = text[: len(text) - len(body)]
     fm_text = _fm.set_field(fm_text, ReviewKey.APPROVED_WITH_CONCERNS, True)
     file_path.write_text(fm_text + body)
@@ -1709,17 +1716,18 @@ def apply_action(
     summary[JobKey.COMMIT_SHA] = sha
     return summary
 
+  # continue-review: the one-shot signal that re-opens the cycle
   if action.kind == Action.CONTINUE_REVIEW_MIRROR:
-      # Bug 44 redesign: operator ticked `- [x] continue review cycle`
-      # on the CONCERNS_DECISION pause banner. The choice is a one-
-      # shot signal — we drop `review_approved: false` so the
-      # document re-enters the main cycle. Atomic-tick: bundle the
-      # banner-repaint (CONCERNS_DECISION → Waiting) in the same bot
-      # commit.
-      #
-      # Bug 73 / inv 4: `review_round` is NOT bumped here — the
-      # bump is a separate mechanical bot-commit (the inline atomic-tick
-      # cleanup) emitted after the main writer's next commit.
+    # Bug 44 redesign: operator ticked `- [x] continue review cycle`
+    # on the CONCERNS_DECISION pause banner. The choice is a one-
+    # shot signal — we drop `review_approved: false` so the
+    # document re-enters the main cycle. Atomic-tick: bundle the
+    # banner-repaint (CONCERNS_DECISION → Waiting) in the same bot
+    # commit.
+    #
+    # Bug 73 / inv 4: `review_round` is NOT bumped here — the
+    # bump is a separate mechanical bot-commit (the inline atomic-tick
+    # cleanup) emitted after the main writer's next commit.
     fm_text = text[: len(text) - len(body)]
     fm_text = _write_review_approved(fm_text, False)
     # Phase-driven re-entry into the main cycle (spec transition
@@ -1744,24 +1752,25 @@ def apply_action(
     summary[JobKey.COMMIT_SHA] = sha
     return summary
 
+  # revert: a post-approve writer left content, so the main round re-opens
   if action.kind == Action.REVERT_TO_MAIN:
-      # Final-as-section revert: the operator approved BUT a
-      # post-approve writer left non-empty content in its owned H1
-      # section. Kick the document back into a fresh main-writer
-      # round so the operator can react to those concerns.
-      #
-      # Atomic-tick invariant (spec § Orthogonal rules): the
-      # `review_approved: false` flip + banner repaint to Waiting
-      # MUST land in the same bot-commit. Two consecutive mechanical
-      # bot-commits invite an operator commit between them and break
-      # the atomicity of the revert.
-      #
-      # Bug 73 / inv 4: `review_round` is NOT bumped here — that
-      # bump is bundled with the next main-writer's commit by
-      # `_run_atomic_tick_cleanup` (atomic-tick on the writer side).
-      # Post-approve section contents are PRESERVED in the body so
-      # the next main-writer round can read them as
-      # `concerns`.
+    # Final-as-section revert: the operator approved BUT a
+    # post-approve writer left non-empty content in its owned H1
+    # section. Kick the document back into a fresh main-writer
+    # round so the operator can react to those concerns.
+    #
+    # Atomic-tick invariant (spec § Orthogonal rules): the
+    # `review_approved: false` flip + banner repaint to Waiting
+    # MUST land in the same bot-commit. Two consecutive mechanical
+    # bot-commits invite an operator commit between them and break
+    # the atomicity of the revert.
+    #
+    # Bug 73 / inv 4: `review_round` is NOT bumped here — that
+    # bump is bundled with the next main-writer's commit by
+    # `_run_atomic_tick_cleanup` (atomic-tick on the writer side).
+    # Post-approve section contents are PRESERVED in the body so
+    # the next main-writer round can read them as
+    # `concerns`.
     fm_text = text[: len(text) - len(body)]
     fm_text = _write_review_approved(fm_text, False)
     # Phase-driven revert (spec transition validators → main): explicit
@@ -1779,6 +1788,7 @@ def apply_action(
     summary[JobKey.COMMIT_SHA] = sha
     return summary
 
+  # repaint: the banner is re-rendered to match the state the document is actually in
   if action.kind == Action.BANNER_REPAINT:
     fm_text = text[: len(text) - len(body)]
     # Spec § Stage 1 — review opening: the bootstrap subsystem sees a
@@ -1797,22 +1807,22 @@ def apply_action(
       fm_text = _fm.set_field(fm_text, ReviewKey.ROUND, 1)
     if ReviewKey.APPROVED not in meta:
       fm_text = _fm.set_field(fm_text, ReviewKey.APPROVED, False)
-  # Phase-driven lifecycle (spec § Target model): every banner-
-  # repaint that opens or re-opens the pre-approve cycle stamps the
-  # explicit `review_phase` + `review_main_done` frontmatter, so
-  # the state machine reads the stage from frontmatter instead of
-  # walking commit trailers. Three cases land here:
-  #   - bootstrap (`review_round` was absent): fresh opt-in →
-  #     `review_phase: main` + `review_main_done: []`.
-  #   - mid-review reconstruct (`review_round` present but
-  #     `review_phase` absent): a document mid-review at the moment
-  #     of the phase-driven upgrade — derive the phase from observed
-  #     body / approval state (handled by `_reconstruct_phase`).
-  #   - operator new pre-approve round (`review_phase` present, the
-  #     operator just committed, not approved): reset the round →
-  #     `review_phase: main` + `review_main_done: []`. The
-  #     `review_round` bump itself stays in the post-main atomic-tick
-  #     cleanup (unchanged from the trailer-era behaviour).
+    # Phase-driven lifecycle (spec § Target model): every banner-
+    # repaint that opens or re-opens the pre-approve cycle stamps the
+    # explicit `review_phase` + `review_main_done` frontmatter, so
+    # the state machine reads the stage from frontmatter instead of
+    # walking commit trailers. Three cases land here:
+    #   - bootstrap (`review_round` was absent): fresh opt-in →
+    #     `review_phase: main` + `review_main_done: []`.
+    #   - mid-review reconstruct (`review_round` present but
+    #     `review_phase` absent): a document mid-review at the moment
+    #     of the phase-driven upgrade — derive the phase from observed
+    #     body / approval state (handled by `_reconstruct_phase`).
+    #   - operator new pre-approve round (`review_phase` present, the
+    #     operator just committed, not approved): reset the round →
+    #     `review_phase: main` + `review_main_done: []`. The
+    #     `review_round` bump itself stays in the post-main atomic-tick
+    #     cleanup (unchanged from the trailer-era behaviour).
     review_phase_now = context.get(ReviewKey.PHASE)
     approved_now = bool(context.get(JobKey.APPROVED))
     operator_committed = bool(context.get(JobKey.LAST_COMMIT_IS_HUMAN))
@@ -1825,14 +1835,14 @@ def apply_action(
     # inconsistent FM (writer round pending) + banner (chain exhausted).
     fm_resets_writer_round = False
     if ReviewKey.ROUND not in meta:
-        # Bootstrap — first commit on a freshly opted-in fixture.
+      # Bootstrap — first commit on a freshly opted-in fixture.
       fm_text = _fm.set_field(fm_text, ReviewKey.PHASE, Phase.MAIN)
       fm_text = _fm.set_field(fm_text, ReviewKey.MAIN_DONE, _serialize_main_done([]))
       fm_resets_writer_round = True
     elif review_phase_now is None:
-        # Mid-review reconstruct (one-shot upgrade). Reached only on a
-        # parseable doc — `decide` routes parse failures to repair,
-        # never to banner-repaint.
+      # Mid-review reconstruct (one-shot upgrade). Reached only on a
+      # parseable doc — `decide` routes parse failures to repair,
+      # never to banner-repaint.
       recon_phase, recon_main_done = _reconstruct_phase(
           meta=meta, body=body, class_cfg=class_cfg, approved=approved_now,
       )
@@ -1844,24 +1854,24 @@ def apply_action(
       if recon_phase == Phase.MAIN and not recon_main_done:
         fm_resets_writer_round = True
     elif operator_committed and not approved_now and review_phase_now in (Phase.MAIN, Bucket.AWAITING_OPERATOR):
-        # Operator committed a new pre-approve round (iterated without
-        # approving) → re-open the main phase and clear the done-set.
+      # Operator committed a new pre-approve round (iterated without
+      # approving) → re-open the main phase and clear the done-set.
       fm_text = _fm.set_field(fm_text, ReviewKey.PHASE, Phase.MAIN)
       fm_text = _fm.set_field(fm_text, ReviewKey.MAIN_DONE, _serialize_main_done([]))
       fm_resets_writer_round = True
-  # Defensive — start.py / open_request.py already clear this on
-  # the opt-in commit. If the file reached this branch with
-  # `review_active: true` AND a stale `review_result`, drop
-  # the terminal discriminator so the apply-gate routine doesn't
-  # fire on a doc that's mid-review.
+    # Defensive — start.py / open_request.py already clear this on
+    # the opt-in commit. If the file reached this branch with
+    # `review_active: true` AND a stale `review_result`, drop
+    # the terminal discriminator so the apply-gate routine doesn't
+    # fire on a doc that's mid-review.
     if ReviewKey.RESULT in meta:
       fm_text = _fm.unset_field(fm_text, ReviewKey.RESULT)
-  # Paint the banner AFTER the FM has been finalised so an FM-reset
-  # (bootstrap / reconstruct-to-main / operator-iterated) can override the
-  # `action.banner_state` precomputed against the pre-reset state. When
-  # `fm_resets_writer_round` is True, the chain is NOT exhausted regardless
-  # of body state — a writer round is pending again — so the banner must
-  # reflect IN_PROCESS / Waiting: writer.
+    # Paint the banner AFTER the FM has been finalised so an FM-reset
+    # (bootstrap / reconstruct-to-main / operator-iterated) can override the
+    # `action.banner_state` precomputed against the pre-reset state. When
+    # `fm_resets_writer_round` is True, the chain is NOT exhausted regardless
+    # of body state — a writer round is pending again — so the banner must
+    # reflect IN_PROCESS / Waiting: writer.
     effective_banner_state = (
         _banner.State.IN_PROCESS if fm_resets_writer_round else action.banner_state
     )
@@ -1885,28 +1895,29 @@ def apply_action(
     summary[JobKey.COMMIT_SHA] = sha
     return summary
 
+  # finalize: the review's own markup leaves the document for good
   if action.kind == Phase.FINALIZE:
-      # Strip edit markers; drop banner + approve checkbox; remove
-      # system callouts; strip owned H1 sections (Routing, Final
-      # check, …); set review_active=false. Delegated to finalize.py
-      # so this dispatcher branch and the standalone `lazy-review
-      # finalize` CLI share one transformation contract.
-      #
-      # Terminal-action sections (`experts.terminal.<group>`) are
-      # preserved through the strip so the post-finalize transition
-      # (e.g. `spec.request-handler` apply mode reading routing
-      # ticks) can still read the operator's choices. The transition
-      # is responsible for stripping the section once its work is
-      # done. (Bug 31.)
-      # Spec § Stage 7: preserve-set is a set of SECTION-ID
-      # (the second component of the `#expert/<flat>/<section-id>`
-      # ownership tag — the key under `experts.terminal.<id>` /
-      # `experts.validation.<id>` in config). Terminal section-ids
-      # always preserve (apply transition reads them); validation
-      # section-ids preserve only when `approved_with_concerns` is
-      # active (see below). The `_role` field in the section-writer
-      # 6-tuple IS the section-id, set by `_gather_section_writers`
-      # from the umbrella dict key.
+    # Strip edit markers; drop banner + approve checkbox; remove
+    # system callouts; strip owned H1 sections (Routing, Final
+    # check, …); set review_active=false. Delegated to finalize.py
+    # so this dispatcher branch and the standalone `lazy-review
+    # finalize` CLI share one transformation contract.
+    #
+    # Terminal-action sections (`experts.terminal.<group>`) are
+    # preserved through the strip so the post-finalize transition
+    # (e.g. `spec.request-handler` apply mode reading routing
+    # ticks) can still read the operator's choices. The transition
+    # is responsible for stripping the section once its work is
+    # done. (Bug 31.)
+    # Spec § Stage 7: preserve-set is a set of SECTION-ID
+    # (the second component of the `#expert/<flat>/<section-id>`
+    # ownership tag — the key under `experts.terminal.<id>` /
+    # `experts.validation.<id>` in config). Terminal section-ids
+    # always preserve (apply transition reads them); validation
+    # section-ids preserve only when `approved_with_concerns` is
+    # active (see below). The `_role` field in the section-writer
+    # 6-tuple IS the section-id, set by `_gather_section_writers`
+    # from the umbrella dict key.
     preserve_section_ids = {
         _role
         for (_name, _role, _title, _post_approve, is_terminal, _position) in _gather_section_writers(class_cfg)
@@ -1949,10 +1960,11 @@ def apply_action(
     summary[JobKey.COMMIT_SHA] = sha
     return summary
 
+  # barrier dispatch: every pending writer of the barrier is queued in one pass
   if action.kind == Action.BARRIER_DISPATCH:
-      # Queue ALL pending writers of the active barrier at once (spec
-      # § Stage 5 dispatch-all). No commit — the pump drains them; the
-      # sweep-collect tick lands their sections together.
+    # Queue ALL pending writers of the active barrier at once (spec
+    # § Stage 5 dispatch-all). No commit — the pump drains them; the
+    # sweep-collect tick lands their sections together.
     dispatched: list[str] = []
     for ref in inputs.barrier_writers_to_dispatch:
       name, sec_id = ref[0], ref[1]
@@ -1967,15 +1979,17 @@ def apply_action(
     summary[JobKey.DISPATCHED] = dispatched
     return summary
 
+  # barrier collect: the finished writers' sections land together
   if action.kind == Action.BARRIER_COLLECT:
     return _barrier_collect(
         repo, settings, class_cfg, file_path, inputs, context, summary,
     )
 
+  # reset: an operator edit outside the owned sections invalidates the approval
   if action.kind == Action.RESET_APPROVAL:
-      # Post-approve operator body-edit outside owned sections (spec
-      # § Stage 6 boundary): drop approval + barrier phase, re-open the
-      # validator barrier from a fresh main round.
+    # Post-approve operator body-edit outside owned sections (spec
+    # § Stage 6 boundary): drop approval + barrier phase, re-open the
+    # validator barrier from a fresh main round.
     fm_text = text[: len(text) - len(body)]
     fm_text = _write_review_approved(fm_text, False)
     # Phase-driven reset (spec transition terminals → main on
@@ -1997,16 +2011,20 @@ def apply_action(
     summary[JobKey.COMMIT_SHA] = sha
     return summary
 
+  # repair: a document the parser rejected goes to the doc doctor
   if action.kind == Outcome.REPAIR:
     return _dispatch_repair(
         repo, settings, class_cfg, file_path, inputs, context, summary,
     )
 
+  # main: an ordinary writer round
   if action.kind == Phase.MAIN:
     return _dispatch_writer(
         repo, settings, class_cfg, file_path, inputs, action, context, summary,
     )
 
+  # the branches above cover every kind the state machine emits, so reaching here means it
+  # grew one this dispatcher was never taught — report it instead of failing silently
   summary[JobKey.ERROR] = f"unknown action kind: {action.kind}"
   return summary
 
@@ -2134,8 +2152,6 @@ def _run_atomic_tick_cleanup(  # pylint: disable=unused-argument
   meta, body = _fm.parse(raw)
   fm_text = raw[: len(raw) - len(body)]
   new_body = body
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
-  _section_writers_full = _gather_section_writers(class_cfg)  # noqa: F841
   # Banner state to land alongside the cleanup commit (atomic-tick
   # invariant — the relaxed banner-tick rule allows a single bot
   # commit to carry banner + frontmatter changes; bundling them here
@@ -2169,11 +2185,11 @@ def _run_atomic_tick_cleanup(  # pylint: disable=unused-argument
         message=message,
     )
   except _git_ops.GitOpsError as exc:
-      # Empty-diff is possible for a no-op cleanup (main commit
-      # in a pre-approve round with no validation sections to clear,
-      # bump alone bumped the round but if review_round was already
-      # at the target value somehow, the diff is empty). Treat as
-      # benign — nothing to commit, no follow-up needed.
+    # Empty-diff is possible for a no-op cleanup (main commit
+    # in a pre-approve round with no validation sections to clear,
+    # bump alone bumped the round but if review_round was already
+    # at the target value somehow, the diff is empty). Treat as
+    # benign — nothing to commit, no follow-up needed.
     # waiver: git CLI vocabulary
     if "nothing to commit" in str(exc):
       return result
@@ -2205,7 +2221,7 @@ def _dispatch_writer(
   Returns:
     Updated `summary` dict with status, commit sha, and job info.
   """
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+  # waiver: this branch runs only for kinds whose action carries a 2-tuple expert; the union member is not narrowable here
   expert_name, section_id = action.expert  # type: ignore[misc]
   kind = "review"
   text = context[JobKey.TEXT]
@@ -2223,12 +2239,12 @@ def _dispatch_writer(
     summary[JobKey.EXPERT] = expert_name
     summary[JobKey.JOB_ID] = job_id
     return summary
-# Resolve the wire-side role / mode for the main-writer dispatch.
-# `role` is a free-form string the operator may declare per-expert
-# in `review.classes[].experts.main[].role`; the dispatcher
-# forwards it verbatim to the agent. When unset it falls back to the
-# canonical `main` label. `mode` is the structural ownership
-# classification the protocol enforces — always `main` here.
+  # Resolve the wire-side role / mode for the main-writer dispatch.
+  # `role` is a free-form string the operator may declare per-expert
+  # in `review.classes[].experts.main[].role`; the dispatcher
+  # forwards it verbatim to the agent. When unset it falls back to the
+  # canonical `main` label. `mode` is the structural ownership
+  # classification the protocol enforces — always `main` here.
   wire_role = _resolve_wire_role(
       class_cfg, action_kind=action.kind,
       expert_name=expert_name, section_id=section_id,
@@ -2237,11 +2253,12 @@ def _dispatch_writer(
       action_kind=action.kind, class_cfg=class_cfg, section_id=section_id,
   )
 
+  # a job that does not exist yet is created; anything else is inspected for its outcome
   if existing.get(JobKey.STATUS) == Outcome.MISSING:
-      # Dispatch a fresh job — one atomic call through the core CLI.
-      # Core (dispatch-job subcommand) handles dir creation, config.json
-      # composition from settings.experts, source/result writes, and
-      # READY-touched-last ordering. We just shape the bundle.
+    # Dispatch a fresh job — one atomic call through the core CLI.
+    # Core (dispatch-job subcommand) handles dir creation, config.json
+    # composition from settings.experts, source/result writes, and
+    # READY-touched-last ordering. We just shape the bundle.
     stripped = _body.strip_for_main_writer(text)
     # Main-writer payload extension: forward non-empty post-approve
     # section contents as `concerns`. The main-writer
@@ -2251,9 +2268,9 @@ def _dispatch_writer(
     concerns: list[dict] = []
     for (name, group, title, post_approve, is_terminal, _position) in _gather_section_writers(class_cfg):
       if not post_approve or is_terminal:
-          # Terminal sections (apply-after-tick) carry operator
-          # ticks, not validation concerns — they must not be
-          # lifted as `[!question]` callouts in the main body.
+        # Terminal sections (apply-after-tick) carry operator
+        # ticks, not validation concerns — they must not be
+        # lifted as `[!question]` callouts in the main body.
         continue
       content = _body.section_content_for_owner(body, (_flatten(name), group))
       # guard: empty or whitespace-only section carries no concern to lift
@@ -2320,15 +2337,15 @@ def _dispatch_writer(
     summary[JobKey.EXPERT] = expert_name
     return summary
 
-# guard: a finished job always carries its job_id (pending / missing returned above)
+  # guard: a finished job always carries its job_id (pending / missing returned above)
   if job_id is None:
     summary[JobKey.STATUS] = "error:missing-job-id"
     summary[JobKey.EXPERT] = expert_name
     return summary
-# Job finished — apply its response. Every return path below MUST
-# consume the job (mark it CONSUMED) so the next tick treats it as
-# missing and dispatches fresh instead of re-reading the stale
-# response.
+  # Job finished — apply its response. Every return path below MUST
+  # consume the job (mark it CONSUMED) so the next tick treats it as
+  # missing and dispatches fresh instead of re-reading the stale
+  # response.
   response = existing.get(JobKey.RESPONSE, {})
   bare_expert, repo_key = _parse_expert_name(expert_name)
   target_repo = _resolve_target_repo(repo, repo_key) if "@" in expert_name else repo
@@ -2355,7 +2372,7 @@ def _dispatch_writer(
     _core_consume_job(target_repo, bare_expert, job_id, **consume_kwargs)
     summary[JobKey.ERROR] = f"response_invalid: {exc}"
     return summary
-# Phase trailer (Bug 24): main-writer commits always land as `main`.
+  # Phase trailer (Bug 24): main-writer commits always land as `main`.
   phase = Phase.MAIN
   outcome = response.get(JobKey.OUTCOME)
   if outcome == Outcome.EMPTY:
@@ -2377,8 +2394,8 @@ def _dispatch_writer(
     summary[JobKey.COMMIT_SHA] = empty_sha
     return summary
   if outcome == Outcome.EDITED:
-      # Unified transport (wire-kind refactor): the main writer returns
-      # the full document body via `result/<file>`.
+    # Unified transport (wire-kind refactor): the main writer returns
+    # the full document body via `result/<file>`.
     result_relpath = response[JobKey.RESULT][0]
     if isinstance(result_relpath, dict):
       result_relpath = result_relpath.get(JobKey.PATH)
@@ -2397,8 +2414,8 @@ def _dispatch_writer(
     )
     agent_overlay = _filter_fm_overlay(agent_meta, allow_fm)
     try:
-        # body.reassemble expects the pipeline phase ('main' /
-        # 'section' / 'final'); the main writer owns the full body.
+      # body.reassemble expects the pipeline phase ('main' /
+      # 'section' / 'final'); the main writer owns the full body.
       reapply_result = _reapply.reapply(
           operator_text=text,
           agent_body=agent_body,
@@ -2412,8 +2429,8 @@ def _dispatch_writer(
       _core_consume_job(target_repo, bare_expert, job_id, **consume_kwargs)
       summary[JobKey.ERROR] = f"reapply_failed: {exc}"
       return summary
-  # Body drift is graceful — the diagnostic is surfaced via summary
-  # so logging / UX layers can pick it up.
+    # Body drift is graceful — the diagnostic is surfaced via summary
+    # so logging / UX layers can pick it up.
     if reapply_result.ownership_violation is not None:
       summary[JobKey.OWNERSHIP_VIOLATION] = {
           JobKey.EXPERT: reapply_result.ownership_violation.expert,
@@ -2466,14 +2483,14 @@ def _dispatch_writer(
           raise
         empty_diff = True
       if empty_diff:
-          # Inv 11 ("One commit per response"): the writer
-          # responded, so a commit with the `Doc-Review-Phase` +
-          # `expert=` trailer MUST land. Without it `_chain_state`
-          # leaves the writer in `main_pending` and the next tick
-          # re-dispatches forever (the dedup-key is cleared by the
-          # consume below). Land an empty commit with the proper
-          # trailer so the chain advances exactly like the explicit
-          # `outcome=empty` path above.
+        # Inv 11 ("One commit per response"): the writer
+        # responded, so a commit with the `Doc-Review-Phase` +
+        # `expert=` trailer MUST land. Without it `_chain_state`
+        # leaves the writer in `main_pending` and the next tick
+        # re-dispatches forever (the dedup-key is cleared by the
+        # consume below). Land an empty commit with the proper
+        # trailer so the chain advances exactly like the explicit
+        # `outcome=empty` path above.
         sha = _git_ops.commit_empty(
             repo,
             round_=review_round,
@@ -2504,10 +2521,10 @@ def _dispatch_writer(
       )
       summary.update(cleanup)
       return summary
-  # Atomic-tick post-writer cleanup (Bug 73 + atomic-tick invariant):
-  # same dispatcher tick as the main-writer commit, under bot
-  # identity. Bumps `review_round` + `review_main_done` and
-  # repaints the banner against the new chain state.
+    # Atomic-tick post-writer cleanup (Bug 73 + atomic-tick invariant):
+    # same dispatcher tick as the main-writer commit, under bot
+    # identity. Bumps `review_round` + `review_main_done` and
+    # repaints the banner against the new chain state.
     cleanup = _run_atomic_tick_cleanup(
         repo, file_path, class_cfg,
         writer_kind=action.kind, expert_name=expert_name,
@@ -2524,6 +2541,7 @@ def _dispatch_writer(
     summary[JobKey.COMMIT_SHA] = sha
     return summary
 
+  # the job is drained whatever its outcome was, so the next tick starts clean
   _core_consume_job(target_repo, bare_expert, job_id, **consume_kwargs)
   # spec § Class 3 (trigger #2 logical-error): main-writer outcome=error category=logical falls
   # through the empty/edited branches above; record the incident before returning so the operator
@@ -2569,8 +2587,8 @@ def _diff_is_content_bearing(source_path: Path, context_path: Path) -> tuple[boo
     empty when no content difference was detected.
   """
   try:
-      # guard: tolerate missing source/context files (e.g. job dir
-      # cleanup race) — treat as no override.
+    # guard: tolerate missing source/context files (e.g. job dir
+    # cleanup race) — treat as no override.
     if not source_path.exists() or not context_path.exists():
       return False, ""
     src = source_path.read_text()
@@ -2710,7 +2728,7 @@ def _pickup_historian_responses(
   # of pickup mostly affects git-log readability, not file layout).
   job_dirs = []
   for jdir in edir.iterdir():
-      # guard: not a job dir
+    # guard: not a job dir
     if not jdir.is_dir():
       continue
     try:
@@ -2719,13 +2737,13 @@ def _pickup_historian_responses(
       continue
   job_dirs.sort()
   for _mtime, jdir in job_dirs:
-      # guard: job terminated or already consumed
+    # guard: job terminated or already consumed
     if (jdir / JobFile.DEAD).exists():
       continue
     # guard: CONSUMED job's response was already applied or discarded
     if (jdir / Outcome.CONSUMED).exists():
       continue
-  # guard: agent hasn't finished yet
+    # guard: agent hasn't finished yet
     if not (jdir / JobFile.DONE).exists():
       continue
     req_file = jdir / JobFile.REQUEST
@@ -2734,7 +2752,7 @@ def _pickup_historian_responses(
       req = json.loads(req_file.read_text())
     except (OSError, json.JSONDecodeError):
       continue
-  # guard: job belongs to a different file
+    # guard: job belongs to a different file
     if req.get(JobKey.TARGET_FILE) != target:
       continue
     try:
@@ -2902,7 +2920,7 @@ def _dispatch_repair(  # pylint: disable=unused-argument
     })
     summary[JobKey.STATUS] = "dispatched"
     return summary
-# guard: a finished repair job always carries its job_id (pending / missing returned above)
+  # guard: a finished repair job always carries its job_id (pending / missing returned above)
   if job_id is None:
     summary[JobKey.STATUS] = "error:missing-job-id"
     return summary
@@ -3096,7 +3114,7 @@ def _historian_jobs_outstanding(repo: Path, class_cfg: dict, file_path: Path) ->
     # guard: only job subdirectories hold a request.json
     if not jdir.is_dir():
       continue
-  # guard: terminal-state jobs never block finalize
+    # guard: terminal-state jobs never block finalize
     if (jdir / Outcome.CONSUMED).exists() or (jdir / JobFile.DEAD).exists():
       continue
     try:
@@ -3135,7 +3153,7 @@ def _operator_diff_line_ranges(repo: Path, file_path: Path, sha: str = "HEAD") -
     return []
   ranges: list[tuple[int, int]] = []
   for line in out.stdout.splitlines():
-      # guard: only hunk headers carry the +start,count we need
+    # guard: only hunk headers carry the +start,count we need
     if not line.startswith("@@"):
       continue
     match = re.search(r"\+(\d+)(?:,(\d+))?", line)
@@ -3261,7 +3279,7 @@ def _operator_post_approve_analysis(
   # Terminal section line ranges, keyed by section-id.
   term_spans: dict[str, tuple[int, int]] = {}
   for (name, sec_id, _title, post_approve, is_terminal, _pos) in section_writers_full:
-      # guard: only post-approve terminal writers are selectively respawnable
+    # guard: only post-approve terminal writers are selectively respawnable
     if not (post_approve and is_terminal):
       continue
     owner_tag = f"#expert/{_flatten(name)}/{sec_id}"
@@ -3269,8 +3287,8 @@ def _operator_post_approve_analysis(
       if tag == owner_tag:
         term_spans[sec_id] = (s, e)
         break
-# Protected (no-reset) ranges: the frontmatter/banner preamble before
-# the first H1, plus every tagged (owned) H1 section.
+  # Protected (no-reset) ranges: the frontmatter/banner preamble before
+  # the first H1, plus every tagged (owned) H1 section.
   protected: list[tuple[int, int]] = []
   if first_h1 is not None and first_h1 > 1:
     protected.append((1, first_h1 - 1))
@@ -3352,21 +3370,21 @@ def _compute_barrier_inputs(  # pylint: disable=unused-argument
     if status == JobStatus.PENDING:
       out[JobKey.OPEN] = True
     elif status in ("done", "dead"):
-        # Selective respawn on a terminal-state job: respawn only if
-        # (a) operator touched this section AND (b) the existing job
-        # was dispatched in response to an OLDER operator commit. The
-        # job's `_operator_sha_at_dispatch` payload field is the
-        # anchor — set to `chain.last_contentful_sha` at the moment
-        # of dispatch. When a fresh respawn lands DONE its anchor
-        # equals the current operator sha → not stale → done_or_dead
-        # ++ → barrier-collect proceeds. Comparing operator-sha (not
-        # file content) avoids the false-positive loop where
-        # mechanical banner-repaint commits between the operator-tick
-        # and the respawn-dispatch shift the file hash without any
-        # new operator action. Legacy jobs (no anchor in payload) are
-        # treated as stale once → re-dispatched once → from then on
-        # the anchor exists and the check stabilises. DEAD jobs
-        # always count as done_or_dead (terminal failure).
+      # Selective respawn on a terminal-state job: respawn only if
+      # (a) operator touched this section AND (b) the existing job
+      # was dispatched in response to an OLDER operator commit. The
+      # job's `_operator_sha_at_dispatch` payload field is the
+      # anchor — set to `chain.last_contentful_sha` at the moment
+      # of dispatch. When a fresh respawn lands DONE its anchor
+      # equals the current operator sha → not stale → done_or_dead
+      # ++ → barrier-collect proceeds. Comparing operator-sha (not
+      # file content) avoids the false-positive loop where
+      # mechanical banner-repaint commits between the operator-tick
+      # and the respawn-dispatch shift the file hash without any
+      # new operator action. Legacy jobs (no anchor in payload) are
+      # treated as stale once → re-dispatched once → from then on
+      # the anchor exists and the check stabilises. DEAD jobs
+      # always count as done_or_dead (terminal failure).
       is_stale = False
       if status == JobStatus.DONE and sec_id in respawn_ids and operator_commit_sha is not None:
         payload = _newest_job_payload(repo, name, dkey, include_consumed=False)
@@ -3376,18 +3394,18 @@ def _compute_barrier_inputs(  # pylint: disable=unused-argument
         to_dispatch.append(ref)
       else:
         done_or_dead += 1
-    # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+    # waiver: collapsing this else/if into elif would flatten the missing-section branch into the sibling checks it is distinct from
     else:  # noqa: PLR5501  -- missing-section branch; nested if/elif kept readable
-        # First-ever dispatch is needed when the section is not in
-        # the body yet. Otherwise, respawn when the operator has
-        # committed AFTER the most recent job (including the just-
-        # consumed one) was dispatched — same operator-sha anchor
-        # check as the done branch. After a fresh respawn collects +
-        # consumes, the CONSUMED job's anchor equals the current
-        # operator sha → no further respawn (avoids the infinite
-        # re-dispatch loop in the post-collect state where the file
-        # hash differs from dispatch state due to the collect's own
-        # mechanical commit).
+      # First-ever dispatch is needed when the section is not in
+      # the body yet. Otherwise, respawn when the operator has
+      # committed AFTER the most recent job (including the just-
+      # consumed one) was dispatched — same operator-sha anchor
+      # check as the done branch. After a fresh respawn collects +
+      # consumes, the CONSUMED job's anchor equals the current
+      # operator sha → no further respawn (avoids the infinite
+      # re-dispatch loop in the post-collect state where the file
+      # hash differs from dispatch state due to the collect's own
+      # mechanical commit).
       if not has_section:
         to_dispatch.append(ref)
       elif sec_id in respawn_ids and operator_commit_sha is not None:
@@ -3488,7 +3506,7 @@ def _find_barrier_job(repo: Path, expert_name: str, dedup_key: str) -> tuple | N
     # guard: request belongs to a different dedup key — not this barrier job
     if data.get(JobKey.DEDUP_TRACKER) != dedup_key:
       continue
-  # guard: already collected
+    # guard: already collected
     if (jdir / Outcome.CONSUMED).exists():
       continue
     mtime = req.stat().st_mtime
@@ -3543,10 +3561,10 @@ def _collect_one_barrier_section(
   )
   # guard: failed round — leave section uncommitted; daemon re-dispatches (mirrors require-not-met below).
   if (not is_empty) and is_failed:
-      # spec § Class 3 (trigger #2 logical-error): when a review expert returns
-      # outcome=error category=logical, the input is invalid and retry won't help — register the
-      # incident so the operator sees it instead of an invisible per-tick re-dispatch loop. Other
-      # categories (transient → runner retries; technical → log+exit) do NOT land here.
+    # spec § Class 3 (trigger #2 logical-error): when a review expert returns
+    # outcome=error category=logical, the input is invalid and retry won't help — register the
+    # incident so the operator sees it instead of an invisible per-tick re-dispatch loop. Other
+    # categories (transient → runner retries; technical → log+exit) do NOT land here.
     err = (response or {}).get(JobKey.ERROR) or {}
     if isinstance(err, dict) and err.get(JobKey.CATEGORY) == ErrorCause.LOGICAL:
       try:
@@ -3575,7 +3593,7 @@ def _collect_one_barrier_section(
       marker = "> [!check] No concerns"
       agent_body = f"# {section_title}\n{owner_tag}\n\n{marker}\n"
   else:
-      # guard: a non-empty, non-failed response is always a dict carrying a result payload
+    # guard: a non-empty, non-failed response is always a dict carrying a result payload
     if response is None:
       return None
     result_relpath = response[JobKey.RESULT][0]
@@ -3611,9 +3629,9 @@ def _collect_one_barrier_section(
         require_fm=require_fm,
     )
   except ValueError:
-      # require not met (e.g. router declares require: [request_class] but did not
-      # classify) — leave the section uncommitted so the bad round is not silently
-      # applied; the daemon re-dispatches on the next tick.
+    # require not met (e.g. router declares require: [request_class] but did not
+    # classify) — leave the section uncommitted so the bad round is not silently
+    # applied; the daemon re-dispatches on the next tick.
     return None
   new_text = reapply_result.text
   _cur_meta2, cur_body2 = _fm.parse(new_text)
@@ -3682,7 +3700,7 @@ def _barrier_collect(  # pylint: disable=unused-argument
   ]
   _live_jobs = [(r, f) for (r, f) in _found_jobs if f is not None and f[2] in ("done", "dead")]
   for _r, _f in _live_jobs:
-      # guard: only a DONE job carries a snapshot worth comparing
+    # guard: only a DONE job carries a snapshot worth comparing
     if _f[2] != JobStatus.DONE:
       continue
     try:
@@ -3743,10 +3761,10 @@ def _barrier_collect(  # pylint: disable=unused-argument
       threshold = _to_int(class_cfg.get(JobKey.CONCERNS_DECISION_THRESHOLD), default=2)
       threshold = max(threshold, 1)
       if new_vr < threshold:
-          # 5a revert-to-main (spec transition validators → main):
-          # explicit `review_phase: main` + fresh empty
-          # `review_main_done` so the next pre-approve round re-runs
-          # the main writers; drop the approve mirror.
+        # 5a revert-to-main (spec transition validators → main):
+        # explicit `review_phase: main` + fresh empty
+        # `review_main_done` so the next pre-approve round re-runs
+        # the main writers; drop the approve mirror.
         fm_text = _write_review_approved(fm_text, False)
         fm_text = _fm.set_field(fm_text, ReviewKey.PHASE, Phase.MAIN)
         fm_text = _fm.set_field(fm_text, ReviewKey.MAIN_DONE, _serialize_main_done([]))
@@ -3755,10 +3773,10 @@ def _barrier_collect(  # pylint: disable=unused-argument
         )
         msg = f"review: validator barrier → revert (validation_round → {new_vr})"
       else:
-          # 5b concerns-decision pause (spec transition validators →
-          # concerns-pause): the operator chooses continue vs
-          # approve-with-concerns. Stay approved; phase carries the
-          # pause so the next tick renders the pause banner.
+        # 5b concerns-decision pause (spec transition validators →
+        # concerns-pause): the operator chooses continue vs
+        # approve-with-concerns. Stay approved; phase carries the
+        # pause so the next tick renders the pause banner.
         fm_text = _fm.set_field(fm_text, ReviewKey.PHASE, Bucket.CONCERNS_PAUSE)
         new_body = _banner.replace_banner(new_body, _banner.State.CONCERNS_DECISION)
         msg = f"review: validator barrier → pause (validation_round → {new_vr})"
@@ -3774,23 +3792,23 @@ def _barrier_collect(  # pylint: disable=unused-argument
         )
         msg = "review: validator barrier clear → terminals"
       else:
-          # No terminals → clear the phase; next tick finalizes
-          # (historian-gated). Banner reflects ready-to-finalize.
+        # No terminals → clear the phase; next tick finalizes
+        # (historian-gated). Banner reflects ready-to-finalize.
         fm_text = _fm.unset_field(fm_text, ReviewKey.PHASE)
         new_body = _banner.replace_banner(new_body, _banner.State.READY)
         msg = "review: validator barrier clear → finalize"
   else:
-      # Terminal barrier — decide on the COLLECTED body:
-      #  - any terminal section still missing (writer pending/errored,
-      #    its section never grafted) → HOLD: the round is not done.
-      #    Never "clear" a barrier whose terminal writer produced
-      #    nothing (Bug 101); keep the Waiting banner so the next tick
-      #    re-dispatches the missing writer.
-      #  - all present + an unanswered [!question] → hand to the operator.
-      #  - all present + no question → clear; the next tick finalizes
-      #    (historian-gated). Banner is Waiting-on-finalize, NOT the
-      #    pre-approval Ready-to-approve prompt — the doc is already
-      #    approved, so State.READY would render a stale approve checkbox.
+    # Terminal barrier — decide on the COLLECTED body:
+    #  - any terminal section still missing (writer pending/errored,
+    #    its section never grafted) → HOLD: the round is not done.
+    #    Never "clear" a barrier whose terminal writer produced
+    #    nothing (Bug 101); keep the Waiting banner so the next tick
+    #    re-dispatches the missing writer.
+    #  - all present + an unanswered [!question] → hand to the operator.
+    #  - all present + no question → clear; the next tick finalizes
+    #    (historian-gated). Banner is Waiting-on-finalize, NOT the
+    #    pre-approval Ready-to-approve prompt — the doc is already
+    #    approved, so State.READY would render a stale approve checkbox.
     terminal_owners = [
         (_flatten(name), sec_id)
         for (name, sec_id, _t, pa, term, _p) in section_writers_full
@@ -3821,7 +3839,7 @@ def _barrier_collect(  # pylint: disable=unused-argument
     )
     summary[JobKey.DECISION_COMMIT_SHA] = decision_sha
   except _git_ops.GitOpsError as exc:
-      # guard: a no-op decision (banner already matched) is benign
+    # guard: a no-op decision (banner already matched) is benign
     # waiver: git CLI vocabulary
     if "nothing to commit" not in str(exc):
       raise
@@ -3873,11 +3891,11 @@ def _find_done_job_local(repo: Path, expert: str, dedup_key: str) -> dict:
     # guard: request belongs to a different dedup key — not this dispatch
     if req.get(JobKey.DEDUP_TRACKER) != dedup_key:
       continue
-  # Skip terminal-failure markers in active-search: DEAD is a kill
-  # marker, the job is gone. CONSUMED means the consumer has
-  # already applied or discarded this job's response — for dedup
-  # purposes the job is finished. Treat both as missing so a
-  # fresh dispatch can replace them.
+    # Skip terminal-failure markers in active-search: DEAD is a kill
+    # marker, the job is gone. CONSUMED means the consumer has
+    # already applied or discarded this job's response — for dedup
+    # purposes the job is finished. Treat both as missing so a
+    # fresh dispatch can replace them.
     # guard: DEAD is a kill marker — the job is gone, treat as missing
     if (jdir / JobFile.DEAD).exists():
       continue
@@ -3887,10 +3905,10 @@ def _find_done_job_local(repo: Path, expert: str, dedup_key: str) -> dict:
     candidates.append((req_file.stat().st_mtime, jdir))
   if not candidates:
     return {JobKey.STATUS: Outcome.MISSING}
-# Newest matching job wins. There should normally be only one active
-# match at a time (dedup_key in dispatch_job prevents fresh creation
-# while one is active), but multiple DONE jobs can accumulate before
-# cleanup — pick the most recent.
+  # Newest matching job wins. There should normally be only one active
+  # match at a time (dedup_key in dispatch_job prevents fresh creation
+  # while one is active), but multiple DONE jobs can accumulate before
+  # cleanup — pick the most recent.
   candidates.sort(reverse=True)
   _mtime, jdir = candidates[0]
   job_id = jdir.name
@@ -3926,9 +3944,9 @@ def _find_done_job_remote(local_repo: Path, expert_name_raw: str, dedup_key: str
   base = local_repo / JobFile.EXPERTS_DIR / JobFile.REMOTE_JOBS_DIR
   if not base.exists():
     return {JobKey.STATUS: Outcome.MISSING}
-# Scan all label dirs (registry key OR basename fallback) for a tracker
-# whose dedup_key matches — the local-side label is the dispatcher's
-# choice (Task 6's reverse_lookup), not necessarily repo_key.
+  # Scan all label dirs (registry key OR basename fallback) for a tracker
+  # whose dedup_key matches — the local-side label is the dispatcher's
+  # choice (Task 6's reverse_lookup), not necessarily repo_key.
   for label_dir in base.iterdir():
     # guard: only label subdirectories hold per-expert tracker dirs
     if not label_dir.is_dir():
@@ -4017,8 +4035,8 @@ def _core_consume_job(repo: Path, expert: str, job_id: str, *, dispatched_from: 
     jdir = local_repo / JobFile.EXPERTS_DIR / JobFile.JOBS_DIR / expert / job_id
     if jdir.exists():
       (jdir / Outcome.CONSUMED).touch()
-  # cross-repo: also touch on the target side if the dispatch
-  # crossed repos.
+    # cross-repo: also touch on the target side if the dispatch
+    # crossed repos.
     if dispatched_from is not None:
       target_jdir = repo / JobFile.EXPERTS_DIR / JobFile.JOBS_DIR / expert / job_id
       if target_jdir.exists():
@@ -4090,7 +4108,7 @@ def _body_content_changed(repo: Path, file_path: Path, commit_sha: str) -> bool:
       check=False, capture_output=True, text=True,
   )
   if parent.returncode != 0:
-      # No parent — e.g. initial commit. Treat as content change.
+    # No parent — e.g. initial commit. Treat as content change.
     return True
   parent_sha = parent.stdout.strip()
   cur_text = _show_blob(repo, commit_sha, file_path)
@@ -4098,14 +4116,14 @@ def _body_content_changed(repo: Path, file_path: Path, commit_sha: str) -> bool:
   if cur_text is None or prev_text is None:
     return True
   try:
-      # Compare just the body (post strip of banner / approve line /
-      # owned sections / History / system callouts). Frontmatter is
-      # intentionally excluded — review_active flips, approved flips,
-      # etc. are metadata and not narratable by historian. System
-      # callouts (#review/<x>-tagged) are scaffolding the writer adds
-      # to ask the operator something; per the functional spec the
-      # historian narrates substance, not scaffolding, so callouts
-      # are stripped before the comparison.
+    # Compare just the body (post strip of banner / approve line /
+    # owned sections / History / system callouts). Frontmatter is
+    # intentionally excluded — review_active flips, approved flips,
+    # etc. are metadata and not narratable by historian. System
+    # callouts (#review/<x>-tagged) are scaffolding the writer adds
+    # to ask the operator something; per the functional spec the
+    # historian narrates substance, not scaffolding, so callouts
+    # are stripped before the comparison.
     _, cur_body = _fm.parse(cur_text)
     _, prev_body = _fm.parse(prev_text)
     # Strip only banner-state callouts (#review/in-process /
@@ -4172,12 +4190,12 @@ def process_one_file(repo: Path, file_path: Path) -> dict:
         JobKey.KIND: Outcome.SKIP,
         JobKey.REASON: "no_matching_review_class",
     }
-# Spec § historian subsystem: pickup pass runs every tick before
-# the state machine evaluates inputs, so any historian responses
-# that completed since last tick land in `# History` (and become
-# visible to compute_inputs's gates) immediately. Failures inside
-# the pickup are surfaced via the per-job summary, never abort
-# the tick.
+  # Spec § historian subsystem: pickup pass runs every tick before
+  # the state machine evaluates inputs, so any historian responses
+  # that completed since last tick land in `# History` (and become
+  # visible to compute_inputs's gates) immediately. Failures inside
+  # the pickup are surfaced via the per-job summary, never abort
+  # the tick.
   history_pickup = _pickup_historian_responses(repo, settings, class_cfg, file_path)
   try:
     inputs, context = compute_inputs(repo, class_cfg, file_path)

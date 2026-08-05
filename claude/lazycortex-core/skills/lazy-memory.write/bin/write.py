@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 _BIN = Path(__file__).resolve().parents[3] / "bin"
 sys.path.insert(0, str(_BIN))
 
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from memory_runtime import (  # noqa: E402
   FrontmatterError, slugify, resolve_slug, validate_frontmatter,
   topic_from_tag, _read_note_frontmatter, regen_touched_tags,
@@ -152,6 +152,10 @@ def _load_expert_git_author(repo: Path, expert: str) -> dict:
   Returns an empty dict when the file or entry is missing — the caller
   decides whether that is fatal.
 
+  Args:
+    repo: Absolute path to the repository worktree root.
+    expert: Expert name as registered in `lazy.settings.json[experts]`.
+
   Returns:
     The `git_author` dict for the named expert, or an empty dict when the settings
     file is absent, unreadable, or does not declare the expert.
@@ -189,6 +193,10 @@ def _resolve_memory_bot_identity(repo: Path, expert: str) -> tuple[str, str]:
   whose local-part is `[<prefix>.]*<known-expert>` belongs to that
   expert family).
 
+  Args:
+    repo: Absolute path to the repository worktree root.
+    expert: Expert name as registered in `lazy.settings.json[experts]`.
+
   Returns:
     A two-tuple of `(name, email)` with the `memory.` prefix applied, ready
     for use as git commit author credentials.
@@ -220,6 +228,9 @@ def _staged_diff_empty(repo: Path) -> bool:
   Used to skip the commit when the write was a true no-op (overwrite of
   a byte-identical note, idempotent re-run, etc.).
 
+  Args:
+    repo: Absolute path to the repository worktree root.
+
   Returns:
     True when the index has no staged changes; False when at least one path is staged.
   """
@@ -239,6 +250,12 @@ def _atomic_commit_memory(
   Raises `WriteError` with category `commit-failed` when `git add` or
   `git commit` exits non-zero — the staged index is left as-is so the
   operator can inspect it.
+
+  Args:
+    repo: Absolute path to the repository worktree root.
+    expert: Expert identifier used to resolve the memory-bot commit identity.
+    paths: Candidate paths to stage; entries missing on disk are staged as deletions.
+    title: Note title used to build the commit subject.
 
   Returns:
     The new commit SHA (7 hex chars) on success, or `None` when nothing was

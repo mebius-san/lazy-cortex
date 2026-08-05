@@ -12,7 +12,10 @@ pump uses — but with a trivial prompt that does no real work, so a broken
 is surfaced fast instead of eating a live routine's wall timeout. Alongside the
 per-expert verdicts it reports the checkout-level conditions that make a launch
 harmful rather than broken: an inbox already driven by another daemon on this
-host, and a daemon gate too coarse to name the machine it was answered on.
+host, a daemon gate too coarse to name the machine it was answered on, and a
+sandbox allowlist that does not cover a location its own entries resolve to
+(fail for write, warn for read) — a confined spawn is checked against the
+resolved path, so every write through such a symlink fails.
 
 Emits a JSON verdict document to stdout; the `lazy-runtime.preflight` skill owns
 the log write, the operator-facing table, and any settings fix. This bin never
@@ -377,34 +380,70 @@ def _inbox_dir_checks(repo: Path, expert: str) -> list[dict]:
 
 def _repo_checks(repo: Path) -> list[dict]:
   """
-  Validate that this checkout owns the inboxes it is about to drive.
+  Validate the checkout-level conditions that make a launch harmful or broken.
 
   Launchability is not only a property of one expert's config: a checkout whose inbox is already
-  driven by another daemon on this host dispatches every file twice, and a checkout that gates
-  the daemon on a bare boolean while sourcing directories from a synced path cannot tell the
-  machines that gate reaches apart. Both make a launch actively harmful rather than merely
-  broken, so they belong in the same verdict document.
+  driven by another daemon on this host dispatches every file twice, and a checkout whose sandbox
+  allowlist does not cover a location it is meant to reach fails every write through it silently.
+  Both conditions apply to every expert dispatched from this checkout, so they belong in the
+  same verdict document rather than in any one expert's per-expert findings.
 
   Args:
-    repo: Repository root whose inbox ownership and daemon gate are read.
+    repo: Repository root whose inbox ownership and sandbox scope are read.
 
   Returns:
-    One finding per contested inbox (`fail`) and per under-specified gate (`warn`); empty when
-    the checkout owns every inbox it scans.
+    One `fail` finding per contested inbox and per uncovered sandbox write location, plus one
+    `warn` per uncovered sandbox read location; empty when the checkout owns every inbox it
+    scans and its sandbox scope covers everything it grants.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from inbox_guard import check_inbox_collision, check_run_here_specificity
+  from inbox_guard import check_inbox_collision
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from constants import InboxGuardKey
-  findings = [
+  return [
     _finding(Level.FAIL, f"inbox ownership: {f[InboxGuardKey.DETAIL]}")
     for f in check_inbox_collision(repo)
+  ] + _sandbox_checks(repo)
+
+
+def _sandbox_checks(repo: Path) -> list[dict]:
+  """
+  Validate that the sandbox scope of a checkout grants what its allowlist entries reach.
+
+  A confined spawn is checked against the location the operating system resolves, so an
+  entry reached through a symlink permits nothing where the data actually lives: every
+  write lands as `Operation not permitted` and every job dispatched into that directory
+  fails, one after another, with nothing in the config looking wrong. A checkout with no
+  sandbox file spawns unconfined and has nothing to report.
+
+  Args:
+    repo: Repository root whose recorded sandbox scope is read.
+
+  Returns:
+    One `fail` finding per uncovered write location and one `warn` per uncovered read
+    location; empty when the recorded scope reaches everything, or when no scope is recorded.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  from sandbox_scope import audit
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  from constants import SandboxSyncKey
+  result = audit(repo)
+  # guard: no sandbox file — spawns run unconfined, so no allowlist can be short
+  if not result[SandboxSyncKey.PRESENT]:
+    return []
+  # guard: confinement recorded as off — the allowlist grants nothing and denies nothing
+  if result[SandboxSyncKey.ENABLED] is False:
+    return []
+  fixes = f"run `lazycortex-core sandbox-sync --repo-root {repo}` to record it"
+  return [
+    _finding(Level.FAIL, f"sandbox allowWrite does not cover '{p}' — a confined spawn is checked "
+                         f"against the resolved path, so every write through that symlink fails; {fixes}")
+    for p in result[SandboxSyncKey.MISSING_WRITE]
+  ] + [
+    _finding(Level.WARN, f"sandbox allowRead does not cover '{p}' — a confined spawn cannot read "
+                         f"through that symlink; {fixes}")
+    for p in result[SandboxSyncKey.MISSING_READ]
   ]
-  findings.extend(
-    _finding(Level.WARN, f"daemon gate: {f[InboxGuardKey.DETAIL]}")
-    for f in check_run_here_specificity(repo)
-  )
-  return findings
 
 
 def _finding(level: str, message: str) -> dict:
@@ -447,8 +486,10 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
     findings.append(_finding(Level.FAIL, f"expert '{expert}' not found in settings.experts"))
     return findings
 
+  # the agent reference is the spawn's identity — without a resolvable one the spawn
+  # silently falls back to the default assistant
   agent_ref = entry.get(JobConfigKey.AGENT)
-  # guard: no agent reference — the spawn silently falls back to the default assistant
+  # an absent reference fails outright; a present one still has to resolve
   if not agent_ref or not isinstance(agent_ref, str):
     findings.append(_finding(Level.FAIL, _MSG_MISSING_AGENT))
   else:
@@ -458,6 +499,7 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
     except ReferenceError as e:
       findings.append(_finding(Level.FAIL, f"{_MSG_AGENT_UNRESOLVED}: {e}"))
 
+  # an aspect that does not resolve costs the spawn part of its instruction set
   for aspect_ref in (entry.get(JobConfigKey.ASPECTS) or []):
     # guard: skip malformed non-string aspect entries defensively
     if not isinstance(aspect_ref, str) or not aspect_ref:
@@ -468,6 +510,7 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
     except ReferenceError as e:
       findings.append(_finding(Level.FAIL, f"aspect ref does not resolve: {e}"))
 
+  # a dispatching routine's protocol must resolve or the expert runs without its contract
   for protocol_ref in _routine_protocols_for_expert(repo, expert):
     try:
       # waiver: cross-module reference-category token, not an internal key
@@ -475,15 +518,17 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
     except ReferenceError as e:
       findings.append(_finding(Level.FAIL, f"protocol ref does not resolve: {e}"))
 
+  # delegate the two structured settings blocks to their own checkers
   findings.extend(_mcp_config_checks(repo, entry.get(JobConfigKey.MCP_CONFIG)))
   findings.extend(_setting_sources_checks(entry.get(JobConfigKey.SETTING_SOURCES)))
 
+  # an unrecognized pin is only a soft warning — the CLI may still accept the alias
   model = entry.get(JobConfigKey.MODEL)
   if model and isinstance(model, str) and not _model_is_known(repo, model):
     findings.append(_finding(Level.WARN, f"model '{model}' is not a known tier nor present in agent_models"))
 
-  # guard: a missing / unresolvable agent is the actionable defect — a model
-  # invariant on top of it would double-fail with a misleading pin-model fix
+  # a missing / unresolvable agent is the actionable defect — a model invariant on
+  # top of it would double-fail with a misleading pin-model fix
   agent_broken = any(
     any(marker in f.get(RKey.MESSAGE, "") for marker in _AGENT_UNRESOLVED_MARKERS) for f in findings
   )
@@ -498,6 +543,7 @@ def _static_checks(repo: Path, expert: str, entry: dict | None) -> list[dict]:
         f"{_MSG_UNPINNED_MODEL}: set experts.{expert}.model or add an agent_models entry for '{agent_ref}'",
       ))
 
+  # inbox reachability is the last static gate before the caller sees a verdict
   findings.extend(_inbox_dir_checks(repo, expert))
   return findings
 
@@ -653,7 +699,7 @@ def _derive_plugin_dirs(repo: Path) -> tuple[str, bool]:
   # Dev-vault sources take precedence (matches lazy.runtime.sh --dev-mode).
   # waiver: dev-vault plugin-tree dirname, fixed by the repo layout, not a domain key
   dev_claude = Path(repo) / "claude"
-  # guard: not a dev vault — skip the in-repo source scan
+  # in a dev vault every in-repo source dir carrying a manifest is a plugin dir
   if dev_claude.is_dir():
     for entry in sorted(dev_claude.iterdir()):
       # waiver: plugin-manifest layout idiom, mirrors reference_resolver / runtime_daemon
@@ -846,6 +892,7 @@ def _run_probe(repo: Path, entry: dict) -> dict:
   setting_sources = entry.get(JobConfigKey.SETTING_SOURCES)
   declared_servers = _servers_in_config(repo, mcp_config)
 
+  # build the same command line the pump would spawn, then bolt on MCP debug output
   argv = build_expert_argv(
     repo, env,
     contract_path = _contract_path(), model = model, mcp_config = mcp_config,
@@ -859,6 +906,7 @@ def _run_probe(repo: Path, entry: dict) -> dict:
   # waiver: external Claude Code CLI flags, not internal keys
   argv = [ *argv, "--debug", "mcp", "--debug-file", debug_file ]
 
+  # run the probe spawn under a bounded timeout — an overrun counts as hung, not failed
   started = time.monotonic()
   timed_out = False
   exit_code: int | None = None
@@ -875,6 +923,7 @@ def _run_probe(repo: Path, entry: dict) -> dict:
     stdout = e.stdout if isinstance(e.stdout, str) else ""
   duration = round(time.monotonic() - started, 2)
 
+  # turn the raw run into per-server statuses plus the agent-resolution verdict
   debug_text = _read_debug_file(debug_file)
   servers = _classify_servers(debug_text, declared_servers, timed_out)
   agent_resolved = _PROBE_OK_TOKEN in stdout or (exit_code == 0 and not timed_out)
@@ -1000,6 +1049,7 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
   entry = raw_entry if isinstance(raw_entry, dict) else None
   static = _static_checks(repo, expert, entry)
 
+  # the settings scopes the spawn would actually inherit after normalization
   raw_sources = entry.get(JobConfigKey.SETTING_SOURCES) if entry is not None else None
   effective_sources = _normalize_setting_sources(
     raw_sources if isinstance(raw_sources, (str, list)) else None
@@ -1010,6 +1060,7 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
   raw_hooks = entry.get(SettingsKey.HOOKS) if entry is not None else None
   hooks_enabled = list((raw_hooks or {}).get(HooksKey.ENABLED) or []) if isinstance(raw_hooks, dict) else []
 
+  # the probe stays unrun unless it can produce a trustworthy signal
   dynamic: dict | None = None
   # Only probe a registered expert whose agent statically resolves — a probe with
   # a missing agent would spuriously "pass" via the default-assistant fallback.
@@ -1020,6 +1071,7 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
   if probe and entry is not None and agent_resolves:
     dynamic = _run_probe(repo, entry)
 
+  # fixes are proposed only for a failing expert — a passing one has nothing to repair
   verdict = _verdict_for(static, dynamic)
   fixes = _fixes_for(expert, static, dynamic) if verdict == Verdict.FAIL else []
   return {
@@ -1049,13 +1101,15 @@ def preflight(repo: Path, *, expert: str | None, probe: bool) -> dict:
   """
   repo = Path(repo)
   targets, skipped = collect_target_experts(repo)
-  # guard: a single-expert run narrows the target list to just that name
+  # a single-expert run narrows the target list to just that name
   if expert is not None:
     targets = [ expert ]
     skipped = []
 
+  # evaluate every target, then add the checkout-level findings that belong to no expert
   results = [ evaluate_expert(repo, name, probe = probe) for name in targets ]
   repo_findings = _repo_checks(repo)
+  # a one-line headline the operator reads before drilling into the per-expert detail
   failed = sum(1 for r in results if r[RKey.VERDICT] == Verdict.FAIL)
   mode = "static-only" if not probe else "static+probe"
   summary = f"{len(results)} expert(s) checked ({mode}); {failed} failing, {len(results) - failed} ok"
@@ -1063,6 +1117,7 @@ def preflight(repo: Path, *, expert: str | None, probe: bool) -> dict:
     summary += f"; {len(skipped)} cross-repo target(s) skipped"
   if repo_findings:
     summary += f"; {len(repo_findings)} repo-level finding(s)"
+  # the verdict document the preflight skill renders
   return {
     "experts": results,
     RKey.REPO: repo_findings,
@@ -1096,6 +1151,7 @@ def _cli(argv: list[str]) -> int:
   parser.add_argument("--no-probe", action = "store_true", help = "Run static checks only (no spawn)")
   args = parser.parse_args(argv)
 
+  # resolve the repo root, run the preflight, and emit the verdict document as JSON
   repo = Path(args.cwd) if args.cwd else Path(os.environ.get("LAZY_REPO_ROOT", os.getcwd()))
   doc = preflight(repo, expert = args.expert, probe = not args.no_probe)
   print(json.dumps(doc, indent = 2))

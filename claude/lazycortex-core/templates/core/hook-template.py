@@ -27,6 +27,7 @@ This template encodes the lazy-core.hook-writing § 1-8 contract:
 Delete the trailing AUTHORING NOTES block before saving; it is a guide, not
 runtime documentation.
 """
+
 from __future__ import annotations
 
 import json
@@ -93,6 +94,8 @@ def _in_transactional_state(root: str) -> bool:
     ).strip()
   except subprocess.CalledProcessError:
     return False
+
+  # `--git-dir` answers relative for a plain checkout and absolute for a worktree — normalise before probing
   git_path = os.path.join(root, git_dir) if not os.path.isabs(git_dir) else git_dir
   return any(os.path.exists(os.path.join(git_path, m)) for m in _TRANSACTIONAL_MARKERS)
 
@@ -153,6 +156,7 @@ def main() -> int:
   except (json.JSONDecodeError, ValueError):
     return 0
 
+  # the two payload fields every branch below gates on
   # waiver: external-format hook-payload field name, not an internal key
   tool_name = hook_input.get("tool_name", "")
   # waiver: external-format hook-payload field name, not an internal key
@@ -215,6 +219,7 @@ def main() -> int:
   # ---- Example: context-only branch ----
   # _context("<hook-name>: <one-line summary>")
 
+  # fall-through: the event needed no action — exit status is never a decision channel
   return 0
 
 

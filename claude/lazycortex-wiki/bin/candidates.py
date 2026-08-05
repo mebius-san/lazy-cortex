@@ -100,6 +100,9 @@ class CandidateSource:
       repo-relative POSIX strings; scores are non-negative floats where a
       higher value means a stronger candidate.  An empty list means the
       source has no opinion.
+
+    Raises:
+      NotImplementedError: Always, unless a subclass overrides this method.
     """
     raise NotImplementedError("CandidateSource subclasses must implement suggest()")
 
@@ -184,13 +187,12 @@ class CandidateFinder:
     """
     Return the ranked, capped list of candidate paths for `target`.
 
-    Steps:
-    1. Enumerate scope nodes; split out the target and the others.
-    2. Ask every source for `(path, score)` suggestions over the others.
-    3. Sum scores per path across sources.
-    4. Drop the target itself and any `unrelated_links` pin; force-include
-       every `pinned_links` pin with a sentinel score so it always survives.
-    5. Sort by descending score, tie-broken by path, and cap to `top_n`.
+    Scores every other scope node against `target` across the configured sources and
+    ranks the result for the caller to use as a See-also shortlist.
+
+    Guarantees:
+      - Every `pinned_links` target on `target` survives the ranking and the top-N cap.
+      - Every `unrelated_links` target on `target` is excluded from the result.
 
     Args:
       target: Absolute path of the node to find candidates for.
@@ -203,6 +205,7 @@ class CandidateFinder:
     target_resolved = target.resolve()
     others = [ p for p in all_nodes if p.resolve() != target_resolved ]
 
+    # the target's own link and its operator pins constrain what may be suggested
     target_rel = self._rel(target)
     pinned, unrelated = self._target_pins(target)
 
@@ -297,6 +300,12 @@ class _NodeFacets:
   Holds the node's repo-relative path, its topic tags (as bare
   `axis/value...` strings without the `wiki/` prefix), its normalised
   connector phrases, and the token bag drawn from its summary and connectors.
+
+  Attributes:
+    rel_path: Repo-relative POSIX path of the node.
+    topics: Bare `axis/value...` topic strings without the `wiki/` prefix.
+    connectors: Normalised (lowercased, trimmed) connector phrases.
+    tokens: Lowercased word tokens drawn from the node's summary and connectors.
   """
 
   def __init__(
@@ -388,6 +397,7 @@ class ContentCandidateSource(CandidateSource):
     if target_facets is None:
       return []
 
+    # keep only the nodes that share at least one signal with the target
     out: list[tuple[str, float]] = []
     for other in others:
       facets = self._facets(other)
@@ -490,6 +500,7 @@ class ContentCandidateSource(CandidateSource):
     if node is None:
       return None
 
+    # the two node types expose the same facets under different accessors
     if isinstance(node, _nodes.MarkdownNode):
       topics = { self._strip_prefix(t) for t in node.wiki_tags }
       summary = node.wiki_summary or ""
@@ -499,11 +510,13 @@ class ContentCandidateSource(CandidateSource):
       summary = node.summary or ""
     connectors_raw = node.connectors
 
+    # case-fold the connectors and pool their words with the summary's for token overlap
     connectors = { c.strip().lower() for c in connectors_raw if c.strip() }
     tokens = self._tokenise(summary)
     for conn in connectors_raw:
       tokens |= self._tokenise(conn)
 
+    # one comparable bundle per node — the scorer works on nothing else
     return _NodeFacets(
       rel_path = self._rel(path),
       topics = topics,
@@ -697,7 +710,7 @@ class GraphCandidateSource(CandidateSource):
         continue
       # The bare path runs up to the first em-dash gloss separator (or end).
       path = stripped.split(" — ", 1)[0].strip()
-      # guard: a gloss separator that was a plain space-hyphen — take first token
+      # a plain space-hyphen gloss survives the split above — keep only the first token
       path = path.split()[0] if path else ""
       if path:
         out.add(path)
@@ -767,15 +780,9 @@ class BackCandidateFinder:
     """
     Return the set of scope nodes for which `target` is a top-N candidate.
 
-    Steps:
-    1. Enumerate scope nodes; drop the target itself.
-    2. For each other node Y, ask `CandidateFinder` for Y's ranked top-N.
-    3. Keep Y when the target's repo-relative path appears in Y's top-N.
-
-    Honours operator pins via the inner finder: a node Y whose `unrelated_links`
-    blacklists the target will not include the target in its top-N, so it is
-    correctly excluded from the attracted set; a node Y that pins the target
-    in `pinned_links` always counts as attracted.
+    Guarantees:
+      - A node whose `unrelated_links` blacklists `target` is excluded from the result.
+      - A node that pins `target` in `pinned_links` is always included in the result.
 
     Args:
       target: Absolute path of the newly-added / re-classified node whose

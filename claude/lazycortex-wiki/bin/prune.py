@@ -68,6 +68,7 @@ class NodePruner:
     deleted_abs = (deleted if deleted.is_absolute() else self._repo / deleted).resolve()
     pruned: list[str] = []
 
+    # sweep every node in the scope, recording the ones that lost a link
     for node_path in self._resolver.iter_nodes(self._cfg):
       node = _nodes.node_for(node_path)
       # guard: unrecognised file type — skip
@@ -76,12 +77,14 @@ class NodePruner:
       if self._prune_node(node, node_path, deleted_abs):
         pruned.append(node_path.relative_to(self._repo).as_posix())
 
+    # the pruned See-also links may have removed a topic entirely — rebuild the index
     index_path = _index.TopicIndex(
       repo     = self._repo,
       cfg      = self._cfg,
       scope_id = self._scope_id,
     ).build()
 
+    # report what the caller needs to review: the scope, the loss, and its fallout
     return {
       _K_SCOPE:        self._scope_id,
       _K_DELETED:      deleted_abs.relative_to(self._repo).as_posix(),

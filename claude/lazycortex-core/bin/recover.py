@@ -124,6 +124,7 @@ def cleanup(repo: Path, mode: str, message: str | None = None) -> None:
   if mode in { RecoverMode.ABORT, RecoverMode.MANUAL_FIX }:
     return
 
+  # commit mode: preserve the halted work as a real commit
   if mode == RecoverMode.COMMIT:
     # guard: commit mode demands an explicit message — refuse to invent one
     if not message:
@@ -135,6 +136,7 @@ def cleanup(repo: Path, mode: str, message: str | None = None) -> None:
                    cwd = str(repo), check = True, capture_output = True)
     return
 
+  # stash mode: park the halted work where the operator can restore it later
   if mode == RecoverMode.STASH:
     # push everything (including untracked) onto the stash with a recovery marker
     subprocess.run(
@@ -143,6 +145,7 @@ def cleanup(repo: Path, mode: str, message: str | None = None) -> None:
     )
     return
 
+  # discard mode: throw the halted work away and return the tree to HEAD
   if mode == RecoverMode.DISCARD:
     # revert tracked file changes, then remove untracked files + directories
     subprocess.run([ "git", "checkout", "--", "." ],

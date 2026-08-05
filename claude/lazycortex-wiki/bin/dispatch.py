@@ -28,9 +28,12 @@ class CoreDispatch:
   Thin §1c bridge between lazycortex-wiki and lazycortex-core's CLI.
 
   Resolves the `lazycortex-core` binary at construction time and exposes a
-  single dispatch-level operation, `dispatch_curator`.  An internal helper
-  method handles the raw subprocess call and is exercised directly by unit
-  tests via the public interface.
+  single dispatch-level operation to queue curator jobs.
+
+  Attributes:
+    EXPERT_NAME: Expert name as it appears in `lazy.settings.json[experts]`.
+    KIND_CLASSIFY: Payload `kind` value requesting node classification.
+    KIND_LINK: Payload `kind` value requesting node linking.
   """
 
   # Expert name as it appears in `lazy.settings.json[experts]`.
@@ -48,7 +51,6 @@ class CoreDispatch:
   # Path components used in binary resolution.
   _CORE_PLUGIN_NAME = "lazycortex-core"
   _BIN_SEGMENT      = "bin"
-  _CACHE_SEGMENTS   = (".claude", "plugins", "cache")
 
   # Valid kind values that the curator protocol recognises. Callers place one
   # of these as the payload's `kind` field; the payload is written verbatim to
@@ -173,22 +175,17 @@ class CoreDispatch:
     """
     Locate the `lazycortex-core` CLI binary.
 
-    Two-stage lookup matching the shape `runtime_daemon.resolve_routine_command`
-    uses on the daemon side:
-
-    1. Walk `$LAZYCORTEX_PLUGIN_DIRS` (set by the daemon when it spawns
-       subprocess routines) for `<dir>/bin/lazycortex-core`.
-    2. Fall back to the highest-versioned entry in the plugin cache
-       at `~/.claude/plugins/cache/<registry>/lazycortex-core/<version>/bin/lazycortex-core`.
-       Used when the env is unset (operator running outside the daemon,
-       or a consumer install that does not run the daemon at all).
+    Walks `$LAZYCORTEX_PLUGIN_DIRS` — set by the daemon for every subprocess
+    routine it spawns — for `<dir>/bin/lazycortex-core`, matching the shape
+    `runtime_daemon.resolve_routine_command` uses on the daemon side.
 
     Returns:
       Resolved `Path` to a usable `lazycortex-core` binary.
 
     Raises:
-      RuntimeError: When both lookup stages fail.
+      RuntimeError: When the environment names no directory carrying the binary.
     """
+    # take the first directory that actually carries the binary — order is the caller's priority
     env_dirs = os.environ.get(CoreDispatch._ENV_PLUGIN_DIRS, "").split(os.pathsep)
     for d in env_dirs:
       # guard: skip empty segments produced by a leading/trailing colon
@@ -197,27 +194,15 @@ class CoreDispatch:
       cli = Path(d) / CoreDispatch._BIN_SEGMENT / CoreDispatch._CORE_PLUGIN_NAME
       if cli.is_file():
         return cli
-    # Stage 2 — plugin cache layout:
-    # ~/.claude/plugins/cache/<registry>/lazycortex-core/<version>/bin/lazycortex-core
-    cache = Path.home().joinpath(*CoreDispatch._CACHE_SEGMENTS)
-    if cache.is_dir():
-      plugin_dirs = [
-        registry / CoreDispatch._CORE_PLUGIN_NAME
-        for registry in cache.iterdir()
-        if registry.is_dir() and (registry / CoreDispatch._CORE_PLUGIN_NAME).is_dir()
-      ]
-      all_versions = [
-        v for pd in plugin_dirs for v in pd.iterdir() if v.is_dir()
-      ]
-      if all_versions:
-        latest = sorted(all_versions, key = lambda v: v.name, reverse = True)[0]
-        cli = latest / CoreDispatch._BIN_SEGMENT / CoreDispatch._CORE_PLUGIN_NAME
-        if cli.is_file():
-          return cli
+
+    # the environment is the only sanctioned discovery channel — see dev.plugin-boundaries § 1c;
+    # name what was searched so a misconfigured runner is diagnosable from the message alone
+    searched = [d for d in env_dirs if d] or ["<unset>"]
     raise RuntimeError(
-      "lazycortex-core CLI not resolvable: $LAZYCORTEX_PLUGIN_DIRS "
-      "yields no match and the plugin cache has no lazycortex-core "
-      "version with a bin/lazycortex-core entry. Either pass "
-      "--plugin-dir to the daemon, or install lazycortex-core into "
-      "the Claude Code plugin cache."
+      f"lazycortex-core CLI not resolvable: no "
+      f"{CoreDispatch._BIN_SEGMENT}/{CoreDispatch._CORE_PLUGIN_NAME} under any directory named by "
+      f"${CoreDispatch._ENV_PLUGIN_DIRS} (searched: {', '.join(searched)}). "
+      f"This worker runs as a daemon subprocess, which exports that variable; "
+      f"running it from a plain shell requires exporting "
+      f"${CoreDispatch._ENV_PLUGIN_DIRS} to the enabled plugin directories first."
     )

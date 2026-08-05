@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 _BIN = Path(__file__).resolve().parents[3] / "bin"
 sys.path.insert(0, str(_BIN))
 
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from memory_runtime import (  # noqa: E402
   _read_note_frontmatter, _iter_notes, topic_from_tag,
   regen_local_tag_file, regen_global_tag_file,
@@ -62,6 +62,8 @@ def reindex(repo: Path) -> dict:
         if f.is_file() and f.suffix == ".md":
           all_topics.add(f.stem)
 
+  # Pass 2: harvest topics from every note's frontmatter tags, plus each expert's
+  # own .tags/ files so stale per-expert entries are seen too.
   for expert_dir in experts:
     for note in _iter_notes(expert_dir):
       # waiver: internal counter/summary dict subkey, single-source set in this script
@@ -88,12 +90,13 @@ def reindex(repo: Path) -> dict:
         if f.is_file() and f.suffix == ".md":
           all_topics.add(f.stem)
 
-  # Pass 2: regenerate every (expert, topic) pair and every global topic.
+  # Pass 3: regenerate every (expert, topic) pair and every global topic.
   for topic in sorted(all_topics):
     for expert_dir in experts:
       regen_local_tag_file(expert_dir, topic)
     regen_global_tag_file(memory_root, topic)
 
+  # report the topic count the caller sees as the rebuild's coverage
   # waiver: internal counter/summary dict subkey, single-source set in this script
   summary["tags"] = len(all_topics)
   return summary

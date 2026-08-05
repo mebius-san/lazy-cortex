@@ -80,19 +80,10 @@ class TopicIndex:
     """
     Build the topic tree and write `topics.md` to the configured path.
 
-    Steps:
-    1. Enumerate all scope nodes via `ScopeResolver.iter_nodes`.
-    2. For each node, read `wiki_summary`, `wiki/*` tags, and connectors.
-    3. Group nodes by axis → value-path.
-    4. Render the deterministic markdown document.
-    5. Write to `cfg["topics_index"]` (relative to repo root), creating
-       parent dirs as needed.
-
     Nodes that carry no `wiki/*` tags and have no `wiki_summary` are
     skipped entirely — there is nothing meaningful to index.  Nodes with
     `wiki/*` tags but no summary appear under their tags with an empty
-    gloss.  Non-markdown files returned by `iter_nodes` are skipped
-    gracefully.
+    gloss.  Files of an unsupported type are skipped gracefully.
 
     Returns:
       Absolute path to the written `topics.md` file.
@@ -165,6 +156,7 @@ class TopicIndex:
     # Raw accumulator: axis → value_path → list of (rel_link, link_text, summary, connectors)
     raw: dict[str, dict[str, list[tuple[str, str, str | None, list[str]]]]] = {}
 
+    # fold every node into each axis/value bucket its tags name
     for node_path in node_paths:
       node = _nodes.node_for(node_path)
       # guard: unrecognised file type — skip gracefully
@@ -186,15 +178,18 @@ class TopicIndex:
       if not wiki_tags and summary is None:
         continue
 
+      # every bucket entry for this node shares the same label and link
       link_text = node_path.stem
       rel_link = self._relative_link(node_path, index_path)
 
+      # a node appears once under each axis/value pair it is tagged with
       for tag in wiki_tags:
         axis, value_path = self._split_tag(tag)
         # guard: malformed tag — skip
         if axis is None or value_path is None:
           continue
 
+        # grow the nesting on demand, then record this node under the pair
         raw.setdefault(axis, {})
         raw[axis].setdefault(value_path, [])
         raw[axis][value_path].append((rel_link, link_text, summary, connectors))
@@ -206,6 +201,7 @@ class TopicIndex:
       for value_path in sorted(raw[axis]):
         result[axis][value_path] = sorted(raw[axis][value_path], key = lambda t: t[0])
 
+    # the sorted mirror is what the renderer walks
     return result
 
   def _split_tag(self, tag: str) -> tuple[str | None, str | None]:
@@ -227,12 +223,14 @@ class TopicIndex:
     if not tag.startswith(_WIKI_TAG_PREFIX):
       return None, None
 
+    # everything past the prefix is the axis plus its value segments
     rest = tag[len(_WIKI_TAG_PREFIX):]
     segs = rest.split("/")
     # guard: fewer than two segments means no value under the axis
     if len(segs) < 2:
       return None, None
 
+    # first segment names the axis; the remainder re-joins as a nested value path
     axis = segs[0]
     value_path = "/".join(segs[1:])
     return axis, value_path
@@ -297,6 +295,7 @@ class TopicIndex:
     lines.append("---")
     lines.append(f"# Topics — {self._scope_id}")
 
+    # one section per axis, each opened by a blank line so headings stay readable
     for axis, values in tree.items():
       lines.append("")
       lines.append(f"## {axis}")
@@ -311,5 +310,6 @@ class TopicIndex:
           if connectors:
             lines.append(f"{_CONNECTOR_PREFIX}{_CONNECTOR_SEP.join(connectors)}")
 
+    # the empty last element gives the joined document its trailing newline
     lines.append("")
     return "\n".join(lines)

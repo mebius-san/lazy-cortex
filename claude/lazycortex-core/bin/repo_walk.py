@@ -28,15 +28,31 @@ class RepoWalk:
   _LAZYIGNORE = ".lazyignore"
 
   def __init__(self, repo: Path) -> None:
+    """
+    Bind the walker to one repository root.
+
+    Args:
+      repo: Absolute path to the repository root to enumerate.
+    """
     self._repo = Path(repo)
     self._excludes = self._repo / self._LAZYIGNORE
 
   def _ignored(self, rels: list[str]) -> set[str]:
+    """
+    Return the subset of candidate paths that git's ignore stack excludes.
+
+    Args:
+      rels: Repo-relative candidate paths to check.
+
+    Returns:
+      The subset of `rels` that git ignores. Empty when `rels` is empty or when the check
+      cannot run (not a git repository, or a git failure).
+    """
     # guard: nothing to check
     if not rels:
       return set()
     cmd = [ "git" ]
-    # guard: a .lazyignore exists — add it as the global excludes source
+    # wire the repo `.lazyignore` in as git's global excludes source when the file is present
     if self._excludes.is_file():
       cmd += [ "-c", f"core.excludesFile={self._excludes}" ]
     cmd += [ "check-ignore", "--no-index", "--stdin", "-z" ]
@@ -63,7 +79,7 @@ class RepoWalk:
       is unavailable or the directory is not a repository.
     """
     cmd = [ "git" ]
-    # guard: a .lazyignore exists — add it as the global excludes source
+    # wire the repo `.lazyignore` in as git's global excludes source when the file is present
     if self._excludes.is_file():
       cmd += [ "-c", f"core.excludesFile={self._excludes}" ]
     cmd += [ "ls-files", "-co", "--exclude-standard", "-z" ]

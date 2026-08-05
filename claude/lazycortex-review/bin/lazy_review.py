@@ -38,7 +38,7 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import JobKey  # noqa: E402
 
 
@@ -109,6 +109,13 @@ def _prune_runs_logs(log_dir: Path, today: str) -> None:
 
 
 def _log_tick(repo: Path, result: dict) -> None:
+  """
+  Append the tick's actions to today's run-log file, pruning logs past the retention window.
+
+  Args:
+    repo: Absolute path to the repository root.
+    result: Tick result dict whose `actions` entries are logged, one JSON line each.
+  """
   # waiver: filesystem path idiom
   log_dir = repo / ".logs" / "lazy-review" / "runs"
   log_dir.mkdir(parents=True, exist_ok=True)
@@ -142,7 +149,7 @@ def cmd_process_file(args: argparse.Namespace) -> int:
     0 on success, 1 if the dispatcher summary carries an error.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import dispatcher  # type: ignore
   repo = Path(args.repo).resolve()
   file_path = Path(args.file).resolve()
@@ -161,9 +168,10 @@ def cmd_process_file(args: argparse.Namespace) -> int:
     print(json.dumps(summary, indent=2))
   _log_tick(repo, {JobKey.ACTIONS: [summary]})
   err = summary.get(JobKey.ERROR)
+  # guard: the tick reported an error — surface its text so the daemon's classifier
+  # (`_classify_routine_error`) can map `compute_inputs_failed` / `config_violation:`
+  # to the halt-class cause
   if err:
-      # guard: surface the error text so the daemon's classifier (`_classify_routine_error`)
-      # can map `compute_inputs_failed` / `config_violation:` to the halt-class cause
     print(f"lazy-review: {err}", file=sys.stderr)
     return 1
   return 0
@@ -180,7 +188,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     Exit code from the status module.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import status  # type: ignore
   return status.main([args.file])
 
@@ -196,7 +204,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     Exit code from the start module.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import start  # type: ignore
   forward: list[str] = [args.file]
   if args.expert:
@@ -215,7 +223,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
     Exit code from the submit module.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import submit  # type: ignore
   forward: list[str] = [args.file]
   if args.expert:
@@ -234,7 +242,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
     Exit code from the stop module.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import stop  # type: ignore
   return stop.main([args.file])
 
@@ -250,7 +258,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     Exit code from the finalize module.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+  # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
   import finalize  # type: ignore
   return finalize.main([args.file])
 
@@ -267,6 +275,7 @@ def build_parser() -> argparse.ArgumentParser:
   # waiver: argparse CLI signature, not a domain key
   sub = parser.add_subparsers(dest="cmd", required=True)
 
+  # `process-file` — the daemon's per-file entry point
   # waiver: argparse CLI signature, not a domain key
   p_pf = sub.add_parser("process-file", help="state-machine for one file")
   # waiver: argparse CLI signature, not a domain key
@@ -277,12 +286,14 @@ def build_parser() -> argparse.ArgumentParser:
   p_pf.add_argument("--quiet", action="store_true")
   p_pf.set_defaults(func=cmd_process_file)
 
+  # `status` — read-only introspection for the operator
   # waiver: argparse CLI signature, not a domain key
   p_status = sub.add_parser("status", help="introspect one file")
   # waiver: argparse CLI signature, not a domain key
   p_status.add_argument("file")
   p_status.set_defaults(func=cmd_status)
 
+  # `start` — opt a document in, opening writer round included
   # waiver: argparse CLI signature, not a domain key
   p_start = sub.add_parser("start", help="opt a file into review")
   # waiver: argparse CLI signature, not a domain key
@@ -291,6 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
   p_start.add_argument("--expert", default=None)
   p_start.set_defaults(func=cmd_start)
 
+  # `submit` — opt a document in with the opening writer round skipped
   p_submit = sub.add_parser(
       # waiver: argparse CLI signature, not a domain key
       "submit", help="opt a file into review skipping the opening writer round")
@@ -300,18 +312,22 @@ def build_parser() -> argparse.ArgumentParser:
   p_submit.add_argument("--expert", default=None)
   p_submit.set_defaults(func=cmd_submit)
 
+  # `stop` — opt a document out mid-cycle
   # waiver: argparse CLI signature, not a domain key
   p_stop = sub.add_parser("stop", help="opt a file out of review")
   # waiver: argparse CLI signature, not a domain key
   p_stop.add_argument("file")
   p_stop.set_defaults(func=cmd_stop)
 
+  # `finalize` — strip the review's markup from an approved document
   # waiver: argparse CLI signature, not a domain key
   p_final = sub.add_parser("finalize", help="finalize a fully-approved doc")
   # waiver: argparse CLI signature, not a domain key
   p_final.add_argument("file")
   p_final.set_defaults(func=cmd_finalize)
 
+  # every subcommand carries its handler in `func`, so the caller dispatches on the parse
+  # result alone and never has to match subcommand names a second time
   return parser
 
 

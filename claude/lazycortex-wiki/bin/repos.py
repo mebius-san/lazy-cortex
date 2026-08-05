@@ -102,10 +102,10 @@ class RepoRegistry:
       Absolute `Path` of the link target, or `None` when the repo key is
       unregistered.
     """
-    # guard: cross-repo link with @key/ prefix
+    # cross-repo form: the @key/ prefix routes the link through the repo registry
     if link.startswith("@"):
       slash = link.find("/", 1)
-      # guard: no slash after the key — treat entire remainder as key, path empty
+      # split the key from the relative path; a bare @key carries no path
       if slash == -1:
         key = link[1:]
         rel  = ""

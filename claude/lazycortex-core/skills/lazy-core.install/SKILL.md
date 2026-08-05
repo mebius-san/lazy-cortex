@@ -674,51 +674,22 @@ State **ignores-updated** and report the appended lines in Step 14. `.gitignore`
 
 On **Leave .gitignore as is**, state **ignores-declined** and carry one WARN line into Step 14 naming each still-visible path and the consequence: the tree stays dirty and the daemon halts on its first tick.
 
-### 12.5a. Inbox ownership — refuse a collision, offer to pin an ambiguous gate
+### 12.5a. Inbox ownership — refuse a collision
 
-Two daemons over one physical inbox import every document twice, and the duplicate is not automatically reversible. Run both guards, and treat them differently — they carry different severities and different fixes:
+Two daemons over one physical inbox import every document twice, and the duplicate is not automatically reversible. Run the guard:
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
-from inbox_guard import check_inbox_collision, check_run_here_specificity
+from inbox_guard import check_inbox_collision
 from pathlib import Path
-p = Path('<repo-root>')
-for f in check_inbox_collision(p):
+for f in check_inbox_collision(Path('<repo-root>')):
   print('collision: ' + f['detail'])
-for f in check_run_here_specificity(p):
-  print('ambiguous: ' + f['detail'])
 "
 ```
 
 **Any `collision` line is a refusal, not a warning.** State **inbox-conflict**, print the lines verbatim, and tell the operator that one of the two checkouts must set `daemon.run_here: false` (the other one is named in the finding). Then skip Steps 13, 13.5, and 13.6 entirely — no supervisor is installed for a contested inbox — and mark this step failed in Step 14. Which checkout drives a shared inbox is the operator's decision, so never resolve it here.
 
-**An `ambiguous` line with no collision is a one-question conversion, not a refusal.** A bare `daemon.run_here: true` is what every install before this feature recorded, so refusing it would stop the first consumer to adopt the feature on their first re-run. Ask once:
-
-```
-AskUserQuestion:
-  header: "Pin run_here?"
-  question: "This repo sources working directories from outside git, so its gitignored overlay travels to every machine holding that path — and `daemon.run_here: true` reads as answered on all of them. Pin it to this host (<hostname>)?"
-  description: "Rewrites `daemon.run_here` in THIS checkout's gitignored `lazy.settings.local.json` from `true` to a one-entry host list naming <hostname>. Every other machine reaching the same synced path then skips the daemon install and tears down any supervisor unit it already has, instead of starting a second daemon over the same inbox. 'Leave as is' keeps the bare boolean; the condition is re-reported on every audit until it is pinned."
-  options: ["Pin to this host", "Leave as is"]
-```
-
-On **Pin to this host**, derive the hostname the same way Step 13's gate compares it (`socket.gethostname().split('.')[0].lower()`) and persist:
-
-```bash
-PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
-from lazy_settings import load_local_only_section, save_local_section
-from pathlib import Path
-import socket
-p = Path('<repo-root>/.claude/lazy.settings.json')
-sec = load_local_only_section(p, 'daemon')
-sec['run_here'] = [ socket.gethostname().split('.')[0].lower() ]
-save_local_section(p, 'daemon', sec)
-"
-```
-
-State **run-here-pinned**; Step 13 reads the new host list and proceeds normally. On **Leave as is**, state **run-here-ambiguous-kept** and continue — this matches the WARN severity `/lazy-core.audit` D12 assigns the same condition.
-
-Outcome: `no-declaration` / `linked` / `unchanged` / `declined-on-record` / `ignores-ok` / `ignores-updated` / `ignores-declined` / `run-here-pinned` / `run-here-ambiguous-kept` / `inbox-conflict`. The repair outcome and the ignore-coverage outcome are both stated — `linked, ignores-updated` is a normal pair.
+Outcome: `no-declaration` / `linked` / `unchanged` / `declined-on-record` / `ignores-ok` / `ignores-updated` / `ignores-declined` / `inbox-conflict`. The repair outcome and the ignore-coverage outcome are both stated — `linked, ignores-updated` is a normal pair.
 
 ## Step 13: Gate 2 (run_here) + daemon supervisor install
 
@@ -874,23 +845,18 @@ The spawn loads `--settings` AND the cwd's `.claude/settings.local.json`, merged
 
 Both writes are clean, non-contradictory merges — apply the File-sync policy **silently**: no confirmation, never overwrite an existing key, union missing scope in. Ask only on a genuine conflict per File-sync policy case 3 (e.g. an existing `sandbox.enabled: false` that contradicts the required `true`).
 
-### 13.5b. Recommended blocks
+### 13.5b. Sandbox scope (CLI) and the permission block
 
-Substitute `<repo-root>` with the absolute path of the current repo. Substitute `<plugin-source-N>` lines with one entry per plugin source directory the daemon will pass via `--plugin-dir` (Step 13a's derived `dev_mode` dictates whether these are in-repo `<repo-root>/claude/<plugin>/` paths or `~/.claude/plugins/cache/...` paths — list what the supervisor unit will actually use).
+The sandbox file is written by `lazycortex-core sandbox-sync`, never by hand. The sandbox compares the **resolved** path, so an allowlist entry reached through a symlink grants nothing where the data actually lives — the CLI records the resolved location of every entry plus the targets of the symlinks directly inside it (an external-dirs `Data` / `-Inbox` slot), which is exactly what a hand-written allowlist misses.
 
-Block 1 — `<repo-root>/.runtime/sandbox.settings.json` (daemon-owned; read only by spawns via `--settings`):
+Substitute `<repo-root>` with the absolute path of the current repo. Substitute `<plugin-source-N>` with one entry per plugin source directory the daemon will pass via `--plugin-dir` (Step 13a's derived `dev_mode` dictates whether these are in-repo `<repo-root>/claude/<plugin>/` paths or `~/.claude/plugins/cache/...` paths — list what the supervisor unit will actually use).
 
-```json
-{
-  "sandbox": {
-    "enabled": true,
-    "filesystem": {
-      "allowRead":  ["<repo-root>", "<plugin-source-1>", "<plugin-source-2>", "..."],
-      "allowWrite": ["<repo-root>"]
-    }
-  }
-}
+```bash
+lazycortex-core sandbox-sync --repo-root <repo-root> \
+  --allow-read <plugin-source-1> --allow-read <plugin-source-2>
 ```
+
+The repo root is granted read+write implicitly. The call is idempotent: it appends only what is missing, never drops or reorders a recorded entry, and never overwrites a recorded `enabled`.
 
 Block 2 — `<repo-root>/.claude/settings.local.json` (permission scope; loaded by every session in the checkout):
 
@@ -908,19 +874,20 @@ The `Bash(lazycortex-core *)` entry is required so dispatched experts can invoke
 
 Tilde-form (`~/...`) is acceptable for paths the operator wants portable across machines — Claude Code expands `~` at load time. Absolute paths are equally valid.
 
-### 13.5c. Apply the File-sync policy to both files
+### 13.5c. Run the sandbox sync, then apply the File-sync policy to the permission file
 
-`Read <repo-root>/.runtime/sandbox.settings.json` and apply Block 1:
+Run the `sandbox-sync` call above and read its JSON result:
 
-1. **Missing or unparseable** → `Write` Block 1 verbatim as a new file. State **sandbox-created**.
-2. **Present, no `sandbox` key** → `Edit` to add it (preserve every existing key). State **sandbox-appended**.
-3. **Present, `sandbox` already there** → union missing `filesystem.allowRead` / `allowWrite` paths in, silently; never drop or replace existing entries. State **sandbox-merged**. Only a direct contradiction (e.g. `enabled: false`) triggers an `AskUserQuestion`.
+1. `changed: true` and `present: false` → State **sandbox-created**.
+2. `changed: true` and `present: true` → State **sandbox-merged** (`added_read` / `added_write` name what was appended).
+3. `changed: false` → State **sandbox-unchanged**.
+4. `enabled: false` → the checkout has confinement recorded as off, which contradicts the required `true`; the CLI left it alone. Raise one `AskUserQuestion` per File-sync policy case 3 and state **sandbox-conflict** when the operator keeps it off.
 
 `Read <repo-root>/.claude/settings.local.json` and apply Block 2 + migrate:
 
-4. **Missing or unparseable** → `Write` Block 2 verbatim. State **perms-created**.
-5. **Present** → union missing `permissions` / `additionalDirectories` scope in, silently (add only paths / tool names not already present; never drop existing). State **perms-merged**.
-6. **Migration** — if this file carries a legacy top-level `sandbox` key (written by an earlier version of this step), REMOVE it: the sandbox now lives in the runtime file, and a `sandbox` here would confine the interactive session. State **migrated-local-sandbox**; **no-legacy-sandbox** when absent.
+5. **Missing or unparseable** → `Write` Block 2 verbatim. State **perms-created**.
+6. **Present** → union missing `permissions` / `additionalDirectories` scope in, silently (add only paths / tool names not already present; never drop existing). State **perms-merged**.
+7. **Migration** — if this file carries a legacy top-level `sandbox` key (written by an earlier version of this step), REMOVE it: the sandbox now lives in the runtime file, and a `sandbox` here would confine the interactive session. State **migrated-local-sandbox**; **no-legacy-sandbox** when absent.
 
 Never replace an entire key with the recommended value. The consumer's existing files are authoritative for shape; this skill only adds missing scope (and removes the migrated `sandbox` key).
 
@@ -957,7 +924,7 @@ AskUserQuestion:
   - `No` → persist `metrics.enabled = false` into the tracked `daemon` section (`save_section`); state **metrics-declined**.
   - `Yes` → run the three sub-steps:
 
-1. **Allocate the port** (sequential from 9464; the repo's own recorded port is reused):
+1. **Allocate the port** (sequential from 9464; the repo's own recorded port is reused unless a second registered daemon records the same one, in which case this checkout is moved off it):
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" metrics-alloc-port --repo-root <repo-root>
@@ -975,6 +942,7 @@ m = tracked.setdefault('metrics', {})
 m['enabled'] = True
 m.setdefault('repo_label', '<repo_label>')  # default: local-<basename>; keep an existing value
 m.setdefault('bind', '127.0.0.1')
+if 'port' in m: print('tracked-port-leaked: ' + str(m['port']))
 save_section(p, 'daemon', tracked)
 local = load_local_only_section(p, 'daemon')
 local.setdefault('metrics', {})['port'] = <allocated port>
@@ -982,7 +950,7 @@ save_local_section(p, 'daemon', local)
 "
 ```
 
-  A pre-existing tracked `metrics.port` (older installs wrote it there) is left in place — the local overlay wins on merged reads, no migration is performed.
+  A pre-existing tracked `metrics.port` (older installs wrote it there, and a checkout extracted from another repo inherits one) is a leak: the value is per-host and reaches every other machine through git. Install does not strip it — the tracked file is that repo's own content and its removal belongs in that repo's own commit. When the snippet prints `tracked-port-leaked: <port>`, carry the token into the outcome so the operator removes `daemon.metrics.port` from the tracked file themselves.
 
 3. **Regenerate the host scrape-targets file** so an external Prometheus with a `file_sd_configs` pointer picks the daemon up with zero manual edits:
 
@@ -992,7 +960,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/lazycortex-core" metrics-scrape-file
 
 ### Outcome
 
-`metrics-enabled port=<port> label=<label> scrape-targets=<count>` / `metrics-declined` / `skipped-not-run-here`.
+`metrics-enabled port=<port> label=<label> scrape-targets=<count>` / `metrics-declined` / `skipped-not-run-here`. Append ` tracked-port-leaked=<port>` to the enabled outcome when the persist snippet printed that token.
 
 ## Step 14: Report
 
@@ -1012,7 +980,7 @@ Report to the user:
 - Expert registration outcome (Step 11)
 - lazycortex-core agent-model tier seed outcome (Step 11 §1b, via `lazy-core.agent-models-seed`)
 - Expert-pump routine registration outcome (Step 12)
-- External working-directory outcome (Step 12.5), including every `skipped (was …)` line, the ignore-coverage outcome with each appended `.gitignore` line (or, on `ignores-declined`, the WARN naming every path git can still see), the `run_here` pin decision, and any `inbox-conflict` refusal
+- External working-directory outcome (Step 12.5), including every `skipped (was …)` line, the ignore-coverage outcome with each appended `.gitignore` line (or, on `ignores-declined`, the WARN naming every path git can still see), and any `inbox-conflict` refusal
 - Daemon supervisor install outcome (Step 13)
 - Sandbox/permissions merge outcome (Step 13.5)
 - Metrics provisioning outcome (Step 13.6)

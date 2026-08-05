@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Control the full lifecycle of a document under review — opt in, track state, pause, and seal the result in one auditable commit chain.
-last_regen: 2026-06-10
+last_regen: 2026-08-05
 diagram_spec:
   anchor: "Document lifecycle"
   request: "State diagram of a document moving through the review loop: not-active → active (via start or submit) → stopped (via stop, resumable) → active again (via start) → finalized (via finalize); status is a read-only probe at any active state"
@@ -12,6 +12,7 @@ source_skills:
   - lazy-review.status
   - lazy-review.stop
   - lazy-review.finalize
+  - lazy-review.configure
 ---
 # Review cycle
 
@@ -43,6 +44,7 @@ When every section is approved — either by the daemon completing its final rou
 - **Resume from a paused state** — after `/lazy-review.stop`, re-running `/lazy-review.start <file>` picks up from the preserved `review_round` and `approved` values. No manual frontmatter editing needed.
 - **Hand-crank finalization** — normally the daemon fires finalization automatically once the final writer confirms. Run `/lazy-review.finalize <file>` directly if you want to close out the document yourself rather than waiting for the daemon tick.
 - **Change edit-marker style** — finalization reads `lazycortex-review.edit_marker_style` from `lazy.settings.json`. To change the style for future reviews, run `/lazy-review.configure`.
+- **Change section layout or writer assignments** — a document's `validation` / `terminal` sections and their expert owners come from its class definition, not from the per-document verbs above. Run `/lazy-review.configure` to add sections or reassign writers; the wizard is read-first, so re-running it on an already-configured class is quiet unless you're adding something new.
 
 ## Document lifecycle
 

@@ -118,7 +118,7 @@ def resolve_product_by_path(vault: Path, rel_path: str) -> tuple[str | None, dic
   """
   vroot = _vault_root_value(vault)
   parts = list(Path(rel_path).parts)
-  # guard: caller passed a repo-root-relative path including the vault-root prefix
+  # strip the vault-root prefix when the caller passed a repo-root-relative path
   if vroot != "." and parts and parts[0] == vroot:
     parts = parts[1:]
   doc_segments = tuple(parts)
@@ -155,6 +155,7 @@ def main(argv: list[str]) -> int:
   parser = argparse.ArgumentParser(prog = "lazycortex-specs resolve-product")
   sub = parser.add_subparsers(dest = "mode", required = True)
 
+  # `by-key` — resolve a product from its registry key
   # waiver: argparse CLI signature -- by-key subcommand
   p_key = sub.add_parser(_MODE_BY_KEY)
   # waiver: argparse CLI signature -- positional argument name
@@ -166,6 +167,7 @@ def main(argv: list[str]) -> int:
       help = "vault root holding .claude/lazy.settings.json (default: cwd)",
   )
 
+  # `by-path` — resolve a product from a path inside its spec tree
   # waiver: argparse CLI signature -- by-path subcommand
   p_path = sub.add_parser("by-path")
   # waiver: argparse CLI signature -- positional argument name
@@ -177,9 +179,11 @@ def main(argv: list[str]) -> int:
       help = "vault root holding .claude/lazy.settings.json (default: cwd)",
   )
 
+  # the vault root anchors every settings lookup below
   args = parser.parse_args(argv)
   vault: Path = (args.cwd or Path.cwd()).resolve()
 
+  # by-key mode answers straight from the products registry
   if args.mode == _MODE_BY_KEY:
     record = resolve_product_by_key(vault, args.key)
     # guard: unknown key resolves to null, still a clean exit
@@ -189,6 +193,7 @@ def main(argv: list[str]) -> int:
     print(json.dumps({ "key": args.key, "record": record }))
     return 0
 
+  # by-path mode walks the products registry for the longest owning spec_path
   key, record = resolve_product_by_path(vault, args.relpath)
   # guard: no owning product is a non-error null result
   if key is None:

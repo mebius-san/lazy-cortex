@@ -4,10 +4,8 @@ Ownership guard for an inbox shared by more than one checkout.
 An inbox reached through a symlink is one physical directory, so a repository cloned twice —
 an interactive copy and a runtime copy — can end up with two daemons scanning it. Each daemon
 keeps its own dedup keys and its own error ledger, so both dispatch a job for the same file
-and the document is processed twice. This module detects the two ways that happens: two
-supervisor units on this host resolving to one inbox, and a checkout that gates the daemon on
-a bare boolean while declaring externally-sourced directories, which cannot distinguish the
-machines a synced overlay reaches.
+and the document is processed twice. This module detects that by evidence: two supervisor
+units registered on this host resolving to one physical inbox.
 """
 from __future__ import annotations
 # waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -16,7 +14,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from constants import (
-  DaemonKey,
   InboxGuardKey,
   InboxGuardKind,
   RoutineKey,
@@ -73,8 +70,8 @@ def check_inbox_collision(repo: Path | str, platform: str | None = None) -> list
   Report every other checkout on this host that drives the same physical inbox.
 
   Notes:
-    - Only daemons installed on this host are visible. A checkout synced to a second machine
-      is the other case, covered by `check_run_here_specificity`.
+    - Only daemons installed on this host are visible. A checkout reachable from a second
+      machine raises the same finding there, once that machine installs its own supervisor.
 
   Args:
     repo: Repository root whose inbox routines are being defended.
@@ -113,39 +110,3 @@ def check_inbox_collision(repo: Path | str, platform: str | None = None) -> list
           ),
         })
   return findings
-
-
-def check_run_here_specificity(repo: Path | str) -> list[dict]:
-  """
-  Report a daemon gate that cannot distinguish the machines a synced overlay reaches.
-
-  A checkout that declares externally-sourced directories is, by construction, reachable from
-  a file-synced path, so the gitignored overlay carrying the gate travels to every machine
-  holding that path and a bare boolean reads as answered on all of them.
-
-  Args:
-    repo: Repository root whose gate and declaration are read.
-
-  Returns:
-    One finding dict when the gate is a bare true while external dirs are declared; empty
-    otherwise.
-  """
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from external_dirs import declared_paths
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from lazy_settings import load_local_only_section
-  repo = Path(repo)
-  # guard: no external declaration — the gate's shape is not this guard's business
-  if not declared_paths(repo):
-    return []
-  gate = load_local_only_section(repo / SettingsFile.REL, SettingsKey.DAEMON).get(DaemonKey.RUN_HERE)
-  # guard: only a bare true is under-specified; a host list, false, and absence are all definite
-  if gate is not True:
-    return []
-  return [{
-    InboxGuardKey.KIND: InboxGuardKind.RUN_HERE_AMBIGUOUS,
-    InboxGuardKey.DETAIL: (
-      "daemon.run_here is a bare true while external dirs are declared — pin it to a host "
-      "list so a synced overlay cannot start a second daemon on another machine"
-    ),
-  }]

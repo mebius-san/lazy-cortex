@@ -44,6 +44,14 @@ class State(enum.Enum):
 
   Callers read this to determine what the current document banner communicates to the operator
   and drive banner-repaint decisions.
+
+  Attributes:
+    IN_PROCESS: Agents are working; the operator waits for the chain to hand back control.
+    ACTION_NEEDED: An open question or concern blocks progress until the operator responds.
+    READY: The document is ready for the operator to approve.
+    CONCERNS_DECISION: The operator must choose between continuing the review cycle or
+      approving with outstanding concerns.
+    FINALIZING: The document has been approved and is being finalized.
   """
 
   IN_PROCESS = "in-process"
@@ -59,6 +67,11 @@ class DispatchState(enum.Enum):
 
   Callers use this to determine whether agents are still working or whether the chain has
   returned control to the operator.
+
+  Attributes:
+    OPERATOR_COMMITTED: The operator just committed and the chain has not yet picked up work.
+    CHAIN_IN_PROGRESS: An agent is currently working on the document.
+    CHAIN_EXHAUSTED: The chain has drained and control has returned to the operator.
   """
 
   OPERATOR_COMMITTED = "operator-committed"
@@ -145,6 +158,12 @@ def _find_callout_block(body: str, header_match: re.Match[str]) -> str:
 
 
 def _any_unanswered_question(body: str) -> bool:
+  """
+  Report whether `body` contains an open question callout with no operator tick.
+
+  Returns:
+    True if at least one unanswered question callout is present, False otherwise.
+  """
     # Strip code-fence regions — callout-shaped lines inside ```...```
     # fences are body content, never gating callouts (see parser.strip_code_fences).
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
@@ -158,6 +177,12 @@ def _any_unanswered_question(body: str) -> bool:
 
 
 def _any_concern(body: str) -> bool:
+  """
+  Report whether `body` contains an open concern callout.
+
+  Returns:
+    True if at least one concern callout is present, False otherwise.
+  """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import parser as _parser
   scan_body = _parser.strip_code_fences(body)

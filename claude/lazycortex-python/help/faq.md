@@ -1,21 +1,15 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, tests, and the checker stack.
-last_regen: 2026-08-03
+last_regen: 2026-08-05
 no_diagram: true
 source_skills:
   - lazy-python.install
   - lazy-python.audit
   - lazy-python.check-style
-  - chk
-  - tst
-  - review.py
   - lazy-python.docstring-writer
   - lazy-python.test-writer
   - lazy-python.code-reviewer
-  - lazy-python.style
-  - lazy-python.docstrings
-  - lazy-python.tests
 ---
 # Frequently asked questions
 
@@ -80,6 +74,16 @@ That is the guideline-review phase, the seventh and final step of `chk-py all`. 
 ## `chk-py all` is failing with `review: PENDING` even though every other check is clean. How do I clear it?
 
 A pending review now fails the gate instead of passing silently past it: `review.py` exits a distinct `PENDING` code (2) whenever the scope has changed since its last review and nobody has decided it yet. Dispatch the `lazy-python.code-reviewer` agent against the manifest path printed just above the `PENDING` line, then run `chk-py review --render <findings.json>` — that render step is what actually clears the gate, and it exits non-zero itself if the agent found a `FAIL`. If you genuinely cannot dispatch an agent in that context — a nested writer agent, a scripted sweep — set `CHK_REVIEW=skip` for that single invocation; it exits 0 but records no decision, so the same scope is still pending the next time anyone runs `chk-py all` against it. For CI or automation where the `claude` CLI is installed but no one is present to dispatch manually, set `CHK_REVIEW=headless` instead — `review.py` dispatches the reviewer agent itself through the CLI and renders its findings in the same run. Neither flag is a substitute for an actual review decision; a scope that has not changed since its last real review reuses those findings rather than re-manifesting.
+
+---
+
+## `chk-py` is flagging blocks for missing a purpose comment. What is `check_block_comments`?
+
+`pcf` now proves presence of a purpose comment mechanically, on top of the review phase judging whether it says anything. `check_block_comments` (on by default) flags any block inside a function body whose first line after the blank separator is not a comment — including a lone trailing `return x`, which counts as a block on its own. A `# waiver:`, `# noqa`, `# type:`, `# pylint:`, `# fmt:`, or `# noinspection` line does not count as a purpose comment; those are directives. Clause headers, split-call continuations, the docstring, nested-function headers, and the body's own opening block are left alone — the check only fires on blocks after a blank-line separator.
+
+Getting `pcf` green does not mean the review pass will be clean too: presence is now structural and belongs to `pcf`, but meaningfulness still belongs to `chk-py review` and the `lazy-python.code-reviewer` agent, which flags a comment that just restates the code below it (`# return the result` above `return result`) or names the syntax rather than the intent.
+
+To disable the check, set `[tool.pcf] check_block_comments = false` in `pyproject.toml` — but silently switching off a checker without the user's explicit approval for that exact change is a serious violation per the checking guidelines. Don't turn it off on your own judgement; propose it and ask.
 
 ---
 

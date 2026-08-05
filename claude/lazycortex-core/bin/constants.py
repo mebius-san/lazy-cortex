@@ -322,7 +322,8 @@ class MemoryFrontmatterKey:
 # ----------------------------------------------------------------------------------------
 class IncidentKey:
   """
-  Keys an error-ledger caller fills in the event dict it records.
+  Keys on an error-ledger event — those a caller fills in when recording one, plus those the
+  ledger derives when listing incidents back.
 
   Attributes:
     INCIDENT: The stable incident-folding key.
@@ -331,6 +332,12 @@ class IncidentKey:
     SEVERITY: The event severity.
     EXPERT: The owning expert name, when the incident is job-scoped.
     ROUTINE: The owning routine name, when the incident is routine-scoped.
+    PHASE: The lifecycle phase the event records — an incident opening or a later triage.
+    ACTOR: The component that recorded the event.
+    JOB_ID: The owning job identifier, when the incident is job-scoped.
+    DETAIL: The one-line human-readable description.
+    REFS: The map of artifact paths an operator needs to inspect the incident.
+    STATE: The folded incident state carried on a listing entry.
   """
 
   INCIDENT = "incident"
@@ -460,7 +467,7 @@ class IncidentPhase:
 # ----------------------------------------------------------------------------------------
 class IncidentKind:
   """
-  Closed-set `kind` value tokens core-internal callers record on incidents.
+  Closed-set `kind` value tokens recorded on incidents.
 
   Attributes:
     JOB_DEAD: A job whose claimant process died before producing output.
@@ -470,6 +477,8 @@ class IncidentKind:
     DAEMON_ERROR: An unexpected daemon-loop exception.
     WORKTREE_TASK_ERROR: A worktree-task lifecycle failure.
     UNPINNED_MODEL: A dispatch whose model resolved to nothing and fell back to the CLI default.
+    PLUGIN_ERROR: An in-band failure a sibling plugin reported through the error-record CLI,
+      for a condition neither a job nor a routine result can express.
   """
 
   JOB_DEAD = "job_dead"
@@ -479,6 +488,7 @@ class IncidentKind:
   DAEMON_ERROR = "daemon_error"
   WORKTREE_TASK_ERROR = "worktree_task_error"
   UNPINNED_MODEL = "unpinned_model"
+  PLUGIN_ERROR = "plugin_error"
 
 
 # ----------------------------------------------------------------------------------------
@@ -616,6 +626,52 @@ class RuntimeFile:
 
 
 # ----------------------------------------------------------------------------------------
+class SandboxKey:
+  """
+  Field names inside the daemon-owned sandbox settings file.
+
+  Attributes:
+    SANDBOX: The top-level block that confines an expert spawn.
+    ENABLED: The switch that turns the confinement on.
+    FILESYSTEM: The block holding the path allowlists.
+    ALLOW_READ: The allowlist of paths a confined spawn may read.
+    ALLOW_WRITE: The allowlist of paths a confined spawn may write.
+  """
+
+  SANDBOX = "sandbox"
+  ENABLED = "enabled"
+  FILESYSTEM = "filesystem"
+  ALLOW_READ = "allowRead"
+  ALLOW_WRITE = "allowWrite"
+
+
+# ----------------------------------------------------------------------------------------
+class SandboxSyncKey:
+  """
+  Field names in the result of a sandbox-allowlist sync or audit.
+
+  Attributes:
+    PATH: Absolute location of the sandbox settings file the result describes.
+    PRESENT: Whether that file existed before the call.
+    ENABLED: The confinement switch as recorded in the file, or null when unrecorded.
+    ADDED_READ: Read-allowlist entries the sync appended.
+    ADDED_WRITE: Write-allowlist entries the sync appended.
+    MISSING_READ: Resolved read targets no recorded entry covers.
+    MISSING_WRITE: Resolved write targets no recorded entry covers.
+    CHANGED: Whether the sync rewrote the file.
+  """
+
+  PATH = "path"
+  PRESENT = "present"
+  ENABLED = "enabled"
+  ADDED_READ = "added_read"
+  ADDED_WRITE = "added_write"
+  MISSING_READ = "missing_read"
+  MISSING_WRITE = "missing_write"
+  CHANGED = "changed"
+
+
+# ----------------------------------------------------------------------------------------
 class JobArtifact:
   """
   Per-attempt forensic filenames written inside a job bundle directory.
@@ -625,7 +681,7 @@ class JobArtifact:
     DIAGNOSIS_JSON: The doctor's diagnosis written when a job is permanently failed.
     ATTEMPTS: The cumulative attempt-counter file.
     TRANSCRIPT: The captured stream-json transcript of the expert spawn.
-    ERROR_JSON: The legacy per-attempt error payload cleared on retry.
+    ERROR_JSON: The per-attempt rejection payload fed back into the next attempt's prompt.
   """
 
   DEAD_JSON = "dead.json"
@@ -704,9 +760,12 @@ class JobOutcome:
 
   Attributes:
     ERROR: The outcome value marking a job that failed.
+    DEFERRED: The outcome value marking work the expert deliberately left undone with its
+      input untouched, so a consumer must neither drain the input nor treat it as failed.
   """
 
   ERROR = "error"
+  DEFERRED = "deferred"
 
 
 # ----------------------------------------------------------------------------------------
@@ -717,12 +776,14 @@ class JobLogOutcome:
   Attributes:
     DONE: The attempt finished the job without an error outcome.
     FAILED: The attempt finished the job with an error outcome.
+    DEFERRED: The attempt deliberately left the work undone with its input untouched.
     DEAD: The job was marked dead by the dead-job detector.
     ERROR: The attempt failed transiently or logically; the job stays queued for retry.
   """
 
   DONE = "done"
   FAILED = "failed"
+  DEFERRED = "deferred"
   DEAD = "dead"
   ERROR = "error"
 
@@ -741,6 +802,8 @@ class JobCollectKey:
     TARGET_REPO: The label of the foreign repo for a remote tracker entry.
     DISPATCHED_AT: The dispatch timestamp carried on a remote tracker entry.
     DEDUP_KEY: The dedup key carried on a reconcilable finished-job entry.
+    CATEGORY: The error category of a failed finished-job entry, absent on a success.
+    AGE_SEC: Seconds elapsed since the entry's bundle finished.
   """
 
   STATUS = "status"
@@ -751,6 +814,8 @@ class JobCollectKey:
   TARGET_REPO = "target_repo"
   DISPATCHED_AT = "dispatched_at"
   DEDUP_KEY = "dedup_key"
+  CATEGORY = "category"
+  AGE_SEC = "age_sec"
 
 
 # ----------------------------------------------------------------------------------------
@@ -765,6 +830,7 @@ class JobStatus:
     ACTIVE: The bundle is READY and claimed (PID present).
     DONE: The bundle finished without an error outcome.
     FAILED: The bundle finished with an error outcome.
+    DEFERRED: The bundle finished with the reserved deferred outcome — work postponed, input untouched.
     DEAD: The bundle carries a DEAD marker.
     CANCELLED: The bundle carries a CANCELLED marker — cancelled by the operator.
     ALREADY_QUEUED: Dispatch result token — a live bundle already owns the dedup key.
@@ -776,6 +842,7 @@ class JobStatus:
   ACTIVE = "active"
   DONE = "done"
   FAILED = "failed"
+  DEFERRED = "deferred"
   DEAD = "dead"
   CANCELLED = "cancelled"
   ALREADY_QUEUED = "already-queued"
@@ -872,7 +939,7 @@ class MetricStateKey:
   Keys in the metrics module's process-local registry dict.
 
   Attributes:
-    INITIALIZED: Whether `init_metrics` has run.
+    INITIALIZED: Whether `init` has run.
     REPO: The repo label captured at init.
     VERSION: The plugin version captured at init.
     DAEMON_NAME: The daemon identifier captured at init.
@@ -891,8 +958,10 @@ class MetricStateKey:
     DIRTY_TREE: The dirty-working-tree silent-skip gauge instrument.
     EXPERT_JOBS: The expert-job-attempt counter instrument.
     EXPERT_JOB_DURATION: The expert-job-attempt duration histogram instrument.
+    INCIDENTS: The error-ledger incident counter instrument.
     TOKEN_OFFSET: The byte offset into the token log read so far.
     JOBS_OFFSET: The byte offset into the job log read so far.
+    INCIDENTS_OFFSET: The byte offset into the error-ledger journal read so far.
     SERVER: The WSGI server object.
     SERVER_THREAD: The server's background thread.
   """
@@ -916,8 +985,10 @@ class MetricStateKey:
   DIRTY_TREE = "dirty_tree"
   EXPERT_JOBS = "expert_jobs"
   EXPERT_JOB_DURATION = "expert_job_duration"
+  INCIDENTS = "incidents"
   TOKEN_OFFSET = "token_offset"
   JOBS_OFFSET = "jobs_offset"
+  INCIDENTS_OFFSET = "incidents_offset"
   SERVER = "server"
   SERVER_THREAD = "server_thread"
 
@@ -938,7 +1009,8 @@ class MetricLabel:
     EXPERT: The expert-name label.
     OUTCOME: The job-attempt outcome label.
     MODEL: The model-tier label.
-    KIND: The token-kind label.
+    KIND: The token-kind label, reused for the incident-kind label.
+    CAUSE: The incident-cause label.
     VERSION: The plugin-version label.
     DAEMON_NAME: The daemon-identifier label.
   """
@@ -951,6 +1023,7 @@ class MetricLabel:
   OUTCOME = "outcome"
   MODEL = "model"
   KIND = "kind"
+  CAUSE = "cause"
   VERSION = "version"
   DAEMON_NAME = "daemon_name"
 
@@ -1093,11 +1166,9 @@ class InboxGuardKind:
 
   Attributes:
     COLLISION: Two checkouts on this host drive one physical inbox.
-    RUN_HERE_AMBIGUOUS: A checkout declaring external dirs gates the daemon on a bare boolean.
   """
 
   COLLISION = "inbox_collision"
-  RUN_HERE_AMBIGUOUS = "run_here_ambiguous"
 
 
 # ----------------------------------------------------------------------------------------

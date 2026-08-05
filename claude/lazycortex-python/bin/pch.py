@@ -68,9 +68,11 @@ def load_config() -> dict:
   if not os.path.exists(config_path):
     return {}
 
+  # tomllib needs a binary handle; the whole file is parsed to reach one nested table
   with open(config_path, 'rb') as fle:
     data = tomllib.load(fle)
 
+  # an absent [tool.pch] table means "defaults" — an empty mapping is the neutral config
   return data.get('tool', {}).get('pch', {})
 
 
@@ -96,6 +98,7 @@ def find_inspect_sh() -> str | None:
     if os.path.isfile(candidate):
       return candidate
 
+  # neither the env var nor any known install path resolved — the caller reports the miss
   return None
 
 
@@ -122,6 +125,7 @@ def find_system_path() -> str | None:
     if os.path.isdir(path):
       return path
 
+  # no PyCharm entry resolved to a directory — the sandbox runs without cached stubs
   return None
 
 
@@ -148,6 +152,7 @@ def find_config_path() -> str | None:
     if os.path.isdir(path):
       return path
 
+  # no PyCharm entry resolved to a directory — the sandbox runs without SDK settings
   return None
 
 
@@ -173,6 +178,7 @@ def prepare_sandbox_config(sandbox_dir: str, real_config: str | None) -> str:
   if real_config is None or not os.path.isdir(real_config):
     return config_dir
 
+  # mirror the real config so the inspection inherits SDK and interpreter settings
   for entry in os.listdir(real_config):
     # guard: skip lock file
     if entry in CONFIG_SKIP:
@@ -181,6 +187,7 @@ def prepare_sandbox_config(sandbox_dir: str, real_config: str | None) -> str:
     dst = os.path.join(config_dir, entry)
     os.symlink(src, dst)
 
+  # the VM options file needs this path to redirect idea.config.path
   return config_dir
 
 
@@ -206,6 +213,7 @@ def prepare_sandbox_system(sandbox_dir: str, real_system: str | None) -> str:
   if real_system is None or not os.path.isdir(real_system):
     return system_dir
 
+  # mirror the real system dir so the inspection inherits Python stubs and SDK data
   for entry in os.listdir(real_system):
     # guard: skip exclusively-locked entries
     if entry in SYSTEM_SKIP:
@@ -214,6 +222,7 @@ def prepare_sandbox_system(sandbox_dir: str, real_system: str | None) -> str:
     dst = os.path.join(system_dir, entry)
     os.symlink(src, dst)
 
+  # the VM options file needs this path to redirect idea.system.path
   return system_dir
 
 
@@ -258,9 +267,11 @@ def run_inspection(
     fle.write(f'-Didea.config.path={sandbox_dir}/config\n')
     fle.write(f'-Didea.log.path={sandbox_dir}/log\n')
 
+  # inspect.sh reads the sandbox redirection only through this environment variable
   env = os.environ.copy()
   env['PYCHARM_VM_OPTIONS'] = vm_opts_path
 
+  # run to completion with output captured — it is surfaced selectively below, never streamed
   result = subprocess.run(cmd, capture_output = True, text = True, check = False, env = env)
 
   # check whether the output directory has any XML results
@@ -277,6 +288,7 @@ def run_inspection(
       print(result.stderr.rstrip(), file = sys.stderr)
     return result.returncode
 
+  # results exist, so report success — the caller reads the findings, not the exit code
   return 0
 
 
@@ -297,11 +309,13 @@ def parse_results(output_dir: str) -> list[tuple[str, int, str, str, str]]:
   if not os.path.isdir(output_dir):
     return problems
 
+  # one XML file per inspection; sorted so findings come out in a stable order
   for filename in sorted(os.listdir(output_dir)):
     # guard: skip non-XML files
     if not filename.endswith('.xml'):
       continue
 
+    # a report that does not parse is reported and skipped, never fatal
     filepath = os.path.join(output_dir, filename)
     try:
       tree = ET.parse(filepath)
@@ -309,6 +323,7 @@ def parse_results(output_dir: str) -> list[tuple[str, int, str, str, str]]:
       print(f'pch: warning: failed to parse {filename}: {exc}', file = sys.stderr)
       continue
 
+    # each report holds one `problem` element per finding
     root = tree.getroot()
     for problem in root.iter('problem'):
       file_elem = problem.find('file')
@@ -328,18 +343,23 @@ def parse_results(output_dir: str) -> list[tuple[str, int, str, str, str]]:
       if raw_path.startswith(PROJECT_DIR_PREFIX):
         raw_path = raw_path[len(PROJECT_DIR_PREFIX):]
 
+      # a finding without a line number still belongs in the report, anchored at 0
       line = int(line_elem.text) if line_elem is not None and line_elem.text else 0
 
+      # severity and inspection name come from the optional problem_class element
       severity = ''
       inspection_name = ''
       if problem_class_elem is not None:
         severity = problem_class_elem.get('severity', '').lower()
         inspection_name = problem_class_elem.text or ''
 
+      # the description carries the message the user reads
       description = description_elem.text
 
+      # one tuple per finding, in the shape the filtering pass consumes
       problems.append((raw_path, line, severity, inspection_name, description))
 
+  # every XML file merged into one flat list, ready for the filtering pass
   return problems
 
 
@@ -387,8 +407,10 @@ def filter_results(
     if inspection_name in ignore_inspections:
       continue
 
+    # the finding cleared every filter, so it survives into the report
     filtered.append(item)
 
+  # only the findings that survived every filter are worth printing
   return filtered
 
 
@@ -457,6 +479,7 @@ def main() -> None:
     config_excludes = [ e for e in config_excludes
                         if e not in target_parts ]
 
+  # the hardcoded excludes always apply; config and CLI only widen the list
   exclude_substrings = HARDCODED_EXCLUDES + config_excludes
   if args.exclude:
     exclude_substrings.extend(args.exclude)
@@ -478,6 +501,7 @@ def main() -> None:
   try:
     print(f'pch: running PyCharm inspections on \'{module_path}\' (this may take a while)...')
 
+    # the inspector writes its XML reports into the output dir as a side effect
     ret = run_inspection(inspect_sh, project_dir, profile_path, output_dir, module_path, sandbox_dir)
     # guard: non-zero here means inspect.sh failed without producing results
     if ret != 0:

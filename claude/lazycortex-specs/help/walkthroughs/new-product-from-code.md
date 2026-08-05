@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to an existing codebase, generate its design and tech docs from source, then scaffold the first feature.
-last_regen: 2026-07-26
+last_regen: 2026-08-05
 diagram_spec:
   anchor: "## How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs spec.product-config to register the product and write settings, then runs spec.create-from-code to scan source and produce design + tech docs, then runs spec.create-feature to scaffold the first feature asset; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -10,6 +10,8 @@ source_skills:
   - spec.product-config
   - spec.create-from-code
   - spec.create-feature
+  - spec.sync-with-code
+  - spec.doctor
 ---
 # How do I get specs for a codebase that already exists?
 
@@ -104,10 +106,10 @@ The skill asks you a small set of clarifying questions about the feature's scope
 The product is registered and its initial spec is live. From here:
 
 - **Add more features** — run `/spec.create-feature <compound-key> <slug>` for each new feature you want to document. You can scaffold any of the candidates Agent D surfaced, or invent a new slug for a feature the scan did not detect.
-- **Keep docs in sync with code** — when source changes land, run `/spec.sync-with-code <compound-key>` to reconcile the tech doc, surface behavior changes for the design doc, and update branch pins if you are working on a non-default branch.
+- **Keep docs in sync with code** — when source changes land, run `/spec.sync-with-code <compound-key>` to reconcile the tech doc, surface behavior changes for the design doc, update branch pins if you are working on a non-default branch, and propose gate/stage corrections (e.g. flipping `spec_develop_done`) grounded in what actually shipped — always with your confirmation before anything is written.
 - **Drive assets through their gates** — use `/spec.flip-gate` to advance a feature's readiness gates (`spec_design_done` → `spec_plan_done` → …), or let the `spec.gate-tick` daemon routine advance derived gates automatically on each md-scan tick.
 - **Re-run the doc scan** — if the codebase grows significantly, re-run `/spec.create-from-code <compound-key>` to refresh the design and tech docs. The skill reconciles existing branch pins before overwriting.
-- **Doctor checks** — run `/spec.doctor <compound-key>` at any time to audit the product tree for broken links, missing sections, role violations, and source-link staleness.
+- **Doctor checks** — run `/spec.doctor <compound-key>` at any time to audit the product tree for broken links, missing sections, role violations, and source-link staleness. It is read-only by default and only reports; pass `--apply` to walk through the findings and confirm fixes one at a time.
 
 ## How the skills hand off
 

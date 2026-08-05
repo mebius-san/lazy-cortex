@@ -37,9 +37,11 @@ def load_config() -> dict:
   if not os.path.exists(config_path):
     return {}
 
+  # the whole manifest is parsed because tomllib offers no partial read
   with open(config_path, 'rb') as fle:
     data = tomllib.load(fle)
 
+  # only this tool's own section is of interest; an absent section means default behaviour
   return data.get('tool', {}).get('toi', {})
 
 
@@ -232,7 +234,7 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
 
     # handle default values for positional arguments
     # these are runtime expressions and should be visited
-    # guard: only process if there are defaults (avoid -0 slice returning all args)
+    # an empty defaults list would make the `-0` slice select every argument, so pair them only when present
     if node.args.defaults:
       positional_args_with_defaults = zip(
           node.args.args[-len(node.args.defaults):],  # only the args with defaults
@@ -392,6 +394,7 @@ def _line_matches(source_lines: list[str], lineno: int, pattern: re.Pattern[str]
       return True
     prev -= 1
 
+  # neither the line itself nor the comment block above it carries the pattern
   return False
 
 
@@ -422,6 +425,7 @@ def _waiver_status(source_lines: list[str], header_line: int, name_line: int) ->
       or _line_matches(source_lines, header_line, WAIVER_MARKER_RE):
     return 'invalid'
 
+  # no waiver of any kind covers this import, so the finding stands
   return 'active'
 
 
@@ -474,6 +478,7 @@ def analyze_file(
     relpath = os.path.relpath(path, start = os.getcwd())
     warning = f'{relpath}:1: warning: uses TYPE_CHECKING but lacks `from __future__ import annotations`'
 
+  # the caller aggregates all four channels across the tree, so none of them may be collapsed here
   return suggestions, warning, waived, invalid
 
 
@@ -522,6 +527,7 @@ def walk_dir(
         except SyntaxError as e:
           print(f'[!] Syntax error in {path}: {e}', file = sys.stderr)
 
+  # the processed count is reported even on a clean run, so it travels with the findings
   return all_suggestions, warnings, files_processed, total_waived, invalid_map
 
 
@@ -558,6 +564,7 @@ def main() -> None:
     config_excludes = [ e for e in config_excludes
                         if e not in target_parts ]
 
+  # CLI exclusions extend the config list, they never replace it
   exclude_substrings = config_excludes
   if args.exclude:
     exclude_substrings.extend(args.exclude)

@@ -66,6 +66,12 @@ class Markers:
   Specs writers own the bytes between the markers; everything outside
   (including the H1 container heading, the protected owner tag, and any
   H2 sub-section headings) is preserved byte-for-byte.
+
+  Attributes:
+    SOURCES_HEADING: Heading text for the `# Sources` container section.
+    SOURCES_PROTECTED_TAG: Owner tag marking the `# Sources` section as a protected cross-plugin region.
+    REQUESTS_HEADING: Heading text for the `## Requests` sub-section.
+    REQUESTS_MARKER_ID: Marker identifier for the requests sub-section's managed region.
   """
 
   # ──────────────────────────────────────────────────────────────────────────
@@ -151,12 +157,13 @@ class Markers:
     if start not in text or end not in text:
       return text
 
+    # locate the managed region's boundaries before splicing new content into it
     start_idx = text.index(start)
     end_idx = text.index(end, start_idx)
 
     # Advance past the start marker and its trailing newline
     after_start = start_idx + len(start)
-    # guard: if there's a newline immediately after the start marker, consume it
+    # consume the newline right after the start marker so the marker keeps its own line
     if after_start < len(text) and text[after_start] == "\n":
       after_start += 1
 
@@ -167,6 +174,7 @@ class Markers:
     else:
       inner_block = ""
 
+    # splice the new inner block in, keeping both marker lines intact
     return text[:after_start] + inner_block + text[end_idx:]
 
   # ──────────────────────────────────────────────────────────────────────────
@@ -193,12 +201,14 @@ class Markers:
     if start not in text or end not in text:
       return None
 
+    # step past the start marker to where the inner content actually begins
     start_idx = text.index(start)
     after_start = start_idx + len(start)
-    # guard: consume the newline immediately after the start marker
+    # consume the newline right after the start marker so it stays out of the inner content
     if after_start < len(text) and text[after_start] == "\n":
       after_start += 1
 
+    # the inner content runs up to the end marker, normalised the same way writes are
     end_idx = text.index(end, start_idx)
     return text[after_start:end_idx].strip("\n")
 
@@ -289,6 +299,7 @@ class Markers:
     else:
       inner_block = ""
 
+    # assemble the H2 sub-section with the marker pair wrapping the bullets
     subsection = (
       f"{self.REQUESTS_HEADING}\n"
       f"{start}\n"

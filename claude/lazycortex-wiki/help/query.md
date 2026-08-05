@@ -1,12 +1,13 @@
 ---
 chapter_type: block
 summary: Associative Q&A over the wiki graph — /wiki.query dispatches seekers to find entry points then a gatherer to traverse glossed See-also links and synthesise the answer.
-last_regen: 2026-07-29
+last_regen: 2026-08-05
 diagram_spec:
   anchor: "How the query pipeline works"
   request: "Sequence diagram showing /wiki.query dispatching one seeker per scope in parallel to read topics.md and return entry points, then dispatching a single gatherer to traverse See-also links depth-first and return a synthesised answer block back to the skill, which presents the answer and entry-point seed to the user."
 source_skills:
   - lazy-wiki.query
+  - lazy-wiki.relink
 ---
 # Wiki query
 
@@ -38,7 +39,7 @@ If no scope has a topic index on disk, or if the seekers find no relevant entry 
 ## Common adjustments
 
 - **Multiple scopes.** If your project has several wiki scopes (e.g. one for source, one for docs), seekers run in parallel across all of them. Run `/lazy-wiki.configure` to add, edit, or remove scopes and their `topics_index` paths.
-- **Index out of date.** The seeker draws only from `topics.md`. If a recently added node hasn't been indexed yet, it won't appear as an entry point. Run `/lazy-wiki.relink` to bring the index up to date, or wait for the next scheduled relink routine.
+- **Index out of date.** The seeker draws only from `topics.md`. If a recently added node hasn't been indexed yet, it won't appear as an entry point. Run `/lazy-wiki.relink` to bring the index up to date, or wait for the next scheduled relink routine. `/lazy-wiki.relink` is the daemon-free way to do this in-session: it classifies and links every changed node, rebuilds `topics.md` once, and commits the result under your identity — useful when you don't run the runtime daemon, or want to force a refresh right before a query.
 - **Cross-repo links.** If your wiki scopes span multiple repositories, the gatherer resolves `@<repo-key>/…` links via the `repos` registry in your wiki settings. Add or update repo entries via `/lazy-wiki.configure`.
 
 ## How the query pipeline works

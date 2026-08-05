@@ -171,6 +171,7 @@ def _parse_topics_md(content: str) -> set[str]:
   """
   tags: set[str] = set()
 
+  # the index declares its tags only through headings — the link lines carry none
   for raw_line in content.splitlines():
     line = raw_line.strip()
 
@@ -180,6 +181,7 @@ def _parse_topics_md(content: str) -> set[str]:
       if heading:
         tags.add(f"{_WIKI_TAG_PREFIX}{heading}")
 
+  # callers diff this against the live node tags to spot desync
   return tags
 
 
@@ -260,6 +262,7 @@ def _extract_link_target(item: str) -> tuple[str, str]:
     target, _, gloss = stripped.partition(" — ")
     return target.strip(), gloss.strip()
 
+  # neither shape matched — the whole item is the target and there is no gloss
   return stripped, ""
 
 
@@ -380,9 +383,23 @@ class Doctor:
   """
   Integrity audit runner for a single wiki scope.
 
-  Each check method takes the loaded scope nodes and returns a list of
-  findings.  `run_all` collects them and, when `apply=True`, also executes
-  the auto-fix for fixable findings.
+  Runs a fixed suite of checks against the scope's nodes and returns structured
+  findings, each carrying a severity, message, affected node, and whether it can
+  be auto-repaired.
+
+  Attributes:
+    CHECK_ORPHAN_TOPIC: Check identifier for a node tag missing from the topics index.
+    CHECK_BROKEN_SEE_ALSO: Check identifier for a See-also link whose target does not exist.
+    CHECK_PATH_BASE: Check identifier for a See-also link written against a non-canonical base.
+    CHECK_BROKEN_REPO_KEY: Check identifier for a See-also link naming an unregistered repo key.
+    CHECK_INDEX_DESYNC: Check identifier for a topics-index tag no node currently carries.
+    CHECK_MISSING_SUMMARY: Check identifier for a node with no summary.
+    CHECK_STALE_GLOSS: Check identifier for a See-also gloss that no longer matches its
+      target's current summary.
+    CHECK_UNKNOWN_AXIS: Check identifier for a tag whose axis is not declared for the scope.
+    CHECK_DUP_BRANCH: Check identifier for near-duplicate tag values within the same axis.
+    CHECK_BROKEN_WIKI_BLOK: Check identifier for a code node with an unterminated `<wiki>` block.
+    CHECK_SCOPE_OVERLAP: Check identifier for a node claimed by more than one configured scope.
   """
 
   # Check identifiers (canonical names).
@@ -439,12 +456,9 @@ class Doctor:
     tag_axes     = list(self._cfg.get(_CFG_TAG_AXES) or [])
     index_path   = self._resolve_index_path()
 
-    # The generated topics-index file may match the scope globs; it is
-    # deterministic output, not a curated node, so exclude it from every check.
-    node_paths = [
-      p for p in self._resolver.iter_nodes(self._cfg)
-      if p.resolve() != index_path
-    ]
+    # the generated topics-index file is excluded by the resolver itself, so this is
+    # the curated-node set already
+    node_paths = self._resolver.iter_nodes(self._cfg)
 
     # Load every node once; skip unrecognised types.
     nodes: list[tuple[Path, _nodes.MarkdownNode | _nodes.CodeNode]] = []
@@ -455,6 +469,7 @@ class Doctor:
         continue
       nodes.append((p, nd))
 
+    # one flat findings list across every check; the index rebuild is deferred to the end
     all_findings: list[dict] = []
     needs_index_rebuild = False
 
@@ -462,10 +477,12 @@ class Doctor:
     for node_path, node in nodes:
       rel = node_path.relative_to(self._repo).as_posix()
 
+      # classification checks — what the node declares about itself
       all_findings += self._check_orphan_topic(node, rel, index_path)
       all_findings += self._check_missing_summary(node, rel)
       all_findings += self._check_unknown_axis(node, rel, tag_axes)
 
+      # linking checks — what the node points at
       sa_findings = self._check_see_also(node, rel)
       all_findings += sa_findings
 
@@ -509,6 +526,7 @@ class Doctor:
         )
         builder.build()
 
+    # findings carry their own applied/fixable flags — the caller renders from this alone
     return all_findings
 
   # ── check: orphan-topic ───────────────────────────────────────────────────
@@ -536,6 +554,7 @@ class Doctor:
     if index_tags is None:
       return findings
 
+    # a tag the index never learned about means the node was classified after the last build
     wiki_tags = self._node_wiki_tags(node)
     for tag in wiki_tags:
       # guard: tag present in index — no finding
@@ -571,6 +590,7 @@ class Doctor:
     items = _see_also_lines_from_node(node)
     node_dir = (self._repo / rel).parent
 
+    # cross-repo and local links fail in different ways, so each shape is checked apart
     for item in items:
       target, gloss = _extract_link_target(item)
       # guard: empty target — skip
@@ -582,6 +602,7 @@ class Doctor:
         slash = target.find("/", 1)
         key = target[1:slash] if slash != -1 else target[1:]
         repo_root = self._reg.resolve_repo(key)
+        # guard: unregistered key — nothing downstream can resolve the link
         if repo_root is None:
           findings.append(_finding(
             check    = self.CHECK_BROKEN_REPO_KEY,
@@ -637,6 +658,7 @@ class Doctor:
             findings.append(f)
             abs_target = rebased
           else:
+            # no base recovers it — the edge itself is gone, so the line must be dropped
             f = _finding(
               check    = self.CHECK_BROKEN_SEE_ALSO,
               severity = SEV_FAIL,
@@ -656,6 +678,7 @@ class Doctor:
           abs_path  = abs_target,
         )
 
+    # all three See-also checks report through one list so the caller applies them together
     return findings
 
   def _check_stale_gloss_for_target(
@@ -685,6 +708,7 @@ class Doctor:
     if target_node is None:
       return []
 
+    # the gloss is compared against the target's own summary, wherever that type keeps it
     if isinstance(target_node, _nodes.MarkdownNode):
       current_summary = target_node.wiki_summary or ""
     else:
@@ -700,6 +724,7 @@ class Doctor:
     if not gloss:
       return []
 
+    # the gloss survived a summary edit — carry the replacement text for the apply step
     f = _finding(
       check    = self.CHECK_STALE_GLOSS,
       severity = SEV_WARN,
@@ -738,10 +763,12 @@ class Doctor:
     if not index_tags:
       return findings
 
+    # pool what the nodes actually declare right now
     live_tags: set[str] = set()
     for _, node in nodes:
       live_tags.update(self._node_wiki_tags(node))
 
+    # anything the index still lists but no node carries is a leftover from an earlier build
     for tag in sorted(index_tags - live_tags):
       findings.append(_finding(
         check    = self.CHECK_INDEX_DESYNC,
@@ -808,6 +835,7 @@ class Doctor:
     if not tag_axes:
       return findings
 
+    # flag every tag whose axis the scope never declared
     axes_set = set(tag_axes)
     for tag in self._node_wiki_tags(node):
       # tag is `wiki/<axis>/<value...>`
@@ -867,6 +895,8 @@ class Doctor:
       val_list = sorted(values)
       for i, a in enumerate(val_list):
         for b in val_list[i + 1:]:
+          # three signals stand in for "the operator meant the same branch": case-fold
+          # equality, one value being a prefix of the other, and a small edit distance
           a_low, b_low = a.lower(), b.lower()
           is_dup = False
           if a_low == b_low:
@@ -880,6 +910,7 @@ class Doctor:
           elif _levenshtein(a_low, b_low) <= _DUP_EDIT_DIST_THRESHOLD:
             is_dup = True
 
+          # order-independent pair key so the same duplicate is reported only once
           if is_dup:
             pair = (min(a, b), max(a, b))
             # guard: already reported this pair
@@ -923,6 +954,7 @@ class Doctor:
       # guard: unrecognised extension — not a code node
       if style is None:
         continue
+      # guard: unreadable file — report it instead of aborting the whole sweep
       rel = p.relative_to(self._repo).as_posix()
       try:
         text = p.read_text(encoding = _ENCODING)
@@ -936,12 +968,14 @@ class Doctor:
         ))
         continue
 
+      # the tags are matched per line, so the block is inspected line-wise
       lines = text.splitlines(keepends = True)
 
       # Check for unterminated block: open tag present without matching close tag.
       open_found = self._has_wiki_open(lines, style)
       close_found = self._has_wiki_close(lines, style)
 
+      # either tag alone means the block cannot be parsed or rewritten safely
       if open_found and not close_found:
         findings.append(_finding(
           check    = self.CHECK_BROKEN_WIKI_BLOK,
@@ -959,6 +993,7 @@ class Doctor:
           fixable  = False,
         ))
 
+    # report-only: a malformed block is never rewritten, only surfaced
     return findings
 
   def _has_wiki_open(self, lines: list[str], prefix: str) -> bool:
@@ -1019,11 +1054,13 @@ class Doctor:
     if len(all_scopes) < 2:
       return findings
 
+    # replay every scope's own glob logic against each node to see who else claims it
     matcher = _scope.GlobMatcher()
     for p in node_paths:
       rel = p.relative_to(self._repo).as_posix()
       matching_scopes = []
       for sid, scfg in all_scopes.items():
+        # a scope claims the node only when an include glob hits and no exclude does
         paths_globs = scfg.get(_CFG_PATHS) or []
         exclude_globs = scfg.get(_CFG_EXCLUDE) or []
         included = any(matcher.match(rel, pat) for pat in paths_globs)
@@ -1031,6 +1068,7 @@ class Doctor:
         if included and not excluded:
           matching_scopes.append(sid)
 
+      # two claimants means two indexes would curate the same node against each other
       if len(matching_scopes) > 1:
         findings.append(_finding(
           check    = self.CHECK_SCOPE_OVERLAP,

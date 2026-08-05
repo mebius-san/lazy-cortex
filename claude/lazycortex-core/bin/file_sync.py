@@ -8,6 +8,7 @@ copies what is mechanically safe (absent targets; diverged targets under
 --copy-diverged), and emits a machine-readable receipt so the calling skill only
 exercises judgment on genuinely diverged files.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -72,7 +73,7 @@ def sync_one(src: str, dst: str, *, copy_diverged: bool = False, chmod_x: bool =
     state = STATE_REFRESHED
   else:
     state = STATE_DIVERGED
-  # guard: a diverged target awaiting merge judgment must not be mutated, not even its mode bits
+  # mode bits follow content: a diverged target awaiting merge judgment must not be mutated at all
   if chmod_x and state != STATE_DIVERGED:
     _ensure_exec(dst)
   return state
@@ -102,20 +103,28 @@ def sync_dir(
   Returns:
     One result dict per file: `{"file", "src", "dst", "state"}`.
   """
+  # the shipped set is flat and sorted, so the receipt order is stable across runs
   results = []
   names = sorted(
     entry for entry in os.listdir(src_dir)
     if entry not in excludes and os.path.isfile(os.path.join(src_dir, entry))
   )
+
+  # every shipped file is triaged against its same-named target
   for name in names:
     src = os.path.join(src_dir, name)
     dst = os.path.join(dst_dir, name)
     state = sync_one(src, dst, copy_diverged = copy_diverged, chmod_x = chmod_x)
     results.append({ KEY_FILE: name, KEY_SRC: src, KEY_DST: dst, KEY_STATE: state })
+
+  # a name that was just synced can never be an orphan
   synced = { entry[KEY_FILE] for entry in results }
+
   # guard: orphan detection is reporting-only and needs both patterns and an existing target dir
   if not owned_globs or not os.path.isdir(dst_dir):
     return results
+
+  # target-side leftovers inside an owned namespace are reported, never removed
   for name in sorted(os.listdir(dst_dir)):
     # guard: only owned, not-just-synced plain files count as orphans
     if name in synced or name in excludes or not os.path.isfile(os.path.join(dst_dir, name)):
@@ -123,6 +132,8 @@ def sync_dir(
     if any(fnmatch.fnmatch(name, pattern) for pattern in owned_globs):
       orphan = os.path.join(dst_dir, name)
       results.append({ KEY_FILE: name, KEY_SRC: "", KEY_DST: orphan, KEY_STATE: STATE_KEPT_ORPHAN })
+
+  # synced files first, owned orphans appended after them
   return results
 
 
@@ -136,6 +147,7 @@ def main(argv: list[str]) -> int:
   Returns:
     Process exit code — 0 on success, 2 on a missing source path.
   """
+  # the CLI surface: the source/target pair plus the dir-mode filters and the copy switches
   # waiver: argparse CLI signature and help strings, not domain keys (whole block below)
   parser = argparse.ArgumentParser(description = "Deterministic file-sync triage for install-managed mirrors.")
   # waiver: argparse CLI signature, not a domain key
@@ -155,10 +167,13 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature, not a domain key
   parser.add_argument("--chmod-x", action = "store_true", help = "ensure executable bits on synced targets")
   args = parser.parse_args(argv)
+
   # guard: a missing source is a caller error, not a triage state
   if not os.path.exists(args.src):
     print(json.dumps({ "error": f"source not found: {args.src}" }))
     return 2
+
+  # a directory source triages its whole flat content; a file source is a single pair
   if os.path.isdir(args.src):
     results = sync_dir(
       args.src, args.dst,
@@ -170,9 +185,13 @@ def main(argv: list[str]) -> int:
   else:
     state = sync_one(args.src, args.dst, copy_diverged = args.copy_diverged, chmod_x = args.chmod_x)
     results = [ { KEY_FILE: os.path.basename(args.dst), KEY_SRC: args.src, KEY_DST: args.dst, KEY_STATE: state } ]
+
+  # per-state tallies so the caller can read the outcome without walking the results
   counts: dict[str, int] = {}
   for entry in results:
     counts[entry[KEY_STATE]] = counts.get(entry[KEY_STATE], 0) + 1
+
+  # the receipt hoists the diverged paths, the only ones needing caller judgment
   receipt = {
     "results": results,
     "counts": counts,

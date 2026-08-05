@@ -10,6 +10,7 @@ when the icon-map is missing or incompatible — hooks stay inert in that case.
 
 See claude/lazycortex-obsidian/references/lazy-obsidian.iconize-protocol.md.
 """
+
 from __future__ import annotations
 # waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # pylint: disable=import-error
@@ -158,7 +159,7 @@ def parse_frontmatter(text: str) -> dict:
     return {}
   out: dict = {}
   for line in m.group(1).splitlines():
-    # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+    # waiver: the loop variable is deliberately rebound — each line is normalised in place before use
     line = line.rstrip()  # noqa: PLW2901
     # guard: skip blank and comment lines
     if not line or line.startswith("#"):
@@ -542,11 +543,13 @@ def cmd_sync_staged(args: argparse.Namespace) -> int:
   if icon_map is None or _preflight_incompatible(icon_map):
     return EXIT_OK
 
+  # rewriter plus the accumulators the staged walk fills
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from frontmatter_rewriter import rewrite_file
   touched: list[str] = []
   planned: list[dict] = []
 
+  # resolve the icon for every staged note and rewrite its frontmatter
   for rel in _staged_md_files(vault):
     fm = _read_frontmatter_for(vault, rel)
     entries = resolve_matchers(icon_map, rel, fm)
@@ -565,13 +568,14 @@ def cmd_sync_staged(args: argparse.Namespace) -> int:
     if rewrite_file(note_path, icon = icon, color = color):
       touched.append(rel)
 
+  # a dry run reports the plan and leaves the index untouched
   if args.dry_run:
     print(json.dumps({ ResultKey.OP: "sync-staged", ResultKey.DRY_RUN: True, ResultKey.PLANNED: planned },
                      ensure_ascii = False))
     return EXIT_OK
 
+  # re-stage the .md files whose frontmatter we just rewrote so they ride along in the pending commit
   if touched:
-    # Re-stage the .md files whose frontmatter we just rewrote.
     rs = subprocess.run(
       [ "git", "-C", str(vault), "add", "--", *touched ],
       capture_output = True, text = True, check = False,
@@ -580,6 +584,7 @@ def cmd_sync_staged(args: argparse.Namespace) -> int:
       sys.stderr.write(
         f"warning: re-stage of modified notes failed: {rs.stderr.strip()}\n")
 
+  # emit the machine-readable result record for the calling hook
   print(json.dumps({ ResultKey.OP: "sync-staged", ResultKey.TOUCHED: touched }, ensure_ascii = False))
   return EXIT_OK
 
@@ -639,11 +644,13 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
     return EXIT_OK
   prefix = normalize_path(args.prefix) if args.prefix else ""
 
+  # rewriter plus the accumulators the vault walk fills
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from frontmatter_rewriter import rewrite_file
   touched: list[str] = []
   planned: list[dict] = []
 
+  # recompute the icon for every markdown file in scope and rewrite its frontmatter
   for rel in _walk_md_files(vault, prefix or None):
     fm = _read_frontmatter_for(vault, rel)
     entries = resolve_matchers(icon_map, rel, fm)
@@ -659,11 +666,13 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
     if rewrite_file(note_path, icon = icon, color = color):
       touched.append(rel)
 
+  # a dry run reports the plan and leaves the worktree untouched
   if args.dry_run:
     print(json.dumps({ ResultKey.OP: "reconcile", ResultKey.DRY_RUN: True, ResultKey.PREFIX: prefix,
                        ResultKey.PLANNED: planned }, ensure_ascii = False))
     return EXIT_OK
 
+  # emit the machine-readable result record for the caller
   print(json.dumps({ ResultKey.OP: "reconcile", ResultKey.PREFIX: prefix,
                      ResultKey.TOUCHED_COUNT: len(touched) }, ensure_ascii = False))
   return EXIT_OK
@@ -694,11 +703,13 @@ def cmd_reconcile_plugin(args: argparse.Namespace) -> int:
   plugin = args.plugin
   prefix = f"claude/{plugin}"
 
+  # rewriter plus the accumulators the plugin-subtree walk fills
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from frontmatter_rewriter import rewrite_file
   touched: list[str] = []
   planned: list[dict] = []
 
+  # repaint every note under the plugin subtree whose color depends on the bumped version
   for rel in _walk_md_files(vault, prefix):
     fm = _read_frontmatter_for(vault, rel)
     entries = resolve_matchers(icon_map, rel, fm)
@@ -717,11 +728,13 @@ def cmd_reconcile_plugin(args: argparse.Namespace) -> int:
     if rewrite_file(note_path, icon = icon, color = color):
       touched.append(rel)
 
+  # a dry run reports the plan and leaves the index untouched
   if args.dry_run:
     print(json.dumps({ ResultKey.OP: "reconcile-plugin", ResultKey.PLUGIN: plugin, ResultKey.DRY_RUN: True,
                        ResultKey.PLANNED: planned }, ensure_ascii = False))
     return EXIT_OK
 
+  # re-stage the repainted notes so they land in the same commit as the version bump
   if touched:
     rs = subprocess.run(
       [ "git", "-C", str(vault), "add", "--", *touched ],
@@ -731,6 +744,7 @@ def cmd_reconcile_plugin(args: argparse.Namespace) -> int:
       sys.stderr.write(
         f"warning: re-stage of modified notes failed: {rs.stderr.strip()}\n")
 
+  # emit the machine-readable result record for the pre-commit pipeline
   print(json.dumps({ ResultKey.OP: "reconcile-plugin", ResultKey.PLUGIN: plugin, ResultKey.TOUCHED: touched },
                    ensure_ascii = False))
   return EXIT_OK
@@ -828,18 +842,22 @@ def cmd_reconcile_dirty(args: argparse.Namespace) -> int:
   if icon_map is None or _preflight_incompatible(icon_map):
     return EXIT_OK
 
+  # dirty notes are the only place icons can have gone stale since the last turn
   paths = _dirty_md_files(vault)
   # guard: no dirty markdown files → silent no-op
   if not paths:
     return EXIT_OK
 
+  # a sibling note's rename or deletion shifts colors across its whole directory, so reconcile by parent dir
   prefixes = sorted({ "/".join(PurePosixPath(p).parts[:-1]) for p in paths })
 
+  # rewriter plus the accumulators the per-prefix walks fill
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from frontmatter_rewriter import rewrite_file
   touched: list[str] = []
   planned: list[dict] = []
 
+  # recompute the icon for every note in each affected directory and rewrite its frontmatter
   for prefix in prefixes:
     for rel in _walk_md_files(vault, prefix or None):
       fm = _read_frontmatter_for(vault, rel)
@@ -856,12 +874,14 @@ def cmd_reconcile_dirty(args: argparse.Namespace) -> int:
       if rewrite_file(note_path, icon = icon, color = color):
         touched.append(rel)
 
+  # a dry run reports the plan and leaves the worktree untouched
   if args.dry_run:
     print(json.dumps({ ResultKey.OP: "reconcile-dirty", ResultKey.DRY_RUN: True,
                        ResultKey.PREFIXES: prefixes, ResultKey.PLANNED: planned },
                      ensure_ascii = False))
     return EXIT_OK
 
+  # emit the machine-readable result record for the Stop hook
   print(json.dumps({ ResultKey.OP: "reconcile-dirty", ResultKey.PREFIXES: prefixes,
                      ResultKey.TOUCHED_COUNT: len(touched) }, ensure_ascii = False))
   return EXIT_OK
@@ -1075,16 +1095,9 @@ def cmd_check_versions(args: argparse.Namespace) -> int:
   current = _current_version()
   pre = _shim_installed_version(vault)
 
+  # classify an installed version triple against the worker's current version;
+  # returns one of VersionStatus.MISSING / MAJOR_DRIFT / MINOR_DRIFT / OK
   def _status(installed: tuple | None) -> str:
-    """
-    Classify an installed version triple against the worker's current version.
-
-    Args:
-      installed: Installed version triple, or None when no shim is installed.
-
-    Returns:
-      One of `"missing"`, `"major-drift"`, `"minor-drift"`, or `"ok"`.
-    """
     # guard: nothing installed
     if installed is None:
       return VersionStatus.MISSING
@@ -1095,6 +1108,7 @@ def cmd_check_versions(args: argparse.Namespace) -> int:
       return VersionStatus.MINOR_DRIFT
     return VersionStatus.OK
 
+  # shim drift is the half of the report that does not depend on the icon-map
   pre_status = _status(pre)
 
   # Icon-map schema handshake (bilateral): report both the schema the vault declares
@@ -1117,8 +1131,11 @@ def cmd_check_versions(args: argparse.Namespace) -> int:
         compatible = False
     schema_block[ResultKey.STATUS] = VersionStatus.OK if compatible else VersionStatus.INCOMPATIBLE
 
+  # either half being out of step is what the caller's exit code must reflect
   drift = (pre_status in (VersionStatus.MISSING, VersionStatus.MAJOR_DRIFT)
            or schema_block[ResultKey.STATUS] == VersionStatus.INCOMPATIBLE)
+
+  # emit the machine-readable compatibility report
   report = {
     ResultKey.OP: "check-versions",
     "HOOK_VERSION": HOOK_VERSION,
@@ -1287,16 +1304,8 @@ def interpolate(template: str, frontmatter: dict, basename: str) -> str:
   # guard: no token markers → return template verbatim
   if "{{" not in template:
     return template
+  # resolve a single `{{...}}` capture to its replacement string
   def sub(match: re.Match) -> str:
-    """
-    Resolve a single `{{...}}` capture to its replacement string.
-
-    Args:
-      match: Regex match object capturing the inner token reference.
-
-    Returns:
-      The replacement string for the captured token.
-    """
     ref = match.group(1)
     if ref == InterpToken.BASENAME:
       return basename
@@ -1459,7 +1468,7 @@ def _callback_dir(vault: Path | None = None) -> Path:
   # guard: test override wins
   if CALLBACK_DIR_OVERRIDE is not None:
     return Path(CALLBACK_DIR_OVERRIDE)
-  # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+  # waiver: a genuine module-level rebind, not a false positive — this is the one writer of that cache
   global _CALLBACK_VAULT_CACHE  # noqa: PLW0603  # pylint: disable=global-statement
   if vault is None:
     if _CALLBACK_VAULT_CACHE is None:

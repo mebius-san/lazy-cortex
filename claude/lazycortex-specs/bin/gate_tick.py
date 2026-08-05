@@ -41,9 +41,9 @@ _BIN = Path(__file__).resolve().parent
 if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import flip_gate  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402
     DERIVED_GATES,
     GATE_ORDER,
@@ -54,7 +54,7 @@ from spec_keys import (  # noqa: E402
     StageKey,
     TickAction,
 )
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from summary_render import parent_container_note, apply_container_stats  # noqa: E402
 
 
@@ -167,21 +167,30 @@ def _commit_promotions(asset_dir: Path, promoted_docs: list[str]) -> None:
     asset_dir: The asset folder holding the siblings and the status folder-note.
     promoted_docs: Bare filenames of the siblings that were just rewritten.
   """
+  # the promoted siblings and the asset's own status folder-note ride in one commit
   repo = flip_gate._repo_root(asset_dir)
   paths = [str(asset_dir / name) for name in promoted_docs]
   paths.append(str(asset_dir / f"{asset_dir.name}.md"))
+
+  # the parent container's stats line goes stale on promotion, so refresh it and carry it along
   parent = parent_container_note(asset_dir)
   if parent is not None and apply_container_stats(parent):
     paths.append(str(parent))
+
+  # stage the whole set first so the commit below lands atomically
   subprocess.run(
       ["git", "add", "--", *paths],
       cwd = str(repo), check = True, capture_output = True,
   )
+
+  # naming every promoted doc in the subject keeps the history readable at a glance
   joined = ", ".join(promoted_docs)
   subject = (
       f"{_PROMOTE_AUTHOR_NAME}: promote spec_stage "
       f"{Stage.DRAFT}→{Stage.APPROVED} on {joined}"
   )
+
+  # commit under the dedicated bot identity so the operator's authorship stays untouched
   subprocess.run(
       [
           "git",
@@ -212,18 +221,25 @@ def _commit_readiness_change(
     withdrawn: True when the prior `[!ready]` was replaced by `[!info] readiness withdrawn`;
       False when a fresh `[!ready]` was appended. Drives the commit subject.
   """
+  # an empty toplevel means there is no repo to commit into
   top = flip_gate._git_field(asset_dir, ["rev-parse", "--show-toplevel"], "")
   # guard: asset is not inside a git repository — skip commit (test-fixture path); the file
   # write above remains and is the entire mutation the bare-fixture caller observes
   if not top:
     return
+
+  # stage the rewritten folder-note so the tree is clean for the next daemon iteration
   repo = Path(top)
   subprocess.run(
       ["git", "add", "--", str(asset_note)],
       cwd = str(repo), check = True, capture_output = True,
   )
+
+  # the subject distinguishes a withdrawal from a plain callout drop
   action = "withdraw readiness" if withdrawn else "drop readiness callout"
   subject = f"{_PROMOTE_AUTHOR_NAME}: {action} for {gate} on {asset_dir.name}"
+
+  # commit under the dedicated bot identity so the operator's authorship stays untouched
   subprocess.run(
       [
           "git",

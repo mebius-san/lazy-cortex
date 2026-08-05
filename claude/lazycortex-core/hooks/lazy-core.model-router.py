@@ -23,6 +23,7 @@ Never blocks. Any error → `sys.exit(0)` (pass-through).
 
 Protocol reference: https://code.claude.com/docs/en/hooks.md
 """
+
 from __future__ import annotations
 # waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # deferred imports below module code; position intentional (ruff E402 noqa guards it)
@@ -42,11 +43,11 @@ if TYPE_CHECKING:
 # bin/ to sys.path so `lazy_settings` is importable.
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "bin"))
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from lazy_settings import load_section  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import hook_gate  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from constants import AgentToolInput, HookKey, HookName, SettingsFile, SettingsKey, ToolName  # noqa: E402
 
 
@@ -97,6 +98,7 @@ def load_config(cwd: str | None) -> dict:
   user_path = Path.home() / SettingsFile.REL
   proj_path = Path(cwd or ".") / SettingsFile.REL
 
+  # read both layers; either may be absent, which _safe_load reports as an empty section
   user_section = _safe_load(user_path)
   proj_section = _safe_load(proj_path)
 
@@ -163,6 +165,7 @@ def main() -> None:
   if not hook_gate.is_enabled(HookName.MODEL_ROUTER):
     sys.exit(0)
 
+  # the hook payload carries the tool call this dispatch is about to make
   payload = json.load(sys.stdin)
   # guard: only Agent dispatches participate in routing
   if payload.get(HookKey.TOOL_NAME) != ToolName.AGENT:
@@ -190,6 +193,7 @@ def main() -> None:
     )
     configured = None
 
+  # the caller's explicit choice outranks the configured route
   proposed = caller_model or configured
 
   # 2. Apply LAZY_AGENT_MODEL_FLOOR cap (wins over caller + config)

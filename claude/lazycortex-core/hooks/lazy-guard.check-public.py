@@ -40,15 +40,19 @@ if TYPE_CHECKING:
 # Resolve the sibling bin/ dir so the enablement gate is importable.
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import hook_gate  # noqa: E402
-# waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from constants import HookName  # noqa: E402
 
 
 class _Check(TypedDict):
   """
   One secret/PII scan check: a compiled pattern plus a human-readable name.
+
+  Attributes:
+    name: Human-readable label identifying the check in findings output.
+    pattern: Compiled regular expression the check matches against staged diff lines.
   """
   name: str
   pattern: re.Pattern[str]
@@ -110,6 +114,7 @@ def _in_public_scope(path: str, compiled_globs: list[re.Pattern[str]]) -> bool:
   if not compiled_globs:
     return True
   return any(rx.match(path) for rx in compiled_globs)
+
 
 # ----------------------------------------------------------------------------------------
 # Check categories and patterns
@@ -252,6 +257,7 @@ def is_waived(check_id: str, file_path: str, matched_text: str, waivers: list) -
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from datetime import date
 
+  # a waiver covers the finding only when check id, scope, pattern, and expiry all agree
   today = date.today().isoformat()
   for w in waivers:
     # check-id match
@@ -299,9 +305,6 @@ def main() -> None:
   context but do not block. The hook is a no-op on any unsupported tool call, on repos
   without `.guard-waivers.json`, when no staged diff is present, and when scope filtering
   drops every staged file.
-
-  Returns:
-    None. The hook decision (if any) is serialized as JSON on stdout.
   """
   # Enablement gate — first action. An expert spawn short-circuits here via a pure env check.
   # guard: hook disabled in the current context
@@ -315,6 +318,7 @@ def main() -> None:
     # not JSON — ignore silently so a malformed payload never crashes the trigger
     return
 
+  # the tool identity and its input decide whether this call is a commit worth scanning
   # waiver: external-format hook-payload field name, not an internal key
   tool_name = hook_input.get("tool_name", "")
   # waiver: external-format hook-payload field name, not an internal key
@@ -394,6 +398,7 @@ def main() -> None:
   if not added_lines:
     return
 
+  # the repo's own waivers and public scopes govern what counts as a finding here
   waivers, scope_globs = load_config(root)
 
   # subtree-public mode: drop changes outside the declared public scopes.
@@ -404,9 +409,11 @@ def main() -> None:
     if not added_lines:
       return
 
+  # findings are kept apart because secrets block the commit and the rest only warn
   fail_findings = []
   warn_findings = []
 
+  # scan every added line against both check families
   for file_path, content in added_lines:
     # skip safe lines (templates, variable refs, etc.)
     # guard: skip lines matching a known safe-line pattern
@@ -481,6 +488,7 @@ def main() -> None:
       }
     }
 
+  # the decision reaches Claude Code as the hook's stdout payload
   json.dump(result, sys.stdout)
 
 

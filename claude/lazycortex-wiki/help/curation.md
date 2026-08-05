@@ -1,12 +1,14 @@
 ---
 chapter_type: block
 summary: Curate wiki nodes in-session via /wiki.relink or via daemon routines — classify summaries and topic tags, normalise the tag vocabulary, build glossed See-also links, and prune links to deleted nodes.
-last_regen: 2026-07-29
+last_regen: 2026-08-05
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing /wiki.relink driving the curation block: (1) relink-plan produces classify[], link[], drop[] lists; (2) curator agent runs classify per node via apply-node; (3) normalize-tags consolidates the tag vocabulary via retag; (4) build-index rebuilds topics.md; (5) curator agent runs link per node via apply-node; (6) prune-node drops dangling See-also lines for each path in drop[]; (7) relink commits all touched files and records the wiki_synced_sha anchor. Show that the curator agent is dispatched twice (classify phase, link phase), that prune-node is a deterministic primitive with no curator dispatch, and that the skill owns the single commit."
 source_skills:
-  - wiki.relink
+  - lazy-wiki.configure
+  - lazy-wiki.relink
+  - lazy-wiki.curator
 ---
 # Curation
 
@@ -27,7 +29,7 @@ The same curation logic runs autonomously when the runtime daemon is active. On 
 
 ## How it fits together
 
-You invoke `/wiki.relink [<scope-id>]`. If you omit the scope id, the skill lists the configured scopes and asks you which to process.
+You invoke `/wiki.relink [<scope-id>]`. If you omit the scope id, the skill lists the configured scopes and asks you which to process. Scopes are created and edited with `/wiki.configure` — see the paths, tag axes, and topics-index path you set there.
 
 The skill starts by running `relink-plan`, which inspects the `wiki_synced_sha` anchor stored in `topics.md` and returns three path lists — nodes to classify (new or modified), nodes to link (whose summary or neighbours changed), and nodes to drop (deleted since the anchor). The plan operates in one of three modes: `initial` (no anchor yet — process everything), `incremental` (delta from the anchor to HEAD), or `anchor-lost` (the anchor commit became unreachable; the plan falls back to a content-hash backstop). You do not need to choose the mode; the plan decides automatically.
 
@@ -35,7 +37,7 @@ The skill starts by running `relink-plan`, which inspects the `wiki_synced_sha` 
 
 **Normalise phase.** After all classify writes land, the skill collects the full set of tag values now present in the scope and dispatches the curator once more to consolidate them. The curator examines the collected vocabulary, builds an alias map (merging synonyms, nesting subtypes), and applies it via `retag` — which rewrites every affected node's tags in one pass. An empty alias map is valid; the curator skips `retag` and reports so.
 
-**Index rebuild.** The skill rebuilds `topics.md` once, after the normalise pass and before linking. This produces the freshly populated catalog the link phase reads.
+**Index rebuild.** The skill rebuilds `topics.md` once, after the normalise pass and before linking. This produces the freshly populated catalog the link phase reads. The scope's own topics-index file — the path you set for `topics_index` in `/wiki.configure`, or any file carrying `wiki_role: topics-index` in its frontmatter — is recognised as the index and never treated as a curatable node, so a relink can never write a summary and See-also section into the file the next index rebuild is about to overwrite wholesale.
 
 **Link phase.** For each node in the link list, the skill first computes a ranked shortlist of topic-overlapping candidates, then dispatches the curator to verify those candidates against the node's content, select the genuinely related ones, gloss each from their `topics.md` entry (verbatim summary — no paraphrase), and apply the `see_also` section via `apply-node`. When the candidate list is empty, the curator selects targets from the full `topics.md` by judgment.
 
@@ -56,6 +58,8 @@ If the curator reports an error for a specific node (malformed input, a failed `
 **Tag vocabulary is drifting.** The normalise step runs automatically on every relink, but it only sees values that exist after the current classify pass. If you want to consolidate tags across an already-classified scope without relinking everything, invoke `/wiki.relink` on that scope — the plan will return an `incremental` set of changed nodes and the normalise pass will tidy the vocabulary. The weekly daemon sweep does this across every configured scope automatically, so most projects never need to trigger it by hand.
 
 **Selecting a specific scope.** Pass the scope id directly: `/wiki.relink <scope-id>`. The skill skips the interactive prompt.
+
+**Topics index no longer needs a manual exclusion.** You used to have to add the scope's topics-index path to `exclude_paths` in `/wiki.configure` yourself, or the curator would treat the index as an ordinary node — writing a summary and See-also section into it that the next index rebuild silently erased. The index is now recognised automatically by its configured path or by a `wiki_role: topics-index` frontmatter marker, ahead of every other check, which also covers a renamed index or a neighbouring scope's index caught by the same globs. Any existing `exclude_paths` entry for the index is harmless to keep.
 
 **Daemon routines not seeded.** If `wiki.scan`, `wiki.scan-deletes`, or `wiki.relink-weekly` are missing from your settings, run `/wiki.install` — it seeds all three (absent-only, so existing configuration is untouched).
 

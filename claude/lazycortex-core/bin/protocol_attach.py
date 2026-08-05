@@ -40,7 +40,7 @@ def _resolve_settings_path(cwd: Path | str | None) -> Path:
   Returns:
     Path to `<cwd>/.claude/lazy.settings.json` under the resolved working directory.
   """
-  # guard: explicit --cwd wins; otherwise mirror the dispatcher's LAZY_REPO_ROOT-or-cwd convention
+  # pick the repo root: explicit --cwd wins, otherwise the dispatcher's LAZY_REPO_ROOT-or-cwd convention
   if cwd is not None:
     root = Path(cwd)
   else:
@@ -88,7 +88,7 @@ def add_protocols(routine_name: str, ids: list[str], *, cwd: Path | str | None =
     current.append(pid)
     added.append(pid)
   routine[RoutineKey.PROTOCOLS] = current
-  # guard: nothing new — skip the write so the round-trip stays a true no-op
+  # write only when something was added, so a no-op round-trip leaves the file untouched
   if added:
     save_section(path, SettingsKey.ROUTINES, routines)
   return { "routine": routine_name, "added": added, RoutineKey.PROTOCOLS: current }

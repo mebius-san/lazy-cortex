@@ -216,7 +216,7 @@ def _drop_sections(
     section_body_only = section_text[len(_heading_line_for(start, end, body)):]
     owner = _owner_of_section(section_body_only)
     tagged = _section_is_tagged(section_body_only)
-    # guard: the # History section is governed solely by drop_history — never by the drop_owned
+    # the # History section is governed solely by drop_history — never by the drop_owned
     # policy, even though the historian's tag is ownerless.
     if _parser.is_historian_section(section_body_only):
       if not drop_history:
@@ -437,11 +437,11 @@ def remove_owned_section(body: str, owner: tuple[str, str]) -> str:
     # guard: only the target owner's section is dropped; skip every other section.
     if owner_pair != owner:
       continue
-  # Drop the section span entirely. The H1 spans returned by
-  # `_enumerate_h1_spans` include the trailing blank gap before
-  # the next H1, so cutting [start, end) leaves no orphan blank
-  # line behind. Surrounding sections shift up by exactly the
-  # section's byte length.
+    # Drop the section span entirely. The H1 spans returned by
+    # `_enumerate_h1_spans` include the trailing blank gap before
+    # the next H1, so cutting [start, end) leaves no orphan blank
+    # line behind. Surrounding sections shift up by exactly the
+    # section's byte length.
     return body[:start] + body[end:]
   return body
 
@@ -476,24 +476,24 @@ def replace_owned_section_body(
     # guard: only the target owner's section has its tag line stripped; skip every other section.
     if owner_pair != owner:
       continue
-  # Find the ownership-tag line: should be the first non-empty
-  # line after the heading.
+    # Find the ownership-tag line: should be the first non-empty
+    # line after the heading.
     lines = section_text.splitlines(keepends=True)
     head_lines: list[str] = []
     i = 0
     if i < len(lines):
       head_lines.append(lines[i])  # heading
       i += 1
-  # Walk blanks until we find the tag line.
+    # Walk blanks until we find the tag line.
     while i < len(lines) and lines[i].strip() == "":
       head_lines.append(lines[i])
       i += 1
     if i < len(lines):
       head_lines.append(lines[i])  # ownership tag
       i += 1
-  # Preserve any trailing blank lines from the section's tail
-  # (the trailing blank gap before the next H1 that the span
-  # includes — see `_enumerate_h1_spans`).
+    # Preserve any trailing blank lines from the section's tail
+    # (the trailing blank gap before the next H1 that the span
+    # includes — see `_enumerate_h1_spans`).
     tail_blanks: list[str] = []
     j = len(lines) - 1
     while j >= i and lines[j].strip() == "":
@@ -885,6 +885,7 @@ def reassemble(
   # Always apply the (filtered) frontmatter overlay on top of operator's.
   new_fm_text = _apply_frontmatter_overlay(op_fm_text, agent_frontmatter_overlay)
 
+  # the phase decides which half of the document the agent was allowed to touch
   if phase == Phase.MAIN:
     return _reassemble_main(op_body, agent_body, new_fm_text, section_layout=section_layout)
   if phase == Phase.SECTION:
@@ -937,9 +938,9 @@ def _restore_owned_and_history(
     if _parser.is_historian_section(section_body_only):
       history_section = section_text
       continue
-  # Spec inv 8: preserve EVERY tagged H1 section (any tag), not
-  # only 2-part #expert/<flat>/<section-id>. Downstream consumer
-  # overlays may carry other prefixes. All foreign to the main writer.
+    # Spec inv 8: preserve EVERY tagged H1 section (any tag), not
+    # only 2-part #expert/<flat>/<section-id>. Downstream consumer
+    # overlays may carry other prefixes. All foreign to the main writer.
     # guard: only foreign-owned tagged sections get re-placed; skip untagged main-writer body and the
     # caller's own section — but an ownerless tagged section (owner is None) never matches a None skip_owner.
     if not tagged or (skip_owner is not None and owner == skip_owner):
@@ -1009,8 +1010,8 @@ def _carry_banner_from_operator(operator_body: str, new_body: str) -> str:
     head = m.group(0)
   if not head:
     return new_body
-# Normalize: strip all trailing newlines, then re-attach exactly one
-# trailing newline + one blank-line separator.
+  # Normalize: strip all trailing newlines, then re-attach exactly one
+  # trailing newline + one blank-line separator.
   head = head.rstrip("\n") + "\n\n"
   # Strip any banner already in new_body to avoid duplication.
   new_body_no_banner = _strip_banner(new_body).lstrip("\n")
@@ -1038,7 +1039,7 @@ def _document_title_heading(body: str) -> str | None:
     # guard: the historian's # History section is not the title
     if _parser.is_historian_section(section_body_only):
       continue
-  # guard: expert-owned sections are not the title
+    # guard: expert-owned sections are not the title
     if _owner_of_section(section_body_only) is not None:
       continue
     return heading_line.rstrip("\n")
@@ -1068,7 +1069,7 @@ def _carry_title_from_operator(operator_body: str, new_content: str) -> str:
   # guard: operator body carries no title H1 — nothing to restore
   if op_title is None:
     return new_content
-# guard: writer kept a title H1 — leave its content untouched
+  # guard: writer kept a title H1 — leave its content untouched
   if _document_title_heading(new_content) is not None:
     return new_content
   return op_title + "\n\n" + new_content.lstrip("\n")
@@ -1118,7 +1119,7 @@ def _reassemble_section(
     owned section spliced in at the configured position, and the operator's banner restored.
   """
   # Body comes from operator — agent's body edits are IGNORED.
-    # Pull only the agent's owned section.
+  # Pull only the agent's owned section.
   agent_owned = _extract_section_by_owner(agent_body, owned_owner)
   # Operator body minus owned sections AND History — we re-add both
   # below in canonical order (owned first, History last). Bug 30.

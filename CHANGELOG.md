@@ -4,6 +4,16 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 6.0.0 — 2026-08-05 UTC
+
+- **Breaking:** The response envelope now fails closed — a job that omits `outcome` (or sends a malformed response) counts as failed everywhere instead of silently succeeding, and a violated envelope is rejected and retried rather than accepted. Adds a `deferred` outcome for work an expert deliberately postpones without losing its input. Any protocol defining its own status field in place of `outcome` must be rewritten.
+- New `lazycortex_runtime_incidents_total` metric and alerts (failing jobs, growing dead-letter queue, fresh incidents) surface failures and parked bundles without anyone having to open the error ledger by hand; the dashboard gains a Deferred column.
+- Fixes `Operation not permitted` writes for expert sandboxes reached through a symlink — the sandbox scope now resolves symlinked paths so the allowlist matches what actually gets written to.
+- Stale transient inbox bundles are now retried instead of being parked forever.
+- Inbox tick cleans up empty harness bookkeeping directories instead of leaving them behind.
+- Fixes a metrics-port collision — a daemon that inherited a port via copied config no longer clashes with another daemon already using it; it gets allocated a free port instead.
+- Removes false-positive install/audit/preflight warnings about "ambiguous" checkouts that fired on any repo with `external_dirs` configured, even plain local repos that were never file-synced.
+
 ### 5.20.4 — 2026-08-03 UTC
 
 - New `lazy-python.code-reviewer` agent gets a default model tier (opus) in the canonical model-tier table, so a fresh install seeds it consistently instead of falling back to the harness default.
@@ -487,6 +497,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.6.1 — 2026-08-05 UTC
+
+- Fixed the spec-apply worker committing arbitrary unrelated worktree changes alongside its own edits — it now stages only the files its own pass touched.
+
 ### 3.6.0 — 2026-07-30 UTC
 
 - New `/spec.import` skill imports exported spec designs from another repo, read-only — fetches by ref, lets you pick which exported assets to land, and auto-registers the import only when something was actually exported.
@@ -584,6 +598,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 2.2.4 — 2026-08-05 UTC
+
+- _no user-visible changes_
 
 ### 2.2.3 — 2026-07-23 UTC
 
@@ -737,6 +755,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 5.2.8 — 2026-08-05 UTC
+
+- _no user-visible changes_
+
 ### 5.2.7 — 2026-07-30 UTC
 
 - `lazy-review.configure` setup skill is now fully in English — phases 3–4 were previously left half in Russian.
@@ -797,6 +819,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).
 
 ## lazycortex-observe
+
+### 0.8.0 — 2026-08-05 UTC
+
+- Failed and stuck jobs now surface without opening a dashboard: three new alerts (a job finishing without completing, bundles parked in the dead-letter queue, and new incidents opening) plus an incidents counter and a Deferred column on the runtime dashboard.
 
 ### 0.7.5 — 2026-07-30 UTC
 
@@ -927,6 +953,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 2.3.0 — 2026-08-05 UTC
+
+- New `pcf` check `check_block_comments` (on by default): every block inside a function body must now open with a purpose comment — a waiver/noqa/type/pylint/fmt/noinspection line no longer counts as one.
+- Fixed: `pcf`'s copyright-spacing check no longer misfires on classless modules that open with a module docstring.
+
 ### 2.2.0 — 2026-08-03 UTC
 
 - `chk-py all` now fails when a guideline review is pending but hasn't been read — set `CHK_REVIEW=skip` to bypass a single run.
@@ -1033,6 +1064,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 1.7.1 — 2026-08-05 UTC
+
+- Fixed the topics index leaking into curation: the scope resolver now recognizes it automatically (by its configured `topics_index` path or a `wiki_role: topics-index` marker), so you no longer need to hand-list it in `exclude_paths` — covers renamed indexes and indexes from a sibling scope caught by the same globs.
+- **Breaking:** dropped the `~/.claude/plugins/cache/` fallback for locating the `lazycortex-core` binary. `$LAZYCORTEX_PLUGIN_DIRS` is now the only lookup path — if it's unset, commands fail with an error naming what was searched.
 
 ### 1.7.0 — 2026-08-01 UTC
 

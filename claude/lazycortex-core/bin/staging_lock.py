@@ -526,10 +526,12 @@ def acquire(
                          # waiver: one-off human-facing message
                          message = "staging lock disabled (lazy-core.git.enabled=false)")
 
+  # poll-loop bookkeeping: when to give up, how long we have waited, and whether this is the first look
   deadline = time.time() + cfg.wait_seconds
   waited = 0.0
   first_pass = True
 
+  # the acquire loop retries until the lock is taken, broken as stale, or the deadline passes
   while True:
     existing = _read_lock(repo_root)
 
@@ -666,7 +668,7 @@ def load_config(repo_root: Path) -> StagingConfig:
     try:
       sys.path.insert(0, str(Path(__file__).parent))
       # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-      # waiver: intentional suppression — the flagged rule is a known false positive / accepted exception on this line
+      # waiver: sibling module resolved at runtime via the sys.path.insert above; mypy cannot see that path
       import lazy_settings  # type: ignore
       section = lazy_settings.load_section(settings_path, _SECTION)
     except Exception:

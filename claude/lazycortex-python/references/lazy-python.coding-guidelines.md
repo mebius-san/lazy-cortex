@@ -297,7 +297,7 @@ class StatsInit(BaseInit, Generic[FieldType]):
 ## Module Structure
 Organize modules in the following order:
 1. Copyright header.
-2. Module docstring — `__init__.py` only (see __init__.py File Patterns below). Regular source files carry no module docstring.
+2. Module docstring — required in `__init__.py` (see __init__.py File Patterns below), permitted in a module that defines no classes, forbidden in a module that defines one or more. A class carries its own docstring, so a module docstring above it duplicates or contradicts that contract; a flat module of functions — a CLI entry point, a worker script — has no other place to state what the file is for.
 3. Imports (see Import Organization below).
 4. Module-level constants, TypeVars, TypeAliases, and enums.
 5. Classes and functions.

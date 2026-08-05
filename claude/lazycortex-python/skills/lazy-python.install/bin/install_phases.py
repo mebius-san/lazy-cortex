@@ -178,11 +178,13 @@ class Phase3Pyproject:
     """
     template_text = self.template.read_text()
 
+    # a repo with no pyproject yet gets a minimal [project] stanza to merge onto
     if self.target.exists():
       existing_text = self.target.read_text()
     else:
       existing_text = '[project]\nname = "consumer"\nversion = "0.1.0"\n'
 
+    # the consumer's own [tool] sections decide what still has to be merged in
     existing_data = tomllib.loads(existing_text)
     existing_tool = existing_data.get("tool", {})
 
@@ -195,7 +197,7 @@ class Phase3Pyproject:
 
     # Idempotent no-op when every checker section is already present.
     if not missing:
-      # guard: ensure file exists even if no merge happened (first run on missing file is still a write)
+      # a first run against a missing file still has to materialise the baseline stanza
       if not self.target.exists():
         self.target.write_text(existing_text)
       return 0
@@ -207,6 +209,7 @@ class Phase3Pyproject:
       if block:
         appended_blocks.append(block)
 
+    # append rather than rewrite, so the consumer's own content stays byte-identical
     new_content = existing_text.rstrip() + "\n\n" + "\n\n".join(appended_blocks) + "\n"
     self.target.write_text(new_content)
     return 0
@@ -342,6 +345,7 @@ class Phase6EnvSource:
       print("env-source-already-set")
       return 0
 
+    # an explicit choice made by the operator outranks anything auto-detection would find
     override = os.environ.get(self.OVERRIDE_ENV)
     # guard: the skill passes an explicit choice back when it disambiguated multiple candidates
     if override:
@@ -349,6 +353,7 @@ class Phase6EnvSource:
       print(f"env-source-recorded: {override}")
       return 0
 
+    # auto-detection: probe the conventional bootstrap-script locations
     found = [c for c in self.CANDIDATES if (self.consumer_dir / c).is_file()]
     # guard: nothing to offer — leave settings untouched
     if not found:
@@ -392,7 +397,7 @@ class Phase6EnvSource:
     """
     data = self._load()
     section = data.get("python")
-    # guard: preserve a pre-existing python section that lacks env_source
+    # a missing or non-mapping python section starts from an empty one
     if not isinstance(section, dict):
       section = {}
     section["env_source"] = path
@@ -440,7 +445,7 @@ class Phase7Expert:
     """
     data = self._load()
     experts = data.get("experts")
-    # guard: preserve a settings file that carries no experts section yet
+    # a settings file with no experts section yet starts from an empty mapping
     if not isinstance(experts, dict):
       experts = {}
 
@@ -449,11 +454,13 @@ class Phase7Expert:
       print("expert-already-registered")
       return 0
 
+    # register a copy of the template so later operator edits cannot reach the class constant
     experts[self.EXPERT_KEY] = dict(self.EXPERT_ENTRY)
     data["experts"] = experts
     self.settings.parent.mkdir(parents = True, exist_ok = True)
     self.settings.write_text(json.dumps(data, indent = 2) + "\n", encoding = "utf-8")
 
+    # outcome word the install skill parses to report what this phase did
     print(f"expert-registered: {self.EXPERT_KEY}")
     return 0
 

@@ -1,13 +1,15 @@
 ---
 chapter_type: walkthrough
-summary: Go from a bare repo to a fully-wired Obsidian vault — Iconize sync, diagram render glue, and click-to-zoom — in a single chained install pass.
-last_regen: 2026-06-10
+summary: Go from a bare repo to a fully-wired Obsidian vault — tag pages, Iconize sync, diagram glue, click-to-zoom — one chained install.
+last_regen: 2026-08-05
 diagram_spec:
   anchor: "Journey at a glance"
   request: "Sequence diagram showing the vault bootstrap journey: user runs /lazy-obsidian.install, which chains into /lazy-obsidian.iconize-install (installs folder-notes, obsidian-icon-folder, iconize-reloader, scaffolds icon-map and pre-commit shim) and then /lazy-obsidian.diagram-install (syncs mermaid-fit.css and ascii-fit.css, enables them in appearance.json, installs mermaid-popup), ending with the user verifying in Obsidian."
 source_skills:
+  - lazy-obsidian.install
   - lazy-obsidian.iconize-install
   - lazy-obsidian.diagram-install
+  - lazy-obsidian.gen-tag-pages
 ---
 # How do I wire up a fresh vault from scratch?
 
@@ -23,6 +25,10 @@ commands.
 
 After this walkthrough your vault has:
 
+- A tag-page template scaffolded at `.claude/templates/obsidian.tag-page-template.md`
+  (consumed by the `lazy-obsidian.gen-tag-pages` agent) and the **Dataview**
+  community plugin installed, so tag pages render their `Index` section once
+  you generate them.
 - **Iconize** (`obsidian-icon-folder`), **Folder Notes**, and the bundled
   **iconize-reloader** plugin installed and configured with the opinionated
   settings that enable frontmatter-driven icon painting.
@@ -198,6 +204,13 @@ plugin settings for Iconize and confirm the frontmatter field names are
 The install is idempotent — re-run `/lazy-obsidian.install` any time to pick
 up template changes after a plugin update, or to bring a newly cloned repo up
 to the same baseline.
+
+**Generate your first tag pages.** The template scaffolded in Step 1 doesn't
+populate `Tags/` by itself. Ask Claude to regenerate tag pages (e.g.
+"regenerate tag pages") to dispatch the `lazy-obsidian.gen-tag-pages` agent —
+it scans every note's `tags:` frontmatter and creates, updates, or removes
+pages under `Tags/` to match. Existing summaries are kept, not overwritten;
+re-run it any time tags change.
 
 **Seed your icon registry.** The icon-map scaffold is intentionally empty.
 Run `/lazy-obsidian.iconize-config` to add role/path-to-icon rules — that skill

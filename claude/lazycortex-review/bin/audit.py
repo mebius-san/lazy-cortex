@@ -110,13 +110,13 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
       if not isinstance(umbrella_cfg, dict):
         continue
       for section_id, writer in umbrella_cfg.items():
-          # Rule 1: section-id alphabet
+        # Rule 1: section-id alphabet
         if not _SECTION_ID_RE.match(section_id):
           # waiver: one-off human-facing message
           _add(findings, ReviewStatus.FAIL,"section-id-alphabet",
                f'section-id "{section_id}" violates ^[a-z][a-z0-9_-]*$'
                f" — needed for tag parsing (#expert/<flat-name>/<section-id>)")
-      # Rule 2: uniqueness across umbrellas
+        # Rule 2: uniqueness across umbrellas
         if section_id in seen_section_ids and seen_section_ids[section_id] != umbrella:
           # waiver: one-off human-facing message
           _add(findings, ReviewStatus.FAIL,"section-id-collision",
@@ -135,21 +135,21 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
             _add(findings, ReviewStatus.FAIL,"writer-missing-field",
                  f'writer at {class_name}.experts.{umbrella}.{section_id}'
                  f' missing required field "{field}"')
-    # Rule 2 (cross-repo): repo field is deprecated; "." is silently accepted
+        # Rule 2 (cross-repo): repo field is deprecated; "." is silently accepted
         # waiver: external-format field name, not an internal key
         if "repo" in writer and writer["repo"] != ".":
           # waiver: one-off human-facing message
           _add(findings, ReviewStatus.FAIL,"repo-field-redundant",
                f'writer {writer.get(JobKey.NAME, "")!r} has `repo` field — use @<repo> in `name` instead '
                f'(this field is deprecated; "." is silently accepted)')
-      # Rule 4: position enum
+        # Rule 4: position enum
         position = writer.get(JobKey.POSITION)
         if position is not None and position not in (Position.TOP, Position.BOTTOM):
           # waiver: one-off human-facing message
           _add(findings, ReviewStatus.FAIL,"position-enum",
                f'writer at {class_name}.experts.{umbrella}.{section_id}'
                f' has position="{position}" — must be "top" or "bottom"')
-      # Rule 5: section non-empty
+        # Rule 5: section non-empty
         section_title = writer.get(JobKey.SECTION)
         if section_title is not None and (
             not isinstance(section_title, str) or not section_title.strip()
@@ -158,7 +158,7 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
           _add(findings, ReviewStatus.FAIL,"section-title-empty",
                f"writer at {class_name}.experts.{umbrella}.{section_id}"
                f" has empty section title")
-      # Rule 6: flat-name alphabet (existing: flattened dot-name)
+        # Rule 6: flat-name alphabet (existing: flattened dot-name)
         name = writer.get(JobKey.NAME, "")
         if name:
           flat = _flatten_expert_name(name)
@@ -167,7 +167,7 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
             _add(findings, ReviewStatus.FAIL,"flat-name-alphabet",
                  f'expert "{name}" flattens to "{flat}"'
                  f" which violates tag-safe alphabet ^[a-z0-9_-]+$")
-    # Rule 6b (cross-repo): each part of expert@repo must pass alphabet check
+        # Rule 6b (cross-repo): each part of expert@repo must pass alphabet check
         if name and "@" in name:
           expert_part, repo_part = _parse_expert_name(name)
           if not _FLAT_PART_RE.match(expert_part):
@@ -180,7 +180,7 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
             _add(findings, ReviewStatus.FAIL,"flat-name-alphabet",
                  f'repo part {repo_part!r} of {name!r} fails alphabet '
                  f'^[a-z0-9_-]+$ (right side)')
-    # Rule 7: name resolves in root experts catalog
+        # Rule 7: name resolves in root experts catalog
         if name and name not in root_experts:
           # waiver: one-off human-facing message
           _add(findings, ReviewStatus.FAIL,"expert-not-registered",
@@ -200,6 +200,7 @@ def _check_all(settings: dict, findings: list[dict]) -> None:
     _add(findings, ReviewStatus.FAIL,"edit_marker_style",
          f"unknown style {style!r}; expected one of {sorted(_VALID_STYLES)}")
 
+  # the class list is the spine of the review config; everything below hangs off it
   review = settings.get(JobKey.REVIEW) or {}
   classes = review.get(JobKey.CLASSES) or []
   if not isinstance(classes, list):
@@ -209,9 +210,11 @@ def _check_all(settings: dict, findings: list[dict]) -> None:
          "'review.classes' must be a list")
     return
 
+  # every expert a class names is collected here and checked against the table below
   experts_tbl = settings.get(JobKey.EXPERTS) or {}
   referenced: set[str] = set()
 
+  # each class is checked in place, so one broken entry does not hide the rest
   for i, class_cfg in enumerate(classes):
     if not isinstance(class_cfg, dict):
       _add(findings, ReviewStatus.FAIL,f"class_{i}_shape",
@@ -226,9 +229,9 @@ def _check_all(settings: dict, findings: list[dict]) -> None:
       _add(findings, ReviewStatus.FAIL,f"class_{i}_experts_shape",
            f"class #{i} 'experts' must be an object")
       continue
-  # validation and terminal use the new dict-of-writer-object schema;
-  # they are validated separately by _check_section_writers_new_schema.
-  # history uses a single writer-object {"name": ...}; repo is not allowed.
+    # validation and terminal use the new dict-of-writer-object schema;
+    # they are validated separately by _check_section_writers_new_schema.
+    # history uses a single writer-object {"name": ...}; repo is not allowed.
     new_schema_umbrellas = {Bucket.VALIDATION, Bucket.TERMINAL}
     history_val = experts.get(Phase.HISTORY)
     if history_val is not None:
@@ -250,17 +253,17 @@ def _check_all(settings: dict, findings: list[dict]) -> None:
           _add(findings, ReviewStatus.FAIL,f"class_{i}_history_repo_forbidden",
                f'class #{i} experts.history must be a single writer object {{"name": ...}};'
                f' "repo" is not allowed (historian always runs in the local repo)')
-      # Rule (cross-repo): @<repo> syntax is forbidden on history.name
+        # Rule (cross-repo): @<repo> syntax is forbidden on history.name
         name_val = history_val.get(JobKey.NAME, "")
         if isinstance(name_val, str) and "@" in name_val:
           # waiver: one-off human-facing message
           _add(findings, ReviewStatus.FAIL,"history-repo-syntax-forbidden",
                f'experts.history.name {name_val!r} uses @<repo> syntax — '
                f'historian must run locally, no cross-repo dispatch allowed')
-      # Rule (cross-repo): historian commits the Doc-Review trailer
-      # locally, so it MUST have can_commit_in_repo=true. Default
-      # (false) would inject the foreign-execution no-commit clause
-      # into the historian's prompt and silently break the trailer.
+        # Rule (cross-repo): historian commits the Doc-Review trailer
+        # locally, so it MUST have can_commit_in_repo=true. Default
+        # (false) would inject the foreign-execution no-commit clause
+        # into the historian's prompt and silently break the trailer.
         if name_val and isinstance(name_val, str) and name_val in experts_tbl:
           h_entry = experts_tbl.get(name_val) or {}
           # waiver: external-format field name, not an internal key
@@ -285,6 +288,7 @@ def _check_all(settings: dict, findings: list[dict]) -> None:
           continue
         referenced.add(m[JobKey.NAME])
 
+  # a class may only reference an expert the top-level table actually declares
   for name in referenced:
     if name not in experts_tbl:
       _add(findings, ReviewStatus.FAIL,f"expert_{name}_missing",
@@ -299,13 +303,14 @@ def _check_all(settings: dict, findings: list[dict]) -> None:
       _add(findings, ReviewStatus.WARN,f"expert_{name}_no_git_author",
            f"expert {name!r} missing git_author.name or git_author.email")
 
+  # a config with no classes parses fine but reviews nothing
   if not classes:
     # waiver: one-off human-facing message
     _add(findings, ReviewStatus.WARN,"no_classes",
          # waiver: one-off human-facing message
          "no review.classes configured — run /lazy-review.configure")
 
-# Rule (cross-repo): expert@repo names must reference a declared repos key
+  # Rule (cross-repo): expert@repo names must reference a declared repos key
   repos_block = (settings.get(JobKey.REPOS) or {})
   declared_keys = {k for k in repos_block if k != JobKey.VERSION}
   for i, class_cfg in enumerate(classes):
@@ -322,7 +327,7 @@ def _check_all(settings: dict, findings: list[dict]) -> None:
         collected_names = [w.get(JobKey.NAME, "") for w in members.values()
                            if isinstance(w, dict)]
       elif group_key == Phase.HISTORY:
-          # history is single writer; @-check handled above; skip repo-key check
+        # history is single writer; @-check handled above; skip repo-key check
         continue
       elif isinstance(members, list):
         collected_names = [m.get(JobKey.NAME, "") for m in members
@@ -342,6 +347,7 @@ def _check_all(settings: dict, findings: list[dict]) -> None:
                f'not declared in `repos` — add `repos.{repo_part}: {{}}` '
                f'to lazy.settings.json')
 
+  # the section-writer schema has its own rules, checked as a separate pass
   _check_section_writers_new_schema(settings, findings)
 
 

@@ -61,6 +61,57 @@ groups:
             See state.json on the host for `dirty_paths` and (for
             pump-internal failures) the offending expert + job_id.
 
+      - alert: LazyCortexExpertJobsFailing
+        expr: |
+          sum by (repo, expert) (increase(lazycortex_runtime_expert_jobs_total{outcome!="done"}[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "Expert {{ $labels.expert }} on {{ $labels.repo }} finished a job without completing it"
+          description: |
+            At least one job of {{ $labels.expert }} ended in something other
+            than a finished outcome in the last 15 minutes — an error, a
+            deferral, a dead bundle, or a response that violated the runtime's
+            response envelope. An autonomous runtime fails silently otherwise:
+            the work stops, nothing tells anyone.
+
+            Inspect with `lazycortex-core error-list --repo <repo>` and the
+            bundles under .experts/.jobs/{{ $labels.expert }}/ on the host.
+
+      - alert: LazyCortexDeadLetterQueueGrowing
+        expr: |
+          sum by (repo, expert) (lazycortex_runtime_queue_depth{state=~"failed|deferred|dead"}) > 0
+        for: 30m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "{{ $labels.expert }} on {{ $labels.repo }} has parked bundles waiting for triage"
+          description: |
+            Bundles in state {{ $labels.state }} stay on disk holding their
+            dedup key, so the input they own is never re-dispatched until an
+            operator consumes them. A deferral clears itself once its routine's
+            window elapses; a failed or dead bundle does not.
+
+            Triage with `/lazy-runtime.recover` or `lazycortex-core error-list`.
+
+      - alert: LazyCortexIncidentsOpening
+        expr: |
+          sum by (repo, kind, cause) (increase(lazycortex_runtime_incidents_total[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: lazycortex-runtime
+        annotations:
+          summary: "New {{ $labels.kind }} incident ({{ $labels.cause }}) on {{ $labels.repo }}"
+          description: |
+            The error ledger opened at least one incident of kind
+            {{ $labels.kind }} with cause {{ $labels.cause }} in the last 15
+            minutes. Read the journal with
+            `lazycortex-core error-list --repo <repo>`.
+
       - alert: LazyCortexNoMetricsScraped
         expr: up{job=~".*lazycortex.*"} == 0
         for: 5m

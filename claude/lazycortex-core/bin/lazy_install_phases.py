@@ -52,7 +52,7 @@ def ensure_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
   for line in lines:
     stripped = line.strip()
     variants = { stripped, stripped.rstrip("/"), stripped + "/" }
-    # guard: skip entries already covered by an existing line variant
+    # an entry absent in every variant form is the only one that still needs writing
     if not existing_set & variants:
       to_append.append(stripped)
 
@@ -61,6 +61,7 @@ def ensure_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
     # waiver: install-phase outcome token, not a reusable domain key
     return "already-present"
 
+  # append the missing entries, keeping the file newline-terminated on both sides of the seam
   suffix = "" if existing.endswith("\n") or not existing else "\n"
   appended = "".join(f"{ln}\n" for ln in to_append)
   # waiver: stdlib encoding idiom
@@ -93,6 +94,7 @@ def remove_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
     # waiver: install-phase outcome token, not a reusable domain key
     return "already-absent"
 
+  # filter the file down to the lines the caller did not ask to remove
   targets = { ln.strip() for ln in lines }
   # waiver: stdlib encoding idiom
   src_lines = gi.read_text(encoding = "utf-8").splitlines()
@@ -103,6 +105,7 @@ def remove_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
     # waiver: install-phase outcome token, not a reusable domain key
     return "already-absent"
 
+  # write the survivors back, newline-terminated unless the filter emptied the file out
   body = "\n".join(kept)
   # waiver: stdlib encoding idiom
   gi.write_text(body + ("\n" if body else ""), encoding = "utf-8")
@@ -141,8 +144,10 @@ def bootstrap_logs_dir(repo: Path | str) -> str:
     if not existed:
       dir_created_any = True
 
+  # both runtime directories carry state git must never see
   gi_outcome = ensure_gitignore_lines(repo, [ ".logs/", ".runtime/" ])
 
+  # any materialisation at all — a fresh directory or a fresh ignore line — counts as a bootstrap
   # waiver: install-phase outcome token, not a reusable domain key
   if dir_created_any or gi_outcome == "updated":
     # waiver: install-phase outcome token, not a reusable domain key
@@ -180,6 +185,7 @@ def migrate_log_hooks(settings_path: Path | str) -> str:
     # waiver: install-phase outcome token, not a reusable domain key
     return "no-stale-entries"
 
+  # pull in the hook table this migration rewrites
   # waiver: stdlib encoding idiom
   settings = json.loads(settings_path.read_text(encoding = "utf-8"))
   # waiver: external Claude Code settings field name, not an internal key
@@ -214,6 +220,7 @@ def migrate_log_hooks(settings_path: Path | str) -> str:
       del hooks[event]
       changed = True
 
+  # rewrite the file only when the walk actually stripped something
   if changed:
     # waiver: external Claude Code settings field name, not an internal key
     settings["hooks"] = hooks
@@ -284,6 +291,7 @@ def bootstrap_lazyignore(repo: Path | str, template: Path | str) -> str:
     # waiver: install-phase outcome token, not a reusable domain key
     return "template-missing"
 
+  # seed the consumer's copy from the shipped template
   # waiver: stdlib encoding idiom
   target.write_text(template.read_text(encoding = "utf-8"), encoding = "utf-8")
 
@@ -291,6 +299,8 @@ def bootstrap_lazyignore(repo: Path | str, template: Path | str) -> str:
   # and halt the daemon's _check_working_tree guard
   ensure_gitignore_lines(repo, [ ".worktrees/" ])
 
+  # the install chain distinguishes a phase that planted the file from one that found it
+  # already there, so a re-run reads as quiet rather than as work redone
   # waiver: install-phase outcome token, not a reusable domain key
   return "seeded"
 
@@ -385,9 +395,9 @@ def detect_install_scope(
   home = Path.home() if home is None else Path(home)
   project_root = Path(project_root)
 
-  # guard: the shared cache is the sole proof the plugin is installed — its absence aborts
-  # regardless of any enablement flag, since there are no sources to sync
+  # the shared cache is the sole proof the plugin is installed on this machine
   entries = _installed_entries(home / _INSTALLED_PLUGINS_REL, plugin_key)
+  # guard: no install record aborts regardless of any enablement flag — there are no sources to sync
   if not entries:
     # waiver: install-scope detection signal, not a reusable domain key
     return "not-installed"
@@ -444,6 +454,7 @@ def bootstrap_daemon_git(repo: Path | str) -> str:
     # waiver: install-phase outcome token, not a reusable domain key
     return "skipped-no-branch"
 
+  # read the daemon section the seed would land in
   settings = repo / SettingsFile.REL
   section = load_tracked_section(settings, SettingsKey.DAEMON)
   # guard: an operator-written block is authoritative — never overwrite what is already there
@@ -451,10 +462,12 @@ def bootstrap_daemon_git(repo: Path | str) -> str:
     # waiver: install-phase outcome token, not a reusable domain key
     return "kept-local"
 
+  # derive the block from the checkout itself — a remote means routine output has somewhere to go
   block = { GitConfigKey.BASE_BRANCH: branch }
   if _git_capture(repo, [ "remote", "get-url", "origin" ]) is not None:
     block[GitConfigKey.REMOTE_SYNC] = "pull_push"
 
+  # persist the derived block into the tracked settings
   section[DaemonKey.GIT] = block
   save_section(settings, SettingsKey.DAEMON, section)
   # waiver: install-phase outcome token, not a reusable domain key
@@ -507,8 +520,10 @@ def bootstrap_memory_dir(repo: Path | str) -> str:
   if not mem_existed:
     mem.mkdir(parents = True, exist_ok = True)
 
+  # migrate away the legacy negation line earlier versions appended
   gi_outcome = remove_gitignore_lines(repo, [ "!.memory/", "!.memory" ])
 
+  # a fresh directory or a scrubbed legacy line each count as work done
   # waiver: install-phase outcome token, not a reusable domain key
   if not mem_existed or gi_outcome == "removed":
     # waiver: install-phase outcome token, not a reusable domain key

@@ -83,7 +83,7 @@ class TagOps:
         bucket = axes.setdefault(axis, {})
         entry = bucket.setdefault(value, { self._K_COUNT: 0, self._K_EXAMPLES: [] })
         entry[self._K_COUNT] += 1
-        # guard: keep a few distinct example summaries as light context
+        # keep a few distinct example summaries as light context
         if (
           summary
           and summary not in entry[self._K_EXAMPLES]
@@ -183,7 +183,7 @@ class TagOps:
     out: list[tuple[str, str]] = []
     for tag in cls._bare_topics(node):
       axis, sep, value = tag.partition("/")
-      # guard: skip a tag with no axis/value split
+      # collect only the tags that carry both an axis and a value
       if sep and value:
         out.append((axis, value))
     return out
@@ -207,11 +207,11 @@ class TagOps:
     for tag in bare:
       axis, sep, value = tag.partition("/")
       new_tag = tag
-      # guard: this axis/value is aliased
+      # rewrite the value when the alias map covers this axis
       if sep and axis in alias_map and value in alias_map[axis]:
         new_tag = f"{axis}/{alias_map[axis][value]}"
         hits += 1
-      # guard: drop a duplicate produced by a collapse
+      # keep the first occurrence of each tag so a collapse cannot duplicate
       if new_tag not in seen:
         seen.add(new_tag)
         out.append(new_tag)
