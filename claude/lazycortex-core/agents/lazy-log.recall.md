@@ -1,6 +1,6 @@
 ---
 name: lazy-log.recall
-description: "Search all change-history sources (run logs, changelog, raw commit log, git history, memory) for a query. Returns ranked matches with git SHAs so the user can jump to the actual commit. Use when the user asks 'why was X changed?' or 'when did we change Y?'"
+description: "Use when the user asks why or when one specific thing changed — 'why was X changed?', 'when did we switch to Y?', 'what commit removed Z?'. Searches every change-history source (changelog, run logs, commits.jsonl, git log, memory) and returns ranked individual matches with git SHAs to jump to. Pick this over `lazy-log.summary` (thematic narrative of a whole topic) and `lazy-log.timeline` (dated what-happened-when list) when the answer is a particular change to point at."
 tools: Read, Glob, Grep, Bash
 model: inherit
 logging-waiver: "single-response synthesizer — output IS the prose response, no mutations to record"

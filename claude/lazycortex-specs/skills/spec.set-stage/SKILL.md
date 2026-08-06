@@ -1,6 +1,6 @@
 ---
 name: spec.set-stage
-description: Use to change the per-file `spec_stage` of an authored spec doc (design/tech/plan/bug). Accepts a stage from the closed set `empty | draft | approved | rejected | cancelled`, rewrites `spec_stage` in frontmatter, mirrors the `spec/<stage>` tag, and appends a transition line to the nearest folder-note's `# History`. Every per-file stage change in the system goes through this primitive.
+description: "Use when one authored spec doc (design / tech / plan / bug) changes stage — a draft is approved, a plan is rejected, an asset is cancelled. Every `spec.*` skill that moves a per-file `spec_stage` delegates here instead of editing frontmatter, so the `spec/<stage>` mirror tag and the folder-note `# History` line never drift."
 execution-discipline-waiver: "Single-purpose primitive — wraps the per-file-stages reference; no multi-phase orchestration where step-skip can hide."
 ---
 # Set Per-file Stage

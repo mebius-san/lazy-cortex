@@ -1,6 +1,6 @@
 ---
 name: lazy-python.install
-description: Quiet install that wires lazycortex-python into a consumer repo — mirrors rules, deploys chk-py / tst-py wrappers, bootstraps the pyproject.toml checker stack, scaffolds project overlay guidelines, syncs the scaffold template, and records python.env_source when the repo ships an env-bootstrap script. Asks the user almost nothing: install scope is derived, `pch` (PyCharm offline inspections) follows whether `inspect.sh` is present, and it never touches CLAUDE.md (the plugin rules load from `.claude/rules/` regardless); the only prompt beyond a File-sync conflict is disambiguating multiple env_source candidates. The PostToolUse check-style hook auto-registers from the plugin manifest — no install step writes to settings.json.
+description: "Run when the operator asks to set up Python tooling in a repo, after a lazycortex-python update, or when `/lazy-python.audit` reports missing rules, wrappers, pyproject checker sections, or overlay guidelines. Also the fix whenever `chk-py` / `tst-py` aren't on hand in a repo that should have them. Idempotent and near-silent — it asks only on a genuine file conflict or when several env-bootstrap scripts are candidates."
 allowed-tools: Bash, Read, Edit, Write, Glob, Grep, Skill, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet
 user-invocable: true
 ---

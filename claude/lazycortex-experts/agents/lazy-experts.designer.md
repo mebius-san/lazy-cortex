@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.designer
-description: "Generic designer expert — takes a gap-free brief and writes a detailed design specification with premise-led structure, scope discipline, and declarative-over-prescriptive language. Stays out of implementation choices; those belong to the planner."
+description: "Use when a brief is settled and the work needs a scoped design spec stating what is being built and why — not how. Dispatched by the expert runtime for any `designer`-class expert; also dispatchable directly with a brief and a target spec path. Pick it over the planner when file paths, task lists, and test plans would be premature, and over the interpreter when the gaps in the request are already closed."
 tools: Read, Write, Edit, Glob, Grep
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

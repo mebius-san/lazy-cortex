@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import io
 import os
 import re
 import sys
@@ -196,6 +197,9 @@ SUPPRESSION_RE = re.compile(
 
 # regex matching a waiver comment with non-empty explanation text
 WAIVER_RE = re.compile(r'#\s*waiver:\s*\S')
+
+# regex matching an `opt:` or `limit:` marker whose colon ends the line, i.e. carries no clause
+EMPTY_MARKER_CLAUSE_RE = re.compile(r'#\s*(opt|limit):\s*$')
 
 # regex matching a TMP marker comment (with or without colon)
 TMP_RE = re.compile(r'#\s*TMP\b')
@@ -2167,6 +2171,39 @@ class CodeFormatAnalyzer:
       ))
 
 
+  def _check_marker_clauses(self) -> None:
+    """
+    Check that `opt:` and `limit:` marker comments carry a clause.
+
+    The whole value of both markers is the text after the colon: `opt:` states why a
+    non-obvious implementation choice was made for performance, `limit:` names the ceiling
+    of a deliberate simplification and the upgrade path past it. A marker whose colon ends
+    the line states neither. Whether the clause says anything real is a review-phase
+    judgement, not a checker one.
+
+    Only real comments are scanned. The same text inside a string literal is not a marker;
+    inside a docstring it is a D7 violation and is reported by that check instead.
+    """
+    # the tokenizer separates comments from string literals that merely look like them
+    source = '\n'.join(self.source_lines)
+    try:
+      tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+      return
+
+    # a marker whose colon ends the comment carries no clause at all
+    for token in tokens:
+      # guard: only real comments carry markers
+      if token.type != tokenize.COMMENT:
+        continue
+      match = EMPTY_MARKER_CLAUSE_RE.search(token.string)
+      if match:
+        self.issues.append((
+          token.start[0],
+          f"marker '# {match.group(1)}:' carries no clause; state what it annotates"
+        ))
+
+
   def _collect_block_linenos(self, node: ast.AST, out: list[int]) -> None:
     """
     Collect the start line of every statement belonging to one function body.
@@ -2728,6 +2765,7 @@ class CodeFormatAnalyzer:
     self._check_error_suppression()
     self._check_double_backticks()
     self._check_guard_comments()
+    self._check_marker_clauses()
     if self.check_block_comments:
       self._check_block_comments()
     self._check_typing_cast()
@@ -2777,7 +2815,7 @@ PLAIN_SECTIONS = {'Returns', 'Yields'}
 
 # regex: marker tags forbidden inside docstring text (D7).
 # these belong in code comments, never in docstring bodies.
-_DOCSTRING_MARKERS_RE = re.compile(r'\b(TODO|TMP|DBG|REF|opt|guard|DOC\s*\():')
+_DOCSTRING_MARKERS_RE = re.compile(r'\b(TODO|TMP|DBG|REF|opt|guard|limit|DOC\s*\():')
 
 # regex: imperative summary with 3+ comma-separated clauses joined by ", and " (D6).
 # matches forms like "Enter X, install Y, and render Z."
@@ -3590,7 +3628,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
     """
     D7: reject development-marker tokens inside docstring text.
 
-    The configured marker tokens (TODO, TMP, DBG, REF, opt, guard, and the
+    The configured marker tokens (TODO, TMP, DBG, REF, opt, guard, limit, and the
     `DOC(...)` tag) belong in code comments, never in docstring bodies (per
     `documenting_guidelines.md` line 19 zero-tolerance blocker).
 

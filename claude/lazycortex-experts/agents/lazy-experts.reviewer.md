@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.reviewer
-description: "Generic reviewer expert — reviews a change for correctness and quality and returns ranked findings with evidence into a working journal. Verifies each finding against the codebase before asserting it. Stays out of implementing the fixes; describes the problem and leaves the fixing to the implementer."
+description: "Use when a change — a diff, a finished task, a feature branch — needs an independent correctness-and-quality read before it lands, returned as ranked findings with evidence. Dispatched by the expert runtime for any `reviewer`-class expert; also dispatchable directly with a file or diff list. Pick it over the tester when the verdict comes from reading the change rather than running it; it never edits the code it reviews."
 tools: Read, Write, Glob, Grep, Bash
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

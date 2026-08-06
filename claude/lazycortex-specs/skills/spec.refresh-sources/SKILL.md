@@ -1,6 +1,6 @@
 ---
 name: spec.refresh-sources
-description: Re-project a spec doc's body `# Sources` sub-sections from frontmatter — `## Requests` from `spec_source_requests`, `## Docs` from `spec_source_docs` — preserving any operator-authored glosses on existing wikilink lines (matched by wikilink target). Then regenerates the `# Summary` précis for the asset note and affected container notes (category, product root), and refreshes container stats. Use after manually editing a doc's `spec_source_docs` / `spec_source_requests` frontmatter to bring the body back in sync.
+description: "Use after hand-editing a spec doc's `spec_source_docs` / `spec_source_requests` frontmatter, or whenever its body `# Sources` bullets no longer match that frontmatter. Re-projects the `## Docs` / `## Requests` lists (keeping operator glosses on existing wikilinks), then regenerates the `# Summary` précis for the asset note and its category / product-root containers and refreshes their stats. One file per call — callers loop."
 execution-discipline-waiver: "Single-purpose projection primitive — wraps the source-attribution reference; no multi-phase orchestration where step-skip can hide."
 ---
 # Refresh Sources

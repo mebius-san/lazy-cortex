@@ -1,6 +1,6 @@
 ---
 name: lazy-review.install
-description: "Per-repo bootstrap for lazycortex-review. Seeds lazy.settings.json with review.classes / experts defaults, creates .experts/.jobs/ and .logs/lazy-review/runs/ directories, registers the daemon-gated lazy-review.scan routine, and registers the plugin-CLI Bash allow-pattern in settings.local.json. Idempotent and quiet on re-run — every decision is derived or read-first, never re-asked; an enabled plugin installs its whole surface."
+description: "Run when the operator asks to set up document review in this repo, after a lazycortex-review update, or when review skills fail because `lazy.settings.json` has no `review` section, the `.experts/.jobs/` queue is missing, or the scan routine was never registered. Per-repo bootstrap only — wiring the first document class is `/lazy-review.configure`. Idempotent and quiet on re-run."
 allowed-tools: Read, AskUserQuestion, Skill, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(lazycortex-core *)
 lazy_setup_phase: install
 ---

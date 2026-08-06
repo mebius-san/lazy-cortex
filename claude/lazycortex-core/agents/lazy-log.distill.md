@@ -1,6 +1,6 @@
 ---
 name: lazy-log.distill
-description: "Convert raw commit entries from .logs/commits.jsonl into themed functional prose in ./.logs/changelog.md. Output is theme-first (## <theme>) with one paragraph per day (### YYYY-MM-DD); same-day re-runs rewrite today's paragraph in place; touched theme blocks bump to the top. Throttled to once per 4h via mtime(.logs/changelog.md). Invoke after meaningful commits (see lazy-log.logging rule) or on demand."
+description: "Use after meaningful commits land (per the lazy-log.logging cadence), or when the operator asks to catch the changelog up. Rewrites ./.logs/changelog.md as themed prose from .logs/commits.jsonl, throttled to 4h unless forced — the running internal narration, not lazy-log.bullets' per-release public block and not the read-only history searches of lazy-log.recall/summary/timeline."
 tools: Read, Write, Edit, Glob, Bash, TaskCreate, TaskUpdate, TaskList
 model: inherit
 logging-waiver: "work output IS the changelog rewrite — per-run log duplicates the artifact"

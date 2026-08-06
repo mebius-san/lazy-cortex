@@ -1,6 +1,6 @@
 ---
 name: lazy-python.audit
-description: Read-only health check across the 11 invariants the lazycortex-python plugin promises — rules mirror integrity, reference resolution, artifact presence, wrappers, pyproject sections (incl. [tool.ruff]), hook registration, venv state (mypy/pylint/pytest/ruff + pytest-clarity/pytest-sugar).
+description: "Run when the operator asks whether the Python tooling is wired up correctly, or when it silently isn't working — `chk-py` / `tst-py` missing or failing to launch, the check-style hook never firing, the python rules absent from `.claude/rules/`, a checker not in the venv. Read-only; the fix is always a re-run of `/lazy-python.install`."
 allowed-tools: Bash, Read, Glob, Grep
 user-invocable: true
 ---

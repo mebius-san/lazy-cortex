@@ -1,6 +1,6 @@
 ---
 name: spec.request-classify
-description: Classify a request file's body into a request_class token. The valid set is an OPEN set — closed meta classes (task | spec | plan | feedback | unknown) plus asset categories (built-in feature | change | bug, plus any operator-defined keys from products[<key>].asset_categories such as characters / scenes / chapters). The skill resolves the asset-category half dynamically from lazy.settings.json on every dispatch — a category registered via spec.add-asset-category is recognised on the next run without a rubric update. Output is a single lowercase token.
+description: "Dispatched by the `spec.request-router` agent during a request's review loop to label one body with a `request_class` token; not for direct use. Resolves the legal class set from `lazy.settings.json` on every dispatch, so a category added via `spec.add-asset-category` is recognised on the next run without a rubric edit."
 execution-discipline-waiver: "Single-purpose primitive — one input, one classification token."
 ---
 # Classify a request

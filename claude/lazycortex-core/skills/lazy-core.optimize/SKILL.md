@@ -1,6 +1,6 @@
 ---
 name: lazy-core.optimize
-description: "Optimize Claude Code context loading for the current project. Slims oversized rules files by moving reference material to agent definitions, audits global settings for project-specific leakage and moves entries to local settings. Run when startup feels slow or after adding new rules/agents."
+description: "Run when startup feels slow, the always-loaded context budget crosses its WARN threshold, a rules file has grown oversized, or a project-specific permission leaked into global settings. Unlike `lazy-core.audit`, which only reports, this one rewrites: it moves reference material out of rules into on-demand agent definitions and relocates leaked settings entries to the local scope."
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir -p *)
 ---
 # Context Optimization

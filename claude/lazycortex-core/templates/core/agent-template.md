@@ -1,6 +1,6 @@
 ---
 name: <namespace.name>
-description: <when to dispatch this agent, not just what it does — coordinator reads this to decide>
+description: "<trigger FIRST — `Use when <task shape>` for a generally-dispatchable agent, or `Dispatched by /<skill>; not for direct use.` when one caller owns it — then whatever distinguishes it from a sibling agent>"
 tools: Read, Glob, Grep
 model: inherit
 ---
@@ -38,7 +38,10 @@ A partial report is a bug — fail explicitly with an error string the coordinat
 Authoring notes (delete before saving):
 
 - Conform to `lazy-core.agent-writing`:
-  § 1 Frontmatter `name`, `description`, `tools` all required (FAIL if missing).
+  § 1 Frontmatter `name`, `description`, `tools` all required (FAIL if missing). `description:` opens
+      with WHEN to dispatch, never with the agent's internal job spec — the dispatching model matches
+      the task against this field to pick a `subagent_type` (mechanism-only → WARN). Shapes and
+      worked rewrites: `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`.
   § 2 Single-response model — no `AskUserQuestion` (FAIL).
   § 3 Structured-report contract for coordinator-dispatched agents.
   § 4 Multi-phase agents carry the Execution-Discipline preamble from `lazy-core.skill-writing § 1`,

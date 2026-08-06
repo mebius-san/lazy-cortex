@@ -1,6 +1,6 @@
 ---
 name: lazy-diagram.draw
-description: "Diagram dispatcher — picks (kind, format) for a free-form request, dispatches the per-format drawer agent, byte-compares against the existing fence under the anchor, and writes (or skips) one fenced diagram. Outcome vocabulary: created / replaced / unchanged / skipped-below-threshold / failed:<reason> / split-into-N. Use when you want a NEW diagram inserted under a named heading; for migrating an existing fence to current standards see /lazy-diagram.fix."
+description: "Use when a NEW diagram should land under a named heading in a markdown file — an authoring skill reaching a declared draw seam, or a direct request to draw a flow / sequence / state / architecture / layout picture of something. Picks (kind, format) from the free-form request, dispatches the per-format drawer agent, and writes one fenced diagram. For re-conforming a fence that already exists, see `/lazy-diagram.fix`."
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, Agent
 ---
 # lazy-diagram.draw

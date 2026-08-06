@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.install
-description: "Bootstrap the lazycortex-wiki plugin for the current project (or globally). Creates the template dir, syncs the navigation rule, seeds the wiki settings section + agent_models, registers the `wiki.curator` expert (always), and — when the daemon is enabled — registers the three wiki routines. Idempotent and quiet on re-run — every decision is persisted and never re-asked. Detects install scope automatically."
+description: "Run when the operator asks to set up the wiki in a repo, after a lazycortex-wiki update, or when wiki skills fail because the `lazy-wiki.navigation` rule, the `wiki` settings section, or the `wiki.curator` expert is missing from the project. Bootstrap only — defining what the wiki covers is `/wiki.configure`. Idempotent and quiet on re-run; install scope is detected, never asked."
 allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(ls *), Bash(python3 *), Bash(lazycortex-core *)
 ---
 # Install lazycortex-wiki

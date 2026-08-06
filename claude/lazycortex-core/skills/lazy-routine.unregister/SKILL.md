@@ -1,6 +1,6 @@
 ---
 name: lazy-routine.unregister
-description: Remove a named routine from lazy.settings.json. Wraps expert_runtime.unregister_routine. Protects the built-in lazy-expert.pump routine.
+description: "Run when the operator asks to stop a daemon routine for good, or before re-registering one with a different shape (register refuses to overwrite). Idempotent on a name that is not registered; refuses to remove the built-in `lazy-expert.pump` without `--force`."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Write, AskUserQuestion
 ---
 # Routine Unregister

@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.planner
-description: "Generic planner expert — takes a detailed design spec and produces an ordered implementation plan: file-level tasks, test plan, rollback procedure. Stays out of design choices; those belong to the designer."
+description: "Use when a design spec exists and the work still needs breaking down into an ordered, file-level implementation plan with a test command and a rollback procedure. Dispatched by the expert runtime for any `planner`-class expert; also dispatchable directly with a spec and a target plan path. Pick it over the designer when what to build is already decided and only the sequencing is missing, and over the implementer when nothing should be written yet."
 tools: Read, Write, Edit, Glob, Grep
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

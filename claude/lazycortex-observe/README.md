@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#fde68a"
+iconize_color: "#93c5fd"
 ---
 # lazycortex-observe
 
@@ -61,10 +61,10 @@ Requires these plugins from the same marketplace:
 
 | Skill | Description |
 |---|---|
-| `lazy-observe.audit` | Audit the lazycortex-observe plugin: verify any rule files still encode their invariants and cross-check artifact conventions. Read-first; presents findings, asks before fixing. Severity: PASS / WARN / FAIL. |
-| `lazy-observe.doctor` | Read-only health check for the lazycortex-observe shipper on this host. Verifies service status, agent process, local /metrics endpoint, agent's own remote_write success counter, observer URL reachability, and WAL bounds. Reports each as PASS / WARN / FAIL with a one-line fix suggestion. Never mutates filesystem or service state. |
-| `lazy-observe.install` | Bootstrap the lazycortex-observe shipper for this host: pre-flight-detect an already-working collection stack (and abort untouched when one exists), pick agent kind (Alloy / otelcol), collect remote_write URL + auth, render the agent config + service unit covering EVERY local runtime daemon, install + load the supervised service, smoke-test the local /metrics endpoints. Supports `--integrate-only` (contribute a Prometheus file_sd scrape-targets file to an existing stack, install no shipper) and `--force-standalone` (install the shipper despite detected coverage). Genuine config (URL, auth, agent kind) is read-first from `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` and never re-asked once on record; rendered files follow the silent file-sync policy. Idempotent and quiet on re-run. |
-| `lazy-observe.uninstall` | Tear down the lazycortex-observe shipper on this host: unload the launchd agent or systemd user unit, remove rendered configs and the WAL dir. DESTRUCTIVE — removes a supervised service, so the WAL/log and operator-private-state teardowns each ask before deleting; operator-private state under `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` is preserved by default. Idempotent — every already-absent target is a silent no-op, never an error; re-running on a clean host does nothing. |
+| `lazy-observe.audit` | Run when the operator asks to audit the lazycortex-observe plugin's own shipped surface — rule bodies still encoding their invariants, execution-discipline preambles, logging conventions. Delegated from `lazy-core.doctor` Phase 3. Not the skill for 'are my metrics arriving' — that is `/lazy-observe.doctor`; this one never looks at the running shipper. |
+| `lazy-observe.doctor` | Run when metrics stopped reaching the observer, a dashboard went flat, an alert says the shipper is down, or the operator asks whether metrics shipping is healthy on this host. Read-only end-to-end check of the service unit, agent process, local `/metrics` endpoints, remote_write success, observer reachability, and WAL size — it reports fixes with PASS / WARN / FAIL, never applies them. |
+| `lazy-observe.install` | Run when the operator asks to start shipping lazycortex runtime metrics off this host, to point the local daemons at their Prometheus / Mimir, or after `/lazy-observe.doctor` reports `not-installed`. Pre-flights for an existing collection stack and aborts untouched when one covers the host: pass `--integrate-only` when a Prometheus already runs here and only needs scrape targets, `--force-standalone` to install the shipper anyway. URL, auth, and agent kind are asked once and never re-asked; idempotent and quiet on re-run. |
+| `lazy-observe.uninstall` | Run when the operator asks to stop shipping metrics from this host, remove the lazycortex-observe service, or clean up before switching to a different observer. DESTRUCTIVE — it unloads a supervised launchd/systemd unit; the WAL, log, and operator-private-state deletions each ask first, and answers under `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` are kept by default. Idempotent — a clean host is a silent no-op. |
 
 ## Documentation
 

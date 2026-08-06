@@ -1,6 +1,6 @@
 ---
 name: lazy-review.historian
-description: "Plugin-shipped history-summary specialist. Diffs the current and prior versions of a reviewed document and produces one substantive sentence summarising what is now in the document that was not there before. Never names actors, never narrates the review process. Never edits the reviewed document."
+description: "Dispatched by the lazy-review dispatcher once per approved clean state of a reviewed document, to produce that state's `# History` entry; not for direct use. Returns one sentence naming what the document now says that it did not before — never who changed it, never the review process itself."
 tools: Read, Write
 model: inherit
 execution-discipline-waiver: "single-response specialist; no multi-phase orchestration"

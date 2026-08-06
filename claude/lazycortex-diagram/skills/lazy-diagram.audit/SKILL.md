@@ -1,6 +1,6 @@
 ---
 name: lazy-diagram.audit
-description: "Audit the lazycortex-diagram plugin: verify template well-formedness, exemplar conformance against the authoring rule, and role + init-block coverage in styles-*.json schemes. Parallel-scan coordinator dispatching 3 read-only Explore agents (A2, A3, A5). Read-first; presents findings, asks before fixing. Severity: PASS / WARN / FAIL / INFO. TODO: re-add fixture-related scans (A1, A4) when the final dev-vs-shipped split is decided."
+description: "Run when the operator asks to audit the lazycortex-diagram plugin itself — after authoring or editing a template under `templates/diagram.*/` or a `styles-*.json` scheme, or when drawn diagrams come out with unbound roles, a missing init block, or an exemplar that no longer matches the authoring rule. Delegated from `lazy-core.doctor` Phase 3. Audits the plugin's own shipped templates and schemes, never a diagram in your docs — a stale fence in a document is `/lazy-diagram.fix`."
 allowed-tools: Read, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, Agent, AskUserQuestion, Edit, Write
 ---
 # lazy-diagram.audit

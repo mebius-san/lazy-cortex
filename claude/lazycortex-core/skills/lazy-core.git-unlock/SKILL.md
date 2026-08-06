@@ -1,6 +1,6 @@
 ---
 name: lazy-core.git-unlock
-description: "Manually break the lazy-core.git staging lock. Asks before acting (AskUserQuestion). Use only when /lazy-core.git-status shows a lock that the hook's break-the-lock heuristics will not auto-break."
+description: "Run when the operator asks to force the git staging lock open after `/lazy-core.git-status` shows a holder the hook's automatic heuristics (dead PID / other host / stale-and-idle) will not break — typically a live holder that has abandoned its staging window. Confirms before deleting the lock."
 allowed-tools: "Bash(python3 *), Bash(git rev-parse *), Bash(mkdir -p *), Bash(date -u *), Read, Write, AskUserQuestion"
 dirty-tree-waiver: "deletes .git/lazy-git.lock under .git/ — never tracked by git, never enters the working tree"
 ---

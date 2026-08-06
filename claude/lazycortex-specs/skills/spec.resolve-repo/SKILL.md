@@ -1,6 +1,6 @@
 ---
 name: spec.resolve-repo
-description: Use to resolve a repo key (e.g., `backend`, `shared`) to its runtime metadata by reading the cross-plugin `lazy.settings.json[repos]` section and inspecting the local checkout's git remote. Returns `{local_path, branch, remote_url, host, owner, repo, forge, base_url}`. The forge type is derived from the remote's hostname via the known-forges table in `${CLAUDE_PLUGIN_ROOT}/references/spec.sources-protocol.md`; an explicit `forge:` override in the repo record is honored for self-hosted instances.
+description: "Dispatched by `spec.source-url` and by any `spec.*` skill that must turn a repo key from `lazy.settings.json[repos]` into a checkout path, branch, and forge — `spec.create-from-code`, `spec.sync-with-code`, `spec.doctor`, `spec.product-config`, `spec.finalize-branch`. Not for direct use: callers never inspect git remotes themselves, they call this once per repo per run and cache the record."
 execution-discipline-waiver: "Single-purpose primitive — resolves one repo key against repo-config + known-forges; no multi-phase orchestration where step-skip can hide."
 ---
 # Resolve Repo

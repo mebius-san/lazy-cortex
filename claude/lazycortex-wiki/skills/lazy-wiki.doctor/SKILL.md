@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.doctor
-description: "Audit a wiki scope's integrity: orphan topics, broken See-also links and repo keys, index desync, missing summaries, stale glosses, unknown axes, duplicate branches, broken code <wiki> blocks, and scope overlaps. Read-only by default; applies fixable repairs only after the operator confirms."
+description: "Run when the operator asks to check the wiki's health, or when the wiki misbehaves — `/wiki.query` misses material it should cover or returns entries that no longer exist, See-also links point at moved or deleted nodes, the topic index disagrees with the files on disk. Read-only audit of one scope or all; the repairs it CAN make (index rebuild, broken/stale See-also lines) are applied only after the operator confirms."
 allowed-tools: Read, Bash(lazycortex-wiki doctor *), Bash(date -u *), Bash(git rev-parse *), Bash(mkdir -p *)
 ---
 # lazy-wiki.doctor

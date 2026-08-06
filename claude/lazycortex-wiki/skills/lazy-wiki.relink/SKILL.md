@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.relink
-description: "Daemon-free, in-session relink of one wiki scope. Computes the relink plan (initial / incremental / anchor-lost) via lazycortex-wiki relink-plan, then dispatches the wiki curator as a synchronous subagent in tail:false mode to classify then link each node — the curator applies its own curation via apply-node (C-hybrid, no collector). The skill rebuilds topics.md once between phases, records the new wiki_synced_sha anchor, and makes the single commit under the operator identity. Use when there is no runtime daemon (the plugin must work standalone) or to force an in-session relink."
+description: "Use when a wiki scope's nodes need classifying and See-also linking right now — this checkout runs no runtime daemon, or the operator wants to force a relink instead of waiting for the `wiki.scan` / `wiki.relink-weekly` routines. Computes the plan (initial / incremental / anchor-lost), dispatches the wiki curator synchronously per node in tail-off mode, rebuilds `topics.md`, records the new anchor, and makes one commit under the operator identity."
 allowed-tools: Read, Bash(lazycortex-wiki *), Bash(date -u *), Bash(git *), Bash(mkdir -p *), Bash(rm -rf *), Bash(test *), Bash(cp *), Write, Agent, AskUserQuestion, TaskCreate, TaskUpdate, TaskList
 ---
 # lazy-wiki.relink

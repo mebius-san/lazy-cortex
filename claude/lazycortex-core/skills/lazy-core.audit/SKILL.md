@@ -1,6 +1,6 @@
 ---
 name: lazy-core.audit
-description: "Quick read-only audit of what gets loaded into conversation context at startup plus skill-writing, agent-writing, rule-writing, and logging compliance. Shows sizes, loading behavior, optimization opportunities, Execution-Discipline preamble presence, no-Optional headings, narrative-padding heuristics, rule-file frontmatter/size/code-block/scope enforcement, and logging-rule installation state. No changes made."
+description: "Run when the operator asks why sessions start heavy, what is loaded into context at startup, or whether this repo's skills / agents / rules follow the authoring and logging rules. Read-only, reports only — the sibling `/lazy-core.doctor` is the one that checks cross-artifact consistency and offers fixes."
 allowed-tools: Read, Glob, Grep, Bash(wc *), Bash(command -v python3), Bash(python3 --version), Bash(python3 *), Bash(test *)
 ---
 # Context Audit
@@ -140,21 +140,23 @@ Emit WARN only when the match survives all three gates.
 
 **Naming hygiene** — for `.claude/skills/*/`, `.claude/agents/*.md`, `.claude/commands/*.md`, `.claude/hooks/*`, `.claude/rules/*.md`: filename (or directory name for skills) must use dot-namespace (`namespace.name`). `[WARN]` for anything missing a dot (e.g., `logging.md` → `<namespace>.logging.md`).
 
-**Skill-writing compliance** — see `lazy-core.skill-writing`. File set: `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md` (commands exempt from the preamble check). Four checks:
+**Skill-writing compliance** — see `lazy-core.skill-writing`. File set: `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md` (commands exempt from the preamble check). Five checks:
 
 1. **Preamble present** — grep each file for `^## Execution discipline (MANDATORY`. Absent AND no `execution-discipline-waiver:` in frontmatter → `[FAIL]`. Frontmatter carries a non-empty `execution-discipline-waiver: "<reason>"` string → `[INFO]` with the waiver reason (visible, not silent). Frontmatter carries `execution-discipline-waiver: true` / `yes` / `""` → `[FAIL]` (invalid waiver).
 2. **No "Optional" in phase/step headings** — grep for `^##+ .*[Pp]hase.*[Oo]ptional`, `^##+ .*[Ss]tep.*[Oo]ptional`, and any `^### .*[Oo]ptional`. Match → `[FAIL]`.
 3. **Narrative padding (heuristic)** — grep the body (exclude frontmatter) for the denylist: `\bv\d+\.\d+\.\d+`, `user had to`, `we got burned`, `in a past session`, `in a previous run`, `user had to patch`. Match → `[WARN]` with the offending line. Final decision is the author's — heuristic, not structural.
 4. **Valid `lazy_setup_phase` value** — grep frontmatter for `^lazy_setup_phase:`. Value outside `{pre-install, per-plugin, post-install}` → `[WARN]` with the offending value. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md` for the contract.
+5. **`description:` states when to invoke** — see `lazy-core.skill-writing § 8` and `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`. Read each file's `description:` and judge it against the three trigger shapes; mechanism-only → `[WARN] description states mechanism, not a trigger — <skill> will not be selected | <path>`. Absent `description:` → `[FAIL]`. This is a judgement call, not a grep — read the reference before ruling on a batch.
 
 **Agent-writing compliance** — see `lazy-core.agent-writing`. File set: `.claude/agents/*.md`, `claude/*/agents/*.md`. Checks:
 
 1. **Frontmatter complete** — `name`, `description`, `tools` all present. Missing any → `[FAIL]`.
-2. **Preamble present** (for multi-phase agents) — same check as skill-writing §1. Agents with `## Phase N` or `## Process` sections must carry the preamble OR a valid `execution-discipline-waiver:` string. Same FAIL/INFO vocabulary.
-3. **No `AskUserQuestion` in agent body** — grep for `AskUserQuestion` outside fenced code/frontmatter. Match → `[FAIL]` (agents have no user channel).
-4. **Tool allowlist hygiene** — `tools: ["*"]` → `[WARN]` (unless a justification comment on the same line).
-5. **No "Optional" in phase/step headings** — same as skill-writing §2 → `[FAIL]`.
-6. **Narrative padding (heuristic)** — same denylist as skill-writing §3 → `[WARN]`.
+2. **`description:` states when to dispatch** — same judgement as skill-writing check 5, against `lazy-core.agent-writing § 1`. An agent whose sole caller is one skill satisfies it by naming that caller. Mechanism-only → `[WARN]`.
+3. **Preamble present** (for multi-phase agents) — same check as skill-writing §1. Agents with `## Phase N` or `## Process` sections must carry the preamble OR a valid `execution-discipline-waiver:` string. Same FAIL/INFO vocabulary.
+4. **No `AskUserQuestion` in agent body** — grep for `AskUserQuestion` outside fenced code/frontmatter. Match → `[FAIL]` (agents have no user channel).
+5. **Tool allowlist hygiene** — `tools: ["*"]` → `[WARN]` (unless a justification comment on the same line).
+6. **No "Optional" in phase/step headings** — same as skill-writing §2 → `[FAIL]`.
+7. **Narrative padding (heuristic)** — same denylist as skill-writing §3 → `[WARN]`.
 
 **Model routing** — load both settings files via `bin/lazy_settings.py`:
 
@@ -610,10 +612,12 @@ One line per Agent B naming `[WARN]`.
 - **Waivered files** (INFO) — one line per file with `execution-discipline-waiver: "<reason>"`.
 - **Narrative-padding heuristic** (WARN) — one line per match with the offending line.
 - **Invalid `lazy_setup_phase` value** (WARN) — one line per match with the offending value.
+- **`description:` states mechanism, not a trigger** (WARN) — one line per skill, prefixed by a `<n> of <total>` count line. A skill the router cannot select is dead surface, so the ratio is the finding as much as the individual lines are.
 
 ### Agent-writing compliance
 
 - **Frontmatter incomplete** (FAIL) — one line per agent missing `name`/`description`/`tools`.
+- **`description:` states mechanism, not a trigger** (WARN) — one line per agent, same `<n> of <total>` count line.
 - **Missing preamble** (FAIL) — multi-phase agents without preamble and without valid waiver.
 - **`AskUserQuestion` in agent body** (FAIL) — one line per match.
 - **`tools: ["*"]` without justification** (WARN) — one line per match.
@@ -720,6 +724,7 @@ If all L1–L4 checks pass: emit a single `PASS: logging rule installed, .logs/ 
 - Rule over size budget → move long guidance to `<plugin>/skills/<skill>/references/*.md` per `lazy-core.rule-writing § 2`.
 - "Optional" in phase/step heading → rename the heading; the user's accept/decline choice belongs inside an `AskUserQuestion`, not at the heading level.
 - Narrative-padding match → review and drop the passage if its removal leaves executable behavior unchanged.
+- Mechanism-only `description:` → rewrite it to open with the invocation condition, per `lazy-core.skill-writing § 8` and the shapes in `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`. Mechanism moves into the body, where it costs nothing. `lazy-core.doctor` Phase 4 offers a per-finding rewrite (never batched).
 - `lazy.settings.json[experts]` FAIL → add missing fields per the expert schema; run `/lazy-core.install` wizard step to re-scaffold.
 - Reference resolution FAIL → verify the agent reference uses a valid format (`<plugin>:<name>`, `user:<name>`, or bare `<name>`) and that the referenced artifact exists.
 - Loop settings FAIL → re-run `/lazy-core.install` to scaffold or repair the flat `daemon` and `routines` sections in `lazy.settings.json`.

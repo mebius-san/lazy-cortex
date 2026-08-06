@@ -1,6 +1,6 @@
 ---
 name: lazy-core.doctor
-description: "Health check for Claude Code project configuration. Verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, checks that installed plugins are at the latest marketplace version, and delegates to sibling audit skills (lazy-guard.check-public, per-plugin audits) when they apply. Reports issues and offers targeted fixes. Run periodically or when something feels off."
+description: "Run when the operator asks whether the project config is healthy, or when something feels off — a rule or skill is not firing, plugins may be behind the marketplace, settings / agents / memory / hooks / CLAUDE.md have drifted apart. Merges its own cross-artifact scan with the installed plugins' audits and offers per-finding fixes; the sibling `/lazy-core.audit` only measures context weight and authoring compliance and never fixes."
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash(python3 *), mcp__*__recall, mcp__*__retain
 ---
 # Project Health Check
@@ -388,6 +388,21 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 - *Run condition*: `.claude/lazy.settings.json` contains a non-empty `experts` section, a `lazy-core.runtime` section, **or a non-empty `external_dirs.paths` list**. Skip if none is present (no expert runtime configured — silent skip, no report entry). Test the `paths` list, never the section: a settings migration stamps a `{"_version": 1}` stub for every known section into every repo, so "non-empty section" would match everywhere and defeat the skip.
 - *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D13 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).
 
+**11g. Obsidian coverage** → `lazy-obsidian.audit`
+- *Availability*: `lazycortex-obsidian` meets the canonical signal set above.
+- *Run condition*: same as availability — plugin installation / enablement is the opt-in.
+- *On invoke*: fold audit findings into an **Obsidian** subsection.
+
+**11h. Python coverage** → `lazy-python.audit`
+- *Availability*: `lazycortex-python` meets the canonical signal set above.
+- *Run condition*: same as availability — plugin installation / enablement is the opt-in.
+- *On invoke*: fold audit findings into a **Python** subsection.
+
+**11i. Description triggers** — inline, via `lazy-core.audit` skill-writing check 5 + agent-writing check 2
+- *Availability*: always — the contract lives in `lazycortex-core` itself.
+- *Run condition*: at least one file in `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md`, `.claude/agents/*.md`, or `claude/*/agents/*.md`. No local skills or agents → silent skip.
+- *On invoke*: `Read` `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`, then judge every one of those files' `description:` against it inline (do NOT dispatch a separate skill). One `[WARN]` per mechanism-only description, `[FAIL]` per missing one; fold into a **Description triggers** subsection. A description that will not fire is invisible to the router, so the count matters as much as the individual lines — lead the subsection with `<n> of <total> descriptions carry no trigger`.
+
 ## Phase 4 — Present + fix + waive
 
 Render in the existing format, with a new "Waived" tail section covering findings Phase 2.7 suppressed:
@@ -431,6 +446,7 @@ After the report, ask the user which fixes to apply. Apply only confirmed fixes.
 - Rule lacks scope AND waiver → ask the user, per rule, whether the rule is legitimately always-loaded. If yes, add `always_loaded: <reason>` (reason must be substantive — one line explaining *why* every turn needs it, not `true`). If no, add a `paths:` block-list narrowing it to the folders where it applies. Show the proposed frontmatter diff before writing. Never auto-pick a scope — only the user knows the rule's true audience.
 - Inline-array `paths:` shape (FAIL from `lazy-core.audit` rule-writing check 3) → in-place migration to canonical YAML block-list. Parse the existing `paths: ["a", "b", ...]` line, preserve all globs verbatim (including quote style), rewrite as a key on its own line followed by one `  - "<glob>"` per array element. The conversion is mechanical (no semantic change) but always show the diff before writing — the rule file is loaded into context for whoever's editing files in its scope, so even a YAML-shape change deserves explicit user confirmation. Apply per-rule via `AskUserQuestion`; batch only on explicit "apply all" from the user.
 - Authoring rule without template reference (WARN from `lazy-core.audit` rule-writing check 9) → ask the user, per finding, whether to scaffold a template. Two-step fix: (1) derive `<artifact-type>` from the rule filename (`*.writing.md` → strip `-writing`/`.writing` and pluralize as needed; e.g. `lazy-core.skill-writing.md` → `skill`), copy the matching base template (`<plugin>/templates/core/{rule,skill,agent}-template.md`) to `<plugin>/templates/<group>/<derived-name>-template.md` — default `<group>` to the plugin's primary namespace (`core` for `lazycortex-core`); ask the user if they prefer a different group name. (2) Prepend `**Template:** ${CLAUDE_PLUGIN_ROOT}/templates/<group>/<derived-name>-template.md — start here when creating a new <artifact-type>.` immediately after the rule's H1 + orientation paragraph, before the first `## ` section. Show the full diff (new template file + rule edit) before writing; apply only on explicit user confirmation. Per `lazy-core.scaffold`.
+- Mechanism-only `description:` (WARN from Phase 3 § 11i) → offer a rewrite, one finding at a time. First `Read` `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md` and the artifact's own body: the trigger has to come from what the file actually does and who actually calls it, so before proposing a caller trigger, grep the artifact's name across `.claude/` and `claude/` and name the caller you found. Compose the replacement `description:` line, show it beside the current one, and ask per finding via `AskUserQuestion` (`replace` / `keep` / `let me word it`). On confirmation `Edit` that one frontmatter line and nothing else — not the body, not another key. **Never batch this offer**: each description is a separate judgement about what the artifact is for, an "apply all auto-fixable" answer does not reach it, and a wrong trigger is worse than an honest mechanism line because it makes the router fire the skill on the wrong requests. A `FAIL` (absent `description:`) is reported, never fixed — a missing description means the author never said what the artifact is for, and that is not doctor's call.
 - Memory index: add missing entries, remove broken links; flag stale for review.
 - Settings leakage: offer to move entries between files (respect the split in `rules/lazy-core.hygiene.md`).
 - Permissions leakage into tracked `settings.json`: offer an in-place migration — move the entire `permissions.*` block (both `allow` and `ask` arrays) from tracked `settings.json` to the paired `settings.local.json`. Merge with any existing entries there, preserving order and deduplicating. Leave `enabledPlugins`, `hooks`, `env`, `enabledMcpjsonServers`, and similar enablement flags in the tracked file untouched. Show the diff before writing; apply only on explicit user confirmation.
@@ -438,7 +454,7 @@ After the report, ask the user which fixes to apply. Apply only confirmed fixes.
 - Path hygiene: replace hardcoded paths with relative equivalents; show diff before applying.
 - MCP enablement: either set `enableAllProjectMcpServers: true` in global settings or add `enabledMcpjsonServers` to project settings; remove stale entries.
 - MCP tools not whitelisted: invoke `lazy-guard.allow-mcp <server>` for each confirmed finding — do NOT write `permissions.allow` directly from doctor. `allow-mcp` owns scope-routing, dedup, and cross-scope cleanup; reusing it keeps both skills consistent.
-- Agents / skills / CLAUDE.md / hook scripts — report only, never auto-edit.
+- Agents / skills / CLAUDE.md / hook scripts — report only, never auto-edit. The one carve-out is the `description:` frontmatter line, via the per-finding offer above; every other byte of a skill or agent stays report-only.
 - Plugin dependency warnings — report only; fixing requires enabling the missing plugin in `settings.json` (user's decision) or editing the declaring plugin's manifest.
 - Plugin outdated / unrecorded version (Phase 2.5) — report only; direct the user to run `/plugin update <name>` or reinstall. Doctor never shells out to `claude plugin update`. In release mode, Phase 2.6 suppresses content findings on this plugin's owned rules — the suppression counter is surfaced so the user knows to re-run after upgrading.
 

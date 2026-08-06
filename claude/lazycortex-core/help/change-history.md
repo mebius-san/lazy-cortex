@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Run-log housekeeping and change-history access — clean up orphaned log directories, distill commits into themed prose, and ask "why was X changed?" across every source at once.
-last_regen: 2026-07-16
+last_regen: 2026-08-06
 diagram_spec:
   anchor: "How the members fit together"
   request: "Architecture diagram showing the two groups of members in the change-history block: (1) lazy-log.clean prunes the .logs/claude/ tree; (2) lazy-log.distill converts .logs/commits.jsonl into .logs/changelog.md; (3) lazy-log.recall, lazy-log.timeline, and lazy-log.summary read from changelog + run logs + git log + memory to answer history queries; (4) lazy-log.bullets reads git commits to produce a user-facing release block. Show the shared inputs (commits.jsonl, changelog.md, run logs) feeding the query agents."
@@ -37,7 +37,7 @@ The block divides into two groups: **maintenance** and **querying**.
 
 On the maintenance side, `/lazy-log.clean` and `lazy-log.distill` are the keepers of record quality. Run `/lazy-log.clean` when `.logs/claude/` has accumulated folders from renamed, retired, or now-waivered skills — it removes the noise without destroying historical value, offering a distill-to-memory path for any logs worth keeping. Run `lazy-log.distill` on demand (or let it run automatically after commits) to keep the internal changelog current; without recent distillation the query agents fall back to raw `.logs/commits.jsonl` entries and miss the functional prose that makes recall searches fast and accurate.
 
-On the query side, the three search agents draw from the same four sources — changelog, run logs, raw commits, git log — and differ only in their output shape:
+On the query side, the three search agents draw from the same four sources — changelog, run logs, raw commits, git log — and differ in the shape of question each answers:
 
 | Agent | Best for |
 |---|---|

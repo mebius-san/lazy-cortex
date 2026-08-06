@@ -1,6 +1,6 @@
 ---
 name: lazy-expert.cancel-job
-description: Cancel an expert job — stop its executor immediately and mark the bundle CANCELLED, keeping the directory for forensics. Confirms via AskUserQuestion. Wraps expert_runtime.cancel_job.
+description: "Run when the operator wants an expert job stopped — wrong expert, changed requirements, a moved source file, or a job that should not finish. Confirms, kills the executor, and marks the bundle CANCELLED; the job directory stays on disk for forensics and the dedup key is released so the same work can be re-dispatched."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Write, AskUserQuestion
 ---
 # Expert Cancel Job

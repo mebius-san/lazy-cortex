@@ -52,9 +52,9 @@ Requires these plugins from the same marketplace:
 
 | Skill | Description |
 |---|---|
-| `lazy-python.audit` | Read-only health check across the 11 invariants the lazycortex-python plugin promises — rules mirror integrity, reference resolution, artifact presence, wrappers, pyproject sections (incl. [tool.ruff]), hook registration, venv state (mypy/pylint/pytest/ruff + pytest-clarity/pytest-sugar). |
-| `lazy-python.check-style` | Six-step Python code/style review — manually-invoked workflow that reads canon + overlay, identifies modified files, runs manual inspection categories, then dispatches chk-py + tst-py to gate. |
-| `lazy-python.install` | Quiet install that wires lazycortex-python into a consumer repo — mirrors rules, deploys chk-py / tst-py wrappers, bootstraps the pyproject.toml checker stack, scaffolds project overlay guidelines, syncs the scaffold template, and records python.env_source when the repo ships an env-bootstrap script. Asks the user almost nothing: install scope is derived, `pch` (PyCharm offline inspections) follows whether `inspect.sh` is present, and it never touches CLAUDE.md (the plugin rules load from `.claude/rules/` regardless); the only prompt beyond a File-sync conflict is disambiguating multiple env_source candidates. The PostToolUse check-style hook auto-registers from the plugin manifest — no install step writes to settings.json. |
+| `lazy-python.audit` | Run when the operator asks whether the Python tooling is wired up correctly, or when it silently isn't working — `chk-py` / `tst-py` missing or failing to launch, the check-style hook never firing, the python rules absent from `.claude/rules/`, a checker not in the venv. Read-only; the fix is always a re-run of `/lazy-python.install`. |
+| `lazy-python.check-style` | Use when the user asks to review, check, or clean up Python code they just changed — 'check my style', 'review these files against our guidelines', 'is this ready to commit'. Run it after a batch of edits and before committing: it pairs manual guideline inspection (the things `chk-py` cannot see, read fresh from the canon plus the project overlay) with the full `chk-py` + `tst-py` gate and a re-verify pass. |
+| `lazy-python.install` | Run when the operator asks to set up Python tooling in a repo, after a lazycortex-python update, or when `/lazy-python.audit` reports missing rules, wrappers, pyproject checker sections, or overlay guidelines. Also the fix whenever `chk-py` / `tst-py` aren't on hand in a repo that should have them. Idempotent and near-silent — it asks only on a genuine file conflict or when several env-bootstrap scripts are candidates. |
 
 ## Documentation
 
@@ -67,7 +67,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/install-and-audit.md) — Bootstrap lazycortex-python into your repo with an 8-step install wizard (incl. python.env_source detection) and verify with the 11-check read-only audit.
 - [overlay](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/overlay.md) — Project-specific guideline files in docs/guidelines/ plus [tool.pcf] declarations in pyproject.toml let you extend the project-neutral canon per repo.
 - [scaffold](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/scaffold.md) — Canonical Python file skeletons — python-template.py for regular files, init-template.py for __init__.py — installed once via /lazy-python.install Step 6.
-- [add-project-overlay](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/add-project-overlay.md) — Register a project docstring section in pyproject.toml and a coding-guideline clause in the overlay, then confirm both the docstring writer and the code reviewer honor them.
+- [add-project-overlay](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/add-project-overlay.md) — Register a coding-guideline clause in the project overlay, then confirm both /lazy-python.check-style and the chk-py review gate's lazy-python.code-reviewer catch it.
 - [install-and-first-check](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/install-and-first-check.md) — Install lazycortex-python, then run chk-py all -q directly to build the project venv and prove the seven-step gate is clean.
 - [migrate-existing-repo](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/migrate-existing-repo.md) — Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation across the seven-step gate (including guideline review), and fix them in committed chunks.
 - [write-tests-for-new-class](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/write-tests-for-new-class.md) — Dispatch lazy-python.test-writer against a new class and get a test file that covers all seven Paranoid-Testing categories, verified by tst-py.
@@ -80,9 +80,9 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Agent | Description |
 |---|---|
-| `lazy-python.code-reviewer` | Use this agent to review new or changed Python code against the `lazy-python.*` guidelines plus the project's own overlay — the guideline layer no script can check. Dispatch it as the review phase of the check pipeline (`chk-py review` prints the manifest and names this agent), or directly with an explicit file list. It reports findings only; it never edits code. |
-| `lazy-python.docstring-writer` | Use this agent when adding or fixing docstrings on classes, methods, or properties in a Python codebase that adopts the `lazy-python.*` documentation conventions. Reads canonical guidelines from the plugin plus the project overlay on every dispatch. |
-| `lazy-python.test-writer` | Use this agent when writing unit tests for a class or module in a Python codebase that adopts the `lazy-python.*` testing conventions. Reads canonical testing and checking guidelines from the plugin plus the project overlay on every dispatch. Never modifies production code — only writes test files. |
+| `lazy-python.code-reviewer` | Dispatch as the review phase of the Python check pipeline — `chk-py review` prints a manifest and names this agent — or directly with an explicit file list when new or changed Python needs judging against the `lazy-python.*` guidelines plus the project's own overlay, the layer no script can check. It reports findings only; it never edits code. Examples: <example> Context: The checkers are green and the change is ready for the review phase. user: "chk-py review printed a manifest" assistant: "I'll dispatch the lazy-python.code-reviewer agent against that manifest." </example> <example> Context: The user wants an existing file reviewed for guideline conformance. user: "Review src/core/entity.py against our guidelines" assistant: "I'll use the lazy-python.code-reviewer agent to review that file." </example> |
+| `lazy-python.docstring-writer` | Use this agent when adding or fixing docstrings on classes, methods, or properties in a Python codebase that adopts the `lazy-python.*` documentation conventions. Reads canonical guidelines from the plugin plus the project overlay on every dispatch. Examples: <example> Context: A class or method is missing a docstring or has a non-compliant one. user: "Write docstrings for this class" assistant: "I'll use the lazy-python.docstring-writer agent to generate compliant docstrings." </example> |
+| `lazy-python.test-writer` | Use this agent when writing unit tests for a class or module in a Python codebase that adopts the `lazy-python.*` testing conventions. Reads canonical testing and checking guidelines from the plugin plus the project overlay on every dispatch. Never modifies production code — only writes test files. Examples: <example> Context: A new class was written and needs tests. user: "Write tests for DataRoll" assistant: "I'll use the lazy-python.test-writer agent to create compliant tests." </example> |
 
 ## Commands
 
@@ -102,7 +102,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Hook | Trigger | Description |
 |---|---|---|
-| `lazy-python.check-style` | `Edit\|Write` | PostToolUse hook for lazy-python. |
+| `lazy-python.check-style` | `Edit\|Write` | lazy-python.check-style.sh |
 
 ## Installation
 

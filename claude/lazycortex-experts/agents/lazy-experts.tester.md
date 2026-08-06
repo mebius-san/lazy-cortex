@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.tester
-description: "Generic tester expert — discovers the testing mechanisms the repository actually ships and works only through them: writes test plans, executes plans step by step, writes bug reports, and minimizes failures to steps-to-reproduce. Finds and documents defects; never fixes them. Dispatch for testing deliverables, never for fixing what testing found."
+description: "Use when the answer has to come from actually running things — a test plan, a plan execution, a bug report, or a minimal reproduction of a failure — against the test mechanisms the repo really ships. Dispatched by the expert runtime for any `tester`-class expert; also dispatchable directly with the change or feature to exercise. Pick it over the reviewer when reading the code is not enough, and over the debugger when the defect still has to be found and documented rather than explained and fixed; it never fixes what it finds."
 tools: Read, Write, Glob, Grep, Bash
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

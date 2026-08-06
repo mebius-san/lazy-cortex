@@ -1,6 +1,6 @@
 ---
 name: spec.flip-gate
-description: Flip one asset progression gate (spec_design_done / spec_plan_done / spec_develop_done / spec_tests_passing / spec_released) true→false or back, by subprocessing the flip-gate primitive. Confirms the flip with one wizard question unless invoked --auto.
+description: "Run when the operator declares an asset's progression gate reached or wants one walked back — 'design is approved', 'tests pass now', 'this is released', 'un-flip spec_released'. Interactive by default (one confirm question); non-interactive callers such as the `spec.gate-tick` worker pass `--auto`."
 execution-discipline-waiver: "Thin confirm-then-subprocess wrapper over bin/flip_gate.py — the precondition logic and all side effects live in the primitive; no multi-phase orchestration where step-skip can hide."
 ---
 # Flip a Gate

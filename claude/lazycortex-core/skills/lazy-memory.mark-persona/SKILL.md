@@ -1,6 +1,6 @@
 ---
 name: lazy-memory.mark-persona
-description: Opt one expert into the memory subsystem by appending `lazycortex-core:lazy-memory.persona-aspect` to its `aspects[]` in `lazy.settings.json[experts][<expert>]`. Idempotent — re-running on an already-marked expert is a no-op.
+description: "Run when the operator asks to give an expert memory (let it keep notes between jobs), or when an audit reports that `.memory/<expert>/` exists but the expert is not marked persona. Appends the persona aspect to that one expert; idempotent."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Write, AskUserQuestion
 ---
 # Mark expert as persona

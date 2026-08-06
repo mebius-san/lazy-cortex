@@ -1,6 +1,6 @@
 ---
 name: lazy-core.agent-models
-description: "Interactively assign model tiers (haiku/sonnet/opus/default) to every dispatchable subagent missing from `lazy.settings.json`, and prune entries whose plugin agent no longer exists. Auto-routes each entry to its structurally-correct scope: `_user.*` → global file, `_project.*` → project file, `_builtin.*` → global (override with `--scope=project|global`). Non-interactive executors (`lazy-core.autosetup`) auto-apply the curated tiers from `default-tiers.json`, apply the prune, and report the rest as needs-interactive. Cheap, standalone, idempotent — safe to re-run. Invoked directly or by `lazy-core.optimize` Phase 7."
+description: "Run when the operator asks which model each subagent runs on or wants to set them — after adding agents, after a fresh `/lazy-core.install`, or when an audit reports missing `agent_models` entries. Also runs as Phase 7 of `/lazy-core.optimize`. Interactive wizard over the entries install did not already seed; also prunes entries whose agent file is gone. Cheap, standalone, safe to re-run."
 allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(date *), Bash(test *), Bash(python3 *)
 lazy_setup_phase: post-install
 ---

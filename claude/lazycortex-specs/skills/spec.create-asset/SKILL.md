@@ -1,6 +1,6 @@
 ---
 name: spec.create-asset
-description: Universal asset-creation skill — scaffolds one asset folder (`<spec_path>/<category>/<slug>/`) under a registered product for any asset category (built-in feature / change / bug, or an operator-defined category from the product's `asset_categories`), asks category-scaled clarifying questions, authors the docs in the product's language, and draws the primary behavioral diagram(s). The three built-in `spec.create-feature` / `spec.create-change` / `spec.create-bug` skills are thin wrappers that pin `<category>` and delegate here.
+description: "Use when the user asks to add a new feature, change, bug — or any operator-defined asset category such as characters / scenes / chapters — to a product that already has a spec. The built-in `spec.create-feature` / `spec.create-change` / `spec.create-bug` skills only pin the category and delegate here; invoke this one directly for every other category."
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Skill, AskUserQuestion, TaskCreate, TaskUpdate, TaskList
 ---
 # Create Asset

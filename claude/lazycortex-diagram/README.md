@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#93c5fd"
 ---
 # lazycortex-diagram
 
@@ -43,10 +43,10 @@ Requires these plugins from the same marketplace:
 
 | Skill | Description |
 |---|---|
-| `lazy-diagram.audit` | Audit the lazycortex-diagram plugin: verify template well-formedness, exemplar conformance against the authoring rule, and role + init-block coverage in styles-*.json schemes. Parallel-scan coordinator dispatching 3 read-only Explore agents (A2, A3, A5). Read-first; presents findings, asks before fixing. Severity: PASS / WARN / FAIL / INFO. TODO: re-add fixture-related scans (A1, A4) when the final dev-vs-shipped split is decided. |
-| `lazy-diagram.draw` | Diagram dispatcher — picks (kind, format) for a free-form request, dispatches the per-format drawer agent, byte-compares against the existing fence under the anchor, and writes (or skips) one fenced diagram. Outcome vocabulary: created / replaced / unchanged / skipped-below-threshold / failed:<reason> / split-into-N. Use when you want a NEW diagram inserted under a named heading; for migrating an existing fence to current standards see /lazy-diagram.fix. |
-| `lazy-diagram.fix` | Take an existing diagram fence and re-conform it to the current drawer-agent standards. Reads the host section's prose as the request, infers (kind, format) from the existing fence's syntax marker, dispatches the per-format drawer agent, and replaces the fence in place when the body differs. Outcome vocabulary: replaced / unchanged / failed:<reason>. Use when an old diagram drifted from the contract (palette removed, theme directive missing, terminology changed); for inserting a NEW fence under a heading see /lazy-diagram.draw. |
-| `lazy-diagram.install` | Bootstrap the lazycortex-diagram plugin for the current project (or globally). Syncs the authoring rule shipped by the plugin into the consumer's rules directory and seeds agent model tiers for the per-format drawer agents. Idempotent and quiet on re-run — an enabled plugin installs its whole surface, decisions are derived not asked, and orphaned rules are left in place. Detects install scope automatically. |
+| `lazy-diagram.audit` | Run when the operator asks to audit the lazycortex-diagram plugin itself — after authoring or editing a template under `templates/diagram.*/` or a `styles-*.json` scheme, or when drawn diagrams come out with unbound roles, a missing init block, or an exemplar that no longer matches the authoring rule. Delegated from `lazy-core.doctor` Phase 3. Audits the plugin's own shipped templates and schemes, never a diagram in your docs — a stale fence in a document is `/lazy-diagram.fix`. |
+| `lazy-diagram.draw` | Use when a NEW diagram should land under a named heading in a markdown file — an authoring skill reaching a declared draw seam, or a direct request to draw a flow / sequence / state / architecture / layout picture of something. Picks (kind, format) from the free-form request, dispatches the per-format drawer agent, and writes one fenced diagram. For re-conforming a fence that already exists, see `/lazy-diagram.fix`. |
+| `lazy-diagram.fix` | Use when a diagram fence that already exists has drifted from the current contract — hardcoded palette, missing theme directive, node labels that no longer match the prose around them — or when `/lazy-diagram.audit` offers to repair an offending file. Infers (kind, format) from the fence's syntax marker, re-renders it against the host section's prose, and replaces it in place. For inserting a NEW fence under a heading, see `/lazy-diagram.draw`. |
+| `lazy-diagram.install` | Run when the operator asks to set up diagram drawing in a repo, and again after a plugin update so new artifacts land. Also the answer when `/lazy-diagram.draw` or `/lazy-diagram.fix` misbehaves because the `lazy-diagram.authoring` rule is missing from the rules directory or the drawer agents have no model tier assigned. Idempotent and quiet on re-run; install scope is detected, not asked. |
 
 ## Documentation
 
@@ -63,8 +63,8 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Agent | Description |
 |---|---|
-| `lazy-diagram.draw-ascii` | Single-pass writer agent: produces an ASCII diagram body for a given (kind, request, exemplar). Dispatched by /lazy-diagram.draw or /lazy-diagram.fix, or invokable directly by any caller that supplies kind=<X>. Returns the diagram block content (without surrounding triple-backticks) as its response. Use when you have already chosen kind=<one of: flow, fs-tree, layout> and format=ascii. |
-| `lazy-diagram.draw-mermaid` | Single-pass writer agent: produces a mermaid diagram body for a given (kind, request, scheme). Dispatched by /lazy-diagram.draw or /lazy-diagram.fix, or invokable directly by any caller that supplies kind=<X>. Returns the diagram fence content (without surrounding triple-backticks) as its response. Use when you have already chosen kind=<one of: flow, sequence, state, erd, class, architecture, layout, nav, tree, controls-scheme, decision-tree, screen-scheme, journey, mindmap, gantt, timeline> and format=mermaid. |
+| `lazy-diagram.draw-ascii` | Dispatched by /lazy-diagram.draw or /lazy-diagram.fix once kind and format are settled; dispatch it directly only when you have ALREADY chosen format=ascii and kind=<one of: flow, fs-tree, layout> — it never infers either. Single-pass writer: its whole response is the ASCII diagram body, without the surrounding triple-backticks. |
+| `lazy-diagram.draw-mermaid` | Dispatched by /lazy-diagram.draw or /lazy-diagram.fix once kind and format are settled; dispatch it directly only when you have ALREADY chosen format=mermaid and kind=<one of: flow, sequence, state, erd, class, architecture, layout, nav, tree, controls-scheme, decision-tree, screen-scheme, journey, mindmap, gantt, timeline> — it never infers either. Single-pass writer: its whole response is the mermaid fence body, without the surrounding triple-backticks. |
 
 ## Commands
 

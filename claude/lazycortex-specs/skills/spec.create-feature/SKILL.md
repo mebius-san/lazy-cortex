@@ -1,6 +1,6 @@
 ---
 name: spec.create-feature
-description: Built-in wrapper over `spec.create-asset` — pins `<category>` to `feature` and delegates. Use when adding a new feature to a product that already has a spec; all clarification, scaffolding, prose, and diagrams are owned by `spec.create-asset`.
+description: "Use when adding a new feature to a product that already has a spec. Built-in wrapper: pins `<category>` to `feature` and delegates — all clarification, scaffolding, prose, and diagrams are owned by `spec.create-asset`."
 execution-discipline-waiver: "Thin wrapper — pins the category to `feature` and delegates to spec.create-asset via the Skill tool; the multi-phase orchestration where step-skip can hide lives entirely in the delegate."
 ---
 # Create Feature

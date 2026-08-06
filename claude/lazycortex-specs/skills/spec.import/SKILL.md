@@ -1,6 +1,6 @@
 ---
 name: spec.import
-description: Pull-based cross-repo design handoff — fetch every configured `spec.imports[]` entry, land each `handoff` product's approved assets read-only (`spec_imported: true`), auto-register missing products, and report the run as a summary table. Non-interactive; the manual counterpart to the `spec.import-pull` daemon routine, both driving the same primitive.
+description: "Run when the operator asks to pull specs from another repo, refresh handed-off assets, or check what an import brought in — and right after adding an entry to the spec settings' `imports[]` array. The `spec.import-pull` daemon routine drives the same primitive on a cadence; invoke this to force a run now and get the summary table."
 ---
 # Import Specs
 

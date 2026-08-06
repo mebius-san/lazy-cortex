@@ -1,6 +1,6 @@
 ---
 name: spec.resolve-dependency
-description: Use to resolve a product dependency entry to concrete links (spec wikilink, dev GitHub URL) and optional local spec path. Reads a product's `dependencies` from `lazy.settings.json[products]` and returns a structured record. Called by callers that need to classify or link a dep entry (e.g., `spec.product-config` import classification).
+description: "Dispatched by `/spec.product-config` when it classifies or links one entry of a product's `dependencies[]` array; not for direct use. Returns `{kind, spec_link, dev_link, local_spec_path?}` for a single entry — never follows the links, never writes, never asks the user."
 execution-discipline-waiver: "Single-purpose primitive — resolves one dep entry against the dependencies reference; no multi-phase orchestration where step-skip can hide."
 ---
 # Resolve Dependency

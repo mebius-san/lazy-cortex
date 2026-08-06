@@ -1,6 +1,6 @@
 ---
 name: lazy-expert.list-jobs
-description: List expert queue jobs, optionally filtered by expert name or status. Wraps expert_runtime.list_jobs.
+description: "Run when the operator asks what the expert queue is doing — whether a job has finished, whether the daemon is busy, which experts have work outstanding, or to recover a job_id they lost. Optional filters by expert name and by status."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Write, AskUserQuestion
 logging-waiver: "read-only status query — single read, no mutation, no decision"
 ---

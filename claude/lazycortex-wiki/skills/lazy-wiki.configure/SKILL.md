@@ -1,7 +1,7 @@
 ---
 name: lazy-wiki.configure
-description: "Wizard to create or edit a wiki scope in .claude/lazy.settings.json — collects id, path globs, optional exclude_paths, tag_axes, and topics_index. Strict one-question-per-turn via AskUserQuestion."
-allowed-tools: Read, Edit, Write, AskUserQuestion, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*)
+description: "Use when the user wants to add a wiki scope, change which paths the wiki covers, or edit an existing scope's globs, axes, exclusions, or topics-index path. Wizard over .claude/lazy.settings.json[wiki.scopes], one question per turn via AskUserQuestion; also refreshes the Coverage section of the installed navigation rule."
+allowed-tools: Read, Edit, Write, AskUserQuestion, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(git ls-files *), Bash(git commit *)
 ---
 # lazy-wiki.configure
 
@@ -13,7 +13,7 @@ Prerequisite: `/wiki.install` has run (the `wiki` settings section exists).
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Verify install + load settings`
@@ -24,8 +24,9 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Phase 6 — Collect topics_index`
    - `Phase 7 — Collect filter`
    - `Phase 8 — Write back + log`
+   - `Phase 9 — Refresh navigation-rule Coverage`
    - `Report`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** Outcomes: `verified` / `collected` / `skipped-per-user-choice` / `written` / `logged` / `report-emitted`.
+2. **Mark each task `in_progress` on enter and `completed` on exit.** Outcomes: `verified` / `collected` / `skipped-per-user-choice` / `written` / `logged` / `refreshed` / `unchanged` / `absent` / `report-emitted`.
 3. **Do not reach the Report step until every prior task is `completed`.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
@@ -122,6 +123,22 @@ Then log to `./.logs/claude/lazy-wiki.configure/<UTC-timestamp>.md` — two sepa
 
 Outcome: `written` and `logged`.
 
+## Phase 9 — Refresh navigation-rule Coverage
+
+The `## Coverage` section of the installed `lazy-wiki.navigation` rule is what every session reads to decide whether a question must route through `/wiki.query`. It is derived from the scope globs collected above, so it goes stale the moment `paths` or `exclude_paths` change.
+
+Locate the installed rule: `<repo-root>/.claude/rules/lazy-wiki.navigation.md`, falling back to `~/.claude/rules/lazy-wiki.navigation.md`. Neither present → outcome `absent` (the rule was never installed; `/wiki.install` owns that).
+
+`Edit` the section body — everything between the `## Coverage` heading and the next `##` — replacing it wholesale with one bullet per scope in `lazy.settings.json[wiki.scopes]`, in id order:
+
+`- **<id>** — <glob>, <glob> (excluding <glob>, <glob>)`
+
+Drop the parenthetical when the scope declares no `exclude_paths`. Replace, never append — a second run must produce the same section, not a longer one. Touch nothing else in the rule. Body already identical → outcome `unchanged`.
+
+The rule is a tracked file in most repos, so commit it in the same execution per `lazy-core.skill-writing § 6`. Check with `Bash(git ls-files --error-unmatch <path>)`; on success `Bash(git commit -m "chore(wiki): refresh navigation Coverage for scope <id>" -- <path>)`. Untracked (exit non-zero) → leave it in the worktree, no commit.
+
+Outcome: `refreshed`, `unchanged`, or `absent`.
+
 ## Report
 
 One line per task in the canonical list, with its outcome word. Summary line: `scope <id> <created|updated>: paths=<count>, tag_axes=[<axes>], topics_index=<path>, review-skip=<on|off>, folder_note=<value held in the filter>`.
@@ -132,3 +149,4 @@ One line per task in the canonical list, with its outcome word. Summary line: `s
 - **Phase 2 re-asks on invalid id** — id doesn't match `^[a-z][a-z0-9_-]*$` → enter a valid slug (lowercase letters, digits, hyphens, underscores; must start with a letter).
 - **Phase 3 re-asks on empty paths** — at least one path glob is required; blank input is not accepted.
 - **Phase 6 re-asks on blank topics_index** — a relative file path is required (the file need not exist yet).
+- **Phase 9 reports `absent`** — no `lazy-wiki.navigation.md` in either rules directory, so sessions get no coverage trigger → run `/wiki.install`, then re-run this wizard to fill the section.

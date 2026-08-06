@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, querying the wiki, and interpreting doctor findings.
-last_regen: 2026-07-31
+last_regen: 2026-08-06
 no_diagram: true
 source_skills:
   - lazy-wiki.query
@@ -83,6 +83,14 @@ If the runtime daemon is active, this happens automatically and independently of
 `/wiki.query "<question>"` answers questions by traversing the wiki graph — the glossed See-also links and topic index entries written by the curator. It dispatches a seeker subagent per configured scope to pick entry points from `topics.md`, validates those paths, then hands them to a gatherer subagent that walks See-also links, reads relevant node bodies, and synthesises an answer. The large topic index and all traversed node bodies stay in the subagents' contexts and never load into your main session.
 
 The quality of answers depends on the wiki being well-linked. On a fresh install with no relink completed, seekers will find no entry points and the response will say so.
+
+---
+
+## Why does Claude reach for `/wiki.query` before it just greps or opens a file I ask about?
+
+Once `/wiki.install` has synced the navigation rule into your project, any session working in this repo is instructed not to answer a question from its own reading of the sources when the question is about material a configured scope covers — `/wiki.query` runs first, before Grep, Glob, or opening a file in that scope. This is because a blind grep or a file-by-file read misses the glosses and See-also edges that say which node actually answers the question; the wiki graph is the shortcut around that search.
+
+Which questions count as "covered" is decided by the `## Coverage` section of the installed navigation rule, listing each scope's path globs. `/wiki.configure` writes that section for you — every time you create or edit a scope, Phase 9 rewrites `## Coverage` with one bullet per configured scope (its globs and any exclusions) so the rule stays in sync with `lazy.settings.json[wiki.scopes]`. You never need to hand-edit the rule file yourself. Files outside every configured scope's globs are unaffected — the session works with them as it always has.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: lazy-review.configure
-description: "Wizard to add a review class to .claude/lazy.settings.json — collects path globs, main / validation / terminal / history expert assignments under the new experts schema. Read-first: every value already persisted in lazy.settings.json is honoured silently and never re-asked. Strict one-question-per-turn via AskUserQuestion."
+description: "Run when the operator wants a new kind of document to go through review, wants to change which paths a review class matches, or wants to reassign who writes / validates / closes out / narrates it. Wizard over `review.classes` in `.claude/lazy.settings.json`, one question per turn via AskUserQuestion; read-first, so an already-configured class is re-validated without a single prompt. Requires `/lazy-review.install` to have run."
 allowed-tools: Read, Edit, Write, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(python3 *), Bash(mkdir -p *), Bash(date *)
 ---
 # lazy-review.configure

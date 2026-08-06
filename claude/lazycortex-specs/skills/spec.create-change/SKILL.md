@@ -1,6 +1,6 @@
 ---
 name: spec.create-change
-description: Built-in wrapper over `spec.create-asset` — pins `<category>` to `change` and delegates. Use when requesting a change to an existing product spec; all clarification, scaffolding, prose, and diagrams are owned by `spec.create-asset`. A "change" is the atomic modification unit, peer to a feature.
+description: "Use when requesting a change to an existing product spec — the atomic modification unit, peer to a feature. Built-in wrapper: pins `<category>` to `change` and delegates — all clarification, scaffolding, prose, and diagrams are owned by `spec.create-asset`."
 execution-discipline-waiver: "Thin wrapper — pins the category to `change` and delegates to spec.create-asset via the Skill tool; the multi-phase orchestration where step-skip can hide lives entirely in the delegate."
 ---
 # Create Change

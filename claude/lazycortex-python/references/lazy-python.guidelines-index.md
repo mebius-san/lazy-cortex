@@ -32,5 +32,5 @@ own project:
 
 - **CLI tool names.** Commands like `./cli/chk`, `./cli/tst`, `./cli/imp` come from the source project's tool layout. Substitute your project's equivalents (or your own scripts) where they appear in `lazy-python.checking-guidelines.md` and `lazy-python.testing-guidelines.md`.
 - **Copyright header.** The `Copyright Headers` section in `lazy-python.coding-guidelines.md` describes the shape of a standard header; adapt the owner and license text to match your project's license.
-- **Marker comment system.** `TODO:`, `TMP:`, `DBG:`, `REF:`, `opt:`, `guard:`, `DOC(…):`, `# Contract!`, `# waiver:` are project-wide conventions imported with the rules. Treat them as human-readable annotations; no extraction tooling currently ships with this plugin.
+- **Marker comment system.** `TODO:`, `TMP:`, `DBG:`, `REF:`, `opt:`, `guard:`, `limit:`, `DOC(…):`, `# Contract!`, `# waiver:` are project-wide conventions imported with the rules. Treat them as human-readable annotations; no extraction tooling currently ships with this plugin.
 - **Base test class.** References to `<YourBaseTest>` in `lazy-python.testing-guidelines.md` are placeholders for whatever base test class your project ships (or `unittest.TestCase` if there is no project-specific base).

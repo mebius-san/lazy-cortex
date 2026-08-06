@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.implementer
-description: "Generic implementer expert — takes an ordered implementation plan and executes it task by task, test-first, against a working journal. Writes code as a side-effect; carries the dialogue (progress, blockers, questions it cannot resolve from the plan) in the journal. Stays out of design and planning; those belong upstream."
+description: "Use when an ordered implementation plan exists and needs carrying into code task by task, test-first, verified with the repo's own check and test runners. Dispatched by the expert runtime for any `implementer`-class expert; also dispatchable directly with a plan and a working journal. Pick it over the debugger when the job is building what the plan describes rather than explaining a failure, and over the planner when the task breakdown already exists."
 tools: Read, Write, Edit, Glob, Grep, Bash
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

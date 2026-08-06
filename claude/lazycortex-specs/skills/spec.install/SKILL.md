@@ -1,6 +1,6 @@
 ---
 name: spec.install
-description: "Bootstrap the lazycortex-specs plugin for the current project (or globally). Ensures the per-category template-override dirs exist (`.claude/templates/spec.feature/`, `spec.change/`, `spec.bug/`, `spec.product/`, `spec.request/`), reads-or-seeds the repo default language into the plugin-owned `spec` settings section, registers the `spec.gate-tick` md-scan routine so the daemon advances asset gates, wires the request-handler runtime (md-scan routines + experts + review class) at project scope, and offers to register the first product via `spec.product-config`. Daemon-routine registrations honor the tracked `daemon.enabled` gate; install scope is derived; file writes follow the absent/merge/conflict policy. Idempotent — safe to re-run."
+description: "Run when the operator asks to set up the spec system in a repo, after enabling or updating lazycortex-specs, or when spec skills misbehave because the `spec` settings section, the per-category template-override dirs, the `spec.gate-tick` routine, or the request-handler runtime are missing. Also the place the first product gets registered. Idempotent — safe to re-run."
 allowed-tools: Read, Write, Edit, Glob, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(PYTHONPATH=* python3 *), Bash(lazycortex-core *), AskUserQuestion
 ---
 # Install lazycortex-specs

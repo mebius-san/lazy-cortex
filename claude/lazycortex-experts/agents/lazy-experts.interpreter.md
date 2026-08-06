@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.interpreter
-description: "Generic interpreter expert — takes a free-form human request, log, or doc and produces a gap-free structured brief that downstream LLM work (designer / planner / etc.) can consume without ambiguity. Surfaces uncertainty inside the document instead of asking interactively."
+description: "Use when a request is too vague to act on — a free-form ask, a rough note, an old doc, a log — and someone needs a gap-free structured brief before any design starts. Dispatched by the expert runtime for any `interpreter`-class expert; also dispatchable directly with the raw input and a target brief path. Pick it over the designer when the why and the unknowns are not yet pinned down; it raises its questions inside the document and never proposes a solution."
 tools: Read, Write, Edit, Glob, Grep
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

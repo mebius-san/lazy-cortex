@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 6.1.0 — 2026-08-06 UTC
+
+- `lazy-core.audit` and `lazy-core.doctor` now flag skill/agent descriptions that describe their mechanism instead of the request that should trigger them, and doctor offers a per-finding rewrite you review and accept inline.
+- `lazy-core.doctor` also runs the `lazy-obsidian.audit` and `lazy-python.audit` checks it previously never reached.
+- Runtime monitoring gets teeth: error-ledger incidents now export as a `lazycortex_runtime_incidents_total` counter, with new alerts for failing expert jobs, a growing dead-letter queue, and freshly opened incidents, plus a Deferred column on the dashboard.
+
 ### 6.0.0 — 2026-08-05 UTC
 
 - **Breaking:** The response envelope now fails closed — a job that omits `outcome` (or sends a malformed response) counts as failed everywhere instead of silently succeeding, and a violated envelope is rejected and retried rather than accepted. Adds a `deferred` outcome for work an expert deliberately postpones without losing its input. Any protocol defining its own status field in place of `outcome` must be rewritten.
@@ -497,6 +503,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.6.2 — 2026-08-06 UTC
+
+- Skill and agent descriptions rewritten to lead with the trigger that should invoke them, so `spec.*` skills get matched more reliably to the request that needs them.
+
 ### 3.6.1 — 2026-08-05 UTC
 
 - Fixed the spec-apply worker committing arbitrary unrelated worktree changes alongside its own edits — it now stages only the files its own pass touched.
@@ -598,6 +608,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 2.2.5 — 2026-08-06 UTC
+
+- Skill and agent descriptions rewritten to lead with the symptom that should send you to them — unpainted icons, mermaid fences overflowing the note column, a stale icon after a bulk frontmatter change — instead of listing what each one installs.
 
 ### 2.2.4 — 2026-08-05 UTC
 
@@ -721,6 +735,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.1.5 — 2026-08-06 UTC
+
+- Skill and agent descriptions rewritten to lead with the trigger that should invoke them; the drawer agents now say explicitly that they never infer kind or format, so they are only reached once those are settled.
+- Troubleshooting help page no longer ships a broken "Diagnostic flowchart" heading with no diagram under it.
+
 ### 1.1.4 — 2026-07-23 UTC
 
 - Install now seeds the diagram drawer agents' model tiers automatically from the shared canonical catalog.
@@ -754,6 +773,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 5.2.9 — 2026-08-06 UTC
+
+- The review verbs now describe themselves by the state of the document that makes each one right — `start` for a document not yet in the loop, `submit` when the content is already written, `stop` to park an unapproved one, `finalize` to close out an approved one — so Claude picks the right verb from your words instead of the nearest-sounding name.
 
 ### 5.2.8 — 2026-08-05 UTC
 
@@ -819,6 +842,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).
 
 ## lazycortex-observe
+
+### 0.8.1 — 2026-08-06 UTC
+
+- Skill descriptions rewritten around the symptoms that should send you to them: a flat dashboard or a silent shipper reaches `/lazy-observe.doctor`, while the plugin's own surface audit stays with `/lazy-observe.audit`.
 
 ### 0.8.0 — 2026-08-05 UTC
 
@@ -890,6 +917,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 0.7.3 — 2026-08-06 UTC
+
+- Every expert agent (debugger, designer, fiction-writer, implementer, interpreter, planner, reviewer, tester) now has a trigger-first description that states what it's for and what sets it apart from its closest neighbours — sharper auto-dispatch when Claude picks which expert to run.
+
 ### 0.7.2 — 2026-08-03 UTC
 
 - The `implementer` agent now verifies every task against the repo's own checkers, its full test suite, and (when the language plugin ships one) a guideline-review agent before calling the task done — and it never relaxes a check just to force a green run.
@@ -952,6 +983,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 2.4.0 — 2026-08-06 UTC
+
+- Added a `limit:` marker to the guideline canon alongside `opt:`, with a new check that flags empty `opt:`/`limit:` clauses and routes foreign (non-canon) markers correctly.
+- `pcf` now checks that every block inside a function body opens with a purpose comment (on by default) — waiver/noqa/type/pylint/fmt/noinspection lines don't count, so previously-silent missing-comment blocks now surface as findings.
 
 ### 2.3.0 — 2026-08-05 UTC
 
@@ -1064,6 +1100,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 1.8.0 — 2026-08-06 UTC
+
+- Wiki navigation now mandates running `/wiki.query` before reading a covered scope's sources directly — no more grepping or opening nodes blind when the wiki already covers the question. `/wiki.configure` keeps the rule's `## Coverage` list in sync with your scopes automatically.
+- The topics index is now excluded from a scope automatically (by its configured path or a `wiki_role: topics-index` marker) — no more listing it manually in `exclude_paths`, and a renamed or sibling-scope index can no longer leak into curation.
 
 ### 1.7.1 — 2026-08-05 UTC
 

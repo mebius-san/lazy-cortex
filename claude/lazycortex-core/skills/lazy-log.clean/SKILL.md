@@ -1,6 +1,6 @@
 ---
 name: lazy-log.clean
-description: "Interactive housekeeping for `./.logs/claude/`. Classifies each subdirectory against the live set of canonical skills/agents/commands; offers merge / distill-to-memory / delete / leave per orphan, batched by pattern when a cluster of anonymous folders (e.g. `task-N`) would otherwise produce dozens of prompts. Read-first — no folder is touched until the user has approved every action."
+description: "Run when the operator asks to tidy `./.logs/claude/` — stray or misnamed run-log folders, clusters of anonymous `task-N` dirs, logs left behind by skills that no longer exist. Read-first and interactive: classifies every folder against the live artifact names and offers merge / distill-to-memory / delete / leave before anything is touched."
 allowed-tools: Read, Glob, Grep, Bash(mkdir -p *), Bash(date *), Bash(python3 *), Bash(ls *), Bash(stat *), Bash(find *), Bash(mv *), Bash(rmdir *), Bash(rm -rf .logs/claude/*), Bash(git rev-parse*)
 ---
 # Run-Log Housekeeping

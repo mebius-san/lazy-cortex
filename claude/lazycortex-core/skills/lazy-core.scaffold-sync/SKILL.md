@@ -1,6 +1,6 @@
 ---
 name: lazy-core.scaffold-sync
-description: "Install-time helper: copies a plugin's authoring templates into the consumer's `.claude/templates/<group>/` directories and upserts the corresponding scaffold-registry entries. Invoked by a plugin's install skill via Skill dispatch."
+description: "Dispatched by a plugin's install skill (`lazy-core.install` Step 4, `lazy-python.install` Step 6) to copy that plugin's authoring templates into the consumer and upsert its scaffold-registry entries; not for direct use. Repo-specific `_local` entries are `/lazy-core.scaffold-local`'s business, not this skill's."
 allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(diff *), Bash(cp *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet
 ---
 # Sync Scaffold Templates and Registry
