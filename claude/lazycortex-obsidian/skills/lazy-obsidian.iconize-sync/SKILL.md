@@ -30,7 +30,7 @@ Invoked by: the PostToolUse hook, or manually.
 
 ### `sync-staged`
 
-Iterate `git diff --cached --name-only --diff-filter=ACMR -- '*.md'`, resolve each, batch-rewrite, then re-stage every modified `.md` so the frontmatter update lands in the same commit.
+Iterate `git diff --cached --name-only --diff-filter=ACMR -- '*.md'`, resolve each, and batch-rewrite the frontmatter in the working tree. The index is never written to — the git index belongs to the operator, and a hook that stages into it leaves entries behind that outlive the commit it fired on. A rewrite made during a pre-commit run therefore lands in the *next* commit, not the one in flight.
 
 Invoked by: `.githooks/pre-commit`.
 
@@ -40,7 +40,7 @@ Walk every `.md` file (under `--prefix` if given, else whole vault), compute the
 
 ### `reconcile-plugin <plugin>`
 
-Plugin-scoped reconcile + auto-stage. Walks `claude/<plugin>/**/*.md` only, re-resolves icons, rewrites frontmatter where the resolution differs, and re-stages touched files so they ride the caller's pending commit.
+Plugin-scoped reconcile. Walks `claude/<plugin>/**/*.md` only, re-resolves icons, rewrites frontmatter where the resolution differs, and reports every rewritten path in its `touched` array. It does not stage: the caller folds `touched` into its own commit pathspec, which is what carries the repaint into the commit.
 
 Use case: invoked by the pre-commit pipeline after bumping `claude/<plugin>/.claude-plugin/plugin.json`. The version delta flips callbacks like `plugin-is-patch-bumped`, so every file under the plugin's subtree whose color depends on those callbacks (folder note, README) repaints in the same commit. The full `reconcile` walk would do the same at vault scope; this one is bounded.
 

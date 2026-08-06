@@ -527,8 +527,12 @@ def cmd_sync_staged(args: argparse.Namespace) -> int:
   """
   Resolve and apply icons for every `.md` file currently staged in the vault index.
 
-  Re-stages files whose frontmatter is rewritten so they ride along in the operator's
-  pending commit. Stays inert when the icon-map is missing or incompatible.
+  Rewrites frontmatter in the working tree only; the index is never written to. The
+  git index belongs to the operator, and a hook that stages into it leaves entries
+  behind that outlive the commit it fired on. A rewrite made during a pre-commit run
+  therefore lands in the *next* commit, not the one in flight — a one-commit lag in
+  cosmetic frontmatter, against a shared index that stays the operator's alone.
+  Stays inert when the icon-map is missing or incompatible.
 
   Args:
     args: Parsed CLI arguments carrying optional `--vault`, `--icon-map`, and `--dry-run`
@@ -568,21 +572,11 @@ def cmd_sync_staged(args: argparse.Namespace) -> int:
     if rewrite_file(note_path, icon = icon, color = color):
       touched.append(rel)
 
-  # a dry run reports the plan and leaves the index untouched
+  # a dry run reports the plan and leaves the worktree untouched
   if args.dry_run:
     print(json.dumps({ ResultKey.OP: "sync-staged", ResultKey.DRY_RUN: True, ResultKey.PLANNED: planned },
                      ensure_ascii = False))
     return EXIT_OK
-
-  # re-stage the .md files whose frontmatter we just rewrote so they ride along in the pending commit
-  if touched:
-    rs = subprocess.run(
-      [ "git", "-C", str(vault), "add", "--", *touched ],
-      capture_output = True, text = True, check = False,
-    )
-    if rs.returncode != 0:
-      sys.stderr.write(
-        f"warning: re-stage of modified notes failed: {rs.stderr.strip()}\n")
 
   # emit the machine-readable result record for the calling hook
   print(json.dumps({ ResultKey.OP: "sync-staged", ResultKey.TOUCHED: touched }, ensure_ascii = False))
@@ -680,13 +674,18 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
 
 def cmd_reconcile_plugin(args: argparse.Namespace) -> int:
   """
-  Reconcile icons under a single plugin's sub-tree and re-stage touched files.
+  Reconcile icons under a single plugin's sub-tree and report every path rewritten.
 
   Used by the pre-commit pipeline after a `plugin.json` bump: the version delta flips
   callbacks like `plugin-is-patch-bumped`, so every file under the plugin's subtree whose
   color depends on that callback (folder note, README) must repaint in the same commit.
   The full `reconcile` walk would do the same but at vault scope; this one is bounded to
   the touched plugin.
+
+  Rewrites reach the working tree only; the index is never written to. The caller folds
+  the reported paths into its own commit pathspec, which is what carries the repaint into
+  the commit — the git index belongs to the operator, and staging into it here would leave
+  entries behind that outlive the commit this ran for.
 
   Args:
     args: Parsed CLI arguments carrying the target `plugin` name and optional `--vault`,
@@ -728,21 +727,11 @@ def cmd_reconcile_plugin(args: argparse.Namespace) -> int:
     if rewrite_file(note_path, icon = icon, color = color):
       touched.append(rel)
 
-  # a dry run reports the plan and leaves the index untouched
+  # a dry run reports the plan and leaves the worktree untouched
   if args.dry_run:
     print(json.dumps({ ResultKey.OP: "reconcile-plugin", ResultKey.PLUGIN: plugin, ResultKey.DRY_RUN: True,
                        ResultKey.PLANNED: planned }, ensure_ascii = False))
     return EXIT_OK
-
-  # re-stage the repainted notes so they land in the same commit as the version bump
-  if touched:
-    rs = subprocess.run(
-      [ "git", "-C", str(vault), "add", "--", *touched ],
-      capture_output = True, text = True, check = False,
-    )
-    if rs.returncode != 0:
-      sys.stderr.write(
-        f"warning: re-stage of modified notes failed: {rs.stderr.strip()}\n")
 
   # emit the machine-readable result record for the pre-commit pipeline
   print(json.dumps({ ResultKey.OP: "reconcile-plugin", ResultKey.PLUGIN: plugin, ResultKey.TOUCHED: touched },
@@ -997,8 +986,9 @@ def _preflight_incompatible(icon_map: dict) -> bool:
   redirect and see why hooks went inert. A True return signals the caller to short-circuit
   with the OK exit code — hooks must never block a commit.
 
-  A missing `schema_version` is treated as schema 1 for backward compatibility, so
-  pre-handshake vaults keep working silently.
+  A missing `schema_version` reads as schema 1 — the pre-handshake shape. Schema 1 is not
+  supported, so such a vault is reported incompatible and its hooks go inert with the
+  stderr diagnostic above, rather than being processed under a guessed schema.
 
   Args:
     icon_map: Parsed icon-map dict.

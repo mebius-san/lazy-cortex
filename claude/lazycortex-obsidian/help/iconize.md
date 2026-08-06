@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Scaffold, configure, and run the iconize-sync system to keep Obsidian file and folder icons in sync with your vault's frontmatter-driven icon registry.
-last_regen: 2026-06-10
+last_regen: 2026-08-06
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing the three-skill iconize block: iconize-install scaffolds plugins + icon-map + hooks; iconize-config edits the icon-map registry; iconize-sync runs the worker to write iconize_icon/iconize_color into note frontmatter; Iconize plugin and iconize-reloader plugin then paint icons on screen from frontmatter and data.json respectively."
@@ -10,6 +10,7 @@ source_skills:
   - lazy-obsidian.iconize-install
   - lazy-obsidian.iconize-config
   - lazy-obsidian.iconize-sync
+source_sha: a080c1ec8ba430f6f7ffaa2b62b17fe55e51c50e
 ---
 # Iconize — frontmatter-driven icon management for Obsidian vaults
 
@@ -34,17 +35,17 @@ Once the system is scaffolded, `/lazy-obsidian.iconize-config` is how you grow t
 
 - `reconcile` — walks all `.md` files (or a `--prefix` subtree) and rewrites `iconize_icon` / `iconize_color` everywhere the registry has an opinion. Files that no longer match any rule have those keys cleared.
 - `sync <path>` — resolves and rewrites a single file; this is what the PostToolUse hook calls after every Write or Edit to keep things current without a full sweep.
-- `sync-staged` — resolves only the `.md` files in the git index and re-stages them, so icon frontmatter is always consistent inside a commit. The pre-commit shim calls this automatically.
+- `sync-staged` — resolves the `.md` files staged in the git index and rewrites their frontmatter in the working tree, reporting which paths it touched. It never touches the git index itself — the pre-commit shim that calls it is responsible for staging the result. A repaint made during a pre-commit run therefore lands in the *next* commit, not the one in flight; the icon on disk is correct immediately either way.
 - `reconcile-dirty` — safety net for files written via Bash or bulk renames that bypass the PostToolUse hook; the Stop hook calls this at the end of every agent turn.
 - `check-versions` — confirms the pre-commit shim's `HOOK_VERSION` and the icon-map's `schema_version` are compatible with the installed worker.
 
-The three hooks (PostToolUse on Write/Edit, pre-commit shim, Stop) mean you rarely need to call `iconize-sync` directly — icons stay current as you work. The only time you call it explicitly is after a registry change (`reconcile`) or a bulk operation that you want to sweep immediately.
+The three hooks (PostToolUse on Write/Edit, pre-commit shim, Stop) mean you rarely need to call `iconize-sync` directly — icons stay current as you work. The only time you call it explicitly is after a registry change (`reconcile`) or a bulk operation that you want to sweep immediately. None of the hooks stage anything into the git index on your behalf — whoever fires the sync (the pre-commit shim, or you) stages whatever it reports as touched.
 
 ## Common adjustments
 
 **Adding or changing icons for a new frontmatter value.** Run `/lazy-obsidian.iconize-config` and pick the registry that holds the value. The wizard prompts for the key, icon name, and color. After saving, run `/lazy-obsidian.iconize-sync reconcile` to apply everywhere.
 
-**Scoping a reconcile to one plugin or folder.** Pass `--prefix <path>` to `reconcile`, or use `reconcile-plugin <plugin>` if you want to reconcile a specific LazyCortex plugin subtree and have the changes automatically re-staged.
+**Scoping a reconcile to one plugin or folder.** Pass `--prefix <path>` to `reconcile`, or use `reconcile-plugin <plugin>` if you want to reconcile a specific LazyCortex plugin subtree. Neither writes to the git index — `reconcile-plugin` reports every rewritten path in its `touched` array, and it's on you (or the pipeline calling it) to fold those paths into the commit that should carry them.
 
 **Checking whether your install is current after a plugin update.** Run `/lazy-obsidian.iconize-sync check-versions`. Exit code 0 means both axes (shim version and icon-map schema) are compatible. If it exits 5, re-run `/lazy-obsidian.iconize-install` to update the shim or migrate the schema.
 

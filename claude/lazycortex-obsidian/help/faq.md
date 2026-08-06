@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about vault setup, Iconize, diagram render glue, plugin updates, and tag pages for lazycortex-obsidian.
-last_regen: 2026-06-10
+last_regen: 2026-08-06
 no_diagram: true
 source_skills:
   - lazy-obsidian.install
@@ -12,6 +12,7 @@ source_skills:
   - lazy-obsidian.iconize-sync
   - lazy-obsidian.update-plugin
   - lazy-obsidian.gen-tag-pages
+source_sha: a080c1ec8ba430f6f7ffaa2b62b17fe55e51c50e
 ---
 # Frequently asked questions
 
@@ -36,6 +37,12 @@ The plugin cache is the installed copy of the plugin's files. An empty cache usu
 ## I ran `/lazy-obsidian.install` but icons are not showing up in Obsidian. What should I check?
 
 Icons are painted by Iconize reading `iconize_icon` and `iconize_color` from each note's frontmatter. Three things are required: Iconize's `iconInFrontmatterEnabled` setting must be `true` with the field names set to `iconize_icon` and `iconize_color` (asserted automatically by `/lazy-obsidian.iconize-install`), the icon-map at `.claude/iconize/obsidian-icon-map.json` must have matchers that cover your notes, and `/lazy-obsidian.iconize-sync reconcile` must have been run to write the frontmatter. If the matchers are missing entries, run `/lazy-obsidian.iconize-config` to add them, then run `/lazy-obsidian.iconize-sync reconcile` to apply.
+
+---
+
+## Why does the icon frontmatter show up in the commit after the one I just made, not that one?
+
+`/lazy-obsidian.iconize-sync sync-staged` — the hook that runs during `git commit` — never writes to git's index; it only rewrites frontmatter in the working tree. That is deliberate: no hook stages into your index behind your back. The icons are correct on disk and in the vault immediately, but if a repaint happens during the pre-commit run, the rewritten frontmatter line is already too late for the commit in flight and lands in your next commit instead. If you need the fresh frontmatter in the commit you are about to make, run `/lazy-obsidian.iconize-sync reconcile` (or `reconcile-dirty`) before staging, then commit as usual.
 
 ---
 

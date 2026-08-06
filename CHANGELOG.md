@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 6.2.1 — 2026-08-07 UTC
+
+- `lazy-log.bullets` now always calls out a changed skill / agent / command `description:` as a release note, rather than leaving it to a heuristic that could silently drop it — the description decides what the artifact matches, so a reword is a user-visible change even when nothing else in the artifact does.
+
 ### 6.2.0 — 2026-08-07 UTC
 
 - `lazy-core.audit` and `lazy-core.doctor` now judge **command** descriptions alongside skills and agents — a command is routed by its `description:` exactly as a skill is, and every lazycortex-core command got a trigger-first one. Doctor also offers a per-finding rewrite: it proposes the replacement line and edits only that line on confirmation, never in bulk.
@@ -618,6 +622,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 2.2.7 — 2026-08-07 UTC
+
+- The iconize pre-commit hook no longer stages its own frontmatter repaints — it rewrites the working tree and reports what it touched, so an icon-colour update shows up in your *next* commit instead of the one in flight. In exchange nothing is left staged in your index behind a commit you did not ask for.
 
 ### 2.2.6 — 2026-08-07 UTC
 
