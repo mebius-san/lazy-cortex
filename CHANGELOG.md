@@ -984,6 +984,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 2.4.1 — 2026-08-06 UTC
+
+- The checkers reference now documents the marker-clause check that shipped in 2.4.0: `pcf` flags an `opt:` or `limit:` marker whose colon ends the line with no clause after it. It reads real comment tokens, so the same text inside a string literal is not a marker; whether the clause says anything real stays the review phase's call.
+- Skill and agent descriptions rewritten to open with the request that should invoke them instead of a summary of their internals.
+
 ### 2.4.0 — 2026-08-06 UTC
 
 - Added a `limit:` marker to the guideline canon alongside `opt:`, with a new check that flags empty `opt:`/`limit:` clauses and routes foreign (non-canon) markers correctly.
