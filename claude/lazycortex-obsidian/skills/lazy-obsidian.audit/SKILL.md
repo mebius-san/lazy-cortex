@@ -1,6 +1,6 @@
 ---
 name: lazy-obsidian.audit
-description: "Semantic audit for the lazycortex-obsidian plugin. Verifies iconize-sync artifacts stay coherent: worker version constants match template HOOK_VERSION markers, icon-map template parses at the current schema with no retired keys, protocol template's `owner_skill` points at an existing skill, hook templates carry parseable version markers. Phase 8 covers the diagram render glue: mermaid-fit.css + ascii-fit.css presence + selector shape, mermaid-popup override block in plugin-settings.json, no stale palette CSS. Read-first; presents findings, then asks which to fix. Delegated from `lazy-core.doctor` Phase 3."
+description: "Run when the operator asks to audit the lazycortex-obsidian plugin, or when its machinery misbehaves after an update — icons stop being painted, the icon-map is rejected as the wrong schema, the pre-commit shim reports a version mismatch, or mermaid/ascii fences render unstyled in the vault. Checks the plugin's own shipped artifacts (worker version constants, icon-map and hook templates, the Iconize settings block, the render-glue CSS), not any one vault's installed state. Read-first; presents findings, then asks which to fix."
 allowed-tools: Read, Glob, Grep, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), AskUserQuestion, Write
 argument-hint: "(no arguments — runs the full plugin audit)"
 ---

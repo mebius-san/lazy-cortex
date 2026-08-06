@@ -1,6 +1,6 @@
 ---
 name: lazy-diagram.draw-mermaid
-description: "Single-pass writer agent: produces a mermaid diagram body for a given (kind, request, scheme). Dispatched by /lazy-diagram.draw or /lazy-diagram.fix, or invokable directly by any caller that supplies kind=<X>. Returns the diagram fence content (without surrounding triple-backticks) as its response. Use when you have already chosen kind=<one of: flow, sequence, state, erd, class, architecture, layout, nav, tree, controls-scheme, decision-tree, screen-scheme, journey, mindmap, gantt, timeline> and format=mermaid."
+description: "Dispatched by /lazy-diagram.draw or /lazy-diagram.fix once kind and format are settled; dispatch it directly only when you have ALREADY chosen format=mermaid and kind=<one of: flow, sequence, state, erd, class, architecture, layout, nav, tree, controls-scheme, decision-tree, screen-scheme, journey, mindmap, gantt, timeline> — it never infers either. Single-pass writer: its whole response is the mermaid fence body, without the surrounding triple-backticks."
 tools: Read, Glob, Grep
 model: inherit
 execution-discipline-waiver: "single-response writer; output IS the return value, no multi-step process"

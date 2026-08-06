@@ -1,6 +1,6 @@
 ---
 name: <namespace.name>
-description: <one-line dispatch context — when to invoke this skill>
+description: "<trigger FIRST, one of: `Use when <request or situation>` / `Dispatched by /<skill>; not for direct use.` / `Run when the operator asks to <verb>.` — then mechanism only if a sibling skill's trigger overlaps this one>"
 allowed-tools: Read, Glob, Grep
 ---
 # <Skill Title>
@@ -49,6 +49,9 @@ Authoring notes (delete before saving):
   § 2 No "Optional" in any phase/step heading (FAIL).
   § 3 One-word outcome per step (`installed`, `unchanged`, `skipped-per-user-choice`, …).
   § 4 No narrative padding (`v1.2.3`, "we got burned", incident post-mortems → WARN).
+  § 8 `description:` opens with WHEN to invoke, never with mechanism — it is the routing table, and
+      a skill the router cannot select never fires (WARN). Shapes, anti-patterns, and worked
+      rewrites: `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`.
 - Filename: `<namespace.name>/SKILL.md`.
 - Logging: only if your project has a logging contract installed (e.g. `lazy-log.logging` from
   `lazycortex-core`). If so, add a `## Logging` section pointing at

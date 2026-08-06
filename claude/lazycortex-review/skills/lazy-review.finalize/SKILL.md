@@ -1,6 +1,6 @@
 ---
 name: lazy-review.finalize
-description: "Public verb — close out a fully-approved document. Folds all edit-annotation markers into final text, strips the banner and approve checkbox, removes every system callout (keeps # History), sets review_active false, and commits with Doc-Review-Phase: finalize trailer."
+description: "Use when a document is already approved but still looks like a review artefact — banner, approve checkbox, edit markers, system callouts — and the operator wants it closed out by hand: 'finalize this', 'clean up the review markup', or the dispatcher's automatic finalize never fired. Leaves an ordinary markdown file with `approved: true` and its `# History`. Not for an unapproved doc — that is `/lazy-review.stop`."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date *)
 execution-discipline-waiver: "thin dispatcher — work lives in bin/finalize.py (finalize_text + atomic git commit), this SKILL.md is a single subprocess call with no decision logic"
 ---

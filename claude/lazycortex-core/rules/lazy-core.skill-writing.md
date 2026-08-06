@@ -127,6 +127,16 @@ Shape: a flat bullet list, one entry per documented user-visible abort or surfac
 
 Include when the skill has user-visible aborts; omit when no such failure modes exist (do NOT write `## Failure modes` followed by "(none)"). `lazy-core.audit` Agent B emits `INFO` (not `WARN`) when a SKILL.md body contains an explicit abort, "if X then error", or "fails when" phrase but no `## Failure modes` section.
 
+## 8. `description:` states WHEN to invoke
+
+`description:` is the routing table — Claude Code matches the user's request against it to decide what to invoke, and nothing else about the skill is visible at that moment. A description spent on internals ("thin dispatcher", "wraps `foo.bar()`", a list of what the skill prints) gives the router nothing to match on, so the skill never fires and the model does the work by hand instead.
+
+The description **opens** with the invocation condition, in one of three shapes: `Use when <request or situation>` (user-summoned), `Dispatched by /<skill>; not for direct use.` (single caller), `Run when the operator asks to <verb>.` (slash-invoked utility). Mechanism follows only when it disambiguates from a sibling whose trigger overlaps.
+
+A restated purpose (`Use to resolve a dependency`), a condition that cannot be evaluated without already doing the work, and a feature list of the skill's own output are **not** triggers.
+
+Shapes, anti-patterns, worked rewrites, and the judging procedure: `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md` — read it before authoring or auditing a description. Agents follow the same requirement, see `lazy-core.agent-writing § 1`.
+
 ## Cross-referenced contracts (not copied here)
 
 - `lazy-core.agent-writing` — agent-specific authoring (single-response model, tool allowlist, structured-report contract).
@@ -142,6 +152,7 @@ Opting a skill into `lazy-core.setup`: see `${CLAUDE_PLUGIN_ROOT}/references/laz
 - `lazy-core.audit` Agent B enforces §§ 1–4 (preamble presence, no-Optional, narrative-padding heuristic) and § 6 (no dirty working tree — heuristic write-without-commit detection). Absent preamble and "Optional" in heading are `FAIL`; narrative-padding denylist match and unwaived dirty-tree finding are `WARN`.
 - `lazy-core.doctor` surfaces these findings in Phase 3 and prompts the user to fix or waive.
 - § 7 is informational: `lazy-core.audit` Agent B emits `INFO` when a SKILL.md with documented aborts lacks a `## Failure modes` section.
+- § 8: `lazy-core.audit` Agent B judges each `description:` against the three trigger shapes and emits `WARN` on a mechanism-only one. Judgement, not a grep — a description may phrase its trigger in its own words. A missing `description:` is `FAIL`.
 
 ## Scope
 

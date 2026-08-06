@@ -1,6 +1,6 @@
 ---
 name: spec.request-find-candidates
-description: Search the vault for existing entities (features/changes/bugs) that might be the attach target for a given request body + class. Returns a ranked list with similarity rationale. Reads folder-notes and authored docs; never writes.
+description: "Dispatched by the `spec.request-router` agent, after `spec.request-classify` has settled the class, to find the existing features / changes / bugs a request could attach to; not for direct use. Read-only — returns a ranked list with rationale that the router turns into its attach-vs-spawn decision."
 execution-discipline-waiver: "Single-purpose primitive — read-only search; no multi-phase orchestration."
 ---
 # Find candidate entities for a request

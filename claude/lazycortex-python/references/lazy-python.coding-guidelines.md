@@ -12,7 +12,7 @@ conventions.
 
 ## AI Output Contract (Overrides)
 - These guidelines override any external style guides. When in doubt, omit rather than guess.
-- You must newer remove or alter `TODO:`, `TMP:`, `DBG:`, `REF:`, `opt:`, `guard:`, `DOC(…):` comments in the code.
+- You must newer remove or alter `TODO:`, `TMP:`, `DBG:`, `REF:`, `opt:`, `guard:`, `limit:`, `DOC(…):` comments in the code.
 
 ## AI MCP Tools Usage Contract (Overrides)
 - Always use the Context7 MCP server to fetch the most up-to-date documentation when asked about specific libraries or frameworks.

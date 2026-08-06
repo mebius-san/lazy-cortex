@@ -1,6 +1,6 @@
 ---
 name: lazy-core.install
-description: "Bootstrap the lazycortex-core plugin for the current project (or globally). Copies every rule template shipped by the plugin into the rules directory, syncs authoring templates into `.claude/templates/core/`, bootstraps the scaffold registry, seeds runtime defaults, registers experts (always — they are dispatch-routing config, not daemon-only), and — behind two remembered gates (project-level `daemon.enabled`, per-checkout `daemon.run_here`) — sets up the daemon routines + supervisor. Idempotent and quiet on re-run — every decision is persisted and never re-asked; an enabled plugin installs its whole surface. Detects install scope automatically."
+description: "Run when the operator asks to set up lazycortex-core in a repo (or globally), or when core artifacts are missing — the plugin's rules are not in `.claude/rules/`, `lazy.settings.json` has no runtime section, `.experts/` is not initialised, or the daemon was never wired. Installs this plugin only; `/lazy-core.setup` is the one that runs every plugin's install. Idempotent and quiet on re-run — decisions are persisted and never re-asked."
 allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(find *), Bash(date *), Bash(diff *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *)
 ---
 # Install lazycortex-core

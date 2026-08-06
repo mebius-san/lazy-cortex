@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#93c5fd"
+iconize_color: "#fde68a"
 ---
 # lazycortex-wiki
 
@@ -45,11 +45,11 @@ Requires these plugins from the same marketplace:
 
 | Skill | Description |
 |---|---|
-| `lazy-wiki.configure` | Wizard to create or edit a wiki scope in .claude/lazy.settings.json — collects id, path globs, optional exclude_paths, tag_axes, and topics_index. Strict one-question-per-turn via AskUserQuestion. |
-| `lazy-wiki.doctor` | Audit a wiki scope's integrity: orphan topics, broken See-also links and repo keys, index desync, missing summaries, stale glosses, unknown axes, duplicate branches, broken code <wiki> blocks, and scope overlaps. Read-only by default; applies fixable repairs only after the operator confirms. |
-| `lazy-wiki.install` | Bootstrap the lazycortex-wiki plugin for the current project (or globally). Creates the template dir, syncs the navigation rule, seeds the wiki settings section + agent_models, registers the `wiki.curator` expert (always), and — when the daemon is enabled — registers the three wiki routines. Idempotent and quiet on re-run — every decision is persisted and never re-asked. Detects install scope automatically. |
-| `lazy-wiki.query` | Associative Q&A over the wiki graph. Thin dispatcher: a per-scope seeker subagent picks entry points from topics.md, a single gatherer subagent traverses See-also and synthesises the answer. The large topic index and traversed node bodies stay in the subagents' contexts, never the main session. |
-| `lazy-wiki.relink` | Daemon-free, in-session relink of one wiki scope. Computes the relink plan (initial / incremental / anchor-lost) via lazycortex-wiki relink-plan, then dispatches the wiki curator as a synchronous subagent in tail:false mode to classify then link each node — the curator applies its own curation via apply-node (C-hybrid, no collector). The skill rebuilds topics.md once between phases, records the new wiki_synced_sha anchor, and makes the single commit under the operator identity. Use when there is no runtime daemon (the plugin must work standalone) or to force an in-session relink. |
+| `lazy-wiki.configure` | Use when the user wants to add a wiki scope, change which paths the wiki covers, or edit an existing scope's globs, axes, exclusions, or topics-index path. Wizard over .claude/lazy.settings.json[wiki.scopes], one question per turn via AskUserQuestion; also refreshes the Coverage section of the installed navigation rule. |
+| `lazy-wiki.doctor` | Run when the operator asks to check the wiki's health, or when the wiki misbehaves — `/wiki.query` misses material it should cover or returns entries that no longer exist, See-also links point at moved or deleted nodes, the topic index disagrees with the files on disk. Read-only audit of one scope or all; the repairs it CAN make (index rebuild, broken/stale See-also lines) are applied only after the operator confirms. |
+| `lazy-wiki.install` | Run when the operator asks to set up the wiki in a repo, after a lazycortex-wiki update, or when wiki skills fail because the `lazy-wiki.navigation` rule, the `wiki` settings section, or the `wiki.curator` expert is missing from the project. Bootstrap only — defining what the wiki covers is `/wiki.configure`. Idempotent and quiet on re-run; install scope is detected, never asked. |
+| `lazy-wiki.query` | Use when a question needs material the wiki curates — 'why is it built this way', 'where is X described', 'what relates to Y', or any request whose answer lives in files a wiki scope covers. Run it BEFORE grepping or opening files in a covered scope, and whenever the user asks about a topic rather than a specific file. Dispatches per-scope seekers plus one gatherer, so the topic index and traversed node bodies never enter the calling context. |
+| `lazy-wiki.relink` | Use when a wiki scope's nodes need classifying and See-also linking right now — this checkout runs no runtime daemon, or the operator wants to force a relink instead of waiting for the `wiki.scan` / `wiki.relink-weekly` routines. Computes the plan (initial / incremental / anchor-lost), dispatches the wiki curator synchronously per node in tail-off mode, rebuilds `topics.md`, records the new anchor, and makes one commit under the operator identity. |
 
 ## Documentation
 
@@ -82,7 +82,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Rule | Description |
 |---|---|
-| `lazy-wiki.navigation.md` | Discovery and navigation contract for the curated semantic wiki. Tells agents how to enter the wiki, follow glossed links, find backlinks, and when to use /wiki.query. |
+| `lazy-wiki.navigation.md` | Discovery and navigation contract for the curated semantic wiki — when to query it instead of reading sources, how to enter it, follow glossed links, and find backlinks. |
 
 ## Installation
 

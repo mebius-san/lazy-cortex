@@ -1,6 +1,6 @@
 ---
 name: spec.request-attach
-description: Attach a request to an existing entity. Distributes the request body across the entity's docs by content type (whole-doc match → section-split → fallback per spec.request-protocol.md), maintains a `# Sources` H1 attribution section in every populated doc, appends a wikilink-only entry to the folder-note's ## Source requests, opens a fresh review cycle on every populated doc via lazy-review.start. Idempotent on re-invocation.
+description: "Dispatched by the `spec.request-apply` worker when a request's routing resolves to an attach target, and by `spec.request-spawn` right after it scaffolds a new entity; not for direct use. The only primitive that crosses from a request file into an existing feature / change / bug — it distributes the body, records attribution, and opens a review cycle on every doc it populated."
 execution-discipline-waiver: "Single-purpose primitive — distribute body to one target entity; idempotent on the request side."
 ---
 # Attach a request to an existing entity

@@ -1,6 +1,6 @@
 ---
 name: lazy-core.autosetup
-description: Non-interactive executor of the lazycortex install chain for ONE repo. Dispatch from a cross-project rollout loop (one agent per project) or directly when a repo's lazycortex config must be brought current without operator interaction — e.g. after a plugin update changed what install seeds. Receives `repo=<absolute path>` in the prompt. Executes every applicable `<namespace>.install` SKILL.md against that repo under a no-questions discipline: derivable or already-recorded decisions apply, question-gated steps are skipped and reported. Commits its changes in the target repo. NOT for first-time project setup — a repo with no recorded install decisions mostly reports `needs-interactive`.
+description: "Dispatch from a cross-project rollout loop (one agent per project), or directly when ONE repo's lazycortex config must be brought current with no operator in the loop — e.g. after a plugin update changed what install seeds. Receives `repo=<absolute path>` in the prompt. Executes every applicable `<namespace>.install` SKILL.md against that repo under a no-questions discipline: derivable or already-recorded decisions apply, question-gated steps are skipped and reported. Commits its changes in the target repo. NOT for first-time project setup — a repo with no recorded install decisions mostly reports `needs-interactive`. Sibling `lazy-core.autocheckup` checks and repairs instead of installing."
 tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList
 model: inherit
 ---

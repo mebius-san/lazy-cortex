@@ -1,6 +1,6 @@
 ---
 name: lazy-core.scaffold-local
-description: "Manage `_local` scaffold entries in the consumer repo: add a new repo-specific template type (group + kind + globs) or remove an existing one. Safe path to author `_local` entries without hand-editing the fragile registry YAML."
+description: "Run when the operator asks to add or drop a repo-specific template type — a `_local` scaffold entry with its own group, kind, and path globs, so new files matching those globs start from that template. Use instead of hand-editing the registry in `.claude/rules/lazy-core.scaffold.md`; plugin-shipped entries belong to `/lazy-core.scaffold-sync`."
 allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet
 ---
 # Manage Local Scaffold Entries

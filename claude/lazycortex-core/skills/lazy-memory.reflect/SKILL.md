@@ -1,6 +1,6 @@
 ---
 name: lazy-memory.reflect
-description: Dispatch a single `kind=reflect` job for one persona-marked expert. The expert reviews recent `.logs/claude/<self>/*.md` runs + current `.memory/<self>/*.md` and consolidates via `lazy-memory.write`. Refuses non-persona-marked experts.
+description: "Run when the operator asks an expert to consolidate what it has learned — fold its recent run logs into its memory notes. Dispatches one `kind=reflect` job for that expert; refuses an expert that is not persona-marked (run `/lazy-memory.mark-persona` first)."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Write
 ---
 # Memory reflect

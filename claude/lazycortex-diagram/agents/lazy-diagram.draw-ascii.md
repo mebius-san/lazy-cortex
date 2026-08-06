@@ -1,6 +1,6 @@
 ---
 name: lazy-diagram.draw-ascii
-description: "Single-pass writer agent: produces an ASCII diagram body for a given (kind, request, exemplar). Dispatched by /lazy-diagram.draw or /lazy-diagram.fix, or invokable directly by any caller that supplies kind=<X>. Returns the diagram block content (without surrounding triple-backticks) as its response. Use when you have already chosen kind=<one of: flow, fs-tree, layout> and format=ascii."
+description: "Dispatched by /lazy-diagram.draw or /lazy-diagram.fix once kind and format are settled; dispatch it directly only when you have ALREADY chosen format=ascii and kind=<one of: flow, fs-tree, layout> — it never infers either. Single-pass writer: its whole response is the ASCII diagram body, without the surrounding triple-backticks."
 tools: Read, Glob, Grep
 model: inherit
 execution-discipline-waiver: "single-response writer; output IS the return value, no multi-step process"

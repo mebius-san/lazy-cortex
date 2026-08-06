@@ -1,6 +1,6 @@
 ---
 name: lazy-routine.offer-protocols
-description: "Shared configurator helper: discover reference files flagged as routine-protocol candidates, judge which are relevant to a given routine's context from their frontmatter, offer the relevant optional ones to the operator, and union the chosen into the routine's existing protocols list. Invoked as a sub-step from a plugin's install/configure skill via Skill dispatch. The routine config and runtime are untouched apart from the flat protocols list."
+description: "Dispatched by a plugin's install / configure skill (`lazy-review.install`, `spec.install`) right after it registers a writer-dispatching routine, to offer the operator the optional protocol references that fit that routine's context; not for direct use. Only ever appends to the routine's flat `protocols` list."
 execution-discipline-waiver: "nested helper invoked from install/configure skills via Skill dispatch — the parent skill owns step discipline; a MANDATORY preamble here would re-anchor the parent's step pointer (lazy-core.skill-writing § 1.5)"
 allowed-tools: Read, Glob, AskUserQuestion, Bash(lazycortex-core *)
 ---

@@ -1,5 +1,5 @@
 ---
-description: <one-line dispatch context — what this command does and when to run it>
+description: "<trigger FIRST — `Run when the operator asks to <verb>` (name the request shapes they actually type, not the verb the filename already carries) — then mechanism only if a sibling command's trigger overlaps>"
 ---
 # `/<namespace>.<name>`
 
@@ -54,6 +54,10 @@ Authoring notes (delete before saving):
     <help block — purpose statement + one-line bullet per shipped artifact>
 
   Plugin help commands (`<namespace>.help`) are a specific contract — see `lazy-core.skill-writing § 7`.
+
+- `description:` opens with WHEN to run the command, per `lazy-core.skill-writing § 8` — it is the
+  routing table, and a command the router cannot select never fires (WARN). Shapes and worked
+  rewrites: `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`.
 
 - Filename: `<namespace>.<name>.md` under `.claude/commands/` or `<plugin>/commands/`.
 

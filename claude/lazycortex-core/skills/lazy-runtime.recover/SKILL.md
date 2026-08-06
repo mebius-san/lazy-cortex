@@ -1,6 +1,6 @@
 ---
 name: lazy-runtime.recover
-description: Recover the lazycortex-core runtime daemon from a halt — either a working-tree halt (uncommitted_changes) or a remote-sync halt (git_pull_diverged, git_push_failed, git_remote_unavailable). Branches on the halt reason: walks the operator through dirt cleanup for tree halts, or through manual repair guidance for remote-sync halts. Atomically clears the daemon_halted block from state.json once the precondition holds.
+description: "Run when the runtime daemon has stopped scheduling — routines no longer fire, or `.runtime/state.json` carries a `daemon_halted` block. Branches on the halt reason: `uncommitted_changes` walks the operator through commit / stash / discard of the dirt a routine left behind; `git_pull_diverged` / `git_push_failed` / `git_remote_unavailable` describes the remote-sync failure and waits for the operator to repair it externally. Ends by atomically clearing the halt so the daemon resumes."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(git status *), Bash(date -u *), Write, AskUserQuestion
 dirty-tree-waiver: "applies operator-chosen cleanup ops to the working tree (commit/stash/discard) — the operator is the commit author, not this skill"
 ---

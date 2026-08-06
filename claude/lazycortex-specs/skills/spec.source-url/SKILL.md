@@ -1,6 +1,6 @@
 ---
 name: spec.source-url
-description: Use to build a single forge-correct source URL for a file in a source repo. Takes `(repo_key, path, kind="blob", branch=None)` and returns the URL using the forge's path scheme from the known-forges table in `${CLAUDE_PLUGIN_ROOT}/references/spec.sources-protocol.md`. All `spec.*` skills and generator agents MUST go through this primitive — never inline `<base>/blob/<branch>/<path>` or other forge-specific path schemes.
+description: "Dispatched by every `spec.*` skill and generator agent that emits a link to a file or directory in a source repo — `spec.create-from-code`, `spec.sync-with-code`, `spec.doctor`, `spec.product-config`, `spec.finalize-branch`. Not for direct use except when a human is debugging a wrong URL. Nobody inlines a forge path scheme (GitHub `/blob/`, GitLab `/-/blob/`, Bitbucket `/src/`) anywhere else."
 execution-discipline-waiver: "Single-purpose primitive — wraps the known-forges table; no multi-phase orchestration where step-skip can hide."
 ---
 # Source URL

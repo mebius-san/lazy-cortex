@@ -1,6 +1,6 @@
 ---
 name: lazy-review.submit
-description: "Public verb — open one document into the review loop skipping the opening writer round (the diffs are already in the file), landing straight on a reviewer. Atomically writes review_active/review_round/approved frontmatter, pre-seeds the main-writer round as done, drops the Waiting banner above the first H1, and commits under the operator's git identity. Optional --expert pins a per-document main-writer override."
+description: "Use when a document is NOT yet in the review loop, its content is already written, and the operator wants it reviewed rather than drafted — 'submit this for review', 'I've made the edits, get it reviewed'. Skips the opening writer round and lands straight on a reviewer; use `/lazy-review.start` instead when the experts should write the document first. `--expert <name>` pins a per-document main-writer override. No-op on a document already opted in."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date *)
 execution-discipline-waiver: "thin dispatcher — work lives in bin/submit.py (open_submit + atomic git add/commit), this SKILL.md is a single subprocess call with no decision logic"
 ---

@@ -1,6 +1,6 @@
 ---
 name: lazy-observe.doctor
-description: "Read-only health check for the lazycortex-observe shipper on this host. Verifies service status, agent process, local /metrics endpoint, agent's own remote_write success counter, observer URL reachability, and WAL bounds. Reports each as PASS / WARN / FAIL with a one-line fix suggestion. Never mutates filesystem or service state."
+description: "Run when metrics stopped reaching the observer, a dashboard went flat, an alert says the shipper is down, or the operator asks whether metrics shipping is healthy on this host. Read-only end-to-end check of the service unit, agent process, local `/metrics` endpoints, remote_write success, observer reachability, and WAL size — it reports fixes with PASS / WARN / FAIL, never applies them."
 allowed-tools: Read, Glob, Bash(launchctl *), Bash(systemctl *), Bash(curl *), Bash(test *), Bash(date *), Bash(ps *), Bash(du *), Bash(uname *), Bash(python3 *)
 ---
 # Doctor lazy-observe

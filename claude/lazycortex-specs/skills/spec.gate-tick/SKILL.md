@@ -1,6 +1,6 @@
 ---
 name: spec.gate-tick
-description: Script-only md-scan worker that advances one asset's gates per tick — auto-flips the next derived gate, drops a readiness callout for the next human-signal gate, or withdraws a stale readiness callout. Dispatched per-file by the daemon; performs no Claude calls.
+description: "Dispatched per status folder-note by the daemon's `spec.gate-tick` md-scan routine to advance one asset a single notch; not for direct use — it is a pure script and makes no Claude calls. Read it when asked why an asset auto-advanced, or where a `[!ready]` (or withdrawn-readiness) callout in its `## Gates` section came from."
 execution-discipline-waiver: "Documents a pure script (bin/gate_tick.py) dispatched by the daemon — there is no Claude-side execution to discipline."
 logging-waiver: "script-only md-scan worker invoked per-file by the daemon; the routine's daemon log records execution"
 ---

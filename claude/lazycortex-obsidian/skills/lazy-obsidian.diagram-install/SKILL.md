@@ -1,6 +1,6 @@
 ---
 name: lazy-obsidian.diagram-install
-description: "Scaffold the Obsidian render glue for the lazycortex-diagram engine into a vault: install the `mermaid-fit.css` and `ascii-fit.css` snippets, enable them in `appearance.json`, and install the `mermaid-popup` community plugin (click-to-zoom for mermaid fences) via `/lazy-obsidian.update-plugin`. Quiet file-sync — writes silently when absent or unchanged, merges silently when the shipped delta doesn't contradict local edits, and asks only on a genuine conflict. Re-runnable; idempotent. Project-scope only (no global mode — Obsidian render glue is per-vault). Detects and silently keeps the legacy `mermaid-no-bg.css` snippet (made redundant by the engine's theme directive)."
+description: "Run when the operator asks to make lazycortex diagrams render properly in Obsidian, or when they report that mermaid fences overflow the note column, sit on a white box, ASCII diagrams are clipped, or clicking a diagram doesn't zoom. Installs the fit-CSS snippets, enables them in `appearance.json`, and installs the `mermaid-popup` vault plugin. Project scope only, idempotent, and chained from `/lazy-obsidian.install`."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(jq *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList
 argument-hint: "(no arguments — scaffolds into <repo-root>/.obsidian/)"
 ---

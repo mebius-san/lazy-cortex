@@ -39,10 +39,11 @@ these conventions.
 - No-change rules:
   - If a section violates the rules, normalize and fix it, but do not delete or move it. 
   - Always keep a section if it exists, unless it is empty or redundant.
-- `TODO:`, `TMP:`, `DBG:`, `REF:`, `opt:`, `guard:`, `DOC(…):` and other special comments interpretation rules:
+- `TODO:`, `TMP:`, `DBG:`, `REF:`, `opt:`, `guard:`, `limit:`, `DOC(…):` and other special comments interpretation rules:
   - Treat any code or comments marked with `TMP:` as non-existent for the purposes of documentation, behavior description, and refactoring suggestions. Do not mention `TMP:` blocks or derive documented behavior from them.
   - Treat any code region marked with `TODO:` as if it were already fully and correctly implemented. Do not mention missing implementation, stubs, placeholders, or the need to finish `TODO:` blocks in docstrings, Notes, or any other generated text, even if the underlying code is incomplete.
   - Treat `opt:` comments as optimization annotations that explain why a non-obvious implementation choice was made for performance reasons. Do not alter or remove them.
+  - Treat `limit:`-marked code as complete and correct as written. Never describe it as incomplete, temporary, provisional, or in need of the named upgrade, and never carry the ceiling into the docstring — document exactly what the code does today. Do not alter or remove the comments.
   - `REF:` comments are source references that point to related code, classes, constants, or `DOC(…)` groups elsewhere in the codebase. They are stripped automatically when docstring sections are read during generation, so they serve only as human-readable traceability links. Do not alter or remove them.
   - Ignore any comments or tags like `DBG:`, `DOC(…):` in the docstring or comments for the docstring generation or modification process.
 - Change Rules:
@@ -499,6 +500,14 @@ The codebase uses several marker prefixes in comments. Each serves a specific pu
 - `DBG:` — marks diagnostic/debug code blocks used during development to inspect runtime state.
 - `REF:` — marks source references pointing to related code, classes, constants, or `DOC(…)` groups elsewhere in the codebase. Stripped automatically during generation; serves only as human-readable traceability links.
 - `opt:` — marks optimization annotations that explain why a non-obvious implementation choice was made for performance reasons.
+- `limit:` — marks a deliberate simplification with a known ceiling: the implementation is correct at the current scale but stops being adequate under the named condition. One line, naming the ceiling and the upgrade path.
+  - Correct:
+      # limit: global lock, per-account locks if throughput matters
+      # limit: O(n²) scan, index it if the list grows past a few hundred
+  - Not `TODO:` — the code is finished as written; the marker records a boundary, not unfinished work.
+  - Not `opt:` — that annotates a choice made **for** performance; this one annotates a choice made **against** it, knowingly.
+  - Not `waiver:` — no checker rule is being broken.
+  - `pcf` proves only that the clause is non-empty; whether it names a real ceiling and a real upgrade path is the review phase's call.
 - `guard:` — marks a guard clause: an `if` (or equivalent `try`/`except` validation) whose body exits the current scope (`return`/`continue`/`break`/`raise`/`sys.exit`). Not for accumulation or branch ifs (see guard rules in Comments section above).
 - `DOC(…):` — marks documentation comments that describe domain rules, mechanics, algorithms, or other domain-specific concepts (see DOC Comments section below).
 - `waiver:` — marks an intentional exception from a coding rule. The comment must explain **why** the exception is justified. Required whenever `typing.cast()` is used (see Type Casting rules) or any other banned pattern is unavoidable.

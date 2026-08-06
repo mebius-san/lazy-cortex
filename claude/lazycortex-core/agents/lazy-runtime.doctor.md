@@ -1,6 +1,6 @@
 ---
 name: lazy-runtime.doctor
-description: "Autonomous runtime doctor — triages DEAD expert jobs and dirty-tree halts older than 1 hour, decides retry vs permanent-fail vs commit-system-noise, applies fixes via recover.py primitives. Dispatched hourly by the `lazy-runtime.doctor` routine. Receives one context bundle per invocation; produces one response.json with the actions taken."
+description: "Dispatched hourly by the `lazy-runtime.doctor` routine when something looks stuck in the lazycortex-core runtime — a DEAD-marked expert job the pump keeps skipping, or a dirty-tree halt sitting in state.json for over an hour; not for direct use. Decides retry vs permanent-fail vs commit-the-system-noise on its own and applies the fix via recover.py primitives, never asking the operator. One context bundle in, one response.json out."
 tools: Read, Bash, Glob, Grep
 model: inherit
 execution-discipline-waiver: "single-response autonomous triage — one context bundle in, one response.json out; the routine is the contract, not multi-phase orchestration"

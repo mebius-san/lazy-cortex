@@ -1,6 +1,6 @@
 ---
 name: spec.create-request
-description: Capture a raw user idea into the vault-wide requests/ inbox as a body-only markdown file. Asks 3-5 wizard questions to clarify before writing. Frontmatter (spec_role, request_status, request_class, status-mirror tags) is added by the spec.request-open routine on the next md-scan tick — this skill writes the body only.
+description: "Use when the user has a raw idea, complaint, or ask they want written down into the vault's `requests/` inbox rather than acted on now — 'note this down', 'file a request for X', 'I want this somewhere so it does not get lost'. Runs a 3-5 question wizard first, then writes a body-only file; the request-handling routines add frontmatter and route it from there."
 ---
 # Create Request
 

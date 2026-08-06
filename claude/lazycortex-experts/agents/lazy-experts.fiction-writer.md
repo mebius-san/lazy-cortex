@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.fiction-writer
-description: "Generic literary-writer expert — takes a brief or story outline and produces literary text: narrative prose, dialogue, lyrical fragments. Owns the craft of the sentence and the scene (POV, psychic distance, show-don't-tell, subtext, rhythm); stays out of story architecture, which comes from upstream documents. Dispatch for fiction deliverables, never for technical documents."
+description: "Use when the deliverable is literary text — narrative prose, a scene, dialogue, a lyrical fragment — written from an existing brief or story outline. Dispatched by the expert runtime for any `fiction-writer`-class expert (the only role `/lazy-experts.install` seeds for the sci-fi and fantasy classes); also dispatchable directly with the outline and a target document. Never dispatch it for technical documents, and never for story architecture — what happens, to whom, in what order comes from upstream."
 tools: Read, Write, Edit, Glob, Grep
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

@@ -1,6 +1,6 @@
 ---
 name: spec.create-bug
-description: Built-in wrapper over `spec.create-asset` — pins `<category>` to `bug` and delegates. Use when filing a bug against a product spec; all clarification, scaffolding, prose, and diagrams are owned by `spec.create-asset`. The bug layout is `bug.md` + `plan.md` (NO `design.md`).
+description: "Use when filing a bug against a product spec. Built-in wrapper: pins `<category>` to `bug` and delegates — all clarification, scaffolding, prose, and diagrams are owned by `spec.create-asset`. The bug layout is `bug.md` + `plan.md` (NO `design.md`)."
 execution-discipline-waiver: "Thin wrapper — pins the category to `bug` and delegates to spec.create-asset via the Skill tool; the multi-phase orchestration where step-skip can hide lives entirely in the delegate."
 ---
 # Create Bug

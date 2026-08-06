@@ -1,6 +1,6 @@
 ---
 name: lazy-wiki.query
-description: "Associative Q&A over the wiki graph. Thin dispatcher: a per-scope seeker subagent picks entry points from topics.md, a single gatherer subagent traverses See-also and synthesises the answer. The large topic index and traversed node bodies stay in the subagents' contexts, never the main session."
+description: "Use when a question needs material the wiki curates — 'why is it built this way', 'where is X described', 'what relates to Y', or any request whose answer lives in files a wiki scope covers. Run it BEFORE grepping or opening files in a covered scope, and whenever the user asks about a topic rather than a specific file. Dispatches per-scope seekers plus one gatherer, so the topic index and traversed node bodies never enter the calling context."
 allowed-tools: Read, Agent, Bash(test -f *), Bash(date -u *), Bash(git rev-parse *), Bash(mkdir -p *), Write
 dirty-tree-waiver: "writes only its run log under .logs/ (untracked) — never a tracked file"
 ---

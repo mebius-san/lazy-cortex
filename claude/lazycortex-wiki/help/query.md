@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Associative Q&A over the wiki graph — /wiki.query dispatches seekers to find entry points then a gatherer to traverse glossed See-also links and synthesise the answer.
-last_regen: 2026-08-05
+last_regen: 2026-08-06
 diagram_spec:
   anchor: "How the query pipeline works"
   request: "Sequence diagram showing /wiki.query dispatching one seeker per scope in parallel to read topics.md and return entry points, then dispatching a single gatherer to traverse See-also links depth-first and return a synthesised answer block back to the skill, which presents the answer and entry-point seed to the user."
@@ -21,6 +21,7 @@ The seeker and gatherer subagents each run in their own isolated context. The se
 - Finding out which modules, services, or documents relate to a given topic without manually reading the topic index.
 - Tracking down the authoritative source for a design decision recorded in the wiki.
 - Asking follow-up questions about your project's architecture using the curated, maintained knowledge layer rather than raw grep.
+- Before falling back to grep or opening files by hand in a scope the wiki covers — once a wiki scope is installed, the shipped `lazy-wiki.navigation` rule makes `/wiki.query` mandatory first, not just convenient.
 
 ## How it fits together
 
@@ -41,6 +42,7 @@ If no scope has a topic index on disk, or if the seekers find no relevant entry 
 - **Multiple scopes.** If your project has several wiki scopes (e.g. one for source, one for docs), seekers run in parallel across all of them. Run `/lazy-wiki.configure` to add, edit, or remove scopes and their `topics_index` paths.
 - **Index out of date.** The seeker draws only from `topics.md`. If a recently added node hasn't been indexed yet, it won't appear as an entry point. Run `/lazy-wiki.relink` to bring the index up to date, or wait for the next scheduled relink routine. `/lazy-wiki.relink` is the daemon-free way to do this in-session: it classifies and links every changed node, rebuilds `topics.md` once, and commits the result under your identity — useful when you don't run the runtime daemon, or want to force a refresh right before a query.
 - **Cross-repo links.** If your wiki scopes span multiple repositories, the gatherer resolves `@<repo-key>/…` links via the `repos` registry in your wiki settings. Add or update repo entries via `/lazy-wiki.configure`.
+- **Deciding whether a question is covered.** The `lazy-wiki.navigation` rule that ships with the plugin carries a `## Coverage` section listing each scope's `paths` globs; `/wiki.configure` rewrites that section whenever a scope is created or edited. That's what lets any agent working in the repo tell — without opening the wiki — whether your question falls inside a scope the wiki curates. When it does, the rule requires `/wiki.query` to run before Grep, Glob, or opening a file directly; grepping the scope blind, opening nodes one by one to find the relevant one, and answering from memory of an earlier session are each called out as the violation the rule forbids. Outside a covered scope, work continues normally.
 
 ## How the query pipeline works
 

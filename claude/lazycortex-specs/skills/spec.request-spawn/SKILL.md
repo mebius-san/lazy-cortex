@@ -1,6 +1,6 @@
 ---
 name: spec.request-spawn
-description: Spawn a new feature/change/bug entity from a request, then delegate to spec.request-attach to populate it from the request body. Calls the deterministic `lazycortex-specs scaffold-asset` primitive for the empty-scaffold step, then invokes `spec.request-attach` on the freshly-created folder-note.
+description: "Dispatched by the `spec.request-apply` worker when a request's routing decision names a spawn target rather than an existing entity; not for direct use. Scaffolds the new feature / change / bug, then hands the folder-note to `spec.request-attach` to fill it from the request body."
 execution-discipline-waiver: "nested-from-agent — invoked by spec.request-apply; outer agent owns step discipline (per lazy-core.skill-writing § 1.5)"
 allowed-tools: Read, Bash(lazycortex-specs scaffold-asset *), Skill
 ---

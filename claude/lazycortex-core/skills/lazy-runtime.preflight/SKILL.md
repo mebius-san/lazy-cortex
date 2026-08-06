@@ -1,6 +1,6 @@
 ---
 name: lazy-runtime.preflight
-description: Validate that every routine-dispatched expert is actually launchable — its spawn config is well-formed, its agent / aspects / protocols resolve, and its optional per-expert MCP servers initialize without hanging. Emulates each expert launch with a trivial prompt (no real work), then for a broken config proposes a concrete fix and applies it only after the operator confirms. Run before wiring a new expert or MCP server into a live routine, or when a routine's expert spawns keep timing out.
+description: "Run before wiring a new expert or MCP server into a live routine, and when a routine's expert spawns keep timing out, die instantly, or never produce a response. Emulates each expert launch with a trivial prompt (no real work) to expose the unresolvable agent, missing aspect/protocol, bad `mcp_config` path, or MCP server that hangs at init, then proposes a concrete fix and applies it only after the operator confirms."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(git rev-parse *), Bash(date -u *), Write, Edit, AskUserQuestion
 ---
 # Runtime Preflight

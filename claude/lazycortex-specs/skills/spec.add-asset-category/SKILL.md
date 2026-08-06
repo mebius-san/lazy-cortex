@@ -1,6 +1,6 @@
 ---
 name: spec.add-asset-category
-description: Register a new operator-defined asset category on a product — writes the category block (`icon`, optional `color`) into `products[<key>].asset_categories.<name>` and scaffolds the category folder + operator-zone folder-note (carrying the managed `iconize_icon`/`iconize_color` and an operator-authored `description`). The category's docs are covered automatically by the shared behavior-keyed review classes (right-anchored wildcard globs) — this skill never touches `review.classes`. Invoke when an operator wants a product to grow a new asset kind (characters / scenes / chapters / …) beyond the built-in feature / change / bug set.
+description: "Use when a product must grow a new asset kind beyond the built-in feature / change / bug set — characters, scenes, chapters, endpoints, whatever the operator names — or when `spec.request-classify` has no category to route a request into. Writes the category block into `products[<key>].asset_categories.<name>` and scaffolds its folder plus operator-zone folder-note; review coverage is automatic, so it never touches `review.classes`."
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, AskUserQuestion, TaskCreate, TaskUpdate, TaskList
 ---
 # Add Asset Category

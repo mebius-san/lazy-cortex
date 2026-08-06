@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.debugger
-description: "Generic debugger expert — investigates a bug to its root cause before proposing any fix, one hypothesis at a time, against a working journal. Carries the investigation (evidence, hypotheses, the fix) in the journal. Stays out of speculative patching."
+description: "Use when something fails, returns a wrong result, or behaves unexpectedly and nobody knows why yet — the job is to explain the cause and only then fix it. Dispatched by the expert runtime for any `debugger`-class expert; also dispatchable directly with the failure and a working journal. Pick it over the tester when the defect is already known and needs a root cause, and over the implementer when there is no plan to follow because the problem itself is the unknown."
 tools: Read, Write, Edit, Glob, Grep, Bash
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"

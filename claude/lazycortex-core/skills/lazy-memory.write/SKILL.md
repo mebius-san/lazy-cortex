@@ -1,6 +1,6 @@
 ---
 name: lazy-memory.write
-description: "Atomic memory-note writer for persona-marked experts. Writes one note under `.memory/<expert>/`, regenerates touched `.tags/` files (local + global), optionally drops consolidated log files, then commits the change atomically under the memory-bot identity (`memory.<expert>`). The only blessed writer of .memory/."
+description: "Invoked by a persona-marked expert whenever it records or updates a memory note (per `lazy-memory.persona-aspect`), and by the operator when merging notes by hand — the only blessed writer of `.memory/`. Direct `Write` / `Edit` under `.memory/` silently desyncs the tag index; this skill writes the note, regenerates the touched `.tags/` files, and commits atomically under the memory-bot identity."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Bash(git *), Write
 ---
 # Memory write

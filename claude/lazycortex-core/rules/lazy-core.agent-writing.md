@@ -13,7 +13,7 @@ Agents are dispatched as one-shot subagents via the `Agent` tool. Their output i
 ## 1. Frontmatter requirements (FAIL if missing)
 
 - `name:` — dot-namespaced (`<namespace>.<name>`).
-- `description:` — must state *when* to dispatch this agent, not just what it does. The coordinator reads this to decide.
+- `description:` — must **open** with when to dispatch, not with what the agent does. The dispatching model matches the task against this field to pick a `subagent_type`; a description that narrates the agent's internal job spec ("takes X, produces Y, stays out of Z") gives it nothing to match on. Use one of the shapes in `lazy-core.skill-writing § 8`: `Use when <task shape>` for generally-dispatchable agents, or `Dispatched by /<skill>; not for direct use.` for agents with a single caller — naming the sole caller is itself a valid trigger. `<example>` blocks are welcome after the trigger sentence, never in place of it. Mechanism-only → `WARN`; missing → `FAIL`.
 - `tools:` — explicit allowlist. See § 5.
 - `model: inherit` — always set to `inherit`. This is Claude Code's native keyword meaning "use the parent's model". Actual model routing is handled by `lazy.settings.json` via the `lazy-core.model-router` hook; the frontmatter value is the fallback when no config override exists.
 

@@ -1,6 +1,6 @@
 ---
 name: lazy-routine.register
-description: Register a named routine in lazy.settings.json. Type-aware wizard (subprocess / inbox / schedule / git / md-scan). Wraps expert_runtime.register_routine with closed-set validation. Used by plugin install skills.
+description: "Run when the daemon should start doing something on its own — the operator asks to schedule recurring work, watch an inbox directory, react to local git HEAD, or scan markdown files by frontmatter. Also dispatched by plugin install skills (`spec.install`) to wire their own routines instead of hand-writing settings JSON. Type-aware wizard; refuses to overwrite an existing routine without `--force`."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(git check-ignore *), Write, AskUserQuestion
 dirty-tree-waiver: "registers a routine in lazy.settings.json — operator commits explicitly to coordinate with sibling routines / install steps"
 ---

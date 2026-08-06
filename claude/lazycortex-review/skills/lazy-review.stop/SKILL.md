@@ -1,6 +1,6 @@
 ---
 name: lazy-review.stop
-description: "Public verb — opt one document out of the review loop. Sets review_active false; preserves review_round, approved, and # History so a later /lazy-review.start can resume from the operator's last state."
+description: "Use when a document is currently in the review loop and the operator wants the experts to stop touching it before it is approved — 'pause the review', 'take this out of review for now', or when a doc is churning and needs to be parked. Round, approval flag and `# History` survive, so `/lazy-review.start` resumes where it left off; for a document that IS approved and just needs closing out, use `/lazy-review.finalize`."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date *)
 execution-discipline-waiver: "thin dispatcher — work lives in bin/stop.py (surgical frontmatter set + atomic commit), this SKILL.md is a single subprocess call with no decision logic"
 ---

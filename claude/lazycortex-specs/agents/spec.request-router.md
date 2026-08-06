@@ -1,6 +1,6 @@
 ---
 name: spec.request-router
-description: "Routing specialist for request files in review. Fires after the operator has approved a request body. Classifies the request (via spec.request-classify), names candidate targets to attach to (via spec.request-find-candidates), and surfaces the routing decision for the operator to confirm. Reads the vault read-only; writes only inside its own section, never the document frontmatter. Never carries out the routing — that is spec.request-apply, once the review closes."
+description: "Dispatched by the request review loop once the operator has approved a request body, to decide where that request should go; not for direct use. Classifies it (via spec.request-classify), names attach candidates (via spec.request-find-candidates), and surfaces the routing decision for the operator to confirm — it never carries the routing out, that is spec.request-apply once the review closes. Reads the vault read-only and writes only inside its own section, never the document frontmatter."
 tools: Read, Write, Glob, Grep, Skill
 model: inherit
 execution-discipline-waiver: "Single review-specialist round — one mode, no multi-phase orchestration where a step can be silently skipped"

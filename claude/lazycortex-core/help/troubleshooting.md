@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-08-05
+last_regen: 2026-08-06
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor, scaffold registry, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, unpinned models), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -14,8 +14,6 @@ source_skills:
   - lazy-core.git-unlock
   - lazy-core.install
   - lazy-core.optimize
-  - lazy-core.scaffold-local
-  - lazy-core.scaffold-sync
   - lazy-core.setup
   - lazy-expert.cancel-job
   - lazy-expert.collect-job
@@ -24,13 +22,11 @@ source_skills:
   - lazy-guard.allow-mcp
   - lazy-guard.check-public
   - lazy-log.clean
-  - lazy-log.distill
   - lazy-memory.index
   - lazy-memory.mark-persona
   - lazy-memory.reflect
   - lazy-memory.write
   - lazy-repo.mark-public
-  - lazy-routine.offer-protocols
   - lazy-routine.register
   - lazy-routine.unregister
   - lazy-runtime.preflight
@@ -79,6 +75,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: `lazy-core.agent-models/default-tiers.json` inside the plugin cache cannot be read or parsed. This file is the single source of truth for built-in subagent model tiers; the skill refuses to fall back to hardcoded values.
 
 **Fix**: Reinstall `lazycortex-core` by running `/plugin update lazycortex-core@lazycortex`, then re-run `/lazy-core.install`.
+
+---
+
+## `/lazy-core.install` Step 8 fails: settings.json malformed JSON
+
+**Symptom**: `/lazy-core.install` fails at Step 8 with an error about invalid JSON in one of the four standard settings paths.
+
+**Likely cause**: Step 8 strips stale `lazycortex-log` hook registrations left behind by the plugin's retirement (see the migration note at the end of this page) out of the four standard settings files — project and user `settings.json` / `settings.local.json`. If one of those was hand-edited and now contains invalid JSON, the step cannot read it to check for stale entries.
+
+**Fix**: Open the settings file the error names and fix the JSON syntax error, then re-run `/lazy-core.install`.
 
 ---
 
@@ -222,6 +228,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## The daemon halts with `uncommitted_changes` right after install, and `git status` lists the external directories
+
+**Symptom**: Right after `/lazy-core.install` finishes, the daemon halts on its first tick with reason `uncommitted_changes`, and `git status` shows the external working-directory symlinks it just created as untracked or modified.
+
+**Likely cause**: The symlinked slots are visible to git — either Step 12.5 recorded `ignores-declined` because you declined the `.gitignore` update it offered, or your existing `.gitignore` only covers the directory form of the name (`Data/`) while the slot itself is a symlink, which a directory-only ignore line does not match.
+
+**Fix**: Re-run `/lazy-core.install` and accept the ignore-coverage question this time — it appends the anchored, slashless line (`/Data`) next to whatever is already there, which does match a symlink. Then commit or clean the working tree and run `/lazy-runtime.recover` to clear the halt.
+
+---
+
 ## `/lazy-core.install` Step 12.5 reports `inbox-conflict` and no supervisor is installed
 
 **Symptom**: `/lazy-core.install` reaches Step 12.5, reports `inbox-conflict`, and does not install the daemon supervisor for this checkout.
@@ -271,34 +287,6 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: `/lazy-core.setup` has no top-level per-plugin confirmation — it discovers every applicable `<namespace>.install` skill among enabled plugins and runs the whole chain in one pass.
 
 **Fix**: Run `/lazy-core.setup --dry-run` first to preview the full plan before committing to it. If a specific plugin should be skipped going forward, disable that plugin, then re-run `/lazy-core.setup` — every child is idempotent, so re-running after a partial or unwanted pass is safe.
-
-## `/lazy-core.scaffold-local` fails: registry missing, core CLI unresolved, or entry not found
-
-**Symptom**: Running `/lazy-core.scaffold-local` fails with "registry not found at `<path>`", "cannot resolve core CLI — lazycortex-core not installed", "core CLI not found at `<path>`", or — in remove mode — "entry `.claude/templates/<group>/<kind>-template.md` not found in the _local registry map".
-
-**Likely cause (registry / core CLI)**: `.claude/rules/lazy-core.scaffold.md` hasn't been bootstrapped in this repo yet, or `lazycortex-core` isn't registered (or its recorded install path is stale) in `~/.claude/plugins/installed_plugins.json`.
-
-**Likely cause (entry not found)**: The `group`/`kind` pair you passed for removal doesn't match an existing `_local` registry entry — a typo, or the entry was already removed.
-
-**Fix (registry / core CLI)**: Run `/lazy-core.install` if the scaffold registry was never initialised. If the core CLI path is stale, run `/plugin update lazycortex-core@lazycortex` to refresh the cache. Then re-run `/lazy-core.scaffold-local`.
-
-**Fix (entry not found)**: Re-run `/lazy-core.scaffold-local` in `add` mode first if the entry was never created, or double-check the exact `group`/`kind` spelling against the template filename `.claude/templates/<group>/<kind>-template.md` before retrying the removal.
-
----
-
-## `/lazy-core.scaffold-sync` reports a collision while a plugin installs
-
-**Symptom**: A plugin's own `/lazy-core.install` (or equivalent install skill) fails partway through with "scaffold-sync: collision — template path `<key>` declared by both group `<groupA>` and group `<groupB>` with conflicting globs", or "cannot resolve core CLI — lazycortex-core not installed".
-
-**Likely cause (collision)**: The plugin being installed ships two template groups that both declare the same consumer-facing template path with different glob lists — an authoring bug in that plugin's own manifests, not something your repo did.
-
-**Likely cause (core CLI)**: `lazycortex-core` isn't installed yet, or its recorded install path in `~/.claude/plugins/installed_plugins.json` is stale.
-
-**Fix (collision)**: This is a defect in the plugin being installed. Report it upstream, or — if it's your own custom plugin — edit its `scaffold.entries.json` manifests so no two groups declare the same template path with different globs, then re-run that plugin's install skill.
-
-**Fix (core CLI)**: Run `/lazy-core.install` first if `lazycortex-core` was never installed, or `/plugin update lazycortex-core@lazycortex` to refresh a stale cache, then re-run the failing plugin's install skill.
-
----
 
 ## `/lazy-core.audit` fails: "lazy.settings.json is not valid JSON"
 
@@ -610,6 +598,18 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Fix**: Set `daemon.run_here: false` in the checkout that must not drive the shared inbox (`.claude/lazy.settings.local.json`), then re-run `/lazy-runtime.preflight` to confirm.
 
+---
+
+## An expert job fails with `Operation not permitted` even though `/lazy-runtime.preflight` reports it as launchable
+
+**Symptom**: An expert job fails with `Operation not permitted`, but `/lazy-runtime.preflight` for that expert reports everything fine — no missing MCP server, no unresolvable agent, no bad `mcp_config` path.
+
+**Likely cause**: The sandbox allowlist that confines the expert's spawn names a directory reached through a symlink — commonly one of the external working directories `/lazy-core.install` links in at Step 12.5 — and confinement is checked against the resolved (real) path rather than the symlinked one, so the allowlist entry never actually matches what the spawn tries to reach.
+
+**Fix**: Run `/lazy-runtime.preflight` again — it now offers a `sandbox` fix for this case; accept it, or run `lazycortex-core sandbox-sync --repo-root "$PWD"` by hand to regenerate `.runtime/sandbox.settings.json` against resolved paths.
+
+---
+
 ## `/lazy-expert.dispatch-job` fails: experts directory not initialised
 
 **Symptom**: Running `/lazy-expert.dispatch-job` produces an error like "`.experts/` not initialised — run `/lazy-core.install` first."
@@ -641,6 +641,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: The `expert_name` argument contains a typo that does not match any key in `lazy.settings.json[experts]`. The skill creates the job directory under the named key regardless — if the key is unrecognised, the daemon's pump routine skips it silently on every drain cycle.
 
 **Fix**: Run `/lazy-expert.list-jobs` to see all active job directories and confirm which expert key the job landed under. Cancel the misrouted job with `/lazy-expert.cancel-job`, then re-dispatch with the correct `expert_name`.
+
+---
+
+## `/lazy-expert.dispatch-job` fails with a `JSONDecodeError` on the protocols argument
+
+**Symptom**: `/lazy-expert.dispatch-job` raises a `JSONDecodeError` pointing at the protocols argument instead of dispatching the job.
+
+**Likely cause**: The protocols argument was passed as something other than a JSON array literal — a bare comma-separated string, a single unquoted name, or an empty string instead of `'[]'`.
+
+**Fix**: Pass a JSON array literal — `'[]'` for no protocols, or `'["plugin:protocol-name"]'` to attach one — then re-dispatch with the corrected argument.
 
 ---
 
@@ -731,18 +741,6 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: The skill protects the built-in pump routine from accidental removal. Without `lazy-expert.pump`, the runtime daemon stops draining the job queue and expert jobs queue indefinitely.
 
 **Fix**: If removal is intentional, pass the `--force` flag: `/lazy-routine.unregister lazy-expert.pump --force`. Expert jobs will stop being processed until the routine is re-registered. To restore it later, re-run `/lazy-core.install` — the install skill re-registers the pump if experts are configured.
-
----
-
-## An install or configure wizard reports `no-relevant-candidates` or `routine-absent` while offering optional routine protocols
-
-**Symptom**: While running a plugin's install or configure wizard, a step that would offer optional protocol references for a writer-dispatching routine (e.g. a review or spec routine) reports `no-relevant-candidates` and skips the question entirely, or reports `routine-absent`.
-
-**Likely cause (no-relevant-candidates)**: None of the discovered reference files that opt in via `routine_protocol_candidate: true` frontmatter were judged relevant to what this specific routine's writers produce — this is the normal outcome when no installed plugin ships an optional protocol that fits the routine's declared context.
-
-**Likely cause (routine-absent)**: The routine this step tried to attach protocols to isn't registered in `.claude/lazy.settings.json` — usually because an earlier daemon-enablement gate in the same wizard was declined and the routine was removed before this step ran.
-
-**Fix**: Both outcomes are expected, non-error results — no action is needed for either. If you did expect optional protocols to be offered, confirm the plugin providing them is installed. If the routine was removed by an earlier gate in the wizard, re-run the wizard and accept that gate so the routine is registered before this step runs.
 
 ---
 
@@ -891,16 +889,6 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Fix (absent)**: Run any logged skill once (for example `/lazy-core.audit`) to create `.logs/claude/` and at least one log file. Then re-run `/lazy-log.clean`.
 
 **Fix (Step 1)**: Check the reason string in the error. Ensure `lazycortex-core` is properly installed by re-running `/lazy-core.install`. If the error mentions Python, verify that `python3` resolves to 3.12 or higher in the current shell environment.
-
----
-
-## Commits stopped appearing in `.logs/commits.jsonl`, and the distilled changelog misses recent work
-
-**Symptom**: `.logs/commits.jsonl` (the raw feed `lazy-log.distill` converts into `.logs/changelog.md`, and that `lazy-log.recall`, `lazy-log.summary`, and `lazy-log.timeline` search) stops growing even though you're committing regularly. Recent commits are simply absent from the changelog and from change-history queries.
-
-**Likely cause**: You're committing with a chained or flag-form command — `git add . && git commit -m "..." && git push`, `cd <dir> && git commit`, or `git -C <dir> commit` — on a plugin version older than this fix. The `lazy-log.commit-recorder` hook used to gate on a `Bash` command that literally started with `git commit`; any real-world chained invocation (the dominant pattern) never triggered the recorder, so the commit was silently dropped from the feed. A push that failed after a successful commit in the same chain could also drop an otherwise-recorded commit under the older gate.
-
-**Fix**: Run `/plugin update lazycortex-core@lazycortex` to pick up the current hook, which detects `git commit` anywhere in the command — including chained and flag-prefixed forms — and still records a commit that succeeded even when a later segment of the same chain (e.g. the push) failed. Restart any open Claude Code sessions afterward; hook registrations are held in memory for the session's lifetime. Past commits made under the old hook are not retroactively recorded — only commits going forward are captured.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: lazy-expert.dispatch-job
-description: Dispatch a job to a named expert queue. Wraps expert_runtime.dispatch_job and returns {job_id, queue_path}.
+description: "Run when a task should be handed to a named expert to run in the background instead of blocking the session — long work the operator wants queued and picked up later. Returns a job_id in seconds; the runtime daemon executes the job and `/lazy-expert.collect-job` retrieves the output."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Write, AskUserQuestion
 ---
 # Expert Dispatch Job
