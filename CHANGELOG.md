@@ -4,6 +4,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 6.2.0 — 2026-08-07 UTC
+
+- `lazy-core.audit` and `lazy-core.doctor` now judge **command** descriptions alongside skills and agents — a command is routed by its `description:` exactly as a skill is, and every lazycortex-core command got a trigger-first one. Doctor also offers a per-finding rewrite: it proposes the replacement line and edits only that line on confirmation, never in bulk.
+- `lazy-log.bullets` no longer drops a repo-wide commit from a plugin's release notes because the subject did not name that plugin — it reads the commit's diff scoped to the plugin being released.
+- `lazy-core.doctor` runs the `lazy-obsidian.audit` and `lazy-python.audit` checks it had never been told to run.
+
 ### 6.1.0 — 2026-08-06 UTC
 
 - `lazy-core.audit` and `lazy-core.doctor` now flag skill/agent descriptions that describe their mechanism instead of the request that should trigger them, and doctor offers a per-finding rewrite you review and accept inline.
@@ -503,6 +509,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 3.6.3 — 2026-08-07 UTC
+
+- `/spec.help` is now found when you ask which verb creates or advances a spec, or how the readiness gates work, not just by an exact match on its own output.
+
 ### 3.6.2 — 2026-08-06 UTC
 
 - Skill and agent descriptions rewritten to lead with the trigger that should invoke them, so `spec.*` skills get matched more reliably to the request that needs them.
@@ -608,6 +618,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 2.2.6 — 2026-08-07 UTC
+
+- `/lazy-obsidian.help` is now found when you ask which verb handles folder icons, tag pages, or a community plugin, not just by an exact match on its own output.
 
 ### 2.2.5 — 2026-08-06 UTC
 
@@ -735,6 +749,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.1.6 — 2026-08-07 UTC
+
+- `lazy-diagram.draw-mermaid` now quotes node labels, so a label starting with a character Mermaid reads as a shape modifier — a leading `/`, the natural shape for a node named after a slash-command — no longer produces an unterminated shape that fails to render. A pre-write check rejects unquoted labels before they ship.
+- `/lazy-diagram.help` now surfaces when you ask which verb draws a new picture versus repairing an existing fence, rather than only on an exact match against its own output.
+
 ### 1.1.5 — 2026-08-06 UTC
 
 - Skill and agent descriptions rewritten to lead with the trigger that should invoke them; the drawer agents now say explicitly that they never infer kind or format, so they are only reached once those are settled.
@@ -773,6 +792,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 5.2.10 — 2026-08-07 UTC
+
+- `/lazy-review.help` now surfaces on the occasion it is for — asking how a document enters or leaves the review loop, or where its logs land — instead of listing what it outputs.
 
 ### 5.2.9 — 2026-08-06 UTC
 
@@ -842,6 +865,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).
 
 ## lazycortex-observe
+
+### 0.8.2 — 2026-08-07 UTC
+
+- `/lazy-observe.help` is now found when you ask how lazycortex runtime metrics reach your dashboards, not just by an exact match on its own output.
 
 ### 0.8.1 — 2026-08-06 UTC
 
@@ -917,6 +944,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 0.7.4 — 2026-08-07 UTC
+
+- `/lazy-experts.help` is now found when you ask what the plugin ships or which generic expert fits a piece of work, not just by an exact match on its own output.
+
 ### 0.7.3 — 2026-08-06 UTC
 
 - Every expert agent (debugger, designer, fiction-writer, implementer, interpreter, planner, reviewer, tester) now has a trigger-first description that states what it's for and what sets it apart from its closest neighbours — sharper auto-dispatch when Claude picks which expert to run.
@@ -983,6 +1014,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 2.4.2 — 2026-08-07 UTC
+
+- `/lazy-python.help` is now found when you ask what the plugin enforces or which verb runs the checkers, not just by an exact match on its own output.
 
 ### 2.4.1 — 2026-08-06 UTC
 
@@ -1105,6 +1140,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 1.8.1 — 2026-08-07 UTC
+
+- `/wiki.help` now fires on what you are actually asking — how the wiki gets built, curated, or queried — instead of only matching its own output list.
 
 ### 1.8.0 — 2026-08-06 UTC
 

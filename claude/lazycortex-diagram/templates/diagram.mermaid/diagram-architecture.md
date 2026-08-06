@@ -42,24 +42,24 @@ Layout config is baked into the scheme's `blocks.init.architecture`; the drawer 
 <<init>>
 flowchart LR
   subgraph frontend [Frontend]
-    webApp[Web app]
-    mobileApp[Mobile app]
+    webApp["Web app"]
+    mobileApp["Mobile app"]
   end
 
   subgraph backend [Backend]
-    apiServer[API server]
-    cardService[Card service]
-    authService[Auth service]
+    apiServer["API server"]
+    cardService["Card service"]
+    authService["Auth service"]
   end
 
   subgraph data [Data]
-    cardDb[(Card DB)]
-    cache[(Redis cache)]
+    cardDb[("Card DB")]
+    cache[("Redis cache")]
   end
 
   subgraph integrations [Integrations]
-    emailGateway[/Email gateway/]
-    auditStream[/Audit stream/]
+    emailGateway["/Email gateway/"]
+    auditStream["/Audit stream/"]
   end
 
   webApp -->|fetches data| apiServer

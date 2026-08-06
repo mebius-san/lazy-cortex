@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, split behaviour, direct agent invocation, and install.
-last_regen: 2026-06-01
+last_regen: 2026-08-07
 no_diagram: true
 source_skills:
   - lazy-diagram.draw
@@ -65,6 +65,12 @@ Several mermaid syntax markers are ambiguous. A `flowchart` body could represent
 ## What happens when `/lazy-diagram.fix` warns "no host-section prose"?
 
 Fix uses the prose surrounding the existing fence — paragraphs between the anchor heading and the fence, plus any prose immediately after it — as the re-render request. If the section contains only the fence and no surrounding prose, fix falls back to using the fence's own node labels and edge labels as the request and continues with a `[WARN]` notice. The diagram will be re-conformed to the current scheme, but the output quality depends entirely on the label vocabulary in the existing fence. Adding prose that describes what the diagram depicts gives the drawer agent richer context and typically produces a better result on the next fix run.
+
+---
+
+## Why does every node label in a flow/nav/tree-shaped mermaid diagram come out wrapped in double quotes?
+
+Mermaid reads the character right after a node's opening bracket as a shape modifier — `[/` opens a parallelogram, `[(` a cylinder, `[[` a subroutine, `{{` a hexagon — before it ever looks at your label text. A label that happens to start with a slash, such as a skill verb like `/wiki.install`, used to collide with that rule: `id[/wiki.install...]` reads as an unterminated parallelogram and the diagram silently failed to render. The mermaid writer now always quotes every node label (`id["/wiki.install"]`, `id{"text"}`, `id(("text"))`), with no exceptions, so slashes, brackets, parentheses, and `#`/`-` characters can appear in a label without breaking the shape. This is a rendering detail, not something you configure — quoting happens automatically whenever `/lazy-diagram.draw` or `/lazy-diagram.fix` produces or re-conforms a mermaid fence.
 
 ---
 

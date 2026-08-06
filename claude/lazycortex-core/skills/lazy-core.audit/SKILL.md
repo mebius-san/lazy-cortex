@@ -146,7 +146,7 @@ Emit WARN only when the match survives all three gates.
 2. **No "Optional" in phase/step headings** — grep for `^##+ .*[Pp]hase.*[Oo]ptional`, `^##+ .*[Ss]tep.*[Oo]ptional`, and any `^### .*[Oo]ptional`. Match → `[FAIL]`.
 3. **Narrative padding (heuristic)** — grep the body (exclude frontmatter) for the denylist: `\bv\d+\.\d+\.\d+`, `user had to`, `we got burned`, `in a past session`, `in a previous run`, `user had to patch`. Match → `[WARN]` with the offending line. Final decision is the author's — heuristic, not structural.
 4. **Valid `lazy_setup_phase` value** — grep frontmatter for `^lazy_setup_phase:`. Value outside `{pre-install, per-plugin, post-install}` → `[WARN]` with the offending value. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md` for the contract.
-5. **`description:` states when to invoke** — see `lazy-core.skill-writing § 8` and `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`. Read each file's `description:` and judge it against the three trigger shapes; mechanism-only → `[WARN] description states mechanism, not a trigger — <skill> will not be selected | <path>`. Absent `description:` → `[FAIL]`. This is a judgement call, not a grep — read the reference before ruling on a batch.
+5. **`description:` states when to invoke** — see `lazy-core.skill-writing § 8` and `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`. **Commands are in scope for this check**, unlike the preamble check above: widen the file set to `.claude/commands/*.md` and `claude/*/commands/*.md`. A command is routed by its description exactly as a skill is, and `<ns>.help` commands are the ones an operator most needs the router to find. Read each file's `description:` and judge it against the three trigger shapes; mechanism-only → `[WARN] description states mechanism, not a trigger — <artifact> will not be selected | <path>`. Absent `description:` → `[FAIL]`. This is a judgement call, not a grep — read the reference before ruling on a batch.
 
 **Agent-writing compliance** — see `lazy-core.agent-writing`. File set: `.claude/agents/*.md`, `claude/*/agents/*.md`. Checks:
 
@@ -612,7 +612,7 @@ One line per Agent B naming `[WARN]`.
 - **Waivered files** (INFO) — one line per file with `execution-discipline-waiver: "<reason>"`.
 - **Narrative-padding heuristic** (WARN) — one line per match with the offending line.
 - **Invalid `lazy_setup_phase` value** (WARN) — one line per match with the offending value.
-- **`description:` states mechanism, not a trigger** (WARN) — one line per skill, prefixed by a `<n> of <total>` count line. A skill the router cannot select is dead surface, so the ratio is the finding as much as the individual lines are.
+- **`description:` states mechanism, not a trigger** (WARN) — one line per skill or command, prefixed by a `<n> of <total>` count line. A skill the router cannot select is dead surface, so the ratio is the finding as much as the individual lines are.
 
 ### Agent-writing compliance
 

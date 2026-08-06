@@ -152,7 +152,7 @@ Opting a skill into `lazy-core.setup`: see `${CLAUDE_PLUGIN_ROOT}/references/laz
 - `lazy-core.audit` Agent B enforces §§ 1–4 (preamble presence, no-Optional, narrative-padding heuristic) and § 6 (no dirty working tree — heuristic write-without-commit detection). Absent preamble and "Optional" in heading are `FAIL`; narrative-padding denylist match and unwaived dirty-tree finding are `WARN`.
 - `lazy-core.doctor` surfaces these findings in Phase 3 and prompts the user to fix or waive.
 - § 7 is informational: `lazy-core.audit` Agent B emits `INFO` when a SKILL.md with documented aborts lacks a `## Failure modes` section.
-- § 8: `lazy-core.audit` Agent B judges each `description:` against the three trigger shapes and emits `WARN` on a mechanism-only one. Judgement, not a grep — a description may phrase its trigger in its own words. A missing `description:` is `FAIL`.
+- § 8: `lazy-core.audit` Agent B judges each `description:` against the three trigger shapes and emits `WARN` on a mechanism-only one, across skills, agents, **and commands** — a command is routed by its description exactly as a skill is. Judgement, not a grep: a description may phrase its trigger in its own words. A missing `description:` is `FAIL`.
 
 ## Scope
 

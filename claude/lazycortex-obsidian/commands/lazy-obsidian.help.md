@@ -1,5 +1,5 @@
 ---
-description: Show lazycortex-obsidian purpose and a one-line summary of each skill it ships
+description: "Run when the operator asks what lazycortex-obsidian can do to this repo's vault, or which verb handles folder icons, tag pages, or a community plugin — lists the vault surface: install, single-plugin update, the iconize install / config / sync trio, the semantic audit, and the tag-page generator agent."
 execution-discipline-waiver: "help command — static text, no multi-step logic"
 logging-waiver: "static text — no executable steps"
 ---

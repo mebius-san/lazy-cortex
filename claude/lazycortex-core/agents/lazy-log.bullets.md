@@ -68,7 +68,9 @@ Drop commits matching any of:
 
 Heuristic: **would a user installing the plugin feel this change?** If no, drop. New skills, renamed commands (breaking), changed defaults, new checks that emit new warnings, bugs users could hit — all kept.
 
-If every commit is filtered out, mark Step 4 `all-internal`, render an empty block (`- _no user-visible changes_`) and proceed to Step 6.
+**Judge the commit's diff inside this plugin, never its subject scope.** A repo-wide commit — `feat(repo): …`, `docs(repo): …`, a subject listing eight other plugins — reaches many trees at once, and the part that landed in *this* plugin is what the release block is about. Re-read it scoped: `git show <sha> -- <plugin_dir>`. A commit whose overall subject reads like plumbing routinely carries a real consumer-visible change to one plugin, and dropping it on the subject alone is how a release ships as "no user-visible changes" while its siblings, changed by the very same commit, each get a bullet. Conversely a repo-wide commit that only touched this plugin's README is still a drop.
+
+If every commit is filtered out, mark Step 4 `all-internal` and render `- _no user-visible changes_`. Before you do, check the version delta: a plugin whose version moved but whose every commit filtered out is the signature of a mis-scoped judgement above, not of a genuinely silent release. Re-read the scoped diffs once before emitting an empty block — an empty release block is a claim to the consumer that nothing changed for them, and it must be true.
 
 ### Step 4 — Rewrite as bullets
 

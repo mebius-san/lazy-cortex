@@ -38,19 +38,19 @@ Layout config is baked into the scheme's `blocks.init.tree`; the drawer emits th
 ```mermaid
 <<init>>
 flowchart TD
-  card[Card]
+  card["Card"]
 
-  card --> contentCard[Content card]
-  card --> referenceCard[Reference card]
-  card --> taskCard[Task card]
+  card --> contentCard["Content card"]
+  card --> referenceCard["Reference card"]
+  card --> taskCard["Task card"]
 
-  contentCard --> noteCard[Note]
-  contentCard --> articleCard[Article]
-  contentCard --> mediaCard[Media]
+  contentCard --> noteCard["Note"]
+  contentCard --> articleCard["Article"]
+  contentCard --> mediaCard["Media"]
 
-  referenceCard --> linkCard[Link]
-  referenceCard --> citationCard[Citation]
+  referenceCard --> linkCard["Link"]
+  referenceCard --> citationCard["Citation"]
 
-  taskCard --> todoCard[To-do]
-  taskCard --> milestoneCard[Milestone]
+  taskCard --> todoCard["To-do"]
+  taskCard --> milestoneCard["Milestone"]
 ```

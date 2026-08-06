@@ -1,5 +1,5 @@
 ---
-description: Cheatsheet for lazycortex-review — public verbs, install/configure flow, where logs and errors land. The first thing a new consumer should run.
+description: "Run when the operator asks what lazycortex-review does, how a document gets into or out of the unattended review loop, or where its logs and errors land — lists the doc-review dispatcher's surface: the start / submit / stop / status / finalize verbs, the install → configure → audit setup order, and the per-run log, error-stream, and lock paths."
 logging-waiver: "static text — no executable steps"
 ---
 # /lazy-review.help

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap the plugin, register products, pull cross-repo design handoffs, audit spec health, and discover skills.
-last_regen: 2026-07-30
+last_regen: 2026-08-06
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing the install-and-audit lifecycle: spec.install as the first step (creates consumer template dirs, registers spec.gate-tick routine, wires request-handler runtime across channels 6a–6g), leading to spec.product-config (product creation wizard: writes product record to lazy.settings.json[products], scaffolds folder tree with # Summary protected sections and précis+stats markers, generates four behavior-keyed review classes — one per doc-kind (design@, plan@, tech@, bug@) with wildcard globs spanning every asset category — and normalizes the lazy-review.scan coarse discovery masks), with spec.import as an optional recurring pull step that fetches configured spec.imports[] entries and lands each handoff product's approved assets read-only (auto-registering missing products), spec.doctor as a recurring health-check loop that dispatches four parallel agents (A: link health, B: source staleness, C: role/header/stage, D: status gates/folders/intake) plus an inline Check 8 cross-reference, and spec.help as an always-available discovery entry point at the side. Show spec.install feeding into spec.product-config, spec.product-config completing to a registered product, spec.import pulling into the same registered product from the side, and spec.doctor pointing back at the registered product as a recurring validation pass. Keep spec.help separate."
