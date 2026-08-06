@@ -1,5 +1,5 @@
 ---
-description: Show lazycortex-observe purpose and a one-line summary of each skill it ships
+description: "Run when the operator asks what lazycortex-observe can do or how lazycortex runtime metrics get off this host into their dashboards — lists the metrics-shipper surface: install / doctor / uninstall / audit for the Grafana Alloy or OpenTelemetry agent that remote-writes to a Prometheus-compatible observer."
 execution-discipline-waiver: "help command — static text, no multi-step logic"
 logging-waiver: "static text — no executable steps"
 ---

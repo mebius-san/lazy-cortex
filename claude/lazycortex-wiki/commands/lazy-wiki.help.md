@@ -1,5 +1,5 @@
 ---
-description: Show lazycortex-wiki purpose and a one-line summary of each skill, agent, and command it ships
+description: "Run when the operator asks what lazycortex-wiki can do, how the semantic wiki gets built, curated, or asked a question, or which verb sets up a scope — lists the wiki surface: install / configure / relink / query / doctor, plus the curator, seeker, and gatherer agents those skills dispatch."
 execution-discipline-waiver: "static help text — no executable steps"
 logging-waiver: "static text — no executable steps"
 ---

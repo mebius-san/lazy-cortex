@@ -1,5 +1,5 @@
 ---
-description: Show lazycortex-experts purpose and a one-line summary of each agent, aspect, skill, and command it ships
+description: "Run when the operator asks what lazycortex-experts ships, which generic expert fits a piece of work, or how to assemble a named specialist — lists the eight persona agents (interpreter, designer, planner, implementer, debugger, reviewer, tester, fiction-writer), the domain and cross-cutting aspects that layer onto them, and the `lazy.settings.json[experts]` composition shape."
 execution-discipline-waiver: "static help text — no executable steps"
 logging-waiver: "static text — no executable steps"
 ---

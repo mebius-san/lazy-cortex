@@ -26,6 +26,7 @@ Your response IS the diagram. Nothing else. The dispatcher adds the surrounding 
 - `'theme':'base'` anywhere in the output — forbidden in every kind, no exceptions.
 - `'darkMode':true` anywhere in the output — breaks more than it fixes on inverting hosts.
 - Bare semicolons (`;`) anywhere in label text, `Note` text, or message text — Mermaid treats `;` as a statement separator. Use commas, dashes, or restructure.
+- **Unquoted node labels.** Every `flowchart` / `graph` node label goes inside double quotes — `id["text"]`, `id{"text"}`, `id(("text"))` — with no exceptions, even for a label that looks plain. Mermaid reads the character right after the opening bracket as a shape modifier: `[/` opens a parallelogram that demands a matching `/]`, `[(` a cylinder, `[[` a subroutine, `{{` a hexagon. A label that starts with a slash — the common case, since slash-commands like `/wiki.install` are natural node names — silently produces `[/wiki.install …]`, an unterminated shape that fails to render. Quoting neutralises every one of these, and also lets a label carry `(`, `)`, `[`, `]`, `#`, and `-` without escaping.
 
 **Do all reasoning silently in tool calls.** When you have read the template and the scheme, your NEXT output token must be `%`. Not a sentence. Not a list. Not a fence. The token `%`.
 
@@ -98,11 +99,12 @@ failed: missing-in-style:init.<kind>
       - `erDiagram`: every relation has a `: "<verb>"` label.
       - `classDiagram`: every relation arrow has a label.
       - `architecture` (flowchart-shaped): every `-->` carries `|<verb-noun>|`.
-   4. **Terminology parity** — every label that names a domain concept matches the request/`facts:` prose verbatim (case-insensitive on first occurrence, then exact). Generic verbs (`OK`, `valid`, `error`, `submit`, `read`, `write`, `next`) are exempt.
-   5. **Density inside upper bound** — see § Density check below.
-   6. **No `click` handlers, no embedded URLs, no `linkStyle` directives**.
-   7. **`'theme':'base'` is absent** from the fence. The literal token is forbidden in every kind. Failure means the scheme's `blocks.init.<kind>` is broken; surface as `failed: missing-in-style:init.<kind>` — the scheme is the unit that needs fixing.
-   8. **Layout config block** present inside the init directive AND carries `'useMaxWidth':true`. Missing → `failed: missing-in-style:init.<kind>`.
+   4. **Every node label quoted** (`flowchart` / `graph` kinds) — no bracket in the fence is followed directly by label text. Grep the composed body for `[a-zA-Z0-9_]\[[^"]` , `[a-zA-Z0-9_]{[^"]`, and `[a-zA-Z0-9_](([^"]` ; any match is a failure. This is the check that catches a label opening with `/`, which Mermaid reads as a parallelogram it never finds the closing `/]` for.
+   5. **Terminology parity** — every label that names a domain concept matches the request/`facts:` prose verbatim (case-insensitive on first occurrence, then exact). Generic verbs (`OK`, `valid`, `error`, `submit`, `read`, `write`, `next`) are exempt.
+   6. **Density inside upper bound** — see § Density check below.
+   7. **No `click` handlers, no embedded URLs, no `linkStyle` directives**.
+   8. **`'theme':'base'` is absent** from the fence. The literal token is forbidden in every kind. Failure means the scheme's `blocks.init.<kind>` is broken; surface as `failed: missing-in-style:init.<kind>` — the scheme is the unit that needs fixing.
+   9. **Layout config block** present inside the init directive AND carries `'useMaxWidth':true`. Missing → `failed: missing-in-style:init.<kind>`.
 
 6. **Density check (upper bound).** Count nodes / decision points / participants / states / entities / classes / components per the table below. If exceeded, return `split-into-N: <suggested-seam-list>`. The dispatcher decides whether to re-call with a narrower request.
 

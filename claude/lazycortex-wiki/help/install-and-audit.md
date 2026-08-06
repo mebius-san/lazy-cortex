@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-wiki in a project — install, configure scopes, run integrity audits, and orient yourself with the built-in help command.
-last_regen: 2026-08-06
+last_regen: 2026-08-07
 diagram_spec:
   anchor: "How the setup flow connects"
   request: "Flow diagram showing the install-and-audit lifecycle: wiki.install seeds settings and registers the expert plus the three daemon-gated routines (wiki.scan for changed files, wiki.scan-deletes for deleted files/link pruning, wiki.relink-weekly for the full rescan) → wiki.configure wizard collects scope id/paths/exclude_paths/tag_axes/topics_index/filter (review-skip), writes to lazy.settings.json, and refreshes the Coverage section of the installed lazy-wiki.navigation rule from the scope's paths/exclude_paths → wiki.doctor audits the scope and optionally applies fixable repairs. wiki.help is shown as an optional orientation step available at any point."

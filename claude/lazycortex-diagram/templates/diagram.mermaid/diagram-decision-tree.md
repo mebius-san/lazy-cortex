@@ -38,14 +38,14 @@ Layout config is baked into the scheme's `blocks.init.decision-tree`; the drawer
 ```mermaid
 <<init>>
 flowchart TD
-  isPublic{Make card public?}
-  hasViewers{Viewer list provided?}
-  needsExpiry{Set expiry?}
+  isPublic{"Make card public?"}
+  hasViewers{"Viewer list provided?"}
+  needsExpiry{"Set expiry?"}
 
-  publicLink[Outcome: public link]
-  privateLink[Outcome: private link, no viewers]
-  privateLinkViewers[Outcome: private link with viewer list]
-  privateLinkExpiry[Outcome: private link with viewers and expiry]
+  publicLink["Outcome: public link"]
+  privateLink["Outcome: private link, no viewers"]
+  privateLinkViewers["Outcome: private link with viewer list"]
+  privateLinkExpiry["Outcome: private link with viewers and expiry"]
 
   isPublic -->|yes| publicLink
   isPublic -->|no| hasViewers

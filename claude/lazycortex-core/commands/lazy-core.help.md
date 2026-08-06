@@ -1,5 +1,5 @@
 ---
-description: Show lazycortex-core purpose and a one-line summary of each skill it ships
+description: "Run when the operator asks what lazycortex-core can do, which of its verbs handles a job, or what is available now that it is installed — lists this plugin's whole surface: config install / audit / doctor / optimize, the expert job runtime and its routines, the guard scans that catch secrets and PII before a repo goes public, and the change-history log agents."
 execution-discipline-waiver: "help command — static text, no multi-step logic"
 logging-waiver: "static text — no executable steps"
 ---

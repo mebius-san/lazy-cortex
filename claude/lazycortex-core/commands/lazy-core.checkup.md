@@ -1,5 +1,5 @@
 ---
-description: One entry point that runs every read-only audit/doctor this plugin orchestrates against consumer config, merges findings into a per-plugin table, then prompts once for which mutating fix-flow to run. Read-only by default.
+description: "Run when the operator asks for one pass over everything — 'check my whole config', 'run all the audits', 'is anything broken across the lazycortex plugins' — and wants to be asked at the end what to fix. Runs every read-only audit and doctor this plugin orchestrates, merges them into one per-plugin table, then prompts once for a mutating fix-flow; the sibling `/lazy-core.audit` only measures context weight and authoring compliance and never fixes, and `/lazy-core.doctor` is its own cross-artifact scan with a per-finding fix loop."
 ---
 # `/lazy-core.checkup`
 

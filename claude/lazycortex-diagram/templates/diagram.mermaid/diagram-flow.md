@@ -43,11 +43,11 @@ Layout config is baked into the scheme's `blocks.init.flow`; the drawer emits th
 ```mermaid
 <<init>>
 flowchart LR
-  userSubmitsForm[User submits form]
-  validateInput{Input valid?}
-  persistRecord[Persist record]
-  showSuccess[Show success toast]
-  showFieldErrors[Render field errors]
+  userSubmitsForm["User submits form"]
+  validateInput{"Input valid?"}
+  persistRecord["Persist record"]
+  showSuccess["Show success toast"]
+  showFieldErrors["Render field errors"]
 
   userSubmitsForm -->|click submit| validateInput
   validateInput -->|valid| persistRecord

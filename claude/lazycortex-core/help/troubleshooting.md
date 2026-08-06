@@ -820,7 +820,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause**: The expert's entry in `lazy.settings.json[experts]` does not carry `lazycortex-core:lazy-memory.persona-aspect` in its `aspects[]`. Both skills refuse to proceed unless the expert has opted into the memory subsystem.
 
-**Fix**: Run `/lazy-memory.mark-persona <expert>`. The skill appends the persona aspect to the expert's entry and is idempotent — re-running on an already-marked expert returns `already-marked` with no change. Then retry the original skill.
+**Fix**: Run `/lazy-memory.mark-persona <expert>`. The skill appends the persona aspect to that one expert's entry and is idempotent — re-running on an already-marked expert returns `already-marked` with no change. Then retry the original skill.
 
 ---
 

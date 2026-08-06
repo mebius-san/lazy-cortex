@@ -400,7 +400,7 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 
 **11i. Description triggers** — inline, via `lazy-core.audit` skill-writing check 5 + agent-writing check 2
 - *Availability*: always — the contract lives in `lazycortex-core` itself.
-- *Run condition*: at least one file in `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md`, `.claude/agents/*.md`, or `claude/*/agents/*.md`. No local skills or agents → silent skip.
+- *Run condition*: at least one file in `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md`, `.claude/agents/*.md`, `claude/*/agents/*.md`, `.claude/commands/*.md`, or `claude/*/commands/*.md`. No local skills, agents, or commands → silent skip.
 - *On invoke*: `Read` `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`, then judge every one of those files' `description:` against it inline (do NOT dispatch a separate skill). One `[WARN]` per mechanism-only description, `[FAIL]` per missing one; fold into a **Description triggers** subsection. A description that will not fire is invisible to the router, so the count matters as much as the individual lines — lead the subsection with `<n> of <total> descriptions carry no trigger`.
 
 ## Phase 4 — Present + fix + waive

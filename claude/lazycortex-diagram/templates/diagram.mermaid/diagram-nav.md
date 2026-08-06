@@ -38,13 +38,13 @@ Layout config is baked into the scheme's `blocks.init.nav`; the drawer emits the
 ```mermaid
 <<init>>
 flowchart LR
-  home[Home dashboard]
-  cardList[Cards list]
-  cardDetail[Card detail]
-  cardEditor[Card editor]
+  home["Home dashboard"]
+  cardList["Cards list"]
+  cardDetail["Card detail"]
+  cardEditor["Card editor"]
   shareModal(Share modal)
-  settings[Settings]
-  account[Account]
+  settings["Settings"]
+  account["Account"]
 
   home -->|click cards tab| cardList
   home -->|click settings| settings

@@ -1,5 +1,5 @@
 ---
-description: Show lazycortex-python purpose and a one-line summary of each skill, agent, rule, and hook it ships
+description: "Run when the operator asks what lazycortex-python enforces, how Python is checked in this repo, or which verb runs the checkers — lists the Python-discipline surface: install / audit / check-style, the `chk-py` and `tst-py` wrappers, the docstring-writer / test-writer / code-reviewer agents, the always-loaded style, docstring and test rules, and the PostToolUse style hook."
 execution-discipline-waiver: "static help text — no executable steps"
 logging-waiver: "static text — no executable steps"
 ---
