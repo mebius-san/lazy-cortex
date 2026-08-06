@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, and plugin updates.
-last_regen: 2026-08-05
+last_regen: 2026-08-06
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
@@ -14,6 +14,7 @@ source_skills:
   - lazy-obsidian.diagram-install
   - lazy-obsidian.update-plugin
   - lazy-obsidian.audit
+source_sha: a080c1ec8ba430f6f7ffaa2b62b17fe55e51c50e
 ---
 # Troubleshooting
 
@@ -84,6 +85,16 @@ source_skills:
 **Likely cause**: The plugin was updated via `/plugin update lazycortex-obsidian@lazycortex` but the pre-commit shim in `.githooks/pre-commit` was not refreshed to match the new worker's `HOOK_VERSION`. A MAJOR version bump in the worker renders the old shim inert (it exits 0 with a diagnostic but does not sync).
 
 **Fix**: Run `/lazy-obsidian.iconize-install` — it invokes `install-hooks` which rewrites the shim to the current `HOOK_VERSION`. Alternatively, run `/lazy-obsidian.iconize-sync check-versions` to confirm the drift report, then re-run `/lazy-obsidian.iconize-install`.
+
+---
+
+## A note's icon frontmatter looks "one commit behind" after committing
+
+**Symptom**: You commit a change, and the `iconize_icon` / `iconize_color` frontmatter you'd expect from that commit shows up in the *next* commit instead — the icon on disk and in the vault is correct immediately, but `git log` on the note makes it look like the repaint lagged by one commit.
+
+**Likely cause**: This is expected, not a fault. `sync-staged` (the pre-commit hook) never stages into the git index — the index belongs to the operator — so a frontmatter rewrite it makes during a pre-commit run lands in the working tree but rides along in the *next* commit, not the one currently in flight.
+
+**Fix**: Nothing to fix. The icon is already correct in the vault and on disk right away. If you want the repaint folded into the commit you're about to make instead of the next one, run `/lazy-obsidian.iconize-sync reconcile-dirty` before committing — it walks `git status` for dirty `.md` files and reconciles them in one pass, so the rewrite is staged alongside your other changes.
 
 ---
 
