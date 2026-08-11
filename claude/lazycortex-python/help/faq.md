@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, tests, and the checker stack.
-last_regen: 2026-08-05
+last_regen: 2026-08-11
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -10,6 +10,7 @@ source_skills:
   - lazy-python.docstring-writer
   - lazy-python.test-writer
   - lazy-python.code-reviewer
+source_sha: 41539cc1c95f454532d9d9902144f9ca174df5db
 ---
 # Frequently asked questions
 
@@ -87,6 +88,26 @@ To disable the check, set `[tool.pcf] check_block_comments = false` in `pyprojec
 
 ---
 
+## What are the `Contract:`, `Decision:`, and `Domain(...)` markers, and how do I write them?
+
+These are the three "block" markers — Capitalized names that open a standalone comment block rather than annotate a single line. (Contrast the lowercase one-line markers `opt:`, `guard:`, `limit:`, `ref:`, `waiver:`, and the CAPS temporary markers `TODO:`, `TMP:`, `DBG:`.)
+
+- **`# Contract:`** marks a caller-visible guarantee that must survive refactoring — data ownership, transaction requirements, thread-safety, index alignment. The marker line carries no text after the colon; the guarantee itself follows on subsequent `#` lines. `Contract:` comments are the *only* source `lazy-python.docstring-writer` may draw a method's `Guarantees:` docstring section from (plus the public protocol itself) — it never infers a guarantee from the method body.
+- **`# Decision:`** records a real design fork worth keeping next to the code: the thesis is mandatory on the marker line itself — `# Decision: <chose X, not Y> — <why>` — with any longer rationale continuing on following `#` lines. `pcf` only proves the thesis is non-empty; whether it records a genuine fork (not the only viable move, not a repo convention, not something obvious from the code) is a `chk-py review` judgement.
+- **`# Domain(group):`** marks a comment describing domain rules, mechanics, or algorithms — never method implementation. The group name categorizes the comment by topic (grep for existing `# Domain(` groups before inventing a new one) and dot-separated subcategories map to a documentation folder tree.
+
+All three are standalone blocks: a blank line separates them from the code above, from the code below, and from any other comment — never glue one to a statement in place of the block's own purpose comment. `pcf`'s block-marker check enforces that boundary mechanically (see the next question); whether the content itself is correct stays a review-phase judgement.
+
+---
+
+## `pcf` reports a marker block as "glued to the line above" or "touches the code below its body". What does that mean?
+
+`pcf` treats every `Domain(...)`, `Contract:`, and `Decision:` block as a standalone unit, not a comment attached to the statement next to it: every contiguous `#` line adjacent to the marker is read as part of the block's own text. The check requires a blank line both above the block (separating it from preceding code or an unrelated comment) and below it (separating the block's last `#` line from the code that follows). A marker sitting directly under a line of code, or a block whose last line touches the next statement with no blank line between them, trips this finding.
+
+Fix it by adding the missing blank line — above the marker, below the block's last comment line, or both, depending on which side the finding names. This is purely a boundary issue; it does not change what the block says, and the marker keywords themselves (`Contract:`, `Decision:`, `Domain(...)`) are unaffected. If the finding appears alongside `# REF:`, `# DOC(...)`, or `# Contract!` in older code, those are the pre-rename spellings — see the marker question above for the current form (`ref:`, `Domain(...)`, `Contract:`).
+
+---
+
 ## Does `lazy-python.code-reviewer` duplicate what `pcf` / `mypy` / `ruff` / `pylint` already check?
 
 No — by design it refuses to. The agent's whole job is guideline clauses no deterministic checker can prove: whether a comment explains the right thing, whether a `# guard:` marker is on an actual defensive early-exit rather than an ordinary branch, whether a docstring's `Args:`/`Returns:`/`Raises:` still match the real signature, whether a suppression comment (`# type: ignore`, `# noqa`, `# pylint: disable`) carries a real `# waiver:` reason. If a finding duplicates something `pcf` or `ruff` would already have flagged, that is a bug in the agent's output, not an expected overlap.
@@ -95,7 +116,7 @@ No — by design it refuses to. The agent's whole job is guideline clauses no de
 
 ## How do I add my own docstring section?
 
-Declare it in `pyproject.toml` under a `[[tool.pcf.extra_docstring_sections]]` table — the section's `name`, its list `style` (`bulleted`, `definition`, or `plain`), and an `after`/`before` anchor naming a built-in or previously declared section to position it relative to. Add `ref_exempt = true` if the section's body carries `# REF:` lines that should be shielded from the phrasing and private-name checks. The shipped `pyproject-defaults.toml` template ships all three `[tool.pcf]` keys as commented-out examples, ready to uncomment and adapt.
+Declare it in `pyproject.toml` under a `[[tool.pcf.extra_docstring_sections]]` table — the section's `name`, its list `style` (`bulleted`, `definition`, or `plain`), and an `after`/`before` anchor naming a built-in or previously declared section to position it relative to. Add `ref_exempt = true` if the section's body carries `# ref:` lines that should be shielded from the phrasing and private-name checks. The shipped `pyproject-defaults.toml` template ships all three `[tool.pcf]` keys as commented-out examples, ready to uncomment and adapt.
 
 Registering the section only tells `chk-py` where it belongs, its list style, and its exemptions — it does not tell anyone what to write inside it. Add the section's actual content rules to `docs/guidelines/documenting_guidelines.md` (the overlay). `lazy-python.docstring-writer` reads both the registration and the overlay on every dispatch and never invents a section your project hasn't declared.
 

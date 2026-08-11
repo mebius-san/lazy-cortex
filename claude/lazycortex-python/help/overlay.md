@@ -1,13 +1,14 @@
 ---
 chapter_type: block
 summary: Project-specific guideline files in docs/guidelines/ plus [tool.pcf] declarations in pyproject.toml let you extend the project-neutral canon per repo.
-last_regen: 2026-08-03
+last_regen: 2026-08-11
 no_diagram: true
 source_skills:
   - lazy-python.install
   - lazy-python.docstring-writer
   - lazy-python.test-writer
   - lazy-python.code-reviewer
+  - lazy-python.guidelines-index
 ---
 # Per-repo overlay guidelines
 
@@ -58,7 +59,7 @@ This follows the same File-sync policy `/lazy-python.install` applies to every a
 **Two overlay mechanisms, not one.** Docstring conventions split across two places depending on whether the rule is mechanical or prose:
 
 - **`docs/guidelines/documenting_guidelines.md`** — the content rules for any extra section you register (what belongs in it, how to phrase it) and any narrative conventions the checker can't enforce mechanically.
-- **`pyproject.toml` `[tool.pcf]`** — the mechanical declarations that the checker and the writer agent both need to parse: `extra_docstring_sections` (section name, list style, order anchor, optional `ref_exempt` flag for sections whose body carries `# REF:` lines), `d2_exempt_marker_attrs` (class attribute names whose declaration exempts a class from the private-attributes-in-Attributes check), and `private_name_allowlist` (private identifiers tolerated in docstring narrative). The shipped `pyproject-defaults.toml` template ships all three as commented-out examples under `[tool.pcf]`.
+- **`pyproject.toml` `[tool.pcf]`** — the mechanical declarations that the checker and the writer agent both need to parse: `extra_docstring_sections` (section name, list style, order anchor, optional `ref_exempt` flag for sections whose body carries `# ref:` lines), `d2_exempt_marker_attrs` (class attribute names whose declaration exempts a class from the private-attributes-in-Attributes check), and `private_name_allowlist` (private identifiers tolerated in docstring narrative). The shipped `pyproject-defaults.toml` template ships all three as commented-out examples under `[tool.pcf]`.
 
 **How `lazy-python.docstring-writer` uses the overlay.** Step 1 of the agent always reads `lazy-python.documenting-guidelines.md` from the plugin, then attempts to read `${CLAUDE_PROJECT_DIR}/docs/guidelines/documenting_guidelines.md`. If the overlay file exists, its rules are merged with the canon; overlay rules win on conflict. The agent also reads the `## Documenting` section of `CLAUDE.md` as a third overlay layer for project-wide notes. Section registration itself is read from `pyproject.toml` `[tool.pcf]` rather than the overlay — the overlay supplies the section's content rules, `[tool.pcf]` supplies its name, order, and style. If none of these optional files or settings exist the agent proceeds with the project-neutral canon alone: no extra sections, no private-attribute escape hatch.
 
@@ -78,7 +79,7 @@ This follows the same File-sync policy `/lazy-python.install` applies to every a
 
 **Declaring a log-level suppression helper.** In `docs/guidelines/testing_guidelines.md`, name the context manager your project exposes for suppressing expected warning or error logs during tests (e.g. `with_log_level`). `lazy-python.test-writer` uses this helper in fixture and setup code rather than leaving the generic placeholder.
 
-**Registering an extra class-docstring section.** In `pyproject.toml`, add a `[[tool.pcf.extra_docstring_sections]]` table with `name`, `style` (`"bulleted"`, `"definition"`, or `"plain"`), and an `after` / `before` order anchor naming a built-in section or a previously declared entry (an unresolved anchor appends the section at the end of the order). Set `ref_exempt = true` if the section's body carries `# REF:` lines. Then describe the section's content rules — what belongs in it and how to phrase it — in `docs/guidelines/documenting_guidelines.md`. `lazy-python.docstring-writer` reads both before writing the section and will never invent it in a project that hasn't registered it.
+**Registering an extra class-docstring section.** In `pyproject.toml`, add a `[[tool.pcf.extra_docstring_sections]]` table with `name`, `style` (`"bulleted"`, `"definition"`, or `"plain"`), and an `after` / `before` order anchor naming a built-in section or a previously declared entry (an unresolved anchor appends the section at the end of the order). Set `ref_exempt = true` if the section's body carries `# ref:` lines. Then describe the section's content rules — what belongs in it and how to phrase it — in `docs/guidelines/documenting_guidelines.md`. `lazy-python.docstring-writer` reads both before writing the section and will never invent it in a project that hasn't registered it.
 
 **Declaring the private-attribute escape hatch.** If your project has classes where private fields or `@property` methods should legitimately appear in `Attributes:`, add the marker attribute name(s) to `pyproject.toml` `[tool.pcf] d2_exempt_marker_attrs`. A class is exempt when it declares one of the listed attribute names. Document the convention (which marker names exist and what they signal) in `docs/guidelines/documenting_guidelines.md`.
 

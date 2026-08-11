@@ -72,28 +72,76 @@ class _InstallPhase(Protocol):
 # ----------------------------------------------------------------------------------------
 class Phase1MirrorRules:
   """
-  Install phase that copies plugin rule files into the consumer's `.claude/rules/` directory.
-  """
+  Install phase that mirrors the plugin's shipped rule files into the consumer's `.claude/rules/`
+  directory.
 
-  RULES = ("lazy-python.style.md", "lazy-python.docstrings.md", "lazy-python.tests.md")
+  Responsibilities:
+    - Write every shipped rule file to the consumer's rules directory and print a JSON receipt
+      naming each rule's outcome.
+
+  Guarantees:
+    - Leaves any consumer rule file not shipped by the plugin untouched.
+    - Verifies each write by re-reading the target before reporting a successful outcome.
+
+  Attributes:
+    consumer_dir: Root directory of the consumer repository being installed into.
+    source_dir: Directory holding the plugin's shipped rule files.
+    target_dir: Consumer's rules directory that receives the mirrored files.
+  """
 
   def __init__(self, *, consumer_dir: Path) -> None:
     self.consumer_dir: Path = consumer_dir
+    self.source_dir: Path = PLUGIN_ROOT / "rules"
     self.target_dir: Path = consumer_dir / ".claude/rules"
 
   def run(self) -> int:
     """
-    Copy each plugin rule into the consumer's rules dir.
+    Mirror every shipped rule into the consumer's rules directory.
+
+    Notes:
+      - Prints a JSON receipt to stdout mapping each rule filename to `installed`, `unchanged`,
+        `refreshed`, or `failed`.
 
     Returns:
-      0 on success.
+      0 when every rule verified successfully, 1 when at least one write failed verification.
     """
     self.target_dir.mkdir(parents = True, exist_ok = True)
-    for name in self.RULES:
-      source = PLUGIN_ROOT / "rules" / name
-      target = self.target_dir / name
-      shutil.copyfile(source, target)
+    shipped = sorted(name for name in os.listdir(self.source_dir) if name.endswith(".md"))
+    states = { name: self._mirror(name) for name in shipped }
+    print(json.dumps({ "phase": "phase1", "rules": states }, indent = 2))
+    # guard: an unverified write must not read as a successful mirror
+    if "failed" in states.values():
+      return 1
     return 0
+
+  def _mirror(self, name: str) -> str:
+    """
+    Reconcile a single shipped rule with its target in the consumer's rules directory.
+
+    Notes:
+      - Overwrites the target file when its contents differ from the shipped rule.
+
+    Args:
+      name: Filename of the shipped rule.
+
+    Returns:
+      One of `installed`, `unchanged`, `refreshed`, `failed`.
+    """
+    source = self.source_dir / name
+    target = self.target_dir / name
+    shipped = source.read_bytes()
+    # an absent or stale target is replaced wholesale; only identical bytes are left alone
+    if not target.exists():
+      state = "installed"
+    elif target.read_bytes() == shipped:
+      return "unchanged"
+    else:
+      state = "refreshed"
+    shutil.copyfile(source, target)
+    # guard: the write is only an outcome once the target actually holds the shipped bytes
+    if target.read_bytes() != shipped:
+      return "failed"
+    return state
 
 
 # ----------------------------------------------------------------------------------------

@@ -64,7 +64,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [checkers](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/checkers.md) — The `chk-py` and `tst-py` CLI wrappers that gate every Python change — style, type-only imports, syntax, mypy, ruff, pylint, and guideline review — backed by a shared venv resolver that works from any terminal.
 - [discipline](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/discipline.md) — Three always-loaded rules shape every Python edit; five reference guidelines back the writer agents and chk-py/tst-py with the full canon.
 - [hook](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/hook.md) — The PostToolUse hook that runs `pcf.py` on every `.py` edit and surfaces style violations inline in the next turn — zero install steps, zero config writes.
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/install-and-audit.md) — Bootstrap lazycortex-python into your repo with an 8-step install wizard (incl. python.env_source detection) and verify with the 11-check read-only audit.
+- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/install-and-audit.md) — Bootstrap lazycortex-python with a 10-step install wizard (incl. env_source detection) and verify with the 11-check read-only audit.
 - [overlay](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/overlay.md) — Project-specific guideline files in docs/guidelines/ plus [tool.pcf] declarations in pyproject.toml let you extend the project-neutral canon per repo.
 - [scaffold](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/scaffold.md) — Canonical Python file skeletons — python-template.py for regular files, init-template.py for __init__.py — installed once via /lazy-python.install Step 6.
 - [add-project-overlay](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/add-project-overlay.md) — Register a coding-guideline clause in the project overlay, then confirm both /lazy-python.check-style and the chk-py review gate's lazy-python.code-reviewer catch it.
@@ -88,7 +88,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Command | Description |
 |---|---|
-| `lazy-python.help` | Show lazycortex-python purpose and a one-line summary of each skill, agent, rule, and hook it ships |
+| `lazy-python.help` | Run when the operator asks what lazycortex-python enforces, how Python is checked in this repo, or which verb runs the checkers — lists the Python-discipline surface: install / audit / check-style, the `chk-py` and `tst-py` wrappers, the docstring-writer / test-writer / code-reviewer agents, the always-loaded style, docstring and test rules, and the PostToolUse style hook. |
 
 ## Rules
 

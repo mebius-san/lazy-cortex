@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-08-03
+last_regen: 2026-08-11
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-locate-plugin-post-bump); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-major-upgrade (D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions) needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; review branch splits on chk-py-all-exits-2-pending-review (dispatch lazy-python.code-reviewer against the printed manifest, then render) vs render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -16,6 +16,7 @@ source_skills:
   - lazy-python.docstring-writer
   - lazy-python.test-writer
   - lazy-python.code-reviewer
+source_sha: 41539cc1c95f454532d9d9902144f9ca174df5db
 ---
 # Troubleshooting
 
@@ -82,6 +83,16 @@ source_skills:
 - `private_name_allowlist` — private identifiers your project's docstrings are allowed to reference by name in prose (`D9`).
 
 Re-run `chk-py all -q` after saving; the newly-declared config keys restore the previous pass/fail boundary for your project without reintroducing project-specific behavior into the plugin's shipped defaults.
+
+---
+
+## After the marker-register-scheme upgrade, `chk-py` flags markers that used to pass
+
+**Symptom**: Code carrying `# DOC(group):`, `# REF:`, or `# Contract!` markers that passed `pcf` before the 3.0.0 upgrade now fails — `pcf` either reports the old marker spelling as unrecognized text, or reports a block marker as "glued to the line above" / "touches the code below its body" even though the marker itself is unchanged.
+
+**Likely cause**: 3.0.0 renamed three marker forms as part of a register scheme where a marker's capitalization now encodes its category: CAPS markers (`TODO:`, `TMP:`, `DBG:`) stay temporary annotations, Capitalized markers (`Domain(…):`, `Contract:`, `Decision:`) open standalone knowledge blocks, and lowercase markers (`opt:`, `guard:`, `limit:`, `waiver:`, `ref:`) are one-line annotations. `DOC(group):` is renamed to `Domain(group):`, `REF:` is renamed to lowercase `ref:`, and `Contract!` is renamed to `Contract:` (a colon, no bang) so it shares the Capitalized register with `Decision:`. `pcf` also gained a new structural check alongside the renames: a block marker (`Domain(…):`, `Contract:`, `Decision:`) must now be a standalone block — separated from the code above it and from the code below its body by a blank line — because every `#` line adjacent to the marker is read as part of the block's own text, never as a comment glued to a statement.
+
+**Fix**: Rename every `DOC(group):` to `Domain(group):`, every `REF:` to lowercase `ref:`, and every `Contract!` to `Contract:` across your project's Python source — this is a mechanical rename; the marker's meaning and placement rules are otherwise unchanged. Then check every `Domain(…):`, `Contract:`, and `Decision:` block has a blank line both above it and after its last body line — glue a block onto a `def`/class line or a preceding comment and `pcf` now reports it. If your project registered `[tool.pcf] extra_docstring_sections` with `ref_exempt = true`, the exemption now covers `# ref:` lines (lowercase) rather than `# REF:` — no config change needed, just the marker rename. Re-run `chk-py all -q` after the renames and re-spacing; the checks that passed under the old spellings resolve once the text and layout match the new register.
 
 ---
 

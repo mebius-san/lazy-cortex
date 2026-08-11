@@ -6,7 +6,7 @@ user-invocable: true
 ---
 # Install lazycortex-python
 
-Idempotent and quiet install (plus a log write). Mirrors the three plugin rules into `.claude/rules/`, deploys the `chk-py` / `tst-py` wrappers into `cli/`, bootstraps the checker sections of `pyproject.toml` (including `[tool.pch]` when PyCharm is present), scaffolds project-overlay guideline stubs, syncs the scaffold template, and records `python.env_source` when the repo ships an env-bootstrap script. Every file it writes follows the File-sync policy below — silent on a clean write or merge, asking only on a genuine conflict. It asks the user almost nothing: install scope and `pch` enablement are derived, and it never touches `CLAUDE.md`; the sole extra prompt is disambiguating multiple `env_source` candidates in Step 7. The Python ≥ 3.12 floor is owned by `/lazy-core.install` and not re-probed here. Safe to re-run after every plugin update.
+Idempotent and quiet install (plus a log write). Mirrors the three plugin rules into `.claude/rules/`, deploys the `chk-py` / `tst-py` wrappers into `cli/`, bootstraps the checker sections of `pyproject.toml` (including `[tool.pch]` when PyCharm is present), scaffolds project-overlay guideline stubs, syncs the scaffold template, and records `python.env_source` when the repo ships an env-bootstrap script. Every file it writes follows the File-sync policy below — plugin-owned mirrors are refreshed from the shipped source without asking; consumer-owned config gains what it lacks and asks only on a direct contradiction. It asks the user almost nothing: install scope and `pch` enablement are derived, and it never touches `CLAUDE.md`; the sole extra prompt is disambiguating multiple `env_source` candidates in Step 7. The Python ≥ 3.12 floor is owned by `/lazy-core.install` and not re-probed here. Safe to re-run after every plugin update.
 
 The PostToolUse check-style hook auto-registers from the plugin's `hooks/hooks.json` when the plugin is enabled — no install step writes to the consumer's settings.json.
 
@@ -35,35 +35,33 @@ This skill is **idempotent and quiet on re-run**. Every choice it makes is read 
 
 - **Plugin enabled = full functionality.** An enabled plugin installs its whole surface. There is no per-file "install this?" prompt and no per-artifact opt-in — wanting the plugin means wanting its rules, wrappers, checker stack, overlays, and template.
 - **Install scope is not asked.** lazycortex-python is per-repo tooling — the rule mirror, wrappers, checker stack, and overlays all land under `${CLAUDE_PROJECT_DIR}` regardless of where the plugin is enabled, so there is no user-vs-project branch to resolve here. (Scope detection for plugins that DO branch their target lives in `lazy-core.install` Step 1, keyed on enablement rather than the install record's `scope`.)
-- **This skill asks the user almost nothing.** It does not touch `CLAUDE.md` (the plugin rules load from `.claude/rules/` regardless, so a pointer would be redundant). Everything is derived: install scope (above), and `pch` (PyCharm offline inspections) follows `inspect.sh` presence — Step 3 probes for PyCharm, Step 4 deploys `[tool.pch]` when it is found and omits it otherwise, with no prompt and no persisted flag. Only two `AskUserQuestion`s can ever fire: a genuine File-sync case-3 conflict (below), and — in Step 7 only — the disambiguation prompt when **more than one** `python.env_source` candidate script is present. Zero or one candidate is handled silently; a recorded value is never re-asked.
+- **This skill asks the user almost nothing.** It does not touch `CLAUDE.md` (the plugin rules load from `.claude/rules/` regardless, so a pointer would be redundant). Everything is derived: install scope (above), and `pch` (PyCharm offline inspections) follows `inspect.sh` presence — Step 3 probes for PyCharm, Step 4 deploys `[tool.pch]` when it is found and omits it otherwise, with no prompt and no persisted flag. Only two `AskUserQuestion`s can ever fire: a genuine contradiction in consumer-owned config (below), and — in Step 7 only — the disambiguation prompt when **more than one** `python.env_source` candidate script is present. Zero or one candidate is handled silently; a recorded value is never re-asked.
 
 The Python ≥ 3.12 floor is owned by `/lazy-core.install` (its single Step 0 probe). This skill MUST NOT re-probe the floor — there is no Python-version question here.
 
 ## File-sync policy (applies to every file this skill writes)
 
-Every file this skill creates or updates — the rule mirror, the `chk-py` / `tst-py` wrappers, the `pyproject.toml` checker stack, the `docs/guidelines/*.md` overlays, and the scaffold template — follows three cases. No per-file "install?" prompt, no drift merge/overwrite/keep-local wizard:
+Two classes of file, two policies. Which applies follows from who owns the bytes, never from how large the diff is.
 
-1. **Absent or unchanged** — target missing, or byte-identical to the shipped / last-known version → write silently. State `installed` / `unchanged`.
-2. **Locally changed but cleanly mergeable** — target diverged, but the shipped delta applies without contradicting local edits (new rules / sections / keys added, every local-only chunk left untouched) → merge silently. State `merged`.
-3. **Genuine conflict** — the same region was changed both locally and in the shipped version in ways that cannot be reconciled automatically → the ONLY case that asks. `AskUserQuestion` naming the file, quoting the conflicting region, showing a unified diff; options `merge-shipped` / `keep-local`.
+**Install-managed mirrors** — the three plugin rules, the `chk-py` / `tst-py` wrappers, and the scaffold template: files copied or rendered verbatim out of the plugin. The plugin owns them end to end; a consumer who wants different content authors **their own** rule file (or registers a `_local` scaffold entry), so a target that differs from the shipped source is a stale copy by construction. Absent → copy (`installed`); byte-identical → nothing (`unchanged`); different → overwrite from the source (`refreshed`). No diff preview, no merge, no question. A no-longer-shipped rule (orphan) is left in place silently (`kept-orphan`) — this skill never deletes consumer files. The verdict comes from a byte comparison plus a post-write re-check, never from reading the two files and judging.
 
-"Conflict" means you cannot determine what should survive — **not** merely "the bytes differ". No contradiction → no question. A no-longer-shipped file (orphan) is left in place silently (`kept-orphan`); this skill never deletes consumer files.
-
-**Consumer-owned config nuance** — `pyproject.toml` and the `docs/guidelines/*.md` overlays are config the consumer routinely edits. Adding a missing checker section or a missing overlay stub is a clean, non-contradictory merge → always silent. Only a direct contradiction (the consumer set a checker key to a value that opposes a required one) is a conflict that asks per case 3.
+**Consumer-owned config** — `pyproject.toml`, the `docs/guidelines/*.md` overlays, `.gitignore`, `lazy.settings.json`: files the consumer routinely edits, where this skill only contributes sections. Add what is missing (always silent), leave what is there byte-for-byte. A direct contradiction — the consumer set a checker key to a value that opposes a required one — is the ONLY case that asks. `AskUserQuestion` naming the file, quoting the region, showing a unified diff; options `merge-shipped` / `keep-local`. "Conflict" means you cannot determine what should survive, **not** merely that the bytes differ.
 
 ## Step 1: Mirror plugin rules into `.claude/rules/`
 
-Mirror the three plugin rule files (`lazy-python.style.md`, `lazy-python.docstrings.md`, `lazy-python.tests.md`) from `${CLAUDE_PLUGIN_ROOT}/rules/` into `<consumer>/.claude/rules/` under the **File-sync policy**, per rule. References, checkers, skills, agents, hooks, and templates stay in the plugin and are read by absolute path from `${CLAUDE_PLUGIN_ROOT}/...` — only rules ship into the consumer's session-loaded set.
+Mirror every rule file shipped under `${CLAUDE_PLUGIN_ROOT}/rules/` into `<consumer>/.claude/rules/`. References, checkers, skills, agents, hooks, and templates stay in the plugin and are read by absolute path from `${CLAUDE_PLUGIN_ROOT}/...` — only rules ship into the consumer's session-loaded set.
 
-The mirror is plugin-managed — consumers are not meant to hand-edit the mirrored files (`/lazy-python.audit` check 1 flags drift). Apply the policy: absent or byte-identical → write silently; locally changed but the shipped delta applies cleanly → merge silently; same region changed incompatibly in both → the only case that asks.
+The rules are install-managed mirrors, so the **File-sync policy** applies: absent → copy, identical → nothing, different → overwrite. Consumers are not meant to hand-edit the mirrored files (`/lazy-python.audit` check 1 flags drift), and a mirror that drifted is a stale copy, not a customisation.
 
-The `phase1` helper copies all three byte-identical (the absent / unchanged path). When a target rule has diverged, do NOT run `phase1` over it blindly — apply the policy via `Read` + `Edit` so a genuine conflict is surfaced, not silently clobbered.
+`phase1` is the whole step — it enumerates the shipped rules itself, byte-compares each against its target, overwrites the stale ones, and re-reads every write to confirm it landed. Run it unconditionally; there is nothing here to judge and nothing to hand-merge:
 
 ```
 Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase1 ${CLAUDE_PROJECT_DIR})
 ```
 
-Outcome per rule: `installed` (absent → copied) / `unchanged` (byte-identical) / `merged` (drift, clean delta) / `kept-local` (conflict, user chose local).
+It prints a JSON receipt mapping each rule to its state and exits non-zero when any write failed to verify. Quote the receipt in the report — an `already-current` claim with no receipt behind it is a reporting defect.
+
+Outcome per rule: `installed` (absent → copied) / `unchanged` (byte-identical) / `refreshed` (stale → overwritten) / `failed` (write did not verify).
 
 ## Step 2: Deploy chk-py and tst-py wrappers into `cli/` and ensure `.venv/` gitignored
 
@@ -77,7 +75,7 @@ Run:
 Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase2 ${CLAUDE_PROJECT_DIR})
 ```
 
-The wrappers are rendered plugin artifacts (substituted absolute paths, not consumer-authored). Under the File-sync policy this is the absent / unchanged write path — `phase2` writes the current render; a re-run with an unchanged render is a no-op rewrite. The `.gitignore` append is idempotent (case 2 clean merge — adds the `.venv/` line only when absent).
+The wrappers are rendered plugin artifacts (substituted absolute paths, not consumer-authored). They are install-managed mirrors — `phase2` writes the current render unconditionally, so a re-run with an unchanged render is a no-op rewrite and a stale wrapper is replaced. The `.gitignore` append is consumer-owned config and idempotent: the `.venv/` line is added only when absent.
 
 Outcome: `wrappers-deployed-2 + gitignore-ensured` when `.venv/` was added to the consumer's `.gitignore`; `wrappers-deployed-2 + gitignore-already-present` when the `.venv/` line was already there (idempotent re-run).
 
@@ -97,7 +95,7 @@ Outcome: `pch-ready` or `pch-missing-inspect-sh`.
 
 ## Step 4: Bootstrap pyproject.toml checker sections (pch gated on PyCharm presence)
 
-Merges checker sections from `${CLAUDE_PLUGIN_ROOT}/templates/pyproject-defaults.toml` into the consumer's `pyproject.toml` under the **File-sync policy** (consumer-owned-config nuance): missing sections are appended (clean merge, silent); existing sections are preserved verbatim (consumer wins). Only a direct contradiction — a consumer checker key set to a value that opposes a required one — is a conflict that asks per case 3.
+Merges checker sections from `${CLAUDE_PLUGIN_ROOT}/templates/pyproject-defaults.toml` into the consumer's `pyproject.toml` under the **File-sync policy**'s consumer-owned-config half: missing sections are appended (clean merge, silent); existing sections are preserved verbatim (consumer wins). Only a direct contradiction — a consumer checker key set to a value that opposes a required one — is a conflict that asks.
 
 The always-on sections (`pcf`, `toi`, `pytest`, `mypy`, `pylint`, `ruff`) deploy unconditionally. The `pch` section is **fully derived from `<pycharm_present>`** (Step 3) — no question, no persisted flag. An enabled plugin installs its whole surface, so when PyCharm is here, pch is part of it:
 
@@ -117,7 +115,7 @@ Outcome: `pyproject-bootstrapped` when at least one missing section was appended
 
 ## Step 5: Scaffold project overlay guidelines under `docs/guidelines/`
 
-Creates stub overlay files (`coding_guidelines.md`, `documenting_guidelines.md`, `testing_guidelines.md`, `checking_guidelines.md`) under `<consumer>/docs/guidelines/` with the canonical `# Project additions to <topic>` headers, under the **File-sync policy**. These are consumer-owned config: absent → write the stub silently; present → left untouched silently (the consumer's overlay is authoritative — case "kept-local"). A stub vs a consumer-edited overlay is never a conflict, so this step never asks.
+Creates stub overlay files (`coding_guidelines.md`, `documenting_guidelines.md`, `testing_guidelines.md`, `checking_guidelines.md`) under `<consumer>/docs/guidelines/` with the canonical `# Project additions to <topic>` headers, under the **File-sync policy**'s consumer-owned-config half: absent → write the stub silently; present → left untouched silently (the consumer's overlay is authoritative — case "kept-local"). A stub vs a consumer-edited overlay is never a conflict, so this step never asks.
 
 Run:
 

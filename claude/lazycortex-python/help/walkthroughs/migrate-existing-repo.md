@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation across the seven-step gate (including guideline review), and fix them in committed chunks.
-last_regen: 2026-08-05
+last_regen: 2026-08-11
 diagram_spec:
   anchor: "Migration flow"
   request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install runs its ordered steps fully automatically (mirror rules, deploy wrappers, detect PyCharm, bootstrap pyproject.toml with [tool.pch] when PyCharm present, scaffold overlay, sync scaffold template, record python.env_source with a one-time disambiguation prompt only when multiple bootstrap-script candidates exist, seed agent-model tiers, register the code-reviewer expert, log) → user runs chk-py all -q → seven-step gate (pcf, toi, cmp, mypy, ruff, pylint, review) surfaces existing violations and names lazy-python.code-reviewer for the review phase → user fixes violations in chunks and commits iteratively, dispatching the code-reviewer and rendering its findings, until chk-py all exits clean"
@@ -11,6 +11,8 @@ source_skills:
   - lazy-python.check-style
   - lazy-python.docstring-writer
   - lazy-python.code-reviewer
+  - chk
+source_sha: 41539cc1c95f454532d9d9902144f9ca174df5db
 ---
 # Adopt the plugin in a repo with pre-existing Python that drifted from the canon
 
@@ -50,6 +52,8 @@ Every step is idempotent — safe to re-run if interrupted.
 
 **Migrating from a pre-2.0 install.** If this repo adopted `lazycortex-python` before the 2.0.0 release, its docstrings may depend on things `pcf` used to ship built-in: `Generation Rules` / `Value Ranges` docstring sections and a hardcoded `_field_filters` private-name escape hatch. As of 2.0, none of that is baked in — every project declares its own via `[tool.pcf]` in `pyproject.toml`. Step 4 of this install only appends checker sections that are missing; it never touches a `[tool.pcf]` block you already have, so re-running `/lazy-python.install` on an existing repo is safe. If your repo relied on the old built-ins, open `pyproject.toml` after this step and find the commented-out `extra_docstring_sections`, `d2_exempt_marker_attrs`, and `private_name_allowlist` examples under `[tool.pcf]` — uncomment and adapt them to your project's actual section names and field names before Step 2's inventory run, or `chk-py` will flag every class that used the old built-in sections as missing them.
 
+**Migrating past the 3.0 marker rename.** Release 3.0 renamed three marker comments to fit a name-register scheme (the register a marker's name uses now encodes its category) and added a new `pcf` check alongside the rename: `REF:` became `ref:` (lowercase, one-line annotation), `# DOC(...):` became `# Domain(...):` (Capitalized, opens a standalone knowledge block), and `# Contract!` became `# Contract:` (also Capitalized, also standalone — no text after the colon on the marker line itself). The new check enforces that boundary: every Capitalized block marker (`Domain(...):`, `Contract:`, `Decision:`) must be separated by a blank line from the code above it and from the code or foreign comment below it — a marker glued to a statement, or a block whose last line touches the code that follows, is now a violation in its own right, independent of the rename. If this repo's Python predates 3.0, expect leftover `REF:` / `DOC(...):` / `Contract!` occurrences and un-separated `Domain(...):` / `Contract:` / `Decision:` blocks to surface as `pcf` findings in Step 2's inventory — rename the markers and insert the separating blank lines as part of remediation (Step 4 groups this under the `pcf` batch) rather than treating them as unrelated noise.
+
 **Verification gate**: the install ends with a one-line-per-step report. Confirm each step shows an outcome word: `mirrored-3`, `wrappers-deployed-2 + gitignore-ensured`, `pch-ready` or `pch-missing-inspect-sh`, `pyproject-bootstrapped`, an `env-source-*` outcome, a `seeded` or `unchanged` tier-seed outcome, an `expert-registered` or `expert-already-registered` outcome, and so on. If any line shows `ERROR` or is missing, see the troubleshooting doc before proceeding.
 
 ### Step 2 — Take a full violation inventory
@@ -66,7 +70,7 @@ On first run the venv resolver creates `.venv/` at the repo root and installs `m
 
 Save the full output — it is your remediation queue. Do not start fixing yet; complete the inventory first so you know the scope before touching any file.
 
-**What to expect in a drifted repo**: `pcf` and `ruff` typically surface the most findings — missing or malformed docstrings, import-block ordering, line-length overruns, and bare `except` clauses. If Step 1's migration note applies to your repo and you skipped uncommenting the `[tool.pcf]` examples, expect `pcf` to also flag every class that used the old `Generation Rules` / `Value Ranges` sections or the old `_field_filters` escape hatch — go back to Step 1 and declare them before continuing. `mypy` surfaces type annotation gaps. `pylint` adds naming and complexity findings. `review` will name a lot of scope on a first pass across a whole pre-existing tree — expect it to flag missing purpose comments, mismatched naming prefixes, and any overlay clauses your repo has already accumulated in `docs/guidelines/`. A repo with a few dozen Python files may produce hundreds of lines of output; that is normal and expected.
+**What to expect in a drifted repo**: `pcf` and `ruff` typically surface the most findings — missing or malformed docstrings, import-block ordering, line-length overruns, and bare `except` clauses. If Step 1's pre-2.0 migration note applies to your repo and you skipped uncommenting the `[tool.pcf]` examples, expect `pcf` to also flag every class that used the old `Generation Rules` / `Value Ranges` sections or the old `_field_filters` escape hatch — go back to Step 1 and declare them before continuing. If Step 1's 3.0 marker-rename note applies, expect additional `pcf` findings for any leftover `REF:` / `DOC(...):` / `Contract!` markers and for `Domain(...):` / `Contract:` / `Decision:` blocks that aren't blank-line-separated from their surroundings — both are part of the same `pcf` batch as the style findings below, not a separate pass. `mypy` surfaces type annotation gaps. `pylint` adds naming and complexity findings. `review` will name a lot of scope on a first pass across a whole pre-existing tree — expect it to flag missing purpose comments, mismatched naming prefixes, and any overlay clauses your repo has already accumulated in `docs/guidelines/`. A repo with a few dozen Python files may produce hundreds of lines of output; that is normal and expected.
 
 Also run the existing test suite once, before any remediation, so you know its starting state:
 
@@ -90,7 +94,7 @@ The audit runs 11 read-only checks and prints a `pass/warn/fail` line for each. 
 
 Work through the violation queue in logical batches rather than one enormous commit. Recommended grouping:
 
-1. **Syntax and critical style (`pcf` / `cmp` findings)** — These gate the other checkers; clear them first. A `pcf` violation blocks the whole `chk-py all` run from advancing past the first step cleanly.
+1. **Syntax and critical style (`pcf` / `cmp` findings)** — These gate the other checkers; clear them first. A `pcf` violation blocks the whole `chk-py all` run from advancing past the first step cleanly. If this repo predates the 3.0 marker rename, fold the mechanical rename (`REF:` → `ref:`, `# DOC(...):` → `# Domain(...):`, `# Contract!` → `# Contract:`) and the blank-line separation `Domain(...):` / `Contract:` / `Decision:` blocks now need into this same batch — it is a `pcf` finding like any other and clears the same way, file by file, before the batches below.
 2. **Type annotations (`mypy` findings)** — Group by module or class; one commit per module keeps the diff readable.
 3. **Import ordering and minor style (`ruff` findings)** — Usually mechanical; `ruff` can auto-fix many of these. Run `ruff check --fix <path>` for the mechanical subset, review the diff, then let `pcf` confirm the critical-fail layer still passes.
 4. **Naming, complexity, and docstrings (`pylint` / `pcf` docstring findings)** — Most labour-intensive; work file by file. Use `/lazy-python.docstring-writer` to generate canonical docstrings for classes and methods rather than hand-authoring them — the agent reads the canon and your overlay before writing, and never touches code, only docstrings.

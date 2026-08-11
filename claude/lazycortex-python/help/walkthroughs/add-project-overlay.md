@@ -1,14 +1,15 @@
 ---
 chapter_type: walkthrough
 summary: Register a coding-guideline clause in the project overlay, then confirm both /lazy-python.check-style and the chk-py review gate's lazy-python.code-reviewer catch it.
-last_regen: 2026-08-05
+last_regen: 2026-08-11
 diagram_spec:
   anchor: "How the overlay and pyproject.toml layers combine"
-  request: "Sequence diagram showing two parallel flows that both start from the same project overlay. Flow 1 (docstrings): user registers an extra_docstring_sections entry (name/style/anchor/ref_exempt) plus optional d2_exempt_marker_attrs / private_name_allowlist in pyproject.toml [tool.pcf], writes the section's content rules in docs/guidelines/documenting_guidelines.md, dispatches lazy-python.docstring-writer; the agent reads the plugin canon, then the overlay (override-on-conflict), then CLAUDE.md's Documenting section if present, then applies the merged ruleset plus the pyproject.toml registrations to the target file and runs chk-py to verify. Flow 2 (code review): user writes a project-specific clause in docs/guidelines/coding_guidelines.md, runs chk-py review, which resolves the changed-file scope, collects every guideline layer (canon, overlay, .claude/rules, project notes) into a manifest, and names the lazy-python.code-reviewer agent; the agent reads the manifest and every listed layer, reviews the code against its ten-point checklist (including the overlay-specific clause), writes findings JSON, and the user renders them with chk-py review --render. Show both flows sharing the overlay directory as their common source of truth but feeding two different agents and two different verification commands."
+  request: "Sequence diagram showing two parallel flows that both start from the same project overlay. Flow 1 (docstrings): user registers an extra_docstring_sections entry (name/style/anchor/ref_exempt) plus optional d2_exempt_marker_attrs / private_name_allowlist in pyproject.toml [tool.pcf], writes the section's content rules in docs/guidelines/documenting_guidelines.md, dispatches lazy-python.docstring-writer; the agent reads the plugin canon, then the overlay (override-on-conflict), then CLAUDE.md's Documenting section if present, then applies the merged ruleset plus the pyproject.toml registrations to the target file and runs chk-py to verify. Flow 2 (code review): user writes a project-specific clause in docs/guidelines/coding_guidelines.md, runs chk-py review, which resolves the changed-file scope, collects every guideline layer (canon, overlay, .claude/rules, project notes) into a manifest, and names the lazy-python.code-reviewer agent; the agent reads the manifest and every listed layer, reviews the code against its eleven-point checklist (including the overlay-specific clause), writes findings JSON, and the user renders them with chk-py review --render. Show both flows sharing the overlay directory as their common source of truth but feeding two different agents and two different verification commands."
 source_skills:
   - lazy-python.install
   - lazy-python.code-reviewer
   - lazy-python.check-style
+source_sha: 41539cc1c95f454532d9d9902144f9ca174df5db
 ---
 # Add a project-specific coding-guideline clause and confirm the review gate catches it
 
@@ -50,7 +51,7 @@ Both surfaces read `coding_guidelines.md`, but at different points in the workfl
 - **`/lazy-python.check-style`** reads three layers in its own Step 1, every time it's invoked: the plugin's `lazy-python.coding-guidelines.md` canon, then `docs/guidelines/coding_guidelines.md`, then the `## Style` section of `CLAUDE.md` if present. It then walks a fixed set of manual-inspection categories (docstring quality, contract consistency, guard clauses, method organization, naming, structural rules, comment preservation) against every modified file, before running `chk-py all` in its Step 4.
 - **`lazy-python.code-reviewer`** reads four layers, weakest to strongest: the plugin's `lazy-python.*-guidelines.md` canon, every file under `docs/guidelines/*.md` (so `coding_guidelines.md` counts), `.claude/rules/*.md` files scoped to Python, and `CLAUDE.md` / `.claude/CLAUDE.md`. A later layer overrides an earlier one on conflict. It is dispatched against a manifest that `chk-py review` — the seventh step of the `chk-py all` gate — writes when the review scope is pending.
 
-Checklist item 10 in the reviewer's own instructions, "Overlay-specific clauses", exists precisely for rules only your project declares — a clause your overlay adds that the canon does not carry.
+Checklist item 11 in the reviewer's own instructions, "Overlay-specific clauses", exists precisely for rules only your project declares — a clause your overlay adds that the canon does not carry.
 
 ### Step 3 — Write a project-specific clause in the coding overlay
 
@@ -88,13 +89,13 @@ Dispatch the agent against the manifest `chk-py all` printed:
 Dispatch the lazy-python.code-reviewer agent against the review manifest at .runtime/lazy-python/review/<timestamp>.json
 ```
 
-The agent reads the manifest, reads every layer it lists — canon, your `coding_guidelines.md`, any Python-scoped `.claude/rules/*.md`, and `CLAUDE.md` — reviews the files under review against its ten-point checklist, and writes a findings JSON to the `findings_path` the manifest named. Render what it wrote:
+The agent reads the manifest, reads every layer it lists — canon, your `coding_guidelines.md`, any Python-scoped `.claude/rules/*.md`, and `CLAUDE.md` — reviews the files under review against its eleven-point checklist, and writes a findings JSON to the `findings_path` the manifest named. Render what it wrote:
 
 ```
 chk-py review --render .runtime/lazy-python/review/<timestamp>.findings.json
 ```
 
-If your changed file violates the naming clause, expect a finding whose `rule` reads something like `overlay-repository-layer-naming`, with the file, line, and a message describing the mismatch — that's the reviewer applying checklist item 10 against a clause no deterministic checker knows about. If the file already conforms, an empty `findings` array (rendered as `Success: no guideline issues found`) confirms the reviewer read the clause and had nothing to flag — not that it skipped the check. A `FAIL` severity in the output means the render exits non-zero, exactly like a `pcf` or `mypy` failure would.
+If your changed file violates the naming clause, expect a finding whose `rule` reads something like `overlay-repository-layer-naming`, with the file, line, and a message describing the mismatch — that's the reviewer applying checklist item 11 against a clause no deterministic checker knows about. If the file already conforms, an empty `findings` array (rendered as `Success: no guideline issues found`) confirms the reviewer read the clause and had nothing to flag — not that it skipped the check. A `FAIL` severity in the output means the render exits non-zero, exactly like a `pcf` or `mypy` failure would.
 
 ### Step 6 — Re-run check-style's remaining steps
 
@@ -146,7 +147,7 @@ sequenceDiagram
     chkpy->>reviewer: name code-reviewer agent with manifest
     reviewer->>chkpy: read manifest
     reviewer->>guidelines: read every listed guideline layer
-    reviewer->>reviewer: review code against ten-point checklist
+    reviewer->>reviewer: review code against eleven-point checklist
     reviewer->>chkpy: write findings JSON
     user->>chkpy: render findings with chk-py review --render
   end

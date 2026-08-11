@@ -198,8 +198,17 @@ SUPPRESSION_RE = re.compile(
 # regex matching a waiver comment with non-empty explanation text
 WAIVER_RE = re.compile(r'#\s*waiver:\s*\S')
 
-# regex matching an `opt:` or `limit:` marker whose colon ends the line, i.e. carries no clause
-EMPTY_MARKER_CLAUSE_RE = re.compile(r'#\s*(opt|limit):\s*$')
+# regex matching an `opt:`, `limit:`, or `Decision:` marker whose colon ends the line,
+# i.e. carries no clause
+EMPTY_MARKER_CLAUSE_RE = re.compile(r'#\s*(opt|limit|Decision):\s*$')
+
+# regex matching a bare `# Contract:` marker line (canon: no text after the colon)
+CONTRACT_MARKER_RE = re.compile(r'#\s*Contract:\s*$')
+
+# regex matching the opening line of a block marker (`Domain(…):`, a bare `Contract:`,
+# `Decision:`) -- the Capitalized family that owns a standalone block. `Contract:` with
+# text after the colon is prose referencing a contract, not the marker itself.
+BLOCK_MARKER_RE = re.compile(r'#\s*(Domain\s*\(|Contract:\s*$|Decision:)')
 
 # regex matching a TMP marker comment (with or without colon)
 TMP_RE = re.compile(r'#\s*TMP\b')
@@ -2173,13 +2182,14 @@ class CodeFormatAnalyzer:
 
   def _check_marker_clauses(self) -> None:
     """
-    Check that `opt:` and `limit:` marker comments carry a clause.
+    Check that `opt:`, `limit:`, and `Decision:` marker comments carry a clause.
 
-    The whole value of both markers is the text after the colon: `opt:` states why a
+    The whole value of these markers is the text after the colon: `opt:` states why a
     non-obvious implementation choice was made for performance, `limit:` names the ceiling
-    of a deliberate simplification and the upgrade path past it. A marker whose colon ends
-    the line states neither. Whether the clause says anything real is a review-phase
-    judgement, not a checker one.
+    of a deliberate simplification and the upgrade path past it, `Decision:` states the
+    thesis of a recorded design fork. A marker whose colon ends the line states none of
+    them. Whether the clause says anything real is a review-phase judgement, not a
+    checker one.
 
     Only real comments are scanned. The same text inside a string literal is not a marker;
     inside a docstring it is a D7 violation and is reported by that check instead.
@@ -2201,6 +2211,104 @@ class CodeFormatAnalyzer:
         self.issues.append((
           token.start[0],
           f"marker '# {match.group(1)}:' carries no clause; state what it annotates"
+        ))
+
+
+  def _check_contract_bodies(self) -> None:
+    """
+    Check that every `# Contract:` marker is followed by guarantee text.
+
+    The marker line itself carries no text (canon: nothing after the colon); the guarantee
+    lives on the following `#` lines. A bare marker with no comment line after it, or with
+    an empty comment line, states no guarantee at all. Whether the guarantee text names a
+    real caller-visible invariant is a review-phase judgement, not a checker one.
+
+    Only real comments are scanned; the same text inside a string literal is not a marker.
+    """
+    # the tokenizer separates comments from string literals that merely look like them
+    source = '\n'.join(self.source_lines)
+    try:
+      tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+      return
+
+    # map each comment's line number to its text so the body lookup is O(1)
+    comment_lines = {
+      token.start[0]: token.string
+      for token in tokens
+      if token.type == tokenize.COMMENT
+    }
+
+    # a contract marker whose next line is not a comment with text carries no guarantee
+    for lineno, text in comment_lines.items():
+      # guard: only bare `# Contract:` lines open a contract block
+      if not CONTRACT_MARKER_RE.match(text.strip()):
+        continue
+      if not comment_lines.get(lineno + 1, '').lstrip('#').strip():
+        self.issues.append((
+          lineno,
+          "marker '# Contract:' carries no guarantee text; "
+          "state the guarantee on the following '#' lines"
+        ))
+
+
+  def _check_block_marker_boundaries(self) -> None:
+    """
+    Check that every block marker opens a standalone comment block.
+
+    A block marker (`Domain(…):`, `Contract:`, `Decision:` — including its one-line form)
+    is not a comment to a code line: every `#` line adjacent to it is read as the block's
+    body, so the block must be separated by a blank line from the surrounding code and
+    from any other comments. A marker glued below code or below a foreign comment, or a block whose last
+    body line touches the code below it, breaks that boundary.
+
+    Only real comments are scanned; the same text inside a string literal is not a marker.
+    """
+    # the tokenizer separates comments from string literals that merely look like them
+    source = '\n'.join(self.source_lines)
+    try:
+      tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+      return
+
+    # standalone comment lines only -- a trailing comment after code is never a block
+    comment_only_lines = {
+      token.start[0]
+      for token in tokens
+      if token.type == tokenize.COMMENT
+      and not self.source_lines[token.start[0] - 1][: token.start[1]].strip()
+    }
+
+    # every block-marker comment must carry a blank line on both sides of its block
+    for token in tokens:
+      # guard: only standalone block-marker comments open a block
+      if token.type != tokenize.COMMENT or token.start[0] not in comment_only_lines:
+        continue
+      # guard: comments outside the Capitalized block family are not this check's business
+      if not BLOCK_MARKER_RE.match(token.string.strip()):
+        continue
+
+      # the boundary above: the previous line must be blank (a docstring fence counts as
+      # surrounding code -- the block is standalone even at the top of a body)
+      lineno = token.start[0]
+      above = self.source_lines[lineno - 2].strip() if lineno >= 2 else ''
+      if above:
+        self.issues.append((
+          lineno,
+          f"block marker '{token.string.strip()}' is glued to the line above; "
+          f"a block marker is a standalone block -- separate it with a blank line"
+        ))
+
+      # the boundary below: walk the contiguous `#` body, then require a blank line
+      last = lineno
+      while last + 1 in comment_only_lines:
+        last += 1
+      below = self.source_lines[last].strip() if last < len(self.source_lines) else ''
+      if below:
+        self.issues.append((
+          last,
+          f"block opened by '{token.string.strip()}' touches the code below its body; "
+          f"a block marker is a standalone block -- separate it with a blank line"
         ))
 
 
@@ -2766,6 +2874,8 @@ class CodeFormatAnalyzer:
     self._check_double_backticks()
     self._check_guard_comments()
     self._check_marker_clauses()
+    self._check_contract_bodies()
+    self._check_block_marker_boundaries()
     if self.check_block_comments:
       self._check_block_comments()
     self._check_typing_cast()
@@ -2815,7 +2925,7 @@ PLAIN_SECTIONS = {'Returns', 'Yields'}
 
 # regex: marker tags forbidden inside docstring text (D7).
 # these belong in code comments, never in docstring bodies.
-_DOCSTRING_MARKERS_RE = re.compile(r'\b(TODO|TMP|DBG|REF|opt|guard|limit|DOC\s*\():')
+_DOCSTRING_MARKERS_RE = re.compile(r'\b(TODO|TMP|DBG|ref|opt|guard|limit|Domain\s*\([^)]*\)):')
 
 # regex: imperative summary with 3+ comma-separated clauses joined by ", and " (D6).
 # matches forms like "Enter X, install Y, and render Z."
@@ -3506,7 +3616,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
 
     Ref-exempt sections are registered by the consumer via `[tool.pcf]
     extra_docstring_sections` with `ref_exempt = true`; their bodies carry
-    `# REF:` lines and generator-owned content that project tooling consumes,
+    `# ref:` lines and generator-owned content that project tooling consumes,
     so D5/D7/D9 must not flag them.
 
     Args:
@@ -3628,13 +3738,18 @@ class DocstringAnalyzer(ast.NodeVisitor):
     """
     D7: reject development-marker tokens inside docstring text.
 
-    The configured marker tokens (TODO, TMP, DBG, REF, opt, guard, limit, and the
-    `DOC(...)` tag) belong in code comments, never in docstring bodies (per
-    `documenting_guidelines.md` line 19 zero-tolerance blocker).
+    The configured marker tokens (TODO, TMP, DBG, ref, opt, guard, limit, and the
+    `Domain(...)` tag) belong in code comments, never in docstring bodies (per
+    `documenting_guidelines.md` line 19 zero-tolerance blocker). The `Decision:` marker
+    is matched only at the start of a docstring line: "decision" is common English
+    prose, and a mid-line "decision:" is a domain noun, not a marker.
 
     Skips ref-exempt sections entirely -- sections registered via
-    `[tool.pcf]` with `ref_exempt = true` carry `# REF:` lines as source
-    references that consumer tooling strips at runtime.
+    `[tool.pcf]` with `ref_exempt = true` carry `# ref:` lines as source
+    references that consumer tooling strips at runtime. Also skips the label
+    of a definition-list entry (`Args:`, `Attributes:`, `Raises:`, `Type
+    Parameters:`), where a parameter or attribute named `limit` / `opt` /
+    `guard` is a name being documented, not a marker.
 
     Args:
       docstring: the cleaned docstring text.
@@ -3643,12 +3758,35 @@ class DocstringAnalyzer(ast.NodeVisitor):
     """
     lines = docstring.split('\n')
     skip_idx = self._ref_exempt_line_indices(docstring)
+    current_section: str | None = None
     for idx, line in enumerate(lines):
       # guard: ref-exempt section content is owned by consumer tooling
       if idx in skip_idx:
         continue
+      stripped = line.strip()
+      # track section transitions so definition-list labels can be told apart
+      if stripped.endswith(':') and stripped[:-1] in self.sections_order:
+        current_section = stripped[:-1]
+        continue
       m = _DOCSTRING_MARKERS_RE.search(line)
+      # `Decision:` is recognized only when it opens the docstring line -- the bare
+      # word with a colon mid-line is domain prose, not a marker
+      if m is None and stripped.startswith('Decision:'):
+        # guard: `Decision:` opening a line in a definition section is the documented
+        # name, not a marker
+        if current_section in self.definition_sections:
+          continue
+        self.issues.append((
+          start_line + idx,
+          f"D7 marker 'Decision:' inside docstring of '{node_name}'; "
+          f"markers belong in code comments"
+        ))
+        continue
       if m:
+        # guard: `<name>:` opening a line in a definition section is the documented
+        # name, not a marker -- a parameter may legitimately be called `limit`.
+        if current_section in self.definition_sections and stripped.startswith(m.group(0)):
+          continue
         # detect backtick-wrapped marker literals -- meta-references to the marker
         # syntax in checker/rule docstrings, not actual marker usages.
         before = line[: m.start()]
@@ -3683,7 +3821,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
     `Notes:` carries advanced-usage detail; `Attributes:` / `Args:` / `Raises:`
     are definition lists checked by other rules; `Type Parameters:` describes
     type variables; ref-exempt sections registered via `[tool.pcf]` cite code
-    via `# REF:` lines.
+    via `# ref:` lines.
 
     Args:
       docstring: the cleaned docstring text.

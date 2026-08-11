@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all seven Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-08-05
+last_regen: 2026-08-11
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads); agent writes test file covering all 7 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module; agent logs the run. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -9,6 +9,9 @@ source_skills:
   - lazy-python.test-writer
   - lazy-python.check-style
   - lazy-python.docstring-writer
+  - lazy-python.testing-guidelines
+  - tst
+source_sha: 41539cc1c95f454532d9d9902144f9ca174df5db
 ---
 # Generate tests that cover all seven Paranoid-Testing categories for a new class
 
@@ -143,7 +146,7 @@ If your project aggregates its suites through re-export shims (a `test_all.py` t
 
 If your project has no such shims, no key ever repeats and the line never prints — the run behaves exactly as before.
 
-The agent's own verification skips the guideline-review phase both times it runs `chk-py all` (Step 3, outcome 7), so that phase — the seventh step of `chk-py all` — is still pending once the agent finishes. Close it before you commit by invoking `/lazy-python.check-style`: its own Step 4 runs `chk-py all -q` without the skip, so the pending review surfaces for real and gets dispatched and rendered as part of the skill's own gate-closing pass. Its Step 3 manual review additionally walks categories no automated checker proves on the file the agent just wrote — docstring quality, contract consistency between the new tests and the production signatures they exercise, and preservation of any `TODO:` / `TMP:` / `DBG:` / `REF:` markers. Skipping this step leaves the guideline layer — the rules no AST-based checker can prove, like naming semantics and your own overlay clauses — unchecked.
+The agent's own verification skips the guideline-review phase both times it runs `chk-py all` (Step 3, outcome 7), so that phase — the seventh step of `chk-py all` — is still pending once the agent finishes. Close it before you commit by invoking `/lazy-python.check-style`: its own Step 4 runs `chk-py all -q` without the skip, so the pending review surfaces for real and gets dispatched and rendered as part of the skill's own gate-closing pass. Its Step 3 manual review additionally walks categories no automated checker proves on the file the agent just wrote — docstring quality, contract consistency between the new tests and the production signatures they exercise, and preservation of any `TODO:` / `TMP:` / `DBG:` / `ref:` markers. Skipping this step leaves the guideline layer — the rules no AST-based checker can prove, like naming semantics and your own overlay clauses — unchecked.
 
 A green run with no `# FAILS:` comments means the class is fully covered and the implementation satisfies its contract. A run with `# FAILS:` comments means the agent found divergences between the docstring contract and the implementation — these need your attention before the tests can be considered passing.
 

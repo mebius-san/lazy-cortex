@@ -1023,6 +1023,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+### 3.0.0 — 2026-08-11 UTC
+
+- **Breaking:** marker names changed — `DOC(...)` comments are now `Domain(...)`, `REF:` is now `ref:`, and `Contract!` is now `Contract:`. Update existing comments to the new names before the checker runs.
+- Block markers (`Domain(...)`, `Contract:`, `Decision:`) must now stand alone — separated by a blank line from the code above and from any other comment — and the checker enforces it.
+
 ### 2.4.2 — 2026-08-07 UTC
 
 - `/lazy-python.help` is now found when you ask what the plugin enforces or which verb runs the checkers, not just by an exact match on its own output.

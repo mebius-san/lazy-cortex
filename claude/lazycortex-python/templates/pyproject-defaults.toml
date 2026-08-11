@@ -285,7 +285,7 @@ banned_docstring_phrases = [
 # Project-registered docstring sections merged into the section machinery.
 # style: "bulleted" | "definition" | "plain". Order anchor: after/before must
 # name a built-in section or a previously declared entry (else appended last).
-# ref_exempt = true shields the section's body (# REF: lines) from D5/D7/D9.
+# ref_exempt = true shields the section's body (# ref: lines) from D5/D7/D9.
 # [[tool.pcf.extra_docstring_sections]]
 # name = "Field Semantics"
 # style = "bulleted"

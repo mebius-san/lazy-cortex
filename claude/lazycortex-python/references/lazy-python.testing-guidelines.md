@@ -7,6 +7,12 @@ Test structure, naming, assertions, coverage, and test patterns
 for Python projects that adopt these conventions.
 
 
+## Fixing a Bug (regression-test-first policy)
+- **A bug fix starts with a failing test, not with the fix.** Write a test that exercises the defect and run it against the unchanged code first; it must fail for the cause the report describes. A test that passes before the fix, or fails for an unrelated reason, has not captured the bug and is not a regression test.
+- **Only then change production code.** The fix is done when that test passes and the rest of the affected module's suite stays green.
+- **Place the regression test where the canon puts it** — `tests/<module>/…/test_<source>.py` for the source file that carried the defect, as one more method under the existing test class, named for the behaviour it pins (`test_<feature>__<variation>`). No `test_bug_1234.py`, no separate regression directory.
+- **When a unit test genuinely cannot reach the defect** — it lives in wiring the environment provides, or reproduces only through a real external system — say so explicitly, name how the fix was verified instead, and keep the verification reproducible by someone else. "Hard to test" and "needs a fixture I'd have to write" are not that case.
+
 ## Editing Existing Tests (test-edit policy)
 - **Mechanical adaptation to a user-approved contract change is allowed without asking**: signature / parameter updates, tuple-to-dataclass unpack changes, constructor-argument updates, renames following a production rename. Assertions must stay semantically identical; the reviewer verifies the edit is genuinely mechanical.
 - **Changing what a test asserts, weakening an assertion, or deleting a test requires explicit, contemporaneous user approval naming the test.** A failing assertion means production drifted from the contract: fix the code, not the test — unless the user approved the contract change and the test edit follows from it.

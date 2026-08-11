@@ -1,10 +1,10 @@
 ---
-description: Docstring rules (class, method, property), comments, marker comments, contract comments, and DOC comments for Python projects that adopt these conventions.
+description: Docstring rules (class, method, property), comments, marker comments, contract comments, and Domain comments for Python projects that adopt these conventions.
 ---
 # Documentation Standards
 
 Docstring rules (class, method, property), comments, marker comments,
-contract comments, and DOC comments for Python projects that adopt
+contract comments, and Domain comments for Python projects that adopt
 these conventions.
 
 ## LLM Output Contract — Docstring Overrides
@@ -20,7 +20,7 @@ these conventions.
   - Adding any property to the **Attributes** section of any docstring, regardless of perceived importance or documentation value.
   - Adding docstring to methods that are defined inside other methods or functions.
   - Adding `TODO:`, `TMP:` or any other information about work in progress if the class or method is not finished yet.
-  - Adding `DBG:`, `REF:`, `DOC(…):` or any other special comments or tags in the docstring or comments.
+  - Adding `DBG:`, `ref:`, `Domain(…):` or any other special comments or tags in the docstring or comments.
   - Adding sections **Args**, **Returns**, or **Yields** to any property method created with `@property` decorator.
   - Adding implementation steps in Summary or Scope, e.g., “It validates…,” “It sets up…,” “It assigns…,” or “with the given X and Y…”.
   - Mentioning private internal components or backing storage in Scope or Notes unless explicitly part of the public API.
@@ -39,13 +39,14 @@ these conventions.
 - No-change rules:
   - If a section violates the rules, normalize and fix it, but do not delete or move it. 
   - Always keep a section if it exists, unless it is empty or redundant.
-- `TODO:`, `TMP:`, `DBG:`, `REF:`, `opt:`, `guard:`, `limit:`, `DOC(…):` and other special comments interpretation rules:
+- `TODO:`, `TMP:`, `DBG:`, `ref:`, `opt:`, `guard:`, `limit:`, `Decision:`, `Domain(…):` and other special comments interpretation rules:
   - Treat any code or comments marked with `TMP:` as non-existent for the purposes of documentation, behavior description, and refactoring suggestions. Do not mention `TMP:` blocks or derive documented behavior from them.
   - Treat any code region marked with `TODO:` as if it were already fully and correctly implemented. Do not mention missing implementation, stubs, placeholders, or the need to finish `TODO:` blocks in docstrings, Notes, or any other generated text, even if the underlying code is incomplete.
   - Treat `opt:` comments as optimization annotations that explain why a non-obvious implementation choice was made for performance reasons. Do not alter or remove them.
   - Treat `limit:`-marked code as complete and correct as written. Never describe it as incomplete, temporary, provisional, or in need of the named upgrade, and never carry the ceiling into the docstring — document exactly what the code does today. Do not alter or remove the comments.
-  - `REF:` comments are source references that point to related code, classes, constants, or `DOC(…)` groups elsewhere in the codebase. They are stripped automatically when docstring sections are read during generation, so they serve only as human-readable traceability links. Do not alter or remove them.
-  - Ignore any comments or tags like `DBG:`, `DOC(…):` in the docstring or comments for the docstring generation or modification process.
+  - Treat `Decision:`-marked code as settled as written. Do not silently revisit the recorded choice, and never carry the rationale into the docstring — document what the code does, not why the fork was taken. Do not alter or remove the comments.
+  - `ref:` comments are source references that point to related code, classes, constants, or `Domain(…)` groups elsewhere in the codebase. They are stripped automatically when docstring sections are read during generation, so they serve only as human-readable traceability links. Do not alter or remove them.
+  - Ignore any comments or tags like `DBG:`, `Domain(…):` in the docstring or comments for the docstring generation or modification process.
 - Change Rules:
   - If you can convert one big Scope section into the correct sections, do it.
   - If you can add meaningful missing sections, do it.
@@ -58,7 +59,7 @@ these conventions.
   - Avoid redundant sections when there is nothing meaningful to add.
   - Start section text with two spaces of indentation relative to the section title.
   - Limit the length of any text line to 117 characters.
-  - No LaTeX or math markup anywhere in Python source — docstrings and `DOC(...)` line comments alike. Forbidden in any docstring section and in any `DOC(...)` block: `$...$` / `$$...$$` inline and block math, `\(...\)` / `\[...\]` delimiters, and backslash commands (`\frac`, `\sum`, `\in`, `\leq`, `\geq`, `\cdot`, `\times`, `\alpha`–`\omega`, `\sqrt`, `\mathbb`, etc.). Write formulas in plain prose with backticked identifiers and unicode operators where needed (e.g. "the effective factor is `1 - r`, with `r` in `[-1, 1]`"). Source is read in the editor by humans and by Python tooling, neither of which renders math; producing Obsidian-compatible LaTeX from these plain-text formulas belongs to the markdown-assembly tooling, at build time.
+  - No LaTeX or math markup anywhere in Python source — docstrings and `Domain(...)` line comments alike. Forbidden in any docstring section and in any `Domain(...)` block: `$...$` / `$$...$$` inline and block math, `\(...\)` / `\[...\]` delimiters, and backslash commands (`\frac`, `\sum`, `\in`, `\leq`, `\geq`, `\cdot`, `\times`, `\alpha`–`\omega`, `\sqrt`, `\mathbb`, etc.). Write formulas in plain prose with backticked identifiers and unicode operators where needed (e.g. "the effective factor is `1 - r`, with `r` in `[-1, 1]`"). Source is read in the editor by humans and by Python tooling, neither of which renders math; producing Obsidian-compatible LaTeX from these plain-text formulas belongs to the markdown-assembly tooling, at build time.
 
 ## Docstrings
 - Coverage: All classes, functions, methods, and properties must have docstrings.
@@ -161,7 +162,7 @@ these conventions.
     - Must be indented under the section; do not use bullets at column zero.
     - The section must have an empty line before it.
 - Project-registered sections:
-  - A project may register additional class-docstring sections in its `pyproject.toml` via `[tool.pcf] extra_docstring_sections` (section name, list style, order anchor, optional `ref_exempt` flag for sections whose body carries `# REF:` lines consumed by project tooling).
+  - A project may register additional class-docstring sections in its `pyproject.toml` via `[tool.pcf] extra_docstring_sections` (section name, list style, order anchor, optional `ref_exempt` flag for sections whose body carries `# ref:` lines consumed by project tooling).
   - The content rules for such sections live in the project overlay (`docs/guidelines/documenting_guidelines.md`), not in this canon. The checker enforces only order, list style, and the `ref_exempt` shield.
   - Order anchors (`after` / `before`) must name a built-in section or a previously declared entry; an unresolved anchor appends the section at the end of the order.
   - Registered sections with `style = "definition"` are skipped by the private-name narrative check (D9), like the built-in definition sections (`Attributes`, `Args`, `Raises`, `Type Parameters`).
@@ -263,10 +264,10 @@ these conventions.
     - Only describe guarantees that are explicitly defined by the public protocol:
       - The function or method signatures and their type hints.
       - The owning class or interface docstring and public API description.
-      - Explicit comments marked with `Contract!` in the code.
-    - Do not restate implementation details such as “returns `self.is_permanent`”, “iterates over all items”, or “runs in O(1)” unless they are explicitly required by the documented protocol or a `Contract!` comment.
+      - Explicit comments marked with `Contract:` in the code.
+    - Do not restate implementation details such as “returns `self.is_permanent`”, “iterates over all items”, or “runs in O(1)” unless they are explicitly required by the documented protocol or a `Contract:` comment.
     - If no explicit protocol-level guarantees are available, do not invent or expand the **Guarantees** section. Omit this section entirely or keep only the guarantees that already exist in the docstring.
-    - When editing an existing **Guarantees** section, you may reformat or clarify sentences, but you must not strengthen, weaken, or extend the contract beyond what is already stated in the source docstring or `Contract!` comments.
+    - When editing an existing **Guarantees** section, you may reformat or clarify sentences, but you must not strengthen, weaken, or extend the contract beyond what is already stated in the source docstring or `Contract:` comments.
   - Typical triggers include:
     - The method establishes or maintains stable relationships between collections, such as index alignment between entity lists and corresponding states, turns, or other per-entity data.
     - The method guarantees ordering, uniqueness, or determinism of returned values given the same inputs and seed.
@@ -278,7 +279,7 @@ these conventions.
     - Cross-collection or cross-object invariants that callers rely on to interpret data correctly (for example, index relationships, alignment, or synchronization).
     - Determinism and ordering guarantees for return values or mutated structures.
     - Lifecycle and validity guarantees about the resulting state visible to callers.
-    - Do not infer guarantees from the method body or internal control flow. The **Guarantees** section must be based only on the public protocol: the method signature, class or interface documentation, and explicit `Contract!` comments in the code.
+    - Do not infer guarantees from the method body or internal control flow. The **Guarantees** section must be based only on the public protocol: the method signature, class or interface documentation, and explicit `Contract:` comments in the code.
   - What to exclude:
     - One-off preconditions that are better expressed in **Notes** or **Raises**.
     - Internal algorithms, loops, or data structures are used to achieve the guarantees.
@@ -495,10 +496,14 @@ except BadRequestError as error:
 
 ## Marker Comments
 The codebase uses several marker prefixes in comments. Each serves a specific purpose and must never be removed or altered without explicit user approval.
+
+The register of a marker's name encodes its category: CAPS markers (`TODO:`, `TMP:`, `DBG:`) are temporary and die before the work is done; Capitalized markers (`Domain(…):`, `Contract:`, `Decision:`) open standalone knowledge blocks; lowercase markers (`opt:`, `guard:`, `limit:`, `waiver:`, `ref:`) are one-line annotations.
+
+A block marker is **not a comment to the code** — it is a standalone block, separated by an empty line from the surrounding code and from any other comments. Never glue it to a statement in place of the block's purpose comment, and never glue other comments to it: every `#` line adjacent to the block is treated as the block's own text.
 - `TODO:` — marks unfinished work or a planned enhancement that has not been implemented yet.
 - `TMP:` — marks temporary code (debugging aids, workarounds, scaffolding) that must be removed before the feature is considered complete.
 - `DBG:` — marks diagnostic/debug code blocks used during development to inspect runtime state.
-- `REF:` — marks source references pointing to related code, classes, constants, or `DOC(…)` groups elsewhere in the codebase. Stripped automatically during generation; serves only as human-readable traceability links.
+- `ref:` — marks source references pointing to related code, classes, constants, or `Domain(…)` groups elsewhere in the codebase. Stripped automatically during generation; serves only as human-readable traceability links.
 - `opt:` — marks optimization annotations that explain why a non-obvious implementation choice was made for performance reasons.
 - `limit:` — marks a deliberate simplification with a known ceiling: the implementation is correct at the current scale but stops being adequate under the named condition. One line, naming the ceiling and the upgrade path.
   - Correct:
@@ -508,13 +513,27 @@ The codebase uses several marker prefixes in comments. Each serves a specific pu
   - Not `opt:` — that annotates a choice made **for** performance; this one annotates a choice made **against** it, knowingly.
   - Not `waiver:` — no checker rule is being broken.
   - `pcf` proves only that the clause is non-empty; whether it names a real ceiling and a real upgrade path is the review phase's call.
+- `Decision:` — marks a recorded design decision: a real fork where the author chose X over Y and the why is worth keeping next to the code. Hybrid format: the thesis is mandatory on the marker line — `# Decision: <chose X, not Y> — <why>`; rationale or rejected alternatives that do not fit the line continue on the following `#` lines. A short decision stays a single line.
+  - Correct:
+      # Decision: dict over dataclass — the schema drifts with the config
+      # Decision: core/features/export#D-007 — records are append-only
+      # rejected in-place edits: anchors point at heading text,
+      # rewriting the thesis breaks every inbound link
+  - The multi-line form is a standalone block — separated by an empty line from the surrounding code and from any other comments. Never glue it to a statement in place of the block's purpose comment, and never glue other comments to it: every `#` line adjacent to the block is treated as decision text.
+  - A qualified token `<asset-or-product path>#D-NNN` at the start of the clause links the marker to a decision record in the spec catalog. Before reworking code that carries such a link, read the record it points to. A bare `D-NNN` without a path resolves to nothing and does not count as a link.
+  - Record a decision only when all three tests hold: a real fork existed (at least two viable options were considered); revisiting is costly (the choice constrains further work, or reverting it touches more than one place); the why is not recoverable from the code and its artifacts. Consequences of an already-recorded decision, repository conventions, and anything dictated by existing code or contracts are not decisions.
+  - Not `opt:` — that annotates a choice made **for** performance; this one records a fork with no performance motive.
+  - Not `limit:` — that annotates a deliberate simplification with a named ceiling; a decision has no ceiling to name.
+  - Not `waiver:` — no checker rule is being broken.
+  - The clause is written in English, like every other comment — even when the linked registry record is in another language; the thesis is then a translated paraphrase and the original stays behind the link.
+  - `pcf` proves only that the thesis is non-empty; whether it records a real fork with an honest why is the review phase's call.
 - `guard:` — marks a guard clause: an `if` (or equivalent `try`/`except` validation) whose body exits the current scope (`return`/`continue`/`break`/`raise`/`sys.exit`). Not for accumulation or branch ifs (see guard rules in Comments section above).
-- `DOC(…):` — marks documentation comments that describe domain rules, mechanics, algorithms, or other domain-specific concepts (see DOC Comments section below).
+- `Domain(…):` — marks documentation comments that describe domain rules, mechanics, algorithms, or other domain-specific concepts (see Domain Comments section below).
 - `waiver:` — marks an intentional exception from a coding rule. The comment must explain **why** the exception is justified. Required whenever `typing.cast()` is used (see Type Casting rules) or any other banned pattern is unavoidable.
 
 ## Contract Comments
-- `# Contract!` comments mark **caller-visible guarantees** that must survive refactoring.
-- They are the **source of truth** for docstring `Guarantees` sections — the `Guarantees` section must only contain items that trace back to a `Contract!` comment or the public protocol (see the Method Documentation rules above).
+- `# Contract:` comments mark **caller-visible guarantees** that must survive refactoring.
+- They are the **source of truth** for docstring `Guarantees` sections — the `Guarantees` section must only contain items that trace back to a `Contract:` comment or the public protocol (see the Method Documentation rules above).
 - When to use:
   - Data ownership guarantees: "returns a deep copy", "modifying the returned value will NOT modify the original".
   - Transaction requirements: "method must support DB transactions".
@@ -526,42 +545,42 @@ The codebase uses several marker prefixes in comments. Each serves a specific pu
   - Pure implementation details that are invisible to callers.
   - Information that is already obvious from the method signature and type hints.
 - Format:
-  - Place the comment **inside the method or class body**, on its own line, right before the code it governs.
-  - Start with `# Contract!` on its own line (no text after the `!`).
+  - Place the comment **inside the method or class body**, on its own line, above the code it governs — separated from it (and from everything above) by a blank line, per the standalone-block rule in Marker Comments.
+  - Start with `# Contract:` on its own line (no text after the colon).
   - The guarantee text follows on subsequent `#` comment lines:
     ```python
-    # Contract!
+    # Contract:
     # The returned clone is a fully independent deep copy;
     # mutating it never affects the original.
     ```
 - Treatment rules:
-  - Never remove or alter `# Contract!` comments without explicit user approval.
-  - When generating or updating a method's docstring `Guarantees` section, include every `Contract!` comment from that method.
+  - Never remove or alter `# Contract:` comments without explicit user approval.
+  - When generating or updating a method's docstring `Guarantees` section, include every `Contract:` comment from that method.
 
-## DOC Comments
-- DOC comments (`# DOC(group name):`) are special documentation comments that describe domain rules, mechanics, algorithms, or other domain-specific principles.
-- The **group name** in parentheses categorizes the comment by topic. **Always use an existing group already present in the codebase** (grep for `# DOC(` to discover existing groups). Do not invent new groups without explicit user approval.
-- DOC comments explain **principles and concepts**, not method implementation details.
-- DOC comments must always be placed **inside methods or functions**, near the code that implements the described mechanic, or **at class body level** when documenting enum members, class-level constants, or weight mappings that are not tied to a single method. Never place DOC comments between class definitions, above class definitions, or at module level outside a class or function. When a constant or mapping is used by only one method, prefer placing the DOC comment inside that method.
+## Domain Comments
+- Domain comments (`# Domain(group name):`) are special documentation comments that describe domain rules, mechanics, algorithms, or other domain-specific principles.
+- The **group name** in parentheses categorizes the comment by topic. **Always use an existing group already present in the codebase** (grep for `# Domain(` to discover existing groups). Do not invent new groups without explicit user approval.
+- Domain comments explain **principles and concepts**, not method implementation details.
+- Domain comments must always be placed **inside methods or functions**, near the code that implements the described mechanic, or **at class body level** when documenting enum members, class-level constants, or weight mappings that are not tied to a single method. Never place Domain comments between class definitions, above class definitions, or at module level outside a class or function. When a constant or mapping is used by only one method, prefer placing the Domain comment inside that method.
 - Never describe what "this method does" or how the code works internally. Instead, describe the underlying domain mechanics, formulas, or rules that the code implements.
 - Focus on answering "what are the rules/principles?" rather than "what does the code do?"
-- **Never reference code constructs** (class names, method names, variable names, constants, module paths) in DOC comments. DOC comments describe domain concepts and rules in plain language, not code.
-- DOC comments are written for human reading and for future extraction tooling (none currently ships in this project).
+- **Never reference code constructs** (class names, method names, variable names, constants, module paths) in Domain comments. Domain comments describe domain concepts and rules in plain language, not code.
+- Domain comments are written for human reading and for future extraction tooling (none currently ships in this project).
 - Format:
-  - Start with `# DOC(group):` followed by optional tags in square brackets.
-  - The group name must be lowercase. It can be a single word (e.g., `mechanics`, `principles`, `algorithms`) or dot-separated for subcategories (e.g., `mechanics.fighting`, `mechanics.skills`). Dots are converted to subfolder separators in the generated documentation tree: `DOC(mechanics.fighting)` → `<Specs>/mechanics/fighting/`.
+  - Start with `# Domain(group):` followed by optional tags in square brackets.
+  - The group name must be lowercase. It can be a single word (e.g., `mechanics`, `principles`, `algorithms`) or dot-separated for subcategories (e.g., `mechanics.fighting`, `mechanics.skills`). Dots are converted to subfolder separators in the generated documentation tree: `Domain(mechanics.fighting)` → `<Specs>/mechanics/fighting/`.
   - Use `# #` for the title line.
   - Continue with `#` for the body text describing the principles.
 - Example format:
 ```python
-# DOC(mechanics): [tag1] [tag2]
+# Domain(mechanics): [tag1] [tag2]
 # # Title of the concept
 # Description of the domain mechanics, principles, or rules.
 # Additional details about how the system works conceptually.
 ```
 - Correct (describes domain principles):
 ```python
-# DOC(mechanics.skills): [rpg.attributes.*] [skill]
+# Domain(mechanics.skills): [rpg.attributes.*] [skill]
 # # Skill execution chance check
 # When a skill is used, there is a chance that the skill use may fail at the moment of invocation.
 # This chance is determined by the skill's control chance value altered by any relevant modifiers.
@@ -570,7 +589,7 @@ The codebase uses several marker prefixes in comments. Each serves a specific pu
 ```
 - Wrong (describes method behavior):
 ```python
-# DOC(mechanics.skills): [rpg.attributes.*] [skill]
+# Domain(mechanics.skills): [rpg.attributes.*] [skill]
 # # Skill execution chance check
 # This method checks if the skill invocation succeeds. It retrieves the invoke_chance from state
 # and compares it with a random roll. If the check fails, the method sets the run_phase to FAILED

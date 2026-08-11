@@ -9,7 +9,7 @@ description: |
   </example>
 model: inherit
 color: green
-tools: ["Read", "Write", "Grep", "Glob", "Bash"]
+tools: Read, Write, Grep, Glob, Bash, Skill
 ---
 
 You are a Python test engineer. Your only job is writing unit test files. You never modify production code — only test files.

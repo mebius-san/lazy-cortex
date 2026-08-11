@@ -61,14 +61,14 @@ Outcome: `<N>-files-identified`.
 
 For each modified file, walk every category below. The categories cover rules the automated checkers (Step 4) cannot fully verify; the canon for each lives in `lazy-python.coding-guidelines.md` and `lazy-python.documenting-guidelines.md`.
 
-- **Docstring quality** — opening `"""` and closing `"""` each on their own line; `Summary` / `Scope` describe external behaviour only (no implementation details, no algorithm narration, no private-internal references); `TODO:` / `TMP:` / `DBG:` / `REF:` / `opt:` / `guard:` / `limit:` / `DOC(...)` markers preserved verbatim.
+- **Docstring quality** — opening `"""` and closing `"""` each on their own line; `Summary` / `Scope` describe external behaviour only (no implementation details, no algorithm narration, no private-internal references); `TODO:` / `TMP:` / `DBG:` / `ref:` / `opt:` / `guard:` / `limit:` / `Decision:` / `Domain(...)` markers preserved verbatim.
 - **Contract consistency** — public method / property signatures match the docstring's `Args:` / `Returns:` / `Raises:` sections; type hints accurately reflect declared behaviour; no drift between what the docstring promises and what the signature accepts.
 - **Guard clauses** — every guard `if` (early-return for invalid state) has a `# guard:` comment on the preceding line.
 - **Method organization** — public-before-private inside each class; classmethods before instance methods; properties grouped per the canon ordering.
 - **Naming** — `snake_case` for functions, methods, and variables; `_private` prefix for non-public attributes; full words (no abbreviations like `cfg`, `tmp_v`, single-letter loop vars outside short comprehensions).
 - **Structural rules** — 2-space indentation; 117-char line limit; no `typing.cast()`; no bare `Any` in annotations (waiver required to exempt); `__init__` parameters with defaults are keyword-only (after `*`).
-- **Marker clauses** — every `# opt:` states why the non-obvious choice was made for performance; every `# limit:` names the ceiling and the upgrade path past it, and sits on code that is finished as written (unfinished work is `TODO:`). `pcf` proves the clause is non-empty; judging what it says is this pass.
-- **Comment preservation** — the special markers (`TODO:`, `TMP:`, `DBG:`, `REF:`, `opt:`, `guard:`, `limit:`, `DOC(...)`) are untouched anywhere they appeared before the edit. Removing or rewording any of them is an issue regardless of whether the surrounding code looks cleaner without them.
+- **Marker clauses** — every `# opt:` states why the non-obvious choice was made for performance; every `# limit:` names the ceiling and the upgrade path past it, and sits on code that is finished as written (unfinished work is `TODO:`); every `# Decision:` records a real fork per the canon's three tests. `pcf` proves the clause is non-empty; judging what it says is this pass.
+- **Comment preservation** — the special markers (`TODO:`, `TMP:`, `DBG:`, `ref:`, `opt:`, `guard:`, `limit:`, `Decision:`, `Domain(...)`) are untouched anywhere they appeared before the edit. Removing or rewording any of them is an issue regardless of whether the surrounding code looks cleaner without them.
 
 Track every violation found, by file and line. The manual pass is mandatory — do not assume Step 4 will catch these; the checkers are tuned for syntactic / type-level issues, not semantic ones.
 
