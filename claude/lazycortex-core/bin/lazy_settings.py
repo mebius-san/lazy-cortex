@@ -47,17 +47,19 @@ if TYPE_CHECKING:
 
 
 CURRENT_VERSIONS = {
-  "agent_models": 1,
-  "daemon": 2,
+  "agent_models": 2,
+  "daemon": 4,
   "external_dirs": 1,
-  "routines": 2,
-  "experts": 1,
+  "routines": 6,
+  "experts": 4,
   "git": 1,
-  "products": 1,
+  "products": 2,
   "repos": 1,
-  "review": 1,
-  "spec": 1,
-  "wiki": 1,
+  "review": 9,
+  "spec": 2,
+  "structure": 1,
+  "terms": 1,
+  "wiki": 2,
 }
 
 

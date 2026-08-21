@@ -1,12 +1,13 @@
 ---
 chapter_type: block
 summary: The PostToolUse hook that runs `pcf.py` on every `.py` edit and surfaces style violations inline in the next turn — zero install steps, zero config writes.
-last_regen: 2026-08-11
+last_regen: 2026-08-19
 no_diagram: true
 source_skills:
   - lazy-python.check-style.sh
   - hooks.json
-source_sha: 7077e79897dbfe485a378d75ec1f1a297ee450fe
+  - pcf.py
+source_sha: 7e55c7700a727bafa0a894c538571d86f4359c7b
 ---
 # Inline style feedback on every Python edit
 
@@ -24,7 +25,7 @@ Every time you save a `.py` file — via `Edit` or `Write` — the plugin's Post
 
 **`lazy-python.check-style.sh`** is the script the hook engine invokes after each `Edit` or `Write`. It reads the tool call's JSON payload from stdin and exits immediately if `jq` is unavailable or the tool name isn't `Edit`/`Write`, then pulls out the file path and exits if the file is not a `.py` file — so the hook is truly silent on every non-Python edit. For `.py` files it resolves both the project directory and the edited file to their real (symlink-resolved) absolute paths, then runs `python3 -m py_compile` on the just-written file: if the file is syntactically incomplete (an in-progress multi-step edit), it exits cleanly rather than reporting spurious violations. When the file parses, it calls `pcf.py` — located via the `$CLAUDE_PLUGIN_ROOT` environment variable the plugin engine exports, so no path configuration is needed — and captures the output. If `pcf.py` emits any `: note:` lines it writes a `hookSpecificOutput` JSON payload to stdout with an `additionalContext` block containing the violation list; if the file is clean (or excluded by `pcf.py`'s own exclude logic) it exits without producing any output.
 
-**`pcf.py`** owns the exclude decision. The hook passes the symlink-resolved absolute path of the edited file to `pcf.py` and lets `pcf.py` decide whether to scan it. If the path matches an entry in `[tool.pcf] exclude` in `pyproject.toml`, `pcf.py` exits cleanly and the hook produces no output. This means adding a directory to the `exclude` list in `pyproject.toml` is the only thing you need to do to silence the hook for that directory — there is no separate hook configuration.
+**`pcf.py`** owns both the exclude decision and everything it reports through the hook. The hook passes the symlink-resolved absolute path of the edited file to `pcf.py` and lets `pcf.py` decide whether to scan it. If the path matches an entry in `[tool.pcf] exclude` in `pyproject.toml`, `pcf.py` exits cleanly and the hook produces no output. This means adding a directory to the `exclude` list in `pyproject.toml` is the only thing you need to do to silence the hook for that directory — there is no separate hook configuration. `pcf.py` runs a broad catalog of checks by default — import order, docstring shape, line length, code format, purpose comments, magic literals, assert placement, and the language a comment or docstring is written in — and every finding from any of them, not just formatting, surfaces through the same `additionalContext` path the moment you save the file.
 
 The violation format the hook surfaces is the same `file:line: note: message` format that `chk-py pcf` emits, so findings look identical whether they come from the hook or from a manual checker run.
 
@@ -39,6 +40,8 @@ The violation format the hook surfaces is the same `file:line: note: message` fo
 **Disabling individual checks project-wide.** Set the relevant flag under `[tool.pcf]` in `pyproject.toml` — for example `check_assert = false` or `check_magic_literal = false`. `/lazy-python.install` Phase 3 seeds a `[tool.pcf]` section with defaults; edit the values there. No skill verb is needed; `pyproject.toml` is a plain project file, not a skill-managed config.
 
 **Per-directory relaxed rules.** Add entries to `[tool.pcf.overrides]` for subdirectories that need different limits, for example `"tools" = { check_magic_literal = false }`. The last matching path prefix wins.
+
+**Allowing comments or docstrings in another language.** `check_language` (on by default) reports any letter in a comment or docstring that belongs to a script none of `[tool.pcf] allowed_languages` admits — the default is `["english"]`. Add the language you write in (e.g. `"russian"`, `"chinese"`, `"japanese"`) to that list in `pyproject.toml` and the hook stops flagging it; a single quoted foreign word inside a string literal is never scanned, and `# waiver: <reason>` exempts one specific line without widening the project-wide setting.
 
 **Checking whether jq is available.** The hook depends on `jq` to parse the Claude Code payload. If `jq` is absent it exits silently rather than erroring. Install `jq` via your system package manager if you want the hook to function.
 

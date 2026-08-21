@@ -18,6 +18,7 @@ Checks:
   check9 — informational: reports whether CLAUDE.md carries a `lazy-python` pointer (install never writes one)
   check10 — plugin ships a well-formed PostToolUse hook manifest at `hooks/hooks.json`
   check11 — venv probe-then-fallback state mirrors `_ensure_venv.sh`
+  check12 — sources carry `Domain(...)` blocks but the domain-groups dictionary is missing
 """
 from __future__ import annotations
 
@@ -611,6 +612,96 @@ class Check11Venv:
     return {"severity": "PASS", "message": "no venv yet; fallback creates <consumer>/.venv on first chk-py"}
 
 
+# ----------------------------------------------------------------------------------------
+class Check12DomainDictionary:
+  """
+  Verify a domain-groups dictionary exists once the sources carry `Domain(...)` blocks.
+
+  Attributes:
+    CONVENTIONAL_REL: Repo-relative dictionary location used when settings configure none.
+    DOMAIN_RE: Pattern matching a `Domain(...)` marker comment in a source file.
+    PRUNED_DIRS: Directory names never descended into while scanning for markers.
+    consumer_dir: Absolute path to the consumer repository root.
+  """
+
+  CONVENTIONAL_REL = "docs/guidelines/domain-groups.md"
+  DOMAIN_RE = re.compile(r'#\s*Domain\s*\(')
+  PRUNED_DIRS = ("node_modules", "__pycache__")
+
+  def __init__(self, *, consumer_dir: Path) -> None:
+    self.consumer_dir: Path = consumer_dir
+
+  def _dictionary_path(self) -> Path:
+    """
+    Resolve the dictionary location from consumer settings, falling back to the conventional path.
+
+    Returns:
+      Absolute path to the domain-groups dictionary, configured or conventional.
+    """
+    settings = self.consumer_dir / ".claude/lazy.settings.json"
+    data: dict = {}
+    if settings.exists():
+      try:
+        data = json.loads(settings.read_text())
+      # unreadable or malformed settings configure nothing, so the conventional path stays the answer
+      except (json.JSONDecodeError, OSError):
+        data = {}
+    configured = str(data.get("wiki", {}).get("domains", {}).get("dictionary", "") or "")
+    # guard: nothing configured, so the conventional location is the dictionary
+    if not configured:
+      return self.consumer_dir / self.CONVENTIONAL_REL
+    path = Path(configured).expanduser()
+    return path if path.is_absolute() else self.consumer_dir / path
+
+  def _marked_sources(self) -> list[str]:
+    """
+    Collect the Python sources carrying at least one `Domain(...)` marker comment.
+
+    Returns:
+      Sorted list of repo-relative paths, empty when no source is marked.
+    """
+    # limit: walks the worktree instead of the tracked set, so an ignored .py counts too;
+    # switch to `git ls-files` if generated Python ever starts carrying markers
+    marked: list[str] = []
+    for root, dirs, files in os.walk(self.consumer_dir):
+      dirs[:] = [name for name in dirs if not name.startswith(".") and name not in self.PRUNED_DIRS]
+      for name in files:
+        # guard: only Python sources carry the marker this check counts
+        if not name.endswith(".py"):
+          continue
+        source = Path(root) / name
+        try:
+          text = source.read_text(errors = "replace")
+        # a source that cannot be read yields no marker; the audit reports on what it could read
+        except OSError:
+          continue
+        if self.DOMAIN_RE.search(text):
+          marked.append(str(source.relative_to(self.consumer_dir)))
+    return sorted(marked)
+
+  def run(self) -> dict:
+    """
+    Report whether the marked sources have a dictionary to resolve their groups against.
+
+    Returns:
+      Finding dict with `severity` (PASS or WARN) and a `message` string.
+    """
+    dictionary = self._dictionary_path()
+    # guard: the dictionary is there, so every group in code has something to resolve against
+    if dictionary.exists():
+      return {"severity": "PASS", "message": f"domain-groups dictionary present ({dictionary})"}
+
+    # no dictionary — a finding only once the code actually files knowledge under groups
+    marked = self._marked_sources()
+    if not marked:
+      return {"severity": "PASS", "message": "no Domain(...) blocks in the sources — no dictionary needed yet"}
+    return {
+      "severity": "WARN",
+      "message": (f"{len(marked)} source(s) carry Domain(...) blocks but no dictionary at {dictionary} "
+                  "— run /lazy-python.knowledge-sweep to build it"),
+    }
+
+
 def main() -> int:
   """
   Dispatch a named check, emit its JSON finding to stdout, and return 0.
@@ -635,6 +726,7 @@ def main() -> int:
     "check9": Check9ClaudeMd,
     "check10": Check10Hook,
     "check11": Check11Venv,
+    "check12": Check12DomainDictionary,
   }
   handler = checks.get(check_id)
   if handler is None:

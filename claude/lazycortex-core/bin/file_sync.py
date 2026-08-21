@@ -30,6 +30,10 @@ STATE_UNCHANGED = "unchanged"
 STATE_DIVERGED = "diverged"
 STATE_REFRESHED = "refreshed"
 STATE_KEPT_ORPHAN = "kept-orphan"
+STATE_FAILED = "failed"
+
+EXIT_SRC_MISSING = 2
+EXIT_VERIFY_FAILED = 3
 
 KEY_FILE = "file"
 KEY_SRC = "src"
@@ -48,9 +52,29 @@ def _ensure_exec(path: str) -> None:
   os.chmod(path, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def _equal(src: str, dst: str) -> bool:
+  """
+  Byte-compare two files, ignoring any cached comparison result.
+
+  Args:
+    src: Path of the first file.
+    dst: Path of the second file.
+
+  Returns:
+    True when both files hold identical bytes.
+  """
+  # a target written moments ago must never be judged from a stale cache entry
+  filecmp.clear_cache()
+  return filecmp.cmp(src, dst, shallow = False)
+
+
 def sync_one(src: str, dst: str, *, copy_diverged: bool = False, chmod_x: bool = False) -> str:
   """
   Triage a single source/target pair and copy when mechanically safe.
+
+  Every copy is re-compared against its source afterwards; a target whose bytes
+  still differ from the source is reported as `failed` rather than as a
+  successful write.
 
   Args:
     src: Path of the shipped source file.
@@ -60,19 +84,22 @@ def sync_one(src: str, dst: str, *, copy_diverged: bool = False, chmod_x: bool =
     chmod_x: When True, ensure the target carries executable bits after sync.
 
   Returns:
-    One of `installed`, `unchanged`, `refreshed`, `diverged`.
+    One of `installed`, `unchanged`, `refreshed`, `diverged`, `failed`.
   """
   os.makedirs(os.path.dirname(dst) or ".", exist_ok = True)
   if not os.path.exists(dst):
     shutil.copyfile(src, dst)
     state = STATE_INSTALLED
-  elif filecmp.cmp(src, dst, shallow = False):
+  elif _equal(src, dst):
     state = STATE_UNCHANGED
   elif copy_diverged:
     shutil.copyfile(src, dst)
     state = STATE_REFRESHED
   else:
     state = STATE_DIVERGED
+  # a write that did not land is a failure, not a sync: the caller must never read it as applied
+  if state in (STATE_INSTALLED, STATE_REFRESHED) and not _equal(src, dst):
+    return STATE_FAILED
   # mode bits follow content: a diverged target awaiting merge judgment must not be mutated at all
   if chmod_x and state != STATE_DIVERGED:
     _ensure_exec(dst)
@@ -145,7 +172,8 @@ def main(argv: list[str]) -> int:
     argv: Command-line arguments (without the program name).
 
   Returns:
-    Process exit code — 0 on success, 2 on a missing source path.
+    Process exit code — 0 on success, 2 on a missing source path, 3 when at
+    least one written target failed its post-write byte comparison.
   """
   # the CLI surface: the source/target pair plus the dir-mode filters and the copy switches
   # waiver: argparse CLI signature and help strings, not domain keys (whole block below)
@@ -171,7 +199,7 @@ def main(argv: list[str]) -> int:
   # guard: a missing source is a caller error, not a triage state
   if not os.path.exists(args.src):
     print(json.dumps({ "error": f"source not found: {args.src}" }))
-    return 2
+    return EXIT_SRC_MISSING
 
   # a directory source triages its whole flat content; a file source is a single pair
   if os.path.isdir(args.src):
@@ -191,13 +219,18 @@ def main(argv: list[str]) -> int:
   for entry in results:
     counts[entry[KEY_STATE]] = counts.get(entry[KEY_STATE], 0) + 1
 
-  # the receipt hoists the diverged paths, the only ones needing caller judgment
+  # the receipt hoists the two lists a caller must act on: unresolved drift and failed writes
+  failed = [ entry[KEY_DST] for entry in results if entry[KEY_STATE] == STATE_FAILED ]
   receipt = {
     "results": results,
     "counts": counts,
     "diverged": [ entry[KEY_DST] for entry in results if entry[KEY_STATE] == STATE_DIVERGED ],
+    "failed": failed,
   }
   print(json.dumps(receipt, indent = 2))
+  # guard: a write that did not verify must not exit clean
+  if failed:
+    return EXIT_VERIFY_FAILED
   return 0
 
 

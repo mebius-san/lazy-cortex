@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-review skills — symptoms, likely causes, and fixes.
-last_regen: 2026-07-26
+last_regen: 2026-08-19
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree routing on observed symptom. Top-level branches: install/bootstrap failures (settings missing, permission error, core bin not found), configure failures (audit FAIL after wizard, section-id loop), start/submit problems (file not opted in, no-op on re-run when unexpected), status reporting nothing useful, stop/resume confusion, finalize blocked or partial, audit FAIL findings. Each leaf names the troubleshooting entry that resolves it."
@@ -15,6 +15,7 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
+source_sha: a2062bca54f427d017f9acfce7dee26e2b1db066
 ---
 # Troubleshooting
 
@@ -45,6 +46,26 @@ source_skills:
 **Likely cause**: `lazycortex-core` was never installed in this environment, or its cache was cleared.
 
 **Fix**: Run `/lazy-core.install` first. Once the core plugin is installed and its cache is populated, re-run `/lazy-review.install`.
+
+---
+
+## `/lazy-review.install` reports `review.watch_root` as `.` after migrating an old routine
+
+**Symptom**: On a repo that used to run the retired file-scan routine, the install report shows `review.watch_root: "."` — the coordinator's git-watch is now scoped to the whole repo instead of the doc subtree it used to cover.
+
+**Likely cause**: Install derives `review.watch_root` from the retired routine's `paths` globs by taking their common wildcard-free directory prefix. When those globs share no literal root (for example `specs/core/**/*.md` and `docs/**/*.md`), there is nothing to derive, so it falls back to `.`.
+
+**Fix**: Set `review.watch_root` in `.claude/lazy.settings.json` by hand to the directory your review classes actually live under, then re-run `/lazy-review.install`. An operator-set value is never re-derived.
+
+---
+
+## Review callouts render as plain Obsidian callouts after install
+
+**Symptom**: The Waiting banner and the `#review/command`, `#review/question`, `#review/concern` callouts all look identical — no distinct colour or icon.
+
+**Likely cause**: Either this repo has no `.obsidian/` vault (install reports `no-vault` and skips styling entirely — review still works, just unstyled), or the snippet was enabled in `appearance.json` while Obsidian was already running and the app has not picked up the change.
+
+**Fix**: If the repo has a vault, reload it, or click the reload icon next to `review-callouts` in Settings → Appearance → CSS snippets. If there is no `.obsidian/` directory, there is nothing to fix — the callouts work identically, just without the distinct styling.
 
 ---
 
@@ -92,7 +113,7 @@ source_skills:
 
 **Symptom**: After `/lazy-review.submit <file>`, the first round that fires goes to the main writer instead of skipping ahead to a reviewer.
 
-**Likely cause**: `submit` pre-seeds `review_main_done` so the dispatcher skips the opening writer pass, but the dispatcher reads the effective class config at tick time. If the configured class has no reviewer assigned after the main writer, the state machine has nowhere to advance.
+**Likely cause**: `submit` pre-seeds `review_main_done` so the coordinator skips the opening writer pass, but the coordinator reads the effective class config on each wake. If the configured class has no reviewer assigned after the main writer, there is nothing further in the chain to advance to.
 
 **Fix**: Run `/lazy-review.status <file>` and check `owners[]`. If the reviewer slots are empty, run `/lazy-review.configure` to add the required expert assignments for this document's class. Then run `/lazy-review.stop <file>` and `/lazy-review.submit <file>` again to reset the skip-seed.
 
@@ -114,7 +135,7 @@ source_skills:
 
 **Likely cause**: `stop` preserves `review_round` and `approved` as it found them. `start` always writes `review_round: 1` and `approved: false` on first open — it is not a resume operation; it is a fresh open. This is expected behaviour.
 
-**Fix**: If you need to resume mid-round without resetting state, edit the document's frontmatter manually before restarting — set `review_round` to the round you want to resume from. Alternatively, use `/lazy-review.submit <file>` which also opens the document but gives more control over which stage the dispatcher enters.
+**Fix**: If you need to resume mid-round without resetting state, edit the document's frontmatter manually before restarting — set `review_round` to the round you want to resume from. Alternatively, use `/lazy-review.submit <file>` which also opens the document but lands it straight on the review round instead of the opening writer pass.
 
 ---
 
@@ -162,9 +183,9 @@ source_skills:
 
 **Symptom**: `/lazy-review.status <file>` shows the document is active and waiting, but no expert round fires — the banner stays "Waiting" indefinitely.
 
-**Likely cause**: The `lazycortex-core` expert runtime daemon is not running or the `lazy-review.scan` routine was unregistered during install because `daemon.enabled` was `false` at install time.
+**Likely cause**: The `lazycortex-core` expert runtime daemon is not running, or the `lazy-review.coordinator-watch` / `lazy-review.collect` routine pair was unregistered during install because `daemon.enabled` was `false` at install time.
 
-**Fix**: Check whether the daemon is enabled: run `/lazy-core.audit` and look for the `daemon.enabled` value. If the daemon is disabled, enable it via `/lazy-core.configure` and re-run `/lazy-review.install` so the `lazy-review.scan` routine gets registered. If the daemon is enabled but not running, start it via `/lazy-core.start`.
+**Fix**: Check whether the daemon is enabled: run `/lazy-core.audit` and look for the `daemon.enabled` value. If the daemon is disabled, re-run `/lazy-core.install` and answer yes to its daemon gate, then re-run `/lazy-review.install` so both routines get registered. If the daemon is enabled but not running, `/lazy-runtime.preflight` reports what is stopping it.
 
 ---
 

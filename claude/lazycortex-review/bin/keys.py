@@ -51,6 +51,32 @@ class ReviewKey:
 
 
 # ----------------------------------------------------------------------------------------
+class JobMarker:
+  """
+  Per-document job-marker field names in the runtime sidecar, and the wake token one carries.
+
+  These name fields of `.runtime/lazy-review.jobs.json`, not frontmatter: the markers are
+  runtime state the review system owns, invisible in the document and unreachable by a
+  hand-edit (`job_markers.py`).
+
+  Attributes:
+    COORDINATOR_JOB: The id of the coordinator job currently in flight on the document.
+    ACTIVE_JOB: The id of the expert job currently in flight on the document.
+    PENDING_WAKE: The wake the postman raised and the watch worker has yet to consume.
+    JOB_DONE: The `PENDING_WAKE` value a landed expert payload raises.
+    KIND_COORDINATOR: The `mark-job` CLI token selecting `COORDINATOR_JOB`.
+    KIND_WRITER: The `mark-job` CLI token selecting `ACTIVE_JOB`.
+  """
+
+  COORDINATOR_JOB = "coordinator_job"
+  ACTIVE_JOB = "active_job"
+  PENDING_WAKE = "pending_wake"
+  JOB_DONE = "job-done"
+  KIND_COORDINATOR = "coordinator"
+  KIND_WRITER = "writer"
+
+
+# ----------------------------------------------------------------------------------------
 class ReviewStatus:
   """
   Audit / finding severity tokens compared as strings.
@@ -186,7 +212,6 @@ class JobKey:
     PATH: A path-entry field inside a source / context / result list item.
     DEDUP_KEY: A job-bundle dedup-key field.
     PROTOCOLS: A routine / job-bundle attached-protocols field.
-    DISPATCHED_FROM: The dispatch-origin repo field on a job bundle.
     ROLE: A free-form expert role field.
     MODE: The structural dispatch-mode field of a request.
     ROUND: The request round-number field.
@@ -206,7 +231,6 @@ class JobKey:
     REQUIRE: A frontmatter-overlay require-list field.
     CLASSES: The `review.classes` list key.
     REVIEW: The top-level `review` config block key.
-    REPOS: The top-level `repos` config block key.
     CLASS: A class-entry name field.
     PATHS: A class-entry paths-glob list field.
     CHECK: An audit-finding check-id field.
@@ -216,6 +240,7 @@ class JobKey:
     OWNERS: A status-record section-owners list field.
     OWNER: A status-record section-owner field.
     SECTION: A status-record / writer section-title field.
+    SECTION_ID: A job-request owned-section identifier field.
     ACTIONS: A tick-log actions-list field.
     STATE: A status-callout terminal-state field.
     MARKER: A status-callout callout-marker field.
@@ -257,6 +282,8 @@ class JobKey:
     NEW_VALIDATION_ROUND: A validator-barrier summary new-validation-round field.
     DECISION_COMMIT_SHA: A concerns-decision summary commit-sha field.
     HISTORY_PICKUP: A consume-pass summary history-pickup field.
+    CONTEXT_FROM_FRONTMATTER: A class-config frontmatter-key-list field for job-context resolution.
+    WARNINGS: A tick-summary non-fatal-warnings-list field.
   """
 
   NAME = "name"
@@ -285,7 +312,6 @@ class JobKey:
   PATH = "path"
   DEDUP_KEY = "dedup_key"
   PROTOCOLS = "protocols"
-  DISPATCHED_FROM = "dispatched_from"
   ROLE = "role"
   MODE = "mode"
   ROUND = "round"
@@ -305,7 +331,6 @@ class JobKey:
   REQUIRE = "require"
   CLASSES = "classes"
   REVIEW = "review"
-  REPOS = "repos"
   CLASS = "class"
   PATHS = "paths"
   CHECK = "check"
@@ -315,6 +340,7 @@ class JobKey:
   OWNERS = "owners"
   OWNER = "owner"
   SECTION = "section"
+  SECTION_ID = "section_id"
   ACTIONS = "actions"
   STATE = "state"
   MARKER = "marker"
@@ -356,6 +382,8 @@ class JobKey:
   NEW_VALIDATION_ROUND = "new_validation_round"
   DECISION_COMMIT_SHA = "decision_commit_sha"
   HISTORY_PICKUP = "history_pickup"
+  CONTEXT_FROM_FRONTMATTER = "context_from_frontmatter"
+  WARNINGS = "warnings"
 
 
 # ----------------------------------------------------------------------------------------
@@ -367,11 +395,13 @@ class Tag:
     EXPERT_PREFIX: The ownership-tag prefix `#expert/`.
     REVIEW_PREFIX: The system-callout tag prefix `#review/`.
     PROTECTED_PREFIX: The cross-plugin persistent-owner tag prefix `#protected/`.
+    HISTORY: The persistent ownership tag of the `# History` section.
   """
 
   EXPERT_PREFIX = "#expert/"
   REVIEW_PREFIX = "#review/"
   PROTECTED_PREFIX = "#protected/"
+  HISTORY = "#protected/review/history"
 
 
 # ----------------------------------------------------------------------------------------
@@ -386,7 +416,7 @@ class JobFile:
     JOBS_DIR: The job-queue subdirectory name.
     DEAD: The job-dir terminal-failure marker filename.
     DONE: The job-dir completion marker filename.
-    REMOTE_JOBS_DIR: The cross-repo dispatch-tracker root directory name.
+    CANCELLED: The job-dir cancellation marker filename.
   """
 
   REQUEST = "request.json"
@@ -395,7 +425,7 @@ class JobFile:
   JOBS_DIR = ".jobs"
   DEAD = "DEAD"
   DONE = "DONE"
-  REMOTE_JOBS_DIR = ".remote-jobs"
+  CANCELLED = "CANCELLED"
 
 
 # ----------------------------------------------------------------------------------------
@@ -408,12 +438,14 @@ class JobStatus:
     DISPATCHED: A job that has been handed to the runtime for execution.
     DONE: A job that completed and whose result is available.
     DEAD: A job that terminated in failure.
+    CANCELLED: A job that was cancelled before completing.
   """
 
   PENDING = "pending"
   DISPATCHED = "dispatched"
   DONE = "done"
   DEAD = "dead"
+  CANCELLED = "cancelled"
 
 
 # ----------------------------------------------------------------------------------------
@@ -525,6 +557,8 @@ class Paths:
     GIT_DIR: The `.git` directory name used as a repo-root marker / walk-skip entry.
     BIN_DIR: The plugin `bin` directory name used for CLI binary resolution.
     PLUGIN_CACHE: The Claude Code plugin-cache root, relative to the home directory.
+    RUNTIME_DIR: The per-repo gitignored runtime-state directory name.
+    JOBS_SIDECAR: The job-marker sidecar filename inside `RUNTIME_DIR`.
   """
 
   CLAUDE_DIR = ".claude"
@@ -532,6 +566,8 @@ class Paths:
   GIT_DIR = ".git"
   BIN_DIR = "bin"
   PLUGIN_CACHE = ".claude/plugins/cache"
+  RUNTIME_DIR = ".runtime"
+  JOBS_SIDECAR = "lazy-review.jobs.json"
 
 
 # ----------------------------------------------------------------------------------------

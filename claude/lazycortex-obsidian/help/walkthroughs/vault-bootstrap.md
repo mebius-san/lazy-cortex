@@ -1,21 +1,22 @@
 ---
 chapter_type: walkthrough
 summary: Go from a bare repo to a fully-wired Obsidian vault — tag pages, Iconize sync, diagram glue, click-to-zoom — one chained install.
-last_regen: 2026-08-05
+last_regen: 2026-08-19
 diagram_spec:
   anchor: "Journey at a glance"
-  request: "Sequence diagram showing the vault bootstrap journey: user runs /lazy-obsidian.install, which chains into /lazy-obsidian.iconize-install (installs folder-notes, obsidian-icon-folder, iconize-reloader, scaffolds icon-map and pre-commit shim) and then /lazy-obsidian.diagram-install (syncs mermaid-fit.css and ascii-fit.css, enables them in appearance.json, installs mermaid-popup), ending with the user verifying in Obsidian."
+  request: "Sequence diagram showing the vault bootstrap journey: user runs /lazy-obsidian.install, which installs Dataview, chains into /lazy-obsidian.iconize-install (installs folder-notes, obsidian-icon-folder, iconize-reloader, scaffolds icon-map and repaint routine), then itself syncs and enables its CSS snippets (mermaid-fit.css, ascii-fit.css, callouts.css) in appearance.json, and finally chains into /lazy-obsidian.diagram-install (installs mermaid-popup for click-to-zoom), ending with the user reloading Obsidian and verifying."
 source_skills:
   - lazy-obsidian.install
   - lazy-obsidian.iconize-install
   - lazy-obsidian.diagram-install
   - lazy-obsidian.gen-tag-pages
+source_sha: 1b79c714d76efca72ce97419eb66c032923b60bc
 ---
 # How do I wire up a fresh vault from scratch?
 
 This walkthrough takes you from a repo with a bare `.obsidian/` directory to a
 fully configured vault: Iconize frontmatter-sync with its three hard-dependency
-plugins, a pre-commit shim that keeps icons consistent, the diagram render
+plugins, automatic icon repaint as you work, the diagram render
 snippets that make mermaid fences fit the editor column, and click-to-zoom.
 The journey is one entry point — `/lazy-obsidian.install` — that chains the
 whole setup automatically. You get to the end without running three separate
@@ -25,7 +26,7 @@ commands.
 
 After this walkthrough your vault has:
 
-- A tag-page template scaffolded at `.claude/templates/obsidian.tag-page-template.md`
+- A tag-page template scaffolded at `.claude/templates/lazy-obsidian.tag-page-template.md`
   (consumed by the `lazy-obsidian.gen-tag-pages` agent) and the **Dataview**
   community plugin installed, so tag pages render their `Index` section once
   you generate them.
@@ -34,11 +35,13 @@ After this walkthrough your vault has:
   settings that enable frontmatter-driven icon painting.
 - An icon-map scaffold at `.claude/iconize/obsidian-icon-map.json` ready for
   you to populate with role/path-to-icon rules via `/lazy-obsidian.iconize-config`.
-- A pre-commit shim in `.githooks/pre-commit` that reconciles frontmatter icons
-  before every commit, with `core.hooksPath` pointed at `.githooks`.
-- `mermaid-fit.css` and `ascii-fit.css` installed in `.obsidian/snippets/` and
-  enabled in `appearance.json`, so mermaid SVGs and ASCII diagrams fit the
-  editor column automatically.
+- The `lazy-obsidian.repaint` routine registered (when the repo runs the
+  lazycortex daemon), so icons reconcile after every commit.
+- `mermaid-fit.css`, `ascii-fit.css`, and `callouts.css` installed in
+  `.obsidian/snippets/` and enabled in `appearance.json` by the base install
+  itself, so mermaid SVGs and ASCII diagrams fit the editor column and
+  lazycortex's own callout types (`[!decision]`, `[!decision-candidate]`, …)
+  get an icon and color automatically.
 - The `mermaid-popup` community plugin installed for click-to-zoom on every
   mermaid fence.
 - Obsidian's live `data.json` for Iconize listed in `.gitignore` so runtime
@@ -70,9 +73,10 @@ installs **Dataview** into `.obsidian/` via `/lazy-obsidian.update-plugin`
 (Dataview renders the `Index` section of tag pages).
 
 From there the base install chains automatically into
-`/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install` — no
-per-chain opt-in, no second command. Enabling the plugin means full
-functionality; the chains always run.
+`/lazy-obsidian.iconize-install`, then syncs and enables its own CSS
+snippets, then chains into `/lazy-obsidian.diagram-install` — no per-chain
+opt-in, no separate commands. Enabling the plugin means full functionality;
+the chains and the snippet step always run.
 
 The full set of chained work happens inside this one invocation.
 
@@ -107,7 +111,7 @@ error and stops. Check network connectivity, run
 `/lazy-obsidian.update-plugin <id>` directly to see the underlying error, then
 re-run `/lazy-obsidian.install`.
 
-### Step 3 — Iconize chain: icon-map, pre-commit shim, gitignore
+### Step 3 — Iconize chain: icon-map, repaint routine, gitignore
 
 With the plugins in place, the chain scaffolds the three remaining artifacts:
 
@@ -118,9 +122,9 @@ are added silently, keys only in your file are kept silently, and only a
 same-key value conflict prompts you. A schema-version mismatch triggers an
 automatic in-place migration when the transform chain is complete.
 
-**Pre-commit shim** — the worker's `install-hooks` subcommand writes
-`.githooks/pre-commit`, then the chain sets `core.hooksPath` to `.githooks`
-(or prompts if you already point git at a different hooks directory).
+**Repaint routine** — when the repo runs the lazycortex daemon, the chain
+registers the `lazy-obsidian.repaint` routine, which repaints icons after each
+commit; without a daemon this step reports `no-daemon` and moves on.
 
 **Gitignore entry** — Iconize's `data.json` at
 `.obsidian/plugins/obsidian-icon-folder/data.json` is appended to `.gitignore`
@@ -130,38 +134,53 @@ file is currently tracked the report tells you to run
 `git rm --cached .obsidian/plugins/obsidian-icon-folder/data.json` — the chain
 never does this automatically.
 
-### Step 4 — Diagram chain: CSS snippets and click-to-zoom
+### Step 4 — Sync and enable render snippets
 
-The diagram-install chain then runs. It writes two CSS snippets into
-`.obsidian/snippets/`:
+Back in the base install, between the two chains, it syncs every CSS snippet
+it ships into `.obsidian/snippets/` — discovered dynamically, so a future
+plugin update that adds a new snippet lands here without a skill change.
+Today that's three files:
 
 - `mermaid-fit.css` — fits mermaid SVGs to container width without
   aspect-ratio distortion.
 - `ascii-fit.css` — shrinks ASCII-diagram code blocks (`language-text` /
   `language-ascii`) in Reading Mode so wide diagrams fit the editor column with
   horizontal-scroll fallback.
+- `callouts.css` — gives lazycortex's own callout types (e.g. `[!decision]`,
+  `[!decision-candidate]`) an icon and color; Obsidian renders an unrecognized
+  callout type with no styling of its own.
 
-Both snippets are written silently when absent or unchanged. A locally edited
+Each snippet is written silently when absent or unchanged. A locally edited
 snippet is merged silently when the shipped change and your edit touch disjoint
 regions; only a same-region conflict prompts you.
 
-After the snippets land, the chain enables both names in `appearance.json`
-under `enabledCssSnippets`. Then it installs `mermaid-popup` via
-`/lazy-obsidian.update-plugin` — this adds click-to-zoom (10% zoom step per
-scroll wheel tick) on every mermaid fence. A registry fetch failure here does
-not abort the chain: mermaid SVG fit and the transparent-background theme
-directive still work via the CSS snippets alone, and you can re-run
-`/lazy-obsidian.update-plugin mermaid-popup` later.
+After the snippets land, the base install enables all three in
+`appearance.json` under `enabledCssSnippets` — this is the one writer of that
+array. `/lazy-obsidian.diagram-install` only declares the two diagram-fit
+snippets it depends on; it does not install or enable them itself.
 
 **Verification gate:** if the report shows any snippet outcome of `deferred`
-(snippet file absent — can happen if a Step 2 conflict was kept-local in a way
-that prevented writing), re-run `/lazy-obsidian.diagram-install` after
-resolving the conflict.
+(snippet file absent — can happen if a conflict earlier in the run was
+kept-local in a way that prevented writing), re-run `/lazy-obsidian.install`
+after resolving the conflict.
 
-### Step 5 — Read the install report and act on next steps
+### Step 5 — Diagram chain: click-to-zoom
 
-Both chains print a structured report at the end of the single
-`/lazy-obsidian.install` invocation. Scan it for:
+The diagram-install chain then runs. It installs `mermaid-popup` via
+`/lazy-obsidian.update-plugin` — this adds click-to-zoom (10% zoom step per
+scroll wheel tick) on every mermaid fence. The CSS snippets that make diagrams
+fit the editor column were already synced and enabled by the base install in
+the previous step; this chain only declares them so `appearance.json` keeps a
+single writer, and adds the click-to-zoom plugin on top.
+
+A registry fetch failure here does not abort the chain: mermaid SVG fit and
+the transparent-background theme directive still work via the CSS snippets
+alone, and you can re-run `/lazy-obsidian.update-plugin mermaid-popup` later.
+
+### Step 6 — Read the install report and act on next steps
+
+Both chains and the snippet step print a structured report at the end of the
+single `/lazy-obsidian.install` invocation. Scan it for:
 
 - Any **kept-local** outcome (icon-map merge conflict, Iconize frontmatter
   settings conflict, or CSS snippet conflict you chose to keep) — note the key
@@ -172,14 +191,13 @@ Both chains print a structured report at the end of the single
   setup.
 - A WARN if `data.json` is currently tracked in git (action: run
   `git rm --cached .obsidian/plugins/obsidian-icon-folder/data.json`).
-- Any **enabled** outcome from the diagram chain's appearance.json step — this
-  means you need to **reload Obsidian** (or click ↻ next to each snippet in
-  Settings → Appearance → CSS snippets) before the snippets take effect
-  mid-session.
+- Any **enabled** outcome from the snippet sync step (Step 4) — this means you
+  need to **reload Obsidian** (or click ↻ next to each snippet in Settings →
+  Appearance → CSS snippets) before the snippets take effect mid-session.
 - Any **failed:** outcome for `mermaid-popup` — note the reason and re-run
   `/lazy-obsidian.update-plugin mermaid-popup` when the network is available.
 
-### Step 6 — Reload Obsidian and verify
+### Step 7 — Reload Obsidian and verify
 
 Reload Obsidian (Cmd-R / Ctrl-R, or quit and reopen) so the newly installed
 plugins and enabled snippets take effect.
@@ -224,10 +242,11 @@ plugin independently (e.g. after the community registry ships a new version),
 use `/lazy-obsidian.update-plugin <id>`. Pass `--bundled` for
 `iconize-reloader`.
 
-**Diagram authoring.** The render glue installed here is the Obsidian-side half.
-The lazycortex-diagram engine (`/lazy-diagram.draw`) is the recommended producer
-— it emits mermaid fences with the correct theme directive so SVGs inherit the
-panel background. The diagram-install chain works whether or not
+**Diagram authoring.** The render glue installed here — CSS snippets from the
+base install, click-to-zoom from the diagram chain — is the Obsidian-side
+half. The lazycortex-diagram engine (`/lazy-diagram.draw`) is the recommended
+producer — it emits mermaid fences with the correct theme directive so SVGs
+inherit the panel background. The diagram-install chain works whether or not
 `lazycortex-diagram` is enabled; it is useful for any vault that contains
 mermaid fences.
 
@@ -252,8 +271,8 @@ sequenceDiagram
   vault-->>iconize: iconize-reloader installed
   iconize->>vault: scaffold icon-map file
   vault-->>iconize: icon-map scaffolded
-  iconize->>vault: install pre-commit shim
-  vault-->>iconize: pre-commit shim installed
+  iconize->>vault: register repaint routine
+  vault-->>iconize: repaint routine registered
   iconize-->>install: iconize-install complete
   install->>diagram: chain into /lazy-obsidian.diagram-install
   diagram->>vault: sync mermaid-fit.css

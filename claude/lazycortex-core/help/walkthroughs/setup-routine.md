@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-last_regen: 2026-08-05
+last_regen: 2026-08-19
 diagram_spec:
   anchor: "How registration and pickup flow"
   request: "Sequence diagram showing the user running /lazy-routine.register, the skill writing lazy.settings.json, the daemon picking up the new routine on its next cycle without restart, and the user later running /lazy-routine.unregister to remove it. Include the built-in protection check for lazy-expert.pump."
@@ -9,6 +9,7 @@ diagram_spec:
 source_skills:
   - lazy-routine.register
   - lazy-routine.unregister
+source_sha: c6319fd5862972d0cafec847f18eab54aea4d385
 ---
 # Register a periodic routine with the runtime daemon
 
@@ -41,8 +42,14 @@ The validator enforces exactly-one of the two dispatch shapes. Choose the type, 
 - **subprocess** — fire on a fixed interval (e.g. every 300 seconds). Required: `interval_sec`. Good for lint sweeps, data refreshes, and any periodic invocation.
 - **inbox** — watch a directory and fire once per file found. With `expert + request` the file's path is passed to the expert (`{file}` template + `dedup_key`) — the inbox stays the single source of truth. A succeeded job drains its input on the next tick; a failed job is left parked as a dead letter, and its dedup key blocks re-dispatch until you clear it. When the expert reports the reserved `deferred` outcome instead — work it cannot finish until something outside the runtime changes — the bundle is parked the same way, but ages out on its own: once it has waited `deferred_retry_sec`, the next tick offers the same untouched file back to the queue, no manual triage needed. With `command`, the file stays in the inbox until the consumer command moves or deletes it. Required: `inbox_dir`, `interval_sec`. Optional: `deferred_retry_sec` (seconds a deferred bundle stays parked before retry; default one day).
 - **schedule** — fire once per cron boundary (5-field cron expression). Required: `cron`. Use when wall-clock timing matters more than a fixed cadence.
-- **git** — watch local HEAD for new commits, new files, changed files, deleted files, or renamed files; fire once per item. Required: `watch`, `interval_sec`. The `branch` and `remote` fields are vestigial — the watch always targets local HEAD regardless of their values, and remote sync is the daemon's own job. The wizard may surface them for schema compatibility; leave them blank or skip them.
+- **git** — watch local HEAD for new commits, new files, changed files, deleted files, or renamed files; fire once per item. Required: `watch`, `interval_sec`. The `branch` and `remote` fields are vestigial — the watch always targets local HEAD regardless of their values, and remote sync is the daemon's own job. The wizard may surface them for schema compatibility; leave them blank or skip them. Optional: `filter` (the same composite frontmatter block `md-scan` takes, for watched paths worth narrowing by frontmatter) and `group_globs` (an ordered list of directory globs — file items whose path sits below a matching glob collapse into one item per matched directory, carrying every changed path in that directory together, instead of firing once per file; not valid together with `watch: new_commits`).
 - **md-scan** — scan markdown files matching vault-relative globs, filter by frontmatter values, and fire once per match. Files are edited in place by the consumer — no move. Required: `paths` (list of globs), `interval_sec`. A plain glob (e.g. `requests/*.md`) matches only direct children of that directory; a glob containing `**` (e.g. `requests/**/*.md`) matches recursively across any number of nested directories, including zero — use it for a coarse scope-root sieve and let the `filter` narrow it down. Optional: `filter` (composite filter block, e.g. `{"frontmatter": {"key": {"in": [...], "not_in": [...]}}}`) — a `null` value in the `in` list matches files where the key is absent or explicitly null, which is useful for picking up files that have never been processed; an absent `filter` matches all files.
+
+Three fields apply to every type, asked after the type-specific fields and the dispatch shape:
+
+- `hooks_enabled` (list of lazycortex hook short names) — which hooks may run inside this routine's own subprocesses. Defaults to empty, which keeps every lazycortex hook silent — the guard that stops a tree-writing hook from dirtying the worktree behind an autonomous commit. Set it only when the routine's command genuinely needs a specific hook to fire.
+- `ignore_halt` (bool, default false) — let the routine tick while the daemon is halted. It also skips the post-tick working-tree check for that routine, so reserve it for routines whose entire job is clearing the stuck state.
+- `git_author` (`{name, email}`) — the bot identity stamped on any commits the routine's own `command:` consumer makes (exported as `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`). Set it whenever the routine's command commits on its own; the canonical form is `{name: <routine-family>, email: <routine-family>@bot.invalid}` — never the operator's own identity, and never a domain other than `@bot.invalid`, since loop-detection and operator-vs-bot checks key on it. Leave it unset and the routine's commits carry the daemon process's own identity.
 
 ### Step 2 — Run the register wizard
 
@@ -61,7 +68,9 @@ For an `inbox` routine the wizard additionally checks whether `inbox_dir` is git
 
 For an `md-scan` routine the wizard asks for the glob list, the optional frontmatter filter dict, and the dispatch shape. Use a `**` segment in a glob (e.g. `requests/**/*.md`) when the routine should sieve an entire directory tree rather than one flat directory. A `null` value in the filter's `in` list matches files where the key is absent — useful for picking up files that have never been processed (e.g. `{"frontmatter": {"request_status": {"in": [null, "draft"], "not_in": []}}}`).
 
-For a `git` routine, supply `watch` (one of `new_commits` / `new_files` / `changed_files` / `deleted_files` / `renamed_files`) and `interval_sec`. The `branch` and `remote` fields are accepted by the schema for compatibility but have no effect on which changes the watch observes — skip them.
+For a `git` routine, supply `watch` (one of `new_commits` / `new_files` / `changed_files` / `deleted_files` / `renamed_files`) and `interval_sec`. The `branch` and `remote` fields are accepted by the schema for compatibility but have no effect on which changes the watch observes — skip them. If several files under the same directory tend to change together (e.g. all the parts of one asset), set `group_globs` so those items fire as a single grouped run instead of one run per file — but not together with `watch: new_commits`.
+
+After the type-specific fields and the `command`/`expert`+`request` question, the wizard asks about the three shared fields — `hooks_enabled`, `ignore_halt`, `git_author`. Accept the defaults (all unset) unless your routine's command needs a specific hook, needs to keep ticking through a daemon halt, or commits under its own bot identity.
 
 The skill validates the `<plugin>.<verb>` naming pattern and the per-type schema before writing anything. If validation fails it aborts with a clear message — fix the reported field and re-run.
 

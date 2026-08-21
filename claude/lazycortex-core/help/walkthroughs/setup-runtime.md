@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
-summary: Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover if the working tree or a remote sync halts it.
-last_regen: 2026-08-06
+summary: Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover from any of its halt reasons — dirty tree, remote sync, bad routine config, or a closed rate-limit window.
+last_regen: 2026-08-21
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, answers yes to the runtime-daemon wizard, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh, daemon starts and polls .experts/.jobs/ on interval, user checks .runtime/state.json for a recent last_run; (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks a cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
@@ -9,14 +9,15 @@ diagram_spec:
 source_skills:
   - lazy-core.install
   - lazy-runtime.recover
+source_sha: ddfefb0f7c7cd9509a78bd86f8dc930e5e906a56
 ---
 # How do I bootstrap the runtime daemon and recover it if it halts?
 
-The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines. Getting from zero to a daemon that runs in the background is a short journey: install and start it, confirm every registered expert is actually launchable, confirm the daemon is polling, then know how to unblock it if a job or routine leaves the working tree dirty or a remote-sync operation fails.
+The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines. Getting from zero to a daemon that runs in the background is a short journey: install and start it, confirm every registered expert is actually launchable, confirm the daemon is polling, then know how to unblock it if it halts — from a dirty working tree, a failed remote sync, a routine config gone invalid, or a closed subscription rate-limit window.
 
 ## Outcome
 
-After completing this walkthrough you have a running runtime daemon that polls for expert jobs and registered routines on a regular interval, confidence that its registered experts will actually launch when a routine dispatches them, and a working recovery path if the daemon ever halts — either from a dirty working tree or a failed remote sync.
+After completing this walkthrough you have a running runtime daemon that polls for expert jobs and registered routines on a regular interval, confidence that its registered experts will actually launch when a routine dispatches them, and a working recovery path for every halt reason the daemon can raise.
 
 ## What you need
 
@@ -58,7 +59,7 @@ After one polling interval, open `.runtime/state.json` and confirm the `last_run
 
 ### Step 4 — Recover if the daemon halts
 
-The daemon halts in two situations and writes a `daemon_halted` block to `.runtime/state.json` in both cases. If you notice jobs stop processing, run:
+The daemon halts on one of several named reasons and writes a `daemon_halted` block to `.runtime/state.json` in every case. If you notice jobs stop processing, run:
 
 ```
 /lazy-runtime.recover
@@ -75,6 +76,10 @@ The skill reads the halt context and shows you `triggered_by` (which routine or 
 
 **Remote-sync halts (`git_pull_diverged` / `git_push_failed` / `git_remote_unavailable`)** — the daemon's pre- or post-tick remote sync (configured via the `daemon.git` block in `lazy.settings.json`) hit an unrecoverable state. Before you ever see this halt, the daemon retries on its own with backoff whenever a remote-touching operation looks merely unreachable (a network blip, a DNS hiccup) — so a brief outage no longer halts the daemon at all; `git_remote_unavailable` now only fires once those retries are exhausted. The skill does not attempt to fix these automatically (automatic resolution could silently drop your commits). Instead it surfaces reason-specific guidance — for example, inspecting `git log --oneline HEAD origin/<branch>` for a diverged branch, or checking network and `git remote -v` for a remote-unavailable halt. After you resolve the situation by hand, confirm **resume** to clear the halt block. The daemon's next tick re-evaluates; if the condition persists it will halt again with the same reason.
 
+**Routine-config halt (`routine_config_invalid`)** — a `routines.<name>` entry in `lazy.settings.json` (or its gitignored `.local.json` overlay) no longer matches its type's schema, so the daemon dropped the routine and stopped rather than silently running on a config it can't trust. The daemon never auto-corrects a rejected entry — an unknown field may be a typo, a leftover of an older schema, or intent the schema hasn't grown to cover yet, and only you know which. The skill points you at the schema error (`lazycortex-core error-list`, or the newest `.logs/lazy-core/runtime/<date>.jsonl` record whose `name` matches the routine) so you can fix the entry by hand or re-register it with `/lazy-routine.register --force`. Confirm **resume** once the entry is valid again.
+
+**Rate-limit halt (`rate_limit`)** — the host-local subscription rate-limit window closed, and the daemon paused rather than burn a spawn against it. Nothing is broken here and no git repair is needed — the daemon lifts this halt itself the moment the window reopens (the skill shows you `resets_at`, the epoch second that happens). Confirm **resume** only if you want the queue moving again before then; the pump's pre-spawn check still refuses to spawn while the shared rate-limit flag holds a live record, so resuming early burns no tokens.
+
 Once cleanup or manual repair succeeds and the tree is clean, the skill atomically clears the `daemon_halted` block from `state.json`. The daemon resumes scheduling on its next iteration with no restart required.
 
 If the tree is still dirty after cleanup (e.g., a submodule left additional changes), the skill reports `still-dirty` and leaves the halt block in place. Run `git status` to inspect, resolve the remaining changes, and re-run `/lazy-runtime.recover`.
@@ -89,7 +94,7 @@ If your `daemon.git` block sets `remote_sync: "pull_push"` and you also want aut
 
 If you opted into the metrics endpoint during install, the daemon exposes runtime health (routine ticks, errors, tokens, queue depth) on the allocated loopback port for a Prometheus-compatible scraper — nothing further to do here, it runs alongside job draining with no separate startup step. If another daemon on the same host already holds that port, this daemon does not crash-loop over it — it records a `metrics_port_conflict` incident naming the current holder and keeps draining jobs with metrics simply unavailable until the port frees up or you reinstall to pick a fresh one.
 
-The `daemon_halted` recovery path is an expected operational event, not an error in the daemon itself. When it fires often from a particular routine, that routine's output logic is leaving dirt behind — investigate there, not in the daemon.
+Most halt reasons are expected operational events, not errors in the daemon itself — a rate-limit window closing is normal subscription throttling, and it clears itself. When `uncommitted_changes` fires often from a particular routine, that routine's output logic is leaving dirt behind — investigate there, not in the daemon.
 
 ## How setup and recovery connect
 

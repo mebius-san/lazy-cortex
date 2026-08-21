@@ -1,15 +1,15 @@
 ---
 name: lazy-wiki.relink
-description: "Use when a wiki scope's nodes need classifying and See-also linking right now — this checkout runs no runtime daemon, or the operator wants to force a relink instead of waiting for the `wiki.scan` / `wiki.relink-weekly` routines. Computes the plan (initial / incremental / anchor-lost), dispatches the wiki curator synchronously per node in tail-off mode, rebuilds `topics.md`, records the new anchor, and makes one commit under the operator identity."
+description: "Use when a wiki scope's nodes need classifying and See-also linking right now — this checkout runs no runtime daemon, or the operator wants to force a relink instead of waiting for the `lazy-wiki.scan` / `lazy-wiki.relink-weekly` routines. Computes the plan (initial / incremental / anchor-lost), dispatches the wiki curator synchronously per node in tail-off mode, rebuilds `topics.md`, records the new anchor, and makes one commit under the operator identity."
 allowed-tools: Read, Bash(lazycortex-wiki *), Bash(date -u *), Bash(git *), Bash(mkdir -p *), Bash(rm -rf *), Bash(test *), Bash(cp *), Write, Agent, AskUserQuestion, TaskCreate, TaskUpdate, TaskList
 ---
 # lazy-wiki.relink
 
-Relink one wiki scope without the runtime daemon — entirely in the current Claude Code session. The deterministic core (`relink-plan`, `apply-node`, `build-index`, `set-synced-sha`) decides *what* to process; this skill orchestrates by dispatching the `wiki.curator` agent as a synchronous subagent in **tail-off mode** (`tail: false`). There are **no job dirs** — the curator reads the real node (and the real `topics.md` for link) named in its dispatch prompt and **applies its own curation via `apply-node`** (C-hybrid, exactly as on the daemon — there is no collector); it just skips the *tail* (`build-index` / git-commit / `dispatch-link`), which this skill owns: the skill rebuilds the index once between phases and makes the single commit. The daemon path (event-driven `wiki.scan` + weekly `wiki.relink-weekly`) is unaffected and runs in parallel as the autonomous alternative (it, not this skill, uses the runtime's job dirs, and there the curator runs its full tail with `tail: true`).
+Relink one wiki scope without the runtime daemon — entirely in the current Claude Code session. The deterministic core (`relink-plan`, `apply-node`, `build-index`, `set-synced-sha`) decides *what* to process; this skill orchestrates by dispatching the `wiki.curator` agent as a synchronous subagent in **tail-off mode** (`tail: false`). There are **no job dirs** — the curator reads the real node (and the real `topics.md` for link) named in its dispatch prompt and **applies its own curation via `apply-node`** (C-hybrid, exactly as on the daemon — there is no collector); it just skips the *tail* (`build-index` / git-commit / `dispatch-link`), which this skill owns: the skill rebuilds the index once between phases and makes the single commit. The daemon path (event-driven `lazy-wiki.scan` + weekly `lazy-wiki.relink-weekly`) is unaffected and runs in parallel as the autonomous alternative (it, not this skill, uses the runtime's job dirs, and there the curator runs its full tail with `tail: true`).
 
-Invocation: `/wiki.relink [<scope-id>]`. When `<scope-id>` is omitted, ask the operator which configured scope to relink.
+Invocation: `/lazy-wiki.relink [<scope-id>]`. When `<scope-id>` is omitted, ask the operator which configured scope to relink.
 
-Prerequisites: `/wiki.install` has run, at least one scope is configured in `.claude/lazy.settings.json[wiki.scopes]`, and the `wiki.curator` expert is composed. The working tree should be clean for the touched paths — this skill writes and commits node files and `topics.md`.
+Prerequisites: `/lazy-wiki.install` has run, at least one scope is configured in `.claude/lazy.settings.json[wiki.scopes]`, and the `wiki.curator` expert is composed. The working tree should be clean for the touched paths — this skill writes and commits node files and `topics.md`.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -50,13 +50,13 @@ Outcome: `planned:<mode>`.
 
 ## Step 2 — Classify each node
 
-Read the scope's `tag_axes` once from `.claude/lazy.settings.json[wiki.scopes][<scope-id>]`. Then capture the existing tag values as the classify **anchor**: `Bash(lazycortex-wiki collect-tags <scope-id> --repo <repo-root>)` — capture its JSON (empty `axes` on cold-start, when nothing is classified yet).
+Resolve the scope's **effective** axis list once from `.claude/lazy.settings.json`: the repository vocabulary `wiki.tag_axes`, narrowed to the entries the scope's own `wiki.scopes[<scope-id>].tag_axes` names. That key is a narrowing, not a vocabulary — absent or empty means the scope uses the full `wiki.tag_axes`, and an entry outside it is not an axis and is dropped. Pass the resolved list inline; the curator receives a closed set either way. Then capture the existing tag values as the classify **anchor**: `Bash(lazycortex-wiki collect-tags <scope-id> --repo <repo-root>)` — capture its JSON (empty `axes` on cold-start, when nothing is classified yet).
 
 For each absolute node path in `classify[]`, dispatch the curator synchronously — **no job dir**; it reads the real node in place AND applies its own curation via `apply-node` (the skill does NOT apply — the curator owns its write, C-hybrid):
 
 ```
 Agent(subagent_type: "lazycortex-wiki:lazy-wiki.curator",
-      prompt: "kind=classify, tail=false. node_path=<abs-node-path>, scope_id=<scope-id>, repo_root=<repo-root>, tag_axes=<comma-separated tag_axes>, existing_tags=<the collect-tags JSON from above>. Read the real node at node_path (and its own pin fields); choose wiki_summary, topics, connectors — anchor topic values to existing_tags (reuse a fitting existing value instead of coining a synonym); apply them to the node yourself via `lazycortex-wiki apply-node <node_path> --from <a mktemp curation file you create>` (this writes wiki_summary, the wiki/* tags, wiki_connectors, and the wiki_src_hash backstop), then rm the temp; STOP — do NOT build-index, git, or dispatch-link. Report the outcome.")
+      prompt: "kind=classify, tail=false. node_path=<abs-node-path>, scope_id=<scope-id>, repo_root=<repo-root>, tag_axes=<comma-separated effective axes>, existing_tags=<the collect-tags JSON from above>. Read the real node at node_path (and its own pin fields); choose wiki_summary, topics, connectors — anchor topic values to existing_tags (reuse a fitting existing value instead of coining a synonym); apply them to the node yourself via `lazycortex-wiki apply-node <node_path> --from <a mktemp curation file you create>` (this writes wiki_summary, the wiki/* tags, wiki_connectors, and the wiki_src_hash backstop), then rm the temp; STOP — do NOT build-index, git, or dispatch-link. Report the outcome.")
 ```
 
 The curator writes the node via `apply-node`; the skill runs no `apply-node`. If a curator reports an error, skip that node and continue. Track each curated node path for the Step 6 commit. Outcome: `classified:<n>` (or `empty-set` when `classify[]` was empty).
@@ -166,7 +166,7 @@ One line per task in the canonical list, with its outcome word. A missing line i
 
 ## Failure modes
 
-- **`/wiki.relink` reports "unknown scope '<id>'"** — the scope id is not in `lazy.settings.json[wiki.scopes]` → run `/wiki.configure` to create it, or re-invoke with a known id.
+- **`/lazy-wiki.relink` reports "unknown scope '<id>'"** — the scope id is not in `lazy.settings.json[wiki.scopes]` → run `/lazy-wiki.configure` to create it, or re-invoke with a known id.
 - **`relink-plan` returns `anchor-lost` unexpectedly** — the `wiki_synced_sha` commit became unreachable (rebase, `reset --hard`, squash, gc, shallow clone) → the plan falls back to a content-hash backstop over `wiki_src_hash`; this is expected recovery, not an error. The run records a fresh HEAD anchor at Step 6.
 - **A curator subagent reports an error** — malformed input, a failed `apply-node`, or a curator-side schema violation → in tail:false the curator reports it in its reply (there is no `result/response.json`); surface the message, skip that node, and continue with the rest; the node is picked up on the next relink.
 - **The commit at Step 6 stages nothing** — an idempotent re-run produced no byte change → reported as `unchanged`; no empty commit is created.

@@ -52,10 +52,42 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
   de-selected, mutating the collected-item list in place. Items that are neither a
   class method nor a plain function are left untouched.
 
+  Guarantees:
+    - Only the first item encountered in the input list survives for each de-duplication
+      key; every later item sharing that key is de-selected.
+    - Surviving items keep their original relative order from the input list.
+    - An item that is neither a class method nor a plain function is never de-selected.
+    - Every de-selected item is reported through pytest's own `pytest_deselected` hook,
+      keeping other plugins and terminal reporters consistent with the trimmed session.
+
   Args:
     config: the active pytest configuration for this session.
     items: the collected test items, mutated in place to remove duplicates.
   """
+
+  # Contract:
+  # For every set of items that share a de-duplication key, only the first
+  # item encountered in `items` survives; every later item sharing that key
+  # is de-selected.
+
+  # Contract:
+  # Every surviving item keeps its original relative order from the input
+  # `items` list.
+
+  # Contract:
+  # An item that is neither a class method nor a plain function (for example
+  # a doctest item) is never de-selected.
+
+  # Domain(pytool.pipeline-idempotency):
+  # # Re-export shim over-collection
+  # A test suite aggregated through re-export shim modules — an aggregator that star-imports
+  # every package plus a per-package shim re-exporting that package's own test classes — collects
+  # every test in a package twice when a run is scoped at the directory level: once through its
+  # own shim and once through the aggregator. Running the same test twice risks order-dependent
+  # failures from state shared between the two collected instances, so each duplicate is
+  # de-selected before the run starts, keeping only the first occurrence. A suite with no shims
+  # never repeats a test, and this mechanic stays a no-op.
+
   # track the first item seen for each unique test
   seen: set[DedupKey] = set()
   kept: list[Item] = []
@@ -69,6 +101,18 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
     if cls is None and func is None:
       kept.append(item)
       continue
+
+    # Domain(pytool.pipeline-idempotency):
+    # # Test-item dedup key
+    # A duplicated test is identified by the class or function that defines it plus its
+    # collected name, never by its node id: two collections of the same real test always reach
+    # it through different re-export shims, so their node ids differ even though the underlying
+    # class or function object is identical. The key is built from the defining class when one
+    # exists, because an inherited test method is a single function object shared by every
+    # subclass; keying on the function alone would wrongly treat distinct subclasses as the same
+    # duplicated test. A test defined without an owning class falls back to a key built from the
+    # function itself. The collected name already carries any parametrization suffix, so distinct
+    # parameter sets of the same test remain distinct under this key.
 
     # Key on the *collected* class, not the function: an inherited method is one function
     # object shared across subclasses, so a function-based key would wrongly collapse
@@ -91,6 +135,11 @@ def pytest_collection_modifyitems(config: Config, items: list[Item]) -> None:
   if not deselected:
     return
 
+  # Contract:
+  # Every de-selected item is reported through pytest's own `pytest_deselected`
+  # hook rather than being silently dropped, so other plugins and terminal
+  # reporters observe a consistent, correctly-shrunk session.
+
   # the duplicates are deselected through the hook so reporters see a consistent session
   config.hook.pytest_deselected(items = deselected)
   items[:] = kept
@@ -106,10 +155,19 @@ def pytest_terminal_summary(terminalreporter: TerminalReporter, config: Config) 
 
   Prints nothing when no duplicate was de-selected this run.
 
+  Guarantees:
+    - Nothing is printed to the terminal when no duplicate was de-selected during this
+      run's collection phase.
+
   Args:
     terminalreporter: the active terminal reporter for the session.
     config: the active pytest configuration for this session.
   """
+
+  # Contract:
+  # Nothing is printed to the terminal when no duplicate was de-selected
+  # during this run's collection phase.
+
   # guard: no duplicates were removed this run — print nothing
   count = config.stash.get(DEDUP_COUNT, 0)
   if not count:

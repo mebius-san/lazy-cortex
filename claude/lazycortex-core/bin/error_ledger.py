@@ -33,7 +33,7 @@ _LINE_MAX = 4096
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _HUMAN_HALT_CAUSES = {
   "git_pull_diverged", "git_push_failed", "git_remote_unavailable",
-  "config_violation", "suspected_loop",
+  "config_violation", "suspected_loop", "routine_config_invalid",
 }
 
 # ULID algorithm constants (per https://github.com/ulid/spec)

@@ -16,6 +16,7 @@
 .claude/settings.local.json
 .claude/lazy.settings.local.json
 .claude/worktrees/
+.superpowers/
 .worktrees/
 .claude/scheduled_tasks.lock
 .logs/

@@ -61,9 +61,18 @@ def load_config() -> dict:
   """
   Load configuration from pyproject.toml.
 
+  Guarantees:
+    - Returns an empty mapping, never raises, when 'pyproject.toml' is missing or the '[tool.pch]' table
+      is absent.
+
   Returns:
     Configuration dictionary for the pch tool.
   """
+
+  # Contract:
+  # NEVER raises for a missing 'pyproject.toml' or an absent '[tool.pch]' table; both cases return an
+  # empty mapping.
+
   config_path = 'pyproject.toml'
   if not os.path.exists(config_path):
     return {}
@@ -83,9 +92,23 @@ def find_inspect_sh() -> str | None:
 
   Search the PYCHARM_HOME environment variable first, then known installation paths.
 
+  Guarantees:
+    - Never raises when inspect.sh cannot be located anywhere; None is returned instead.
+
   Returns:
     Absolute path to inspect.sh, or None if not found.
   """
+
+  # Contract:
+  # NEVER raises when inspect.sh cannot be located anywhere; None is returned instead of raising.
+
+  # Domain(pytool.inspection-sandbox):
+  # # Locating the offline inspection engine
+  # An offline inspection run needs the same static-analysis engine an interactive IDE session uses,
+  # so it depends on finding a real installation on the host. An explicit environment override always
+  # takes precedence over the built-in list of conventional installation locations, so an operator can
+  # point at a non-standard installation without any other configuration change.
+
   # check PYCHARM_HOME environment variable first
   pycharm_home = os.environ.get('PYCHARM_HOME')
   if pycharm_home:
@@ -107,13 +130,27 @@ def find_system_path() -> str | None:
   """
   Locate the active PyCharm system (caches) directory.
 
+  Guarantees:
+    - Never raises when no PyCharm system directory can be found; None is returned instead.
+
   Returns:
     Absolute path to the system directory, or None if not found.
   """
+
+  # Contract:
+  # NEVER raises when no PyCharm system directory can be found; None is returned instead of raising.
+
   caches_base = os.path.expanduser('~/Library/Caches/JetBrains')
   # guard: no JetBrains caches directory
   if not os.path.isdir(caches_base):
     return None
+
+  # Domain(pytool.inspection-sandbox):
+  # # Selecting among several installed IDE versions
+  # A host may carry data directories from more than one installed IDE version at once, left behind
+  # by upgrades. Directory names sort lexicographically in the same order as the version numbers they
+  # embed, so picking the last name in descending order reliably selects the most recently used version
+  # without parsing a version string.
 
   # find PyCharm directories, pick the newest by version
   candidates = sorted(
@@ -134,9 +171,16 @@ def find_config_path() -> str | None:
   """
   Locate the active PyCharm configuration directory.
 
+  Guarantees:
+    - Never raises when no PyCharm config directory can be found; None is returned instead.
+
   Returns:
     Absolute path to the config directory, or None if not found.
   """
+
+  # Contract:
+  # NEVER raises when no PyCharm config directory can be found; None is returned instead of raising.
+
   config_base = os.path.expanduser('~/Library/Application Support/JetBrains')
   # guard: no JetBrains config directory
   if not os.path.isdir(config_base):
@@ -164,6 +208,10 @@ def prepare_sandbox_config(sandbox_dir: str, real_config: str | None) -> str:
   Symlink everything except the lock file so the inspection gets SDK and
   interpreter settings while avoiding lock conflicts with the running IDE.
 
+  Guarantees:
+    - Never writes to, modifies, or deletes anything inside the real PyCharm configuration directory;
+      real_config is only ever read from.
+
   Args:
     sandbox_dir: root sandbox directory.
     real_config: path to the real PyCharm config directory, or None.
@@ -171,12 +219,25 @@ def prepare_sandbox_config(sandbox_dir: str, real_config: str | None) -> str:
   Returns:
     Path to the sandbox config directory.
   """
+
+  # Contract:
+  # real_config is only ever read; this function NEVER writes to, modifies, or deletes anything inside
+  # the real PyCharm configuration directory.
+
   config_dir = os.path.join(sandbox_dir, 'config')
   os.makedirs(config_dir)
 
   # guard: no real config to symlink from
   if real_config is None or not os.path.isdir(real_config):
     return config_dir
+
+  # Domain(pytool.inspection-sandbox):
+  # # Mirroring configuration without contending for locks
+  # An offline inspection run must see the same SDK and interpreter settings an open IDE session
+  # already has configured, so its sandbox mirrors the real configuration directory entry by entry.
+  # The one entry that is never mirrored is the directory lock file: that lock is held exclusively by
+  # a running IDE session, and linking it would make the offline run collide with, or be blocked by,
+  # an IDE the operator still has open.
 
   # mirror the real config so the inspection inherits SDK and interpreter settings
   for entry in os.listdir(real_config):
@@ -199,6 +260,10 @@ def prepare_sandbox_system(sandbox_dir: str, real_system: str | None) -> str:
   Symlink everything except exclusively-locked entries (.pid, index, caches)
   so the inspection gets Python stubs and SDK data while avoiding lock conflicts.
 
+  Guarantees:
+    - Never writes to, modifies, or deletes anything inside the real PyCharm system directory;
+      real_system is only ever read from.
+
   Args:
     sandbox_dir: root sandbox directory.
     real_system: path to the real PyCharm system directory, or None.
@@ -206,12 +271,25 @@ def prepare_sandbox_system(sandbox_dir: str, real_system: str | None) -> str:
   Returns:
     Path to the sandbox system directory.
   """
+
+  # Contract:
+  # real_system is only ever read; this function NEVER writes to, modifies, or deletes anything inside
+  # the real PyCharm system directory.
+
   system_dir = os.path.join(sandbox_dir, 'system')
   os.makedirs(system_dir)
 
   # guard: no real system to symlink from
   if real_system is None or not os.path.isdir(real_system):
     return system_dir
+
+  # Domain(pytool.inspection-sandbox):
+  # # Mirroring cached data without contending for locks
+  # An offline inspection run must see the same cached Python stubs and SDK data an open IDE session
+  # already built, so its sandbox mirrors the real system (caches) directory entry by entry. Entries
+  # tied to the identity of one running IDE process — its process id, its communication port, its
+  # instance metadata, and its search index and per-project caches — are never mirrored, because they
+  # would either be held exclusively by that process or describe a session that is not this one.
 
   # mirror the real system dir so the inspection inherits Python stubs and SDK data
   for entry in os.listdir(real_system):
@@ -240,6 +318,10 @@ def run_inspection(
 
   Use a sandboxed JVM config so inspections can run while the IDE is open.
 
+  Guarantees:
+    - Returns 0 whenever the run produced at least one XML result file, regardless of inspect.sh's own
+      process exit code; a non-zero return value means inspect.sh failed to produce any results at all.
+
   Args:
     inspect_sh: absolute path to inspect.sh.
     project_dir: absolute path to the project root.
@@ -251,11 +333,30 @@ def run_inspection(
   Returns:
     The subprocess return code.
   """
+
+  # Contract:
+  # A return value of 0 means the run produced at least one XML result file, even when inspect.sh's own
+  # process exit code was non-zero. A non-zero return value means inspect.sh failed to produce any
+  # results at all.
+
   cmd = [ inspect_sh, project_dir, profile_path, output_dir, '-v0' ]
+
+  # Domain(pytool.inspection-sandbox):
+  # # Scoping an inspection run to one directory
+  # An inspection run must always be given an explicit target directory. Left unscoped, the inspection
+  # engine falls back to every module registered against the project, which can silently pull in
+  # unrelated sibling repositories that merely happen to share the same project registration.
 
   # always pass -d to limit scope to the target directory;
   # without -d, inspect.sh inspects ALL registered modules (including sibling repos)
   cmd.extend([ '-d', os.path.join(project_dir, module_path) ])
+
+  # Domain(pytool.inspection-sandbox):
+  # # Redirecting engine paths to run alongside an open IDE
+  # The inspection engine ordinarily writes its working state, configuration, and logs to fixed,
+  # per-user locations — the same locations an open interactive session is already using. Redirecting
+  # those three paths into a private sandbox for the duration of one run is what lets the offline
+  # inspection execute concurrently with an open IDE instead of contending with it or being refused.
 
   # write a VM options file that redirects system/config/log to the sandbox
   # so inspect.sh can run alongside an open PyCharm IDE;
@@ -277,6 +378,13 @@ def run_inspection(
   # check whether the output directory has any XML results
   has_results = any(f.endswith('.xml') for f in os.listdir(output_dir)) if os.path.isdir(output_dir) else False
 
+  # Domain(pytool.inspection-sandbox):
+  # # Two-valued meaning of a non-zero return code
+  # A non-zero return code from an inspection run is ambiguous on its own and must be read together
+  # with whether any results were produced. A non-zero code accompanied by results means the inspection
+  # completed and found issues to report — the expected outcome of an inspection with findings. A
+  # non-zero code with no results at all means the inspection engine itself failed to run to completion.
+
   # exit code 1 with results means "issues found" — that is normal operation;
   # non-zero without results means inspect.sh itself failed;
   # only surface stderr/stdout on fatal failures (PyCharm dumps noisy JVM warnings on every run)
@@ -297,12 +405,21 @@ def parse_results(output_dir: str) -> list[tuple[str, int, str, str, str]]:
   """
   Parse PyCharm XML inspection output into structured findings.
 
+  Guarantees:
+    - Never raises for a report that fails to parse; that report is skipped, with a warning printed to
+      stderr, and every other report's findings are still returned.
+
   Args:
     output_dir: directory containing XML result files.
 
   Returns:
     List of tuples: (filepath, line, severity, inspection_name, description).
   """
+
+  # Contract:
+  # A single XML report that fails to parse NEVER aborts the run; it is skipped, with a warning printed
+  # to stderr, and every other report's findings are still returned.
+
   problems: list[tuple[str, int, str, str, str]] = []
 
   # guard: skip if output directory has no files
@@ -314,6 +431,13 @@ def parse_results(output_dir: str) -> list[tuple[str, int, str, str, str]]:
     # guard: skip non-XML files
     if not filename.endswith('.xml'):
       continue
+
+    # Domain(pytool.checker-severity):
+    # # A malformed report degrades, it never aborts the run
+    # An inspection run produces one report per inspection performed, and any single report can be
+    # incomplete or corrupted without the others being affected. A report that fails to parse is
+    # surfaced to the operator as a warning and excluded from the findings, but it never aborts the
+    # whole run — the findings from every other report are still worth reporting.
 
     # a report that does not parse is reported and skipped, never fatal
     filepath = os.path.join(output_dir, filename)
@@ -429,6 +553,15 @@ def format_problem(filepath: str, line: int, severity: str, inspection: str, des
   Returns:
     Formatted string matching mypy/pcf style: file:line: severity: description  [code].
   """
+
+  # Domain(pytool.checker-severity):
+  # # Normalizing inspection severities to a common vocabulary
+  # An inspection engine's own severity taxonomy is finer and differently named than the vocabulary a
+  # project's other checkers report in. Every native severity level collapses onto one of three
+  # standard levels — error, warning, or note — so findings from this engine read consistently
+  # alongside findings from every other checker in the same report. A native level absent from the
+  # mapping is treated as a note, and an empty severity also falls back to note.
+
   level = SEVERITY_MAP.get(severity, severity or 'note')
   return f'{filepath}:{line}: {level}: {description}  [{inspection}]'
 
@@ -439,7 +572,20 @@ def main() -> None:
   Entry point for the PyCharm inspection runner CLI tool.
 
   Parse arguments, run PyCharm inspections, and report findings.
+
+  Guarantees:
+    - Exits the process with status 1 only when inspect.sh cannot be located or the inspection run fails
+      to produce results; findings that inspect.sh reports are never treated as a failure, however many
+      are found.
+    - The sandbox directory is always removed before this function returns or the process exits, even
+      when the inspection run fails.
   """
+
+  # Contract:
+  # This function exits the process with status 1 only when inspect.sh cannot be located or when the
+  # inspection run fails to produce results; findings that inspect.sh reports are NEVER treated as a
+  # failure exit, no matter how many are found.
+
   # load configuration from pyproject.toml
   config = load_config()
 
@@ -472,6 +618,15 @@ def main() -> None:
   # get excludes from config, CLI args can extend the list
   config_excludes = list(config.get('exclude', []))
 
+  # Domain(pytool.scan-exclusions):
+  # # Precedence among layered exclusion rules
+  # Three layers of exclusion rules combine to decide what an inspection run skips. A baseline of
+  # exclusions applies unconditionally and cannot be overridden by any other layer. Project-configured
+  # exclusions and command-line exclusions both widen that baseline. The one exception is that when the
+  # operator explicitly targets a specific directory for inspection, any project-configured exclusion
+  # that would have hidden a part of that exact target is dropped for the run — an explicit request to
+  # inspect a directory must never be silently defeated by a general-purpose exclusion rule.
+
   # when a specific path is targeted, drop config exclusions that match the target
   # so that explicitly requested directories (e.g. tests/) are not silently skipped
   if module_path != '.':
@@ -498,6 +653,12 @@ def main() -> None:
   prepare_sandbox_system(sandbox_dir, real_system)
   output_dir = os.path.join(sandbox_dir, 'out')
   os.makedirs(output_dir)
+
+  # Contract:
+  # The sandbox directory is ALWAYS removed before this function returns or the process exits, even when
+  # the inspection run fails.
+
+  # run the inspection with the sandbox cleanup guaranteed by the finally clause below
   try:
     print(f'pch: running PyCharm inspections on \'{module_path}\' (this may take a while)...')
 

@@ -1,7 +1,7 @@
 ---
 name: lazy-guard.check-public
-description: "Use when auditing a public repo (or a public subtree inside an otherwise private repo) for leaked secrets, PII, infrastructure details, or hardcoded local paths. Run before making a repo/subtree public, after adding new configs, or as a periodic hygiene check. Reads .guard-waivers.json for accepted exceptions and optional `public_scopes` globs."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(mkdir -p *), Bash(date *)
+description: "Use when auditing a public repo (or a public subtree inside an otherwise private repo) for leaked secrets, PII, infrastructure details, or hardcoded local paths. Run before making a repo/subtree public, after adding new configs, or as a periodic hygiene check. Reads .guard-public.json for accepted exceptions and optional `public_scopes` globs."
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(mkdir -p *), Bash(date *), Agent
 ---
 # Public Repo Security Audit
 
@@ -36,9 +36,9 @@ git ls-files
 
 ### 1b. Load waivers
 
-Read `.guard-waivers.json` from repo root. If absent, use empty waiver set.
+Read `.guard-public.json` from repo root. If absent, use empty waiver set.
 
-**This file also serves as the opt-in signal for the pre-commit hook.** The `lazy-guard.check-public.py` hook only runs in repos that have `.guard-waivers.json` at the root. To enable pre-commit checks, create this file (even with an empty `waivers` array). To disable, remove the file.
+**This file also serves as the opt-in signal for the pre-commit hook.** The `lazy-guard.check-public.py` hook (PII / infrastructure / path warnings) only runs in repos that have `.guard-public.json` at the root. To enable pre-commit checks, create this file (even with an empty `waivers` array). To disable, remove the file. The sibling `lazy-guard.secrets.py` hook (secret blocking) needs no opt-in — it runs in every repo regardless of this file.
 
 Schema:
 
@@ -141,7 +141,7 @@ For each finding the agent records: `check_id`, `file_path`, `line_number`, `mat
 
 1. **Parse** each returned block by splitting on `## scan:` headings; merge findings from all four agents.
 2. **Deduplicate**: same matched text on multiple lines in the same file becomes one finding with a line range.
-3. **Auto-waive B4 against `public_author`** (runs before regex-based waiver matching): for any B4 finding, if `public_author.name` is set and the captured match equals it (or equals `public_author.email`, when `public_author.email` is a non-null string), flip the finding to `WAIVED` with the synthetic reason `matches .guard-waivers.json public_author`. No entry in `waivers[]` is needed for this path.
+3. **Auto-waive B4 against `public_author`** (runs before regex-based waiver matching): for any B4 finding, if `public_author.name` is set and the captured match equals it (or equals `public_author.email`, when `public_author.email` is a non-null string), flip the finding to `WAIVED` with the synthetic reason `matches .guard-public.json public_author`. No entry in `waivers[]` is needed for this path.
 4. **Apply waivers**: a waiver matches when ALL of:
    - `waiver.check` equals `finding.check_id` OR `waiver.check == "*"`
    - `waiver.scope` glob matches `finding.file_path` (or scope is `"*"`)
@@ -157,7 +157,7 @@ For each finding the agent records: `check_id`, `file_path`, `line_number`, `mat
 
 **Public scopes**: `claude/**`, `README.public.md`, `.gitignore`  (or "whole repo" if unset)
 **Files scanned**: N in scope (O outside, M encrypted, K excluded)
-**Waivers loaded**: W from .guard-waivers.json
+**Waivers loaded**: W from .guard-public.json
 
 | Category | FAIL | WARN | INFO | WAIVED |
 |----------|------|------|------|--------|
@@ -186,7 +186,7 @@ For each finding the agent records: `check_id`, `file_path`, `line_number`, `mat
 - [ ] S1: Encrypt via secrets pipeline (for plaintext secrets)
 - [ ] S2: Template-ize with config data (for infrastructure details)
 - [ ] S3: Redact or move PII to secrets/templates
-- [ ] S4: Accept with waiver (auto-generate .guard-waivers.json entry)
+- [ ] S4: Accept with waiver (auto-generate .guard-public.json entry)
 - [ ] S5: Convert hardcoded path to template expression
 
 Apply which fixes? (list numbers, 'all auto', or 'waivers only')
@@ -214,9 +214,9 @@ For each confirmed fix strategy:
   "added": "<today>"
 }
 ```
-Show for approval, then append to `.guard-waivers.json` (create file if needed).
+Show for approval, then append to `.guard-public.json` (create file if needed).
 
-**Author identity**: prefer setting `public_author` at the top of `.guard-waivers.json` over writing per-match B4 waivers. One `public_author` record governs every author field under `public_scopes`, survives scope changes, and makes the intended identity discoverable instead of scattering it across waiver entries.
+**Author identity**: prefer setting `public_author` at the top of `.guard-public.json` over writing per-match B4 waivers. One `public_author` record governs every author field under `public_scopes`, survives scope changes, and makes the intended identity discoverable instead of scattering it across waiver entries.
 
 **S5 (Template path)**: Replace `/Users/<name>/` with `{{ .chezmoi.homeDir }}/`. For plist files where absolute paths are required, suggest S4 waiver instead.
 

@@ -1,20 +1,20 @@
 ---
 chapter_type: walkthrough
 summary: Take one document through a full review cycle from opt-in to finalize.
-last_regen: 2026-08-05
+last_regen: 2026-08-19
 diagram_spec:
   anchor: "How the review loop flows"
   request: "Sequence diagram showing: operator runs /lazy-review.start → banner inserted + commit → daemon dispatches expert jobs per section → operator reads suggestions and ticks approve → operator checks status via /lazy-review.status → all sections approved → operator runs /lazy-review.finalize → finalized commit with Doc-Review-Phase: finalize trailer"
   kind_hint: sequence
 source_skills:
   - lazy-review.start
-  - lazy-review.submit
   - lazy-review.status
   - lazy-review.finalize
+source_sha: a0f3486616110f4c00d3057701561fa5f71a5cbb
 ---
 # Run a document through the review loop
 
-You have a markdown document — a spec, RFC, or design doc — that needs structured feedback from multiple expert lenses. This walkthrough takes you from the moment you opt that document in, through the round-by-round review cycle, to a clean finalized commit. `/lazy-review.start` opens the loop from a blank slate, `/lazy-review.submit` opens it when the diffs are already written and you just need a reviewer pass, `/lazy-review.status` tells you where things stand at any point, and `/lazy-review.finalize` seals the document when every section is approved.
+You have a markdown document — a spec, RFC, or design doc — that needs structured feedback from multiple expert lenses. This walkthrough takes you from the moment you opt that document in, through the round-by-round review cycle, to a clean finalized commit. `/lazy-review.start` opens the loop, `/lazy-review.status` tells you where things stand at any point, and `/lazy-review.finalize` seals the document when every section is approved.
 
 ## What you need
 
@@ -32,8 +32,6 @@ Run `/lazy-review.start <file>` with the path to your markdown document. The ski
 If the document is already opted in, the command is a no-op — it exits cleanly without a new commit.
 
 After this step the daemon sees a human commit and begins the first dispatch cycle: one expert job per section, routed according to your review class configuration.
-
-**If the diffs are already written** — say you drafted the whole document yourself and just want expert eyes on it — run `/lazy-review.submit <file>` instead. It applies the same bootstrap as `start` but pre-seeds the main-writer round as done, so the document lands directly on the Ready banner and the first dispatch cycle goes straight to a reviewer, skipping the opening writer round. Pass `--expert <name>` to pin a specific main-writer override for this document. Like `start`, re-running `submit` on an already opted-in document is a no-op.
 
 ### Step 2 — Wait for expert suggestions to land
 
@@ -71,7 +69,7 @@ Once every section in the final round is approved, run `/lazy-review.finalize <f
 
 - Folds all edit-annotation markers into the final document text.
 - Strips the Waiting banner, approve checkboxes, and system callouts.
-- Preserves the `# History` section that the historian built across rounds.
+- Preserves the `# History` section the coordinator built up across rounds.
 - Sets `review_active: false` in frontmatter.
 - Commits with the `Doc-Review-Phase: finalize` trailer.
 
@@ -83,7 +81,7 @@ If `/lazy-review.finalize` reports `already finalized: <file>`, the document is 
 
 The finalized document lives at the same path with no review scaffolding. The `# History` section records what the review cycle produced. The commit log has a `Doc-Review-Phase: finalize` entry as the terminal marker.
 
-To resume a document later (e.g. a follow-up review pass), run `/lazy-review.start <file>` again — it re-opens the loop from `review_round: 1`. The old `# History` section is preserved; the historian appends new entries to it on the next round.
+To resume a document later (e.g. a follow-up review pass), run `/lazy-review.start <file>` again — it re-opens the loop from `review_round: 1`. The old `# History` section is preserved; the coordinator appends a new line to it each time the document reaches an approved state.
 
 ## How the review loop flows
 

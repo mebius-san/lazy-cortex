@@ -30,9 +30,18 @@ def load_config() -> dict:
   """
   Load configuration from pyproject.toml.
 
+  Guarantees:
+    - Returns an empty dict, never raises, when `pyproject.toml` is missing or carries no
+      `[tool.toi]` section.
+
   Returns:
     Configuration dictionary for the toi tool.
   """
+
+  # Contract:
+  # Returns an empty dict when `pyproject.toml` is missing or carries no `[tool.toi]` section;
+  # never raises for either condition.
+
   config_path = 'pyproject.toml'
   if not os.path.exists(config_path):
     return {}
@@ -67,10 +76,13 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
     - Identify names used only in type annotations.
   
   Guarantees:
-    - All imported names are tracked with their source modules and line numbers.
-    - Runtime and annotation usage are correctly distinguished.
-    - TYPE_CHECKING block detection is accurate.
-  
+    - Every name bound by a module-level import outside a `TYPE_CHECKING` block is recorded
+      with its source module, the import statement's line, and its own line.
+    - A name used inside a type annotation is tracked separately from a name used at runtime;
+      a name used in both contexts is tracked in both.
+    - A block becomes type-checking-only only when its condition is the bare `TYPE_CHECKING`
+      name; detecting one never depends on what the block contains.
+
   Attributes:
     imported_names: mapping of imported names to their source modules and line numbers.
     runtime_refs: set of names used in runtime expressions.
@@ -87,6 +99,13 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
     Sets up all necessary data structures to track imported names, usage contexts,
     and special import patterns during AST traversal.
     """
+
+    # Contract:
+    # Every name introduced by a module-level `import` or `from ... import` statement outside
+    # a `TYPE_CHECKING` block is present in `imported_names`, keyed by the name actually bound
+    # (the alias when one is given), mapped to its source module, the import statement's own
+    # line, and the individual name's line.
+
     # store imported names and their source modules
     self.imported_names: dict[str, ImportInfo] = { }
 
@@ -163,6 +182,20 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
     Args:
       node: the If AST node to process
     """
+
+    # Domain(pytool.import-discipline): [type-only-imports]
+    # # Type-checking-only conditional block
+    # A conditional block that tests a single well-known guard name is a type-checking-only region:
+    # code inside it never executes at runtime, so any import located there already carries
+    # type-only intent and is never treated as a type-only-import candidate that could be moved
+    # behind the guard again.
+
+    # Contract:
+    # `has_type_checking_block` becomes true the moment an `if TYPE_CHECKING:` block is visited,
+    # regardless of what the block contains; only a bare `TYPE_CHECKING` name as the test
+    # qualifies a block as type-checking-only, so any other conditional is analyzed normally
+    # and its imports are tracked as ordinary runtime imports.
+
     # detect and enter TYPE_CHECKING blocks
     if isinstance(node.test, ast.Name) and node.test.id == 'TYPE_CHECKING':
       self.has_type_checking_block = True
@@ -184,6 +217,13 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
     Args:
       node: the Name AST node to process
     """
+
+    # Contract:
+    # A name reached while visiting a type annotation is added to `ann_refs`; a name reached
+    # anywhere else is added to `runtime_refs`. A name used in both contexts ends up in both
+    # sets, so only a name present in `ann_refs` and absent from `runtime_refs` is a genuine
+    # type-only usage.
+
     # record name usage based on the current context
     if self._in_annotation:
       self.ann_refs.add(node.id)
@@ -334,6 +374,14 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
     Args:
       node: the Call AST node to process
     """
+
+    # Domain(pytool.import-discipline): [type-only-imports]
+    # # Runtime type-check exemption
+    # A name passed as the subject of a runtime type check counts as genuine runtime usage, not
+    # annotation-only usage, even though it reads exactly like a type reference. Treating it as
+    # annotation-only would wrongly flag its import as a type-only candidate and could break the
+    # check once the import moved behind a type-checking-only guard.
+
     # handle isinstance and issubclass runtime type checks
     if isinstance(node.func, ast.Name) and node.func.id in { 'isinstance', 'issubclass' }:
       if len(node.args) >= 2:
@@ -415,6 +463,15 @@ def _waiver_status(source_lines: list[str], header_line: int, name_line: int) ->
     `waived` when a valid waiver applies, `invalid` when only an empty-reason
     waiver marker applies, `active` otherwise.
   """
+
+  # Domain(pytool.marker-grammar): [waiver]
+  # # Waiver scope for a type-only import finding
+  # A finding is silenced only by a waiver carrying a non-empty reason, placed either on the
+  # imported name's own line (silencing that one name) or on the import statement's header line
+  # (silencing every name declared in that statement). A waiver marker present without a reason
+  # never silences the finding; it is instead reported separately as an invalid waiver so the
+  # missing reason stays visible.
+
   # guard: a valid waiver on the name line or the block header silences the finding
   if _line_matches(source_lines, name_line, WAIVER_RE) \
       or _line_matches(source_lines, header_line, WAIVER_RE):
@@ -435,6 +492,14 @@ def analyze_file(
   """
   Analyze a Python file to identify type-only import opportunities.
 
+  Guarantees:
+    - A finding reaches the returned suggestions only when its import carries no valid waiver;
+      a valid waiver removes it from suggestions and is folded into the waived count instead.
+    - An empty-reason waiver marker never suppresses a finding — it stays in suggestions and is
+      also reported in the invalid list.
+    - Every returned finding carries the import statement's header line, never the individual
+      imported name's own line.
+
   Args:
     path: path to the Python file to analyze
 
@@ -442,6 +507,15 @@ def analyze_file(
     Tuple of active suggestions, optional warning message, waived-finding count,
     and the list of findings carrying an invalid (empty-reason) waiver marker.
   """
+
+  # Domain(pytool.import-discipline): [type-only-imports]
+  # # Type-only import candidacy
+  # An import is a candidate for moving behind a type-checking-only guard only when the name it
+  # introduces never appears in a runtime expression and appears exclusively inside type annotations.
+  # A small closed set of names is exempt even when every occurrence sits inside an annotation,
+  # because the runtime machinery that consumes them inspects the annotation at class-definition
+  # time and needs the name already resolvable rather than deferred behind such a guard.
+
   # imports that must always be in the main scope even if only used in annotations
   runtime_required = {'InitVar'}
 
@@ -454,6 +528,15 @@ def analyze_file(
   # initialize and apply the analyzer
   analyzer = TypeOnlyImportAnalyzer()
   analyzer.visit(tree)
+
+  # Contract:
+  # A finding is reported in `suggestions` only when its import carries no valid waiver.
+  # A valid waiver (a `# waiver:` comment with a non-empty reason, on the imported name's own
+  # line or on the import statement's header line) removes the finding from `suggestions` and
+  # is counted in the waived total instead. An empty-reason waiver marker never suppresses a
+  # finding — it stays in `suggestions` and is reported a second time in `invalid`. Every
+  # reported finding carries the import statement's header line, never the individual name's
+  # own line.
 
   # partition type-only findings by waiver status; the note keeps the import
   # statement line (header) so output is unchanged for waiver-free files
@@ -472,6 +555,14 @@ def analyze_file(
       invalid.append((header_line, mod, name))
     suggestions.append((header_line, mod, name))
 
+  # Domain(pytool.import-discipline): [type-only-imports]
+  # # Deferred annotation evaluation requirement
+  # A module that carries a type-checking-only conditional block relies on annotations that
+  # reference names available only inside that block. Those annotations must never be evaluated
+  # eagerly, so the module is required to defer all annotation evaluation; a module missing that
+  # deferral is flagged as a warning rather than silently accepted, since the annotations would
+  # otherwise fail once evaluated.
+
   # emit a warning if TYPE_CHECKING is used but future import is missing
   warning = None
   if analyzer.has_type_checking_block and not analyzer.has_future_annotations:
@@ -487,6 +578,10 @@ def walk_dir(
 ) -> tuple[SuggestionsMap, list[str], int, int, SuggestionsMap]:
   """
   Walk the directory tree and analyze all Python files for type-only imports.
+
+  Guarantees:
+    - A file that fails to parse as Python is excluded from every returned channel; the failure
+      is reported only as a message printed to stderr.
 
   Args:
     root: root directory path to scan
@@ -514,6 +609,13 @@ def walk_dir(
         # guard: skip files matching any exclusion substring
         if any(sub in path for sub in all_excludes):
           continue
+
+        # Contract:
+        # A file that fails to parse as Python is excluded from every returned channel —
+        # `files_processed`, the suggestion map, the warning list, and the waived count all
+        # skip it; the only trace of the failure is a message printed to stderr.
+
+        # parse the file, tallying it only on success
         try:
           suggestions, warning, waived, invalid = analyze_file(path)
           files_processed += 1
@@ -534,9 +636,19 @@ def walk_dir(
 def main() -> None:
   """
   The main entry point for the type-only import analyzer CLI tool.
-  
+
   Parse command line arguments, scan directories, and report findings.
+
+  Guarantees:
+    - The process exit code reflects only whether the scan itself completed; it is never
+      driven by the number of findings, waivers, or warnings reported.
   """
+
+  # Contract:
+  # The process exit code reflects only whether the scan itself completed; it is never driven
+  # by the number of findings, waivers, or warnings reported. A clean scan and a scan that
+  # prints suggestions or warnings both leave the process to exit successfully.
+
   # load configuration from pyproject.toml
   config = load_config()
 
@@ -552,6 +664,15 @@ def main() -> None:
 
   # get a path from CLI or use the current directory
   base_path = os.path.abspath(args.path)
+
+  # Domain(pytool.scan-exclusions): [scan-exclusions]
+  # # Scan exclusion precedence
+  # A baseline set of paths is always excluded from analysis and cannot be re-included by
+  # configuration. Configured exclusions extend that baseline, and command-line exclusions extend
+  # the configured set further; neither ever replaces what came before it. When a specific path is
+  # explicitly targeted for analysis, any configured exclusion matching a segment of that path is
+  # dropped first, so an explicitly requested location is never silently skipped by a broader
+  # configured rule.
 
   # get excludes from config, CLI args can extend the list
   config_excludes = list(config.get('exclude', []))

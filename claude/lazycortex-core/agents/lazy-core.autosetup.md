@@ -1,7 +1,7 @@
 ---
 name: lazy-core.autosetup
 description: "Dispatch from a cross-project rollout loop (one agent per project), or directly when ONE repo's lazycortex config must be brought current with no operator in the loop — e.g. after a plugin update changed what install seeds. Receives `repo=<absolute path>` in the prompt. Executes every applicable `<namespace>.install` SKILL.md against that repo under a no-questions discipline: derivable or already-recorded decisions apply, question-gated steps are skipped and reported. Commits its changes in the target repo. NOT for first-time project setup — a repo with no recorded install decisions mostly reports `needs-interactive`. Sibling `lazy-core.autocheckup` checks and repairs instead of installing."
-tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList
+tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, Skill, Agent
 model: inherit
 ---
 # lazy-core.autosetup
@@ -34,10 +34,15 @@ Outcome: `discovered: N`.
 
 For each discovered SKILL.md, in order: `Read` it and execute its steps yourself against the target repo — every `<repo-root>` / "current project" reference in the skill resolves to `repo=`, never to your own cwd. Do NOT dispatch children via a `Skill` tool — a question-gated child would dead-end without a user channel.
 
-Apply each step under exactly one of these rules:
+**Install-managed mirrors are never judged by reading.** Every rule and template a skill copies out of its plugin cache is synced by that skill's own script (`lazycortex-core file-sync`, `scaffold sync-rule`, `install_phases.py phase1`) — run it, and take the verdict from its receipt. Two things follow, both non-negotiable:
 
-- **Derivable or recorded → execute.** Persisted gates (`daemon.enabled`, `daemon.run_here`, recorded languages, existing sections), conflict-free file-sync writes/merges, registry upserts, directory bootstraps — run them exactly as the skill prescribes, including its stated read-first / never-overwrite semantics. A plugin-shipped defaults table is a record too: when a skill declares its own non-interactive resolution for a step (e.g. `lazy-core.agent-models` § Non-interactive execution auto-accepts curated tiers from `default-tiers.json`), follow that resolution instead of skipping the step.
-- **Question-gated with nothing on record → skip.** Any step the skill resolves via `AskUserQuestion` (first-time gates, genuine file conflicts, multi-candidate disambiguation) is skipped and recorded as `needs-interactive: <skill> / <step>`. Never substitute a guessed default for an operator decision.
+- **`already-current` requires a receipt.** Reporting a mirror current without having run the comparison is a defect in the report, not a shortcut. Carry the receipt's per-state counts into the Phase 5 report so the claim is checkable.
+- **Never hand-assemble a merged file.** A mirror whose bytes differ from its source is a stale copy and the script overwrites it wholesale; a `failed` entry means the write did not land and is reported as `failed: <path>`, never as applied. Editing a mirror line by line loses lines, which is the exact defect this rule exists to prevent.
+
+Apply each remaining step under exactly one of these rules:
+
+- **Derivable or recorded → execute.** Persisted gates (`daemon.enabled`, `daemon.run_here`, recorded languages, existing sections), file-sync writes, registry upserts, directory bootstraps — run them exactly as the skill prescribes, including its stated read-first / never-overwrite semantics. A plugin-shipped defaults table is a record too: when a skill declares its own non-interactive resolution for a step (e.g. `lazy-core.agent-models` § Non-interactive execution auto-accepts curated tiers from `default-tiers.json`), follow that resolution instead of skipping the step.
+- **Question-gated with nothing on record → skip.** Any step the skill resolves via `AskUserQuestion` (first-time gates, a contradiction in consumer-owned config, multi-candidate disambiguation) is skipped and recorded as `needs-interactive: <skill> / <step>`. Never substitute a guessed default for an operator decision. Mirror drift is not one of these — no install skill asks about it any more, so `needs-interactive` on a rule or template file is a misread of the step.
 - **Failed step → record and continue.** `failed: <skill> / <step> — <reason>`; never abort the whole run for one child.
 
 Hard boundaries regardless of what any skill says: never modify existing files under `tests/**`, never touch `.gitignore`, never write outside the target repo except the plugin-owned state the skill explicitly manages, never delete as a fix.
@@ -59,9 +64,9 @@ Write the run log per `lazy-log.logging` to `<repo>/.logs/claude/lazy-core.autos
 
 ### outcomes
 applied: <skill/step list or none>
-already-current: <list or none>
+already-current: <list or none — each entry carries the receipt counts it rests on>
 needs-interactive: <skill/step list or none>
-failed: <list or none>
+failed: <list or none — includes every mirror whose write did not verify>
 commit: <sha | already-current | skipped-dirty | skipped-identity>
 
 ### summary

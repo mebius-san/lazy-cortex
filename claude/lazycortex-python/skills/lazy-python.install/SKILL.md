@@ -1,7 +1,7 @@
 ---
 name: lazy-python.install
 description: "Run when the operator asks to set up Python tooling in a repo, after a lazycortex-python update, or when `/lazy-python.audit` reports missing rules, wrappers, pyproject checker sections, or overlay guidelines. Also the fix whenever `chk-py` / `tst-py` aren't on hand in a repo that should have them. Idempotent and near-silent — it asks only on a genuine file conflict or when several env-bootstrap scripts are candidates."
-allowed-tools: Bash, Read, Edit, Write, Glob, Grep, Skill, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet
+allowed-tools: Bash, Read, Edit, Write, Glob, Grep, Skill, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Agent
 user-invocable: true
 ---
 # Install lazycortex-python
@@ -115,7 +115,7 @@ Outcome: `pyproject-bootstrapped` when at least one missing section was appended
 
 ## Step 5: Scaffold project overlay guidelines under `docs/guidelines/`
 
-Creates stub overlay files (`coding_guidelines.md`, `documenting_guidelines.md`, `testing_guidelines.md`, `checking_guidelines.md`) under `<consumer>/docs/guidelines/` with the canonical `# Project additions to <topic>` headers, under the **File-sync policy**'s consumer-owned-config half: absent → write the stub silently; present → left untouched silently (the consumer's overlay is authoritative — case "kept-local"). A stub vs a consumer-edited overlay is never a conflict, so this step never asks.
+Creates stub overlay files (`coding_guidelines.md`, `documenting_guidelines.md`, `testing_guidelines.md`, `checking_guidelines.md`) under `<consumer>/docs/guidelines/`, all under the **File-sync policy**'s consumer-owned-config half: absent → write silently; present → left untouched silently (the consumer's file is authoritative — case "kept-local"). A stub vs a consumer-edited file is never a conflict, so this step never asks. The domain-groups dictionary `domain-groups.md` is NOT seeded here — it is a language-neutral project registry owned by the wiki plugin's domain tooling; `/lazy-python.knowledge-sweep` builds it when the repo adopts markers without that tooling.
 
 Run:
 
@@ -123,7 +123,7 @@ Run:
 Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase5 ${CLAUDE_PROJECT_DIR})
 ```
 
-Outcome: `overlay-created-N` (where `N` is the count of newly-created stubs) when at least one stub was scaffolded; `overlay-already-present` when all four overlay files already existed.
+Outcome: `overlay-created-N` (where `N` is the count of newly-created files) when at least one was scaffolded; `overlay-already-present` when all four files already existed.
 
 ## Step 6: Sync scaffold templates via lazy-core.scaffold-sync
 

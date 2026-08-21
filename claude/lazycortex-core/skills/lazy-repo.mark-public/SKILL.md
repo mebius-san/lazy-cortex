@@ -1,12 +1,12 @@
 ---
 name: lazy-repo.mark-public
-description: "Use when preparing a local/private repo — or a subtree inside one — to become public. Runs the full lazy-guard.check-public audit, walks through fixes and waivers, creates .guard-waivers.json to enable the pre-commit hook, and optionally flips the repo to public on GitHub. Accepts an optional scope argument to mark a subtree public (e.g., `claude/**`) without touching GitHub visibility."
+description: "Use when preparing a local/private repo — or a subtree inside one — to become public. Runs the full lazy-guard.check-public audit, walks through fixes and waivers, creates .guard-public.json to enable the pre-commit hook, and optionally flips the repo to public on GitHub. Accepts an optional scope argument to mark a subtree public (e.g., `claude/**`) without touching GitHub visibility."
 argument-hint: "[scope-glob ...]  # optional; e.g. 'claude/** README.public.md .gitignore' for subtree-public mode"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(git remote*), Bash(gh repo*), Bash(gh api*), Bash(mkdir -p *), Bash(date *)
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git ls-files*), Bash(git remote*), Bash(gh repo*), Bash(gh api*), Bash(mkdir -p *), Bash(date *), Agent
 ---
 # Make a Repo (or Subtree) Public
 
-End-to-end workflow for taking a private/local repo public — or for marking a subtree inside a repo as the "public surface" while the repo itself stays private. Runs the security audit, resolves all findings, creates the waiver file (which activates the pre-commit hook), and in whole-repo mode optionally changes GitHub visibility.
+End-to-end workflow for taking a private/local repo public — or for marking a subtree inside a repo as the "public surface" while the repo itself stays private. Runs the security audit, resolves all findings, creates the guard-public file (which marks the repo public and activates the PII/infra pre-commit hook; the secrets hook is always on regardless), and in whole-repo mode optionally changes GitHub visibility.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -17,7 +17,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 1b — Determine scope`
    - `Step 2 — Run full audit`
    - `Step 3 — Resolve findings`
-   - `Step 4 — Create .guard-waivers.json`
+   - `Step 4 — Create .guard-public.json`
    - `Step 5 — Go public on GitHub (whole-repo mode only)`
    - `Step 6 — Post-flight (Report)`
    - `Log the run`
@@ -47,7 +47,7 @@ Invoke the `/lazy-guard.check-public` skill. Follow its full Phase 1-4 (Prepare,
 
 **Passing the scope**: if Step 1b selected subtree-public mode, the easiest way to scope the audit is:
 
-1. If `.guard-waivers.json` already exists, read it, add/overwrite `public_scopes` with the Step 1b globs, re-write the file.
+1. If `.guard-public.json` already exists, read it, add/overwrite `public_scopes` with the Step 1b globs, re-write the file.
 2. If it doesn't exist, create a minimal scaffold: ```json { "version": 1, "public_scopes": [ ... ], "waivers": [] } ```
 
 This way the check-public skill and the hook immediately see the scope. The file will be completed with accepted waivers in Step 4.
@@ -70,9 +70,9 @@ Work through findings by severity:
 
 If any FAIL findings remain unresolved, do NOT proceed to Step 4.
 
-## Step 4: Create `.guard-waivers.json`
+## Step 4: Create `.guard-public.json`
 
-Write the waiver file to the repo root with all accepted waivers from Step 3. This also activates the pre-commit hook (`lazy-guard.check-public.py`) for future commits.
+Write the waiver file to the repo root with all accepted waivers from Step 3. This also marks the repo public and activates the PII/infra pre-commit hook (`lazy-guard.check-public.py`) for future commits. The secrets hook (`lazy-guard.secrets.py`) runs in every repo and never needed this opt-in.
 
 Include `public_scopes` if Step 1b selected subtree-public mode. Include `global_skip_paths` for vendored/third-party directories if the audit identified any.
 
@@ -108,7 +108,7 @@ If no: tell the user the repo is audit-clean and ready — they can run `gh repo
 
 ## Step 6: Post-flight
 
-- Confirm the pre-commit hook is active (`.guard-waivers.json` exists = hook fires)
+- Confirm the PII/infra pre-commit hook is active (`.guard-public.json` exists = `lazy-guard.check-public.py` fires; `lazy-guard.secrets.py` is always on)
 - In subtree-public mode: remind the user the hook now scans only files under the declared `public_scopes` on every commit
 - Remind: run `/lazy-guard.check-public` periodically or after major changes
 - Log results

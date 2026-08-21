@@ -4,17 +4,14 @@ always_loaded: every skill/agent/command must log on every run
 ---
 # Run Logging (MANDATORY)
 
-Every skill, agent, and command **must** log each run to `./.logs/claude/<name>/YYYY-MM-DD_HH-MM-SS.md` in the current working repository.
+Every skill, agent, and command **must** log each run to `./.logs/claude/<name>/YYYY-MM-DD_HH-MM-SS.md` in the current working repository — including globals and plugin-shipped artifacts, which log in whichever repo is the cwd.
 
 - `<name>` is the skill/agent/command name (e.g., `lazy-core.audit`, `config.add-project`)
 - Timestamp uses UTC: `date -u +%Y-%m-%d_%H-%M-%S`
 - Create directories with `mkdir -p` (project-relative, never under `~/.claude/`)
-- Writing logs must never prompt for permission. Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain with `&&` or use `cat > file <<'EOF'`
-- This applies to all skills/agents/commands, including globals and plugin-shipped ones — they always log in whichever repo is the current working directory
+- Log writes must never prompt for permission: `Bash(mkdir -p ...)` then the `Write` tool, as two separate steps — never chained with `&&`, never `cat > file <<'EOF'`
 
 ## Log format
-
-File path: `./.logs/claude/<name>/YYYY-MM-DD_HH-MM-SS.md`
 
 Frontmatter (YAML, all required):
 
@@ -37,17 +34,17 @@ A skill, agent, or command may opt out by declaring a non-empty string in frontm
 
 **Class-level exemption (no per-file frontmatter required):** agents dispatched by a coordinator skill via `Agent(subagent_type: ...)` and returning a structured findings block do NOT log; the coordinator owns the log.
 
-**Log dir name MUST be the artifact's filename** (`<skill>` from `<skill>/SKILL.md`, `<name>` from `<name>.md`) — never a phase / task / dispatch description. Self-named subagent dirs (`task-N`, `expert-runtime-X`, etc.) violate this; `lazy-core.audit` flags them.
+**Log dir name MUST be the artifact's filename** (`<skill>` from `<skill>/SKILL.md`, `<name>` from `<name>.md`) — never a phase / task / dispatch description. Self-named subagent dirs (`task-N`, `expert-runtime-X`, etc.) are `lazy-core.audit` findings.
 
 ## Distill cadence
 
-Decide whether to invoke `Agent(subagent_type: "lazycortex-core:lazy-log.distill", prompt: "distill pending commits")` on the **current turn**. Walk these gates in order; stop at the first match:
+Decide whether to invoke `Agent(subagent_type: "lazycortex-core:lazy-log.distill", prompt: "distill pending commits")` on the **current turn**. Walk the gates in order; stop at the first match:
 
 1. **No commit this turn → SKIP** (only `git commit` in *this* turn counts; not session-earlier, not `.logs/commits.jsonl`-pending).
 2. **User said "don't distill" → SKIP.**
 3. **User asked to distill / catch up → RUN** (bypasses throttle + qualitative gate).
 4. **`mtime(./.logs/changelog.md)` < 4h → SKIP** (4h floor is a ceiling).
-5. **Just-landed commit not narration-worthy → SKIP** (Claude judges: notable feat/fix/refactor=yes; state-refresh / README-rerender / version-bump=no).
+5. **Just-landed commit not narration-worthy → SKIP** (notable feat/fix/refactor = yes; state-refresh / README-rerender / version-bump = no).
 6. **Otherwise → RUN.**
 
 Pending commits accumulate in `.logs/commits.jsonl`; the next eligible turn catches up.

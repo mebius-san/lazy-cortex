@@ -1,0 +1,39 @@
+/* review-callouts.css — distinct look for lazycortex-review callouts.
+   Unconditional per-type rules: no :has()/tag-markup dependency, works
+   identically in reading mode and Live Preview. */
+
+/* [!question] #review/question — amber, operator must answer */
+.callout[data-callout="question"] {
+  --callout-color: 210, 160, 40;
+  --callout-icon: lucide-help-circle;
+  background-color: rgba(210, 160, 40, 0.08);
+  border-left: 3px solid rgb(var(--callout-color));
+}
+
+/* [!todo] #review/command — violet, operator command channel */
+.callout[data-callout="todo"] {
+  --callout-color: 158, 100, 210;
+  --callout-icon: lucide-terminal;
+  background-color: rgba(158, 100, 210, 0.08);
+  border-left: 3px solid rgb(var(--callout-color));
+}
+
+/* [!attention] #review/concern — red; NOT a built-in Obsidian type, so
+   without this rule it renders as the default grey note */
+.callout[data-callout="attention"] {
+  --callout-color: 210, 80, 60;
+  --callout-icon: lucide-alert-triangle;
+  background-color: rgba(210, 80, 60, 0.08);
+  border-left: 3px solid rgb(var(--callout-color));
+}
+
+/* Title + icon follow the type color (SVG icons take currentColor) */
+.callout[data-callout="question"] > .callout-title,
+.callout[data-callout="todo"] > .callout-title,
+.callout[data-callout="attention"] > .callout-title {
+  color: rgb(var(--callout-color));
+  font-weight: 600;
+}
+
+/* Banner callouts ([!hint] Waiting / [!caution] Action needed /
+   [!success] Ready) keep their built-in colors — already distinct. */

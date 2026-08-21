@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#93c5fd"
 ---
 # lazycortex-diagram
 
@@ -57,7 +57,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/troubleshooting.md) — Common failure modes across lazycortex-diagram skills — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/faq.md) — Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, split behaviour, direct agent invocation, and install.
 
-(`mebius-san` resolves from `.guard-waivers.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
+(`mebius-san` resolves from `.guard-public.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
 ## Agents
 
@@ -70,7 +70,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Command | Description |
 |---|---|
-| `lazy-diagram.help` | Show lazycortex-diagram purpose and a one-line summary of each skill, agent, and rule it ships |
+| `lazy-diagram.help` | Run when the operator asks what lazycortex-diagram can do, which verb draws a new picture versus repairing an existing fence, or what kinds and formats are on offer — lists the diagram engine's surface: draw / fix / audit / install, the mermaid and ASCII drawer agents, and the authoring rule governing templates and style schemes. |
 
 ## Rules
 

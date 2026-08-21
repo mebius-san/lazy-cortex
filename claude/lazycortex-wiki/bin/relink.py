@@ -40,12 +40,20 @@ class RelinkPlanner:
   Determines which scope nodes must be reclassified, re-linked, or dropped, by
   comparing the current working tree against the scope's last synced anchor.
 
+  Guarantees:
+    - Planning is read-only: a planning run never writes to the repository, to the
+      scope's nodes, or to the scope's topic index.
+
   Attributes:
     MODE_INITIAL: Plan mode used when no anchor exists yet, covering the whole scope.
     MODE_INCREMENTAL: Plan mode used when the anchor is a reachable ancestor of HEAD.
     MODE_ANCHOR_LOST: Plan mode used when the anchor is unreachable and content
       hashes decide the plan instead.
   """
+
+  # Contract:
+  # Planning is read-only: a planning run NEVER writes to the repository, to the
+  # scope's nodes, or to the scope's topic index.
 
   # Plan modes.
   MODE_INITIAL     = "initial"
@@ -96,12 +104,41 @@ class RelinkPlanner:
     """
     Compute the relink plan for the scope.
 
+    Guarantees:
+      - Every node path in the returned plan is absolute and every plan list is sorted,
+        so the same working tree always yields the same plan.
+      - In `incremental` and `anchor-lost` mode a node whose curated text has not moved
+        on is never planned, so a pass over a scope with no operator edits since the
+        last one yields nothing to classify and nothing to link.
+
     Returns:
       Dict shaped `{"mode": ..., "synced_sha": <sha-or-None>,
       "classify": [<abs paths>], "link": [<abs paths>], "drop": [<abs paths>]}`.
       The `classify` and `link` lists hold absolute node-path strings; `drop`
       holds absolute paths of nodes deleted since the anchor.  Lists are sorted.
     """
+
+    # Contract:
+    # Every node path in the returned plan is absolute and every plan list is
+    # sorted, so the same working tree ALWAYS yields the same plan.
+
+    # Contract:
+    # In `incremental` and `anchor-lost` mode a node whose curated text has not
+    # moved on is NEVER planned, so a pass over a scope with no operator edits
+    # since the last one yields nothing to classify and nothing to link.
+
+    # Domain(wiki.graph):
+    # # Where a relink pass picks up from
+    # A scope remembers the point in the repository's history at which its nodes were last brought up to
+    # date, and every later pass owes only the work that accumulated past that mark. Three situations tell
+    # the pass what it owes. With no mark recorded, nothing has ever been curated and the whole scope is
+    # owed. With a mark that still stands in the history, only the material that moved since it is owed.
+    # With a mark the history no longer holds — a rewritten or discarded past — the history says nothing
+    # at all, and each node is judged instead by its own text against the text it was curated from. The
+    # mark is kept beside the scope's topic index, so the scope carries its own bearing rather than
+    # depending on any record kept elsewhere.
+
+    # read the mark the scope was last brought up to date at
     synced_sha = self._read_synced_sha()
 
     # guard: no anchor or no index file → full initial pass
@@ -144,12 +181,31 @@ class RelinkPlanner:
     `wiki_src_hash` (or that has no stored hash) is reclassified and re-linked;
     nothing is dropped (git cannot tell us what was deleted without the anchor).
 
+    Guarantees:
+      - An `anchor-lost` plan never drops a node; its empty drop list is not proof that
+        no node left the scope.
+
     Args:
       synced_sha: The unreachable anchor value; echoed back for diagnosis.
 
     Returns:
       The plan dict.
     """
+
+    # Contract:
+    # An `anchor-lost` plan NEVER drops a node; callers MUST NOT read its empty
+    # drop list as proof that no node left the scope.
+
+    # Domain(wiki.graph):
+    # # What a lost history hides
+    # A node that has left the wiki leaves nothing behind to examine: its absence shows only in the record
+    # of what the repository did, never in the material that survives. A pass that has lost its bearing in
+    # that record can therefore still recognise every node whose text has moved on from the text it was
+    # curated from, and cannot recognise a single departure. Such a pass re-curates and never removes,
+    # leaving the links that name a departed node to be repaired once the history is legible again. A node
+    # that was never curated at all counts as moved on, since there is no curated text to hold it against.
+
+    # collect the nodes whose authored text no longer matches what was curated
     changed: list[str] = []
     for node_path in self._resolver.iter_nodes(self._cfg):
       node = _nodes.node_for(node_path)
@@ -157,7 +213,7 @@ class RelinkPlanner:
       if node is None:
         continue
       stored = node.stored_src_hash
-      # guard: never curated (no stored hash) or content drifted → recurate
+      # never curated (no stored hash) or content drifted — recurate
       if stored is None or stored != node.source_hash:
         changed.append(str(node_path))
     changed.sort()
@@ -317,6 +373,16 @@ class RelinkPlanner:
     Returns:
       True when the path belongs to this scope, False otherwise.
     """
+
+    # Domain(wiki.scope):
+    # # One document belongs to one scope
+    # Scopes do not share documents: a document resolves into at most one of them, so the work a scope owes
+    # covers exactly the documents resolving into it and nothing that resolves elsewhere or nowhere at all.
+    # This bounds a pass from both ends — an edit to material outside the scope is no work for it, and a
+    # document that vanished counts as a departure from the wiki only when the place it vanished from was
+    # the scope's own.
+
+    # a path belongs here only when it resolves into this very scope
     result = self._resolver.resolve_scope_by_path(rel_path)
     # guard: path matches no scope at all
     if result is None:

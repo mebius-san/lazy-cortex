@@ -9,7 +9,7 @@ owned by a different writer (or by the operator). The marker pairs are
 therefore scoped to ONE sub-section at a time, not to the whole H1 inner.
 
 Three nested ownership levels (full contract in
-`references/spec.sources-protocol.md`):
+`references/lazy-spec.sources-protocol.md`):
 
 1. H1 `# Sources` + `#protected/spec/sources` owner tag on its first
    content line — section-level identity owned by specs as a whole;
@@ -90,7 +90,7 @@ class Markers:
 
   # ──────────────────────────────────────────────────────────────────────────
   # `## Requests` sub-section — auto-projected from `spec_source_requests`
-  # frontmatter by `spec.request-attach`. Each automated sub-kind ships its
+  # frontmatter by `lazy-spec.request-apply`. Each automated sub-kind ships its
   # own constants block alongside this one.
   # ──────────────────────────────────────────────────────────────────────────
 

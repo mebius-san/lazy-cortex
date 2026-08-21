@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "matchers": [
+    {
+      "when": { "frontmatter.review_active": true, "callback": "review-awaits-operator" },
+      "resolve": { "iconName": "LiFileClock", "iconColor": "#fdba74" },
+      "priority": 450
+    },
+    {
+      "when": { "is_folder_note": true, "callback": "review-awaits-operator" },
+      "resolve": { "iconName": "LiFileClock", "iconColor": "#fdba74" },
+      "priority": 449
+    },
+    {
+      "when": { "frontmatter.review_active": true, "callback": "review-in-process" },
+      "resolve": { "iconName": "LiFileClock", "iconColor": "#93c5fd" },
+      "priority": 350
+    },
+    {
+      "when": { "frontmatter.review_result": "approved-with-concerns" },
+      "resolve": { "iconName": "LiBadgeAlert", "iconColor": "#fde68a" },
+      "priority": 225
+    },
+    {
+      "when": { "frontmatter.review_result": "approved" },
+      "resolve": { "iconName": "LiBadgeCheck", "iconColor": "#86efac" },
+      "priority": 220
+    }
+  ]
+}

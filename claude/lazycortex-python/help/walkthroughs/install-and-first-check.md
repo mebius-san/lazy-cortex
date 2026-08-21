@@ -1,17 +1,17 @@
 ---
 chapter_type: walkthrough
-summary: Install lazycortex-python, then run chk-py all -q directly to build the project venv and prove the seven-step gate is clean.
-last_regen: 2026-08-11
+summary: Install lazycortex-python, then run chk-py all -q directly to build the project venv and prove the six-step checker gate is clean.
+last_regen: 2026-08-19
 diagram_spec:
   anchor: "Install-and-first-check flow"
-  request: "Sequence diagram: user runs /lazy-python.install (quiet 8-step wizard, detail out of scope here) → user runs cli/chk-py all -q from a terminal → the shared venv resolver probes $VIRTUAL_ENV, then <project>/.venv, then a configured path, finds none, creates a project-local .venv and installs mypy/pylint/pytest/ruff plus the pytest-clarity/pytest-sugar plugins → the seven-step gate runs in order: pcf, toi, cmp, mypy, ruff, pylint, review → the first six report clean on the still-untouched repo, and review resolves its scope from the working-tree diff plus untracked .py files and either reports SKIPPED (exit 0, nothing in scope) or PENDING (exit 2, prints manifest + dispatch directive for lazy-python.code-reviewer, never calling an LLM itself from a bare terminal) → user runs cli/tst-py -q to confirm the same venv's pytest works → pytest completes with no failures."
+  request: "Sequence diagram: user runs /lazy-python.install (quiet install wizard, detail out of scope here) → user runs cli/chk-py all -q from a terminal → the shared venv resolver probes $VIRTUAL_ENV, then <project>/.venv, then a configured path, finds none, creates a project-local .venv and installs mypy/pylint/pytest/ruff plus the pytest-clarity/pytest-sugar plugins → the six-step gate runs in order: pcf, toi, cmp, mypy, ruff, pylint, each reporting clean on the still-untouched repo (the guideline-review phase is deliberately NOT part of this run — it has its own cadence) → user runs cli/tst-py -q to confirm the same venv's pytest works → pytest completes with no failures."
   kind_hint: sequence
 source_skills:
   - lazy-python.install
-  - lazy-python.check-style
-  - lazy-python.code-reviewer
   - chk
-source_sha: 41539cc1c95f454532d9d9902144f9ca174df5db
+  - tst
+  - pcf.py
+source_sha: 7e55c7700a727bafa0a894c538571d86f4359c7b
 ---
 # Bootstrap the plugin in a clean repo and confirm the checker stack is wired up
 
@@ -23,8 +23,8 @@ After this walkthrough you have:
 
 - The plugin installed — rule mirrors, `cli/chk-py` / `cli/tst-py` wrappers, bootstrapped `pyproject.toml` sections, and overlay stubs all in place (see the **install-and-audit** block article for the full wizard).
 - A project-local `.venv` at the repo root with `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` installed, built automatically the first time you invoke either wrapper.
-- A completed `chk-py all -q` run reporting all seven steps clean — the six automated checkers plus the guideline-review phase reporting `SKIPPED` or a closed `PENDING` — and a completed `tst-py -q` run confirming the same venv's pytest works.
-- Confidence that the venv resolver and the seven-step gate are correctly wired before you start relying on them for real edits.
+- A completed `chk-py all -q` run reporting all six deterministic steps clean — `pcf`, `toi`, `cmp`, `mypy`, `ruff`, `pylint` — and a completed `tst-py -q` run confirming the same venv's pytest works.
+- Confidence that the venv resolver and the six-step gate are correctly wired before you start relying on them for real edits.
 
 ## What you need
 
@@ -45,7 +45,7 @@ This is a quiet, mostly prompt-free install — the only two prompts it can ever
 
 **Verification gate**: the install ends with a one-line-per-step report. Confirm every line shows an outcome word (`installed`, `wrappers-deployed-2 + gitignore-ensured`, `pyproject-bootstrapped + pch-skipped-no-pycharm`, etc.) with no `ERROR`. Once that report is clean, `./cli/chk-py` and `./cli/tst-py` exist at the repo root and are executable.
 
-### Step 2 — Run the seven-step gate and let it build the venv
+### Step 2 — Run the six-step gate and let it build the venv
 
 From a plain terminal at the repo root:
 
@@ -53,11 +53,11 @@ From a plain terminal at the repo root:
 ./cli/chk-py all -q
 ```
 
-`chk-py` is the rendered wrapper around the plugin's shared `chk` aggregator. `all` runs seven checks in order — `pcf` (code format), `toi` (type-only imports), `cmp` (`py_compile` syntax check), `mypy`, `ruff`, `pylint`, and `review` (guideline review phase) — against `.` by default. Before the first check runs, the shared venv resolver probes for a usable venv in this order: an already-activated `$VIRTUAL_ENV`, an existing `<repo>/.venv`, then a `[tool.lazy-python] venv` path configured in `pyproject.toml`. On a freshly installed repo none of those exist yet, so the resolver falls back to creating `<repo>/.venv` with `uv venv --python 3.12` and installing `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` into it — never wiping a pre-existing venv, only adding what's missing.
+`chk-py` is the rendered wrapper around the plugin's shared `chk` aggregator. `all` runs six deterministic checks in order — `pcf` (code format), `toi` (type-only imports), `cmp` (`py_compile` syntax check), `mypy`, `ruff`, and `pylint` — against `.` by default. Before the first check runs, the shared venv resolver probes for a usable venv in this order: an already-activated `$VIRTUAL_ENV`, an existing `<repo>/.venv`, then a `[tool.lazy-python] venv` path configured in `pyproject.toml`. On a freshly installed repo none of those exist yet, so the resolver falls back to creating `<repo>/.venv` with `uv venv --python 3.12` and installing `mypy`, `pylint`, `pytest`, `ruff`, `pytest-clarity`, and `pytest-sugar` into it — never wiping a pre-existing venv, only adding what's missing.
 
-The seventh step, `review`, is different from the first six: it resolves its scope from your working-tree diff plus any untracked `.py` files, then either reports `SKIPPED` (exit 0) when nothing is in scope, or builds a manifest of the in-scope files plus every applicable guideline layer (canon references, project overlay, project rules) and prints a dispatch directive naming the `lazy-python.code-reviewer` agent. It is pure stdlib and skips the venv entirely, so it also works from pre-commit and CI. A manifested-but-undecided review now exits `2` (`PENDING`) — a genuine, distinct code — so it fails `chk-py all` rather than passing silently: close it by dispatching the named agent against the printed manifest and rendering its findings with `chk-py review --render <findings.json>`, or, for a single run you cannot act on right now (like proving out this checker plumbing), set `CHK_REVIEW=skip` to opt that one invocation out without recording a decision.
+The guideline-review phase (`chk-py review`) is deliberately **not** part of this run. It used to be the seventh step of `all`, but it now runs on its own cadence — recommended at the end of a logical unit of work, mandatory at the end of a full cycle of planned work — so its fixed per-dispatch cost (the whole guideline canon, every time) is paid once per unit of work rather than once per `chk-py all` invocation. It is pure stdlib and skips the venv entirely, so it also works from pre-commit and CI. See "After you're done" below for how to run it.
 
-**Verification gate**: expect this run to take roughly 30–60 seconds the first time (venv creation + package installs); every later run reuses the venv and is fast. The output prints `>>> [N/7] <step> - ...` for each of the seven steps. On a clean tree you should see the first six report success with no `ERROR`, no `py_compile errors detected`, and no violation lines. The seventh, `review`, reports one of two outcomes depending on what's actually in scope: `SKIPPED` if there are no changed or untracked `.py` files yet, or `PENDING` if there are — for example the scaffold templates Step 1 just wrote into `.claude/templates/python/`. A `PENDING` result here is the gate working as designed, not a plumbing failure: dispatch `lazy-python.code-reviewer` against the printed manifest and render its findings, or run once with `CHK_REVIEW=skip` to confirm the rest of the plumbing without doing a full review pass right now. If any of the first six checks reports findings, those are real issues against your existing code, not an install problem — work through them (or point `chk-py all -q <path>` at a single known-clean file first to confirm the plumbing) before treating the checker stack as verified.
+**Verification gate**: expect this run to take roughly 30–60 seconds the first time (venv creation + package installs); every later run reuses the venv and is fast. The output prints `>>> [N/6] <step> - ...` for each of the six steps. On a clean tree you should see all six report success with no `ERROR`, no `py_compile errors detected`, and no violation lines. If any check reports findings, those are real issues against your existing code, not an install problem — work through them (or point `chk-py all -q <path>` at a single known-clean file first to confirm the plumbing) before treating the checker stack as verified.
 
 ### Step 3 — Confirm the shared venv also serves pytest
 
@@ -71,9 +71,11 @@ The seventh step, `review`, is different from the first six: it resolves its sco
 
 ## After you're done
 
-`chk-py all -q` is the routine gate to run before committing any real edit — pair it with `/lazy-python.check-style` when you want the `review` step's manifest actually dispatched and its findings rendered inline (the manual skill runs inside a Claude Code session, so it can dispatch the `lazy-python.code-reviewer` agent where a bare terminal cannot). Once a real edit puts Python files in scope, `review` blocks `chk-py all` with `PENDING` until that dispatch-and-render happens — `/lazy-python.check-style` is the fastest way to close it inline rather than reaching for `CHK_REVIEW=skip` on work you actually want reviewed. `tst-py -q` (or `tst-py <module> -q` to scope to one `tests/<module>/` directory) is the routine test pass once you have tests to run.
+`chk-py all -q` is the routine gate to run before committing any real edit — it stays fast because it never touches the guideline-review phase. `tst-py -q` (or `tst-py <module> -q` to scope to one `tests/<module>/` directory) is the routine test pass once you have tests to run.
 
-The venv you built in Step 2 persists at the repo root and is reused by every future `chk-py` / `tst-py` / `check-style` run — it's only rebuilt if you delete it, and re-running the resolver only adds missing tools, never removes anything. If you ever suspect the install itself has drifted (missing wrapper, stale rule mirror, broken venv resolution) rather than the checker findings themselves, `/lazy-python.audit` — covered in the install-and-audit block article — is the read-only diagnostic to reach for before re-running install.
+`chk-py review` is the separate guideline-review pass — run it at the end of a logical piece of work, and mandatorily at the end of a full cycle of planned work. It resolves its scope from the working-tree diff plus any untracked `.py` files (or `chk-py review --base <ref>` to widen the scope to everything since a given commit, so a unit of work with intermediate commits gets reviewed as a whole rather than just its tail), builds a manifest of every applicable guideline layer, and prints a dispatch directive naming the `lazy-python.code-reviewer` agent — it never calls an LLM itself, so it also works unattended from pre-commit and CI. A manifested-but-undecided review exits `2` (`PENDING`): dispatch the named agent against the printed manifest and render its findings with `chk-py review --render <findings.json>` to close it.
+
+The venv you built in Step 2 persists at the repo root and is reused by every future `chk-py` / `tst-py` run — it's only rebuilt if you delete it, and re-running the resolver only adds missing tools, never removes anything. If you ever suspect the install itself has drifted (missing wrapper, stale rule mirror, broken venv resolution) rather than the checker findings themselves, `/lazy-python.audit` — covered in the install-and-audit block article — is the read-only diagnostic to reach for before re-running install.
 
 ## Install-and-first-check flow
 

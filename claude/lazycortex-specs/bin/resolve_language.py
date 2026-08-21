@@ -1,13 +1,14 @@
 """Spec-language resolver primitive — pick the effective doc language.
 
-The language for a spec doc is resolved through a four-step fallback
-chain; the first non-empty value wins:
+The language for a spec doc is resolved through a fallback chain; the
+first non-empty value wins:
 
 1. the doc's own frontmatter `spec_language` key;
 2. the owning product's `language` (resolved by attributing the doc
    path to a product via `resolve_product_by_path`);
-3. the `spec` section's `default_language` in `lazy.settings.json`;
-4. the hardcoded floor `en`.
+3. the `spec` section's `language` in `lazy.settings.json`;
+4. the top-level `language` key (repo-wide default);
+5. the hardcoded floor `en`.
 
 Settings live at `<vault>/.claude/lazy.settings.json`. Frontmatter is
 read with a minimal flat-scalar parser — no yaml dependency.
@@ -38,7 +39,8 @@ _SETTINGS_REL = Path(".claude") / "lazy.settings.json"
 _SPEC_SECTION = "spec"
 _DOC_LANGUAGE_KEY = "spec_language"
 _PRODUCT_LANGUAGE_KEY = "language"
-_DEFAULT_LANGUAGE_KEY = "default_language"
+_SPEC_LANGUAGE_KEY = "language"
+_ROOT_LANGUAGE_KEY = "language"
 _LANGUAGE_FLOOR = "en"
 
 
@@ -87,31 +89,75 @@ def _parse_frontmatter(text: str) -> dict:
   return values
 
 
-def _spec_default_language(vault: Path) -> str | None:
+def _read_settings(vault: Path) -> dict:
   """
-  Read `default_language` from the `spec` section of the vault settings.
+  Read the vault settings file as a dict, empty when absent or malformed.
 
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
 
   Returns:
-    The configured default language, or None when the section or key is absent
-    or empty.
+    The parsed settings dict, or an empty dict when the file is missing or is
+    not valid JSON.
   """
   settings_path = vault / _SETTINGS_REL
-  # guard: missing settings file means no configured default
+  # guard: missing settings file means no configured values at all
   if not settings_path.is_file():
-    return None
-  data = json.loads(settings_path.read_text())
-  spec = data.get(_SPEC_SECTION)
+    return {}
+  try:
+    data = json.loads(settings_path.read_text())
+  except (OSError, json.JSONDecodeError):
+    return {}
+  return data if isinstance(data, dict) else {}
+
+
+def _clean(value: object) -> str | None:
+  """
+  Narrow a raw settings value to a usable language tag.
+
+  Args:
+    value: Raw value read from the settings dict.
+
+  Returns:
+    The value when it is a non-empty string, else None.
+  """
+  return value if isinstance(value, str) and value else None
+
+
+def _spec_section_language(settings: dict) -> str | None:
+  """
+  Read the spec section's own `language` key from a parsed settings dict.
+
+  Args:
+    settings: The parsed `lazy.settings.json` contents.
+
+  Returns:
+    The configured spec language, or None when the section or the key is
+    absent or empty.
+  """
+  spec = settings.get(_SPEC_SECTION)
   # guard: missing or malformed spec section means no configured default
   if not isinstance(spec, dict):
     return None
-  value = spec.get(_DEFAULT_LANGUAGE_KEY)
-  # guard: only a non-empty string counts as a configured default
-  if isinstance(value, str) and value:
-    return value
-  return None
+  return _clean(spec.get(_SPEC_LANGUAGE_KEY))
+
+
+def resolve_repo_language(vault: Path) -> str:
+  """
+  Resolve the repo-level spec language, ignoring any per-doc override.
+
+  The chain returns the first non-empty value among: the `spec` section's
+  `language`, the top-level `language` key, and the floor `en`.
+
+  Args:
+    vault: Vault root directory holding `.claude/lazy.settings.json`.
+
+  Returns:
+    The resolved language tag; never empty (falls back to `en`).
+  """
+  # one settings read serves both rungs of the chain
+  settings = _read_settings(vault)
+  return _spec_section_language(settings) or _clean(settings.get(_ROOT_LANGUAGE_KEY)) or _LANGUAGE_FLOOR
 
 
 def resolve_spec_language(vault: Path, doc_path: str) -> str:
@@ -120,7 +166,7 @@ def resolve_spec_language(vault: Path, doc_path: str) -> str:
 
   The chain returns the first non-empty value among: the doc's frontmatter
   `spec_language`, the owning product's `language`, the `spec` section's
-  `default_language`, and the floor `en`.
+  `language`, the top-level `language` key, and the floor `en`.
 
   Args:
     vault: Vault root directory holding `.claude/lazy.settings.json`.
@@ -146,14 +192,8 @@ def resolve_spec_language(vault: Path, doc_path: str) -> str:
     if isinstance(product_lang, str) and product_lang:
       return product_lang
 
-  # 3. Spec-section default.
-  default_lang = _spec_default_language(vault)
-  # guard: a configured default is the last non-floor fallback
-  if default_lang:
-    return default_lang
-
-  # 4. Hardcoded floor.
-  return _LANGUAGE_FLOOR
+  # 3-5. Spec-section language, repo-wide language, hardcoded floor.
+  return resolve_repo_language(vault)
 
 
 def main(argv: list[str]) -> int:

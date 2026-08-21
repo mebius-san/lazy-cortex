@@ -196,6 +196,52 @@ def parse(text: str) -> tuple[dict[str, str], str]:
   return (meta, body)
 
 
+# --------------------------------------------------------- read_list_field
+
+
+def read_list_field(text: str, key: str) -> list[str]:
+  """
+  Read a frontmatter key's list value, whether written inline or as a block-style YAML list.
+
+  `parse()` flattens block-style continuation lines away — it exists for scalar reads, not
+  multi-line lists. This helper walks the same key-block span `set_field` targets, but returns
+  every list item instead of replacing them, so callers can read fields a producer writes as a
+  block list (e.g. `spec_source_requests`, one `- "value"` line per entry).
+
+  Args:
+    text: Raw document text, with or without a frontmatter block.
+    key: The top-level frontmatter key to read.
+
+  Returns:
+    List of item strings (surrounding quotes stripped), in document order. Empty when the
+    document has no frontmatter, the key is absent, or the key's value is not a list.
+  """
+  span = _find_fences(text)
+  if span is None:
+    return []
+  open_end, close_start, _close_end = span
+  block = text[open_end:close_start]
+  key_span = _key_block_span(block, key)
+  if key_span is None:
+    return []
+  entry = block[key_span[0]:key_span[1]]
+  header, _, continuation = entry.partition("\n")
+  _, _, inline_value = header.partition(":")
+  inline_value = inline_value.strip()
+  # inline array form: `key: ["a", "b"]` or `key: []`
+  if inline_value.startswith("[") and inline_value.endswith("]"):
+    inner = inline_value[1:-1].strip()
+    if not inner:
+      return []
+    return [item.strip().strip('"').strip("'") for item in inner.split(",")]
+  # block-style form: header line bare, items as indented `- value` continuation lines
+  return [
+      line.strip()[2:].strip().strip('"').strip("'")
+      for line in continuation.splitlines()
+      if line.strip().startswith("- ")
+  ]
+
+
 # ---------------------------------------------------------------- set_field
 
 

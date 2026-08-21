@@ -8,6 +8,7 @@ content under the content-root.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from typing import TYPE_CHECKING
@@ -19,6 +20,9 @@ DEFAULT_VAULT_ROOT = "specs"
 _SETTINGS_REL = Path(".claude") / "lazy.settings.json"
 _SPEC_SECTION = "spec"
 _VAULT_ROOT_KEY = "vault_root"
+# waiver: sibling-plugin CLI env contract per dev.plugin-boundaries § 1c
+_ENV_PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
+_BIN_DIR = "bin"
 
 
 def find_settings_root(start: Path) -> Path:
@@ -77,6 +81,31 @@ def spec_content_root(settings_root: Path) -> Path:
     `settings_root / <spec.vault_root>` (default `specs`).
   """
   return settings_root / _vault_root_value(settings_root)
+
+
+def resolve_plugin_cli(name: str) -> Path | None:
+  """
+  Locate a sibling plugin's CLI binary by name.
+
+  Lets a plugin's bin script reach another plugin's published CLI without assuming a fixed
+  install layout; each caller applies its own error handling to a missing result.
+
+  Args:
+    name: Name of the CLI binary to look for under each plugin directory's `bin/` folder.
+
+  Returns:
+    The resolved binary path, or None when the plugin-dirs environment variable is unset or
+    no plugin directory carries the named CLI.
+  """
+  raw = os.environ.get(_ENV_PLUGIN_DIRS, "")
+  for entry in raw.split(os.pathsep):
+    # guard: empty path segment (trailing/double pathsep) — skip it
+    if not entry:
+      continue
+    cli = Path(entry) / _BIN_DIR / name
+    if cli.is_file():
+      return cli
+  return None
 
 
 def spec_roots(start: Path) -> tuple[Path, Path]:

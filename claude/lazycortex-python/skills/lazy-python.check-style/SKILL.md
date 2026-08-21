@@ -1,7 +1,7 @@
 ---
 name: lazy-python.check-style
 description: "Use when the user asks to review, check, or clean up Python code they just changed — 'check my style', 'review these files against our guidelines', 'is this ready to commit'. Run it after a batch of edits and before committing: it pairs manual guideline inspection (the things `chk-py` cannot see, read fresh from the canon plus the project overlay) with the full `chk-py` + `tst-py` gate and a re-verify pass."
-allowed-tools: Bash, Read, Edit, Glob, Grep
+allowed-tools: Bash, Read, Edit, Glob, Grep, Agent
 user-invocable: true
 ---
 # Python check-style — six-step review
@@ -67,7 +67,7 @@ For each modified file, walk every category below. The categories cover rules th
 - **Method organization** — public-before-private inside each class; classmethods before instance methods; properties grouped per the canon ordering.
 - **Naming** — `snake_case` for functions, methods, and variables; `_private` prefix for non-public attributes; full words (no abbreviations like `cfg`, `tmp_v`, single-letter loop vars outside short comprehensions).
 - **Structural rules** — 2-space indentation; 117-char line limit; no `typing.cast()`; no bare `Any` in annotations (waiver required to exempt); `__init__` parameters with defaults are keyword-only (after `*`).
-- **Marker clauses** — every `# opt:` states why the non-obvious choice was made for performance; every `# limit:` names the ceiling and the upgrade path past it, and sits on code that is finished as written (unfinished work is `TODO:`); every `# Decision:` records a real fork per the canon's three tests. `pcf` proves the clause is non-empty; judging what it says is this pass.
+- **Marker clauses** — every `# opt:` states why the non-obvious choice was made for performance; every `# limit:` names the ceiling and the upgrade path past it, and sits on code that is finished as written (unfinished work is `TODO:`); every `# Decision:` records a real fork per the canon's three tests. `pcf` proves the clause is non-empty; judging what it says is this pass. A `Domain(unfiled):` block is a parked marker rather than a violation — route it to `/lazy-python.knowledge-sweep`, which grows the domain-groups dictionary with the operator and refiles what accumulated.
 - **Comment preservation** — the special markers (`TODO:`, `TMP:`, `DBG:`, `ref:`, `opt:`, `guard:`, `limit:`, `Decision:`, `Domain(...)`) are untouched anywhere they appeared before the edit. Removing or rewording any of them is an issue regardless of whether the surrounding code looks cleaner without them.
 
 Track every violation found, by file and line. The manual pass is mandatory — do not assume Step 4 will catch these; the checkers are tuned for syntactic / type-level issues, not semantic ones.

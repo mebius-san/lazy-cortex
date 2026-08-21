@@ -1,7 +1,7 @@
 ---
 name: lazy-review.doc_doctor
-description: "Dispatched by the lazy-review dispatcher as the repair step when a document in the review loop no longer parses — a missing frontmatter delimiter, an unclosed code fence, an edit-annotation span left open; not for direct use. Repairs structure only, never content, and declares the file irreparable rather than guessing."
-tools: Read, Write, Edit, Glob, Grep
+description: "Dispatched by the review.coordinator as the repair step when a document in the review loop no longer parses — a missing frontmatter delimiter, an unclosed code fence, an edit-annotation span left open; not for direct use. Repairs structure only, never content, and declares the file irreparable rather than guessing."
+tools: Read, Write, Edit, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response specialist; no multi-phase orchestration"
 ---

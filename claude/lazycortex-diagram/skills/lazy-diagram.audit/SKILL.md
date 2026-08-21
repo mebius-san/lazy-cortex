@@ -94,7 +94,7 @@ Outcome: `dispatched (3 agents)`.
 
 - Parse each returned block. Split on `## scan:` headings.
 - Deduplicate findings across A2 / A3 / A5 (same `<path>:<line>` + title = one).
-- Apply waivers from `.guard-waivers.json` if present (none expected for this plugin in v1).
+- Apply waivers from `.guard-public.json` if present (none expected for this plugin in v1).
 
 Outcome: `merged (<n> findings)`.
 

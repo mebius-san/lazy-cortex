@@ -1,16 +1,16 @@
 ---
 name: lazy-python.audit
 description: "Run when the operator asks whether the Python tooling is wired up correctly, or when it silently isn't working — `chk-py` / `tst-py` missing or failing to launch, the check-style hook never firing, the python rules absent from `.claude/rules/`, a checker not in the venv. Read-only; the fix is always a re-run of `/lazy-python.install`."
-allowed-tools: Bash, Read, Glob, Grep
+allowed-tools: Bash, Read, Glob, Grep, Agent
 user-invocable: true
 ---
 # Audit lazycortex-python
 
-Read-only health check that walks the 11 invariants `/lazy-python.install` promises to hold. Each check is a separate sub-process call against `bin/audit_checks.py`; the skill aggregates `{severity, message}` payloads into a single report. Findings are surfaced; nothing is mutated. To fix, re-run `/lazy-python.install` (the install is idempotent and overwrites mirror artifacts).
+Read-only health check that walks the 12 invariants the Python surface promises to hold. Each check is a separate sub-process call against `bin/audit_checks.py`; the skill aggregates `{severity, message}` payloads into a single report. Findings are surfaced; nothing is mutated. To fix, re-run `/lazy-python.install` (the install is idempotent and overwrites mirror artifacts) — except Check 12, whose fix is `/lazy-python.knowledge-sweep`.
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 12 ordered steps (11 checks plus the log write). The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 13 ordered steps (12 checks plus the log write). The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Check 1 — Rules mirror integrity`
@@ -24,8 +24,9 @@ This skill has 12 ordered steps (11 checks plus the log write). The executing ag
    - `Check 9 — CLAUDE.md pointer (informational)`
    - `Check 10 — PostToolUse hook registration`
    - `Check 11 — Venv bootstrap state`
-   - `Step 12 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND captured an outcome word for it" — `PASS` / `WARN` / `FAIL` for the check steps, `logged` for Step 12.
+   - `Check 12 — Domain-groups dictionary`
+   - `Step 13 — Log the run`
+2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND captured an outcome word for it" — `PASS` / `WARN` / `FAIL` for the check steps, `logged` for Step 13.
 3. **Do not reach the Report block until `TaskList` shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report block is a structural verifier.** Its output MUST contain one line per check above with its severity. A missing line is a bug; do not render the report with gaps.
 
@@ -161,7 +162,19 @@ Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py 
 
 Outcome: `PASS` (probe satisfied or fallback bootstrappable) / `WARN` (recoverable degradation — re-run `/lazy-python.install` or configure a venv manually).
 
-## Step 12: Log the run
+## Check 12: Domain-groups dictionary
+
+Verify a domain-groups dictionary exists once the sources carry `Domain(…)` blocks. The path is `.claude/lazy.settings.json[wiki.domains.dictionary]` when configured, else the conventional `docs/guidelines/domain-groups.md`. The style checker deliberately never reads the dictionary — it matches the reserved `unfiled` literal and nothing else — so a repo whose markers all cite groups from a dictionary that was never created passes every checker while validating against nothing. Marked sources plus no dictionary is that condition; the fix is `/lazy-python.knowledge-sweep`, which builds the dictionary from the parked knowledge and refiles the blocks.
+
+Run:
+
+```
+Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.audit/bin/audit_checks.py check12 ${CLAUDE_PROJECT_DIR})
+```
+
+Outcome: `PASS` (dictionary present, or no `Domain(…)` blocks in the sources yet) / `WARN` (blocks without a dictionary — run `/lazy-python.knowledge-sweep`).
+
+## Step 13: Log the run
 
 Log to `./.logs/claude/lazy-python.audit/YYYY-MM-DD_HH-MM-SS.md` per the logging rule (include `git_sha`, `git_branch`, `date`, `input` frontmatter).
 
@@ -185,6 +198,7 @@ Check  8 — Scaffold registry entry        [<sev>] <message>
 Check  9 — CLAUDE.md pointer (info)       [<sev>] <message>
 Check 10 — PostToolUse hook registration  [<sev>] <message>
 Check 11 — Venv bootstrap state           [<sev>] <message>
+Check 12 — Domain-groups dictionary       [<sev>] <message>
 
 Summary: pass=<n> warn=<n> fail=<n>
 ```
@@ -194,4 +208,5 @@ Summary: pass=<n> warn=<n> fail=<n>
 - **`audit_checks.py check<N>` exits non-zero** — the check itself crashed (missing positional argument, unknown check id, internal exception); inspect stderr and re-run with a valid argument. A check returning `FAIL` is a finding, not a crash — exit code stays 0.
 - **`check1` reports `FAIL` (drift)** — a consumer rule under `.claude/rules/lazy-python.*.md` has been hand-edited away from the plugin canon → re-run `/lazy-python.install` to overwrite the mirror (intentional clobber).
 - **`check2` reports `FAIL` (broken pointer)** — a mirrored rule cites a `${CLAUDE_PLUGIN_ROOT}/references/lazy-python.*.md` path that no longer exists in the plugin → either the canon was removed (file a plugin bug) or the consumer's mirror is stale (re-run `/lazy-python.install`).
+- **`check12` reports `WARN` (blocks without a dictionary)** — the sources file knowledge under `Domain(…)` groups but the configured / conventional dictionary does not exist, so no group in the code is validated against anything → run `/lazy-python.knowledge-sweep` to build it and refile what is parked.
 - **`check3` reports `FAIL` (missing artifact)** — the plugin tree at `${CLAUDE_PLUGIN_ROOT}` is incomplete on this machine → re-run `/plugin update lazycortex-python@lazycortex` to restore.

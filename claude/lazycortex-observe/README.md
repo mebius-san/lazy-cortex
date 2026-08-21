@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#93c5fd"
 ---
 # lazycortex-observe
 
@@ -75,13 +75,13 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/troubleshooting.md) — Common failure modes across lazycortex-observe install, uninstall, and doctor — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/faq.md) — Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
 
-(`mebius-san` resolves from `.guard-waivers.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
+(`mebius-san` resolves from `.guard-public.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `lazy-observe.help` | Show lazycortex-observe purpose and a one-line summary of each skill it ships |
+| `lazy-observe.help` | Run when the operator asks what lazycortex-observe can do or how lazycortex runtime metrics get off this host into their dashboards — lists the metrics-shipper surface: install / doctor / uninstall / audit for the Grafana Alloy or OpenTelemetry agent that remote-writes to a Prometheus-compatible observer. |
 
 ## Installation
 

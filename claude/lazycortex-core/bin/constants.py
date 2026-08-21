@@ -19,6 +19,12 @@ if TYPE_CHECKING:
   pass
 
 
+# The canonical email domain for every automatic git identity (experts, routines, deterministic
+# CLI bots). RFC 2606 reserves `.invalid`, so the address is undeliverable by construction, and
+# consumers that classify commits by the `@bot.` substring recognise it as-is.
+BOT_EMAIL_DOMAIN = "@bot.invalid"
+
+
 # ----------------------------------------------------------------------------------------
 class StateKey:
   """
@@ -29,7 +35,8 @@ class StateKey:
     GIT_WATCH: The per-`git`-watch baseline-SHA tracking sub-map.
     LAST_RUN: The per-routine last-successful-run timestamp sub-map.
     LAST_SEEN_SHA: The per-watch baseline SHA stored inside a `git_watch` entry.
-    WORKTREE_TASKS: The worktree-task registry sub-map.
+    FAILED_ITEMS: The per-watch list of items whose `command`-shape worker exited non-zero,
+      stored inside a `git_watch` entry; retried before fresh items on the next tick.
     LAST_CLEANUP_AT: The wall-clock timestamp of the last housekeeping pass.
   """
 
@@ -37,7 +44,7 @@ class StateKey:
   GIT_WATCH = "git_watch"
   LAST_RUN = "last_run"
   LAST_SEEN_SHA = "last_seen_sha"
-  WORKTREE_TASKS = "worktree_tasks"
+  FAILED_ITEMS = "failed_items"
   LAST_CLEANUP_AT = "last_cleanup_at"
 
 
@@ -113,13 +120,11 @@ class RepoDir:
     EXPERTS: The root of the per-repo expert work tree.
     JOBS: The job-queue subdirectory under the expert root.
     TAGS: The memory tag-index subdirectory.
-    REMOTE_JOBS: The cross-repo remote-job tracker subdirectory.
   """
 
   EXPERTS = ".experts"
   JOBS = ".jobs"
   TAGS = ".tags"
-  REMOTE_JOBS = ".remote-jobs"
 
 
 # ----------------------------------------------------------------------------------------
@@ -138,8 +143,11 @@ class RoutineKey:
     PROTOCOLS: The list of protocol identifiers declared by the routine.
     BRANCH: The watched branch for a `git` routine.
     IGNORE_HALT: The flag letting a routine tick even while the daemon is halted.
-    ISOLATE: The flag routing a routine's work through an isolated worktree.
     INBOX_DIR: The repo-relative directory an inbox routine scans.
+    HOOKS_ENABLED: The allow-list of lazycortex hook short names the routine's own subprocess may
+      run. Inert on the `expert` dispatch shape, whose session is spawned by the pump routine and
+      therefore carries the pump's list.
+    GIT_AUTHOR: The git identity block for any commits the routine's own subprocess makes.
   """
 
   NAME = "name"
@@ -152,8 +160,9 @@ class RoutineKey:
   PROTOCOLS = "protocols"
   BRANCH = "branch"
   IGNORE_HALT = "ignore_halt"
-  ISOLATE = "isolate"
   INBOX_DIR = "inbox_dir"
+  HOOKS_ENABLED = "hooks_enabled"
+  GIT_AUTHOR = "git_author"
 
 
 # ----------------------------------------------------------------------------------------
@@ -174,7 +183,10 @@ class DaemonKey:
     GIT: The git-integration sub-configuration block.
     CLEANUP_RUNTIME_LOG_AFTER: The runtime-log retention window.
     POLLING_INTERVAL_SEC: The main-loop polling cadence in seconds.
-    RUN_HERE: The per-checkout gate deciding whether the daemon runs for this working copy.
+    STREAM_IDLE_TIMEOUT_SEC: Seconds of expert-spawn stdout silence before the watchdog re-spawns it.
+    TRANSIENT_MAX_RETRIES: Transient-error budget per job bundle before the pump closes it.
+    RUN_HERE: The hostname-to-checkout-path mapping deciding whether the daemon starts in this working copy.
+    RATE_LIMIT_GUARD: The subscription-rate-limit guard sub-configuration block.
   """
 
   METRICS = "metrics"
@@ -190,6 +202,72 @@ class DaemonKey:
   CLEANUP_RUNTIME_LOG_AFTER = "cleanup_runtime_log_after"
   POLLING_INTERVAL_SEC = "polling_interval_sec"
   RUN_HERE = "run_here"
+  RATE_LIMIT_GUARD = "rate_limit_guard"
+  STREAM_IDLE_TIMEOUT_SEC = "stream_idle_timeout_sec"
+  TRANSIENT_MAX_RETRIES = "transient_max_retries"
+
+
+# ----------------------------------------------------------------------------------------
+class RateLimitGuardKey:
+  """
+  Keys in the `daemon.rate_limit_guard` sub-configuration block.
+
+  Attributes:
+    ENABLED: The master on/off switch for the guard.
+    ON_ALLOWED_WARNING: Whether a pre-exhaustion warning frame trips the guard.
+    ON_REJECTED: Whether an already-closed window trips the guard.
+    ON_OVERAGE: Whether spend having crossed into paid overage trips the guard.
+    WARNING_UTILIZATION_THRESHOLD: Window utilization at or above which a warning frame trips
+      the guard; a warning below it — or one carrying no utilization reading — never does.
+  """
+
+  ENABLED = "enabled"
+  ON_ALLOWED_WARNING = "on_allowed_warning"
+  ON_REJECTED = "on_rejected"
+  ON_OVERAGE = "on_overage"
+  WARNING_UTILIZATION_THRESHOLD = "warning_utilization_threshold"
+
+
+# ----------------------------------------------------------------------------------------
+class RateLimitTrigger:
+  """
+  Closed-set trigger tokens naming why the rate-limit flag was raised.
+
+  The first two are byte-identical to the provider's own `status` values, so a frame's status
+  is compared against them directly; `OVERAGE` has no status counterpart and is derived from
+  the overage field instead.
+
+  Attributes:
+    ALLOWED_WARNING: The provider signalled the window is close to exhaustion.
+    REJECTED: The provider refused the call because the window is closed.
+    OVERAGE: The window was passed and spend continues as paid overage.
+  """
+
+  ALLOWED_WARNING = "allowed_warning"
+  REJECTED = "rejected"
+  OVERAGE = "overage"
+
+
+# ----------------------------------------------------------------------------------------
+class RateLimitRecordKey:
+  """
+  Keys in a per-window record file under the host-local rate-limit flag directory.
+
+  Attributes:
+    RESETS_AT: The epoch-second timestamp at which this window reopens.
+    STATUS: The provider status token carried by the frame that raised the record.
+    IS_USING_OVERAGE: Whether the frame reported spend already running as paid overage.
+    TRIGGER: The closed-set trigger token that raised the record.
+    WRITER: The label of the process that wrote the record.
+    WRITTEN_AT: The epoch-second timestamp at which the record was written.
+  """
+
+  RESETS_AT = "resets_at"
+  STATUS = "status"
+  IS_USING_OVERAGE = "is_using_overage"
+  TRIGGER = "trigger"
+  WRITER = "writer"
+  WRITTEN_AT = "written_at"
 
 
 # ----------------------------------------------------------------------------------------
@@ -216,19 +294,21 @@ class GitConfigKey:
 
   Attributes:
     BASE_BRANCH: The integration base branch.
-    WORKTREE_ROOT: The directory isolated task worktrees are created under.
-    MAX_CONCURRENT_TASKS: The concurrency cap on isolated worktree tasks.
+    WORKTREE_ROOT: The directory isolated job worktrees are created under.
+    WORKTREE_BOOTSTRAP_CMD: The shell command run in a fresh job worktree before the spawn.
     REMOTE_SYNC: The remote-sync mode (`pull`, `pull_push`, or off).
     POST_PUSH_HOOK: The operator shell command run after each push that advances origin.
     POST_PUSH_TIMEOUT_SEC: The wall-clock cap on the post-push hook process, in seconds.
+    ALLOWED_HOOKS: The operator git-hook filenames allowed to run under the daemon.
   """
 
   BASE_BRANCH = "base_branch"
   WORKTREE_ROOT = "worktree_root"
-  MAX_CONCURRENT_TASKS = "max_concurrent_tasks"
+  WORKTREE_BOOTSTRAP_CMD = "worktree_bootstrap_cmd"
   REMOTE_SYNC = "remote_sync"
   POST_PUSH_HOOK = "post_push_hook"
   POST_PUSH_TIMEOUT_SEC = "post_push_timeout_sec"
+  ALLOWED_HOOKS = "allowed_hooks"
 
 
 # ----------------------------------------------------------------------------------------
@@ -246,7 +326,11 @@ class JobConfigKey:
     CAN_COMMIT_IN_REPO: Whether the expert may write and commit inside the repo it runs in.
     MCP_CONFIG: Explicit MCP-config path(s) the spawn loads under strict mode, or unset for none.
     SETTING_SOURCES: Setting scopes the spawn loads (`user`/`project`/`local`), or unset for the hermetic default.
-    HOOKS_ENABLED: The resolved allow-list of hook short names the spawn opts into, or empty for none.
+    WORKSPACE: The workspace mode (`main`/`branch`) the pump enforces before and after the spawn.
+    SOURCE_PATHS: The `source_paths` key — repo-relative paths the pump copies into
+      `source/` when it claims the job.
+    CONTEXT_PATHS: The `context_paths` key — repo-relative paths the pump copies into
+      `context/` when it claims the job.
   """
 
   AGENT = "agent"
@@ -258,7 +342,25 @@ class JobConfigKey:
   CAN_COMMIT_IN_REPO = "can_commit_in_repo"
   MCP_CONFIG = "mcp_config"
   SETTING_SOURCES = "setting_sources"
-  HOOKS_ENABLED = "hooks_enabled"
+  WORKSPACE = "workspace"
+  SOURCE_PATHS = "source_paths"
+  CONTEXT_PATHS = "context_paths"
+
+
+# ----------------------------------------------------------------------------------------
+class WorkspaceMode:
+  """
+  `workspace` value tokens an expert entry declares in `lazy.settings.json[experts]`.
+
+  Attributes:
+    MAIN: The expert's spawn runs on the daemon's base branch — today's behavior, and the
+      default when the key is absent.
+    BRANCH: The pump creates or reuses a job-scoped branch before the spawn and restores
+      the base branch afterward.
+  """
+
+  MAIN = "main"
+  BRANCH = "branch"
 
 
 # ----------------------------------------------------------------------------------------
@@ -272,7 +374,6 @@ class SettingsKey:
     ROUTINES: The routine registry section name.
     EXPERTS: The expert registry section name.
     AGENT_MODELS: The agent-model-tier registry section name.
-    REPOS: The cross-repo target registry section name.
     HOOKS: The lifecycle-hook enablement section name.
     LEGACY_VERSION: The pre-split root-level version key migrations fold away.
     EXTERNAL_DIRS: The externally-sourced working-directory declaration section name.
@@ -283,22 +384,9 @@ class SettingsKey:
   ROUTINES = "routines"
   EXPERTS = "experts"
   AGENT_MODELS = "agent_models"
-  REPOS = "repos"
   HOOKS = "hooks"
   LEGACY_VERSION = "version"
   EXTERNAL_DIRS = "external_dirs"
-
-
-# ----------------------------------------------------------------------------------------
-class RepoEntryKey:
-  """
-  Keys in a single `repos.<key>` cross-repo registry entry.
-
-  Attributes:
-    PATH: The filesystem path to the target repository.
-  """
-
-  PATH = "path"
 
 
 # ----------------------------------------------------------------------------------------
@@ -375,15 +463,33 @@ class HookKey:
 # ----------------------------------------------------------------------------------------
 class EnvVar:
   """
-  Environment-variable names the runtime sets on a spawn and the hooks read back.
+  Environment-variable names the runtime sets on a spawn (and the values it pins for them),
+  read back by the hooks or by the spawned `claude` CLI itself.
 
   Attributes:
     HOOKS_ALLOW_LIST: The comma-separated allow-list of hook short names that may run. Its
       presence (even empty) puts every lazycortex hook into allow-list mode — only the named
-      hooks run; the pump sets it for every expert spawn so a spawn runs no hook unless opted in.
+      hooks run; the daemon sets it from the dispatching routine's `hooks_enabled`, and every
+      process that routine spawns — expert sessions included — inherits it.
+    MAX_SUBAGENT_SPAWN_DEPTH: The `claude` CLI's own subagent-nesting-depth variable name.
+    SUBAGENT_SPAWN_DEPTH_PIN: The value this runtime always sets it to — see the `Decision:`
+      comment at `expert_pump.py`'s own env-construction site for why.
+    GIT_CONFIG_COUNT: git's own variable naming how many config slots the environment carries.
+    GIT_CONFIG_KEY: Prefix of a slot's config-key variable; the slot index completes the name.
+    GIT_CONFIG_VALUE: Prefix of a slot's config-value variable; the slot index completes it.
+    GIT_CONFIG_PREFIX: Common prefix of every variable in git's environment-config protocol,
+      numbered slots and config-file handles alike.
+    GIT_HOOKS_PATH: The git config key naming the directory hooks are read from.
   """
 
   HOOKS_ALLOW_LIST = "LAZYCORTEX_HOOKS_ALLOW_LIST"
+  MAX_SUBAGENT_SPAWN_DEPTH = "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"
+  SUBAGENT_SPAWN_DEPTH_PIN = "3"
+  GIT_CONFIG_COUNT = "GIT_CONFIG_COUNT"
+  GIT_CONFIG_KEY = "GIT_CONFIG_KEY_"
+  GIT_CONFIG_VALUE = "GIT_CONFIG_VALUE_"
+  GIT_CONFIG_PREFIX = "GIT_CONFIG_"
+  GIT_HOOKS_PATH = "core.hooksPath"
 
 
 # ----------------------------------------------------------------------------------------
@@ -392,36 +498,36 @@ class HookName:
   Canonical short names identifying each lazycortex-core lifecycle hook to the enablement gate.
 
   A hook passes its own name to `hook_gate.is_enabled` so a single vocabulary drives both the
-  per-expert `hooks.enabled` allow-list and the interactive `hooks.disabled` block-list. The
+  per-routine `hooks_enabled` allow-list and the interactive `hooks.disabled` block-list. The
   names are stable configuration surface — renaming one silently breaks every operator's config.
 
   Attributes:
     GIT_GUARD: The staging-mutex / dirty-index guard hook.
     MODEL_ROUTER: The subagent model-tier routing hook.
-    CHECK_PUBLIC: The public-repo secret / PII scan hook.
+    CHECK_PUBLIC: The public-repo PII / infrastructure scan hook.
+    SECRETS_GUARD: The always-on secret scan hook.
     SETTINGS_GUARD: The settings-file edit guard hook.
     COMMIT_RECORDER: The commit-log recorder hook.
   """
 
-  GIT_GUARD = "git-guard"
-  MODEL_ROUTER = "model-router"
-  CHECK_PUBLIC = "check-public"
-  SETTINGS_GUARD = "settings-guard"
-  COMMIT_RECORDER = "commit-recorder"
+  GIT_GUARD = "lazy-core.git-guard"
+  MODEL_ROUTER = "lazy-core.model-router"
+  CHECK_PUBLIC = "lazy-guard.check-public"
+  SECRETS_GUARD = "lazy-guard.secrets"
+  SETTINGS_GUARD = "lazy-guard.settings"
+  COMMIT_RECORDER = "lazy-log.commit-recorder"
 
 
 # ----------------------------------------------------------------------------------------
 class HooksKey:
   """
-  Keys in the `hooks` configuration block of `lazy.settings.json` and in a per-expert `hooks` block.
+  Keys in the `hooks` configuration block of `lazy.settings.json`.
 
   Attributes:
     DISABLED: Root-section block-list — hook short names silenced in interactive sessions.
-    ENABLED: Per-expert allow-list — hook short names an expert spawn opts back into.
   """
 
   DISABLED = "disabled"
-  ENABLED = "enabled"
 
 
 # ----------------------------------------------------------------------------------------
@@ -571,12 +677,14 @@ class HaltKey:
     TRIGGERED_BY: The routine or subsystem name that triggered the halt.
     REASON: The closed-set halt-reason code.
     DIRTY_PATHS: The repository-relative paths reported dirty at halt time.
+    RESETS_AT: The epoch-second timestamp a rate-limit halt lifts itself at.
   """
 
   HALTED_SINCE = "halted_since"
   TRIGGERED_BY = "triggered_by"
   REASON = "reason"
   DIRTY_PATHS = "dirty_paths"
+  RESETS_AT = "resets_at"
 
 
 # ----------------------------------------------------------------------------------------
@@ -591,6 +699,8 @@ class HaltReason:
     GIT_PUSH_FAILED: A post-tick push could not complete.
     GIT_REMOTE_UNAVAILABLE: The git remote could not be reached.
     INBOX_COLLISION: Another checkout on this host drives the same physical inbox.
+    ROUTINE_CONFIG_INVALID: A registry entry does not conform to its type schema.
+    RATE_LIMIT: The subscription rate-limit window is closed; spawns pause until it reopens.
   """
 
   UNCOMMITTED_CHANGES = "uncommitted_changes"
@@ -599,6 +709,8 @@ class HaltReason:
   GIT_PUSH_FAILED = "git_push_failed"
   GIT_REMOTE_UNAVAILABLE = "git_remote_unavailable"
   INBOX_COLLISION = "inbox_collision"
+  ROUTINE_CONFIG_INVALID = "routine_config_invalid"
+  RATE_LIMIT = "rate_limit"
 
 
 # ----------------------------------------------------------------------------------------
@@ -680,6 +792,7 @@ class JobArtifact:
     DEAD_JSON: The forensic payload describing a job marked dead.
     DIAGNOSIS_JSON: The doctor's diagnosis written when a job is permanently failed.
     ATTEMPTS: The cumulative attempt-counter file.
+    TRANSIENT_ERRORS: The transient-error counter file the retry budget is judged against.
     TRANSCRIPT: The captured stream-json transcript of the expert spawn.
     ERROR_JSON: The per-attempt rejection payload fed back into the next attempt's prompt.
   """
@@ -687,6 +800,7 @@ class JobArtifact:
   DEAD_JSON = "dead.json"
   DIAGNOSIS_JSON = "diagnosis.json"
   ATTEMPTS = "attempts"
+  TRANSIENT_ERRORS = "transient_errors"
   TRANSCRIPT = "transcript.jsonl"
   ERROR_JSON = "error.json"
 
@@ -714,9 +828,15 @@ class JobRequestKey:
 
   Attributes:
     DEDUP_KEY: The optional dedup marker that suppresses duplicate dispatches.
+    DEDUP_FINGERPRINT: The optional identity token of the artifact behind the dedup key at dispatch time.
+    BRANCH: The job-scoped branch name a `workspace: branch` expert's spawn runs on; a caller
+      dispatching a continuation job passes back the value read off the original dispatch so the
+      continuation lands on the same branch instead of a fresh one.
   """
 
   DEDUP_KEY = "_dedup_key"
+  DEDUP_FINGERPRINT = "_dedup_fingerprint"
+  BRANCH = "branch"
 
 
 # ----------------------------------------------------------------------------------------
@@ -798,9 +918,8 @@ class JobCollectKey:
     RESPONSE: The parsed `response.json` payload carried on a finished job.
     EXPERT: The owning expert name.
     JOB_ID: The job identifier within the expert's queue.
+    DEDUP_FINGERPRINT: The dedup fingerprint carried on a reconcilable finished-job entry.
     PATH: The absolute job-directory path.
-    TARGET_REPO: The label of the foreign repo for a remote tracker entry.
-    DISPATCHED_AT: The dispatch timestamp carried on a remote tracker entry.
     DEDUP_KEY: The dedup key carried on a reconcilable finished-job entry.
     CATEGORY: The error category of a failed finished-job entry, absent on a success.
     AGE_SEC: Seconds elapsed since the entry's bundle finished.
@@ -810,9 +929,8 @@ class JobCollectKey:
   RESPONSE = "response"
   EXPERT = "expert"
   JOB_ID = "job_id"
+  DEDUP_FINGERPRINT = "dedup_fingerprint"
   PATH = "path"
-  TARGET_REPO = "target_repo"
-  DISPATCHED_AT = "dispatched_at"
   DEDUP_KEY = "dedup_key"
   CATEGORY = "category"
   AGE_SEC = "age_sec"
@@ -849,22 +967,6 @@ class JobStatus:
 
 
 # ----------------------------------------------------------------------------------------
-class RemoteTrackerKey:
-  """
-  Keys in a cross-repo remote-job visibility tracker payload.
-
-  Attributes:
-    TARGET_REPO: The label of the foreign repository the job runs in.
-    ABS_PATH: The absolute path to the foreign job directory.
-    DISPATCHED_AT: The dispatch timestamp.
-  """
-
-  TARGET_REPO = "target_repo"
-  ABS_PATH = "abs_path"
-  DISPATCHED_AT = "dispatched_at"
-
-
-# ----------------------------------------------------------------------------------------
 class TickResultKey:
   """
   Keys in a routine-tick result dict the daemon logs.
@@ -875,9 +977,6 @@ class TickResultKey:
     DURATION_SEC: The wall-clock duration of the tick in seconds.
     NOTE: An optional non-error status note.
     ERROR: The failure message present when the tick failed.
-    OUTCOME: The integration outcome carried on a worktree-finish tick.
-    WORK_ID: The unit-of-work identifier carried on a worktree tick.
-    BRANCH: The task branch name carried on a worktree tick.
     DISPATCHED_COUNT: The number of items the tick actually dispatched; absent when the
       routine type does not report one.
   """
@@ -887,50 +986,7 @@ class TickResultKey:
   DURATION_SEC = "duration_sec"
   NOTE = "note"
   ERROR = "error"
-  OUTCOME = "outcome"
-  WORK_ID = "work_id"
-  BRANCH = "branch"
   DISPATCHED_COUNT = "dispatched_count"
-
-
-# ----------------------------------------------------------------------------------------
-class WorktreeEntryKey:
-  """
-  Keys in a single worktree-task registry entry under `worktree_tasks`.
-
-  Attributes:
-    BRANCH: The task branch name.
-    WORKTREE_PATH: The absolute path to the task's worktree directory.
-    ROUTINE: The routine that originated the unit of work.
-    ALLOW_MERGE: Whether completion auto-merges to base or opens a pull request.
-    JOB_ID: The dispatched job id whose completion triggers integration.
-    STARTED: The wall-clock timestamp at which the task was registered.
-  """
-
-  BRANCH = "branch"
-  WORKTREE_PATH = "worktree_path"
-  ROUTINE = "routine"
-  ALLOW_MERGE = "allow_merge"
-  JOB_ID = "job_id"
-  STARTED = "started"
-
-
-# ----------------------------------------------------------------------------------------
-class WorktreeResultKey:
-  """
-  Keys in the integration-outcome dicts the worktree manager returns.
-
-  Attributes:
-    RESULT: The integration-outcome discriminator.
-    BRANCH: The task branch name.
-    WORK_ID: The unit-of-work identifier.
-    REASON: The deferral cause carried on a deferred pull request.
-  """
-
-  RESULT = "result"
-  BRANCH = "branch"
-  WORK_ID = "work_id"
-  REASON = "reason"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1026,28 +1082,6 @@ class MetricLabel:
   CAUSE = "cause"
   VERSION = "version"
   DAEMON_NAME = "daemon_name"
-
-
-# ----------------------------------------------------------------------------------------
-class WorktreeResult:
-  """
-  `result` value tokens for a worktree-task start or finish outcome.
-
-  Attributes:
-    MERGED: The task branch fast-forward merged into base.
-    CONFLICT: The rebase or fast-forward merge conflicted.
-    PR_OPENED: A pull request was opened for the task branch.
-    PR_DEFERRED: The pull request could not be opened and was deferred.
-    AT_CAPACITY: The concurrency cap blocked the start.
-    UNKNOWN: The work id was not registered.
-  """
-
-  MERGED = "merged"
-  CONFLICT = "conflict"
-  PR_OPENED = "pr_opened"
-  PR_DEFERRED = "pr_deferred"
-  AT_CAPACITY = "at_capacity"
-  UNKNOWN = "unknown"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1191,3 +1225,51 @@ class InboxGuardKey:
   OTHER_REPO = "other_repo"
   OTHER_ROUTINE = "other_routine"
   DETAIL = "detail"
+
+
+# ----------------------------------------------------------------------------------------
+class ReviewClassKey:
+  """
+  Keys in the `review` section's class list and its per-entry records.
+
+  Attributes:
+    CLASSES: The `review.classes` list key.
+    CLASS: The class name (a token from `ReviewClassName`).
+    PATHS: The glob patterns routing a document to this class.
+    EXPERTS: The per-class expert wiring block.
+  """
+
+  CLASSES = "classes"
+  CLASS = "class"
+  PATHS = "paths"
+  EXPERTS = "experts"
+
+
+# ----------------------------------------------------------------------------------------
+class ReviewClassName:
+  """
+  Closed-set review-class name tokens referenced by the settings migration ladder.
+
+  Attributes:
+    LEGACY_PLAN: The pre-v2 class name retired via `DEV_PLAN` in favor of today's `CODE_PLAN`.
+    DEV_PLAN: The pre-v9 planner-facing class name that `CODE_PLAN` replaces.
+    CODE_PLAN: The planner-facing implementation-plan document class (v8 → v9).
+    TEST_PLAN: The tester-facing test-plan document class, mirroring the plan class's experts.
+    DEV_REPORT: The pre-v9 implementer-facing class name that `CODE_REPORT` replaces.
+    CODE_REPORT: The implementer-facing implementation-report document class (v8 → v9).
+    TEST_REPORT: The tester-facing test-report document class.
+    DESIGN: The designer-facing design document class.
+    BUG: The tester-facing bug-report document class.
+    ARCHITECTURE: The architect-facing architecture document class (v6 → v7).
+  """
+
+  LEGACY_PLAN = "plan"
+  DEV_PLAN = "dev-plan"
+  CODE_PLAN = "code-plan"
+  TEST_PLAN = "test-plan"
+  DEV_REPORT = "dev-report"
+  CODE_REPORT = "code-report"
+  TEST_REPORT = "test-report"
+  DESIGN = "design"
+  BUG = "bug"
+  ARCHITECTURE = "architecture"

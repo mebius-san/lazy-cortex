@@ -59,7 +59,7 @@ these conventions.
   - Avoid redundant sections when there is nothing meaningful to add.
   - Start section text with two spaces of indentation relative to the section title.
   - Limit the length of any text line to 117 characters.
-  - No LaTeX or math markup anywhere in Python source — docstrings and `Domain(...)` line comments alike. Forbidden in any docstring section and in any `Domain(...)` block: `$...$` / `$$...$$` inline and block math, `\(...\)` / `\[...\]` delimiters, and backslash commands (`\frac`, `\sum`, `\in`, `\leq`, `\geq`, `\cdot`, `\times`, `\alpha`–`\omega`, `\sqrt`, `\mathbb`, etc.). Write formulas in plain prose with backticked identifiers and unicode operators where needed (e.g. "the effective factor is `1 - r`, with `r` in `[-1, 1]`"). Source is read in the editor by humans and by Python tooling, neither of which renders math; producing Obsidian-compatible LaTeX from these plain-text formulas belongs to the markdown-assembly tooling, at build time.
+  - No LaTeX or math markup anywhere in Python source — docstrings and ALL comments alike: `Domain(...)` blocks, `Contract:` blocks, `Decision:` markers, and plain `#` comments. Forbidden in any docstring section and in any comment: `$...$` / `$$...$$` inline and block math, `\(...\)` / `\[...\]` delimiters, and backslash commands (`\frac`, `\sum`, `\in`, `\leq`, `\geq`, `\cdot`, `\times`, `\alpha`–`\omega`, `\sqrt`, `\mathbb`, etc.). Write formulas in plain prose with backticked identifiers and unicode operators where needed (e.g. "the effective factor is `1 - r`, with `r` in `[-1, 1]`"). Source is read in the editor by humans and by Python tooling, neither of which renders math; producing Obsidian-compatible LaTeX from these plain-text formulas belongs to the markdown-assembly tooling, at build time.
 
 ## Docstrings
 - Coverage: All classes, functions, methods, and properties must have docstrings.
@@ -559,16 +559,17 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 
 ## Domain Comments
 - Domain comments (`# Domain(group name):`) are special documentation comments that describe domain rules, mechanics, algorithms, or other domain-specific principles.
-- The **group name** in parentheses categorizes the comment by topic. **Always use an existing group already present in the codebase** (grep for `# Domain(` to discover existing groups). Do not invent new groups without explicit user approval.
+- The **group name** in parentheses categorizes the comment by topic. **Always use a group listed in the project's domain-groups dictionary** (`docs/guidelines/domain-groups.md` — a language-neutral project registry shared by every language's markers); the same dictionary lists the legal tags. Do not invent new groups without explicit user approval.
+- The group `unfiled` is **reserved**: it marks a block whose real group is not in the dictionary yet. It is never listed in the dictionary, and the checker flags every `Domain(unfiled)` block until the operator adds the real group and renames the block.
 - Domain comments explain **principles and concepts**, not method implementation details.
 - Domain comments must always be placed **inside methods or functions**, near the code that implements the described mechanic, or **at class body level** when documenting enum members, class-level constants, or weight mappings that are not tied to a single method. Never place Domain comments between class definitions, above class definitions, or at module level outside a class or function. When a constant or mapping is used by only one method, prefer placing the Domain comment inside that method.
 - Never describe what "this method does" or how the code works internally. Instead, describe the underlying domain mechanics, formulas, or rules that the code implements.
 - Focus on answering "what are the rules/principles?" rather than "what does the code do?"
 - **Never reference code constructs** (class names, method names, variable names, constants, module paths) in Domain comments. Domain comments describe domain concepts and rules in plain language, not code.
-- Domain comments are written for human reading and for future extraction tooling (none currently ships in this project).
+- Domain comments are written for human reading and for extraction: the wiki plugin's domain routine collects the blocks of one group and regenerates that group's document from them, so a block's wording is published prose, not a private note.
 - Format:
   - Start with `# Domain(group):` followed by optional tags in square brackets.
-  - The group name must be lowercase. It can be a single word (e.g., `mechanics`, `principles`, `algorithms`) or dot-separated for subcategories (e.g., `mechanics.fighting`, `mechanics.skills`). Dots are converted to subfolder separators in the generated documentation tree: `Domain(mechanics.fighting)` → `<Specs>/mechanics/fighting/`.
+  - The group name must be lowercase. It can be a single word (e.g., `mechanics`, `principles`, `algorithms`) or dot-separated for subcategories (e.g., `mechanics.fighting`, `mechanics.skills`). Dots lay the group out in the generated documentation tree: every segment but the last is a directory and the last is the document itself, under the configured output root (`docs/domains` unless the project sets its own) — `Domain(mechanics.fighting)` becomes the `fighting` document inside the `mechanics` directory.
   - Use `# #` for the title line.
   - Continue with `#` for the body text describing the principles.
 - Example format:

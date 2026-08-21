@@ -25,7 +25,7 @@ Each plugin addresses one of these pains without forcing you to adopt the others
 
 Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-model routing + settings management)
 
-29 skills, 8 agents, 5 hooks.
+31 skills, 8 agents, 6 hooks.
 
 See [`claude/lazycortex-core/`](claude/lazycortex-core/) for details.
 
@@ -43,7 +43,7 @@ See [`claude/lazycortex-diagram/`](claude/lazycortex-diagram/) for details.
 
 Generic lifecycle experts (interpreter, designer, planner, implementer, debugger, reviewer, tester) plus a fiction-writer agent, a starter set of domain aspects (claude-plugin, game-dev, dotfiles, obsidian-plugin, data-pipeline, sci-fi, fantasy), and two cross-cutting aspects (discipline, tech-writing). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
 
-1 skill, 9 agents.
+1 skill, 11 agents.
 
 Requires: lazycortex-core
 
@@ -73,7 +73,7 @@ See [`claude/lazycortex-obsidian/`](claude/lazycortex-obsidian/) for details.
 
 Python coding discipline as a plugin: shared rules + reference guidelines + chk/tst checkers + PostToolUse hook + docstring-writer/test-writer agents + canonical file template. Installs once per repo via /lazy-python.install.
 
-3 skills, 3 agents, 1 hook.
+4 skills, 5 agents, 1 hook.
 
 Requires: lazycortex-core
 
@@ -81,7 +81,7 @@ See [`claude/lazycortex-python/`](claude/lazycortex-python/) for details.
 
 ### lazycortex-review
 
-Pure-Python source-side review CLI. Drives mechanical doc-review state machine (parse / approval-marker sync / dispatch); experts run via lazycortex-core's expert runtime queue.
+Coordinator-driven markdown document review loop: a closed set of Python primitive verbs (parse-note / set-key / paint-banner / collect-job), an LLM coordinator that owns every decision from a prose playbook, and a git-watch wake plus an interval postman that carry commits and finished expert jobs back into the loop.
 
 8 skills, 2 agents.
 
@@ -93,9 +93,9 @@ See [`claude/lazycortex-review/`](claude/lazycortex-review/) for details.
 
 Specification and design skills for Claude Code
 
-22 skills, 1 agent.
+27 skills, 1 agent.
 
-Requires: lazycortex-core, lazycortex-diagram
+Requires: lazycortex-core, lazycortex-diagram, lazycortex-review
 
 See [`claude/lazycortex-specs/`](claude/lazycortex-specs/) for details.
 
@@ -103,7 +103,7 @@ See [`claude/lazycortex-specs/`](claude/lazycortex-specs/) for details.
 
 Maintains a curated, LLM-navigable semantic wiki over a markdown+code base — summaries, hierarchical topic tags, and glossed See-also links, kept in sync via git-watch and weekly full-scan routines.
 
-5 skills, 3 agents.
+9 skills, 6 agents.
 
 Requires: lazycortex-core
 

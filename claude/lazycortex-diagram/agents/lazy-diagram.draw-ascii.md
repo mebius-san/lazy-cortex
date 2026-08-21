@@ -1,7 +1,7 @@
 ---
 name: lazy-diagram.draw-ascii
 description: "Dispatched by /lazy-diagram.draw or /lazy-diagram.fix once kind and format are settled; dispatch it directly only when you have ALREADY chosen format=ascii and kind=<one of: flow, fs-tree, layout> — it never infers either. Single-pass writer: its whole response is the ASCII diagram body, without the surrounding triple-backticks."
-tools: Read, Glob, Grep
+tools: Read, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response writer; output IS the return value, no multi-step process"
 ---

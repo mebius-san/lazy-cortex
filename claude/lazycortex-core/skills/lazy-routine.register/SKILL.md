@@ -1,7 +1,7 @@
 ---
 name: lazy-routine.register
-description: "Run when the daemon should start doing something on its own — the operator asks to schedule recurring work, watch an inbox directory, react to local git HEAD, or scan markdown files by frontmatter. Also dispatched by plugin install skills (`spec.install`) to wire their own routines instead of hand-writing settings JSON. Type-aware wizard; refuses to overwrite an existing routine without `--force`."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(git check-ignore *), Write, AskUserQuestion
+description: "Run when the daemon should start doing something on its own — the operator asks to schedule recurring work, watch an inbox directory, react to local git HEAD, or scan markdown files by frontmatter. Also dispatched by plugin install skills (`lazy-spec.install`) to wire their own routines instead of hand-writing settings JSON. Type-aware wizard; refuses to overwrite an existing routine without `--force`."
+allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(git check-ignore *), Write, AskUserQuestion, Agent
 dirty-tree-waiver: "registers a routine in lazy.settings.json — operator commits explicitly to coordinate with sibling routines / install steps"
 ---
 # Routine Register
@@ -52,14 +52,20 @@ Every type ends with the same EITHER/OR question — `command` (list) OR `expert
 - **subprocess** — `interval_sec` (int), `timeout_sec?` (int). Then EITHER `command` OR `expert` + `request`.
 - **inbox** — `inbox_dir` (path relative to repo), `interval_sec`, `timeout_sec?`. Then EITHER `command` OR `expert` + `request`. With `expert + request`: files are moved into job staging; with `command`: files stay in the inbox until the consumer removes them.
 - **schedule** — `cron` (5-field expression). Then EITHER `command` OR `expert` + `request`.
-- **git** — `repo_dir?` (default `.`), `remote?` (vestigial/ignored — remote sync is the daemon's job; accepted for schema compatibility but has no effect on the watch), `branch` (vestigial — the watch target is always local HEAD; the field is retained in the schema for legacy round-trip compatibility), `watch` (one of `new_commits` / `new_files` / `changed_files` / `deleted_files` / `renamed_files`), `path_filter?`, `interval_sec`. Then EITHER `command` OR `expert` + `request`.
+- **git** — `repo_dir?` (default `.`), `remote?` (vestigial/ignored — remote sync is the daemon's job; accepted for schema compatibility but has no effect on the watch), `branch` (vestigial — the watch target is always local HEAD; the field is retained in the schema for legacy round-trip compatibility), `watch` (one of `new_commits` / `new_files` / `changed_files` / `deleted_files` / `renamed_files`), `path_filter?`, `filter?` (same composite frontmatter block md-scan takes), `group_globs?` (ordered list of directory globs; file items whose path sits strictly below a matching glob collapse into one item per matched dir — carrying `dir` + sorted member `paths` — instead of one item per file; not valid with `new_commits`), `interval_sec`. Then EITHER `command` OR `expert` + `request`.
 - **md-scan** — `paths` (list of vault-relative globs, e.g. `["requests/*.md"]`), `filter` (optional composite filter block; e.g. `{"frontmatter": {"request_status": {"in": [null, "draft"], "not_in": []}}}`; `null` in `in` matches a missing key or explicit null), `interval_sec`, `timeout_sec?`. Then EITHER `command` OR `expert` + `request`. No file move — the consumer gets the absolute path of each match and edits in place.
+
+Three common fields are asked for every type, after the type-specific ones:
+
+- `hooks_enabled?` (list of lazycortex hook short names) — which hooks may run inside this routine's own subprocesses. Default empty: the daemon exports an empty allow-list and every lazycortex hook stays silent, which is what keeps a tree-writing hook from dirtying the worktree behind an autonomous commit. Ask only when the operator says the routine needs one.
+- `ignore_halt?` (bool, default false) — let the routine tick while the daemon is halted. It also skips the post-tick working-tree check for that routine, so offer it only for work whose whole point is clearing a stuck state.
+- `git_author?` (`{name, email}`) — the bot identity stamped on any commits the routine's own subprocess makes (exported as `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`). Offer it whenever the routine's `command:` consumer commits; canonical form is `{name: <routine-family>, email: <routine-family>@bot.invalid}` — never the operator's identity, and never a domain other than `@bot.invalid` (loop-detect and coordinator operator-vs-bot checks key on it). Absent = the routine commits under the daemon process's identity.
 
 Build a single `cfg` dict carrying `type` + the collected fields.
 
 ### 1c. Pre-flight validation
 
-1. `name` matches `<plugin>.<verb>` (exactly one dot, both parts non-empty). Else abort: "routine names must be `<plugin>.<verb>` format. Got: `<name>`."
+1. `name` matches `<plugin>.<verb>` or `<plugin>.<verb>.<scope>` (two or three non-empty dot-separated parts). `<plugin>` is the plugin's own namespace — `lazy-wiki`, `lazy-core`, and so on per `lazy-core.hygiene` § Naming; the third segment exists for routines registered per scope, one instance each (`lazy-wiki.mirror-sync.<scope-id>`). Else abort: "routine names must be `<plugin>.<verb>[.<scope>]` format. Got: `<name>`."
 2. Call `validate_routine_entry(name, cfg)` to enforce the per-type schema. On `RoutineConfigError`, abort with the message verbatim.
 3. **Working-area gitignore check** — for `inbox` routines, run `git check-ignore -q -- <inbox_dir>` (the `--` is mandatory: an inbox directory whose name starts with a dash, e.g. `-Inbox`, is otherwise parsed as options and git fails with `unknown switch`). Exit 0 = ignored. Exit 1 = tracked → ask via `AskUserQuestion`: > `<inbox_dir>` is not gitignored. Inbox routines move tracked files between iterations, which dirties the working tree and triggers the daemon's halt protection. > - Add `<inbox_dir>/` to `.gitignore` now (recommended) > - Continue anyway — I will commit moves manually > - Abort registration
 

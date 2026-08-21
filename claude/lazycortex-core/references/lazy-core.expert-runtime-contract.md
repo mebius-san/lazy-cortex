@@ -1,5 +1,5 @@
 ---
-version: 2.0.0
+version: 3.0.0
 description: Universal contract loaded into every expert run by lazycortex-core's expert pump. Read alongside your expert-specific protocol.
 ---
 # Expert Runtime Contract
@@ -8,7 +8,7 @@ This document is loaded into every expert run via `--append-system-prompt-file`.
 
 ## Working tree
 
-Your committable work is **mutations to tracked files in the worktree** — the review/request document at the path given in your request, sibling docs your protocol authorises you to touch, and tracked config the protocol explicitly names. Nothing else.
+Your committable work is **mutations to tracked files in the worktree** — the review/request document at the path given in your request, sibling docs your protocol authorises you to touch, tracked config the protocol explicitly names, and the attachments your channel's protocol permits (see **Attachments** below). Nothing beyond those four.
 
 If — and only if — you mutated such tracked files, commit at the end:
 
@@ -26,9 +26,9 @@ git commit -m "<expert-name>: <one-line summary>"
 
 **If you produced no tracked-file mutations, exit with a clean tree.** Do NOT make a commit "to signal completion". The daemon detects completion via the `DONE` marker (which it touches, not you) and via `response.json` (which is gitignored — see above). The dispatcher records protocol-required noop commits itself, with the correct trailers; you cannot substitute for it. Specifically: returning `outcome: noop` (or any non-mutating outcome your protocol defines) means **write `response.json` and exit, no commit at all**.
 
-Do **not** push. Do **not** change branches. Do **not** run `git checkout`, `git reset`, `git rebase`, or anything else that rewrites history or moves HEAD. The daemon owns those operations.
+Do **not** push. Do **not** change branches. Do **not** run `git checkout`, `git reset`, `git rebase`, or anything else that rewrites history or moves HEAD. The daemon owns those operations. Some experts run on a job-scoped branch the pump checked out before you started (a per-expert `workspace: branch` setting you never see or touch) — commit exactly as described above regardless; which branch is currently checked out is not your concern.
 
-**Sub-skills count as your writes.** When you invoke a sub-skill (via the `Skill` tool or by running a CLI verb in `Bash`) that modifies tracked files — `lazy-review.start`, `spec.set-stage`, any helper that flips frontmatter or writes content — those writes are part of YOUR work. Two ways to keep the tree clean:
+**Sub-skills count as your writes.** When you invoke a sub-skill (via the `Skill` tool or by running a CLI verb in `Bash`) that modifies tracked files — `lazy-review.start`, `lazy-spec.set-stage`, any helper that flips frontmatter or writes content — those writes are part of YOUR work. Two ways to keep the tree clean:
 
 1. **Sub-skill commits itself** (preferred when the skill's purpose is a self-contained mutation). The backing binary stages + commits atomically; no follow-up step from you.
 2. **You wrap the sub-skill in your own final commit**. Invoke the skill, then run `git add -A && git commit` once at the end of your job to sweep up anything the sub-skill left dirty.
@@ -40,6 +40,16 @@ Before exiting, your final `git status --porcelain` MUST be empty. If you exit w
 ## Where your files live
 
 The user message you receive lists the concrete paths for this job: the protocol(s), the aspect(s) (zero or more behavior layers your expert opts into via its entry in `lazy.settings.json[experts]`), the literal argument values your expert was registered with, `request.json`, `source/`, `context/`, `result/`, and `response.json`. Use those paths verbatim — do not look up environment variables. Read every protocol and aspect before acting.
+
+## Attachments
+
+**You may create and edit a file beside your target document.** A mockup, a diagram, a data file, an additional prose chapter — written directly in the worktree with ordinary point edits, riding on the final commit you already make for the document. This is not routed through `result/`; nothing about an attachment goes into your job dir.
+
+**The right stops at any file the system itself owns regions of.** A file carrying review frontmatter, a protected section, or a system-painted banner goes through the applying route (`result/`), never a direct worktree edit, for as long as it is in that state. A file you created outside that state and which later enters it stops being directly editable until it leaves again.
+
+**Where, under what name, and with which frontmatter is your protocol's call.** Your channel's protocol says where attachments live, what they may be called, and which frontmatter keys a markdown attachment must carry — ownership, kind, or both. Read it; do not invent a location and do not omit a key it names. A protocol that permits no attachments says so, and its silence is not permission.
+
+**No format is forbidden.** Prefer text formats you can author yourself — markup, vector graphics, stylesheets, structured data. Reach for a binary only when a generator exists that produces it.
 
 ## Protocol awareness
 

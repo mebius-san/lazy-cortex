@@ -44,11 +44,11 @@ After making code changes, **always** verify in this exact order:
 
 Do not run tests before lint and type-check are clean — typing errors mask test failures and create wasted iteration.
 
-4. **Guideline review**: run the reviewer phase after the tests pass — it covers what no checker can (comment density, block structure, naming semantics, guideline conformance):
+4. **Guideline review**: run the reviewer phase once the tests pass — it covers what no checker can (comment density, block structure, naming semantics, guideline conformance):
    ```bash
    ./cli/chk-py review
    ```
-   See `## Guideline review phase` below.
+   Unlike steps 1-3, this one does not belong in the edit loop: it runs at the end of a logical piece of work, and is mandatory at the end of a full cycle of planned work. See `## Guideline review phase` below.
 
 ## Never disable or relax checker rules without explicit approval (MANDATORY)
 
@@ -66,12 +66,19 @@ When a checker complains: fix the root cause. If the code is right and the check
 
 `chk review` is the LLM-side counterpart to the deterministic checkers. `pcf` and `toi` validate what an AST walk can prove; the review phase validates what it cannot — whether a purpose comment actually states a purpose, logical-block separation, naming semantics by prefix, guideline conformance of new or changed code.
 
+**The phase is not part of `chk all`.** One dispatch carries the whole guideline canon — canon, project overlay, every applicable rule file — regardless of how many files it judges, so the cost is fixed per run rather than per reviewed file. Running it inside the edit loop pays that fixed cost on every batch and re-reviews the same file as often as it is touched; batching the scope pays it once. The cadence that follows from this:
+
+- **Recommended**: at the end of a logical piece of work, and after a subagent cycle that produced a substantial amount of Python.
+- **Mandatory**: at the end of a full cycle of planned work — the last step of a plan, before the plan is reported complete.
+- A green `chk all` is not evidence that the review ran. Nothing in the deterministic pipeline covers these rules.
+
 The purpose-comment rule is split across the two halves. **Presence** is structural and belongs to `pcf`: its `check_block_comments` check (on by default, `[tool.pcf] check_block_comments = false` to disable) flags any block inside a function body whose first line after the blank separator is not a comment, counting `# waiver:` / `# noqa` / `# type:` / `# pylint:` / `# fmt:` / `# noinspection` as directives rather than purpose comments. **Meaningfulness** stays with the review phase: a mechanical presence gate cannot tell `# advance past the header` from `# return the result` above `return result`, and under pressure it breeds the latter. A repo that goes green on `pcf` still needs the review pass over the comments it just grew.
 
-- `chk review` builds a manifest (changed files + every applicable guideline layer) and prints the dispatch directive for the `lazy-python.code-reviewer` agent. It does not call the agent itself; it exits `2` while the review is pending, which fails `chk all` and any pre-commit or CI job that runs it.
+The source-language rule is checked the same way, and needs the same second half. `pcf`'s `check_language` check (on by default) reads `[tool.pcf] allowed_languages` — a list of language names, default `["english"]` — and reports any letter in a comment or a docstring belonging to no listed language. Admission is by unicode script, so one entry covers every language written in that script and `russian`, `greek`, `arabic`, `chinese`, `japanese`, `korean` and their siblings are available by name; an unrecognised name narrows the check rather than widening it. Punctuation, digits, symbols, and separator-line drawing belong to no script and always pass, and **string literals are never scanned** — a quoted foreign word is data the code handles. One finding per line names the first offending letter; `# waiver: <reason>` above the line exempts it. What the checker cannot see is prose that is grammatically English but reads as a transliteration, which stays the review phase's call.
+
+- `chk review` builds a manifest (changed files + every applicable guideline layer) and prints the dispatch directive for the `lazy-python.code-reviewer` agent. It does not call the agent itself; it exits `2` while the review is pending, which fails any CI job that runs it.
 - **A pending review is a decision, not a status line.** Exit `2` means the scope has been manifested and nobody has reviewed it yet. Resolve it by dispatching the named agent and rendering its findings, or — when dispatching is not possible in the current context — by asking the operator what to do with this scope. Neither an agent-dispatch prohibition nor a green checker run is grounds for passing over it silently; report the blocker and ask.
-- `CHK_REVIEW=skip` opts a single run out of the phase (exit 0, no manifest) for callers that are in no position to act on a pending review — nested writer agents, a scripted sweep. It records no decision and must never be used to clear a review the operator has not waived.
-- Default scope with no arguments: the current diff against `HEAD` plus untracked `*.py`. With arguments: the given paths.
+- Default scope with no arguments: the current diff against `HEAD` plus untracked `*.py`. With arguments: the given paths. `--base <ref>` diffs against that ref instead of `HEAD`, so a unit of work that landed intermediate commits is reviewed whole rather than from its last commit; an unresolvable ref fails the run instead of silently reporting an empty scope.
 - The agent writes its findings back as JSON; `chk review --render <findings.json>` prints them in the same severity format as `pcf` and exits non-zero on the highest severity found. A `FAIL` finding blocks the commit exactly as a `pcf` FAIL does; a `WARN` does not.
 - `CHK_REVIEW=headless` makes `chk review` invoke the agent itself (`claude -p`) and render in one pass — for CI, opt-in, never the default.
 

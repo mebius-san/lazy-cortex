@@ -1,0 +1,12 @@
+{
+  "tool_types": {
+    "code": { "playbook": "lazycortex-specs:lazy-spec.tool-code-playbook",
+              "report_doc": "code-report", "plan_doc": "code-plan" },
+    "data": { "playbook": "lazycortex-specs:lazy-spec.tool-data-playbook",
+              "report_doc": "data-report" },
+    "test": { "playbook": "lazycortex-specs:lazy-spec.tool-test-playbook",
+              "report_doc": "test-report", "plan_doc": "test-plan" },
+    "docs": { "playbook": "lazycortex-specs:lazy-spec.tool-docs-playbook",
+              "report_doc": "docs-report" }
+  }
+}

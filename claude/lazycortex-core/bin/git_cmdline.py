@@ -65,6 +65,11 @@ class GitSegment:
   """
   One `git <verb>` invocation extracted from a Bash command line.
 
+  Guarantees:
+    - No pathspec is ever misread as an option's value: every token following a bare `--`
+      lands here verbatim regardless of its own shape, and a short option that does not accept
+      a value never consumes the token that follows it as that value.
+
   Attributes:
     verb: The git subcommand (`add`, `commit`, `rm`, `mv`, `reset`, ...); empty when the
       invocation carried no subcommand at all.
@@ -78,6 +83,12 @@ class GitSegment:
   """
   verb: str
   flags: tuple[str, ...]
+
+  # Contract:
+  # No pathspec is ever misread as an option's value: every token following a bare `--` lands
+  # here verbatim regardless of its own shape, and a short option that does not accept a value
+  # never consumes the token after it as that value — that token stays a pathspec.
+
   pathspecs: tuple[str, ...]
   repo_dir: str | None = None
 
@@ -102,6 +113,17 @@ def _elide_substitutions(command: str) -> str:
     unbalanced substitution is left verbatim so tokenisation still fails and the caller fails
     closed.
   """
+
+  # Domain(guard.git-staging):
+  # # Command substitution is opaque to the invoking command
+  # A command substitution is expanded by the shell before the invoked program ever sees it, and the
+  # result always arrives as a single word regardless of the punctuation, quoting, or newlines the
+  # substitution's own body contains. Any analysis of a command line for the invocations it carries can
+  # treat a substitution as one opaque placeholder word without losing information relevant to
+  # classifying the invocation — only its presence matters, never its contents. This covers the common
+  # pattern of building a long message from a substituted here-document, which would otherwise defeat
+  # any attempt to split the command line into words.
+
   out: list[str] = []
   i = 0
   while i < len(command):
@@ -250,6 +272,21 @@ def _strip_global_options(tokens: list[str]) -> tuple[list[str], str | None]:
     matters because it names the repository the command actually targets, which need not be the
     one the caller is standing in.
   """
+
+  # Domain(guard.git-staging):
+  # # Global option value binding
+  # Some options that appear before the subcommand name take a value from the very next word on the
+  # command line; others are switches that carry no value at all. Telling the two apart is required to
+  # locate where the subcommand name itself begins, since a value word must never be mistaken for the
+  # subcommand, and a switch must never be treated as consuming the word that follows it.
+
+  # Domain(guard.git-staging):
+  # # Explicit repository targeting overrides the working directory
+  # When an invocation names an explicit target repository or working tree, it operates against that
+  # named location instead of the directory the caller currently stands in. Any judgment about what the
+  # invocation actually affects, including whether it touches a shared index at all, must be made
+  # against the named target, never assumed to be the caller's own working directory.
+
   rest = tokens[1:]
   repo_dir: str | None = None
   i = 0
@@ -283,6 +320,13 @@ def _consume_options(tokens: list[str]) -> tuple[tuple[str, ...], tuple[str, ...
     `pathspecs` holds the positional arguments in command order. Everything after a bare `--`
     is a pathspec regardless of its shape.
   """
+
+  # Domain(guard.git-staging):
+  # # Long option value binding
+  # A long option's value can be attached to the same word with an equals sign, or given as the
+  # following word. When the value is attached, no further word belongs to that option; when it is not,
+  # the very next word is consumed as the value rather than treated as a positional argument.
+
   flags: list[str] = []
   paths: list[str] = []
   i = 0
@@ -318,6 +362,17 @@ def _consume_short_cluster(tok: str, flags: list[str]) -> int:
     The number of tokens the cluster consumes — 2 when a value-taking option ends the cluster
     without an attached value, 1 otherwise.
   """
+
+  # Domain(guard.git-staging):
+  # # Short option clusters and their value binding
+  # Several single-letter switches can be bundled into one dash-prefixed word. Within such a cluster,
+  # only the specific letters that accept a value ever consume one, and only when that letter is the
+  # last member of the cluster — the value is either the remainder of the same word or the following
+  # word. A handful of legal short options in this family never take their value from a following word
+  # at all; the underlying command-line syntax only accepts their value attached to the same word.
+  # Excluding those letters from the value-consuming set keeps a word that follows one of them
+  # classified as an ordinary positional argument rather than being swallowed as that option's value.
+
   for pos, ch in enumerate(tok[1:], start = 1):
     flags.append(f"-{ch}")
     # guard: this option takes a value — attached remainder, else the following token
@@ -332,6 +387,13 @@ def parse_segments(command: str) -> list[GitSegment] | None:
   """
   Extract every `git <verb>` invocation from a Bash command line.
 
+  Guarantees:
+    - Every git invocation on the command line is represented exactly once, in the same
+      left-to-right order the invocations appear in the command; none is dropped, merged with
+      a neighboring invocation, or reordered.
+    - Never raises and never returns a partial or best-effort result on unparsable input: when
+      the command line cannot be tokenised, parsing returns None so the caller can fail closed.
+
   Args:
     command: The raw Bash command as delivered by Claude Code.
 
@@ -339,10 +401,24 @@ def parse_segments(command: str) -> list[GitSegment] | None:
     One `GitSegment` per git invocation, in command order — empty when the command invokes no
     git at all. None when the command cannot be tokenised, so the caller can fail closed.
   """
+
+  # Contract:
+  # A malformed command line never raises and never yields a partial or best-effort segment
+  # list. Whenever the line cannot be tokenised — unbalanced quotes, or an unterminated command
+  # substitution or backtick — parsing refuses outright and returns None, so the caller can fail
+  # closed instead of acting on an incomplete read of the command.
+
   chunks = _chunks(command)
   # guard: command could not be tokenised — caller must fail closed
   if chunks is None:
     return None
+
+  # Contract:
+  # Every git invocation present in the command line is returned exactly once, in the same
+  # left-to-right order the invocations appear in the command. No invocation is dropped, merged
+  # with a neighboring one, or reordered.
+
+  # accumulate one segment per git invocation found in the command
   segments: list[GitSegment] = []
   for tokens in chunks:
     # guard: invocation is not git
@@ -370,6 +446,10 @@ def is_indexful_commit(segment: GitSegment) -> bool:
   is not classified here — an amend may legitimately reword the previous commit against a clean
   index, which only the caller can check.
 
+  Guarantees:
+    - Never classifies `--amend` on its own; a rewrite of the previous commit without a pathspec
+      is judged only by `is_amend`, a separate and independent call.
+
   Args:
     segment: A parsed segment whose `verb` is `commit`.
 
@@ -377,6 +457,23 @@ def is_indexful_commit(segment: GitSegment) -> bool:
     True when the commit would sweep in foreign staged content, False when every committed path
     is named explicitly.
   """
+
+  # Contract:
+  # This predicate NEVER classifies `--amend`. A commit that rewrites the previous commit
+  # without naming a pathspec is not reported as indexful by this function; a caller that cares
+  # about amend semantics MUST call `is_amend` separately — the two judgments are independent
+  # and neither implies the other.
+
+  # Domain(guard.git-staging):
+  # # What makes a commit indexful
+  # A commit is indexful — capable of sweeping in content the caller never explicitly named — under any
+  # of three conditions: it folds the whole index or the whole working tree into the snapshot regardless
+  # of what was staged, it names a pathspec covering the entire tree (equivalent to naming nothing), or
+  # it names no pathspec at all, which commits whatever already sits in the index. Rewriting the previous
+  # commit is not judged by this criterion on its own — doing so without a pathspec can be a legitimate
+  # reword against an already-clean index, and only the caller, not the command line alone, can know
+  # whether the index was clean beforehand.
+
   # guard: -a / -i fold the whole index or worktree into the snapshot
   if any(f in _INDEXFUL_COMMIT_FLAGS for f in segment.flags):
     return True
@@ -397,6 +494,16 @@ def adds_content(segment: GitSegment) -> bool:
     True for any form that writes content into the index; False for the intent-to-add form,
     which records the path without its content.
   """
+
+  # Domain(guard.git-staging):
+  # # Intent-to-add registers a path without its content
+  # Staging a new path does not always mean staging that path's content. One staging form only records
+  # that the path now exists — the file becomes tracked, but none of its bytes enter the shared index —
+  # while every other staging form copies the file's current content into the index immediately. The
+  # distinction matters wherever the concern is what content a shared index actually carries: the
+  # registration-only form is safe to perform freely, while every other form commits real bytes that
+  # another party did not necessarily intend to share yet.
+
   return not any(f in _INTENT_TO_ADD_FLAGS for f in segment.flags)
 
 
@@ -404,10 +511,21 @@ def is_amend(segment: GitSegment) -> bool:
   """
   Report whether a segment carries the amend flag.
 
+  Guarantees:
+    - Says nothing about whether the commit is indexful; call `is_indexful_commit` separately
+      to determine that — the two judgments are independent.
+
   Args:
     segment: A parsed segment.
 
   Returns:
     True when the segment rewrites the previous commit rather than creating a new one.
   """
+
+  # Contract:
+  # This predicate says nothing about whether the commit is indexful. A caller that needs that
+  # judgment MUST call `is_indexful_commit` separately — the two judgments are independent and
+  # neither implies the other.
+
+  # report whether the amend flag is present
   return any(f in AMEND_FLAGS for f in segment.flags)

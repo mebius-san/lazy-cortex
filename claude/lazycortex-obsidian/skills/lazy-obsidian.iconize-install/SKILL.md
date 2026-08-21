@@ -1,8 +1,8 @@
 ---
 name: lazy-obsidian.iconize-install
-description: "Run when the operator asks to set up folder and file icons in this Obsidian vault, or when `/lazy-obsidian.iconize-sync` refuses because the icon-map is missing, the pre-commit shim isn't installed, or the Iconize / folder-notes / iconize-reloader vault plugins aren't there. Scaffolds the vault-side pieces (icon-map, shim, gitignore entry, schema migration) and installs those three plugins. Chained from `/lazy-obsidian.install`; idempotent, and must be run from the vault's git root."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(git -C *), Bash(chmod *), Bash(python3 *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), Bash(jq *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList
-argument-hint: "[repo=<abs>] [--dry-run] — scaffolds into <repo-root>/.claude/ and <repo-root>/.githooks/ (repo= sets the target under headless dispatch)"
+description: "Run when the operator asks to set up folder and file icons in this Obsidian vault, or when `/lazy-obsidian.iconize-sync` refuses because the icon-map is missing, or the Iconize / folder-notes / iconize-reloader vault plugins aren't there. Scaffolds the vault-side pieces (icon-map, gitignore entry, schema migration, repaint routine) and installs those three plugins. Chained from `/lazy-obsidian.install`; idempotent, and must be run from the vault's git root."
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(git -C *), Bash(chmod *), Bash(python3 *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), Bash(jq *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent
+argument-hint: "[repo=<abs>] [--dry-run] — scaffolds into <repo-root>/.claude/ (repo= sets the target under headless dispatch)"
 ---
 # Install iconize-sync (Obsidian)
 
@@ -14,7 +14,7 @@ Project-local only. There is no global scope — iconize-sync is inherently per-
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 14 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 15 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Locate repo root and vault`
@@ -23,11 +23,13 @@ This skill has 14 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 1.5c — Install/update iconize-reloader (bundled)`
    - `Step 2 — Detect legacy protocol doc`
    - `Step 2.5 — Detect legacy PostToolUse entries`
+   - `Step 2.55 — Remove the legacy pre-commit shim`
    - `Step 2.6 — Assert Iconize frontmatter-feature settings`
    - `Step 2.7 — Icon-map scaffold (schema-aware, file-sync policy)`
-   - `Step 3 — Install the pre-commit shim`
+   - `Step 3.5 — Register the repaint routine`
    - `Step 4 — Create callbacks dir`
    - `Step 4.5 — Ensure iconize data.json is gitignored`
+   - `Step 4.6 — Report visible plugin registries`
    - `Step 5 — Verify`
    - `Step 6 — Report`
    - `Step 7 — Log the run`
@@ -39,14 +41,13 @@ This skill has 14 ordered steps. The executing agent MUST NOT skip, merge, reord
 
 The PostToolUse hook is now **plugin-shipped**: it lives in `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` and is auto-loaded by Claude Code when the plugin is enabled. This skill no longer mutates the consumer's `.claude/settings.json`. The hook self-gates on presence of `.claude/iconize/obsidian-icon-map.json` — so enabling the plugin in a vault that hasn't opted in is a no-op.
 
-The pre-commit shim **still lives in the consumer's `.githooks/`** — git has no plugin awareness. The shim resolves the plugin at exec time (no baked path).
+There is no pre-commit shim any more: commit-time repaint belongs to the `lazy-obsidian.repaint` daemon routine (Step 3.5), and a batch that bypassed the PostToolUse hook is caught by an operator-run `reconcile-dirty`.
 
 ## Artifacts scaffolded
 
 | Artifact | Target path | Source |
 |---|---|---|
 | Icon-map | `.claude/iconize/obsidian-icon-map.json` | `${CLAUDE_PLUGIN_ROOT}/templates/iconize/obsidian-icon-map.json` |
-| Pre-commit shim | `.githooks/pre-commit` | Rendered from `pre-commit-shim.sh` via the worker's `install-hooks` |
 | Callback dir (empty) | `.claude/callbacks/` | Created empty; user drops executables here |
 
 The plugin no longer scaffolds a vault-local protocol doc. The single canonical home is `${CLAUDE_PLUGIN_ROOT}/references/lazy-obsidian.iconize-protocol.md` (cited by the worker and by icon-map matchers). Step 2 below migrates legacy installs by deleting any pre-1.0.0 vault-local copy.
@@ -58,7 +59,7 @@ The plugin no longer scaffolds a vault-local protocol doc. The single canonical 
   - **Interactive** — no `repo=` in the prompt: `<repo-root>` = `git rev-parse --show-toplevel` (cwd is the vault the operator is standing in).
 - Vault (`<vault>`): walk from `<repo-root>` looking for `.obsidian/` (usually `<repo-root>` itself). If none found, abort with a message telling the user to initialize Obsidian first.
 
-Every mutating command below MUST target `<repo-root>` / `<vault>` explicitly (`--vault <vault>`, `git -C <repo-root>`, absolute `<repo-root>/…` paths) — never a cwd-relative path or a cwd walk-up. Only the git/Claude-run hook entrypoints (the pre-commit shim, PostToolUse, Stop) are allowed to resolve the vault from cwd, because there cwd is guaranteed to be the repo.
+Every mutating command below MUST target `<repo-root>` / `<vault>` explicitly (`--vault <vault>`, `git -C <repo-root>`, absolute `<repo-root>/…` paths) — never a cwd-relative path or a cwd walk-up. Only the Claude-run hook entrypoint (PostToolUse) is allowed to resolve the vault from cwd, because there cwd is guaranteed to be the repo.
 
 ## Step 1.5 — Install/update hard-dependency plugins
 
@@ -98,6 +99,16 @@ Orphans are left in place silently — never deleted, never prompted. The consum
 3. If one or more legacy groups are found → leave them untouched. Outcome: **kept-orphan** (count). The report names the file + path so the user can strip them manually. If none found → Outcome: **not-present**.
 
 Never mutate `settings.json` in this step.
+
+## Step 2.55 — Remove the legacy pre-commit shim
+
+Plugin versions ≤ 2.x installed a pre-commit shim at `.githooks/pre-commit` and pointed `core.hooksPath` at `.githooks`. v3.0.0 retires the shim — commit-time repaint belongs to the `lazy-obsidian.repaint` routine, and the shim's `sync-staged` subcommand no longer exists, so a leftover shim fails (silently, `exit 0`) on every commit.
+
+Unlike the orphans in Steps 2 / 2.5, the shim is deleted, not kept: the `HOOK_VERSION:` marker proves the file is ours verbatim (the install always copied the template without customization seams), and after 3.0.0 it can only misfire.
+
+1. Read `<repo-root>/.githooks/pre-commit`. Absent → Outcome: **not-present**.
+2. Present without a `HOOK_VERSION:` marker → not ours; leave untouched. Outcome: **kept-foreign**.
+3. Present with the marker → delete the file. If `.githooks/` is now empty AND `git -C <repo-root> config core.hooksPath` returns `.githooks`, unset it (`git -C <repo-root> config --unset core.hooksPath`) and remove the empty dir. Outcome: **legacy-shim-removed** (append **hooksPath-unset** when the config was cleared).
 
 ## Step 2.6 — Assert Iconize frontmatter-feature settings
 
@@ -171,19 +182,56 @@ Cases 1–5 below operate on `<repo-root>/.claude/iconize/obsidian-icon-map.json
 
 The only prompts this step raises are the per-key value-conflict prompts in case 2 (and the single can't-reconcile prompt in case 3a). A clean install (case 1), a no-op (case 2 byte-identical), a non-contradicting merge (case 2 with no value conflicts), a path move (case 0), and a schema transform (case 3) are all silent. Never raise a generic overwrite/keep-local drift prompt — bytes differing is not a conflict; only the same key carrying incompatible values on both sides is.
 
-## Step 3 — Install the pre-commit shim
+## Step 3.5 — Register the repaint routine
 
-Invoke the plugin worker's `install-hooks` subcommand. This writes the pre-commit shim to `.githooks/pre-commit`. No consumer `settings.json` mutation happens here (the PostToolUse hook is plugin-shipped; see architecture note above).
+Commit-time repaint reacts to the commit instead of riding inside it: a pre-commit rewrite
+would leave frontmatter dirty behind the commit it fired on, which under the daemon halts
+the whole runtime.
+
+Skip the whole step when this repo runs no daemon (`daemon` absent from `lazy.settings.json`).
+Outcome: **no-daemon**.
+
+Register through `lazy-routine.register` (never by hand-editing the registry):
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py --vault <vault> install-hooks
+Skill(skill: "lazycortex-core:lazy-routine.register", args: "lazy-obsidian.repaint --type git")
 ```
 
-Then reconcile `core.hooksPath`:
+Answer its wizard with: `watch` = `new_commits`, `branch` = the repo's own default branch,
+`interval_sec` = `60`, `command` = `["lazycortex-obsidian", "reconcile-commit"]`, no `path_filter`
+and no `filter` — a matcher callback can key on a non-markdown file, so narrowing the trigger
+would silently drop repaints. Set `ignore_halt: true`: the routine must run precisely when a
+dirty tree has stopped everything else, since that dirt is what it clears.
 
-- **Unset** → `git -C <repo-root> config core.hooksPath .githooks` silently (clean apply — nothing local to contradict). Outcome: **set**.
-- **Already `.githooks`** → no-op. Outcome: **already-set**.
-- **Set to some OTHER path** → genuine conflict: the user points git at a different hooks dir and the pre-commit shim won't fire from `.githooks`. This is the ONLY case that prompts. `AskUserQuestion`: **set-hooksPath** (repoint to `.githooks`) / **keep-local** (leave the user's path; warn the shim won't run until they wire it in). Outcome: **set** / **kept-local**.
+If the routine is already registered, leave it. Outcome: **registered** / **already-present** /
+**no-daemon**.
+
+The routine's commits carry the bot identity `lazy-obsidian.repaint` /
+`lazy-obsidian.repaint@bot.invalid` (plus a `Lazy-Bot: lazy-obsidian.repaint` trailer). Sibling
+coordinators (lazycortex-review) recognise system authors by walking the `experts` entries in
+`lazy.settings.json`, so seed a minimal identity entry there — non-destructive, skip when the
+key already exists:
+
+```json
+"experts": {
+  "lazy-obsidian.repaint": {
+    "git_author": { "name": "lazy-obsidian.repaint", "email": "lazy-obsidian.repaint@bot.invalid" }
+  }
+}
+```
+
+Without it every repaint commit reads as an operator edit and needlessly wakes the review
+coordinator on documents under review. Outcome: **identity-seeded** / **identity-present**.
+
+Then paint what predates the routine. A git-watch routine records the current HEAD on its first
+tick and dispatches nothing for history, so every note committed before this moment would keep
+whatever icon it has forever:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py --vault <vault> reconcile
+```
+
+Commit the paths it reports. Outcome: **backfilled-<count>** / **backfill-clean**.
 
 ## Step 4 — Create callbacks dir
 
@@ -208,15 +256,22 @@ Because this step runs only inside `iconize-install`, the opt-in is implicit: th
 
 Idempotent: re-running reports **already-ignored** every time after the first write. This is the only `.gitignore` line the skill manages — it never touches other entries.
 
+## Step 4.6 — Report visible plugin registries
+
+Plugin-shipped iconize registries (`claude/<plugin>/references/<ns>.iconize-registry.json`, see `${CLAUDE_PLUGIN_ROOT}/references/lazy-obsidian.iconize-registry-contract.md`) are **never merged into the icon-map** — the worker discovers and composes them live on every run. This step only shows the operator which registries the worker will see from here.
+
+Enumerate them the way the worker does: walk each root in `$LAZYCORTEX_PLUGIN_DIRS` (when set) or `<vault>/claude/*` (dev-vault fallback) for `references/*.iconize-registry.json`, and list `<plugin>: <registry filename> (<N> matchers)` per hit. An empty result is normal on a vault with no registry-shipping plugins installed.
+
+Outcome: **registries-visible-<count>** / **no-registries**.
+
 ## Step 5 — Verify
 
 Run the worker's `--vault <vault> check-versions`. Expect exit 0. Report shape includes:
 
-- `pre_commit.status` — `ok` / `missing` / `major-drift` / `minor-drift`.
 - `icon_map_schema.status` — `ok` / `incompatible` / `missing`.
 - `icon_map_schema.declared`, `icon_map_schema.min_hook_version` — echo.
 
-Any non-`ok` status surfaces as a drift finding; re-run the relevant step to resolve.
+An `incompatible` status surfaces as a drift finding; re-run Step 2.7 to resolve.
 
 Then run `--vault <vault> --dry-run reconcile` and print the plan so the user can see what a full sweep would do. Do not apply.
 
@@ -230,11 +285,13 @@ One bullet per step, in order — missing bullet = skipped step, back up and run
 - **Step 1.5c** `iconize-reloader`: state tuple. Never `skipped`.
 - **Step 2** legacy protocol doc: **kept-orphan** / **not-present**.
 - **Step 2.5** legacy PostToolUse: **kept-orphan** (count) / **not-present**.
+- **Step 2.55** legacy pre-commit shim: **legacy-shim-removed** (+ **hooksPath-unset**) / **kept-foreign** / **not-present**.
 - **Step 2.6** Iconize frontmatter settings: **asserted** / **merged** / **kept-local** / **iconize-absent**.
 - **Step 2.7** icon-map: **installed** / **unchanged** / **merged** (with `additions=N conflicts-kept-authored=N conflicts-took-shipped=N`) / **migrated-v`N`-to-v`SCHEMA_VERSION`** / **migration-path-missing** / **blocker-plugin-too-old**. Prepend **path-migrated** when the v1.0.0 legacy-path pre-flight moved the file; **kept-orphan** for the legacy path when both old and new paths exist.
-- **Step 3** pre-commit shim: HOOK_VERSION + `core.hooksPath` (**set** / **already-set** / **kept-local**).
+- **Step 3.5** repaint routine: **registered** / **already-present** / **no-daemon**, plus the identity (**identity-seeded** / **identity-present**) and backfill outcomes.
 - **Step 4** callbacks dir: **created** / **already-present** / **.gitkeep-added**.
 - **Step 4.5** `.gitignore` (iconize data.json): **added** / **already-ignored** / **gitignore-created**; WARN if `git ls-files --error-unmatch` exits 0 (user runs `git rm --cached`, never auto).
+- **Step 4.6** plugin registries: **registries-visible-<count>** (one line per registry) / **no-registries**.
 - **Step 5** verify: `check-versions` status + `reconcile --dry-run` summary.
 
 Next steps: "run `lazy-obsidian.iconize-config` to seed registries, then `lazy-obsidian.iconize-sync reconcile`." Add consequence lines for any **kept-local** outcome (2.6, 2.7, 3) and for any **kept-orphan** (2, 2.5 — note the file is a retired duplicate the user can delete by hand). Hard-dep failures abort before Step 6.
@@ -254,4 +311,4 @@ Safe to re-run. Quiet file-sync prompts only on a genuine same-region/same-key c
 
 ## Conflict-prompt discipline
 
-The skill is quiet by default. The only `AskUserQuestion` prompts it raises are genuine conflicts, each as its own one-question prompt: per-conflicting-key icon-map merges (Step 2.7 case 2 / can't-reconcile case 3a), the Iconize frontmatter-feature conflict (Step 2.6, one prompt for the three-key block), and a non-`.githooks` `core.hooksPath` (Step 3). Orphans and clean applies are silent. "Conflict" means the same key/region carries incompatible values on both sides — bytes differing is not a conflict.
+The skill is quiet by default. The only `AskUserQuestion` prompts it raises are genuine conflicts, each as its own one-question prompt: per-conflicting-key icon-map merges (Step 2.7 case 2 / can't-reconcile case 3a) and the Iconize frontmatter-feature conflict (Step 2.6, one prompt for the three-key block). Orphans and clean applies are silent. "Conflict" means the same key/region carries incompatible values on both sides — bytes differing is not a conflict.

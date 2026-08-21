@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Protect your repo's git index from Claude Code — pathspec-only commits by default, an optional staging lock for concurrent sessions, and the two skills to inspect and break it.
-last_regen: 2026-07-29
+last_regen: 2026-08-19
 diagram_spec:
   anchor: "Lock lifecycle"
   request: "State diagram of the lazy-core.git staging-window lock, scoped to the mutex row only (git.pathspec_enabled=false, git.mutex_enabled=true — the lock never exists on the default pathspec row). NO_LOCK → HELD (a hook or skill acquires .git/lazy-git.lock before touching the git index) → auto-released when the staging window closes (commit/reset empties the index) OR auto-broken by heuristics (dead PID / stale-and-idle / different host) → NO_LOCK. Show the manual break path via /lazy-core.git-unlock as an alternative exit from HELD, guarded by /lazy-core.git-status inspection first."
@@ -9,6 +9,7 @@ diagram_spec:
 source_skills:
   - lazy-core.git-status
   - lazy-core.git-unlock
+source_sha: c57b0440478f9bd39c12b3719727f44deb182600
 ---
 # git staging coordination
 
@@ -25,7 +26,7 @@ Your git index is not Claude Code's to sweep up. When you have files staged for 
 
 ## What's in this block
 
-**Pathspec discipline** is not a skill you invoke — it's the default behavior of every Claude Code git action in your repo. A new file gets registered with `git add -N <path>` (no content staged) rather than a plain `git add`; a rename or delete happens as a plain filesystem `mv`/`rm` rather than `git mv`/`git rm`, both of which auto-stage; and every commit names its paths explicitly (`git commit -m "..." -- <path> <path>`) rather than going bare, `-a`, or against a directory. The two exceptions are a commit mid-merge/rebase/cherry-pick (git itself refuses a partial commit there) and `--amend` against a clean index or with its own pathspec. Anything that would snapshot content you didn't ask Claude Code to touch is refused outright, with a message telling the agent to rephrase — never to bypass with `--no-verify` or a raw wrapper. The guard also only judges commands against the repo they actually target — a command that points at a different checkout (its own `-C <dir>` resolving elsewhere) is left alone, so it stays out of the way of tooling that manages other repos alongside yours.
+**Pathspec discipline** is not a skill you invoke — it's the default behavior of every Claude Code git action in your repo. A new file gets registered with `git add -N <path>` (no content staged) rather than a plain `git add`; a rename or delete happens as a plain filesystem `mv`/`rm` rather than `git mv`/`git rm`, both of which auto-stage; and every commit names its paths explicitly (`git commit -m "..." -- <path> <path>`) rather than going bare, `-a`, or against a directory. Reverting a file follows the same logic: `git restore --worktree -- <path>` is allowed, since it only touches the working tree, but `git checkout <tree-ish> -- <path>` and `git restore --staged --source=<tree-ish>` are refused — both rewrite the index entry, silently re-staging a revision's content nobody asked Claude Code to stage. `git restore --staged` without `--source` stays allowed, since it only unstages. The two exceptions to the discipline overall are a commit mid-merge/rebase/cherry-pick (git itself refuses a partial commit there) and `--amend` against a clean index or with its own pathspec. Anything that would snapshot content you didn't ask Claude Code to touch is refused outright, with a message telling the agent to rephrase — never to bypass with `--no-verify` or a raw wrapper. The guard also only judges commands against the repo they actually target — a command that points at a different checkout (its own `-C <dir>` resolving elsewhere) is left alone, so it stays out of the way of tooling that manages other repos alongside yours.
 
 **The staging-window mutex** is the older, opt-in behavior: a per-repo lock at `.git/lazy-git.lock` that serializes the interval from the first staging action to the commit that empties the index, so two concurrent Claude Code sessions never corrupt each other's staged changes. It only takes effect once you've turned pathspec discipline off for that repo (see Common adjustments) — the two rows don't run at the same time.
 

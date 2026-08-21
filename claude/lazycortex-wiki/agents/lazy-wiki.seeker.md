@@ -1,10 +1,10 @@
 ---
 name: lazy-wiki.seeker
-description: "Dispatch from /wiki.query, one per configured wiki scope, to pick entry points for a question. Reads ONLY the one scope's topics.md named in the prompt and returns the relevant node paths (verbatim from the index) with their glosses — never traverses, never reads node bodies. Keeps the large topic catalog out of the caller's context."
-tools: Read
+description: "Dispatch from /lazy-wiki.query, one per configured wiki scope, to pick entry points for a question. Reads ONLY the one scope's topics.md named in the prompt and returns the relevant node paths (verbatim from the index) with their glosses — never traverses, never reads node bodies. Keeps the large topic catalog out of the caller's context."
+tools: Read, Skill, Agent
 model: inherit
-execution-discipline-waiver: "single-response retrieval agent — one prompt (question + one topics.md path) in, one entry-point list out; the /wiki.query skill is the contract"
-logging-waiver: "ephemeral retrieval subagent dispatched by /wiki.query — the coordinating skill owns the run log"
+execution-discipline-waiver: "single-response retrieval agent — one prompt (question + one topics.md path) in, one entry-point list out; the /lazy-wiki.query skill is the contract"
+logging-waiver: "ephemeral retrieval subagent dispatched by /lazy-wiki.query — the coordinating skill owns the run log"
 ---
 # lazy-wiki.seeker
 

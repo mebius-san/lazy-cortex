@@ -1,8 +1,8 @@
 ---
 name: lazy-obsidian.iconize-sync
-description: "Use when a note's or folder's icon is stale and must be re-resolved from the icon-map — after editing `.claude/iconize/obsidian-icon-map.json`, after a bulk frontmatter or stage change, or when files were written via Bash and bypassed the hooks (`reconcile-dirty`). Also invoked non-interactively by the vault's `.githooks/pre-commit` shim and the plugin's PostToolUse / Stop hooks. Writes only `iconize_icon` / `iconize_color` frontmatter — never Iconize's `data.json`."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Write
-argument-hint: "<subcommand> [args] | sync <path> | sync-staged | reconcile [--prefix PATH] | reconcile-plugin <plugin> | reconcile-dirty | install-hooks | check-versions"
+description: "Use when a note's or folder's icon is stale and must be re-resolved from the icon-map — after editing `.claude/iconize/obsidian-icon-map.json`, after a bulk frontmatter or stage change, or when files were written via Bash and bypassed the hooks (`reconcile-dirty`). Also invoked non-interactively by the plugin's PostToolUse hook and the `lazy-obsidian.repaint` daemon routine. Writes only `iconize_icon` / `iconize_color` frontmatter — never Iconize's `data.json`."
+allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Write, Agent
+argument-hint: "<subcommand> [args] | sync <path> | reconcile [--prefix PATH] | reconcile-plugin <plugin> | reconcile-dirty | check-versions"
 execution-discipline-waiver: "thin dispatcher to iconize_sync.py — discipline belongs in the Python worker, not the SKILL.md"
 ---
 # Iconize Sync (Obsidian)
@@ -28,12 +28,6 @@ Resolve one file. Reads its frontmatter, matches against the icon-map, then upse
 
 Invoked by: the PostToolUse hook, or manually.
 
-### `sync-staged`
-
-Iterate `git diff --cached --name-only --diff-filter=ACMR -- '*.md'`, resolve each, and batch-rewrite the frontmatter in the working tree. The index is never written to — the git index belongs to the operator, and a hook that stages into it leaves entries behind that outlive the commit it fired on. A rewrite made during a pre-commit run therefore lands in the *next* commit, not the one in flight.
-
-Invoked by: `.githooks/pre-commit`.
-
 ### `reconcile [--prefix <path>]`
 
 Walk every `.md` file (under `--prefix` if given, else whole vault), compute the desired `iconize_*` frontmatter, and rewrite each file. Files that no longer match a rule have their `iconize_icon` / `iconize_color` keys cleared. Use after bulk frontmatter changes or icon-map edits.
@@ -48,20 +42,13 @@ Use case: invoked by the pre-commit pipeline after bumping `claude/<plugin>/.cla
 
 Safety-net for edits that bypass the PostToolUse `Write|Edit` hook (anything written via `Bash`, a shell script, a bulk rename, etc.). Queries `git status` for dirty `.md` files — modified, added, deleted, untracked, and renamed — and reconciles the unique parent directories of those paths in one pass. Silent no-op on a clean tree or a non-git vault.
 
-Invoked by: Claude Code's `Stop` hook (fires at the end of every agent turn).
-
-### `install-hooks`
-
-Write `.githooks/pre-commit` (shim that runtime-resolves the plugin's `iconize_sync.py` at exec time, carrying a `HOOK_VERSION` marker). Does **not** touch consumer `.claude/settings.json` — the PostToolUse hook is shipped by the plugin itself via `hooks/hooks.json` and is auto-loaded when the plugin is enabled. Idempotent.
+Invoked by: the operator, manually. No hook drives it — a reconcile over every dirty parent directory is too heavy to run on a tool or turn boundary.
 
 ### `check-versions`
 
-Reports two independent drift axes:
+Reports the icon-map schema handshake: checks the vault's `obsidian-icon-map.json` `schema_version` against the worker's `SUPPORTED_SCHEMA` set, and verifies `HOOK_VERSION` satisfies the icon-map's optional `min_hook_version`.
 
-- **Shim** — compares the installed `.githooks/pre-commit` `HOOK_VERSION` marker vs the worker's current `HOOK_VERSION`.
-- **Icon-map schema** — checks the vault's `obsidian-icon-map.json` `schema_version` against the worker's `SUPPORTED_SCHEMA` set, and verifies `HOOK_VERSION` satisfies the icon-map's optional `min_hook_version`.
-
-Exits 0 when both are ok or schema is merely "missing" (vault not opted in); exits 5 on shim MAJOR drift, shim missing, or schema incompatible. Run after `/plugin update lazycortex-obsidian@lazycortex`.
+Exits 0 when the schema is compatible or merely "missing" (vault not opted in); exits 5 on an incompatible schema. Run after `/plugin update lazycortex-obsidian@lazycortex`.
 
 ## How to run
 
@@ -78,7 +65,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py <subcommand> [flags] [args]
 | 0 | Success |
 | 1 | Validation error (bad args, bad icon-map, unknown subcommand) |
 | 4 | Target path missing (strict mode only) |
-| 5 | Hook version drift (MAJOR mismatch) |
+| 5 | Version drift (incompatible icon-map schema) |
 
 ## Logging
 

@@ -6,17 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "# HOOK_VERSION: 2.0.0\njq -r '.tool_response.filePath // .tool_input.file_path' | { read -r f; case \"$f\" in *.md) if [ -f \"${CLAUDE_PROJECT_DIR}/.claude/iconize/obsidian-icon-map.json\" ]; then python3 \"${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py\" sync \"$f\" >/dev/null || true; fi ;; esac; }"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "# HOOK_VERSION: 2.0.0\nif [ -f \"${CLAUDE_PROJECT_DIR}/.claude/iconize/obsidian-icon-map.json\" ]; then python3 \"${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py\" reconcile-dirty >/dev/null || true; fi"
+            "command": "# HOOK_VERSION: 4.0.0\ncase \",${LAZYCORTEX_HOOKS_ALLOW_LIST-__unset__},\" in *,__unset__,*) ;; *,lazy-obsidian.iconize-sync,*) ;; *) exit 0 ;; esac; jq -r '.tool_response.filePath // .tool_input.file_path' | { read -r f; case \"$f\" in *.md) if [ -f \"${CLAUDE_PROJECT_DIR}/.claude/iconize/obsidian-icon-map.json\" ]; then python3 \"${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py\" sync \"$f\" >/dev/null || true; fi ;; esac; }"
           }
         ]
       }

@@ -12,10 +12,9 @@ pump uses — but with a trivial prompt that does no real work, so a broken
 is surfaced fast instead of eating a live routine's wall timeout. Alongside the
 per-expert verdicts it reports the checkout-level conditions that make a launch
 harmful rather than broken: an inbox already driven by another daemon on this
-host, a daemon gate too coarse to name the machine it was answered on, and a
-sandbox allowlist that does not cover a location its own entries resolve to
-(fail for write, warn for read) — a confined spawn is checked against the
-resolved path, so every write through such a symlink fails.
+host, and a sandbox allowlist that does not cover a location its own entries
+resolve to (fail for write, warn for read) — a confined spawn is checked
+against the resolved path, so every write through such a symlink fails.
 
 Emits a JSON verdict document to stdout; the `lazy-runtime.preflight` skill owns
 the log write, the operator-facing table, and any settings fix. This bin never
@@ -38,9 +37,10 @@ from pathlib import Path
 from expert_pump import build_expert_argv, _normalize_mcp_config, _normalize_setting_sources, _VALID_SETTING_SOURCES
 from expert_runtime import resolve_agent_model
 from lazy_settings import load_section
+import rate_limit_flag
 # waiver: ReferenceError is reference_resolver's domain exception, not the builtin
 from reference_resolver import resolve, ReferenceError  # pylint: disable=redefined-builtin
-from constants import HooksKey, JobConfigKey, RoutineKey, RoutineType, SettingsFile, SettingsKey
+from constants import HaltReason, JobConfigKey, RateLimitGuardKey, RoutineKey, RoutineType, SettingsFile, SettingsKey
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -118,7 +118,6 @@ class RKey:
     STATIC: The static-check finding list.
     DYNAMIC: The dynamic-probe result block, or null when the probe was skipped.
     SETTING_SOURCES: The effective `--setting-sources` scopes the spawn will pass.
-    HOOKS_ENABLED: The effective allow-list of lazycortex hook short names the spawn opts into (empty = all off).
     VERDICT: The `ok` / `fail` verdict for the expert.
     FIXES: The proposed-fix list for a failing expert.
     REPO: The repository-level finding list, shared by every expert in the checkout.
@@ -135,13 +134,13 @@ class RKey:
     KIND: The fix-proposal kind.
     TARGET: The fix-proposal target locator.
     ACTION: The fix-proposal action description.
+    SKIPPED: The reason token when the probe was deliberately not run.
   """
 
   NAME = "name"
   STATIC = "static"
   DYNAMIC = "dynamic"
   SETTING_SOURCES = "setting_sources"
-  HOOKS_ENABLED = "hooks_enabled"
   VERDICT = "verdict"
   FIXES = "fixes"
   REPO = "repo"
@@ -158,6 +157,7 @@ class RKey:
   KIND = "kind"
   TARGET = "target"
   ACTION = "action"
+  SKIPPED = "skipped"
 
 
 # ----------------------------------------------------------------------------------------
@@ -220,50 +220,22 @@ def _settings_path(repo: Path) -> Path:
   return Path(repo) / SettingsFile.REL
 
 
-def _strip_repo_suffix(expert: str) -> tuple[str, str | None]:
+def collect_target_experts(repo: Path) -> list[str]:
   """
-  Split a routine `expert` value into a bare name and optional cross-repo key.
-
-  An `expert@<repo-key>` value targets a sibling repository; this preflight only
-  validates local-repo experts, so the caller records the cross-repo key as a
-  skipped target rather than resolving it here.
-
-  Args:
-    expert: The routine's `expert` value, optionally suffixed with `@<repo-key>`.
-
-  Returns:
-    A tuple of the bare expert name and the cross-repo key, or `None` when the
-    value carries no `@<repo-key>` suffix.
-  """
-  # guard: no cross-repo suffix — the whole value is the bare local expert name
-  if "@" not in expert:
-    return expert, None
-  bare, _, repo_key = expert.rpartition("@")
-  # guard: a bare `@.` suffix is the canonical synonym for a local expert
-  if not repo_key or repo_key == ".":
-    return (bare or expert), None
-  return bare, repo_key
-
-
-def collect_target_experts(repo: Path) -> tuple[list[str], list[str]]:
-  """
-  Enumerate the local experts every expert-shape routine dispatches.
+  Enumerate the experts every expert-shape routine dispatches.
 
   Walks `routines[*]`, keeps entries whose type is one of inbox / schedule / git
   / md-scan AND that carry an `expert` key (skipping `command`-shape routines),
-  strips any `@<repo-key>` cross-repo suffix, and de-duplicates the bare local
-  names in first-seen order.
+  and de-duplicates the names in first-seen order.
 
   Args:
     repo: Repository root whose settings are read.
 
   Returns:
-    A tuple of the de-duplicated local expert names and the sorted, de-duplicated
-    set of cross-repo `expert@<repo-key>` targets that were skipped.
+    The de-duplicated expert names, in first-seen order.
   """
   routines = load_section(_settings_path(repo), SettingsKey.ROUTINES)
-  local: list[str] = []
-  skipped: set[str] = set()
+  seen: list[str] = []
   for cfg in routines.values():
     # guard: skip the _version sentinel and any non-dict routine value
     if not isinstance(cfg, dict):
@@ -276,14 +248,10 @@ def collect_target_experts(repo: Path) -> tuple[list[str], list[str]]:
     # guard: command-shape routine — no expert to validate
     if not expert or not isinstance(expert, str):
       continue
-    bare, repo_key = _strip_repo_suffix(expert)
-    if repo_key is not None:
-      skipped.add(f"{bare}@{repo_key}")
-      continue
     # de-dup while preserving first-seen order
-    if bare not in local:
-      local.append(bare)
-  return local, sorted(skipped)
+    if expert not in seen:
+      seen.append(expert)
+  return seen
 
 
 def _routine_protocols_for_expert(repo: Path, expert: str) -> list[str]:
@@ -292,11 +260,11 @@ def _routine_protocols_for_expert(repo: Path, expert: str) -> list[str]:
 
   Protocols live on the routine (via `protocols` or the singular `protocol`), not
   on the expert, so they are gathered across every routine that dispatches this
-  local expert and de-duplicated.
+  expert and de-duplicated.
 
   Args:
     repo: Repository root whose settings are read.
-    expert: Bare local expert name whose dispatching routines are scanned.
+    expert: Expert name whose dispatching routines are scanned.
 
   Returns:
     The de-duplicated protocol references, in first-seen order.
@@ -311,9 +279,8 @@ def _routine_protocols_for_expert(repo: Path, expert: str) -> list[str]:
     # guard: routine does not name a string expert
     if not isinstance(routine_expert, str):
       continue
-    bare, _repo_key = _strip_repo_suffix(routine_expert)
     # guard: routine dispatches a different expert
-    if bare != expert:
+    if routine_expert != expert:
       continue
     refs = cfg.get(RoutineKey.PROTOCOLS)
     if isinstance(refs, list):
@@ -336,7 +303,7 @@ def _inbox_dir_checks(repo: Path, expert: str) -> list[dict]:
 
   Args:
     repo: Repository root whose routine registry and declaration are read.
-    expert: Bare local expert name whose dispatching routines are scanned.
+    expert: Expert name whose dispatching routines are scanned.
 
   Returns:
     One `fail` finding per unresolvable declared inbox; empty when every one resolves.
@@ -356,9 +323,8 @@ def _inbox_dir_checks(repo: Path, expert: str) -> list[dict]:
     # guard: routine does not name a string expert
     if not isinstance(routine_expert, str):
       continue
-    bare, _repo_key = _strip_repo_suffix(routine_expert)
     # guard: routine dispatches a different expert
-    if bare != expert:
+    if routine_expert != expert:
       continue
     rel = cfg.get(RoutineKey.INBOX_DIR)
     # guard: a routine without a string inbox path is caught by schema validation, not here
@@ -923,6 +889,19 @@ def _run_probe(repo: Path, entry: dict) -> dict:
     stdout = e.stdout if isinstance(e.stdout, str) else ""
   duration = round(time.monotonic() - started, 2)
 
+  # A probe is a real spawn with the pump's own stream-json argv, so its frames feed the shared
+  # rate-limit flag exactly as a job run's do. Best-effort — a write failure never fails the probe.
+  try:
+    cfg = rate_limit_flag.config(load_section(repo / SettingsFile.REL, SettingsKey.DAEMON))
+    if cfg[RateLimitGuardKey.ENABLED]:
+      for info in rate_limit_flag.frames(stdout):
+        trigger = rate_limit_flag.triggered(info, cfg)
+        if trigger is not None:
+          # waiver: writer self-identification label, not a reusable domain key
+          rate_limit_flag.record(info, trigger, writer = "preflight-probe")
+  except OSError as e:
+    sys.stderr.write(f"rate-limit guard: probe cannot write flag: {e}\n")
+
   # turn the raw run into per-server statuses plus the agent-resolution verdict
   debug_text = _read_debug_file(debug_file)
   servers = _classify_servers(debug_text, declared_servers, timed_out)
@@ -1019,6 +998,9 @@ def _verdict_for(static: list[dict], dynamic: dict | None) -> str:
   # guard: static-only run (no probe) with no hard failure passes
   if not dynamic:
     return Verdict.OK
+  # guard: a deliberately skipped probe (rate-limit flag up) is not evidence of failure
+  if dynamic.get(RKey.SKIPPED):
+    return Verdict.OK
   # guard: probe hit the wall timeout — hung spawn
   if dynamic.get(RKey.TIMED_OUT):
     return Verdict.FAIL
@@ -1055,11 +1037,6 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
     raw_sources if isinstance(raw_sources, (str, list)) else None
   )
 
-  # Effective hook allow-list the pump would export — [] means every lazycortex
-  # hook no-ops in the spawn (the hermetic default).
-  raw_hooks = entry.get(SettingsKey.HOOKS) if entry is not None else None
-  hooks_enabled = list((raw_hooks or {}).get(HooksKey.ENABLED) or []) if isinstance(raw_hooks, dict) else []
-
   # the probe stays unrun unless it can produce a trustworthy signal
   dynamic: dict | None = None
   # Only probe a registered expert whose agent statically resolves — a probe with
@@ -1069,7 +1046,15 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
     for f in static
   )
   if probe and entry is not None and agent_resolves:
-    dynamic = _run_probe(repo, entry)
+    # the same repo config gates both sides — the skip here and the frame write inside the probe —
+    # so a disabled guard never lets a foreign checkout's record suppress this repo's probes
+    guard = rate_limit_flag.config(load_section(repo / SettingsFile.REL, SettingsKey.DAEMON))
+    # guard: the probe is itself a real `claude -p` spawn — under a raised rate-limit flag it is
+    # skipped with an explicit outcome, never run and never counted as a failure
+    if guard[RateLimitGuardKey.ENABLED] and rate_limit_flag.is_raised():
+      dynamic = { RKey.SKIPPED: HaltReason.RATE_LIMIT }
+    else:
+      dynamic = _run_probe(repo, entry)
 
   # fixes are proposed only for a failing expert — a passing one has nothing to repair
   verdict = _verdict_for(static, dynamic)
@@ -1079,7 +1064,6 @@ def evaluate_expert(repo: Path, expert: str, *, probe: bool) -> dict:
     RKey.STATIC: static,
     RKey.DYNAMIC: dynamic,
     RKey.SETTING_SOURCES: effective_sources,
-    RKey.HOOKS_ENABLED: hooks_enabled,
     RKey.VERDICT: verdict,
     RKey.FIXES: fixes,
   }
@@ -1096,15 +1080,13 @@ def preflight(repo: Path, *, expert: str | None, probe: bool) -> dict:
 
   Returns:
     The full verdict document: `experts` (per-expert results), `repo` (checkout-level
-    findings), `skipped_cross_repo` (unvalidated `expert@<repo>` targets), and a one-line
-    `summary`.
+    findings), and a one-line `summary`.
   """
   repo = Path(repo)
-  targets, skipped = collect_target_experts(repo)
+  targets = collect_target_experts(repo)
   # a single-expert run narrows the target list to just that name
   if expert is not None:
     targets = [ expert ]
-    skipped = []
 
   # evaluate every target, then add the checkout-level findings that belong to no expert
   results = [ evaluate_expert(repo, name, probe = probe) for name in targets ]
@@ -1113,15 +1095,12 @@ def preflight(repo: Path, *, expert: str | None, probe: bool) -> dict:
   failed = sum(1 for r in results if r[RKey.VERDICT] == Verdict.FAIL)
   mode = "static-only" if not probe else "static+probe"
   summary = f"{len(results)} expert(s) checked ({mode}); {failed} failing, {len(results) - failed} ok"
-  if skipped:
-    summary += f"; {len(skipped)} cross-repo target(s) skipped"
   if repo_findings:
     summary += f"; {len(repo_findings)} repo-level finding(s)"
   # the verdict document the preflight skill renders
   return {
     "experts": results,
     RKey.REPO: repo_findings,
-    "skipped_cross_repo": skipped,
     "summary": summary,
   }
 

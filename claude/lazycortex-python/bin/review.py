@@ -5,11 +5,12 @@ Builds the review manifest (changed Python files plus every applicable guideline
 layer), prints the dispatch directive for the lazy-python.code-reviewer agent,
 and renders the agent's findings in the same shape the other checkers use.
 
-The script never calls the agent itself unless CHK_REVIEW=headless is set — it is
-part of the check pipeline, which also runs from pre-commit and CI where no LLM
-is available. A review that has been manifested but not yet reviewed exits with
-PENDING_EXIT so it cannot pass unnoticed; CHK_REVIEW=skip opts a run out of the
-phase entirely, for callers that are in no position to act on a pending review.
+The script never calls the agent itself unless CHK_REVIEW=headless is set — it also
+runs from CI, where no LLM is available. A review that has been manifested but not
+yet reviewed exits with PENDING_EXIT so it cannot pass unnoticed.
+
+The phase is standalone, not a step of `chk all`, and runs at the end of a unit of
+work rather than inside the edit loop.
 """
 
 from __future__ import annotations
@@ -123,25 +124,50 @@ def run_git(repo: Path, *args: str) -> list[str]:
   return [line for line in out.stdout.splitlines() if line]
 
 
-def resolve_scope(repo: Path, paths: list[str]) -> list[str]:
+def resolve_scope(repo: Path, paths: list[str], base: str | None = None) -> list[str]:
   """
   Resolve the set of Python files under review.
+
+  Guarantees:
+    - Returns paths deduplicated and sorted, regardless of which scope source produced them.
+    - When explicit paths are given, they fully determine the scope; the default diff-based
+      scope is never combined with them.
 
   Args:
     repo: Repository root.
     paths: Explicit paths passed on the command line; empty means "current diff".
+    base: Git ref the diff is taken against; None means the last commit. A unit of
+      work that landed intermediate commits names its starting ref here, so the
+      review covers the whole unit rather than the tail after the last commit.
 
   Returns:
     Sorted repo-relative paths of the Python files to review.
   """
+
+  # Domain(pytool.pipeline-idempotency):
+  # # Review scope for a unit of work
+  # The set of files a review covers is either an explicit list the caller names, or — when none
+  # is given — every Python file changed since a base point plus every new untracked one. The
+  # base point defaults to the last commit, but a unit of work that landed several intermediate
+  # commits can move it back to where the work started, so the whole unit is reviewed together
+  # instead of only the tail since the latest commit. A bare current-directory marker handed down
+  # by an outer pipeline counts as "no explicit list", not as a request to review the entire tree.
+
+  # Contract:
+  # The returned paths are always deduplicated and sorted, regardless of whether the
+  # scope comes from explicit paths or from the git-diff default.
+
+  # Contract:
+  # When explicit paths are given, they fully determine the review scope; the
+  # diff-based default scope is never combined with them.
+
   # a bare '.' is the aggregator's default target, not a request to review the whole tree
   explicit = [raw for raw in paths if raw not in ('.', './')]
 
   # explicit paths win — expand directories, keep files
   if explicit:
-    paths = explicit
     found: list[str] = []
-    for raw in paths:
+    for raw in explicit:
       target = (repo / raw).resolve()
       if target.is_dir():
         found.extend(str(found_py.relative_to(repo)) for found_py in list_python_tree(target))
@@ -149,8 +175,8 @@ def resolve_scope(repo: Path, paths: list[str]) -> list[str]:
         found.append(str(target.relative_to(repo)))
     return sorted(set(found))
 
-  # default scope — everything the working tree changed against HEAD, plus untracked
-  changed = run_git(repo, 'diff', '--name-only', 'HEAD')
+  # default scope — everything the working tree changed against the base ref, plus untracked
+  changed = run_git(repo, 'diff', '--name-only', base or 'HEAD')
   changed += run_git(repo, 'ls-files', '--others', '--exclude-standard')
 
   # a path can appear in both git queries, and a deleted file still shows up in the diff
@@ -169,6 +195,14 @@ def rule_applies(text: str) -> bool:
     True when the rule is always loaded or scopes at least one path glob to Python
     files. Body mentions of `.py` do not count — only the frontmatter scope does.
   """
+
+  # Domain(pytool.pipeline-idempotency):
+  # # Rule-file eligibility for a Python review
+  # A repository rule file only enters a Python review's guideline set when its declared scope
+  # says so: either it is marked as always loaded, or its scope explicitly names a Python file
+  # glob. A rule whose body merely mentions Python source files in prose, without declaring that
+  # scope, is left out — only the declared scope decides membership, never incidental wording.
+
   # guard: no frontmatter at all, the rule declares no scope
   if not text.startswith(FRONTMATTER_FENCE):
     return False
@@ -191,6 +225,10 @@ def collect_guidelines(repo: Path, plugin_root: Path) -> dict[str, list[str]]:
   """
   Collect every guideline layer the reviewer must read, canon first.
 
+  Guarantees:
+    - The returned mapping preserves canon-first insertion order, so iterating it in order
+      gives the correct override precedence between conflicting layers.
+
   Args:
     repo: Repository root — source of the overlay, rule, and note layers.
     plugin_root: Plugin root — source of the canonical guidelines.
@@ -198,6 +236,20 @@ def collect_guidelines(repo: Path, plugin_root: Path) -> dict[str, list[str]]:
   Returns:
     Layer name mapped to the paths belonging to it; empty layers are omitted.
   """
+
+  # Domain(pytool.pipeline-idempotency):
+  # # Guideline layer precedence for a code review
+  # A review is built from up to four guideline layers, read in a fixed order: the shipped canon
+  # first, the project's own overlay next, repository rule files scoped to Python sources after
+  # that, and project-wide notes last. Where the overlay repeats or contradicts the canon, the
+  # overlay wins — a project narrows or replaces a canon rule by adding an overlay entry rather
+  # than editing the canon.
+
+  # Contract:
+  # The returned mapping preserves insertion order canon, overlay, rules, project_notes;
+  # a layer that appears later in this order takes precedence over one that appears
+  # earlier when their guidance conflicts.
+
   # canonical guidelines ship with the plugin and are read by absolute path
   layers: dict[str, list[str]] = {
     'canon': [str(found) for found in list_matching(plugin_root / CANON_LAYER[0], CANON_LAYER[1])],
@@ -230,6 +282,10 @@ def scope_key(repo: Path, files: list[str]) -> str:
   """
   Build a content key identifying this exact review scope.
 
+  Guarantees:
+    - Identical file lists, in the same order and with identical contents, always produce
+      the same digest, regardless of machine or process.
+
   Args:
     repo: Repository root.
     files: Repo-relative paths under review.
@@ -238,6 +294,18 @@ def scope_key(repo: Path, files: list[str]) -> str:
     Hex digest over every file's path and content — stable across re-runs that
     changed nothing, so an already-reviewed scope is not re-dispatched.
   """
+
+  # Domain(pytool.pipeline-idempotency):
+  # # Review scope identity
+  # A review scope is identified by a hash over every covered file's path and its exact content,
+  # not by a timestamp or a scope description. Two runs that hash to the same value are the same
+  # review: the later run reuses the earlier verdict instead of dispatching a fresh review, so an
+  # unmodified scope is never reviewed twice.
+
+  # Contract:
+  # Two calls given the same file list, in the same order, with identical file
+  # contents always return the same digest, on any machine and in any process.
+
   digest = hashlib.sha256()
   for name in files:
     digest.update(name.encode('utf-8'))
@@ -251,6 +319,10 @@ def find_cached(review_dir: Path, key: str) -> Path | None:
   """
   Find findings already produced for this scope key.
 
+  Guarantees:
+    - When several stored findings documents match the same scope key, the most
+      recently generated one is returned.
+
   Args:
     review_dir: Directory holding previous manifests and findings.
     key: Scope key of the current review.
@@ -258,6 +330,11 @@ def find_cached(review_dir: Path, key: str) -> Path | None:
   Returns:
     Path of the matching findings file, or None when the scope is not reviewed yet.
   """
+
+  # Contract:
+  # When several stored findings documents match the same scope key, the most
+  # recently generated one is returned; older matching verdicts are never surfaced.
+
   # guard: nothing reviewed in this repo so far
   if not review_dir.is_dir():
     return None
@@ -302,12 +379,28 @@ def print_findings(findings: list[Finding]) -> int:
   """
   Print findings in the checker output shape and decide the exit code.
 
+  Guarantees:
+    - Returns 1 exactly when at least one finding carries FAIL severity; WARN and INFO
+      findings alone never produce a non-zero result.
+
   Args:
     findings: Findings loaded from the reviewer's document.
 
   Returns:
     1 when at least one FAIL is present, 0 otherwise.
   """
+
+  # Domain(pytool.checker-severity):
+  # # Severity vocabulary and the blocking threshold
+  # Every finding carries one severity drawn from a closed three-level vocabulary: informational,
+  # warning, or failure. A phase's overall verdict follows the single worst severity present
+  # across all its findings — one failure anywhere blocks the pipeline outright, while a set
+  # containing only warnings or informational notes is surfaced without blocking it.
+
+  # Contract:
+  # Returns 1 exactly when at least one finding carries FAIL severity; any number of
+  # WARN or INFO findings alone never produces a non-zero return.
+
   # guard: a clean review still prints a summary line
   if not findings:
     print('Success: no guideline issues found')
@@ -337,6 +430,10 @@ def write_manifest(repo: Path, plugin_root: Path, files: list[str], key: str) ->
   """
   Write the review manifest for the current scope.
 
+  Guarantees:
+    - The `findings_path` recorded in the manifest is exactly where the reviewer agent
+      must write its verdict; render mode reads findings from that path only.
+
   Args:
     repo: Repository root.
     plugin_root: Plugin root holding the canonical guidelines.
@@ -353,6 +450,10 @@ def write_manifest(repo: Path, plugin_root: Path, files: list[str], key: str) ->
   # the shared timestamp is what pairs a manifest with the findings file written back for it
   manifest_path = review_dir / f'{stamp}.json'
   findings_path = review_dir / f'{stamp}.findings.json'
+
+  # Contract:
+  # The `findings_path` recorded in the manifest is the exact path the reviewer agent
+  # must write its verdict to; render mode reads findings from that path and no other.
 
   # the manifest carries everything the reviewer needs, so it discovers nothing on its own
   manifest = {
@@ -409,25 +510,41 @@ def dispatch_headless(repo: Path, manifest_path: Path) -> int:
   return print_findings(load_findings(findings_path))
 
 
-def cmd_review(repo: Path, plugin_root: Path, paths: list[str]) -> int:
+def cmd_review(repo: Path, plugin_root: Path, paths: list[str], base: str | None = None) -> int:
   """
   Build the manifest for the current scope and print the dispatch directive.
+
+  Guarantees:
+    - An unresolvable base ref is refused outright: the run exits 1, prints a diagnostic,
+      and writes no manifest, instead of reporting an empty scope.
+    - A scope whose content exactly matches a previously reviewed scope reuses that
+      review's findings instead of being dispatched again.
+    - PENDING_EXIT is returned only for a scope that has just been manifested and not yet
+      judged; it is never conflated with the success (0) or failure (1) codes.
 
   Args:
     repo: Repository root.
     plugin_root: Plugin root holding the canonical guidelines.
     paths: Explicit paths, or empty for the current diff.
+    base: Git ref the diff is taken against, or None for the last commit.
 
   Returns:
-    Process exit code — PENDING_EXIT while the review is undecided, 1 on a FAIL finding, else 0.
+    Process exit code — PENDING_EXIT while the review is undecided, 1 on a FAIL finding,
+    1 on an unresolvable base ref, else 0.
   """
-  # guard: an explicit opt-out keeps the phase out of nested runs that cannot act on a pending review
-  if os.environ.get('CHK_REVIEW') == 'skip':
-    print('review: SKIPPED — CHK_REVIEW=skip')
-    return 0
+
+  # Contract:
+  # An unresolvable base ref is refused outright: the run exits 1, prints a
+  # diagnostic, and writes no manifest, instead of reporting an empty scope.
+
+  # guard: an unknown ref would diff against nothing and report an empty scope, which reads
+  # exactly like "nothing to review" — a typo must fail loudly instead of waiving the phase
+  if base and not run_git(repo, 'rev-parse', '--verify', '--quiet', f'{base}^{{commit}}'):
+    print(f'review: base ref {base!r} does not resolve to a commit', file = sys.stderr)
+    return 1
 
   # the scope decides everything downstream — the key, the manifest, and whether a cache hit applies
-  files = resolve_scope(repo, paths)
+  files = resolve_scope(repo, paths, base)
 
   # guard: nothing changed, the phase has no work
   if not files:
@@ -436,6 +553,10 @@ def cmd_review(repo: Path, plugin_root: Path, paths: list[str]) -> int:
 
   # content key identifies this exact scope for the cache lookup that follows
   key = scope_key(repo, files)
+
+  # Contract:
+  # A scope whose content exactly matches a previously reviewed scope reuses that
+  # review's findings instead of being dispatched again.
 
   # an unchanged scope keeps the findings of its previous review
   cached = find_cached(repo / REVIEW_DIR, key)
@@ -457,7 +578,18 @@ def cmd_review(repo: Path, plugin_root: Path, paths: list[str]) -> int:
         f'then render its findings:')
   print(f'review:   chk-py review --render {findings_path.relative_to(repo)}')
   print('review: a pending review is unfinished work — dispatch the agent, or ask the operator '
-        'to waive this scope. Rerun with CHK_REVIEW=skip only once that decision is recorded.')
+        'to waive this scope.')
+
+  # Domain(pytool.pipeline-idempotency):
+  # # Pending review outcome
+  # A scope that has been prepared for review but not yet judged is neither a pass nor a failure;
+  # it reports a distinct pending outcome of its own. This keeps a pipeline gate from mistaking an
+  # unreviewed scope for a clean one — the pending state stands until a review actually produces a
+  # verdict.
+
+  # Contract:
+  # PENDING_EXIT is returned only for a scope that has just been manifested and not yet
+  # judged; callers MUST NOT treat it as the success code 0 or the failure code 1.
 
   # an undecided review must not pass as success, hence a code of its own
   return PENDING_EXIT
@@ -471,6 +603,9 @@ def main() -> None:
   parser.add_argument('paths', nargs = '*', help = 'paths to review (default: current diff)')
   parser.add_argument('--render', metavar = 'FINDINGS',
                       help = 'render a findings document produced by the reviewer agent')
+  parser.add_argument('--base', metavar = 'REF',
+                      help = 'diff against this ref instead of the last commit, so a unit of work '
+                             'that landed intermediate commits is reviewed whole')
   parser.add_argument('--plugin-root', default = str(Path(__file__).resolve().parent.parent),
                       help = 'plugin root holding the canonical guidelines')
   args = parser.parse_args()
@@ -483,7 +618,7 @@ def main() -> None:
     sys.exit(print_findings(load_findings(Path(args.render))))
 
   # default action — manifest the current scope and report whether the review is still pending
-  sys.exit(cmd_review(repo, Path(args.plugin_root).resolve(), args.paths))
+  sys.exit(cmd_review(repo, Path(args.plugin_root).resolve(), args.paths, args.base))
 
 
 # run main if this is the top-level script

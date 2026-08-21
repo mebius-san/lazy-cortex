@@ -5,10 +5,10 @@
 Subcommands dispatched here:
 
 - `open-request <file>` — mechanical opt-in handler for naked request
-  files. Invoked by the `spec.request-open` md-scan routine; writes
+  files. Invoked by the `lazy-spec.request-open` md-scan routine; writes
   the minimum frontmatter + banner and commits under the
-  `spec.request-open` bot identity. No LLM dispatch — the LLM apply
-  transition (`spec.request-apply` agent) fires later when the
+  `lazy-spec.request-open` bot identity. No LLM dispatch — the LLM apply
+  transition (`lazy-spec.request-apply` agent) fires later when the
   request reaches the post-finalize stage.
 """
 from __future__ import annotations
@@ -34,9 +34,20 @@ _SUB_RESOLVE_PRODUCT = "resolve-product"
 _SUB_RESOLVE_LANGUAGE = "resolve-language"
 _SUB_FLIP_GATE = "flip-gate"
 _SUB_GATE_TICK = "gate-tick"
+# waiver: subcommand name string -- dispatch key for the CLI router
+_SUB_COLLECT_TICK = "collect-tick"
 _SUB_SCAFFOLD_ASSET = "scaffold-asset"
 _SUB_RENDER_CONTAINER_STATS = "render-container-stats"
-_SUB_IMPORT_SPECS = "import-specs"
+_SUB_COORDINATOR_DISPATCH = "coordinator-dispatch"
+_SUB_NOTE_SET_KEY = "note-set-key"
+_SUB_NOTE_CHECK = "note-check"
+_SUB_MARK_JOB = "mark-job"
+_SUB_UPSTREAM_TICK = "upstream-tick"
+_SUB_UPSTREAM_DOCTOR = "upstream-doctor"
+_SUB_DECIDE = "decide"
+_SUB_PINS = "pins"
+_SUB_DOC_TYPE = "doc-type"
+_SUB_ASSET_TYPE = "asset-type"
 # waiver: usage string -- help text printed to stderr; not a domain constant
 _USAGE = (
     "usage: lazycortex-specs <subcommand> [args...]\n"
@@ -45,11 +56,35 @@ _USAGE = (
     "  resolve-product <by-key|by-path> ...   resolve a product from settings\n"
     "  resolve-language <relpath>     resolve a doc's effective language\n"
     "  flip-gate <asset_dir> <gate> [--off] [--auto] [--reason TEXT]   move one gate\n"
-    "  gate-tick <asset_note> [--today YYYY-MM-DD]   advance one asset's gates\n"
-    "  scaffold-asset <product> <category> <slug>  deterministic scaffold of a new asset folder\n"
+    "  gate-tick <asset_note> [--today YYYY-MM-DD]   clear finished job markers, run structural note-check\n"
+    "  collect-tick [--repo DIR]      sweep the job-marker sidecar, gate-tick every recorded note\n"
+    "  scaffold-asset <product> <type> <slug> --doc <name>:<type> [--doc ...] [--path <dir>]\n"
+    "                                  deterministic scaffold of a new asset folder\n"
     "  apply-request <file>           deterministic post-finalize apply transition for a request file\n"
     "  render-container-stats <note>  recompute a container note's stats region\n"
-    "  import-specs [--cwd DIR]        pull exported designs from configured spec-repos\n"
+    "  coordinator-dispatch <asset_note> [--today YYYY-MM-DD]   wake spec.coordinator on activity\n"
+    "  note-set-key <asset_dir> <key> <value> [--today YYYY-MM-DD]\n"
+    "                                  validating frontmatter write from the coordinator's closed schema\n"
+    "  note-check <asset_note>        structural check: frontmatter schema + required section roster\n"
+    "  mark-job <asset_note> coordinator|active|wake <value>|--clear [--repo DIR]\n"
+    "                                  write one runtime job marker into the gitignored sidecar\n"
+    "  upstream-tick [--cwd DIR]       fetch/detect pass over every configured spec.upstream source\n"
+    "  upstream-doctor [--cwd DIR]    read-only § 13 structural scan over spec.upstream state\n"
+    "  decide add <decisions.md> <thesis> --why TEXT --rejected TEXT [--origin TEXT] [--today D]\n"
+    "                                  write a fresh decisions-registry record (lazily creates the file)\n"
+    "  decide supersede <decisions.md> <old-id> <thesis> --why TEXT --rejected TEXT [--origin TEXT]\n"
+    "                                  write a fresh record and mark an older one superseded-by it\n"
+    "  decide obsolete <decisions.md> <id> <reason>   mark an existing record obsolete\n"
+    "  decide promote <living-doc> [--today D]   transfer [!decision] blocks into the sibling registry\n"
+    "  pins [--cwd DIR]               one-shot backfill: add wiki_pinned_topics to every role-bearing doc missing it\n"
+    "  doc-type of <file> | resolve <type> [--product K] | list [--product K] | backfill [--cwd DIR]\n"
+    "                                  read a document's spec_doc_type, or a type's declaration\n"
+    "  doc-type rename <old> <new> [--cwd DIR]\n"
+    "                                  rename a document type in the declaration, the catalog (the\n"
+    "                                  same-named spec_role values included), the template and its\n"
+    "                                  per-category copies, and every same-named review class\n"
+    "  asset-type of <note> | backfill [--cwd DIR]\n"
+    "                                  read an asset's spec_asset_type, or add it where missing\n"
 )
 
 
@@ -91,6 +126,10 @@ def main(argv: list[str]) -> int:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import gate_tick  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
     return gate_tick.main(rest)
+  if sub == _SUB_COLLECT_TICK:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import collect_tick  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return collect_tick.main(rest)
   if sub == _SUB_SCAFFOLD_ASSET:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import scaffold_asset  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
@@ -99,10 +138,46 @@ def main(argv: list[str]) -> int:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import summary_render  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
     return summary_render.main(rest)
-  if sub == _SUB_IMPORT_SPECS:
+  if sub == _SUB_COORDINATOR_DISPATCH:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
-    import import_specs  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
-    return import_specs.main(rest)
+    import coordinator_dispatch  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return coordinator_dispatch.main(rest)
+  if sub == _SUB_NOTE_SET_KEY:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import note_ops  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return note_ops.main_set_key(rest)
+  if sub == _SUB_NOTE_CHECK:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import note_ops  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return note_ops.main_check(rest)
+  if sub == _SUB_MARK_JOB:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import spec_job_markers  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return spec_job_markers.main(rest)
+  if sub == _SUB_UPSTREAM_TICK:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import upstream_tick  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return upstream_tick.main(rest)
+  if sub == _SUB_UPSTREAM_DOCTOR:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import upstream_tick  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return upstream_tick.main_doctor(rest)
+  if sub == _SUB_DECIDE:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import spec_decisions  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return spec_decisions.main(rest)
+  if sub == _SUB_PINS:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import spec_pins  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return spec_pins.main(rest)
+  if sub == _SUB_DOC_TYPE:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import spec_doc_types  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return spec_doc_types.main(rest)
+  if sub == _SUB_ASSET_TYPE:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import asset_types  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return asset_types.main(rest)
   sys.stderr.write(f"unknown subcommand: {sub}\n")
   return 2
 

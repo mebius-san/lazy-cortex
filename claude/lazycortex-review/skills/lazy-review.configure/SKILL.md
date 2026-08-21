@@ -1,7 +1,7 @@
 ---
 name: lazy-review.configure
 description: "Run when the operator wants a new kind of document to go through review, wants to change which paths a review class matches, or wants to reassign who writes / validates / closes out / narrates it. Wizard over `review.classes` in `.claude/lazy.settings.json`, one question per turn via AskUserQuestion; read-first, so an already-configured class is re-validated without a single prompt. Requires `/lazy-review.install` to have run."
-allowed-tools: Read, Edit, Write, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(python3 *), Bash(mkdir -p *), Bash(date *)
+allowed-tools: Read, Edit, Write, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Agent
 ---
 # lazy-review.configure
 
@@ -35,13 +35,15 @@ Outcome: `verified`.
 
 ## Phase 2 — Collect class paths
 
-If `review.classes` already holds a class whose paths the operator means to extend, reuse its `paths` silently (read-first). Otherwise `AskUserQuestion`: *"What glob(s) does this class match?"* — operator types a comma-separated list (e.g. `requests/*.md, docs/specs/*.md`). Split on commas and trim.
+Every class entry carries a `class` identity token — a short unique slug (`design`, `request`, `meeting-notes`) tooling addresses the entry by; globs stay routing-only. Read-first: an entry the operator means to extend is found by its token. For a new class, derive the token from the document kind and confirm it in the same question as the globs; refuse a token another entry already carries.
+
+If `review.classes` already holds the class (matched by token), reuse its `paths` silently (read-first). Otherwise `AskUserQuestion`: *"What glob(s) does this class match, and what identity token names it?"* — operator types a comma-separated glob list (e.g. `requests/*.md, docs/specs/*.md`) and a slug. Split globs on commas and trim.
 
 Outcome: `collected` (asked) or `read-from-record` (reused a persisted class's paths).
 
 ## Phase 3 — Collect writer groups
 
-Pipeline phases (main writers and the historian) and section writers are collected separately. Each question block is its own `AskUserQuestion` call, and each is skipped when the value is already present in the in-memory settings (read-first).
+Main writers and section writers are collected separately. Each question block is its own `AskUserQuestion` call, and each is skipped when the value is already present in the in-memory settings (read-first). This phase is the authoritative source of each writer's `role` value — the free-form string `lazy-review.doc-review-protocol` transports verbatim into `request.json.role` without assigning it semantics of its own.
 
 ### 3a — Main writers
 
@@ -49,13 +51,7 @@ If `experts.main` is already populated — reuse it silently (read-first). Other
 
 Add to the in-memory settings: `experts.main = [{"name": ..., "repo": ".", "role": "main"}]` (one object per selected expert profile; `role` is a free-form string the agent receives in `request.json.role`).
 
-### 3b — Historian
-
-If `experts.history` is already recorded — reuse it silently (read-first). Otherwise `AskUserQuestion` (single-select over the registry; default `review.historian`): *"Who is the historian (writes the # History section)?"*
-
-Add: `experts.history = {"name": ...}`.
-
-### 3c — Sections (loop)
+### 3b — Sections (loop)
 
 If section writers (`experts.validation` / `experts.terminal`) are already recorded for this class — reuse them silently and skip the loop (read-first). Otherwise loop over sections — every iteration strictly through separate `AskUserQuestion` calls:
 
@@ -76,6 +72,10 @@ If section writers (`experts.validation` / `experts.terminal`) are already recor
 
 Outcome: `collected` (asked) or `read-from-record` (every writer group reused from a persisted class).
 
+### Class-level `protocols` (not asked, preserved)
+
+A class entry may carry an optional `protocols` list — plugin-namespaced reference ids (e.g. `lazycortex-specs:lazy-spec.expert-signals-protocol`) the review coordinator folds into every writer dispatch for documents of that class, on top of the doc-review protocol and the `review.protocols` section-level defaults. The wizard never asks for it: the list is seeded by the plugin that owns the document kind (its install skill), and read-first preserves whatever is on record.
+
 ## Phase 4 — Pick edit_marker_style
 
 If `review.edit_marker_style` is already recorded — reuse it silently (read-first). Otherwise `AskUserQuestion`: four options — `simple`, `diff`, `criticmarkup`, `html`. Write the chosen value into `review.edit_marker_style`.
@@ -84,13 +84,21 @@ Outcome: `picked` (asked) or `read-from-record` (reused the persisted style).
 
 ## Phase 5 — Write back + run /lazy-review.audit
 
-Serialize the updated settings via `Write` to `.claude/lazy.settings.json`. Then normalize the `lazy-review.scan` routine — but only when the routine is present. The daemon-gated routine may be absent (a daemon-disabled project, per `/lazy-review.install` Step 2 outcome `skipped-daemon-disabled`); if `routines["lazy-review.scan"]` is missing, skip this normalization silently — there is no scan loop to feed. When present: (1) coarsen each of this class's `paths` globs — take the longest leading wildcard-free directory prefix; if the remaining tail is exactly `*.md`, keep the glob as-is; otherwise emit `<prefix>/**/*.md` (a literal file path coarsens via its parent dir; no literal prefix → `**/*.md`) — and union the coarse masks into the routine's `paths`. The emitted `**` mask is matched anchored at the repo root, so coarsen the REPO-ROOT-RELATIVE form of the glob — if this class's `paths` globs are relative to a content root (e.g. spec-plugin classes are relative to `spec.vault_root`), prepend that root before taking the prefix; a mask without its content-root prefix matches nothing; (2) dedupe and drop any mask subsumed by a broader one (`<p>/**/*.md` covers every mask whose prefix sits under `<p>` and every legacy filename-suffixed mask under `<p>` — remove those); (3) inside `filter.frontmatter` set `review_active` to `{"in": [true], "not_in": []}` (drop the legacy `null` leg — only opted-in files spawn a per-file dispatch; opt-in stamps `review_active: true` atomically and non-active files are no-op skips); (4) set `interval_sec` to `60` when it still carries the legacy `5` (coarse scans run at minute cadence; an operator-chosen value other than 5 stays untouched). Class `paths` stay precise: they are the dispatch-time routing that the coarse sieve deliberately delegates to. This rewrite is idempotent — re-running it on an already-normalized routine changes nothing. Then invoke `/lazy-review.audit` and surface its findings.
+Serialize the updated settings via `Write` to `.claude/lazy.settings.json`. Then widen the coordinator's watch scope so this class's documents actually reach it — but only when `routines["lazy-review.coordinator-watch"]` is present. The daemon-gated routine may be absent (a daemon-disabled project, per `/lazy-review.install` Step 2 outcome `skipped-daemon-disabled`); if it is missing, skip this normalization silently — there is no watch to feed.
+
+The watch carries **one** pathspec, not a list — core's git-watch takes a single `path_filter` — so the scope is one directory root that must contain every class:
+
+1. Take each of this class's `paths` globs in its REPO-ROOT-RELATIVE form (a glob relative to a content root, e.g. a spec-plugin class relative to `spec.vault_root`, gets that root prepended first — without it the pathspec matches nothing) and reduce it to its longest leading wildcard-free directory prefix. A literal file path reduces to its parent dir; a glob whose first component already wildcards reduces to nothing.
+2. The new `review.watch_root` is the common directory of those prefixes and the current `review.watch_root`. Any prefix reducing to nothing, or roots sharing no common directory, makes it `.` (the whole repo).
+3. Write `routines["lazy-review.coordinator-watch"].path_filter` as `:(glob)<watch_root>/**/*.md`, collapsing to `:(glob)**/*.md` when the root is `.`.
+
+Class `paths` stay precise — they are the dispatch-time routing the broad watch deliberately delegates to, and the routine's `review_active` frontmatter filter is what keeps the broad pathspec cheap. Widening is monotonic and idempotent: a root already covering the class changes nothing, and the scope is never narrowed (that would silently drop a class configured earlier). Then invoke `/lazy-review.audit` and surface its findings.
 
 Outcome: `written`.
 
 ## Report
 
-One line per task with its outcome word, followed by `configured: <paths>; experts={main: <count>, history: <count>, validation: <count>, terminal: <count>}; style=<style>; audit=<level>`.
+One line per task with its outcome word, followed by `configured: <paths>; experts={main: <count>, validation: <count>, terminal: <count>}; style=<style>; watch_root=<root>; audit=<level>`.
 
 ## Failure modes
 

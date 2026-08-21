@@ -1,12 +1,13 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-diagram skills — symptoms, likely causes, and fixes.
-last_regen: 2026-05-08
+last_regen: 2026-08-19
 no_diagram: true
 source_skills:
   - lazy-diagram.draw
   - lazy-diagram.fix
   - lazy-diagram.install
+source_sha: 4aec8c6f6f952dc8b1c993f13bdec2a1a00a9ab9
 ---
 # Troubleshooting
 
@@ -157,4 +158,3 @@ source_skills:
 **Likely cause**: The fence's syntax marker (e.g. `flowchart`) matches multiple kinds — `flow`, `nav`, `tree`, `decision-tree`, `controls-scheme`, or `screen-scheme` all use `flowchart` syntax. The skill refuses to guess.
 
 **Fix**: Pin `kind=<one>` from the candidate list shown in the failure message and re-run `/lazy-diagram.fix`.
-

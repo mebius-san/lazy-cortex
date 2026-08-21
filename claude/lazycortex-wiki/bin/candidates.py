@@ -80,7 +80,22 @@ class CandidateSource:
   scored candidate targets.  The finder merges scores across all sources; a
   source contributes nothing by returning an empty list.  Subclasses override
   `suggest`; the base raises to make an un-overridden source a hard error.
+
+  Subclassing:
+    - Key every returned candidate by its repo-relative POSIX path so the finder
+      can merge scores across sources and match the operator pins.
+    - Score candidates on a non-negative scale where a higher value means a
+      stronger candidate.
   """
+
+  # Contract:
+  # A source MUST key every candidate it returns by that candidate's
+  # repo-relative POSIX path, so the finder can merge scores coming from
+  # several sources and match them against the operator pins.
+
+  # Contract:
+  # A source MUST score candidates on a non-negative scale where a higher
+  # value means a stronger candidate.
 
   def suggest(
     self,
@@ -193,6 +208,9 @@ class CandidateFinder:
     Guarantees:
       - Every `pinned_links` target on `target` survives the ranking and the top-N cap.
       - Every `unrelated_links` target on `target` is excluded from the result.
+      - `target` is never offered as a candidate for itself, by scoring or by pinning.
+      - The same scope and target always yield the same order: descending score, path
+        as the tie-break.
 
     Args:
       target: Absolute path of the node to find candidates for.
@@ -201,6 +219,21 @@ class CandidateFinder:
       List of repo-relative POSIX candidate-path strings, at most `top_n` long.
       Empty when no candidate survives the pins and ranking.
     """
+
+    # Domain(wiki.graph):
+    # # Selecting link candidates
+    # A node gets its link candidates in two passes: a cheap, fully predictable pre-selection first
+    # narrows the whole scope down to a short list, and only then is each of those candidates judged on
+    # the merits. The split exists because judging on the merits is expensive, while the scope may be
+    # arbitrarily large.
+    # Selection sums the scores of every closeness signal into a single weight per path, so a node that
+    # matched on several signals at once outranks a node that matched on only one.
+    # Operator decisions stand above the arithmetic and beat any weight: a pinned link is always in the
+    # list and can never be crowded out by computed candidates, while a link marked unwanted is never
+    # offered. A node is never a candidate for itself, neither by computation nor by pinning.
+    # The result is truncated to a given number of best entries. On equal weight the node path decides
+    # the order, so the same scope always yields the same list.
+
     all_nodes = self._resolver.iter_nodes(self._scope_cfg)
     target_resolved = target.resolve()
     others = [ p for p in all_nodes if p.resolve() != target_resolved ]
@@ -215,10 +248,22 @@ class CandidateFinder:
       for path, score in source.suggest(target, others):
         merged[path] = merged.get(path, 0.0) + score
 
+    # Contract:
+    # A node is NEVER offered as a candidate for itself, neither by scoring
+    # nor by pinning.
+
+    # Contract:
+    # A path the target lists in `unrelated_links` is NEVER offered as a
+    # candidate for it.
+
     # Step 4 — drop the target itself and the unrelated_links blacklist.
     merged.pop(target_rel, None)
     for blocked in unrelated:
       merged.pop(blocked, None)
+
+    # Contract:
+    # Every path the target lists in `pinned_links` is always present in the
+    # result and can never be crowded out by a computed candidate.
 
     # Force-include every pinned_links target with a sentinel score so it
     # outranks any computed candidate and always survives the top-N cap.
@@ -227,6 +272,10 @@ class CandidateFinder:
       if pin == target_rel:
         continue
       merged[pin] = _PIN_SCORE
+
+    # Contract:
+    # The same scope and target always yield the same ordered result: entries
+    # rank by descending score, and the candidate path breaks a tie.
 
     # Step 5 — rank by descending score, tie-break by path, cap to top_n.
     ranked = sorted(merged.items(), key = lambda kv: (-kv[1], kv[0]))
@@ -424,6 +473,22 @@ class ContentCandidateSource(CandidateSource):
     Returns:
       Sum of the topic, connector, and token signal contributions.
     """
+
+    # Domain(wiki.graph):
+    # # Content closeness of two nodes
+    # While the scope holds no links at all, the kinship of two nodes can be judged only from their own
+    # content. Kinship is assembled from three signals: a shared topic, a shared connecting phrase, and a
+    # shared word taken from the short description or from a connecting phrase.
+    # The signals are ordered by reliability and weighted accordingly: a shared topic weighs more than a
+    # shared connecting phrase, and a shared connecting phrase more than a shared word. A topic is
+    # declared by the author and is therefore weighty; a connecting phrase is declared too, but speaks of
+    # the link rather than of the subject; an accidental word match is worth the least.
+    # A shared topic is worth the more the deeper the matched value path runs: every segment beyond the
+    # first adds a bonus on top of the base weight, because a narrow shared topic says far more about
+    # kinship than a broad one.
+    # Words shorter than three letters do not count: they are incidental noise that inflates false
+    # matches. A node that matched on no signal at all does not become a candidate at all.
+
     return (
       self._topic_score(a.topics, b.topics)
       + self._connector_score(a.connectors, b.connectors)
@@ -616,13 +681,25 @@ class GraphCandidateSource(CandidateSource):
     each node's repo-relative path to the set of repo-relative paths it links
     to.  Every node appears as a key (even with no outgoing links) so callers
     can iterate the full vertex set.  Link targets are stored verbatim as the
-    curator wrote them — relative paths and `@<repo-key>/…` cross-repo
-    qualifiers both pass through unmodified.
+    curator wrote them — relative paths pass through unmodified.
+
+    Guarantees:
+      - Every scope node appears as a key, including a node with no outgoing links.
+      - Link targets are kept exactly as written, never normalised or resolved.
 
     Returns:
       Dict mapping each node's repo-relative POSIX path to the set of its
       outgoing See-also link targets.
     """
+
+    # Contract:
+    # Every node of the scope appears as a key, including a node with no
+    # outgoing links, so callers can iterate the full vertex set.
+
+    # Contract:
+    # A link target is kept exactly as the curator wrote it and is NEVER
+    # normalised or resolved.
+
     graph: dict[str, set[str]] = {}
     for node_path in self._resolver.iter_nodes(self._scope_cfg):
       node = _nodes.node_for(node_path)
@@ -783,6 +860,7 @@ class BackCandidateFinder:
     Guarantees:
       - A node whose `unrelated_links` blacklists `target` is excluded from the result.
       - A node that pins `target` in `pinned_links` is always included in the result.
+      - `target` is never reported as attracted to itself.
 
     Args:
       target: Absolute path of the newly-added / re-classified node whose
@@ -793,6 +871,29 @@ class BackCandidateFinder:
       node Y whose top-N candidates contain the target. Empty when nothing
       attracts the target.
     """
+
+    # Domain(wiki.graph):
+    # # Reverse attraction of a node
+    # Wiki links are directed, and there is no symmetry between the directions: a node that another node
+    # counts among its best candidates may well not return the favour.
+    # The reverse set therefore matters too — the scope nodes for which a given node itself ranks among
+    # the best candidates. That is the set of nodes which must revisit their links when the node appears
+    # or changes its classification: relinking touches not the whole scope, but only those the new node
+    # has actually attracted.
+    # The reverse set is computed by the same rules as the forward one, so operator pins and exclusions
+    # apply in it exactly as they do there.
+
+    # Contract:
+    # A node is NEVER reported as attracted to itself.
+
+    # Contract:
+    # A node that pins the target in `pinned_links` is always reported as
+    # attracted to it.
+
+    # Contract:
+    # A node that lists the target in `unrelated_links` is NEVER reported as
+    # attracted to it.
+
     all_nodes = self._resolver.iter_nodes(self._scope_cfg)
     target_resolved = target.resolve()
     target_rel = self._rel(target)

@@ -1,40 +1,40 @@
 ---
 chapter_type: walkthrough
-summary: Register a coding-guideline clause in the project overlay, then confirm both /lazy-python.check-style and the chk-py review gate's lazy-python.code-reviewer catch it.
-last_regen: 2026-08-11
+summary: Register a documentation-guideline clause in the project overlay, then confirm lazy-python.docstring-writer honors it in the generated docstring.
+last_regen: 2026-08-19
 diagram_spec:
   anchor: "How the overlay and pyproject.toml layers combine"
-  request: "Sequence diagram showing two parallel flows that both start from the same project overlay. Flow 1 (docstrings): user registers an extra_docstring_sections entry (name/style/anchor/ref_exempt) plus optional d2_exempt_marker_attrs / private_name_allowlist in pyproject.toml [tool.pcf], writes the section's content rules in docs/guidelines/documenting_guidelines.md, dispatches lazy-python.docstring-writer; the agent reads the plugin canon, then the overlay (override-on-conflict), then CLAUDE.md's Documenting section if present, then applies the merged ruleset plus the pyproject.toml registrations to the target file and runs chk-py to verify. Flow 2 (code review): user writes a project-specific clause in docs/guidelines/coding_guidelines.md, runs chk-py review, which resolves the changed-file scope, collects every guideline layer (canon, overlay, .claude/rules, project notes) into a manifest, and names the lazy-python.code-reviewer agent; the agent reads the manifest and every listed layer, reviews the code against its eleven-point checklist (including the overlay-specific clause), writes findings JSON, and the user renders them with chk-py review --render. Show both flows sharing the overlay directory as their common source of truth but feeding two different agents and two different verification commands."
+  request: "Sequence diagram of one flow: the user registers an extra_docstring_sections entry (name/style/anchor/ref_exempt) plus optional d2_exempt_marker_attrs / private_name_allowlist in pyproject.toml [tool.pcf], writes the section's content rules in docs/guidelines/documenting_guidelines.md, and dispatches lazy-python.docstring-writer. The agent reads the plugin's documenting-guidelines canon, then the project overlay (override-on-conflict), then CLAUDE.md's Documenting section if present, applies the merged ruleset plus the pyproject.toml registrations to the target file, then runs chk-py against the changed file to verify. Show the overlay directory and pyproject.toml [tool.pcf] block as the two inputs feeding one agent and one verification command."
 source_skills:
   - lazy-python.install
-  - lazy-python.code-reviewer
-  - lazy-python.check-style
-source_sha: 41539cc1c95f454532d9d9902144f9ca174df5db
+  - lazy-python.docstring-writer
+  - lazy-python.coding-guidelines
+source_sha: 2d4c71c4eca7d0323d314eb20133da81e70b258d
 ---
-# Add a project-specific coding-guideline clause and confirm the review gate catches it
+# Add a project-specific documentation-guideline clause and confirm the docstring writer honors it
 
-Your project has coding conventions the plugin's canon doesn't cover — a naming scheme specific to how your codebase is organized, a module-layout rule, anything the canon has no opinion on. `lazycortex-python` gives you `docs/guidelines/coding_guidelines.md` for this, and two surfaces that read it: `/lazy-python.check-style`, the manually-invoked six-step review workflow you run after an edit batch, and `lazy-python.code-reviewer`, the agent that `chk-py`'s guideline-review gate dispatches to judge exactly the clauses no deterministic checker can prove. Neither plugin code nor a Claude Code restart is involved — both re-read the overlay on every run.
+Your project has documentation conventions the plugin's canon doesn't cover — an extra docstring section your team wants on certain classes, an escape hatch for a private attribute your API intentionally exposes, project-specific narrative rules. `lazycortex-python` gives you `docs/guidelines/documenting_guidelines.md` for the content rules and `pyproject.toml`'s `[tool.pcf]` table for the structural registrations (`extra_docstring_sections`, `d2_exempt_marker_attrs`, `private_name_allowlist`), and `lazy-python.docstring-writer` is the agent that reads both on every dispatch. Neither plugin code nor a Claude Code restart is involved — the agent re-reads the overlay every time it runs.
 
-This walkthrough takes you from an install-created overlay stub to a verified project-specific coding clause — confirmed once by `/lazy-python.check-style`'s own checker pass and again by `lazy-python.code-reviewer`'s guideline finding.
+This walkthrough takes you from an install-created overlay stub to a verified project-specific documentation clause — confirmed by the docstring `lazy-python.docstring-writer` actually writes.
 
 ## Outcome
 
 After completing this walkthrough you have:
 
-- At least one project-specific clause written in `docs/guidelines/coding_guidelines.md`.
-- A `/lazy-python.check-style` run that surfaces the pending guideline-review gate for a file the clause applies to, and a confirmed finding (or a confirmed absence of one) that `lazy-python.code-reviewer` reports once dispatched against it.
-- A working understanding of how the same overlay file reaches both the manual `check-style` workflow and the automated `chk-py` review gate, so you know where to add the next rule as your project's conventions grow.
+- At least one project-specific clause written in `docs/guidelines/documenting_guidelines.md`, optionally backed by a structural registration in `pyproject.toml`'s `[tool.pcf]` table.
+- A `lazy-python.docstring-writer` dispatch whose output visibly reflects that clause — a new section, an included attribute, a narrative rule honored — on a file the clause applies to.
+- A working understanding of the three layers the agent reads in order (plugin canon, project overlay, `CLAUDE.md`), so you know where to add the next rule as your project's documentation conventions grow.
 
 ## What you need
 
-- `lazycortex-python` installed in your repo — Step 1 below confirms `/lazy-python.install` has scaffolded `docs/guidelines/coding_guidelines.md` (and the other three overlay stubs), and re-runs the install if it's missing.
-- At least one file you can commit a small, deliberate change to for the review half of this walkthrough — something the new clause can judge as either conforming or violating.
+- `lazycortex-python` installed in your repo — Step 1 below confirms `/lazy-python.install` has scaffolded `docs/guidelines/documenting_guidelines.md` (and the other three overlay stubs), and re-runs the install if it's missing.
+- A class, method, or property whose docstring you can regenerate for the verification half of this walkthrough — something the new clause changes the shape of.
 
 ## The journey
 
 ### Step 1 — Confirm the overlay stub is scaffolded
 
-`/lazy-python.install` Phase 5 is what creates the four overlay stubs under `docs/guidelines/`, including `coding_guidelines.md`, the one this walkthrough edits. If you already ran `/lazy-python.install` when you first set up the plugin, it's already in place — check that `docs/guidelines/coding_guidelines.md` exists and still carries its canonical `# Project additions to coding` header.
+`/lazy-python.install` Phase 5 is what creates the four overlay stubs under `docs/guidelines/`, including `documenting_guidelines.md`, the one this walkthrough edits. If you already ran `/lazy-python.install` when you first set up the plugin, it's already in place — check that `docs/guidelines/documenting_guidelines.md` exists.
 
 If it's missing, re-run:
 
@@ -42,76 +42,79 @@ If it's missing, re-run:
 /lazy-python.install
 ```
 
-The install is idempotent and quiet: Phase 5 creates only the missing stub files and never touches an overlay you've already started editing — safe to run again mid-project without losing prior work.
+The install is idempotent and quiet: Phase 5 creates only the missing stub files and never touches an overlay you've already started editing — safe to re-run mid-project without losing prior work.
 
-### Step 2 — Understand who reads the coding overlay
+### Step 2 — Understand what lazy-python.docstring-writer reads
 
-Both surfaces read `coding_guidelines.md`, but at different points in the workflow and for different reasons:
+`lazy-python.docstring-writer`'s own Step 1 reads three layers, every dispatch, in this order:
 
-- **`/lazy-python.check-style`** reads three layers in its own Step 1, every time it's invoked: the plugin's `lazy-python.coding-guidelines.md` canon, then `docs/guidelines/coding_guidelines.md`, then the `## Style` section of `CLAUDE.md` if present. It then walks a fixed set of manual-inspection categories (docstring quality, contract consistency, guard clauses, method organization, naming, structural rules, comment preservation) against every modified file, before running `chk-py all` in its Step 4.
-- **`lazy-python.code-reviewer`** reads four layers, weakest to strongest: the plugin's `lazy-python.*-guidelines.md` canon, every file under `docs/guidelines/*.md` (so `coding_guidelines.md` counts), `.claude/rules/*.md` files scoped to Python, and `CLAUDE.md` / `.claude/CLAUDE.md`. A later layer overrides an earlier one on conflict. It is dispatched against a manifest that `chk-py review` — the seventh step of the `chk-py all` gate — writes when the review scope is pending.
+1. The plugin's canonical `lazy-python.documenting-guidelines.md` — the docstring section order, style rules, and zero-tolerance blockers that hold regardless of project.
+2. `docs/guidelines/documenting_guidelines.md` — your project overlay, read next; it overrides the canon on conflict.
+3. `CLAUDE.md`'s `## Documenting` section if present — a third layer for project-wide notes that don't belong to a single topic.
 
-Checklist item 11 in the reviewer's own instructions, "Overlay-specific clauses", exists precisely for rules only your project declares — a clause your overlay adds that the canon does not carry.
+The agent is dispatched fresh each time and does not inherit the main session's loaded rules, so it re-reads all three layers on every run — there is nothing to restart or reload after you edit the overlay.
 
-### Step 3 — Write a project-specific clause in the coding overlay
+This same canon-then-overlay layering is how every `docs/guidelines/<topic>_guidelines.md` file works — `coding_guidelines.md`, `testing_guidelines.md`, and `checking_guidelines.md` follow the identical pattern for their own writer and checker consumers. The coding canon's Knowledge Marker Rules — never remove or alter `TODO:`, `TMP:`, `DBG:`, `ref:`, `Domain(…):`, `Contract:` comments — apply here too: `lazy-python.docstring-writer`'s own Special Comment Handling rules mirror them, so a class's `Domain(…)` or `Contract:` markers keep their meaning as its docstring evolves under this walkthrough.
 
-Open `docs/guidelines/coding_guidelines.md` and add a clause the canon doesn't carry — something specific to how your codebase is organized. For example:
+### Step 3 — Write a project-specific clause in the documenting overlay
+
+Open `docs/guidelines/documenting_guidelines.md` and add a clause the canon doesn't carry. For example, a narrative rule:
 
 ```markdown
-# Project additions to coding
+# Project additions to documenting
 
-## Repository-layer naming
+## Field Semantics section
 
-  Classes that own a persistence boundary (query + write access to one table or
-  collection) are named `<Entity>Store`, never `<Entity>Repository` or `<Entity>DAO`.
-  This applies to every class under `src/storage/`.
+  Classes under `src/protocol/` that serialize to an external wire format
+  carry a `Field Semantics` section listing wire-level constraints (units,
+  valid ranges, endianness) that don't belong in `Attributes`.
 ```
 
-Without this clause, neither `check-style`'s manual review nor `code-reviewer`'s checklist has anything to check a `<Entity>Repository` class against — the canon has no opinion on your module layout or naming scheme.
+A section like this also needs a structural registration so the docstring machinery (`pcf`'s docstring checks and `lazy-python.docstring-writer`) know it exists. Add it to `pyproject.toml`'s `[tool.pcf]` table — the install-bootstrapped section already carries a commented-out example to uncomment and adapt:
 
-### Step 4 — Make a change and dispatch /lazy-python.check-style
-
-Make (or pick) a small change that violates or satisfies your new clause — for instance, add a class under `src/storage/` named against the convention you just wrote — then invoke:
-
-```
-/lazy-python.check-style
-```
-
-The skill's first action is to create a task list, one task per step, so you can watch it progress. It reads the three guideline layers (Step 1), enumerates the modified `.py` files via `git diff` (Step 2), walks the manual-inspection categories against each one (Step 3), then runs `chk-py all <file>.py -q` followed by `chk-py all -q` for the whole project (Step 4).
-
-Because your overlay clause is a guideline-level rule, not a canon rule, `check-style`'s own manual pass in Step 3 won't flag it directly — that judgment belongs to `lazy-python.code-reviewer`. Instead, `chk-py all` in Step 4 will hit the seventh gate step, the guideline review: it prints `review: PENDING — <N> file(s) in scope`, writes a manifest to `.runtime/lazy-python/review/<timestamp>.json` (listing the files in scope and every guideline layer, including your edited `coding_guidelines.md`), and names `lazy-python.code-reviewer` to dispatch against it. `check-style` surfaces this as a violation from `chk-py` in its Step 4 outcome — it does not dispatch the reviewer for you.
-
-### Step 5 — Dispatch lazy-python.code-reviewer and render the findings
-
-Dispatch the agent against the manifest `chk-py all` printed:
-
-```
-Dispatch the lazy-python.code-reviewer agent against the review manifest at .runtime/lazy-python/review/<timestamp>.json
+```toml
+[[tool.pcf.extra_docstring_sections]]
+name = "Field Semantics"
+style = "bulleted"
+after = "Guarantees"
+ref_exempt = true
 ```
 
-The agent reads the manifest, reads every layer it lists — canon, your `coding_guidelines.md`, any Python-scoped `.claude/rules/*.md`, and `CLAUDE.md` — reviews the files under review against its eleven-point checklist, and writes a findings JSON to the `findings_path` the manifest named. Render what it wrote:
+`name` must match the overlay's section heading exactly. `style` is `"bulleted"`, `"definition"`, or `"plain"`. `after` (or `before`) anchors the section's position relative to a built-in section or a previously declared entry. `ref_exempt = true` shields the section's body from checks that would otherwise flag its `# ref:`-style lines.
+
+Without both pieces — the content rule in the overlay and the structural registration in `pyproject.toml` — `lazy-python.docstring-writer` has nothing to add: the canon has no opinion on your wire-format documentation, and an unregistered section name is not one the agent is allowed to invent.
+
+### Step 4 — Dispatch lazy-python.docstring-writer
+
+Pick (or write) a class the new clause applies to — for instance, a class under `src/protocol/` with a wire-level constraint worth documenting — then dispatch:
 
 ```
-chk-py review --render .runtime/lazy-python/review/<timestamp>.findings.json
+Dispatch the lazy-python.docstring-writer agent against <path/to/file.py>
 ```
 
-If your changed file violates the naming clause, expect a finding whose `rule` reads something like `overlay-repository-layer-naming`, with the file, line, and a message describing the mismatch — that's the reviewer applying checklist item 11 against a clause no deterministic checker knows about. If the file already conforms, an empty `findings` array (rendered as `Success: no guideline issues found`) confirms the reviewer read the clause and had nothing to flag — not that it skipped the check. A `FAIL` severity in the output means the render exits non-zero, exactly like a `pcf` or `mypy` failure would.
+The agent's Step 1 re-reads the three layers from Step 2 above, including your edited overlay and the `pyproject.toml` registration. Its Step 2 reads the target file, Step 3 identifies non-compliant or missing docstrings, and Step 4 writes them — following your overlay's content rule for the new `Field Semantics` section at the position and style you registered.
 
-### Step 6 — Re-run check-style's remaining steps
+### Step 5 — Verify the clause took effect
 
-Once the review findings render clean (or you've fixed what they flagged), go back to `/lazy-python.check-style`: Step 5 applies any remaining fixes from its own manual pass or from `chk-py`, and Step 6 re-verifies with `chk-py all -q` (now with the review scope closed) and `tst-py <module> -q` for any touched module. Re-running `chk-py review` against an unchanged scope reuses the previous findings instead of re-dispatching the agent (`review: scope unchanged since ... — reusing findings`) — edit the file or the overlay clause to force a fresh pass.
+Read the docstring the agent wrote (or edited). Confirm:
 
-### Step 7 — Iterate and expand
+- The `Field Semantics` section (or whatever you named it) appears at the position you anchored it (`after = "Guarantees"` in the example above).
+- Its content follows the style you declared (`bulleted`, in the example) and the wording rule you wrote in the overlay.
+- Every other section still follows the canon's ordinary rules — the overlay only adds to the section machinery, it doesn't relax the zero-tolerance blockers.
 
-Once the first clause is confirmed by both surfaces, add more as your project's conventions evolve — further prose in `coding_guidelines.md`. Because both `check-style` and `code-reviewer` re-read the overlay on every run, each new clause takes effect immediately without touching plugin code.
+The agent's own Step 6 already runs `chk-py all <file>.py -q` against the changed file as part of its dispatch — a clean run confirms the file passes the deterministic checks; it does not by itself confirm your new section's wording, which is your judgment call at this step.
+
+If the section is missing, confirm the registration in `pyproject.toml` uses the exact section `name` your overlay heading uses — a mismatch means the agent has no rule to follow for a section it isn't told exists.
+
+### Step 6 — Iterate and expand
+
+Once the first clause is confirmed, add more as your project's documentation conventions grow — further sections, escape-hatch registrations (`d2_exempt_marker_attrs` for private attributes your API intentionally exposes, `private_name_allowlist` for private identifiers your narrative legitimately names), or additional prose in `documenting_guidelines.md`. Because `lazy-python.docstring-writer` re-reads both files on every dispatch, each new clause takes effect immediately without touching plugin code.
 
 ## After you're done
 
-`docs/guidelines/coding_guidelines.md` is living project config. Track it in version control. When a teammate's `check-style` run or review pass disagrees with a project convention, the fix is an overlay edit — not a review comment repeated file by file.
+`docs/guidelines/documenting_guidelines.md` and the `[tool.pcf]` registrations in `pyproject.toml` are living project config. Track both in version control. When a teammate's `lazy-python.docstring-writer` dispatch produces a docstring that disagrees with a project convention, the fix is an overlay edit (and, for structural additions, a `pyproject.toml` registration) — not a one-off manual rewrite repeated file by file.
 
-To verify the overlay stub itself is intact (header not altered or removed), run `/lazy-python.audit` — its overlay check covers all four `docs/guidelines/*.md` files, not just the one this walkthrough touches. It does not validate clause content — that judgment belongs to you and your team, backed by `/lazy-python.check-style` and `lazy-python.code-reviewer`.
-
-If `lazy-python.code-reviewer` misses a clause you expected it to flag, confirm the clause is actually written in `coding_guidelines.md` (not just in your head) and that the file under review was included in the manifest's scope — the reviewer only sees files named in its manifest.
+To verify the overlay stub itself is intact (not accidentally deleted or corrupted), run `/lazy-python.audit` — its overlay check covers all four `docs/guidelines/*.md` files, not just the one this walkthrough touches. It does not validate clause content — that judgment belongs to you and your team, backed by the docstrings `lazy-python.docstring-writer` actually produces.
 
 ## How the overlay and pyproject.toml layers combine
 

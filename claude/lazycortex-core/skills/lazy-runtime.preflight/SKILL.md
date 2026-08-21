@@ -1,7 +1,7 @@
 ---
 name: lazy-runtime.preflight
 description: "Run before wiring a new expert or MCP server into a live routine, and when a routine's expert spawns keep timing out, die instantly, or never produce a response. Emulates each expert launch with a trivial prompt (no real work) to expose the unresolvable agent, missing aspect/protocol, bad `mcp_config` path, or MCP server that hangs at init, then proposes a concrete fix and applies it only after the operator confirms."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(git rev-parse *), Bash(date -u *), Write, Edit, AskUserQuestion
+allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(git rev-parse *), Bash(date -u *), Write, Edit, AskUserQuestion, Agent
 ---
 # Runtime Preflight
 
@@ -34,11 +34,10 @@ Bash(LAZY_REPO_ROOT="$PWD" python3 "${CLAUDE_PLUGIN_ROOT}/bin/expert_preflight.p
 Parse the JSON on stdout. Its shape:
 
 - `experts[]` — one entry per validated expert: `name`, `static[]` (`{level, message}`), `dynamic` (or `null` when the probe was skipped), `verdict` (`ok` / `fail`), `fixes[]`.
-- `repo[]` — checkout-level findings (`{level, message}`) that apply to every expert here: an inbox another daemon on this host already drives (`fail`), a sandbox allowlist that does not cover a location its own entries resolve to (`fail` for write, `warn` for read), and a `daemon.run_here` gate too coarse to name the machine it was answered on (`warn`).
-- `skipped_cross_repo[]` — `expert@<repo>` targets not validated (this preflight only checks local-repo experts).
+- `repo[]` — checkout-level findings (`{level, message}`) that apply to every expert here: an inbox another daemon on this host already drives (`fail`), and a sandbox allowlist that does not cover a location its own entries resolve to (`fail` for write, `warn` for read).
 - `summary` — one-line count.
 
-The dynamic block, when present, carries `exit`, `duration_s`, `timed_out`, `agent_resolved`, `servers[]` (`{name, status, detail}` where status ∈ `connected` / `timed-out` / `auth-required` / `spawn-failed` / `pending-approval` / `unknown`), and `best_effort_plugin_dirs`.
+The dynamic block, when present, carries `exit`, `duration_s`, `timed_out`, `agent_resolved`, `servers[]` (`{name, status, detail}` where status ∈ `connected` / `timed-out` / `auth-required` / `spawn-failed` / `pending-approval` / `unknown`), and `best_effort_plugin_dirs`. One other shape exists: `{"skipped": "rate_limit"}` — the host's subscription rate-limit flag was raised, so the probe (a real `claude` spawn) was deliberately not run; the expert's verdict is unaffected by it. Render it as "probe skipped — rate limit", never as a failure.
 
 The full dynamic probe spawns `claude` per expert (up to ~90s each) and may need MCP auth. When the operator wants a fast structural sweep with no spawn, run with `--no-probe` instead — static checks only.
 
@@ -48,14 +47,13 @@ Outcome: `preflight-run` or `no-targets` (empty `experts[]`).
 
 Render `repo[]` first, above the table — it is not per-expert, and a `fail` there means every expert below is launchable into a harmful state. One line per finding, prefixed with its `level`:
 
-- `fail` on inbox ownership — another checkout on this host drives the same physical inbox, so every file would be dispatched twice. This is not one of the fixes Step 3 applies: which checkout drives a shared inbox is the operator's decision. Print the finding and state that one of the two must set `daemon.run_here: false` (or pin a host list), then re-run.
+- `fail` on inbox ownership — another checkout on this host drives the same physical inbox, so every file would be dispatched twice. This is not one of the fixes Step 3 applies: which checkout drives a shared inbox is the operator's decision. Print the finding and state that one of the two projects must stop naming a checkout on this host in its `daemon.run_here`, then re-run.
 - `fail` on sandbox `allowWrite` — a confined spawn is checked against the resolved path, so an entry reached through a symlink permits nothing where the data lives and every write there fails with `Operation not permitted`. The finding carries the repair: `lazycortex-core sandbox-sync --repo-root <repo>`. Offer it as a Step 3 fix; it adds the resolved locations and never drops a recorded entry.
 - `warn` on sandbox `allowRead` — same cause on the read side; same repair.
-- `warn` on the daemon gate — `daemon.run_here` is a bare `true` in a checkout that sources directories from outside git, so a synced overlay reads it as answered on every machine holding the path. Direct the operator to `/lazy-core.install`, which offers to pin it to this host.
 
 When `repo[]` is empty, print nothing for it.
 
-If `experts[]` is empty: print "No expert-shape routines carry a local expert to validate." plus any `repo[]` findings and any `skipped_cross_repo` entries, and skip to Step 4 with outcome `no-targets`.
+If `experts[]` is empty: print "No expert-shape routines carry an expert to validate." plus any `repo[]` findings, and skip to Step 4 with outcome `no-targets`.
 
 Otherwise render one markdown table row per expert:
 
@@ -65,9 +63,8 @@ Otherwise render one markdown table row per expert:
 - **verdict** — `ok` or `fail`.
 - **static issues** — the `message` of each `static[]` finding, or `—` when none. Prefix each with its `level` (`fail` / `warn`).
 - **server statuses** — `<name>: <status>` per `dynamic.servers[]`, or `—` when the expert declares no MCP servers or the probe was skipped.
-- **active hooks** — the comma-joined `hooks_enabled[]` list — the lazycortex hooks that run in this expert's spawns — or `none` when empty (every hook no-ops; the hermetic default).
 
-Below the table, note any expert whose `dynamic.best_effort_plugin_dirs` is true: "plugin-dir resolution was best-effort for <expert> — a probe-only failure there may be a false negative; re-run under the daemon or with `LAZYCORTEX_PLUGIN_DIRS` set to confirm." List `skipped_cross_repo` targets as unvalidated.
+Below the table, note any expert whose `dynamic.best_effort_plugin_dirs` is true: "plugin-dir resolution was best-effort for <expert> — a probe-only failure there may be a false negative; re-run under the daemon or with `LAZYCORTEX_PLUGIN_DIRS` set to confirm."
 
 Outcome: `table-shown`, `table-shown-repo-blocked` (any `fail` in `repo[]`), or `no-targets`.
 
@@ -174,9 +171,9 @@ input: "<--expert <name> | --no-probe | none>"
 
 ## Failure modes
 
-- **"No expert-shape routines carry a local expert to validate."** — every routine is `command`-shape or targets a cross-repo `expert@<repo>` → nothing to check; register an `expert`-shape routine first, or run the preflight in the repo that owns the expert.
+- **"No expert-shape routines carry an expert to validate."** — every routine is `command`-shape → nothing to check; register an `expert`-shape routine first.
 - **A probe reports every server `timed-out` at once** — the probe hit its 90s wall budget (the whole spawn hung, not one server) → confirm `claude` is on PATH and authenticated (`claude -p "hi"` by hand), then re-run.
 - **"plugin-dir resolution was best-effort"** in the table — the preflight ran interactively with no `LAZYCORTEX_PLUGIN_DIRS` and derived plugin dirs from the repo + cache → a probe-only failure may be a false negative; re-run under the daemon or export `LAZYCORTEX_PLUGIN_DIRS` and confirm.
 - **A fix cannot be applied because the tree is mid-merge / rebase** — the skill refuses to write a settings change it cannot commit → finish the git transaction, then re-run `/lazy-runtime.preflight` to apply the fix.
-- **Every expert reports `ok` but a `fail` line sits above the table** — the experts are individually launchable; the checkout is not, because another daemon on this host already drives one of its inboxes → set `daemon.run_here: false` in the checkout that must not drive it, then re-run.
+- **Every expert reports `ok` but a `fail` line sits above the table** — the experts are individually launchable; the checkout is not, because another daemon on this host already drives one of its inboxes → take the checkout that must not drive it out of its project's `daemon.run_here`, then re-run.
 - **Jobs fail with `Operation not permitted` while the config looks correct** — the sandbox allowlist names a directory reached through a symlink, and confinement is checked against the resolved path → accept the `sandbox` fix in Step 3, or run `lazycortex-core sandbox-sync --repo-root "$PWD"` by hand.

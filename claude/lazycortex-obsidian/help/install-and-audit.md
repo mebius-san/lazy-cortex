@@ -1,15 +1,16 @@
 ---
 chapter_type: block
 summary: Install, keep current, and audit the lazycortex-obsidian plugin — vault bootstrap, Obsidian plugin management, and semantic integrity checks in one pass.
-last_regen: 2026-08-05
+last_regen: 2026-08-19
 diagram_spec:
   anchor: "How the three skills compose"
-  request: "Flow diagram showing how lazy-obsidian.install orchestrates lazy-obsidian.update-plugin (for Dataview, and indirectly for Obsidian community plugins via iconize-install) and how lazy-obsidian.audit feeds findings back to the user for fix or waive; show the idempotent re-run loop"
+  request: "Flow diagram showing how lazy-obsidian.install orchestrates lazy-obsidian.update-plugin (for Dataview, and indirectly for Obsidian community plugins via iconize-install), syncs and enables its own CSS snippets (diagram-fit + callouts), and how lazy-obsidian.audit feeds findings back to the user for fix or waive; show the idempotent re-run loop"
   kind_hint: flow
 source_skills:
   - lazy-obsidian.install
   - lazy-obsidian.audit
   - lazy-obsidian.update-plugin
+source_sha: 1b79c714d76efca72ce97419eb66c032923b60bc
 ---
 # Install and audit
 
@@ -19,25 +20,26 @@ All three are idempotent. Running `/lazy-obsidian.install` a second time produce
 
 ## When you'd use this
 
-- Bootstrapping a freshly cloned repo: run `/lazy-obsidian.install` once to bring the vault to a working baseline (Dataview, Iconize, diagram render glue) without any manual setup.
+- Bootstrapping a freshly cloned repo: run `/lazy-obsidian.install` once to bring the vault to a working baseline (Dataview, Iconize, CSS snippets, diagram render glue) without any manual setup.
 - Refreshing a single vault plugin after a new upstream release: run `/lazy-obsidian.update-plugin <id>` directly — no need to re-run the full install.
 - Checking that your plugin artifacts are still coherent after a plugin update or a cache refresh: run `/lazy-obsidian.audit` to surface any version drift, schema mismatches, or stale settings.
 - Re-running install safely after a plugin update: `/plugin update lazycortex-obsidian@lazycortex` refreshes the plugin cache but does not re-sync rule or template files — follow it with `/lazy-obsidian.install` to pick up changes.
 
 ## How it fits together
 
-You start with `/lazy-obsidian.install`. It detects whether you are installing at project scope (the common case) or user scope, then works through the rule-template sync, the tag-page template, and the Dataview install in order. For the Dataview install it calls `/lazy-obsidian.update-plugin dataview` — that primitive fetches the latest release from GitHub, deep-merges the opinionated `dataview` override block from `plugin-settings.json` onto the vault's `data.json`, and registers the id in `community-plugins.json`. After Dataview, the install skill chains into `/lazy-obsidian.iconize-install` and `/lazy-obsidian.diagram-install` automatically (no opt-in); those chains each call `/lazy-obsidian.update-plugin` again for their own dependencies. Finally, at project or user scope, it seeds the agent-model tier for the plugin's `lazy-obsidian.gen-tag-pages` subagent into `lazy.settings.json` — non-destructively, so a tier you've already customized locally is left alone. At the end you get a single structured report covering every step.
+You start with `/lazy-obsidian.install`. It detects whether you are installing at project scope (the common case) or user scope, then works through the rule-template sync, the tag-page template, and the Dataview install in order. For the Dataview install it calls `/lazy-obsidian.update-plugin dataview` — that primitive fetches the latest release from GitHub, deep-merges the opinionated `dataview` override block from `plugin-settings.json` onto the vault's `data.json`, and registers the id in `community-plugins.json`. Next it chains into `/lazy-obsidian.iconize-install` automatically (no opt-in) — that chain calls `/lazy-obsidian.update-plugin` again for its own dependencies (Iconize, Folder Notes, the bundled `iconize-reloader`). It then syncs and enables every CSS snippet the plugin ships — the mermaid and ASCII diagram-fit snippets plus `callouts.css` (styling for the `[!decision]` / `[!decision-candidate]` callout types) — into your vault's `snippets/` folder, appending each one to `appearance.json`'s `enabledCssSnippets` array; this is the plugin's single writer of that array, so the diagram-install chain that follows (also automatic, no opt-in) only declares its own snippet files rather than touching the array itself. Finally, at project or user scope, it seeds the agent-model tier for the plugin's `lazy-obsidian.gen-tag-pages` subagent into `lazy.settings.json` — non-destructively, so a tier you've already customized locally is left alone. At the end you get a single structured report covering every step.
 
 `/lazy-obsidian.update-plugin` is intentionally narrow: one plugin id per call, no side effects on sibling dirs, backup-safe (`manifest.json.bak` / `main.js.bak` are created before any download, restored on failure). When you pass `--bundled`, the skill copies binaries from the plugin's own templates instead of hitting GitHub — useful for `iconize-reloader`, which ships inside this plugin, and safe in offline environments. The state tuple it prints (`binary=... overrides=... community=...`) is machine-readable so the calling skill can log it verbatim.
 
-`/lazy-obsidian.audit` runs independently of install — invoke it any time you want a coherence check. It works through a fixed set of phases: version constants in `iconize_sync.py` vs. template HOOK_VERSION markers; icon-map template schema validity; cross-artifact coherence for the two-writer model (worker writes frontmatter, the bundled `iconize-reloader` bridges folder-note frontmatter into `data.json`); protocol template sanity; skill cross-references; and the diagram render glue (CSS snippets and mermaid-popup override block). For every FAIL or WARN it offers fix / waive / skip — one question at a time. It is also the target of `lazy-core.doctor` Phase 3, so running the core doctor in any project that has this plugin enabled will delegate to this skill automatically.
+`/lazy-obsidian.audit` runs independently of install — invoke it any time you want a coherence check. It works through a fixed set of phases: version constants in `iconize_sync.py` vs. template `HOOK_VERSION` markers; icon-map template schema validity; cross-artifact coherence for the two-writer model (worker writes frontmatter, the bundled `iconize-reloader` bridges folder-note frontmatter into `data.json`); protocol template sanity; skill cross-references; and the plugin's shipped CSS snippets — the diagram-fit snippets, the `mermaid-popup` override block, and `callouts.css`'s two decision-callout selectors. For every FAIL or WARN it offers fix / waive / skip — one question at a time. It is also the target of `lazy-core.doctor` Phase 3, so running the core doctor in any project that has this plugin enabled will delegate to this skill automatically.
 
 ## Common adjustments
 
 - **Refreshing one Obsidian plugin**: run `/lazy-obsidian.update-plugin <id>`. Pass `--bundled` only for plugins that ship inside this plugin's templates (currently `iconize-reloader`).
 - **Dry run before committing**: add `--dry-run` to any `/lazy-obsidian.update-plugin` call to see the state tuple (`binary`, `overrides`, `community`) that would be produced without writing anything.
+- **A CSS snippet you customized conflicts with an upstream change**: `/lazy-obsidian.install` only prompts when your local edit and the shipped update touch the exact same region of a snippet — it asks you to pick **merge-shipped** (take the shipped version for that region) or **keep-local** (keep yours, still apply any non-conflicting shipped changes). Non-conflicting drift merges silently every time; you'll never be asked about it.
 - **Agent model routing**: `/lazy-obsidian.install` seeds the `lazy-obsidian.gen-tag-pages` subagent's tier automatically on every run, without overwriting a tier you've already customized. If you want to adjust which tier handles `lazy-obsidian` subagents yourself, run `/lazy-core.agent-models --scope=project` — it reads the canonical defaults from `lazycortex-core` and lets you override per-agent without hand-editing `lazy.settings.json`.
-- **After a plugin update**: re-run `/lazy-obsidian.install` after every `/plugin update lazycortex-obsidian@lazycortex`. The cache refresh does not propagate rule or template changes into your repo; the install skill does.
+- **After a plugin update**: re-run `/lazy-obsidian.install` after every `/plugin update lazycortex-obsidian@lazycortex`. The cache refresh does not propagate rule, template, or CSS snippet changes into your repo; the install skill does.
 
 ## How the three skills compose
 
@@ -103,4 +105,4 @@ flowchart LR
 ## See also
 
 - [iconize](iconize.md) — the iconize-sync block (configure and apply vault icon mappings)
-- [walkthroughs/fresh-vault-setup](walkthroughs/fresh-vault-setup.md) — end-to-end walkthrough using this block as its first step
+- [walkthroughs/vault-bootstrap](walkthroughs/vault-bootstrap.md) — end-to-end walkthrough using this block as its first step

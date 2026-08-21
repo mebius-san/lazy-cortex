@@ -2,18 +2,14 @@
 tags:
   - {{product_tag}}
   - spec/draft
-subsystem: {{subsystem}}
 product: {{product}}
 spec_role: design
+spec_doc_type: design
 spec_stage: draft
 spec_source_requests: []
 spec_source_docs: []
 ---
 # {{product}} — design
-
-> **{{subsystem}}** · **{{product}}** — design
-
-_Populated by `spec.create-from-code` (product mode) or hand-authored. Behavior-only — NO source URLs, file paths, or code identifiers._
 
 ## Overview
 _The problem the product solves, who it's for, what would be missing without it._

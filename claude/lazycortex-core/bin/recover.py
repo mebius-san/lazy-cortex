@@ -48,10 +48,15 @@ VALID_MODES = {
 # operator's repair happened outside the skill (manual git ops). The skill
 # offers `manual-fix` instead of the dirt-cleanup wizard. Source of truth:
 # claude/lazycortex-core/bin/runtime_daemon.py:_halt_daemon callers.
+# `rate_limit` rides this path too: there is no dirt to clean, resume simply
+# clears the halt early — the pump's own pre-spawn flag check keeps tokens
+# safe even when the operator resumes before the window reopens.
 MANUAL_FIX_REASONS = {
   "git_pull_diverged",
   "git_push_failed",
   "git_remote_unavailable",
+  "routine_config_invalid",
+  "rate_limit",
 }
 
 
@@ -211,7 +216,7 @@ def cleanup_and_resume(repo: Path, mode: str, message: str | None = None) -> Non
   resume(repo)
 
 
-# ---- doctor primitives (lazy-runtime.doctor uses these via Bash) ----
+# ---- doctor primitives (runtime.doctor uses these via Bash) ----
 
 def revert_files(repo: Path, paths: list[str]) -> None:
   """

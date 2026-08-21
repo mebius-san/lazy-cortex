@@ -1,12 +1,15 @@
-"""Mechanical opt-in handler — owns the full frontmatter shape for
-request files.
+"""Mechanical opt-in handler for request files.
 
-Invoked by the `spec.request-open` md-scan routine for files in
+Invoked by the `lazy-spec.request-open` md-scan routine for files in
 `<vault-root>/requests/*.md` that are not yet in the review loop
-(`review_active` missing or false-without-finalize). The handler
-brings the file to the canonical opt-in shape: 8 frontmatter keys +
-Waiting banner, atomic commit under `spec.request-open` identity.
-No LLM dispatch.
+(`review_active` missing or false-without-finalize). The handler writes only
+the spec-side frontmatter — `spec_role`, `request_status`, `request_class`,
+the `request/draft` tag, and clearing a stale `review_result` — then
+delegates the review-side opt-in shape (`review_active`, `review_round`,
+`review_approved`, `review_phase`, `review_main_done`, the Waiting banner,
+and the `# History` section) to lazycortex-review's own `start` verb. The
+atomic commit under the `lazy-spec.request-open` identity is still owned
+here. No LLM dispatch.
 
 State table for the input file:
 
@@ -26,11 +29,20 @@ State table for the input file:
   outcome `unknown-state-skip`, no-op (operator state, not script's
   business).
 
-The split between this script and the LLM agent is: anything that can
-be decided WITHOUT reading the body (frontmatter shape, banner) is
-script work; classification, candidate enumeration, routing, attach /
-spawn invocation is LLM agent work in the review specialist mode and
-apply-gate mode.
+On the naked and partial paths, the spec-side frontmatter write to disk happens before
+`_bootstrap_review` runs. If that delegated call raises `SystemExit` (CLI unresolved, timeout,
+or non-zero exit), the write has already landed and the commit never happens, leaving the file
+uncommitted and half-shaped in the worktree. This self-heals: the next md-scan tick
+re-classifies the file as `partial` and retries the repair.
+
+Two splits govern who does the work here. Between this script and the LLM
+agent: anything decidable WITHOUT reading the body (frontmatter shape,
+banner) is script work; classification, candidate enumeration, routing,
+attach / spawn invocation is LLM agent work in the review specialist mode
+and apply-gate mode. Between this script and the sibling plugin: the
+spec-side frontmatter keys are written directly here, while the
+review-side opt-in shape is delegated to lazycortex-review's own CLI
+rather than duplicated by hand.
 """
 from __future__ import annotations
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -52,26 +64,41 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from spec_keys import BannerTag, Outcome, SpecKey, SpecValue, State  # noqa: E402
+from spec_keys import BannerTag, Outcome, PlanReview, SpecKey, SpecValue, State  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from spec_paths import find_settings_root, spec_content_root  # noqa: E402
+from spec_paths import find_settings_root, resolve_plugin_cli, spec_content_root  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from summary_render import apply_container_stats  # noqa: E402
 
 
-_REQUIRED_REVIEW_KEYS = (SpecKey.REVIEW_ACTIVE, SpecKey.REVIEW_ROUND, SpecKey.REVIEW_APPROVED)
-_REQUIRED_SPEC_KEYS = (SpecKey.ROLE, SpecKey.STATUS, SpecKey.CLASS)
+_REQUIRED_REVIEW_KEYS = (
+    SpecKey.REVIEW_ACTIVE, SpecKey.REVIEW_ROUND, SpecKey.REVIEW_APPROVED,
+    SpecKey.REVIEW_PHASE, SpecKey.REVIEW_MAIN_DONE,
+)
 _TERMINAL_STATUSES = frozenset({"accepted", "rejected"})
-_BANNER = f"> [!hint] Waiting {BannerTag.IN_PROCESS}"
+
+# The review-side half of the opt-in shape — `review_active` / `review_round` / `review_approved`
+# / `review_phase` / `review_main_done`, the Waiting banner and the `# History` section — belongs
+# to lazycortex-review and is produced by its own `start` verb, never hand-written here. Two
+# copies of that shape drift apart, and the coordinator then burns a repair commit on every
+# request to reconcile them.
+# waiver: sibling-plugin CLI subcommand flag — no constants class in this module carries it
+_NO_COMMIT_FLAG = "--no-commit"
+
+# An inner subprocess bound only buys a diagnostic when it trips before the daemon kills the
+# whole handler, so it has to sit strictly below the driving routine's own `timeout_sec`. The
+# `lazy-spec.request-open` routine bounds this handler at 30s, hence a local 20s rather than the
+# shared `PlanReview.START_TIMEOUT_S` (60s), which would never trip here. That shared constant
+# has no margin at its own call sites either — `lazy-spec.gate-tick` and
+# `lazy-spec.coordinator-watch` are both `timeout_sec: 60`, so the daemon's kill and the inner
+# timeout land together and spawn time decides which wins. Fixing those is their modules' call.
+_BOOTSTRAP_TIMEOUT_S = 20
 
 _FRESH_FRONTMATTER = (
     "---\n"
     f"{SpecKey.ROLE}: {SpecValue.ROLE_REQUEST}\n"
     f"{SpecKey.STATUS}: {SpecValue.STATUS_DRAFT}\n"
     f"{SpecKey.CLASS}: {SpecValue.CLASS_UNKNOWN}\n"
-    f"{SpecKey.REVIEW_ACTIVE}: {SpecValue.TRUE}\n"
-    f"{SpecKey.REVIEW_ROUND}: {SpecValue.ROUND_ONE}\n"
-    f"{SpecKey.REVIEW_APPROVED}: {SpecValue.FALSE}\n"
     "tags:\n"
     f"  - {SpecValue.TAG_DRAFT}\n"
     "---\n"
@@ -82,12 +109,14 @@ def _parse_frontmatter(text: str) -> tuple[dict, int, int]:
   """
   Parse the YAML frontmatter block at the start of a file's text.
 
-  Returns `({}, 0, 0)` when there is no parseable frontmatter.
+  Args:
+    text: Full file text, potentially including a leading YAML frontmatter block.
 
   Returns:
     A three-tuple of `(values, fm_start_idx, fm_end_idx)` where `values` is a flat
     dict of top-level scalar keys and the indices bound the YAML block including the
-    closing `---` line.
+    closing `---` line. Returns `({}, 0, 0)` when the text carries no parseable
+    frontmatter.
   """
   if not text.startswith("---\n"):
     return {}, 0, 0
@@ -120,6 +149,9 @@ def _has_banner(body: str) -> bool:
   """
   Return True when `body` carries the Waiting banner above any first H1.
 
+  Args:
+    body: Markdown body text below the frontmatter block, scanned for the banner.
+
   Returns:
     True when a recognised review-status tag appears before the first H1 heading;
     False when the H1 comes first or no banner is found.
@@ -142,6 +174,10 @@ def _has_banner(body: str) -> bool:
 def _classify(values: dict, body: str) -> str:
   """
   Classify a request file's current state from its frontmatter values and body.
+
+  Args:
+    values: Parsed frontmatter values for the file being classified.
+    body: Markdown body text below the frontmatter block.
 
   Returns:
     One of `naked`, `partial`, `ready`, `ready-for-apply`, `terminal`, or `unknown-state`.
@@ -178,6 +214,11 @@ def _set_field(fm_text: str, key: str, value: str) -> str:
   Inserts before the closing `---` when the key is absent; replaces the
   existing line in place when present.
 
+  Args:
+    fm_text: Frontmatter text block, including its opening and closing `---` fences.
+    key: Frontmatter key to set.
+    value: Value to assign to the key.
+
   Returns:
     The updated frontmatter text with the key set to the given value.
   """
@@ -195,6 +236,10 @@ def _unset_field(fm_text: str, key: str) -> str:
   """
   Remove the `key: …` line from `fm_text`. No-op when absent.
 
+  Args:
+    fm_text: Frontmatter text block to remove the key from.
+    key: Frontmatter key whose line is removed.
+
   Returns:
     The frontmatter text with the matching key line removed, or the original
     text unchanged when the key is not present.
@@ -209,6 +254,10 @@ def _ensure_tags_member(fm_text: str, member: str) -> str:
 
   Creates the block when absent; appends the member when the block exists
   but does not already include it.
+
+  Args:
+    fm_text: Frontmatter text block to update.
+    member: Tag value to ensure is present in the `tags:` block.
 
   Returns:
     The frontmatter text with the given member present in the `tags:` block.
@@ -228,14 +277,74 @@ def _ensure_tags_member(fm_text: str, member: str) -> str:
   return fm_text[:close_idx] + f"tags:\n  - {member}\n" + fm_text[close_idx:]
 
 
-def _repair(text: str, values: dict, fm_end: int) -> str:
+def _resolve_review_cli() -> Path:
   """
-  Bring partial frontmatter up to the canonical opt-in shape.
+  Resolve the `lazycortex-review` CLI binary, failing hard when it cannot be found.
 
   Returns:
-    The complete file text with all missing review keys filled in, the
-    `request/draft` tag ensured, and the Waiting banner prepended to the body
-    when absent.
+    The resolved binary path.
+
+  Raises:
+    SystemExit: When no plugin directory carries the `lazycortex-review` CLI.
+  """
+  cli = resolve_plugin_cli(PlanReview.REVIEW_CLI)
+  # guard: unresolved — env var unset or no plugin dir carries the CLI
+  if cli is None:
+    sys.stderr.write(
+        f"no '{PlanReview.REVIEW_CLI}' resolvable via ${PlanReview.PLUGIN_DIRS_ENV}\n"
+    )
+    raise SystemExit(3)
+  return cli
+
+
+def _bootstrap_review(file_path: Path) -> None:
+  """
+  Seed the review-side opt-in shape for a request file via the sibling review CLI.
+
+  Notes:
+    - Invokes the review CLI as a subprocess and leaves the resulting changes uncommitted for
+      the caller to fold into its own atomic commit.
+
+  Args:
+    file_path: Request file whose review-side shape is being seeded.
+
+  Raises:
+    SystemExit: When the review CLI cannot be resolved, times out, or exits non-zero.
+  """
+  try:
+    res = subprocess.run(
+        [str(_resolve_review_cli()), PlanReview.START_VERB, _NO_COMMIT_FLAG, str(file_path)],
+        cwd = str(file_path.parent), capture_output = True, text = True, check = False,
+        timeout = _BOOTSTRAP_TIMEOUT_S,
+    )
+  # guard: a hung review CLI would otherwise stall every routine on the daemon's serial tick
+  except subprocess.TimeoutExpired:
+    sys.stderr.write(
+        f"{PlanReview.REVIEW_CLI} start timed out after {_BOOTSTRAP_TIMEOUT_S}s "
+        f"on {file_path}\n"
+    )
+    raise SystemExit(3) from None
+  # guard: a failed bootstrap leaves a half-shaped document — surface it as a routine error
+  if res.returncode != 0:
+    sys.stderr.write(
+        f"{PlanReview.REVIEW_CLI} start failed on {file_path}: "
+        f"exit={res.returncode} stderr={res.stderr.strip()[:240]}\n"
+    )
+    raise SystemExit(3)
+
+
+def _repair(text: str, values: dict, fm_end: int) -> str:
+  """
+  Bring partial frontmatter up to the canonical spec-side opt-in shape.
+
+  Args:
+    text: Full file text, frontmatter and body, of the file being repaired.
+    values: Parsed frontmatter values already present in the file.
+    fm_end: Offset marking the end of the frontmatter block within `text`.
+
+  Returns:
+    The complete file text with the missing request keys filled in, the stale
+    apply-gate discriminator cleared, and the `request/draft` tag ensured.
   """
   fm_text = text[:fm_end]
   body = text[fm_end:]
@@ -244,13 +353,6 @@ def _repair(text: str, values: dict, fm_end: int) -> str:
     fm_text = _set_field(fm_text, SpecKey.ROLE, SpecValue.ROLE_REQUEST)
   if SpecKey.CLASS not in values:
     fm_text = _set_field(fm_text, SpecKey.CLASS, SpecValue.CLASS_UNKNOWN)
-# Review keys: enforce canonical defaults if missing
-  if SpecKey.REVIEW_ACTIVE not in values:
-    fm_text = _set_field(fm_text, SpecKey.REVIEW_ACTIVE, SpecValue.TRUE)
-  if SpecKey.REVIEW_ROUND not in values:
-    fm_text = _set_field(fm_text, SpecKey.REVIEW_ROUND, SpecValue.ROUND_ONE)
-  if SpecKey.REVIEW_APPROVED not in values:
-    fm_text = _set_field(fm_text, SpecKey.REVIEW_APPROVED, SpecValue.FALSE)
 # Clear the terminal apply-gate discriminator so re-entering the
 # review loop does not also trigger the downstream apply-gate
 # routine on the next md-scan tick. `review_result` is set only
@@ -258,30 +360,38 @@ def _repair(text: str, values: dict, fm_end: int) -> str:
   if SpecKey.REVIEW_RESULT in values:
     fm_text = _unset_field(fm_text, SpecKey.REVIEW_RESULT)
   fm_text = _ensure_tags_member(fm_text, SpecValue.TAG_DRAFT)
-  # Banner
-  body_stripped = body.lstrip("\n")
-  if not _has_banner(body_stripped):
-    body_stripped = _BANNER + "\n\n" + body_stripped
-  return fm_text + body_stripped
+  return fm_text + body.lstrip("\n")
 
 
 def open_naked_file(file_path: Path) -> str:
   """
-  Apply the mechanical opt-in transition to `file_path`.
+  Apply the mechanical opt-in transition to a request file.
+
+  Notes:
+    - Writes to `file_path` and, for the `opened` and `repaired` outcomes, invokes the
+      `lazycortex-review` CLI to seed the review-side shape before returning.
+
+  Args:
+    file_path: Request file to bring to the canonical opt-in shape.
 
   Returns:
     One of `opened`, `repaired`, `already-opted-in`, `ready-for-apply-skip`,
     `terminal-state-skip`, or `unknown-state-skip`.
+
+  Raises:
+    SystemExit: When the review CLI cannot be resolved or exits non-zero, for the
+      `opened` and `repaired` transitions.
   """
   text = file_path.read_text()
   values, _, fm_end = _parse_frontmatter(text)
   state = _classify(values, text[fm_end:])
   if state == State.NAKED:
-    body = text.lstrip("\n")
-    file_path.write_text(_FRESH_FRONTMATTER + _BANNER + "\n\n" + body)
+    file_path.write_text(_FRESH_FRONTMATTER + text.lstrip("\n"))
+    _bootstrap_review(file_path)
     return Outcome.OPENED
   if state == State.PARTIAL:
     file_path.write_text(_repair(text, values, fm_end))
+    _bootstrap_review(file_path)
     return Outcome.REPAIRED
   if state == State.READY:
     return Outcome.ALREADY_OPTED_IN
@@ -299,11 +409,27 @@ def _atomic_commit(
     author_email: str,
     subject: str,
 ) -> None:
-  """Stage `file_path` and commit under the named bot identity in a
-    single atomic step. The `-c user.name=` / `-c user.email=`
-    overrides keep concurrent bot commits from racing on the per-repo
-    git config (same trick `lazycortex-review/bin/git_ops.py` uses).
-    """
+  """
+  Stage and commit a request file's opt-in edit under a caller-supplied bot identity.
+
+  Notes:
+    - Also stages and commits the requests inbox summary file when its container stats need
+      updating.
+    - Runs `git add` and `git commit` as subprocesses scoped to the file's parent directory,
+      with the commit's author identity set per-call via `-c user.name=` / `-c user.email=`
+      flags rather than mutating the repo's persistent git config, so concurrent bot commits
+      under different identities never race on the same per-repo config file — the same
+      technique used by `lazycortex-review`'s own commit functions.
+
+  Args:
+    file_path: Request file to stage and commit.
+    author_name: Git author name used for the commit.
+    author_email: Git author email used for the commit.
+    subject: Commit message subject.
+
+  Raises:
+    subprocess.CalledProcessError: When either git invocation exits non-zero.
+  """
   cwd = file_path.parent
   add_paths: list[str] = [str(file_path)]
   # waiver: inbox path segments are fixed protocol constants; no constants class in this module
@@ -320,7 +446,7 @@ def _atomic_commit(
           "-c", f"user.name={author_name}",
           "-c", f"user.email={author_email}",
           "-c", "commit.gpgsign=false",
-          "commit", "-q", "-m", subject,
+          "commit", "-q", "-m", subject, "--", *add_paths,
       ],
       cwd = cwd, check = True, capture_output = True,
   )
@@ -335,6 +461,10 @@ def main(argv: list[str]) -> int:
 
   Returns:
     Exit code: 0 on success, 2 when the file does not exist or is not a markdown file.
+
+  Raises:
+    SystemExit: When the review CLI cannot be resolved or exits non-zero while opening
+      or repairing the file.
   """
   # waiver: argparse CLI signature -- program name shown in --help / usage
   parser = argparse.ArgumentParser(prog = "lazycortex-specs open-request")
@@ -342,13 +472,13 @@ def main(argv: list[str]) -> int:
   parser.add_argument("file", type = Path)
   parser.add_argument(
       # waiver: argparse CLI signature -- option flag + bot-identity default
-      "--author-name", default = "spec.request-open",
+      "--author-name", default = "lazy-spec.request-open",
       # waiver: one-off human-facing message -- argparse help text
       help = "git author name for the opt-in commit",
   )
   parser.add_argument(
       # waiver: argparse CLI signature -- option flag + bot-identity default
-      "--author-email", default = "spec.request-open@bot.invalid",
+      "--author-email", default = "lazy-spec.request-open@bot.invalid",
       # waiver: one-off human-facing message -- argparse help text
       help = "git author email for the opt-in commit",
   )

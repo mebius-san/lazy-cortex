@@ -20,31 +20,31 @@ Used for `kind: erd`, `format: mermaid`. Skip if fewer than 2 entities. Split wh
 
 ## Color binding
 
-Mechanism: fuller-init `themeVariables`. The init directive (theme keys, themeCSS, layout block) comes verbatim from the scheme's `blocks.init.erd`; this template never carries literal style values. The role bindings below describe which scheme keys map to which mermaid theme keys for documentation purposes — the scheme bakes the resolved values into the init string.
+Mechanism: fuller-init `themeVariables`, plus a `themeCSS` string for the one surface `themeVariables` can't reach (the relationship-label plate). The init directive (theme keys, `er:{}` config, themeCSS, layout block) comes verbatim from the scheme's `blocks.init.erd`; this template never carries literal style values. The role bindings below describe which scheme keys map to which mermaid theme keys for documentation purposes — the scheme bakes the resolved values into the init string.
 
-Per mermaid's `packages/mermaid/src/diagrams/er/styles.ts` (verified against the bundled mermaid 11.4.1 in Obsidian 1.12.7), the keys that actually drive erd rendering are listed below. `primaryColor`/`primaryBorderColor`/`primaryTextColor` are NOT read directly by the er module — they only cascade into `mainBkg`/`nodeBorder` under `'theme':'base'` (which we forbid). `nodeTextColor` is **not consumed by the er module at all** in current mermaid — it appears only on a generic `.label` selector that does not match erd's `<text class="er entityLabel">` elements. The scheme binds the actual keys.
+Verified against mermaid 11.13.0 as bundled in Obsidian 1.13.7. Mermaid's ER module was rewritten into a unified renderer in mermaid 11.5 — the keys below are that renderer's, not the pre-11.5 one:
 
-- `mainBkg`                       ← `entry.fill`        (entity box fill — THE CARDS)
-- `nodeBorder`                    ← `entry.stroke`      (entity box border)
-- `tertiaryColor`                 ← `edgeLabelBg`       (relationship label box fill — source renders black plate after inversion)
-- `lineColor`                     ← `lineOnCanvas`      (relationship lines + markers)
-- `textColor`                     ← `textOnPlate`       (entity title text via `.entityTitleText{fill:textColor}` — source renders BLACK on the plate, matching all other kinds' text-on-plate convention)
-- `edgeLabelBackground`           ← `edgeLabelBg`       (edge label background plate — source renders BLACK at 50% alpha after inversion)
-- `attributeBackgroundColorOdd`   ← `entry.fill`        (attribute row alternation — odd rows match the entity main background)
-- `attributeBackgroundColorEven`  ← `sub.fill`          (attribute row alternation — even rows take the `sub` palette; using `entry.fill` lookalikes produces near-invisible alternation, so use a visibly distinct scheme role)
+- `mainBkg`        ← `entry.fill`   (entity box fill — THE CARDS)
+- `nodeBorder`      ← `entry.stroke` (entity box border)
+- `lineColor`       ← `lineOnCanvas` (relationship lines + markers)
+- `textColor`       ← `textOnPlate`  (entity title text — source renders BLACK on the plate, matching every other kind's text-on-plate convention)
+- `nodeTextColor`   ← `textOnPlate`  (attribute row text — same convention as the title)
+- `rowOdd`          ← `entry.fill`   (attribute row alternation — odd rows match the entity main background)
+- `rowEven`         ← a lightened sibling of `entry.fill`, baked into `blocks.init.erd` (attribute row alternation — even rows sit one step lighter than `rowOdd` so the banding reads while staying in the entity plate's own hue family; not a `roles{}` token, because no role names a within-plate alternation shade)
 
-`themeCSS` rules baked into `blocks.init.erd` (Obsidian-only escape hatch — concatenated single string with all rules):
+`rowOdd`/`rowEven` are the current attribute-row-alternation keys. **`attributeBackgroundColorOdd`/`attributeBackgroundColorEven` are DEAD since mermaid 11.5's unified ER renderer — do not bind them.**
 
-- `text.entityLabel{fill:...}` — attribute row text + entity-name title. Mermaid's er styles.ts emits NO CSS rule for `.entityLabel`, so the SVG default fill wins. The override forces text-on-plate so it renders BLACK on the entity plate after inversion. Selector targets `<text class="er entityLabel">` (used by both the entity title and every attribute-row text emitted in the er renderer); `!important` is required because mermaid's class-attribute precedence beats unflagged user CSS.
-- `text.entityLabel:not([id*=-attr-]){font-weight:bold;font-size:...}` — entity-name title only (the header at the top of each card). Verified against `erRenderer.js` (mermaid develop, equivalent to 11.x): the entity title is created with `id="text-<entityId>"` (line 318: `const textId = 'text-' + entityId`). **Attribute texts inherit that prefix** — line 72: `attrPrefix = "${entityTextNode.node().id}-attr-${attrNum}"` — so attribute ids end up as `text-<entityId>-attr-N-{type,name,key,comment}`. ALL entityLabel ids start with `text-`, so a `[id^=text-]` selector matches everything (title + attributes) and was the previous bug. The reliable distinguisher is the `-attr-` infix: title ids never contain it, attribute ids always do. `:not([id*=-attr-])` is title-only. **Selector values are unquoted on purpose** — the whole init directive is a single-quoted string in the `%%{init: ...}%%` line; embedding double-quotes inside breaks mermaid's init parser, which silently drops the entire `themeVariables`/`themeCSS` block and falls back to defaults. CSS allows unquoted attribute values when they're valid `<ident-token>`s, and `-attr-` is one (`-` + ident-start `a` + ident chars `ttr-`, per CSS Syntax Module L3). Two effects: (a) `font-weight:bold` mirrors the class-diagram convention (`.classTitle{font-weight:bolder}` is mermaid's built-in for class titles); (b) shrunken `font-size` matches attribute-row size (mermaid's er renderer renders attributes at `conf.fontSize * 0.85`). The shrunk-+-bold combination produces title/row visual parity, like the class diagram. **If the scheme changes `er.fontSize`, the title font-size in the same scheme block must follow `er.fontSize * 0.85`** — both literals live in `blocks.init.erd`.
-- `text.relationshipLabel{fill:...}` — relationship label text on the arrow plates ("owns", "contains", etc.). Mermaid's er styles.ts emits a `.relationshipLabelBox{fill:tertiaryColor}` rule for the plate but **no fill rule for `.relationshipLabel` itself**. The text's actual rendered color depends on whatever generic mermaid CSS happens to inherit (typically near-black, which inverts to near-white but blends into the 0.7-opacity plate). Source value renders WHITE on the BLACK plate after inversion. Distinct from `text.entityLabel` because the surfaces differ: entity text on coloured plates → renders black; relationship text on black plate → renders white.
-- `.relationshipLabelBox{opacity:0.5}` — relationship-label plate opacity. Mermaid's default is `opacity:0.7`, which fully obscures the line passing under the label. Dropped to 50% so the line is visible through the plate while the white label text remains legible against the half-transparent black plate.
+`themeCSS` rule baked into `blocks.init.erd` (the one surface `themeVariables` can't reach — the unified renderer draws the relationship label through the generic `.edgeLabel` wrapper it shares with other diagram kinds, not a bespoke `.relationshipLabel`/`.relationshipLabelBox` class, so there is no themeVariable that targets it):
 
-Caveats (verified against mermaid GitHub issue #2673 and Obsidian forum #67557):
+- `.edgeLabel rect,.edgeLabel .labelBkg{fill:...}` ← `edgeLabelBg` (relationship-label plate)
+- `.edgeLabel,.edgeLabel .label,.edgeLabel .label *,.edgeLabel text{color:...}` ← `textOnCanvas` (relationship-label text)
+
+This is the standard `edge-label-bg` + `text-on-canvas` pairing documented in `lazy-diagram.inversion-rule.md` — white plate / black text as source. Light mode renders it literally (black text on a white plate); the dark-mode-only whole-SVG filter flips it to white text on a black plate. No erd-specific inversion exception applies to this surface any more.
+
+Caveats:
 
 - `classDef` and per-element `style` directives are silently ignored by mermaid's `erDiagram` — do NOT emit them. The fuller-init `themeVariables` block + `themeCSS` is the only working surface.
-- `attributeBackgroundColorOdd/Even` had a hardcoded-fill bug in older Obsidian (fixed in Obsidian 1.8). On older Obsidian versions, attribute row backgrounds may render with mermaid's defaults regardless of these keys. The vault's `cssclasses` snippet path is the per-vault workaround when needed; we do not ship CSS.
-- `erEdgeLabelBackground` and `nodeTextColor` are NOT consumed by the er module in mermaid 11.4.1 — do NOT emit them. They were tried in earlier iterations and verified to have no rendering effect.
+- `tertiaryColor` and `edgeLabelBackground` are not part of this scheme's `blocks.init.erd` — the relationship-label plate is `themeCSS`-driven now, not `themeVariables`-driven. Do not reintroduce a binding to either key.
 
 ## Layout
 

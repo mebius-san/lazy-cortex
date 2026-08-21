@@ -1,7 +1,7 @@
 ---
 name: lazy-memory.mark-persona
 description: "Run when the operator asks to give an expert memory (let it keep notes between jobs), or when an audit reports that `.memory/<expert>/` exists but the expert is not marked persona. Appends the persona aspect to that one expert; idempotent."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Write, AskUserQuestion
+allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Write, AskUserQuestion, Agent
 ---
 # Mark expert as persona
 

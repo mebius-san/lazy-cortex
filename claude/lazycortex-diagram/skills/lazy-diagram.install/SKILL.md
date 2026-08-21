@@ -1,7 +1,7 @@
 ---
 name: lazy-diagram.install
 description: "Run when the operator asks to set up diagram drawing in a repo, and again after a plugin update so new artifacts land. Also the answer when `/lazy-diagram.draw` or `/lazy-diagram.fix` misbehaves because the `lazy-diagram.authoring` rule is missing from the rules directory or the drawer agents have no model tier assigned. Idempotent and quiet on re-run; install scope is detected, not asked."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(date *), Bash(diff *), Bash(lazycortex-core *), AskUserQuestion, Skill
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(test *), Bash(date *), Bash(diff *), Bash(lazycortex-core *), AskUserQuestion, Skill, Agent
 ---
 # Install lazycortex-diagram
 
@@ -32,13 +32,11 @@ This skill is **idempotent and quiet on re-run**. Every choice it makes is persi
 
 ## File-sync policy (applies to every file this skill writes)
 
-Every file this skill creates or updates follows three cases — no per-file "install?" prompt, no drift wizard:
+Two classes of file, two policies. Which applies follows from who owns the bytes, never from how large the diff is.
 
-1. **Absent or unchanged** — target missing, or byte-identical to the shipped / last-known version → write the new version silently. State `installed` / `unchanged`.
-2. **Locally changed but cleanly mergeable** — target diverged from shipped, but the shipped delta applies without contradicting local edits (new sections / keys / entries added, every local-only chunk left untouched) → merge silently. State `merged`.
-3. **Genuine conflict** — the same region (a key, a line, a block) was changed both locally and in the shipped version in ways that cannot be reconciled automatically → the ONLY case that asks. `AskUserQuestion` naming the file, quoting the conflicting region, and showing a unified diff; options `merge-shipped` / `keep-local`.
+**Install-managed mirrors** — every rule under `rules/`, copied verbatim out of the plugin cache. The plugin owns them end to end; a consumer who wants different content authors **their own** rule file rather than editing the mirror, so a target that differs from the shipped source is a stale copy by construction. Absent → copy (`installed`); byte-identical → nothing (`unchanged`); different → overwrite from the source (`refreshed`). No diff preview, no merge, no question. An orphan inside an owned namespace is left in place (`kept-orphan`) — this skill never deletes consumer files. The verdict comes from `file_sync.py`'s byte comparison and its post-write re-check, never from reading the two files and judging.
 
-"Conflict" means you cannot determine what should survive — not merely "the bytes differ". No contradiction → no question. A no-longer-shipped file (orphan) is left in place silently (`kept-orphan`); this skill never deletes consumer files.
+**Consumer-owned config** — `lazy.settings.json` and anything else the consumer authors: add what is missing, leave what is there byte-for-byte. A direct contradiction (an existing value that opposes a required one) is the ONLY case that asks. `AskUserQuestion` naming the file, quoting the region, showing a unified diff; options `merge-shipped` / `keep-local`. "Conflict" means you cannot determine what should survive, not merely that the bytes differ.
 
 ## Step 1: Detect install scope
 
@@ -82,26 +80,25 @@ If the glob returns zero files, abort and tell the user the plugin cache is empt
 
 ## Step 3: Sync rule templates
 
-An enabled plugin installs its whole rule surface — apply the **File-sync policy** per rule, no per-rule "install?" prompt.
+An enabled plugin installs its whole rule surface — the rules are install-managed mirrors, so the **File-sync policy** applies: absent → copy, identical → nothing, different → overwrite. No per-rule prompt of any kind.
 
-### Enumerate source and target
+### Enumerate owned namespaces
 
-- Source rules: `Glob <installPath>/rules/*.md`.
-- Owned namespaces: `lazy-diagram`, plus every unique `<ns>.` prefix appearing in source rule filenames.
-- Target candidates: `Glob <targetRulesDir>/<ns>.*.md` for each owned namespace. Union them.
-- Ensure the destination directory exists with `mkdir -p`.
+Owned namespaces: `lazy-diagram`, plus every unique `<ns>.` prefix appearing in source rule filenames under `<installPath>/rules/`.
 
-### Apply the File-sync policy per rule
+### Run the script — it is the whole step
 
-For every rule name in (source ∪ target):
+Byte comparison decides, the script writes, and it verifies each write. Nothing here is yours to judge. Run (one `--owned-glob` per owned namespace):
 
-- **New** (target missing) → copy source to target silently. State **installed**.
-- **Unchanged** (byte-identical) → no action. State **unchanged**.
-- **Drift, cleanly mergeable** (both present, differ, the shipped delta applies without contradicting local edits — new headings / list items added, every local-only chunk preserved) → merge silently via `Edit`. State **merged**.
-- **Conflict** (the same region changed incompatibly in both) → the only case that asks, per File-sync policy case 3. State **merged** or **kept-local** by the user's choice.
-- **Orphan** (target present, source gone, within an owned namespace) → leave in place silently. State **kept-orphan**.
+```
+Bash(<coreCli> file-sync --src <installPath>/rules --dst <targetRulesDir> --copy-diverged --owned-glob 'lazy-diagram.*.md')
+```
 
-Target files outside this plugin's owned namespaces (other plugins, user-authored rules) are never touched and never reported as orphans.
+`<coreCli>` is `<coreInstallPath>/bin/lazycortex-core`, where `<coreInstallPath>` is the `installPath` of `lazycortex-core@lazycortex` in `installed_plugins.json` — `lazycortex-core` is a hard dependency of this plugin, so the CLI is always present.
+
+The command creates the destination directory, copies absent targets (**installed**), byte-compares the rest (**unchanged**), overwrites every stale target from the shipped source (**refreshed**), and reports owned targets with no source as **kept-orphan** (left in place, never deleted). Exit code 3 with a non-empty `failed` array means a write did not verify — report it as **failed**, never as applied.
+
+Target files outside this plugin's owned namespaces (other plugins, user-authored rules) are never touched and never reported as orphans. Quote the receipt's `counts` line in the report — an `already-current` claim with no receipt behind it is a reporting defect.
 
 ## Step 4: Seed agent-model tiers
 
@@ -126,7 +123,7 @@ Step outcome: `seeded` (any entry added) or `unchanged`.
 - Report to the user what was done:
   - Scope detected
   - Plugin version/commit synced from: `<version>` / `<gitCommitSha>` (from `installed_plugins.json`)
-  - For each rule: state (**installed**, **merged**, **unchanged**, **kept-local**, **kept-orphan**) and target `<path>`
+  - For each rule: state (**installed**, **unchanged**, **refreshed**, **kept-orphan**, **failed**) and target `<path>`, plus the receipt's `counts` line verbatim
   - Per-key `agent_models` seed outcome from Step 4
 
 ## Step 6: Log the run

@@ -1,7 +1,7 @@
 ---
 name: lazy-diagram.draw-mermaid
 description: "Dispatched by /lazy-diagram.draw or /lazy-diagram.fix once kind and format are settled; dispatch it directly only when you have ALREADY chosen format=mermaid and kind=<one of: flow, sequence, state, erd, class, architecture, layout, nav, tree, controls-scheme, decision-tree, screen-scheme, journey, mindmap, gantt, timeline> — it never infers either. Single-pass writer: its whole response is the mermaid fence body, without the surrounding triple-backticks."
-tools: Read, Glob, Grep
+tools: Read, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response writer; output IS the return value, no multi-step process"
 ---
@@ -26,7 +26,7 @@ Your response IS the diagram. Nothing else. The dispatcher adds the surrounding 
 - `'theme':'base'` anywhere in the output — forbidden in every kind, no exceptions.
 - `'darkMode':true` anywhere in the output — breaks more than it fixes on inverting hosts.
 - Bare semicolons (`;`) anywhere in label text, `Note` text, or message text — Mermaid treats `;` as a statement separator. Use commas, dashes, or restructure.
-- **Unquoted node labels.** Every `flowchart` / `graph` node label goes inside double quotes — `id["text"]`, `id{"text"}`, `id(("text"))` — with no exceptions, even for a label that looks plain. Mermaid reads the character right after the opening bracket as a shape modifier: `[/` opens a parallelogram that demands a matching `/]`, `[(` a cylinder, `[[` a subroutine, `{{` a hexagon. A label that starts with a slash — the common case, since slash-commands like `/wiki.install` are natural node names — silently produces `[/wiki.install …]`, an unterminated shape that fails to render. Quoting neutralises every one of these, and also lets a label carry `(`, `)`, `[`, `]`, `#`, and `-` without escaping.
+- **Unquoted node labels.** Every `flowchart` / `graph` node label goes inside double quotes — `id["text"]`, `id{"text"}`, `id(("text"))` — with no exceptions, even for a label that looks plain. Mermaid reads the character right after the opening bracket as a shape modifier: `[/` opens a parallelogram that demands a matching `/]`, `[(` a cylinder, `[[` a subroutine, `{{` a hexagon. A label that starts with a slash — the common case, since slash-commands like `/lazy-wiki.install` are natural node names — silently produces `[/lazy-wiki.install …]`, an unterminated shape that fails to render. Quoting neutralises every one of these, and also lets a label carry `(`, `)`, `[`, `]`, `#`, and `-` without escaping.
 
 **Do all reasoning silently in tool calls.** When you have read the template and the scheme, your NEXT output token must be `%`. Not a sentence. Not a list. Not a fence. The token `%`.
 
@@ -105,6 +105,10 @@ failed: missing-in-style:init.<kind>
    7. **No `click` handlers, no embedded URLs, no `linkStyle` directives**.
    8. **`'theme':'base'` is absent** from the fence. The literal token is forbidden in every kind. Failure means the scheme's `blocks.init.<kind>` is broken; surface as `failed: missing-in-style:init.<kind>` — the scheme is the unit that needs fixing.
    9. **Layout config block** present inside the init directive AND carries `'useMaxWidth':true`. Missing → `failed: missing-in-style:init.<kind>`.
+   10. **`block-beta` structural bounds** (`kind` ∈ `layout` / `screen-scheme` / `controls-scheme`) —
+       - **No edges.** No `-->`, `---`, `-.->`, or `==>` anywhere in the fence. `block-beta` states relationships through the grid, not through arrows; an edge in one of these kinds means the request was mis-classified. Recompose without the arrows; if the request genuinely needs relationships, return `failed: wrong-kind:<flow|architecture>` so the dispatcher re-picks.
+       - **Total `class` coverage.** Every ID declared in the fence — leaf regions AND every `block:<id>` container — carries a `class <id> <role>` line. An ID left unstyled renders on the host's default plate (light in a light host) while its styled neighbours carry plate-coloured label text, so the unstyled block comes out unreadable. Recompose with the missing `class` lines.
+       - **Flat grid on `layout`.** `kind: layout` additionally carries no composite container: no `block:<id>` that opens its own `columns` and encloses child regions before `end`. `block:<id>:<cells>` used purely to span a leaf region stays allowed. Nested regions belong to `screen-scheme` — return `failed: wrong-kind:screen-scheme`.
 
 6. **Density check (upper bound).** Count nodes / decision points / participants / states / entities / classes / components per the table below. If exceeded, return `split-into-N: <suggested-seam-list>`. The dispatcher decides whether to re-call with a narrower request.
 

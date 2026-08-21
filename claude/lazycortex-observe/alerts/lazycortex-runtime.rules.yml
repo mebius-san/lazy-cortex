@@ -50,16 +50,32 @@ groups:
         annotations:
           summary: "LazyCortex daemon halted on {{ $labels.repo }} — manual recovery required"
           description: |
-            The runtime daemon stopped scheduling routines because the
-            working tree became dirty after a routine tick.
+            The runtime daemon stopped scheduling routines. The reason label
+            says which condition tripped it — the working tree left dirty by a
+            tick, a remote-sync failure, the loop detector, or a routine entry
+            that no longer matches its config schema.
 
             Triggered by: {{ $labels.triggered_by }}
             Reason: {{ $labels.reason }}
 
-            Operator must run `/lazy-runtime.recover` on the affected host
-            to clean the tree and clear the halt block in state.json.
-            See state.json on the host for `dirty_paths` and (for
-            pump-internal failures) the offending expert + job_id.
+            uncommitted_changes    — a routine or expert left uncommitted work
+                                     behind; state.json lists `dirty_paths`,
+                                     and a pump-internal failure also names the
+                                     offending expert + job_id.
+            git_pull_diverged      — local and origin each carry commits the
+            git_push_failed          other lacks, a push kept being refused, or
+            git_remote_unavailable   the remote could not be reached.
+            suspected_loop         — one file was committed over and over by the
+                                     same bot author; the halt block names the
+                                     (author, file) pair.
+            routine_config_invalid — the routine named above fails schema
+                                     validation and was dropped; the schema
+                                     error is in its own incident, readable via
+                                     `lazycortex-core error-list`.
+
+            Every reason needs a human: the daemon never clears a halt itself.
+            Operator runs `/lazy-runtime.recover` on the affected host, which
+            branches on the reason and clears the halt block in state.json.
 
       - alert: LazyCortexExpertJobsFailing
         expr: |

@@ -1,24 +1,24 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about vault setup, Iconize, diagram render glue, plugin updates, and tag pages for lazycortex-obsidian.
-last_regen: 2026-08-06
+last_regen: 2026-08-19
 no_diagram: true
 source_skills:
   - lazy-obsidian.install
-  - lazy-obsidian.audit
-  - lazy-obsidian.diagram-install
-  - lazy-obsidian.iconize-config
   - lazy-obsidian.iconize-install
+  - lazy-obsidian.iconize-config
   - lazy-obsidian.iconize-sync
-  - lazy-obsidian.update-plugin
+  - lazy-obsidian.diagram-install
   - lazy-obsidian.gen-tag-pages
-source_sha: a080c1ec8ba430f6f7ffaa2b62b17fe55e51c50e
+  - lazy-obsidian.update-plugin
+  - lazy-obsidian.audit
+source_sha: 1b79c714d76efca72ce97419eb66c032923b60bc
 ---
 # Frequently asked questions
 
 ## Do I need to run anything after enabling the plugin, or does it self-configure?
 
-You need to run `/lazy-obsidian.install` once per project after enabling the plugin. Enabling adds the skills to Claude Code, but the vault setup — Dataview installation, Iconize scaffolding, and diagram render glue — runs only when you invoke that skill. It is idempotent, so running it again after a `/plugin update` is safe and picks up any template or CSS changes.
+You need to run `/lazy-obsidian.install` once per project after enabling the plugin. Enabling adds the skills to Claude Code, but the vault setup — Dataview installation, Iconize scaffolding, CSS snippets, and diagram render glue — runs only when you invoke that skill. It is idempotent, so running it again after a `/plugin update` is safe and picks up any template or CSS changes.
 
 ---
 
@@ -40,9 +40,15 @@ Icons are painted by Iconize reading `iconize_icon` and `iconize_color` from eac
 
 ---
 
-## Why does the icon frontmatter show up in the commit after the one I just made, not that one?
+## Why does the icon frontmatter land in a separate commit after the one I just made?
 
-`/lazy-obsidian.iconize-sync sync-staged` — the hook that runs during `git commit` — never writes to git's index; it only rewrites frontmatter in the working tree. That is deliberate: no hook stages into your index behind your back. The icons are correct on disk and in the vault immediately, but if a repaint happens during the pre-commit run, the rewritten frontmatter line is already too late for the commit in flight and lands in your next commit instead. If you need the fresh frontmatter in the commit you are about to make, run `/lazy-obsidian.iconize-sync reconcile` (or `reconcile-dirty`) before staging, then commit as usual.
+Nothing repaints inside your commit: no hook stages into your index behind your back. Icons follow each note as it is written (the PostToolUse hook), and after a commit lands, the `lazy-obsidian.repaint` daemon routine repaints the affected directories and commits the result itself. If you want the fresh frontmatter folded into the commit you are about to make, run `/lazy-obsidian.iconize-sync reconcile` (or `reconcile-dirty`) before staging, then commit as usual.
+
+---
+
+## I upgraded the plugin and my `.githooks/pre-commit` file is gone. Did something delete it?
+
+Yes, intentionally. Versions of `lazy-obsidian.iconize-install` up to 2.x installed a pre-commit shim at `.githooks/pre-commit` and pointed `core.hooksPath` at `.githooks` so icons repainted before each commit. That approach is retired: commit-time repaint now belongs to the `lazy-obsidian.repaint` daemon routine, and the shim's old `sync-staged` subcommand no longer exists — a leftover shim would fail silently on every commit instead of doing anything useful. When you re-run `/lazy-obsidian.iconize-install` after upgrading, it detects the shim by its `HOOK_VERSION:` marker (proof the file is the plugin's own, never a hand-customized one), deletes it, and unsets `core.hooksPath` if `.githooks/` is now empty. A shim without that marker is left alone as foreign. Nothing else changes — icons still repaint the way the answer above describes.
 
 ---
 
@@ -76,15 +82,23 @@ No. That file is runtime state — Iconize rewrites it on every icon click and t
 
 ---
 
+## Why don't the templates under a plugin's `templates/` tree (or my vault's `.claude/templates/`) ever get icons?
+
+Iconize-sync never paints a template tree, on purpose. A scaffolding template — a plugin's own `claude/<plugin>/templates/**`, or the consumer-side `.claude/templates/**` override tree — carries the same frontmatter shape as the notes it scaffolds, so a frontmatter-keyed matcher would fire on the template itself. Painting it would dirty a shipped source file on every reconcile and bake a stale icon into every note scaffolded from it afterwards. So every path under a template tree resolves to no match, and `reconcile` never even enumerates it.
+
+If you upgraded from a version that predates this behavior, a template may still carry stale `iconize_icon` / `iconize_color` keys painted by an earlier worker run — no-match keeps frontmatter rather than stripping it, so nothing removes them automatically. Strip the two keys by hand from the affected `.md` files under your template trees once; notes scaffolded from them afterwards then take their icon from the matchers as expected.
+
+---
+
 ## Mermaid diagrams look wrong in Obsidian (text invisible, diagram overflowing the column). What should I check?
 
-Run `/lazy-obsidian.diagram-install`. It syncs two CSS snippets (`mermaid-fit.css` and `ascii-fit.css`) into `<vault>/snippets/`, enables them in `appearance.json`, and installs the `mermaid-popup` plugin for click-to-zoom. If the snippets were already installed but snippets are not taking effect, reload Obsidian or click the refresh icon next to each snippet in Settings → Appearance → CSS snippets — Obsidian does not watch `appearance.json` for changes mid-session.
+Run `/lazy-obsidian.install`. Its shared snippet step syncs three CSS snippets — `mermaid-fit.css`, `ascii-fit.css`, and `callouts.css` — into `<vault>/snippets/` and enables all of them with a single `appearance.json` write; `mermaid-fit.css` and `ascii-fit.css` are the ones that fit diagrams to the editor column and pick up the theme text color. If the snippets were already installed but are not taking effect, reload Obsidian or click the refresh icon next to each snippet in Settings → Appearance → CSS snippets — Obsidian does not watch `appearance.json` for changes mid-session. For click-to-zoom specifically, see the next question — that part is handled separately by `/lazy-obsidian.diagram-install`.
 
 ---
 
 ## `/lazy-obsidian.diagram-install` failed on `mermaid-popup`. Do I need to re-run the whole thing?
 
-No. The skill treats `mermaid-popup` as non-blocking — the CSS snippets alone cover diagram fit and theme color. Click-to-zoom is unavailable until the plugin is installed, but other rendering is unaffected. Once the network is available, run `/lazy-obsidian.update-plugin mermaid-popup` on its own to finish that part.
+No. `/lazy-obsidian.diagram-install` today only installs the `mermaid-popup` click-to-zoom plugin — it declares the fit-CSS snippets but does not install or enable them (that is `/lazy-obsidian.install`'s shared snippet step, so there is a single writer of `appearance.json`'s snippet array). So a `mermaid-popup` failure does not affect diagram fit or theme color at all; those keep working via the CSS snippets alone once `/lazy-obsidian.install` has enabled them. Click-to-zoom is unavailable until the plugin installs, but nothing else is affected. Once the network is available, run `/lazy-obsidian.update-plugin mermaid-popup` on its own to finish that part.
 
 ---
 
@@ -102,22 +116,22 @@ Either the id is misspelled, or you are trying to install a plugin that ships bu
 
 ## I ran `/plugin update lazycortex-obsidian@lazycortex`. Do I need to do anything else?
 
-Yes. The plugin update refreshes the plugin cache but does not automatically re-sync rule templates, CSS snippets, or the icon-map template into your consumer repos. Re-run `/lazy-obsidian.install` in each project to pick up any updated templates. If only CSS snippets changed, running `/lazy-obsidian.diagram-install` on its own is sufficient for that part.
+Yes. The plugin update refreshes the plugin cache but does not automatically re-sync rule templates, CSS snippets, or the icon-map template into your consumer repos. Re-run `/lazy-obsidian.install` in each project to pick up any updated templates — including the CSS snippets, since `/lazy-obsidian.install`'s shared snippet step is the one writer of `appearance.json`'s enabled-snippets array. If only the `mermaid-popup` override changed, running `/lazy-obsidian.diagram-install` on its own is sufficient for that part.
 
 ---
 
 ## Tag pages are not being created. The agent reports a missing template.
 
-The tag-page template at `.claude/templates/obsidian.tag-page-template.md` is scaffolded by `/lazy-obsidian.install`. Run it at project scope, then re-run the `lazy-obsidian.gen-tag-pages` agent. If you have customized the template and want to keep your changes, the install skill merges silently unless there is a genuine same-region conflict.
+The tag-page template at `.claude/templates/lazy-obsidian.tag-page-template.md` is scaffolded by `/lazy-obsidian.install`. Run it at project scope, then re-run the `lazy-obsidian.gen-tag-pages` agent. If you have customized the template and want to keep your changes, the install skill merges silently unless there is a genuine same-region conflict.
 
 ---
 
 ## The audit reports a FAIL about version coherence or the icon-map schema. What should I fix first?
 
-Run `/lazy-obsidian.audit` to see the grouped report. For schema failures (worker version constants mismatching hook templates, or `schema_version` outside the supported set), re-running `/lazy-obsidian.iconize-install` migrates the icon-map in place and brings hook templates up to date. For diagram render glue failures (missing CSS snippets, wrong `mermaid-popup` override block), re-running `/lazy-obsidian.diagram-install` resolves them. The audit presents findings one at a time and asks whether to fix, waive, or skip each.
+Run `/lazy-obsidian.audit` to see the grouped report. For schema failures (worker version constants mismatching hook templates, or `schema_version` outside the supported set), re-running `/lazy-obsidian.iconize-install` migrates the icon-map in place and brings hook templates up to date. For diagram render glue failures (missing or malformed `mermaid-fit.css` / `ascii-fit.css` / `callouts.css`, or a wrong `mermaid-popup` override block), re-running `/lazy-obsidian.install` (snippets) or `/lazy-obsidian.diagram-install` (`mermaid-popup`) resolves them. The audit presents findings one at a time and asks whether to fix, waive, or skip each.
 
 ---
 
 ## Can I run this plugin at global scope (`~/.claude/settings.json`) as well as project scope?
 
-You can enable the plugin globally so the skills are available in every project. However, the vault setup steps — Dataview, Iconize, diagram render glue, and the tag-page template — are project-only concerns. Running `/lazy-obsidian.install` at user scope syncs rule templates only; it skips vault setup automatically. To get the full vault setup in a project, run `/lazy-obsidian.install` at project scope in that project's directory.
+You can enable the plugin globally so the skills are available in every project. However, the vault setup steps — Dataview, Iconize, CSS snippets, diagram render glue, and the tag-page template — are project-only concerns. Running `/lazy-obsidian.install` at user scope syncs rule templates only; it skips vault setup automatically. To get the full vault setup in a project, run `/lazy-obsidian.install` at project scope in that project's directory.

@@ -32,7 +32,11 @@ import dispatch as _dispatch  # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import doctor as _doctor      # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import domains as _domains    # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import index as _index        # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import mirror as _mirror      # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import nodes as _nodes        # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
@@ -43,12 +47,16 @@ import relink as _relink      # noqa: E402
 import scope as _scope        # noqa: E402
 # waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
 import tags as _tags          # noqa: E402
+# waiver: sys.path extended above so sibling bin-modules resolve; E402 is intentional
+import axes as _axes          # noqa: E402
 # pylint: enable=wrong-import-position
 
 
 # subcommand name -> one-line help; drives argparse registration and dispatch.
 _SUBCOMMANDS = {
   "resolve-scope":  "Resolve a file path to its scope id and config entry.",
+  "ensure-axes":    "Idempotently union axis names into the repository-wide tag_axes.",
+  "ensure-scope-config": "Idempotently seed filter predicates and exclude globs on one scope.",
   "apply-node":     "Apply a curation.json result to a node file (classify or link fields).",
   "process-file":   "Process a single node: dispatch a classify curation job.",
   "prune-node":     "Drop See-also links to a deleted node and rebuild the scope index.",
@@ -62,6 +70,11 @@ _SUBCOMMANDS = {
   "collect-tags":   "Survey distinct tag values per axis across a scope, as JSON.",
   "retag":          "Apply an axis-value alias map to a scope's node tags.",
   "doctor":         "Audit scope integrity: broken links, missing summaries, stale glosses.",
+  "domain-plan":    "Compute the domain-spec plan (changed/orphaned/unknown groups, index state) as JSON.",
+  "domain-apply-index": "Rebuild the domains.md index from the dictionary and the docs on disk.",
+  "domain-tick":    "Consume one git item: drop orphaned domain docs, dispatch writer jobs for changed groups.",
+  "mirror-plan":    "Fetch a mirror scope's source and print the sync plan as JSON (dry-run, mirror untouched).",
+  "mirror-sync":    "Fetch a mirror scope's source, sync the mirror tree, and commit the touched files.",
 }
 
 # Environment variable name that carries the repository root.
@@ -72,13 +85,23 @@ _ENV_REPO_ROOT = "LAZY_REPO_ROOT"
 class Cli:
   """
   Command-line entry point for the lazycortex-wiki dispatcher.
+
+  Guarantees:
+    - Diagnostics and usage help go to stderr; stdout carries only the invoked
+      subcommand's own result.
   """
+
+  # Contract:
+  # Every diagnostic — warning, error, and usage help — MUST be written to stderr;
+  # stdout carries the invoked subcommand's own result and nothing else.
 
   _PROG = "lazycortex-wiki"
   _DESCRIPTION = "lazycortex-wiki — LLM-navigable semantic wiki over a markdown+code base."
   _DEST = "command"
   _METAVAR = "subcommand"
   _CMD_RESOLVE_SCOPE  = "resolve-scope"
+  _CMD_ENSURE_AXES    = "ensure-axes"
+  _CMD_ENSURE_SCOPE_CONFIG = "ensure-scope-config"
   _CMD_APPLY_NODE     = "apply-node"
   _CMD_PROCESS_FILE   = "process-file"
   _CMD_PRUNE_NODE     = "prune-node"
@@ -92,6 +115,11 @@ class Cli:
   _CMD_DOCTOR         = "doctor"
   _CMD_COLLECT_TAGS   = "collect-tags"
   _CMD_RETAG          = "retag"
+  _CMD_DOMAIN_PLAN    = "domain-plan"
+  _CMD_DOMAIN_APPLY_INDEX = "domain-apply-index"
+  _CMD_DOMAIN_TICK    = "domain-tick"
+  _CMD_MIRROR_PLAN    = "mirror-plan"
+  _CMD_MIRROR_SYNC    = "mirror-sync"
 
   # argparse dest names and help strings — shared or per-subcommand.
   _ARG_PATH           = "path"
@@ -102,6 +130,8 @@ class Cli:
   _ARG_FROM_DEST         = "from_file"
   _ARG_FROM_HELP         = "Path to curation.json produced by the curator."
   _ARG_ALIAS_HELP        = "Path to the alias-map JSON ({axis: {old-value: new-value}})."
+  _ARG_AXES              = "axes"
+  _ARG_AXES_HELP         = "Axis names to ensure are present."
   _ARG_APPLY_PATH_HELP     = "Absolute path to the markdown node file."
   _ARG_PROCESS_PATH_HELP   = "Git-item JSON string or bare file path to process."
   _ARG_SCOPE_ID            = "scope_id"
@@ -127,6 +157,9 @@ class Cli:
   _ARG_APPLY               = "--apply"
   _ARG_APPLY_DEST          = "apply"
   _ARG_APPLY_HELP          = "Perform fixable repairs (index rebuild, drop broken see-also, refresh stale glosses)."
+  _ARG_DOCTOR_COMMIT       = "--commit"
+  _ARG_DOCTOR_COMMIT_DEST  = "commit"
+  _ARG_DOCTOR_COMMIT_HELP  = "With --apply: commit the repaired files (the lazy-wiki.doctor-apply routine's mode)."
   _ARG_NO_COMMIT           = "--no-commit"
   _ARG_NO_COMMIT_DEST      = "no_commit"
   _ARG_NO_COMMIT_HELP      = "Mutate files only; skip the git commit (caller owns the commit)."
@@ -151,7 +184,6 @@ class Cli:
   # Payload field names for the dispatch bundle.
   _PAYLOAD_KIND              = "kind"
   _PAYLOAD_NODE_PATH         = "node_path"
-  _PAYLOAD_NODE_CONT         = "node_content"
   _PAYLOAD_SCOPE_ID          = "scope_id"
   _PAYLOAD_PINS              = "pins"
   _PAYLOAD_EXISTING_TAGS     = "existing_tags"
@@ -159,6 +191,21 @@ class Cli:
 
   # argparse help string for dispatch-link path argument.
   _ARG_DISPATCH_LINK_PATH_HELP = "Absolute path to the node file to dispatch a link job for."
+
+  # argparse strings for the domain subcommands.
+  _ARG_DOMAIN_TICK_PATH_HELP = "Git-item JSON string or bare file path that triggered the tick (omit with --full)."
+  _ARG_FULL                  = "--full"
+  _ARG_FULL_DEST             = "full"
+  _ARG_FULL_HELP             = "Full pass: skip the trigger-path filter (the schedule-routine mode)."
+
+  # Domain payload field names for the writer-job request.
+  _PAYLOAD_GROUP     = "group"
+  _PAYLOAD_GLOSS     = "gloss"
+  _PAYLOAD_LANGUAGE  = "language"
+  _PAYLOAD_DOC_PATH  = "doc_path"
+  _PAYLOAD_HASH      = "hash"
+  _PAYLOAD_BLOCKS    = "blocks"
+  _PAYLOAD_CONTRACTS = "contracts"
 
   # File encoding used throughout this module.
   _ENCODING = "utf-8"
@@ -184,6 +231,14 @@ class Cli:
   _MSG_NO_SCOPES = "doctor: no wiki scopes configured (run /wiki.install and /wiki.configure)"
   _MSG_CLEAN     = "  (clean)"
 
+  # Section label the repo-level domain findings are printed under.
+  _DOMAIN_SECTION = "domains"
+
+  # Domain-subcommand message strings.
+  _MSG_DOMAINS_UNCONFIGURED_PLAN  = "domain-plan: wiki.domains not configured (run /wiki.configure domains)"
+  _MSG_DOMAINS_UNCONFIGURED_INDEX = "domain-apply-index: wiki.domains not configured (run /wiki.configure domains)"
+  _MSG_DOMAIN_TICK_SKIP           = "domain-tick: skip (wiki.domains not configured)"
+
   # Frontmatter anchor key written into topics.md by set-synced-sha.
   _KEY_WIKI_SYNCED_SHA = "wiki_synced_sha"
 
@@ -191,12 +246,23 @@ class Cli:
     """
     Parse arguments and dispatch to the selected subcommand.
 
+    Guarantees:
+      - Exit code 0 means the subcommand ran to completion, including its documented
+        skips; 1 means the subcommand itself failed; 2 never reports failed work and is
+        reserved for an invocation that could not be run at all.
+
     Args:
       argv: Argument vector to parse; defaults to the process arguments when not supplied.
 
     Returns:
       Integer exit code.
     """
+
+    # Contract:
+    # Exit code 0 means the subcommand ran to completion, including its documented skips,
+    # and 1 means the subcommand itself failed; 2 NEVER reports failed work — it is
+    # reserved for an invocation that could not be run at all.
+
     parser = self._build_parser()
     args = parser.parse_args(argv)
     # guard: no subcommand given — print help and exit non-zero
@@ -206,6 +272,10 @@ class Cli:
     cmd = getattr(args, self._DEST)
     if cmd == self._CMD_RESOLVE_SCOPE:
       return self._cmd_resolve_scope(args)
+    if cmd == self._CMD_ENSURE_AXES:
+      return self._cmd_ensure_axes(args)
+    if cmd == self._CMD_ENSURE_SCOPE_CONFIG:
+      return self._cmd_ensure_scope_config(args)
     if cmd == self._CMD_APPLY_NODE:
       return self._cmd_apply_node(args)
     if cmd == self._CMD_PROCESS_FILE:
@@ -232,6 +302,16 @@ class Cli:
       return self._cmd_collect_tags(args)
     if cmd == self._CMD_RETAG:
       return self._cmd_retag(args)
+    if cmd == self._CMD_DOMAIN_PLAN:
+      return self._cmd_domain_plan(args)
+    if cmd == self._CMD_DOMAIN_APPLY_INDEX:
+      return self._cmd_domain_apply_index(args)
+    if cmd == self._CMD_DOMAIN_TICK:
+      return self._cmd_domain_tick(args)
+    if cmd == self._CMD_MIRROR_PLAN:
+      return self._cmd_mirror_plan(args)
+    if cmd == self._CMD_MIRROR_SYNC:
+      return self._cmd_mirror_sync(args)
     return self._not_implemented(cmd)
 
   def _build_parser(self) -> argparse.ArgumentParser:
@@ -247,6 +327,25 @@ class Cli:
       p = sub.add_parser(name, help = summary)
       if name == self._CMD_RESOLVE_SCOPE:
         p.add_argument(self._ARG_PATH, help = self._ARG_PATH_HELP)
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_ENSURE_AXES:
+        p.add_argument(self._ARG_AXES, nargs = "+", help = self._ARG_AXES_HELP)
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_ENSURE_SCOPE_CONFIG:
+        p.add_argument("scope_id", help = "Id of the configured scope to seed.")
+        p.add_argument(
+          "--filter-json",
+          dest = "filter_json",
+          default = None,
+          help = "JSON object of frontmatter predicates to seed, keyed by frontmatter key.",
+        )
+        p.add_argument(
+          "--exclude",
+          dest = "exclude",
+          nargs = "*",
+          default = None,
+          help = "Exclude globs to append to the scope when missing.",
+        )
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_APPLY_NODE:
         p.add_argument(self._ARG_PATH, help = self._ARG_APPLY_PATH_HELP)
@@ -337,6 +436,12 @@ class Cli:
           action = self._ACTION_STORE_TRUE,
           help = self._ARG_APPLY_HELP,
         )
+        p.add_argument(
+          self._ARG_DOCTOR_COMMIT,
+          dest = self._ARG_DOCTOR_COMMIT_DEST,
+          action = self._ACTION_STORE_TRUE,
+          help = self._ARG_DOCTOR_COMMIT_HELP,
+        )
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_COLLECT_TAGS:
         p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_SCOPE_ID_HELP)
@@ -350,6 +455,25 @@ class Cli:
           help = self._ARG_ALIAS_HELP,
         )
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name in (self._CMD_DOMAIN_PLAN, self._CMD_DOMAIN_APPLY_INDEX):
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+      elif name == self._CMD_DOMAIN_TICK:
+        p.add_argument(
+          self._ARG_PATH,
+          nargs = "?",
+          default = None,
+          help = self._ARG_DOMAIN_TICK_PATH_HELP,
+        )
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
+        p.add_argument(
+          self._ARG_FULL,
+          dest = self._ARG_FULL_DEST,
+          action = self._ACTION_STORE_TRUE,
+          help = self._ARG_FULL_HELP,
+        )
+      elif name in (self._CMD_MIRROR_PLAN, self._CMD_MIRROR_SYNC):
+        p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_SCOPE_ID_HELP)
+        p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
     return parser
 
   def _cmd_resolve_scope(self, args: argparse.Namespace) -> int:
@@ -359,12 +483,21 @@ class Cli:
     Output is `{"scope_id": "<id>", "cfg": {...}}` on a match, or
     `{"scope_id": null}` when no scope matches.  Always exits 0.
 
+    Guarantees:
+      - A path that matches no configured scope is reported as data, never as a failure;
+        the command always exits 0.
+
     Args:
       args: Parsed argument namespace; must carry `.path` and `.repo`.
 
     Returns:
       Integer exit code (always 0).
     """
+
+    # Contract:
+    # A path matching no configured scope is reported as data and NEVER as a failure;
+    # the command always exits 0.
+
     repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
     repo = Path(repo_raw).resolve()
     resolver = _scope.ScopeResolver(repo = repo)
@@ -374,6 +507,69 @@ class Cli:
     else:
       scope_id, cfg = result
       print(json.dumps({ "scope_id": scope_id, "cfg": cfg }))
+    return 0
+
+  def _cmd_ensure_axes(self, args: argparse.Namespace) -> int:
+    """
+    Idempotently union axis names into the repository-wide `tag_axes` vocabulary.
+
+    Delegates to `axes.ensure_axes`, which reads and writes the `wiki` section through
+    `lazycortex-core`'s `settings-get` / `settings-set` CLI rather than touching
+    `lazy.settings.json` directly. Prints the outcome dict to stdout as JSON.
+
+    Args:
+      args: Parsed argument namespace; must carry `.axes` and `.repo`.
+
+    Returns:
+      Integer exit code: `1` when `axes.ensure_axes` reports its malformed-`wiki.tag_axes` guard
+      (a top-level `error` key); `0` otherwise. The JSON printed to stdout is unaffected.
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    result = _axes.ensure_axes(repo, args.axes)
+    print(json.dumps(result))
+    # guard: the malformed-vocabulary shape counts as a CLI failure
+    if "error" in result:
+      return 1
+    return 0
+
+  def _cmd_ensure_scope_config(self, args: argparse.Namespace) -> int:
+    """
+    Idempotently seed filter predicates and exclude globs on one configured scope.
+
+    Delegates to `axes.ensure_scope_config`, which reads and writes the `wiki` section through
+    `lazycortex-core`'s `settings-get` / `settings-set` CLI. Prints the outcome dict to stdout
+    as JSON.
+
+    Args:
+      args: Parsed argument namespace; must carry `.scope_id`, `.filter_json`, `.exclude`, and
+        `.repo`.
+
+    Returns:
+      Integer exit code: `1` when the filter JSON does not parse to an object, when the named
+      scope does not exist, or when `axes.ensure_scope_config` reports its malformed-scopes
+      guard; `0` otherwise.
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    frontmatter = None
+    if args.filter_json is not None:
+      try:
+        frontmatter = json.loads(args.filter_json)
+      except json.JSONDecodeError as exc:
+        print(json.dumps({ "error": f"--filter-json is not valid JSON: {exc}" }))
+        return 1
+      # guard: the predicates must arrive as an object keyed by frontmatter key
+      if not isinstance(frontmatter, dict):
+        print(json.dumps({ "error": "--filter-json must be a JSON object" }))
+        return 1
+    result = _axes.ensure_scope_config(
+      repo, args.scope_id, filter_frontmatter = frontmatter, exclude = args.exclude,
+    )
+    print(json.dumps(result))
+    # guard: the malformed-scopes shape and the unknown-scope outcome both count as failure
+    if "error" in result or result.get("status") == "error":
+      return 1
     return 0
 
   def _cmd_apply_node(self, args: argparse.Namespace) -> int:
@@ -533,7 +729,7 @@ class Cli:
 
     Re-processes all nodes regardless of whether the operator source has changed,
     making it suitable for a full-scope vocabulary consolidation pass.  Primarily
-    fired by the `wiki.relink-weekly` daemon schedule routine, which names no scope
+    fired by the `lazy-wiki.relink-weekly` daemon schedule routine, which names no scope
     and so passes over the whole configuration; direct invocation may name one scope.
 
     Notes:
@@ -608,7 +804,6 @@ class Cli:
       if node_obj is None:
         skipped += 1
         continue
-      node_content = abs_path.read_text(encoding = self._ENCODING)
       pins = {
         "pinned_topics":    node_obj.pinned_topics,
         "unrelated_topics": node_obj.unrelated_topics,
@@ -618,7 +813,6 @@ class Cli:
       payload = {
         self._PAYLOAD_KIND:          _dispatch.CoreDispatch.KIND_CLASSIFY,
         self._PAYLOAD_NODE_PATH:     str(abs_path),
-        self._PAYLOAD_NODE_CONT:     node_content,
         self._CFG_TAG_AXES:          tag_axes,
         self._PAYLOAD_SCOPE_ID:      scope_id,
         self._PAYLOAD_PINS:          pins,
@@ -862,16 +1056,34 @@ class Cli:
     when it is omitted), runs `Doctor.run_all` per scope, and prints findings
     grouped by scope and severity with a per-scope and grand-total count.
     When `--apply` is given, fixable findings are repaired in-place and the
-    printed lines note which fixes were applied.
+    printed lines note which fixes were applied; `--commit` additionally
+    commits the repaired files in one commit — the `lazy-wiki.doctor-apply`
+    schedule routine's mode, so its worktree writes never trip the daemon's
+    dirty-tree guard (a hand-run without the flag keeps leaving the repairs
+    uncommitted for the operator to inspect).
+
+    Guarantees:
+      - Without `--apply` the audit is read-only: no audited file is rewritten.
+      - Without `--commit` nothing is committed; applied repairs are left in the working
+        tree for the operator to inspect.
 
     Args:
       args: Parsed argument namespace; carries `.scope_id` (or `None`),
-        `.apply`, and `.repo`.
+        `.apply`, `.commit`, and `.repo`.
 
     Returns:
       Integer exit code: 0 when the audit ran (read-only or `--apply`),
-      1 when a named scope id is unknown or no scopes are configured.
+      1 when a named scope id is unknown, no scopes are configured, or the
+      requested commit step failed.
     """
+
+    # Contract:
+    # Without `--apply` the audit is read-only: no audited file is rewritten.
+
+    # Contract:
+    # Without `--commit` the command NEVER commits; applied repairs are left in the
+    # working tree for the operator to inspect.
+
     repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
     repo = Path(repo_raw).resolve()
     resolver = _scope.ScopeResolver(repo = repo)
@@ -897,6 +1109,7 @@ class Cli:
       target_ids = [ args.scope_id ]
 
     grand_total = 0
+    touched: set[str] = set()
     for scope_id in target_ids:
       doc = _doctor.Doctor(
         repo     = repo,
@@ -907,10 +1120,49 @@ class Cli:
       findings = doc.run_all()
       grand_total += len(findings)
       self._print_scope_findings(scope_id, findings, apply = bool(args.apply))
+      touched |= self._applied_paths(findings, scopes[scope_id])
+
+    # repo-level domain checks ride the same report; report-only, so never printed on a clean tree
+    domain_findings = _doctor.DomainDoctor(repo = repo).run_all()
+    if domain_findings:
+      grand_total += len(domain_findings)
+      self._print_scope_findings(self._DOMAIN_SECTION, domain_findings, apply = False)
 
     mode = "apply" if args.apply else "read-only"
     print(f"\ndoctor: {grand_total} finding(s) across {len(target_ids)} scope(s) [{mode}]")
-    return 0
+
+    # guard: no commit requested (or nothing applied to commit) — the audit itself is done
+    if not (args.apply and args.commit and touched):
+      return 0
+    # one commit for the whole run, under the invoking routine's exported git identity
+    return self._commit_paths(
+      repo = repo,
+      paths = sorted(touched),
+      message = f"lazy-wiki: doctor apply ({len(touched)} file(s))",
+    )
+
+  def _applied_paths(self, findings: list[dict], cfg: dict) -> set[str]:
+    """
+    Collect the repo-relative paths one scope's applied doctor fixes touched.
+
+    Node-level repairs touch the finding's own node file; an applied
+    orphan-topic / index-desync finding means the scope's topics index was
+    rebuilt, so the index path joins the set once for any of them.
+
+    Args:
+      findings: The scope's finding dicts from `Doctor.run_all`.
+      cfg: The scope-config dict, read for its `topics_index` path.
+
+    Returns:
+      Repo-relative POSIX paths of the files the applied fixes rewrote;
+      empty when nothing was applied.
+    """
+    applied = [ f for f in findings if f.get(self._F_APPLIED) ]
+    touched = { f[self._F_NODE] for f in applied if f.get(self._F_NODE) and f[self._F_NODE] != "-" }
+    index_checks = (_doctor.Doctor.CHECK_ORPHAN_TOPIC, _doctor.Doctor.CHECK_INDEX_DESYNC)
+    if any(f[self._F_CHECK] in index_checks for f in applied):
+      touched.add(cfg.get(self._CFG_TOPICS_INDEX) or _doctor._DEFAULT_TOPICS_INDEX)
+    return touched
 
   def _print_scope_findings(
     self,
@@ -991,7 +1243,6 @@ class Cli:
       print(f"process-file: skip (file not found) {raw_path}")
       return 0
 
-    node_content = abs_path.read_text(encoding = self._ENCODING)
     tag_axes: list[str] = cfg.get(self._CFG_TAG_AXES) or []
 
     node_obj = _nodes.node_for(abs_path)
@@ -1023,7 +1274,6 @@ class Cli:
     payload = {
       self._PAYLOAD_KIND:          _dispatch.CoreDispatch.KIND_CLASSIFY,
       self._PAYLOAD_NODE_PATH:     raw_path,
-      self._PAYLOAD_NODE_CONT:     node_content,
       self._CFG_TAG_AXES:          tag_axes,
       self._PAYLOAD_SCOPE_ID:      scope_id,
       self._PAYLOAD_PINS:          pins,
@@ -1100,6 +1350,10 @@ class Cli:
     """
     Commit the given repo-relative paths when any of them carries changes.
 
+    Guarantees:
+      - Only the given paths are staged and committed; content the operator parked in the
+        index never rides along.
+
     Notes:
       - Returns success without committing when there is nothing to commit — no paths given,
         or none of the given paths changed.
@@ -1112,6 +1366,11 @@ class Cli:
     Returns:
       0 on success or clean no-op, 1 when a git command fails.
     """
+
+    # Contract:
+    # Only the given paths are ever staged and committed; content the operator parked in
+    # the index MUST NOT ride along.
+
     # guard: nothing to commit
     if not paths:
       return 0
@@ -1129,7 +1388,7 @@ class Cli:
         cwd = str(repo), text = True,
       )
     except subprocess.CalledProcessError as e:
-      print(f"prune-node: git failed: {e}", file = sys.stderr)
+      print(f"git commit failed: {e}", file = sys.stderr)
       return 1
     return 0
 
@@ -1174,8 +1433,6 @@ class Cli:
       print(f"dispatch-link: skip (file not found) {args.path}")
       return 0
 
-    node_content = abs_path.read_text(encoding = self._ENCODING)
-
     node_obj = _nodes.node_for(abs_path)
     # guard: unrecognised file type — skip
     if node_obj is None:
@@ -1205,7 +1462,6 @@ class Cli:
     payload = {
       self._PAYLOAD_KIND:              _dispatch.CoreDispatch.KIND_LINK,
       self._PAYLOAD_NODE_PATH:         str(abs_path),
-      self._PAYLOAD_NODE_CONT:         node_content,
       self._PAYLOAD_TOPICS_INDEX_CONT: topics_index_content,
       self._PAYLOAD_PINS:              pins,
       self._PAYLOAD_SCOPE_ID:          scope_id,
@@ -1217,6 +1473,19 @@ class Cli:
       node_path = abs_path,
       payload = payload,
     )
+
+    # Domain(wiki.graph):
+    # # Order of the two curation phases
+    # A node is curated in two phases that cannot be swapped: it is first classified — given its short
+    # description and its topics — and only then linked to its neighbours. Neighbours are chosen from the
+    # scope's catalog of classified nodes, so linking a node whose own classification has not yet reached
+    # that catalog could only draw on stale material.
+    # Reaching the catalog also changes what the surrounding nodes ought to link to, so the linking phase is
+    # where the ripple starts: every node the newcomer attracts is sent back to be linked again against the
+    # same freshly rebuilt catalog. A node that already names the newcomer among its neighbours is left
+    # alone, because the link the ripple would draw is there already.
+    # The ripple reaches exactly one step: linking a node never reclassifies it, and so never starts a ripple
+    # of its own, which is what keeps a single appearance from cascading through the whole scope.
 
     # Back-link fan-out — dispatch link jobs for every scope node that lists this
     # node among its top-N candidates. Runs here (not in process-file) because
@@ -1258,7 +1527,6 @@ class Cli:
       y_payload = {
         self._PAYLOAD_KIND:              _dispatch.CoreDispatch.KIND_LINK,
         self._PAYLOAD_NODE_PATH:         str(y_abs),
-        self._PAYLOAD_NODE_CONT:         y_abs.read_text(encoding = self._ENCODING),
         self._PAYLOAD_TOPICS_INDEX_CONT: topics_index_content,
         self._PAYLOAD_PINS:              y_pins,
         self._PAYLOAD_SCOPE_ID:          scope_id,
@@ -1275,6 +1543,351 @@ class Cli:
       f" + back-links={back_dispatched} (skipped-already-linked={back_skipped_existing})"
     )
     return 0
+
+  def _cmd_domain_plan(self, args: argparse.Namespace) -> int:
+    """
+    Print the domain-spec plan to stdout as one JSON object.
+
+    Runs full detection across the configured code, the dictionary, and the generated
+    docs' hash anchors on every call. The plan consumer (the `/wiki.domain-sync` skill
+    or `domain-tick`) owns writer dispatch and commits; this command never writes.
+
+    Guarantees:
+      - Planning is read-only: no domain doc, no index, and no commit is ever produced.
+
+    Args:
+      args: Parsed argument namespace; must carry `.repo`.
+
+    Returns:
+      Integer exit code (0 on success, 1 when `wiki.domains` is not configured).
+    """
+
+    # Contract:
+    # Planning is read-only: the command NEVER writes a domain doc, rebuilds the index,
+    # or produces a commit.
+
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    planner = _domains.DomainPlanner(repo = Path(repo_raw).resolve())
+    # guard: wiki.domains not configured — nothing to plan
+    if not planner.configured:
+      print(self._MSG_DOMAINS_UNCONFIGURED_PLAN, file = sys.stderr)
+      return 1
+
+    # the plan is the whole output — one JSON object on stdout
+    print(json.dumps(planner.plan()))
+    return 0
+
+  def _cmd_domain_apply_index(self, args: argparse.Namespace) -> int:
+    """
+    Report as JSON whether the `domains.md` index was rebuilt.
+
+    Writes the index file only when its rendered content differs from what is
+    already on disk.
+
+    Args:
+      args: Parsed argument namespace; must carry `.repo`.
+
+    Returns:
+      Integer exit code (0 on success, 1 when `wiki.domains` is not configured).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    planner = _domains.DomainPlanner(repo = Path(repo_raw).resolve())
+    # guard: wiki.domains not configured — no index to build
+    if not planner.configured:
+      print(self._MSG_DOMAINS_UNCONFIGURED_INDEX, file = sys.stderr)
+      return 1
+
+    # rebuild only when the render differs; report which way it went
+    index = _domains.DomainIndex(cfg = planner.cfg)
+    updated = index.apply()
+    print(json.dumps({ "index": index.index_rel(), "updated": updated }))
+    return 0
+
+  def _cmd_domain_tick(self, args: argparse.Namespace) -> int:
+    """
+    Reconcile the repo's domain-spec state for one triggered git change.
+
+    Detection is always full; the trigger path only gates whether running a tick is
+    worth it.
+
+    Notes:
+      - Deletes orphaned docs — a group with no blocks left in code, or a doc whose
+        group the dictionary no longer lists — and rebuilds the index
+        deterministically, committing that part itself.
+      - Dispatches one `wiki.domain-writer` job per changed group; the writer owns the
+        doc write, the index refresh, and its own commit.
+      - Idempotent: matching hashes mean zero work, so repeated ticks from the same
+        commit are safe.
+
+    Args:
+      args: Parsed argument namespace; carries `.path` (git-item JSON or bare
+        path, `None` with `--full`), `.repo`, and `.full`.
+
+    Returns:
+      Integer exit code (0 on success or skip, 1 when a git commit fails).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    planner = _domains.DomainPlanner(repo = repo)
+
+    # guard: wiki.domains not configured — the routine fired in an unconfigured repo
+    if not planner.configured:
+      print(self._MSG_DOMAIN_TICK_SKIP)
+      return 0
+
+    # Domain(wiki.domains):
+    # # What a change signal is worth
+    # The published state of the domain tree is read in full from what lies on disk — the knowledge written
+    # in the code, the groups the dictionary admits, and the generation mark each published document carries.
+    # A single reported change therefore never says what has to be rebuilt, only whether reconciling is worth
+    # running at all.
+    # Two kinds of change can move the published set: an edit to code that may carry knowledge blocks, and an
+    # edit to the dictionary, which admits or withdraws a group without any block moving. A change anywhere
+    # else cannot alter the outcome and is dismissed without reading further.
+    # Reconciling twice over the same state is free: the second pass finds every generation mark still
+    # matching and every listed group still backed, so it writes nothing.
+
+    # a per-file trigger is only worth a tick when it lands in the domain sources
+    if not args.full and args.path is not None:
+      rel = self._parse_path_arg(args.path)
+      # guard: path outside the code globs and the dictionary — the tick is a no-op
+      if not self._is_domain_trigger(planner.cfg, rel):
+        print(f"domain-tick: skip (path outside domain sources) {rel}")
+        return 0
+
+    # full detect on every tick — the docs' domain_hash anchors are the whole state
+    plan = planner.plan()
+    changed = plan[_domains.PLAN_CHANGED]
+    orphans = plan[_domains.PLAN_ORPHANED]
+
+    # deterministic half: drop orphaned docs and refresh the index, committed here
+    if orphans or plan[_domains.PLAN_INDEX_STALE]:
+      # only git-tracked orphans join the commit pathspec — an untracked one has no deletion to record
+      tracked = self._tracked_paths(repo, orphans)
+      for rel in orphans:
+        (repo / rel).unlink(missing_ok = True)
+      index = _domains.DomainIndex(cfg = planner.cfg)
+      index.apply()
+
+      # name the dictionary-driven removals in the subject — a count alone hides why the doc went
+      unlisted = plan[_domains.PLAN_UNLISTED]
+      reason = f" ({len(unlisted)} for a group no longer in the dictionary)" if unlisted else ""
+
+      # record the deletions and the refreshed index as one commit
+      exit_code = self._commit_paths(
+        repo    = repo,
+        paths   = [ *tracked, index.index_rel() ],
+        message = f"wiki(domains): drop {len(orphans)} orphaned doc(s){reason}, refresh index",
+      )
+      # guard: commit failed — surface the error so the daemon records it
+      if exit_code != 0:
+        return exit_code
+
+    # LLM half: one writer job per changed group; the writer owns doc + commit
+    if changed:
+      dispatcher = _dispatch.CoreDispatch()
+      for entry in changed:
+        payload = {
+          self._PAYLOAD_KIND:      _dispatch.CoreDispatch.KIND_DOMAIN_SPEC,
+          self._PAYLOAD_GROUP:     entry[_domains.GROUP_KEY],
+          self._PAYLOAD_GLOSS:     entry[_domains.GROUP_GLOSS],
+          self._PAYLOAD_LANGUAGE:  plan[_domains.PLAN_LANGUAGE],
+          self._PAYLOAD_DOC_PATH:  entry[_domains.GROUP_DOC],
+          self._PAYLOAD_HASH:      entry[_domains.GROUP_HASH],
+          self._PAYLOAD_BLOCKS:    entry[_domains.GROUP_BLOCKS],
+          self._PAYLOAD_CONTRACTS: entry[_domains.GROUP_CONTRACTS],
+        }
+        dispatcher.dispatch_domain_writer(
+          repo = repo,
+          group = entry[_domains.GROUP_KEY],
+          payload = payload,
+        )
+
+    # one-line JSON tick summary for the daemon log
+    print(json.dumps({
+      "dispatched":      len(changed),
+      "orphans_removed": len(orphans),
+      "index":           "updated" if (orphans or plan[_domains.PLAN_INDEX_STALE]) else "unchanged",
+    }))
+    return 0
+
+  def _cmd_mirror_plan(self, args: argparse.Namespace) -> int:
+    """
+    Print the dry-run sync plan for one mirror scope.
+
+    Fetches the runtime clone first (the clone is a cache, not the mirror),
+    then prints the plan JSON and touches nothing else.
+
+    Guarantees:
+      - The dry run leaves the mirror tree untouched and never commits; only the runtime
+        clone cache is refreshed.
+
+    Args:
+      args: Parsed argument namespace; must carry `.scope_id` and `.repo`.
+
+    Returns:
+      Integer exit code (0 on success, 1 on unknown scope, missing mirror
+      block, or fetch failure).
+    """
+
+    # Contract:
+    # The dry run leaves the mirror tree untouched and NEVER commits; the only thing it
+    # writes is the runtime clone cache the plan is computed against.
+
+    engine = self._fetch_mirror_engine(args, verb = self._CMD_MIRROR_PLAN)
+    # guard: unknown scope, missing mirror block, or fetch failure — already reported
+    if engine is None:
+      return 1
+
+    # the dry run stops at the plan — nothing is written or committed
+    print(json.dumps(engine.plan()))
+    return 0
+
+  def _cmd_mirror_sync(self, args: argparse.Namespace) -> int:
+    """
+    Apply the sync plan for one mirror scope and commit the fallout.
+
+    Fetches the runtime clone first (the clone is a cache, not the mirror),
+    applies the plan, commits the touched mirror files (new and updated files
+    plus tracked removals — same commit scheme as `prune-node` /
+    `domain-tick`), and prints the applied report JSON.  Idempotent: a second
+    run against an unchanged source commits nothing.
+
+    Args:
+      args: Parsed argument namespace; must carry `.scope_id` and `.repo`.
+
+    Returns:
+      Integer exit code (0 on success, 1 on unknown scope, missing mirror
+      block, fetch failure, or commit failure).
+    """
+    engine = self._fetch_mirror_engine(args, verb = self._CMD_MIRROR_SYNC)
+    # guard: unknown scope, missing mirror block, or fetch failure — already reported
+    if engine is None:
+      return 1
+
+    # apply the plan; the report doubles as the tick summary printed below
+    repo = Path(args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()).resolve()
+    report = engine.sync()
+
+    # commit new + updated files and tracked removals under one deterministic message
+    touched = [
+      *report[_mirror.K_SYNCED],
+      *report[_mirror.K_UPDATED],
+      *self._tracked_paths(repo, report[_mirror.K_REMOVED]),
+    ]
+    exit_code = self._commit_paths(
+      repo    = repo,
+      paths   = touched,
+      message = (
+        f"wiki(mirror): sync {args.scope_id} "
+        f"(+{len(report[_mirror.K_SYNCED])} ~{len(report[_mirror.K_UPDATED])} "
+        f"-{len(report[_mirror.K_REMOVED])})"
+      ),
+    )
+    # guard: commit failed — surface the error so the daemon records it
+    if exit_code != 0:
+      return exit_code
+
+    # the applied report is the caller's one-line summary
+    print(json.dumps(report))
+    return 0
+
+  def _fetch_mirror_engine(self, args: argparse.Namespace, *, verb: str) -> _mirror.MirrorSync | None:
+    """
+    Resolve, validate, and fetch the mirror engine for one scope.
+
+    Args:
+      args: Parsed argument namespace; must carry `.scope_id` and `.repo`.
+      verb: CLI verb name prefixing every error message.
+
+    Returns:
+      The fetched engine, or `None` when the scope is unknown, carries no
+      mirror block, or the fetch failed (the error is already printed).
+    """
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    scopes = _scope.ScopeResolver(repo = repo).load_scopes()
+
+    # guard: requested scope id not present in settings
+    if args.scope_id not in scopes:
+      print(
+        f"{verb}: unknown scope '{args.scope_id}' "
+        f"(known: {', '.join(sorted(scopes)) or 'none'})",
+        file = sys.stderr,
+      )
+      return None
+
+    engine = _mirror.MirrorSync(repo = repo, scope_id = args.scope_id, cfg = scopes[args.scope_id])
+    # guard: scope carries no usable mirror block
+    if not engine.configured:
+      print(
+        f"{verb}: scope '{args.scope_id}' has no mirror block "
+        "(run /wiki.configure mirror)",
+        file = sys.stderr,
+      )
+      return None
+
+    # a fetch failure leaves the mirror untouched and must surface to the daemon
+    error = engine.fetch()
+    # guard: fetch failed — report it and hand the caller nothing to act on
+    if error is not None:
+      print(f"{verb}: {error}", file = sys.stderr)
+      return None
+
+    # the engine is validated and freshly fetched — ready for plan or sync
+    return engine
+
+  def _tracked_paths(self, repo: Path, paths: list[str]) -> list[str]:
+    """
+    Filter a path list down to those git currently tracks.
+
+    Args:
+      repo: Absolute repository root the git command runs in.
+      paths: Repo-relative candidate paths.
+
+    Returns:
+      The subset of `paths` present in the git index, in git's output order;
+      empty when `paths` is empty or the lookup fails.
+    """
+    # guard: nothing to filter
+    if not paths:
+      return []
+    proc = subprocess.run(
+      [ "git", "ls-files", "--", *paths ],
+      cwd = str(repo),
+      capture_output = True,
+      text = True,
+      check = False,
+    )
+    # guard: lookup failed — treat every path as untracked
+    if proc.returncode != 0:
+      return []
+    return [ ln for ln in proc.stdout.splitlines() if ln ]
+
+  def _is_domain_trigger(self, cfg: _domains.DomainConfig, rel: str) -> bool:
+    """
+    Decide whether a trigger path warrants a domain tick.
+
+    Args:
+      cfg: The repo's domain configuration.
+      rel: Repo-relative (or absolute) path of the changed file.
+
+    Returns:
+      True when the path matches a configured code glob or is the dictionary file.
+    """
+    path = Path(rel)
+    # normalise an absolute trigger to the repo-relative POSIX form the globs expect
+    if path.is_absolute():
+      try:
+        rel = path.resolve().relative_to(cfg.repo).as_posix()
+      except ValueError:
+        # guard: outside the repo — cannot match any source
+        return False
+    # guard: the dictionary itself is a domain source
+    if rel == cfg.dictionary:
+      return True
+    matcher = _scope.GlobMatcher()
+    return any(matcher.match(rel, pat) for pat in cfg.code)
 
   def _parse_path_arg(self, raw: str) -> str:
     """

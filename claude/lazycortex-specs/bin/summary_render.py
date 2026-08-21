@@ -12,6 +12,7 @@ import re
 import sys
 from pathlib import Path
 
+import note_explainers
 from spec_keys import Gate, GATE_ORDER
 
 from typing import TYPE_CHECKING
@@ -255,6 +256,8 @@ def apply_container_stats(note_path: Path) -> bool:
       f"{_STATS_START}\n{line}\n{_STATS_END}",
       text, flags = re.DOTALL,
   )
+  # every stats refresh also re-heals the note's section explainer lines
+  new = note_explainers.heal_note_text(note_path, new)
   # guard: skip the write when nothing changed
   if new == text:
     return False

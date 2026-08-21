@@ -9,7 +9,7 @@ description: |
   </example>
 model: inherit
 color: green
-tools: Read, Write, Grep, Glob, Bash, Skill
+tools: Read, Write, Grep, Glob, Bash, Skill, Agent
 ---
 
 You are a Python test engineer. Your only job is writing unit test files. You never modify production code — only test files.
@@ -168,11 +168,11 @@ If any test correctly reflects documented behavior but fails against the current
 
 After writing or editing test files, verify in this order:
 
-1. `CHK_REVIEW=skip chk-py all <test_file>.py -q` for each changed test file (path: `<repo>/cli/chk-py`, installed by `/lazy-python.install`).
-2. `CHK_REVIEW=skip chk-py all -q` for the full project (no path arg → repo-wide style + type check).
-
-`CHK_REVIEW=skip` suppresses the guideline-review phase, which exits `2` on a pending review and cannot be resolved from inside this agent — the dispatching session owns that decision and runs the phase without the opt-out.
+1. `chk-py all <test_file>.py -q` for each changed test file (path: `<repo>/cli/chk-py`, installed by `/lazy-python.install`).
+2. `chk-py all -q` for the full project (no path arg → repo-wide style + type check).
 3. `tst-py <module> -q` to execute the new tests (bare module path, no `.py` extension, no file paths).
+
+The guideline-review phase is not part of `all` and is not this agent's to run — the dispatching session owns it.
 
 Outcome: `clean` or `<N>-violations-fixed`.
 

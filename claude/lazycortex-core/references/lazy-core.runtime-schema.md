@@ -34,10 +34,10 @@ The `daemon` key is optional. When absent, no git ops are performed and `polling
 | `cleanup_completed_after` | duration string | `"7d"` | Age after which a completed job dir is deleted. |
 | `cleanup_failed_after` | duration string | `"30d"` | Age after which a failed job dir is deleted. |
 | `cleanup_dead_after` | duration string | `"7d"` | Age after which a DEAD-marked stuck job dir is deleted. DEAD jobs are marked by `expert_pump._detect_dead_jobs` when their PID file references a dead process; the forensic window before cleanup matches `cleanup_completed_after` by default. |
-| `stream_idle_timeout_sec` | int | `90` | Seconds of stdout silence from a `claude -p` expert spawn before it is treated as a frozen stream, its process group killed, and the spawn re-tried. |
+| `stream_idle_timeout_sec` | int | `900` | Seconds of stdout silence from a `claude -p` expert spawn before it is treated as a frozen stream, its process group killed, and the spawn re-tried. Sized for opus-tier experts, which legitimately stay silent for minutes while thinking. |
 | `stream_max_retries` | int | `3` | Maximum number of in-memory re-spawns on stream-idle-stall before the job is left with a transient error for the next tick. Separate from the on-disk `attempts` counter. |
 | `cleanup_runtime_log_after` | duration string | `"30d"` | Age after which a dated `<YYYY-MM-DD>.jsonl` journal is deleted. The hourly sweep walks all of `.logs/`, so a journal written by any plugin (`.logs/lazy-review/runs/…`, and whatever a future plugin adds) is retained on the same window without registering itself. Journals with no date in the name — `tokens.jsonl`, `jobs.jsonl`, `commits.jsonl` — are append-only ledgers whose age says nothing about which lines are still wanted; operators rotate those. |
-| `loop_detect_window` | int | `threshold * 4` | Number of recent commits to inspect for the per-(author, file) loop-detection heuristic. Must be ≥ `loop_detect_threshold`. Larger values give better accuracy at the cost of a slightly slower `git log` query. |
+| `loop_detect_window` | int | `threshold * 4` | Number of recent commits to inspect for the per-(author, patch-id) loop-detection heuristic. Must be ≥ `loop_detect_threshold`. Larger values give better accuracy at the cost of a slightly slower `git log` query. |
 
 Duration strings: a number followed by a unit suffix — `s`, `m`, `h`, or `d` (e.g. `"30d"`, `"12h"`, `"300s"`).
 
@@ -55,10 +55,11 @@ The `errors` key (nested under the flat `daemon` section) is optional and tunes 
 |---|---|---|
 | `base_branch` | string | **Required.** The operator's base branch the daemon checks out and rides each iteration — no longer reset. Operator commits arrive via the pre-iteration fast-forward pull; routine output lands on this branch directly. |
 | `remote_sync` | `"pull"` / `"pull_push"` | Optional. `"pull"` does pre-iteration fetch+ff-pull. `"pull_push"` additionally does fetch+rebase+push after routines run. Absent = no remote sync. |
-| `worktree_root` | string | Optional. Repo-relative directory that holds per-task worktrees for `isolate: true` routines (see § 13). Default `".worktrees"`. Listed in `.gitignore` so in-tree worktrees stay untracked. |
-| `max_concurrent_tasks` | int | Optional. Maximum number of live worktree tasks allowed at once (see § 13). Default `3`. When the cap is reached, an `isolate: true` routine is left due and retried on a later tick rather than erroring. |
+| `worktree_root` | string | Optional. Repo-relative directory that holds per-job worktrees for `workspace: branch` jobs (see § 13). Default `".worktrees"`. Listed in `.gitignore` so in-tree worktrees stay untracked. |
+| `worktree_bootstrap_cmd` | string | Optional. Shell command (`sh -c`) run inside every freshly created job worktree, after config provisioning and before the spawn, to rebuild the gitignored execution environment (venv and the like) a worktree does not materialise. Absent = no bootstrap. A non-zero exit fails the job (`transient`) before any spawn. Everything the command creates MUST be gitignored — the post-job dirty-worktree check reads `git status --porcelain`, so an un-ignored bootstrap artifact fails every otherwise-correct job. The same obligation covers `settings.local.json` / `lazy.settings.local.json` (already gitignored by install). |
 | `post_push_hook` | string | Optional. Shell command run via `sh -c` (cwd = repo root) after each post-iteration push that actually advances `origin/<base_branch>`. Absent or empty = disabled. Fully isolated: non-zero exit, timeout, or spawn failure is journaled and never affects the tick. |
 | `post_push_timeout_sec` | int | Optional. Wall-clock cap on the post-push hook process. Default `30`. On expiry the hook is killed and the timeout journaled. |
+| `allowed_hooks` | list | Optional. Operator git-hook filenames (`pre-commit`, `commit-msg`, …) allowed to run under the daemon. At startup the daemon rebuilds `<git-common-dir>/lazy-hooks/` with a symlink per vetted name and points `core.hooksPath` at it through the environment, so a hook absent from the list never fires on a routine's commit. Absent or empty = no operator git hook runs under the daemon; the operator's own sessions are untouched. |
 
 `base_branch` and `remote_sync` are seeded by `lazy-core.install` from the checkout itself — the current branch, and `"pull_push"` when an `origin` remote exists. The block is written only when absent or `null`, so a hand-tuned one survives re-installs; `post_push_hook` is never seeded. A daemon-enabled repo whose `git` block stays `null` is a `lazy-core.audit` D3 finding.
 
@@ -109,7 +110,7 @@ The daemon reads two flat top-level sections — `daemon` and `routines`. Each c
     "cleanup_completed_after": "7d",
     "cleanup_failed_after": "30d",
     "cleanup_dead_after": "7d",
-    "stream_idle_timeout_sec": 90,
+    "stream_idle_timeout_sec": 900,
     "stream_max_retries": 3
   },
   "routines": {
@@ -169,7 +170,7 @@ Each key under `routines` is the routine name (dot-namespaced, e.g. `lazy-expert
 |---|---|---|---|
 | `interval_sec` | int | yes (interval types) | How often to run this routine (in seconds). Required for `subprocess`, `inbox`, `git`, `md-scan`; `schedule` uses `cron` instead (see § 8). |
 | `command` | array of strings | one of `command` / `expert`+`request` | `[<plugin-name>, <args>...]`. First element is resolved via plugin cache (see § 4). A routine sets EITHER `command` OR `expert` + `request`, never both, never neither. |
-| `expert` | string | one of `command` / `expert`+`request` | Expert name (optionally `expert@<repo>` for cross-repo dispatch). When set, `request` is also required. The mutually-exclusive alternative to `command`. |
+| `expert` | string | one of `command` / `expert`+`request` | Expert name. When set, `request` is also required. The mutually-exclusive alternative to `command`. |
 | `request` | string \| object | with `expert` | Request template dispatched to `expert`. Required whenever `expert` is set; ignored when `command` is used. |
 | `timeout_sec` | int | no | Per-run timeout. Default: 300 seconds. |
 
@@ -311,23 +312,20 @@ Each entry under `routines` may carry an optional `type` field. Default is `subp
 | `subprocess` (default) | `command`, `interval_sec` | `timeout_sec` |
 | `inbox` | `inbox_dir`, `expert`, `request`, `interval_sec` | `timeout_sec` |
 | `schedule` | `cron`, plus EITHER `command` OR `expert`+`request` | `timeout_sec` |
-| `git` | `branch`, `watch`, `expert`, `request`, `interval_sec` | `repo_dir`, `remote`, `path_filter`, `timeout_sec` |
+| `git` | `branch`, `watch`, plus EITHER `command` OR `expert`+`request`, `interval_sec` | `repo_dir`, `remote`, `path_filter`, `filter`, `group_globs`, `timeout_sec` |
 | `md-scan` | `paths`, `expert`, `interval_sec` | `filter`, `request`, `cadence`, `timeout_sec` |
+
+Every type additionally accepts the common keys `type`, `priority`, `protocol` / `protocols`, `ignore_halt`, `hooks_enabled`, and `git_author` (plus the retired `isolate` / `allow_merge`, accepted but ignored) — `hooks_enabled` is the allow-list of lazycortex hook short names this routine's own subprocess may run (empty or absent silences all of them). `ignore_halt` lets a routine tick while the daemon is halted AND skips the post-tick working-tree check for it, so a routine that carries it must report its own failures.
+
+`git_author` (`{name, email}`, the same shape as an expert entry's block) names the bot identity for any commits the routine's own subprocess makes: the daemon exports `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` into every command-shape spawn via `routine_subprocess_env`, same coverage as the pump gives expert jobs. Committer is deliberately untouched — both consumers of automatic-commit identity (loop-detect and the coordinators' operator-vs-bot check) read the author. Canonical form: `<routine-family>@bot.invalid` (the RFC 2606 `.invalid` TLD is undeliverable by construction). Absent key is not an error — the routine commits under the daemon process's identity, as before. Loop-detect collects `git_author.email` from routines and experts alike, so a deterministic routine cycling on its own diff halts the daemon the same way an expert does.
 
 `paths` globs: a pattern containing `**` is matched full-path-anchored with `**` spanning any number of segments (including zero); a pattern without `**` keeps `PurePath.match` semantics (right-anchored, `*` never crosses `/`). In `**`-bearing patterns character classes like `[abc]` are treated as literal text (only `*` and `?` are wildcards); patterns without `**` keep full `PurePath.match` semantics.
 
-Closed-set strict validation: unknown type, unknown field, missing required, or per-type custom constraint violation → `RoutineConfigError` at registration time.
+Closed-set strict validation: unknown type, unknown field, missing required, or per-type custom constraint violation → `RoutineConfigError` at registration time. The daemon re-validates every entry each time it loads the registry, so an entry written by hand, seeded by an install skill, or left behind by a schema change is rejected on read rather than at first dispatch — see § 10.
 
 **Common optional fields (any type):** `protocol: <ref>` or `protocols: [<ref>, ...]` — declares which protocol(s) the routine's dispatched jobs follow. The dispatcher resolves each ref via `reference_resolver.resolve(..., category="protocols", ...)` and threads the resolved paths through to each job's `config.json`. Protocols are routine-side, not expert-side — expert entries in `lazy.settings.json[experts]` do NOT carry a `protocol` field. See `lazy-core.expert-protocols-contract.md`.
 
-**Worktree-isolation fields (any type):**
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `isolate` | bool | `false` | When `true`, the routine's unit of work runs on a dedicated `task-<id>` branch in an in-tree worktree instead of writing directly to the base branch (see § 13). When absent or `false`, the routine takes the unchanged direct-write dispatch path. |
-| `allow_merge` | bool | `false` | Only meaningful with `isolate: true`. When `true`, a completed task is rebased onto base and fast-forward merged (degrading to a pull request on conflict). When `false`, completion always opens a pull request rather than merging. |
-
-Both must be booleans when present — a non-boolean value raises `RoutineConfigError` at registration time.
+**Retired worktree-isolation fields (any type):** `isolate` and `allow_merge` belonged to the retired routine-side worktree path. They are still ACCEPTED by validation (a consumer's config must not start failing over a dead flag) but ignored, with a stderr warning per occurrence; `lazy-core.doctor` / `lazy-core.autocheckup` offer the prune. Job-level isolation lives in `experts[<name>].workspace` instead — see § Workspace.
 
 ### `inbox`
 
@@ -359,20 +357,24 @@ Watches local `HEAD` and dispatches one job per item per `watch`. Closed enum + 
 | `watch` | Variables exposed in `request` template |
 |---|---|
 | `new_commits` | `{sha}`, `{short_sha}`, `{subject}`, `{author_name}`, `{author_email}`, `{commit_ts}` |
-| `new_files` | `{path}`, `{status}`=A, `{sha}` |
-| `changed_files` | `{path}`, `{status}` (A or M), `{sha}` |
-| `deleted_files` | `{path}`, `{status}`=D, `{sha}` |
-| `renamed_files` | `{old_path}`, `{new_path}`, `{sha}` |
+| `new_files` | `{path}`, `{status}`=A, `{sha}`, `{author_name}`, `{author_email}` |
+| `changed_files` | `{path}`, `{status}` (A or M), `{sha}`, `{author_name}`, `{author_email}` |
+| `deleted_files` | `{path}`, `{status}`=D, `{sha}`, `{author_name}`, `{author_email}` |
+| `renamed_files` | `{old_path}`, `{new_path}`, `{sha}`, `{author_name}`, `{author_email}` |
 
-`last_seen_sha` tracked in state.json's `git_watch.<name>` block. First run records the current local HEAD and dispatches nothing (no history backfill). Non-ancestor baseline-reset (e.g. after a rebase pull rewrites history) resets the baseline and dispatches nothing.
+**`group_globs`** (optional, file-level watches only — rejected with `new_commits`) — an ordered list of directory globs; after the composite filter runs, file items whose path sits strictly below a matching glob collapse into ONE item per matched directory. The first glob in list order wins; a glob matches segment-by-segment (`*` never crosses `/`); a file lying AT the glob's depth (a folder-note beside the group dirs) and any path outside every glob stay ordinary file-level items. A group item exposes `{dir}` (the matched directory), `{paths}` (sorted member paths), and `{sha}` / `{author_name}` / `{author_email}` of the last commit touching the dir in the scanned range. The group is also the retry unit: a failing group re-dispatches whole.
+
+`last_seen_sha` tracked in state.json's `git_watch.<name>` block. First run records the current local HEAD and dispatches nothing (no history backfill). Non-ancestor baseline-reset (e.g. after a rebase pull rewrites history) resets the baseline and computes no fresh items over the discarded range.
+
+**`command`-shape retry cursor.** An item whose spawned worker exits non-zero is recorded in `git_watch.<name>.failed_items` (`{sha, ..., reason}` — the full item dict plus a bounded `reason` string carrying the exit code and a trimmed stderr tail) instead of being silently dropped; `last_seen_sha` still advances past it so one broken item never stalls the rest of the range. The next tick retries every `failed_items` entry — in order, before any fresh item — and clears an entry on success; a repeat failure leaves it in place (no retry cap: a permanently failing item is a permanently visible line in the daemon's routine-tick journal, the operator's diagnostic). An entry whose `sha` history no longer knows (a later force-push rewrote it away) is dropped instead of replayed, using the same ancestry check the baseline-reset guard uses; the tick's `note` field reports the drop. This applies only to the `command` sub-shape — the `expert + request` sub-shape dispatches jobs asynchronously and has no synchronous exit code to observe.
 
 The `remote` config field is vestigial for the watch — remote sync is the daemon's job (`daemon.git.remote_sync` / `_git_pre`). It is accepted but ignored. By the time `dispatch_git` runs, `_git_pre` has already pulled remote commits into the local branch, so local HEAD reflects both local system commits and pulled-in remote commits — one watch covers both, and a remote-less repo works with no fetch.
 
-The git type is working-tree-neutral by construction: only read-only `rev-parse`/`log`/`diff`. Cannot trigger the halt invariant on its own.
+The git watch itself is working-tree-neutral: only read-only `rev-parse`/`log`/`diff`. What it dispatches is not — a `command` routine may write and commit, so the halt invariant is the consumer's responsibility, not the watch's.
 
 ### Composite `filter` block (`inbox`, `git`, `md-scan`)
 
-The optional `filter` key on `inbox`, `git`, and `md-scan` routines is a composite predicate block. Each declared sub-key must pass (AND semantics). An empty or absent block accepts every item.
+The optional `filter` key on `inbox`, `git`, and `md-scan` routines is a composite predicate block. Each declared sub-key must pass (AND semantics), except `any_of` (below), which is itself an OR over composite members. An empty or absent block accepts every item.
 
 **`filter.frontmatter`** — per-key `{ in, not_in }` predicates applied to the item's parsed YAML frontmatter. `in` (allow-list) and `not_in` (deny-list) both AND with each other and with other keys. `null` in either list matches a missing key or an explicit `null`. Non-markdown items and unreadable files parse to `{}` — a `null`-accepting predicate keeps them; a value-requiring predicate drops them. The legacy bare-list/scalar form is rejected.
 
@@ -386,7 +388,9 @@ The optional `filter` key on `inbox`, `git`, and `md-scan` routines is a composi
 
 Items with no file path (e.g. `new_commits` git-watch items) are treated as non-folder-notes: `folder_note: true` excludes them, `folder_note: false` keeps them. Must be a boolean when present — a non-boolean value raises `RoutineConfigError`.
 
-Example combining both sub-keys:
+**`filter.basename`** — a `{ in, not_in }` predicate applied to the item's file basename (`Path(path).name`). Same allow-list/deny-list semantics as `filter.frontmatter`'s per-key predicates. Items with no file path (e.g. `new_commits` git-watch items) match against `None` — a `null`-accepting predicate keeps them; a value-requiring predicate drops them.
+
+Example combining all three flat sub-keys:
 
 ```json
 {
@@ -394,7 +398,23 @@ Example combining both sub-keys:
     "folder_note": true,
     "frontmatter": {
       "stage": { "in": ["draft"], "not_in": [] }
-    }
+    },
+    "basename": { "in": ["design.md", "tech.md"], "not_in": [] }
+  }
+}
+```
+
+**`filter.any_of`** — a non-empty list of composite filters (each shaped like the `filter` block itself: `frontmatter` / `folder_note` / `basename`), matching when **any** member matches (OR semantics). Mutually exclusive with a flat `frontmatter` / `folder_note` / `basename` at the same level as `any_of` — declaring both raises `RoutineConfigError`. Each member is validated with the same closed sub-key vocabulary; an unknown key inside a member raises `RoutineConfigError`. Members do not nest further `any_of`. An empty `any_of: []` raises `RoutineConfigError` rather than silently matching nothing forever — the inverted polarity of an absent/empty flat filter, which accepts everything.
+
+Example — matches a status folder-note OR any of a fixed set of sibling doc basenames:
+
+```json
+{
+  "filter": {
+    "any_of": [
+      { "frontmatter": { "spec_role": { "in": ["status"], "not_in": [] } } },
+      { "basename": { "in": ["design.md", "architecture.md", "code-plan.md"], "not_in": [] } }
+    ]
   }
 }
 ```
@@ -413,30 +433,24 @@ Schema:
     "<routine_name>": <unix_ts>
   },
   "git_watch": {
-    "<routine_name>": { "last_seen_sha": "<full_hex>" }
-  },
-  "worktree_tasks": {
-    "<work_id>": {
-      "branch": "task-<work_id>",
-      "worktree_path": "<abs path under worktree_root>",
-      "routine": "<routine_name>",
-      "allow_merge": false,
-      "job_id": "<job_id|null>",
-      "started": <unix_ts>
+    "<routine_name>": {
+      "last_seen_sha": "<full_hex>",
+      "failed_items": [{ "sha": "<full_hex>", "...": "<rest of the item dict>", "reason": "<exit code + trimmed stderr tail>" }]
     }
   },
   "daemon_halted": {
     "halted_since": <unix_ts>,
     "triggered_by": "<routine_name|_git_pre|_git_post|lazy-expert.pump>",
-    "reason": "uncommitted_changes|git_pull_diverged|git_push_failed|git_remote_unavailable|suspected_loop",
+    "reason": "uncommitted_changes|git_pull_diverged|git_push_failed|git_remote_unavailable|suspected_loop|routine_config_invalid|rate_limit",
     "dirty_paths": ["<git status --porcelain line>", ...],
+    "resets_at": <unix_ts, rate_limit only>,
     "expert": "<expert_name|null>",
     "job_id": "<job_id|null>"
   }
 }
 ```
 
-`daemon_halted` is absent when healthy. `git_watch` is absent when no `git`-type routines are registered. `worktree_tasks` is absent when no `isolate: true` routine has ever started a task; it persists across daemon restarts so an in-flight task is re-attached and polled after a relaunch (see § 13). `dirty_paths` is empty for git-related halt reasons (the tree is presumed clean at halt time; the halt cause is in the branch/remote state, not the working tree).
+`daemon_halted` is absent when healthy. `git_watch` is absent when no `git`-type routines are registered. `failed_items` is absent (or empty) when nothing has ever failed, or once every prior failure has cleared. A legacy `worktree_tasks` block may linger from the retired routine-side worktree path; nothing reads it anymore. `dirty_paths` is empty for git-related halt reasons (the tree is presumed clean at halt time; the halt cause is in the branch/remote state, not the working tree).
 
 **Halt reasons (closed set):**
 
@@ -444,11 +458,14 @@ Schema:
 - `git_pull_diverged` — pre-tick fetch found that local and origin both have commits the other doesn't. Recovery: operator repairs branch state manually, then `/lazy-runtime.recover` clears the halt.
 - `git_push_failed` — post-tick push retried `POST_TICK_MAX_PUSH_ATTEMPTS` (3) times and kept failing. Recovery: operator investigates push refusal (auth, branch protection, persistent race), then `/lazy-runtime.recover`.
 - `git_remote_unavailable` — any other unexpected git failure during pre- or post-tick remote sync (network, permission, missing remote). Recovery: operator restores network/auth, then `/lazy-runtime.recover`.
-- `suspected_loop` — loop-detection heuristic fired: one file was committed ≥ `loop_detect_threshold` times by the same registered-bot author within the `loop_detect_window` commit window. The halt block names the offending `(author, file)` pair. Recovery: operator investigates the routine's commit pattern and runs `/lazy-runtime.recover` once resolved.
+- `suspected_loop` — loop-detection heuristic fired: one identical diff (`git patch-id --stable`) was committed ≥ `loop_detect_threshold` times by the same registered-bot author within the `loop_detect_window` commit window. Commit volume alone never trips it — only a diff that keeps re-landing unchanged, directly or as one leg of an oscillation. The halt block names the offending patch-id, author, and the repeated commits' subjects. Recovery: operator investigates the routine's commit pattern and runs `/lazy-runtime.recover` once resolved.
+- `routine_config_invalid` — a `routines[*]` entry failed `validate_routine_entry` when the daemon read the registry (see § 10). `triggered_by` names the offending routine; the schema error text is in the routine's own `routine:<name>` incident. Recovery: operator fixes the settings entry, then `/lazy-runtime.recover` (mode `manual-fix`).
+- `rate_limit` — an expert run's `rate_limit_event` frame tripped the rate-limit guard (`daemon.rate_limit_guard`): the subscription window is closed. The block carries `resets_at` — the latest reopening time across the host-local flag records at `${XDG_CACHE_HOME:-$HOME/.cache}/lazycortex/rate-limit/`. Self-lifting: `_run_iteration` clears the halt (and resolves the `halt:<repo>` incident) once `now >= resets_at`; a block with no `resets_at` is treated as already expired. While halted the loop sleeps `min(resets_at − now, 3600)` instead of the polling interval, git sync stays alive, and the self-update restart is NOT skipped for this reason (state survives the restart, a restart burns no tokens). Recovery: none needed; `/lazy-runtime.recover` (mode `manual-fix`) resumes early — safe, the pump's pre-spawn flag check still defers spawns while the flag lives.
 
 Persistence consequences:
 - `last_run` survives daemon restart and laptop sleep — slow routines (e.g. every 6h) are honored across restarts.
 - `git_watch.<name>.last_seen_sha` survives daemon restart — `git` routines do not re-dispatch already-handled commits after a reboot.
+- `git_watch.<name>.failed_items` survives daemon restart — a `command`-shape worker crash across a restart still retries on the next tick rather than being lost with the in-memory tick.
 - `daemon_halted` survives daemon restart — a halted daemon stays halted across reboots until the operator runs `/lazy-runtime.recover`.
 
 ---
@@ -461,6 +478,7 @@ The daemon halts (writes a top-level `daemon_halted` block to state.json and sto
 - **Pre-tick divergence** — local and origin branches both have commits the other doesn't → `reason: git_pull_diverged`. Automatic resolution would risk dropping the operator's commits, so the daemon halts and waits.
 - **Post-tick push exhausted retries** — the rebase+push retry loop failed `POST_TICK_MAX_PUSH_ATTEMPTS` times → `reason: git_push_failed`. Indicates either persistent operator-side races (rare) or branch-protection / auth refusal.
 - **Other pre- or post-tick git failure** — network, missing remote, permission, etc. → `reason: git_remote_unavailable`.
+- **Malformed registry entry** — an entry under `routines` fails `validate_routine_entry` when the daemon loads the registry, before any scheduling decision reads it → `reason: routine_config_invalid`. The entry is dropped from that iteration's registry and opens a `routine:<name>` incident carrying the schema error verbatim; every further broken entry increments `routine_errors_total{reason="routine_config_invalid"}` under its own routine label, while the halt block keeps the first one's attribution. Why daemon-wide: a schema violation never self-heals — it stands until the operator edits the settings — so skipping it quietly every tick would hide a routine that silently stopped working.
 
 Per-job attribution: when an expert (inside `expert-pump`) is the cause of a dirty-tree halt, the halt block also records `expert` + `job_id`. The job's `response.json` is overridden with `outcome: "error", error.category: "uncommitted_changes"` and `DONE` is touched. Git-related halts carry no expert attribution (the daemon, not a routine, owns remote sync).
 
@@ -513,29 +531,56 @@ Valid scopes are exactly `user`, `project`, `local`; anything else is dropped (s
 
 ### Lazycortex hooks — hermetic by default
 
-`--setting-sources project,local` sheds *operator user-scope* hooks, but the project's own lazycortex hooks (`git-guard`, `check-public`, `model-router`, `settings-guard`, `commit-recorder`) still load at `project` scope — and each one runs on every `Bash` boundary of the spawn. For a headless expert that is pure tax: `check-public` and `git-guard` alone add tens of seconds per tool call and gate nothing the expert needs.
+`--setting-sources project,local` sheds *operator user-scope* hooks, but the project's own lazycortex hooks (`lazy-core.git-guard`, `lazy-guard.check-public`, `lazy-core.model-router`, `lazy-guard.settings`, `lazy-log.commit-recorder`) still load at `project` scope — and each one runs on every `Bash` boundary of the spawn. For a headless expert that is pure tax: `lazy-guard.check-public` and `lazy-core.git-guard` alone add tens of seconds per tool call and gate nothing the expert needs.
 
-So the pump exports `LAZYCORTEX_HOOKS_ALLOW_LIST` on every spawn, and each lazycortex hook consults it as its first action (`bin/hook_gate.py`). The variable is named for the action it exerts — "these hooks may run" — not for who set it: the pump sets it for experts, but an operator can export the same variable in a shell to the same effect. Its **presence** flips every hook into allow-list mode; only the named hooks run, so an expert with no config runs none of them.
+So the daemon exports `LAZYCORTEX_HOOKS_ALLOW_LIST` for every routine it dispatches, from that routine's own `hooks_enabled`, and each lazycortex hook consults it as its first action (`bin/hook_gate.py` for python hooks; shell hooks read the variable directly, since a git hook gets no path into the plugin tree). Expert spawns inherit it from the routine that runs the pump — the pump is itself a routine, so the setting lives in exactly one place. The variable is named for the action it exerts — "these hooks may run" — not for who set it: an operator can export the same variable in a shell to the same effect. Its **presence** flips every hook into allow-list mode; only the named hooks run, so a routine with no config runs none of them.
 
-An expert opts specific hooks back in:
+`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` is pinned to `3` the same way, on every headless expert spawn — daemon-driven or a manual `expert-pump-once` from `/lazy-spec.drive` alike, since both go through this same `env` construction — and on the daemon's own subprocess environment (`EnvVar.SUBAGENT_SPAWN_DEPTH_PIN`). Only the operator's own interactive session, never itself spawned by the pump, inherits whatever the ambient shell already has.
+
+A routine opts specific hooks back in:
 
 ```
-experts:
+routines:
   <name>:
-    hooks:
-      enabled: [git-guard]   # only git-guard runs in this expert's spawns; the rest no-op
+    hooks_enabled: [lazy-core.git-guard]   # only the git guard runs in this routine's subprocesses; the rest no-op
 ```
 
-Absent `hooks`, or `hooks.enabled: []`, exports an empty allow-list → every lazycortex hook no-ops in the spawn (the hermetic default, mirroring `setting_sources`). The effective allow-list per expert is surfaced by `/lazy-runtime.preflight`.
+Absent or empty, the exported allow-list is empty → every lazycortex hook no-ops in anything the routine spawns (the hermetic default, mirroring `setting_sources`). On an `expert`-shape routine the key is inert: that session is spawned by the pump routine and therefore carries the pump's list.
 
 The same gate powers the mirror-image interactive control. In a normal session (no `LAZYCORTEX_HOOKS_ALLOW_LIST`) every hook runs unless the operator silences it by short name in a root-level block-list:
 
 ```
 hooks:
-  disabled: [model-router]   # this hook no-ops in interactive sessions; the rest run
+  disabled: [lazy-core.model-router]   # this hook no-ops in interactive sessions; the rest run
 ```
 
-`hooks.disabled` reads the tracked value with the local overlay merged on top, so a personal silence can live in the gitignored `lazy.settings.local.json`. The block-list read fails open — a missing or malformed settings file silences nothing. Third-party operator hooks (e.g. `warp`) do not read this variable; they are already shed by `--setting-sources` — a separate layer.
+`hooks.disabled` reads the tracked value with the local overlay merged on top, so a personal silence can live in the gitignored `lazy.settings.local.json`. The block-list read fails open — a missing or malformed settings file silences nothing. Operator hooks outside the lazycortex tree do not read this variable; user-scope ones are already shed by `--setting-sources`, and operator *git* hooks are handled by a different mechanism — the daemon points `core.hooksPath` at a directory of symlinks to the hooks named in `daemon.git.allowed_hooks`, so an unvetted one never runs under it.
+
+### Workspace — branch enforcement, main by default
+
+An expert's spawn runs on the daemon's base branch by default (`workspace: main`, or the key absent — today's behavior). An expert that carries out the acceptance-cycle work `lazycortex-specs.optional-plan-and-auto-implementation.md` describes (implementer/tester classes on a launch-checkbox job and its continuations) opts into a job-scoped branch instead:
+
+```
+experts:
+  <name>:
+    workspace: branch   # main | branch — default main
+    merge: ask           # auto | ask — default ask; consulted by the DISPATCHER's own
+                          # merge logic, never read by the pump itself
+```
+
+`workspace: branch` is a CAPABILITY the expert opts into, not a mandate every one of its jobs must satisfy: it is enforced by the pump (`expert_pump._process_one`), never by the expert — the expert never runs git worktree or checkout commands itself (`lazy-core.expert-runtime-contract.md` "What you must not touch" already forbids it) — and it activates only when the job's own `request.json` carries a `branch` field. When a `workspace: branch` expert is also dispatched for work that carries no `branch` (an ordinary review-rewrite from `review.coordinator`, say, sharing the same implementer/tester expert the acceptance cycle uses), that job runs on whatever is already checked out, byte-identical to a `workspace: main` job — no refusal. The reverse mismatch — a `branch` present in the payload of a `workspace: main` (or absent) expert's job — is also never a refusal: the field is ignored (a warning line goes to the daemon log) because a main-workspace expert never branches, full stop.
+
+**The token stays `branch`; the mechanism is a linked worktree.** When `branch` IS present and `workspace: branch` applies, the pump runs the job in an isolated git worktree at `<worktree_root>/job-<job_id>/` instead of switching the primary checkout: a fresh dispatch's branch is created off fresh base (`origin/<base_branch>` when the tracking ref exists, else the local base), a continuation's existing branch is reused as-is; the gitignored local config (`settings.local.json`, `lazy.settings.local.json`) is symlinked in; `daemon.git.worktree_bootstrap_cmd` (when configured) runs in the worktree to rebuild the gitignored execution environment (a bootstrap failure fails the job as `transient` before any spawn); the spawn's cwd is the worktree; and the worktree is removed on EVERY outcome — success, failure, crash — with the branch as the only durable product. The primary checkout never leaves base, so the operator's tree and the daemon's `_git_pre` are untouched by isolated jobs. The one refusal left in this path is a missing `daemon.git.base_branch` — a fresh job branch has nothing to fork from — so the job errors (`error`, category `logical`) rather than forking off an arbitrary point.
+
+**Commit obligation and job-failure checks.** The isolated agent's prompt carries the obligation to commit all work to its branch (with resume wording on a continuation: build on the existing commits, never rewrite them). After a clean exit the pump verifies the worktree: uncommitted changes, or zero commits over base with a clean tree, fail the JOB (`error`, category `logical`) — never the daemon; the daemon-wide dirty-tree halt applies only to non-isolated jobs, whose spawns share the operator's tree. Uncommitted dirt disappears with the worktree (operator decision, 2026-08-14); diagnosis lives in the job's transcript and error record.
+
+**Continuation reuses the same branch.** A dispatcher driving the acceptance cycle's comment-and-redo loop passes the SAME `branch` value on every continuation job as the original dispatch — the pump's create-or-reuse check (`git rev-parse --verify`) makes this idempotent; a continuation never gets a fresh branch of its own, though it does get a fresh worktree and a fresh bootstrap run. Only the coordinator ever writes the `branch` field — for a fresh launch-checkbox dispatch and every one of its continuations; every other dispatch to the same expert (review rewrites) simply omits it. The pump itself never persists the branch name anywhere — it is RECOMPUTED by the dispatcher from the asset's own identity on every dispatch (`lazy-spec.coordination-playbook.md` § 6), so a dispatcher whose naming scheme depends on a renameable asset identifier (a slug, a folder path) silently orphans an in-flight branch the moment that identifier changes underneath it; this is the dispatcher's own constraint to document, not something the pump's create-or-reuse check can catch.
+
+**`merge` is dispatcher-owned, not pump-owned.** The pump never merges a branch back — only the coordinating dispatcher does, per its own playbook judgment (see `lazy-spec.coordination-playbook.md` § 6 for the spec-system's own instance of this). `merge: auto` / `merge: ask` (default `ask`) is read by that dispatcher logic alone; it has no runtime effect inside `expert_pump.py`.
+
+**A claimant killed mid-job leaves only an orphan directory.** The primary checkout was never switched, so there is nothing to restore; the abandoned worktree is collected by the hourly `sweep()` (every directory under `worktree_root` is an orphan by definition — a live worktree exists only inside one synchronous pump run, and the serial main loop never sweeps concurrently with one). The same holds in a no-daemon drive session (`lazycortex-specs.lazy-spec.drive` pumping `expert-pump-once` by hand): an interrupted manual pump leaves an orphan worktree and an untouched checkout, nothing more.
+
+**The git guard stands down inside a linked worktree.** `lazy-core.git-guard` skips both the pathspec discipline and the staging-window mutex when the invocation's `--git-dir` differs from `--git-common-dir` — a linked worktree has its own index, so the shared-index premise both rows rest on does not hold there.
 
 ### Filesystem sandbox — resolved paths only
 
@@ -624,8 +669,8 @@ lazycortex_runtime_build_info{version,daemon_name,repo}
 
 The `reason` label is metric-specific:
 
-- On `routine_errors_total` (routine tick failures): `{timeout, resolve, subprocess_error, unexpected, git_pre_failed, git_post_failed}`.
-- On `daemon_halts_total` / `daemon_halted` (gauge): `{uncommitted_changes, git_pull_diverged, git_push_failed, git_remote_unavailable, suspected_loop}` — matches the closed set in § 9.
+- On `routine_errors_total` (routine tick failures): `{timeout, resolve, subprocess_error, unexpected, git_pre_failed, git_post_failed, external_dir_broken, routine_config_invalid}`. `routine_config_invalid` is the one value that marks a permanently broken entry rather than a failed run — it never clears on its own and needs a settings edit.
+- On `daemon_halts_total` / `daemon_halted` (gauge): `{uncommitted_changes, git_pull_diverged, git_push_failed, git_remote_unavailable, suspected_loop, routine_config_invalid}` — matches the closed set in § 9.
 
 ### Shipping to a Prometheus + Grafana stack
 
@@ -635,34 +680,15 @@ Versioned independently of `lazycortex-core` via the file's `version:` frontmatt
 
 ---
 
-## 13. Worktree-isolated tasks
+## 13. Job worktrees
 
-A routine flagged `isolate: true` (see § 8) does not write directly to the base branch. Instead the daemon runs its unit of work on a dedicated `task-<id>` branch inside an in-tree git worktree under `<repo>/<worktree_root>/task-<id>/`, then reintegrates the branch to base by auto-merge or pull request. This keeps slow, multi-commit code tasks off the base branch and out of the fast direct-write routines' way. Owned by `WorktreeTaskManager` in `bin/worktree_tasks.py`; wired into the daemon loop in `bin/runtime_daemon.py`.
+Isolated expert jobs (`workspace: branch` — see § Workspace above) run inside linked git worktrees under `<repo>/<worktree_root>/job-<job_id>/`, owned by `WorktreeTaskManager` in `bin/worktree_tasks.py` and driven synchronously by the pump inside one `_process_one` run. The manager never merges, never opens pull requests, and keeps no registry — reintegration is the coordinating dispatcher's business, and a worktree lives exactly as long as the pump run over its job.
 
-The feature is **inert** when no `isolate: true` routine is registered and no task is in flight — direct-write routines take the unchanged dispatch path, and the polling / sweep steps are no-ops.
+The retired routine-side path (`isolate: true` routines, `allow_merge`, `max_concurrent_tasks`, the `worktree_tasks` registry in `state.json`) is gone: those settings keys are ignored with a stderr warning when present, and `lazy-core.doctor` / `lazy-core.autocheckup` offer the prune.
 
-### Lifecycle
+### Sweep
 
-1. **Start.** When an `isolate: true` routine comes due, the daemon calls `mgr.start(...)` instead of the direct-write path. The manager:
-   - Forks a `task-<id>` branch from fresh base — `origin/<base_branch>` when a remote tracking ref exists, else the local base branch.
-   - Creates the worktree directory under `worktree_root` and checks the branch out into it.
-   - Provisions the gitignored local config (`.claude/settings.local.json`, `.claude/lazy.settings.local.json`) by symlinking the primary checkout's copies in, so task agents inherit the operator's permission and path posture (a fresh checkout materialises only tracked files).
-   - Registers the task in `state.json`'s `worktree_tasks.<work_id>` block (see § 9).
-   - When the concurrency cap (`max_concurrent_tasks`) is already reached, `start` returns `{"result": "at_capacity"}`; the daemon leaves the routine due and retries on a later tick.
-2. **Poll.** Each iteration, before dispatching new work, the daemon polls every registered task whose entry carries a `job_id` via `expert_runtime.collect_job`. A task whose job reports `done` advances to finish.
-3. **Finish.** `mgr.finish(work_id)` reintegrates and tears down:
-   - For an `allow_merge: true` task, the branch is rebased onto base and fast-forward merged; a clean merge deletes the task branch.
-   - On rebase or fast-forward conflict, or for an `allow_merge: false` task, the branch is pushed (best effort) and a pull request is opened via `gh`, keeping the branch for review.
-   - Either way the worktree is removed and the registry entry deleted. The primary checkout is returned to the base branch before the worktree is torn down, so the next tick rides base.
-4. **Sweep.** On the same hourly cadence as runtime-log cleanup, `mgr.sweep()` runs `git worktree prune` and force-removes any directory under `worktree_root` that is not in the registry — an orphan left by a crashed task.
-
-### Integration outcomes
-
-`finish` returns one of: `merged` (clean auto-merge), `pr_opened` (pull request created), `pr_deferred` (pull request could not be opened — see below), or `unknown` (work id not registered).
-
-### `gh` dependency (optional)
-
-The pull-request path shells out to the `gh` CLI. When `gh` is absent, or no GitHub remote / auth is configured, `_open_pr` returns `pr_deferred` with a reason — the task branch is kept, the worktree is still torn down, and the daemon continues. The operator opens the pull request by hand later. `gh` is an optional external dependency.
+On the same hourly cadence as runtime-log cleanup, `mgr.sweep()` runs `git worktree prune` and force-removes every directory under `worktree_root` — each one is an orphan left by a crashed pump run, since a live worktree exists only inside one synchronous run of the serial main loop.
 
 ---
 
@@ -675,7 +701,7 @@ The daemon watches its own loaded `.py` source and restarts at an iteration boun
 - On a stable change the daemon logs `restart: own code changed` and restarts:
   - Under a supervisor (`LAZYCORTEX_SUPERVISED=1`, exported by the launchd plist / systemd unit) → clean `SystemExit(0)`; the supervisor relaunches the process with fresh code. The systemd unit uses `Restart=always` (not `on-failure`) so the clean exit-0 still relaunches; launchd's `KeepAlive` relaunches on any exit.
   - Unsupervised → `os.execv` replaces the process image with a fresh interpreter.
-- The restart happens at the iteration boundary, after any commit has landed and outside the halt path, so it never interrupts mid-commit work or masks a halt the operator still needs to recover from. In-flight worktree tasks (§ 13) survive the restart because the registry and worktrees persist on disk and the next iteration's poll re-attaches them.
+- The restart happens at the iteration boundary, after any commit has landed and outside the halt path (except the self-lifting `rate_limit` halt, where restarting is allowed), so it never interrupts mid-commit work or masks a halt the operator still needs to recover from. A worktree left by an interrupted job (§ 13) is collected by the next hourly sweep.
 
 ---
 
@@ -722,9 +748,28 @@ An absent or empty section is the default and changes no behaviour. Four consequ
 - The expert sandbox must grant the location each declared slot points at, not the slot itself (§ 11, *Filesystem sandbox*). `sandbox-sync` derives those locations from the planted symlinks, so it runs after the repair, and `sandbox-audit` catches a source root that moves later.
 
 - An `inbox` routine whose `inbox_dir` is declared and does not resolve fails its tick with `exit = -1` and the error tag `external_dir_broken: <path>`, which folds into the routine's own `routine:<name>` incident and carries the metric label `reason="external_dir_broken"`. An **undeclared** missing inbox stays a silent idle tick, unchanged.
-- `daemon.run_here` must be a host list rather than a bare `true`: a checkout reachable through a synced path carries its gitignored overlay to every machine holding that path, and a bare boolean reads as answered on all of them. Install offers to pin the list to the current host; audit reports the bare boolean as a warning until it is pinned.
+- `daemon.run_here` is where the second daemon is refused, and it must name both halves of the answer. See *The run-here gate* below.
 - Install refuses to put a supervisor on a checkout whose inbox another daemon on this host already drives, and skips the supervisor, sandbox, and metrics steps entirely rather than installing them and reporting afterwards.
 
 **The inbox-ownership halt is not gated on this section.** Every daemon checks at startup whether another checkout on the host resolves an inbox routine to the same physical directory, including a repository that declares no external directories at all — the collision is reachable through any symlink, not only a declared one. Where it fires the condition is real: two daemons over one inbox import every document twice.
 
-That halt is symmetric and permanent. Both checkouts raise it at their own next start, and removing the stray supervisor unit does not release the survivor — the halt is persisted state, and only a dirty-tree halt auto-clears. Decide which checkout drives the inbox, set `daemon.run_here: false` (or a host list) in the other, then run `/lazy-runtime.recover` in the one that should keep going. The check runs once per daemon start, so a collision created while a daemon is already running is seen by the newly started daemon, not by the incumbent.
+That halt is symmetric and permanent. Both checkouts raise it at their own next start, and removing the stray supervisor unit does not release the survivor — the halt is persisted state, and only a dirty-tree halt auto-clears. Decide which checkout drives the inbox, take the other out of its project's `daemon.run_here`, then run `/lazy-runtime.recover` in the one that should keep going. The check runs once per daemon start, so a collision created while a daemon is already running is seen by the newly started daemon, not by the incumbent.
+
+### The run-here gate
+
+Nothing in this runtime reconciles two daemons driving one project. They duplicate every dispatch, overwrite each other's `last_run` ledger, and commit over each other. `daemon.run_here`, in the **tracked** settings file, is the single answer to which daemon is the real one, and the daemon itself enforces it at startup — not only the install that placed the supervisor, so a leaked or hand-copied unit cannot outlive the answer.
+
+The value maps a hostname to the absolute path of the checkout that machine drives:
+
+```json
+"run_here": { "nexus": "~/lazy-runtime/Money" }
+```
+
+Both halves are load-bearing, and neither older shape is accepted:
+
+- A boolean cannot say which machine answered it. A project reached from a second machine — a synced path, or an independent clone — reads the same `true` on all of them.
+- A bare hostname cannot say which checkout. One machine commonly holds several checkouts of a project, a working copy alongside the one the daemon drives, and a hostname grants a daemon in each.
+
+The key is matched against `hostname -s` lowercased; the value is matched against the checkout the process was started in, with `~` expanded and both sides resolved, so a symlinked path still matches. `{}` names nothing and no machine runs the daemon. The map is tracked rather than local because a gitignored overlay never reaches a machine that cloned the repository independently, which is exactly where a second daemon appears.
+
+A daemon started anywhere the map does not name records a `daemon_error` incident with cause `run_here_denied` and exits non-zero. It raises no halt block: `.runtime/` is shared by every machine reaching a synced checkout, and a halt written there by a machine with no claim would stop the daemon that does have one.

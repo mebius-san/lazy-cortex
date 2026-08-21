@@ -71,6 +71,10 @@ def render(template_name: str, vars: dict[str, object]) -> str:  # pylint: disab
 
   Anything else fails loudly rather than pretending Jinja2 compatibility.
 
+  Guarantees:
+    - An unsupported template construct always raises instead of being silently skipped,
+      partially substituted, or rendered as literal text.
+
   Args:
     template_name: File name of the template under the shipped `templates/`
       directory.
@@ -85,6 +89,21 @@ def render(template_name: str, vars: dict[str, object]) -> str:  # pylint: disab
     TypeError: If a `{% for %}` directive iterates over a non-iterable value.
     FileNotFoundError: If the named template does not exist.
   """
+
+  # Contract:
+  # An unsupported template construct always raises rather than being silently skipped,
+  # partially substituted, or rendered as literal text.
+
+  # Domain(observe.install-state):
+  # # Installer configuration renders through a narrow template dialect
+  # The files an install step hands to the host's service manager, and the config a shipping agent
+  # reads on startup, are produced from templates, but the substitution language is deliberately
+  # smaller than a general templating engine: a fixed set of variable substitution, branching, and
+  # simple loops, nothing else. A construct outside that small vocabulary is a rendering error, not a
+  # silent no-op or a partial substitution, so a template mistake surfaces immediately during install
+  # rather than shipping a config that looks plausible but is subtly wrong.
+
+  # read the raw template text and hand it to the mini template engine for substitution
   src = (TEMPLATE_DIR / template_name).read_text()
   return _Template(src, vars).render()
 
@@ -97,6 +116,11 @@ def render_to(template_name: str, vars: dict[str, object], target: Path) -> Path
 
   The render goes through a sibling `.tmp` file followed by `os.replace`, so an
   interrupted call leaves the previous file content intact.
+
+  Guarantees:
+    - The write is atomic — an interrupted, killed, or crashed call always leaves either the
+      previous complete file content or the new complete content at `target`, never a partial
+      write.
 
   Args:
     template_name: File name of the template under the shipped `templates/`
@@ -114,8 +138,23 @@ def render_to(template_name: str, vars: dict[str, object], target: Path) -> Path
     TypeError: If a `{% for %}` directive iterates over a non-iterable value.
     OSError: If the target file or its parent directory cannot be written.
   """
+
+  # Contract:
+  # The write is atomic; an interrupted, killed, or crashed call never leaves a partially
+  # written file at `target` — it always keeps either the previous complete content or gains
+  # the new complete content.
+
   body = render(template_name, vars)
   target.parent.mkdir(parents = True, exist_ok = True)
+
+  # Domain(observe.install-state):
+  # # Config files are replaced atomically, never edited in place
+  # Every generated configuration file installed onto the host is written to a temporary sibling path
+  # first and only moved into its final place in one atomic step. An install run that is interrupted
+  # midway, killed, crashed, or out of disk, always leaves either the complete previous file or the
+  # complete new one at the final path; a half-written file is never observable by whatever process
+  # reads that config next.
+
   # write to a sibling temp file first so an interrupted call leaves the previous file intact
   # waiver: filesystem path idiom
   tmp = target.with_suffix(target.suffix + ".tmp")
@@ -131,6 +170,10 @@ def write_token_file(token: str) -> Path:
   The caller is responsible for asking the operator before invoking, since the
   written file contains sensitive credential material.
 
+  Guarantees:
+    - The written file's permission mode is always tightened to owner-read-write-only (0600),
+      regardless of the file's or its parent directory's prior permission state.
+
   Args:
     token: Token string to persist. A trailing newline is appended on write.
 
@@ -141,6 +184,20 @@ def write_token_file(token: str) -> Path:
     OSError: If the token file or its parent directory cannot be written or
       its permissions cannot be tightened.
   """
+
+  # Contract:
+  # The written token file's permission mode is always tightened to owner-read-write-only
+  # (0600), regardless of the file's or its parent directory's prior permission state.
+
+  # Domain(observe.install-state):
+  # # Secret material is split from ordinary installer answers
+  # Persistent state gathered during installation is split by sensitivity. Everyday configuration
+  # answers picked during the install wizard, such as the collection URL, the auth kind, or the
+  # shipping agent, are written to a plain, world-readable settings file. Anything that authenticates
+  # the shipper to its collection endpoint is never mixed into that file; it is written to its own
+  # file instead, and that file's permissions are tightened to owner-read-write-only so other local
+  # users on the same host cannot read the credential off disk.
+
   TOKEN_FILE.parent.mkdir(parents = True, exist_ok = True)
   TOKEN_FILE.write_text(token + "\n")
   # waiver: inline numeric literal, not a domain constant
@@ -157,6 +214,10 @@ def write_answer_file(answers: dict) -> Path:
   strings with backslashes and double quotes escaped. Token-like keys are
   refused so that secret material never accidentally leaks into the file.
 
+  Guarantees:
+    - A token-like key is refused before anything is written; the answer file is never left
+      with partial content or with a secret-looking key present.
+
   Args:
     answers: Mapping of answer keys to scalar values (URL, agent kind, auth
       kind, etc.).
@@ -169,8 +230,23 @@ def write_answer_file(answers: dict) -> Path:
       `LAZYCORTEX_OBSERVE_TOKEN`.
     OSError: If the answer file or its parent directory cannot be written.
   """
+
+  # Contract:
+  # A token-like key is refused before anything is written; the answer file is never left
+  # with partial content or with a secret-looking key present.
+
   ANSWER_FILE.parent.mkdir(parents = True, exist_ok = True)
   lines = []
+
+  # Domain(observe.install-state):
+  # # Secret-looking answer keys are refused, not filtered
+  # The plain settings file only ever accepts answers whose keys are known in advance to be
+  # non-secret. Before any answer is written, its key is checked against the closed set of names
+  # known to carry credential material; a match aborts the whole write rather than silently dropping
+  # just that one key, so a caller cannot accidentally leak a token into world-readable configuration
+  # by extending the answer set with a badly-named field.
+
+  # render each answer as a TOML literal line, refusing anything that looks like a secret first
   for k, v in sorted(answers.items()):
     # guard: never persist secret keys via the non-secret answer file
     if k in { "token", "LAZYCORTEX_OBSERVE_TOKEN" }:
@@ -197,10 +273,19 @@ def read_answer_file() -> dict:
   skipped, malformed lines are silently ignored, and unquoted values are
   decoded as booleans, ints, floats, or strings in that order.
 
+  Guarantees:
+    - Malformed or unparseable lines never raise; the call always returns a best-effort
+      mapping, empty when no answer file is present.
+
   Returns:
     A mapping of answer keys to decoded values, or an empty mapping when no
     answer file is present yet.
   """
+
+  # Contract:
+  # Malformed or unparseable lines in the answer file are tolerated, never raised; the call
+  # always returns a best-effort mapping (empty when no file is present) instead of aborting.
+
   # guard: no previous answers persisted yet
   if not ANSWER_FILE.exists():
     return {}
@@ -236,6 +321,10 @@ def find_agent_binary(agent_kind: str) -> Path | None:
   """
   Locate the binary for a shipping agent kind on the current `PATH`.
 
+  Guarantees:
+    - Candidate binary names for a kind are tried in a fixed priority order; the first name
+      found on `PATH` wins over any later candidate, regardless of `PATH` ordering.
+
   Args:
     agent_kind: Logical agent identifier — supported values today are `alloy`
       and `otelcol`.
@@ -244,6 +333,11 @@ def find_agent_binary(agent_kind: str) -> Path | None:
     The resolved binary path, or `None` if no matching executable is on
     `PATH` for the given kind (including unknown kinds).
   """
+
+  # Contract:
+  # Candidate binary names for a kind are tried in a fixed priority order; the first name
+  # found on `PATH` wins over any later candidate, regardless of `PATH` ordering.
+
   candidates = {
     "alloy":   [ "alloy", "grafana-alloy" ],
     "otelcol": [ "otelcol", "otelcol-contrib" ],
@@ -260,6 +354,10 @@ def load_service_macos(plist_path: Path) -> tuple[bool, str]:
   """
   Bootstrap the launchd agent for the current GUI user.
 
+  Guarantees:
+    - `ok` is a literal mirror of the subprocess exit status; the call performs no
+      interpretation of what a non-zero exit means.
+
   Args:
     plist_path: Path to the launchd plist that defines the user agent.
 
@@ -268,6 +366,11 @@ def load_service_macos(plist_path: Path) -> tuple[bool, str]:
     `launchctl bootstrap` and `stderr` carries the captured error output for
     diagnostic surfacing.
   """
+
+  # Contract:
+  # `ok` is a literal mirror of the subprocess exit status; the call performs no interpretation
+  # of what a non-zero exit means, leaving that judgment entirely to the caller.
+
   uid = os.getuid()
   proc = subprocess.run(
     [ "launchctl", "bootstrap", f"gui/{uid}", str(plist_path) ],
@@ -283,6 +386,10 @@ def unload_service_macos(plist_path: Path) -> tuple[bool, str]:
   Note that `launchctl bootout` exits non-zero when the agent is not currently
   loaded; the caller decides whether that constitutes failure.
 
+  Guarantees:
+    - `ok` is a literal mirror of the subprocess exit status; the call performs no
+      interpretation of what a non-zero exit means.
+
   Args:
     plist_path: Path to the launchd plist that defines the user agent.
 
@@ -291,6 +398,19 @@ def unload_service_macos(plist_path: Path) -> tuple[bool, str]:
     `launchctl bootout` and `stderr` carries the captured error output for
     diagnostic surfacing.
   """
+
+  # Contract:
+  # `ok` is a literal mirror of the subprocess exit status; the call performs no interpretation
+  # of what a non-zero exit means, leaving that judgment entirely to the caller.
+
+  # Domain(observe.install-state):
+  # # Stopping an already-stopped service is not evidence of failure
+  # Both host service managers this shipper works with exit non-zero when asked to disable or unload
+  # a service that isn't currently loaded, the very same result a genuine failure would produce. An
+  # uninstall or reinstall flow that clears a service which may or may not be present must not treat
+  # that non-zero result as an error by itself; it only means there was nothing to stop, and that is
+  # expected on a machine where the shipper was never actually running.
+
   uid = os.getuid()
   proc = subprocess.run(
     [ "launchctl", "bootout", f"gui/{uid}", str(plist_path) ],
@@ -304,6 +424,10 @@ def load_service_linux(unit_name: str = "lazycortex-observe.service") -> tuple[b
   """
   Enable and start the systemd user unit for the lazycortex-observe agent.
 
+  Guarantees:
+    - `ok` is a literal mirror of the subprocess exit status; the call performs no
+      interpretation of what a non-zero exit means.
+
   Args:
     unit_name: Name of the systemd user unit. Defaults to the canonical
       `lazycortex-observe.service`.
@@ -313,6 +437,11 @@ def load_service_linux(unit_name: str = "lazycortex-observe.service") -> tuple[b
     `systemctl --user enable --now` and `stderr` carries the captured error
     output for diagnostic surfacing.
   """
+
+  # Contract:
+  # `ok` is a literal mirror of the subprocess exit status; the call performs no interpretation
+  # of what a non-zero exit means, leaving that judgment entirely to the caller.
+
   proc = subprocess.run(
     [ "systemctl", "--user", "enable", "--now", unit_name ],
     capture_output = True, text = True, check = False,
@@ -324,6 +453,10 @@ def unload_service_linux(unit_name: str = "lazycortex-observe.service") -> tuple
   """
   Disable and stop the systemd user unit for the lazycortex-observe agent.
 
+  Guarantees:
+    - `ok` is a literal mirror of the subprocess exit status; the call performs no
+      interpretation of what a non-zero exit means.
+
   Args:
     unit_name: Name of the systemd user unit. Defaults to the canonical
       `lazycortex-observe.service`.
@@ -333,6 +466,11 @@ def unload_service_linux(unit_name: str = "lazycortex-observe.service") -> tuple
     `systemctl --user disable --now` and `stderr` carries the captured error
     output for diagnostic surfacing.
   """
+
+  # Contract:
+  # `ok` is a literal mirror of the subprocess exit status; the call performs no interpretation
+  # of what a non-zero exit means, leaving that judgment entirely to the caller.
+
   proc = subprocess.run(
     [ "systemctl", "--user", "disable", "--now", unit_name ],
     capture_output = True, text = True, check = False,
@@ -385,12 +523,35 @@ def resolve_core_cli() -> Path:
   subprocesses), then `$PATH`, then the dev-vault sibling layout (this plugin's checkout
   living next to lazycortex-core under `claude/`).
 
+  Guarantees:
+    - The discovery order is fixed — every `$LAZYCORTEX_PLUGIN_DIRS` entry, then `$PATH`, then
+      the dev-vault sibling layout — and the first location that carries the binary always
+      wins, independent of unrelated environment state.
+
   Returns:
     Absolute path to the CLI binary.
 
   Raises:
     RuntimeError: If the binary is not found anywhere.
   """
+
+  # Contract:
+  # The discovery order is fixed — every `$LAZYCORTEX_PLUGIN_DIRS` entry, then `$PATH`, then
+  # the dev-vault sibling layout — and the first location that carries the binary always wins,
+  # independent of unrelated environment state.
+
+  # Domain(plugin.boundaries):
+  # # A shipper reaches its sibling plugin only through its published command line
+  # This installer never imports another plugin's code directly; wherever it needs functionality that
+  # another plugin owns, such as reading the host's daemon registry, it locates and runs that plugin's
+  # own published command-line program instead and reads back its answer. The search for that program
+  # follows a fixed order of decreasing certainty: first every directory a runtime-launched process is
+  # explicitly told the enabled plugins live in, then wherever the general command search path already
+  # resolves it, and only as a last resort the layout of a development checkout where every plugin's
+  # sources sit side by side. Nothing found by any of the three means the run cannot reach its sibling
+  # at all, and that failure is reported rather than papered over with a guess.
+
+  # walk the discovery order and return the first location that actually carries the binary
   # waiver: external env-var name of the plugin-dirs boundary contract
   for entry in os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "").split(os.pathsep):
     # guard: empty path-list entries are skipped
@@ -421,6 +582,10 @@ def local_scrape_targets() -> list[dict]:
   Shells the core CLI (`daemon-list`) across the plugin boundary — the daemon registry
   and its settings semantics stay owned by lazycortex-core.
 
+  Guarantees:
+    - Only rows whose `metrics_enabled` field is true are returned; every other daemon row the
+      core CLI reports is filtered out.
+
   Returns:
     The `daemons` rows from the core CLI with `metrics_enabled` true; each carries
     `repo_id`, `repo_root`, `repo_label`, `bind`, and `port`.
@@ -428,6 +593,11 @@ def local_scrape_targets() -> list[dict]:
   Raises:
     RuntimeError: If the CLI cannot be found, exits non-zero, or prints unparseable JSON.
   """
+
+  # Contract:
+  # Only rows whose `metrics_enabled` field is true are returned; every other daemon row the
+  # core CLI reports is filtered out before the result reaches the caller.
+
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   import json
   cli = resolve_core_cli()
@@ -455,6 +625,10 @@ def render_scrape_targets_block(targets: list[dict], agent_kind: str) -> str:
   The daemon's exposition already labels every series with `repo`, so the block carries
   addresses only — one line per daemon, indented for its template's surrounding context.
 
+  Guarantees:
+    - A wildcard bind address (`0.0.0.0` or `::`) always renders as the loopback address in the
+      emitted target line; any other bind address renders unchanged.
+
   Args:
     targets: Rows from `local_scrape_targets()`.
     agent_kind: `alloy` or `otelcol` — selects the target-line syntax and indentation.
@@ -463,6 +637,21 @@ def render_scrape_targets_block(targets: list[dict], agent_kind: str) -> str:
     The newline-joined target lines (no trailing newline).
   """
   lines = []
+
+  # Contract:
+  # A wildcard bind address (`0.0.0.0` or `::`) always renders as the loopback address in the
+  # emitted target line; any other bind address renders unchanged.
+
+  # Domain(observe.coverage-detection):
+  # # A wildcard bind address is scraped over loopback
+  # A metrics endpoint that a daemon binds to a wildcard address is reachable on every network
+  # interface of the host, including the loopback interface, so a scrape target built for a
+  # same-host collector always substitutes the loopback address for a wildcard bind rather than
+  # reusing the wildcard literal, which a collector cannot connect to directly. A daemon bound to a
+  # specific, non-wildcard address keeps that address unchanged, since it is already the one address
+  # a same-host collector can reach.
+
+  # render one scrape-target line per covered daemon
   for row in targets:
     # a wildcard bind is scraped over loopback; anything else is scraped at its bind address
     # waiver: inline network literals, not domain constants
@@ -489,6 +678,11 @@ def detect_existing_coverage(targets: list[dict] | None = None) -> dict:
   about process evidence: a lone scraper process does not flip the verdict (it may serve
   something unrelated), but an observe unit or an active scrape connection does.
 
+  Guarantees:
+    - `covered` is true if and only if at least one strong signal is present, or at least two
+      independent weak process signals are present; a single weak signal alone never marks the
+      host as covered.
+
   Args:
     targets: Optional pre-computed `local_scrape_targets()` rows; computed when omitted.
 
@@ -496,6 +690,12 @@ def detect_existing_coverage(targets: list[dict] | None = None) -> dict:
     `{"covered": bool, "verdict": "already-covered"|"clear", "signals": [<str>, ...]}` —
     every detected signal is listed so the operator sees exactly what was found.
   """
+
+  # Contract:
+  # `covered` is true if and only if at least one strong signal is present, or at least two
+  # independent weak process signals are present; a single weak signal alone never marks the
+  # host as covered.
+
   signals: list[str] = []
   strong = 0
 
@@ -547,6 +747,16 @@ def detect_existing_coverage(targets: list[dict] | None = None) -> dict:
       # waiver: human-facing signal token
       signals.append(f"active-scrape-connection:{port}")
       strong += 1
+
+  # Domain(observe.coverage-detection):
+  # # Coverage verdict weighs signal strength, not signal count alone
+  # Before installing a metrics shipper on a host, a pre-flight check decides whether something is
+  # already collecting this host's metrics. Evidence splits into strong signals, such as an installed
+  # collector service already running for this project or a live network connection into a metrics
+  # port, and weak signals, such as a process that merely looks like a known scraper by name and could
+  # just as easily be serving something unrelated. The host counts as already covered when even one
+  # strong signal is present, or when at least two independent weak signals show up together; a single
+  # weak signal alone is never enough to call the host covered, since it could be a false positive.
 
   # verdict: any strong signal, or two independent process signals, means covered
   covered = strong > 0 or process_hits >= 2

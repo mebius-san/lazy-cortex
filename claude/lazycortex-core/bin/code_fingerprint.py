@@ -42,6 +42,14 @@ class CodeFingerprint:
       The explicit path list when one was supplied at construction, otherwise every loaded
       module's file path that lives under a watched plugin root.
     """
+
+    # Domain(runtime.self-update):
+    # # Scope of a daemon's own code
+    # A daemon watching its own source for restart-worthy changes only ever tracks files that
+    # live under the directories it was explicitly told are its own plugin sources. Code loaded
+    # from elsewhere — a dependency, the interpreter's own standard library — is never in scope,
+    # no matter how it was reached at runtime.
+
     # guard: explicit override (tests) — use it verbatim
     if self._explicit is not None:
       return list(self._explicit)
@@ -61,10 +69,20 @@ class CodeFingerprint:
     """
     Compute the current content hash of every tracked source file.
 
+    Guarantees:
+      - A tracked path that cannot be read when this is called is omitted from the result
+        rather than raising.
+
     Returns:
       Mapping from absolute file path string to its SHA-256 hex digest. A tracked path that
       cannot be read is omitted rather than raising.
     """
+
+    # Contract:
+    # A tracked path that cannot be read when this is called is silently omitted from the
+    # result rather than raising; it never causes the call to fail.
+
+    # hash every tracked path, skipping any that cannot currently be read
     out: dict[str, str] = {}
     for p in self._tracked_paths():
       try:
@@ -91,13 +109,46 @@ class CodeFingerprint:
     lazy import would flap a false-positive restart. Paths that disappear from the current set
     (rare — would require a module unload) are also out of the comparison set.
 
+    Guarantees:
+      - Returns True only once the same difference from the accepted baseline has been
+        observed on two consecutive calls in a row.
+      - Excludes any tracked path that newly appears or disappears between two observations
+        from the comparison, so discovery or disappearance of a path never by itself
+        triggers a change.
+
     Returns:
       True if the same change was observed on both this and the previous call; False otherwise.
     """
+
+    # Contract:
+    # A True verdict is only ever returned once the same difference from the accepted
+    # baseline has been observed on two consecutive calls in a row; a difference seen once
+    # and then reverted, or replaced by a different difference before the next call, is
+    # never reported as a change.
+
+    # observe the current hashes to compare against the accepted baseline
     now = self._hashes()
+
+    # Contract:
+    # The comparison only ever considers tracked paths present in both the baseline and the
+    # current observation; a path that newly appears or disappears between two observations
+    # is excluded from the comparison and never by itself causes a True verdict.
+
+    # restrict the comparison to paths present in both the baseline and the current observation
     shared = self._base.keys() & now.keys()
     now_shared = { k: now[k] for k in shared }
     base_shared = { k: self._base[k] for k in shared }
+
+    # Domain(runtime.self-update):
+    # # Self-update change detection
+    # A daemon watching its own loaded source treats a change as real only once the exact
+    # same difference from the accepted baseline appears on two consecutive checks in a row;
+    # a difference seen once and then reverted, or replaced by a different difference before
+    # the second check, is never treated as a change. The comparison only ever considers
+    # source files present in both the baseline and the current observation, so a newly
+    # loaded module that was not part of the baseline is a discovery of already-existing
+    # code, never an edit, and cannot by itself trigger a change.
+
     # guard: identical to the accepted baseline on the shared key set — no change
     if now_shared == base_shared:
       self._pending = None

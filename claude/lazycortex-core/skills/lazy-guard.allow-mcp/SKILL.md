@@ -1,7 +1,7 @@
 ---
 name: lazy-guard.allow-mcp
 description: "Use when the user says 'allow context7 mcp', 'allow all mcp tools', 'trust the brave-search MCP server', or asks to stop being prompted for one server's tools on every call. Classifies each tool into three buckets — safe/reversible into `permissions.allow`, truly destructive into `permissions.ask`, medium-risk into neither so Claude Code still prompts per call — and writes them to the gitignored `settings.local.json` so personal permission choices never land in tracked settings."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(date -u *), Bash(git rev-parse *)
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(date -u *), Bash(git rev-parse *), Agent
 lazy_setup_phase: post-install
 requires_live_session: true
 ---

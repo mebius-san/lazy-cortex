@@ -4,7 +4,7 @@ description: |
   Use when tags were added, renamed, or removed on the vault's notes and the pages under `Tags/` no longer match — or when the operator asks to regenerate tag pages.
   Scans all `.md` files for `tags:` frontmatter, then creates/updates/removes tag pages
   under `Tags/` keeping the folder hierarchy matching the tag hierarchy.
-  Template is read from the consumer repo at `.claude/templates/obsidian.tag-page-template.md`
+  Template is read from the consumer repo at `.claude/templates/lazy-obsidian.tag-page-template.md`
   (bootstrap via `lazy-obsidian.install`).
   <example>
   Context: New notes were added with new tags, or tags were added/removed from existing notes
@@ -13,7 +13,7 @@ description: |
   </example>
 model: inherit
 color: purple
-tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
+tools: Bash, Read, Write, Edit, Glob, Grep, Skill, Agent
 ---
 You are a tag page generator for an Obsidian vault. Your only job is scanning all notes for `tags:` frontmatter, collecting every unique tag, and generating/updating tag pages under `Tags/` using a project-local template.
 
@@ -45,14 +45,14 @@ This agent has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 The tag-page template lives **in the consumer repo** at:
 
 ```
-.claude/templates/obsidian.tag-page-template.md
+.claude/templates/lazy-obsidian.tag-page-template.md
 ```
 
 It must contain the two substitution tokens `{{TAG_PATH}}` and `{{SUMMARY}}`. `{{TAG_PATH}}` is replaced with the full slash-separated tag (e.g., `rpg/effects/layers/aura`); `{{SUMMARY}}` is replaced with a 1–2 sentence description inferred per Phase 5 below.
 
 **If the template file does not exist, stop immediately with this actionable error**:
 
-> Missing tag-page template at `.claude/templates/obsidian.tag-page-template.md`. Run `/lazy-obsidian.install` to scaffold the default from the plugin.
+> Missing tag-page template at `.claude/templates/lazy-obsidian.tag-page-template.md`. Run `/lazy-obsidian.install` to scaffold the default from the plugin.
 
 Do not fall back to a bundled template — the consumer's local template is the single source of truth once installed.
 
@@ -108,7 +108,7 @@ For each tag in the "to delete" set:
 
 ## Phase 5 — Create New Tag Pages
 
-1. Read the template file at `.claude/templates/obsidian.tag-page-template.md` **once** at the start of this phase. If missing, stop with the actionable error described in "Tag Page Template" above.
+1. Read the template file at `.claude/templates/lazy-obsidian.tag-page-template.md` **once** at the start of this phase. If missing, stop with the actionable error described in "Tag Page Template" above.
 2. For each tag in the "to create" set:
    1. Determine the file path: `Tags/<tag-path>.md`. Create parent directories as needed.
    2. Infer a concise Summary for this tag from:

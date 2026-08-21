@@ -29,7 +29,8 @@ from wsgiref.simple_server import WSGIRequestHandler, make_server
 import error_ledger  # pylint: disable=import-error
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from constants import (  # pylint: disable=import-error
-  IncidentKey, IncidentKind, IncidentPhase, JobLogOutcome, JobMarker, JobStatus, MetricLabel, MetricStateKey,
+  HaltReason, IncidentKey, IncidentKind, IncidentPhase, JobLogOutcome, JobMarker, JobStatus, MetricLabel,
+  MetricStateKey,
 )
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from job_response import classify_response, read_response  # pylint: disable=import-error
@@ -538,6 +539,9 @@ def _resolve_status(exit_code: int, error: str | None) -> tuple[str, str | None]
   # waiver: cross-module daemon error tag, not an internal key
   if error == "timeout":
     return ("timeout", "timeout")
+  # guard: a registry entry rejected by its own schema is its own axis, not a failed run
+  if error is not None and error.startswith(HaltReason.ROUTINE_CONFIG_INVALID):
+    return ("error", HaltReason.ROUTINE_CONFIG_INVALID)
   # waiver: cross-module daemon error-tag prefix, not an internal key
   if error is not None and error.startswith("external_dir_broken"):
     # waiver: cross-module daemon error tag, not an internal key

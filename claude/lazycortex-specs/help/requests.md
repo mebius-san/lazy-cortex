@@ -1,66 +1,72 @@
 ---
 chapter_type: block
-summary: Ingest free-form requests and route them into the right place in the spec tree — classify, find candidates, then attach or spawn.
-last_regen: 2026-08-05
+summary: Ingest free-form requests and route them into the right place in the spec tree — classify, find candidates, then let the deterministic apply worker attach, spawn, or link.
+last_regen: 2026-08-19
 diagram_spec:
   anchor: "How the block flows"
-  request: "Flow diagram showing the requests block pipeline: spec.request-router orchestrates — it calls spec.request-classify (returns a class token), then spec.request-find-candidates (returns a ranked candidate list). Based on the candidates score, the flow branches: high-confidence match goes to spec.request-attach (attaches to an existing entity); no match goes to spec.request-spawn (scaffolds a new entity then delegates to spec.request-attach). Show operator confirmation step between router output and apply."
+  request: "Flow diagram showing the requests block pipeline: spec.coordinator, in its routing mode, orchestrates — it calls lazy-spec.request-classify (returns a class token), then lazy-spec.request-find-candidates (returns a ranked candidate list), then writes a short per-target description into the routing decision. Show an operator confirmation step, then a single lazy-spec.request-apply node that branches internally into attach (seeds the description onto an existing entity's primary doc) or spawn (scaffolds a new entity first, then seeds the same way) — both paths converge into 'doc's own writer builds from source in its review job'."
 source_skills:
-  - spec.create-request
-  - spec.request-attach
-  - spec.request-classify
-  - spec.request-find-candidates
-  - spec.request-spawn
+  - lazy-spec.coordinator
+  - lazy-spec.create-request
+  - lazy-spec.request-classify
+  - lazy-spec.request-find-candidates
+source_sha: f0d1d05881fc28c5febe28cfef1bf57bc7bd3879
 ---
 # Requests
 
-When you or a collaborator have an idea, bug report, or design brief that doesn't yet have a home in the spec tree, the requests block handles the journey from raw text to a properly-attributed entry in the right asset. You drop a request into the content root's `requests/` inbox, the block works out what it is and where it belongs, and the result is either a new entity scaffolded from the request body or an existing entity enriched with the request's content — with a review cycle opened on every doc that changed.
+When you or a collaborator have an idea, bug report, or design brief that doesn't yet have a home in the spec tree, the requests block handles the journey from raw text to a properly-attributed entry in the right asset. You drop a request into the content root's `requests/` inbox, the block works out what it is and where it belongs, and the result is either a new entity scaffolded from the request, an existing entity marked up with a short description of what changed, or — when the code already does what the request asks — a link pointing at the entity that already covers it. Every doc that gets a fresh seed opens a review cycle, and the full request itself reaches that doc's own writer through its review job's context.
 
-The block covers five members: `spec.create-request` (the intake skill that captures a raw idea into the vault-wide `requests/` inbox), `spec.request-classify` (the classifier primitive), `spec.request-find-candidates` (the vault search primitive), `spec.request-attach` (the primitive that distributes body content into a target entity), and `spec.request-spawn` (the primitive that scaffolds a new entity and hands it immediately to attach). Once a request enters the review cycle, the `spec.request-router` agent orchestrates classification and candidate search automatically and surfaces the routing decision for your confirmation.
+The block covers three invocable members: `lazy-spec.create-request` (the intake skill that captures a raw idea into the vault-wide `requests/` inbox), `lazy-spec.request-classify` (the classifier primitive), and `lazy-spec.request-find-candidates` (the vault search primitive). Once a request enters the review cycle, `spec.coordinator` — running in its routing mode, one of the five modes the same coordinator persona runs across the whole spec system — orchestrates classification and candidate search automatically and surfaces the routing decision for your confirmation. Enacting that decision — attaching to an existing entity, spawning a new one, or simply linking to one that already covers it — is not a skill you invoke: it is `lazy-spec.request-apply`, a deterministic Python worker that fires on its own once you confirm.
 
 ## When you'd use this
 
 - You received a customer request in plain text and want it tracked against the right feature without manually deciding where it belongs.
 - A collaborator filed a bug description in the inbox and you need it classified, matched to the right bug asset (or a new one created), and opened for review — without manually copying prose into three docs.
-- You have a rough design brief you typed quickly and want distributed across the relevant `design.md` and `plan.md` of an existing feature.
+- You have a rough design brief you typed quickly and want it turned into a short description on the relevant feature's `design.md`, with the full brief available to whoever writes the real doc content next.
 - You're processing a batch of requests after a sprint and need each one classified, routed, and attributed before the retro.
 
 ## How it fits together
 
-The pipeline starts before the routing block fires. You create a request file with `/spec.create-request`, which captures the raw body into the content root's `requests/` inbox as a plain markdown note. A daemon routine adds the `request_class`, `request_status`, and `spec/` mirror tags on the next tick — the create skill writes body only.
+The pipeline starts before the routing block fires. You create a request file with `/lazy-spec.create-request`, which captures the raw body into the content root's `requests/` inbox as a plain markdown note. A daemon routine adds the `request_class`, `request_status`, and `request/<value>` mirror tag on the next tick — the create skill writes body only.
 
-Once the review cycle on the request file opens, `spec.request-router` fires as the routing specialist. It works in two sub-skill calls, then surfaces its proposal for your confirmation.
+Once the review cycle on the request file opens, `spec.coordinator` fires in its routing mode. It works in two sub-skill calls, then surfaces its proposal for your confirmation.
 
-**Classify.** The router calls `/spec.request-classify` to determine what kind of work the request represents. The classifier reads the body and resolves the valid class set dynamically from `lazy.settings.json`: the closed meta classes (`task` / `spec` / `plan` / `feedback` / `unknown`) plus the asset categories of the target product — built-in `feature` / `change` / `bug` plus any operator-defined keys such as `characters` or `scenes` registered via `/spec.add-asset-category`. The classifier applies a priority rubric (bug beats change beats operator-defined categories, and so on down to `feedback` and `unknown`) and returns one lowercase token. The router uses that value verbatim; it never invents a label outside the resolved set. If the class comes back `unknown`, the router surfaces a `[!question]` callout asking you to clarify before candidate search proceeds.
+**Classify.** The coordinator calls `/lazy-spec.request-classify` to determine what kind of work the request represents. The classifier reads the body and resolves the valid class set dynamically from `lazy.settings.json`: the closed meta classes (`task` / `spec` / `plan` / `feedback` / `unknown`) plus the asset types visible on the target product — the plugin's shipped `feature` / `change` / `bug` / `content` / `research` with the product's own `asset_types` merged over them key-by-key, so a type declared via `/lazy-spec.add-asset-type` (`characters`, `scenes`, …) shows up alongside them. The classifier applies a priority rubric (bug beats change beats the product's own declared types, and so on down to `feedback` and `unknown`) and returns one lowercase token. The coordinator uses that value verbatim; it never invents a label outside the resolved set. If the class comes back `unknown`, the coordinator surfaces a `[!question]` callout asking you to clarify before candidate search proceeds.
 
-**Find candidates.** With the class in hand, the router calls `/spec.request-find-candidates`, which searches the content root for existing entities that could be attach targets. Search scope is filtered by class — a `bug` request searches only the product's bugs folder; a `task` request searches across features, changes, and bugs. Each candidate is scored by term overlap against the entity's work-tracking doc, title overlap against the entity's folder name and heading, and whether the entity already lists a related request in its `## Source requests` block (a strong "continuation" signal). The router receives a ranked list of up to five candidates with a one-sentence rationale per entry.
+**Find candidates.** With the class in hand, the coordinator calls `/lazy-spec.request-find-candidates`, which searches the content root for existing entities that could be attach targets. Search scope is filtered by class — a `bug` request searches only the product's bugs folder; a `task` request searches across features, changes, and bugs. Each candidate is scored by term overlap against the entity's primary doc, title overlap against the entity's folder name and heading, and whether the entity already lists a related request in its `## Source requests` block (a strong "continuation" signal). The coordinator receives a ranked list of up to five candidates with a one-sentence rationale per entry.
 
-**Surface for confirmation.** The router writes its proposal into the request file's `# Routing` section. The section carries three things on every round: a short plain-language summary of the routing decision; a `[!question] Confirm the routing?` callout with two checkboxes — "Apply the routing-decision block as written" or "I want a different routing — re-open the review so I can describe it"; and a machine-readable `<!-- routing-decision ... -->` comment block at the end, listing `spawn <kind> <slug>` or `attach <repo-relative-path>` lines, one decision per line. The apply worker reads only the comment block; the prose and callout are for you. You tick one checkbox to confirm. Until you do, the request stays at action-needed. You can also edit the `routing-decision` block in place before ticking — the router reads back whatever you typed on the next round.
+**Check for "already built" before proposing a new asset.** Before it proposes a spawn, the coordinator checks whether the request describes something the code already does — the same research routes an expert's own research pass uses against the target product (`lazy-wiki.structure` query mode, `/lazy-wiki.domains`, `lazy-spec.lookup`). A request whose body names an upstream design-mirror unit runs this check unconditionally, before any spawn decision, plus a `lazy-spec.coverage` gap-scan against the target product's code — a freshly-mirrored source routinely turns out to already be built. Anything the check finds already implemented gets proposed as a **link** to that existing asset rather than a new one (see "Describe, don't distribute" below); an ambiguous overlap goes to you as a `[!question]` rather than a guess either way.
 
-The router never enacts the routing itself. That is `spec.request-apply`'s job once the review closes.
+**Describe, don't distribute.** For every attach, spawn, or link target it settles on, the coordinator writes one short per-target description — a sentence or two naming what the target is or what changes — rather than splitting the request body into sections. A link's description is written loud on purpose: it names, in full sentences, which existing asset covers the request and what evidence backs that call, because a wrong link is invisible — nobody notices a request that quietly got marked "already done" and nothing gets built, where a wrong new-asset proposal is at least visible and easy to merge away. If the target is an already-launched feature (its implementation has started — `spec_develop_done: true`, an active `Start implementation` job, or a `code-report.md`), the coordinator is required to route to a change instead of attaching directly, naming the feature in the change's `targets=` field so the change's own design cascades into the feature later, once approved.
 
-**Attach to an existing entity.** When the routing calls for attaching to an existing entity, `/spec.request-attach` runs. It reads the request body (stripping the `# Routing` section), infers the target entity kind from the folder-note path, and distributes the body content across the entity's authored docs in three tiers: whole-doc match (title-suffix hint, known template shape, or clear structural judgment) lands the body in the matching doc wholesale; recognised section headers are routed per the body-distribution map; and unstructured prose falls back to the entity's primary work-tracking doc (`design.md` for features and changes, `bug.md` for bugs). What happens next depends on the target doc's current stage:
+**Surface for confirmation.** The coordinator writes its proposal into the request file's `# Routing` section. The section carries three things on every round: a short plain-language summary of the routing decision; a `[!question] Confirm the routing?` callout with two checkboxes — "Apply the routing-decision block as written" or "I want a different routing — re-open the review so I can describe it"; and a machine-readable `<!-- routing-decision ... -->` comment block at the end, listing one decision per line under one of three verbs — `spawn <asset-type> <slug> docs=<file>:<doc_type>[,...] [product=<key>] [path=<dir>] [tools=<tool>[,...]] [targets=<folder>/<slug>,...] [:: <description>]`, `attach <repo-relative-path> [drop=<file>[,...]] [:: <description>]`, or `reference <repo-relative-path> [:: <description>]`. `docs=` is mandatory on a spawn line — it names the new asset's starting documents, drawn from the target type's own declaration, so a spawn line missing it is rejected once you confirm. `product=` names which registered product a spawn lands in, stated explicitly whenever the vault holds more than one; `path=` and `tools=` are optional overrides; `targets=` only applies to a `change`-kind spawn, feeding its design cascade; `drop=` on an attach line names which of the target's existing documents a pre-launch rollback removes — leaving it out means dropping nothing at all. The apply worker reads only the comment block; the prose and callout are for you. You tick one checkbox to confirm. Until you do, the request stays at action-needed. You can also edit the `routing-decision` block in place before ticking — the coordinator reads back whatever you typed on the next round, including the description after `::` and every named field.
 
-- `empty` — the distributed content replaces the empty body and the doc transitions to `draft`.
-- `draft` — the content is appended flat under its named sections; stage stays `draft`.
-- `approved` — the content is inserted as diff blocks (additions marked, accepted prose untouched), the doc transitions back to `draft`, and a review cycle opens directly at the reviewer round.
-- `rejected` or `cancelled` — the attach is refused. Run `/spec.set-stage <doc> draft` to revive the doc before retrying.
+The coordinator never enacts the routing itself. That is `lazy-spec.request-apply`'s job once the review closes.
 
-Each populated doc gets the request's wikilink appended to its `spec_source_requests` frontmatter list and its `## Requests` bullet list re-projected inside the `# Sources` section (the bullet list between `<!-- auto:spec-requests:start -->` and `:end -->` markers is the only thing rewritten; every other byte in the doc is left alone). A wikilink-only line is added to the folder-note's `## Source requests` section — no body prose goes there. A review cycle opens on every doc that received content; the folder-note is not opened into review.
+**Enact the decision.** Once you confirm, `lazy-spec.request-apply` — a deterministic Python worker, not an LLM-dispatched skill — reads the resolved `# Routing` section and enacts every spawn, attach, and reference line in it:
 
-**Spawn a new entity.** When no existing entity scores above the match threshold (or the class permits spawning a new one), `/spec.request-spawn` takes over. It invokes the deterministic `lazycortex-specs scaffold-asset` CLI primitive — a Python script with no LLM judgment — which reads `lazy.settings.json`, resolves the template directory, substitutes template tokens, writes the folder-note plus authored docs at their template-default stages (`design.md`/`bug.md` → `draft`, `plan.md` → `empty`), and seeds the folder-note's history. Once the scaffold exits cleanly, spawn immediately delegates to `spec.request-attach` to populate the new entity from the request body. The result is a fully-attributed new entity in `draft` state, with a review cycle open on every doc that received content.
+- **Attach** — the target's primary doc (`design.md` for feature/change, `bug.md` for bug) gets an `> [!attention] change requested: <description>` block spliced in. The doc's existing content is never rewritten.
+- **Spawn** — the worker scaffolds the new entity first (the same deterministic primitive `lazy-spec.create-asset --empty` uses), then seeds the description as the primary doc's initial draft content, the same way an attach target's delta is seeded.
+- **Reference** — the worker touches nothing on the linked asset: no doc edit, no attribution, no review reopened. It only records the link on the request's own frontmatter (`spec_targets`). A request routed entirely through reference lines still finishes as a full accept — it just added no new asset, because the coordinator judged one already exists.
+- **No description was written** (a legacy routing-decision line with no `::` suffix) — a fallback one-line seed, `Request routed here — see linked request`, lands instead of an empty splice. Reference lines carry no fallback — a link is either backed by a real description or not proposed at all.
+
+In neither the attach nor spawn case does the request BODY get copied into the doc. What actually makes it into the finished doc comes later: every doc `lazy-spec.request-apply` seeds also gets the request's wikilink appended to its `spec_source_requests` frontmatter, and that list is exactly what the review dispatcher folds into the doc's own main-writer job as `context/` (`context_from_frontmatter`, wired on the `design` and `bug` review classes). The writer reads the actual request from context and builds the real prose from it — the seeded description is a pointer to start from, not a stand-in for the source.
+
+**A not-yet-launched feature's in-flight ladder rolls back first.** If the attach target is a feature whose planning has already started (a `code-plan.md` / `test-plan.md` exists, or a gate from `spec_plan_done` onward is already true) but hasn't launched implementation, the coordinator names which of the target's existing documents to remove via the attach line's `drop=` field — drawn from the target type's own playbook, and left absent means dropping nothing at all. When `drop=` names documents, the worker cancels the target's active job, stops review on the named siblings, drops them from the worktree, flips the downstream gates back off, and only then seeds the attach delta — landing the feature back where it would be if the ladder had never started, before the fresh request revises its design.
+
+Each seeded doc's folder-note also gets a wikilink-only line in `## Source requests` — no body prose goes there. A review cycle opens on every doc that received a seed (skipping the opening writer round in favor of `submit` when a pre-launch rollback just reopened it); the folder-note itself is never opened into review.
 
 ## Common adjustments
 
-**Scope to a product.** When the vault holds multiple products and the request body doesn't make the product obvious, pass `--product <key>` to `/spec.request-classify` — the classifier scopes the asset-category half of the valid set to that product's `asset_categories` instead of unioning across all products.
+**Scope to a product.** When the vault holds multiple products and the request body doesn't make the product obvious, pass `--product <key>` to `/lazy-spec.request-classify` — the classifier scopes the asset-type half of the valid set to that product's visible `asset_types` instead of unioning across all products.
 
-**Force a class.** If you know the class before the router fires — a body that is unambiguously a bug report — pre-set `request_class` in the request file's frontmatter. The router reads it and skips the classify call.
+**Correct a wrong class.** There's no pre-set frontmatter shortcut — `request_class` stays `unknown` in the file until the apply worker stamps it post-finalize, and the coordinator always calls the classifier itself. If the coordinator's proposed class is wrong, edit the `routing-decision` block in place before ticking the confirm callout's "Apply" option, or tick "I want a different routing" to re-open review and describe the correct class in prose for the next round.
 
-**Override the spawn slug.** The router derives a slug from the request title. If you want a different slug, edit the slug in the `routing-decision` block before confirming — the apply worker reads whatever you left in the block.
+**Override the spawn slug, description, or any of the named fields.** The coordinator derives a slug from the request title and writes its own description. If you want any of it different, edit the `routing-decision` block before confirming — the apply worker reads whatever you left in the block, including `docs=`, `path=`, `tools=`, and `product=` on a spawn line, `targets=` on a change-kind spawn, and `drop=` on an attach line.
 
-**Register a new asset category.** If none of the built-in classes fit a request for a non-software product, run `/spec.add-asset-category` first to register the new category (e.g. `chapters`). On the next classifier dispatch, the new category appears in the resolved valid set automatically.
+**Disagree with a proposed link.** If the coordinator proposes `reference` and you think the request genuinely needs new work, tick "I want a different routing" to re-open review rather than confirming the link — the same mechanism that corrects a wrong class or a wrong target.
 
-**Revive a rejected doc before attaching.** If `spec.request-attach` refuses because a target doc is in `rejected` or `cancelled` stage, run `/spec.set-stage <doc> draft` to revive it, then re-trigger the attach.
+**Declare a new asset type.** If none of the shipped classes fit a request for a non-software product, run `/lazy-spec.add-asset-type` first to declare the type (e.g. `chapters`). On the next classifier dispatch, the new type appears in the resolved valid set automatically — the declaration alone is enough, and no folder has to exist for it yet.
 
 ## How the block flows
 
@@ -68,24 +74,23 @@ Each populated doc gets the request's wikilink appended to its `spec_source_requ
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
   requestReceived[Request received]
-  classifyRequest[spec.request-classify]
-  findCandidates[spec.request-find-candidates]
-  scoreCheck{High-confidence match?}
-  attachEntity[spec.request-attach]
-  spawnEntity[spec.request-spawn]
+  classifyRequest[lazy-spec.request-classify]
+  findCandidates[lazy-spec.request-find-candidates]
+  writeDescription[Coordinator writes per-target description]
   operatorConfirm{Operator confirms?}
-  applyChanges[Apply changes]
+  applyWorker[lazy-spec.request-apply]
+  seedDoc[Seed description onto primary doc]
+  writerBuilds[Doc's writer builds from request in context]
   requestCancelled[Request cancelled]
 
   requestReceived -->|orchestrate| classifyRequest
   classifyRequest -->|class token| findCandidates
-  findCandidates -->|ranked candidates| scoreCheck
-  scoreCheck -->|high confidence| attachEntity
-  scoreCheck -->|no match| spawnEntity
-  spawnEntity -->|delegate| attachEntity
-  attachEntity -->|router output| operatorConfirm
-  operatorConfirm -->|confirm| applyChanges
+  findCandidates -->|ranked candidates| writeDescription
+  writeDescription -->|routing decision| operatorConfirm
+  operatorConfirm -->|confirm| applyWorker
   operatorConfirm -->|reject| requestCancelled
+  applyWorker -->|attach or spawn| seedDoc
+  seedDoc -->|spec_source_requests → context| writerBuilds
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
@@ -96,11 +101,11 @@ flowchart LR
   class requestReceived entry
   class classifyRequest action
   class findCandidates action
-  class scoreCheck guard
-  class attachEntity action
-  class spawnEntity action
+  class writeDescription action
   class operatorConfirm guard
-  class applyChanges success
+  class applyWorker action
+  class seedDoc action
+  class writerBuilds success
   class requestCancelled error
 ```
 

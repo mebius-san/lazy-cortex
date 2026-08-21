@@ -37,10 +37,13 @@ from reference_resolver import resolve, ReferenceError  # pylint: disable=redefi
 # means the lookup happens ONCE per process lifetime, not per job.
 from runtime_daemon import _check_working_tree
 from job_response import classify_response, outcome_tokens, read_response
+from worktree_tasks import WorktreeStartError, WorktreeTaskManager
+import rate_limit_flag
 from constants import (
-  EnvVar, HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase, IncidentState,
-  JobArtifact, JobConfigKey, JobErrorCategory, JobFile, JobLogOutcome, JobMarker, JobOutcome, JobRequestKey,
-  JobResponseKey, JobStatus, RuntimeFile, SettingsFile, SettingsKey,
+  DaemonKey, EnvVar, GitConfigKey, HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase,
+  IncidentState, JobArtifact, JobConfigKey, JobErrorCategory, JobFile, JobIODir, JobLogOutcome, JobMarker,
+  JobOutcome, JobRequestKey, JobResponseKey, JobStatus, RateLimitGuardKey, RateLimitRecordKey, RuntimeFile,
+  SettingsFile, SettingsKey, WorkspaceMode,
 )
 
 from typing import TYPE_CHECKING
@@ -54,7 +57,7 @@ JOBS_BASE = ".experts/.jobs"
 # _STREAM_IDLE_TIMEOUT_DEFAULT seconds is treated as a transient freeze; the spawn's
 # process group is killed and re-spawned up to _STREAM_MAX_RETRIES_DEFAULT times.
 # Both are overridable via daemon.stream_idle_timeout_sec / daemon.stream_max_retries.
-_STREAM_IDLE_TIMEOUT_DEFAULT = 90
+_STREAM_IDLE_TIMEOUT_DEFAULT = 900
 _STREAM_MAX_RETRIES_DEFAULT  = 3
 # Watchdog read-loop poll cadence (seconds): how often the idle timer is re-checked while
 # stdout is silent. Small enough to react promptly, large enough to idle cheaply.
@@ -349,6 +352,14 @@ _READ_ONLY_TOOLS = frozenset({
 })
 
 
+# Decision: kept, not retired, even though `Agent` being a mandatory `tools:` member on every
+# canon-conformant agent (`Agent` is itself excluded from `_READ_ONLY_TOOLS` since a dispatched
+# subagent can write) makes this function unreachable today — no agent can be classified
+# read-only under that rule, so the dirty-tree carve-out below never fires. Retiring it would
+# silently treat a future minimal agent (one that genuinely never writes and never dispatches)
+# as write-capable instead; keeping it honest costs nothing and pays off the day the
+# mandatory-`Agent` rule gains an exception.
+
 def _agent_is_read_only(agent_path: Path) -> bool:
   """
   Return whether the agent declared at the given path can only read.
@@ -434,22 +445,114 @@ def _check_post_claude(repo: Path, expert_name: str, jdir: Path) -> bool:
   return True
 
 
+def _resolve_base_branch(repo: Path) -> str | None:
+  """
+  Read the daemon's configured base branch, for `workspace: branch` restoration.
+
+  Args:
+    repo: Repository root whose settings file is consulted.
+
+  Returns:
+    The `daemon.git.base_branch` value, or None when the daemon's git sync is not configured.
+  """
+  daemon = load_section(repo / SettingsFile.REL, SettingsKey.DAEMON)
+  git_cfg = daemon.get(DaemonKey.GIT) or {}
+  return git_cfg.get(GitConfigKey.BASE_BRANCH)
+
+
+def _worktree_head(wt: Path) -> str | None:
+  """
+  Return the commit the worktree's HEAD points at.
+
+  Args:
+    wt: Path to the worktree directory.
+
+  Returns:
+    The full commit hash, or None when it cannot be resolved.
+  """
+  head = subprocess.run(
+    # waiver: git CLI vocabulary, not a domain constant
+    [ "git", "rev-parse", "HEAD" ], cwd = str(wt), capture_output = True, text = True, check = False,
+  )
+  # guard: an unresolvable HEAD carries no comparable tip
+  if head.returncode != 0:
+    return None
+  return head.stdout.strip()
+
+
+def _isolated_job_failure(wt: Path, pre_spawn_tip: str | None) -> str | None:
+  """
+  Check an isolated job's worktree after a clean spawn: dirty tree or an unmoved branch fails it.
+
+  A job failure, never a daemon halt — the primary checkout was untouched throughout, so the
+  daemon-wide dirty-tree halt's rationale does not apply here. The unmoved-branch check compares
+  against the tip captured before the spawn, so a continuation round that produced nothing is
+  caught even though the branch already carried earlier rounds' commits.
+
+  Args:
+    wt: Path to the job's worktree directory.
+    pre_spawn_tip: The branch tip captured before the spawn, or None when it was unresolvable.
+
+  Returns:
+    None when the worktree is clean and the branch moved, else a one-line failure text.
+  """
+  status = subprocess.run(
+    # waiver: git CLI vocabulary, not a domain constant
+    [ "git", "status", "--porcelain" ], cwd = str(wt), capture_output = True, text = True, check = False,
+  )
+  # guard: the expert left uncommitted changes in its worktree — the commit obligation was broken
+  if status.stdout.strip():
+    return f"isolated job left the worktree dirty: {status.stdout.strip()[:300]}"
+  # guard: a clean tree with the tip exactly where the spawn found it means nothing durable landed
+  if pre_spawn_tip is not None and _worktree_head(wt) == pre_spawn_tip:
+    # waiver: one-off human-facing message
+    return "isolated job finished with no new commits and a clean tree"
+  return None
+
+
+def _isolation_prompt(branch: str, branch_created: bool) -> str:
+  """
+  Compose the commit-obligation paragraph for a spawn running in an isolated worktree.
+
+  Args:
+    branch: The job's branch, named so the agent knows where its work lands.
+    branch_created: Whether this dispatch created the branch (fresh) or reuses it (resume).
+
+  Returns:
+    The paragraph to append to the user prompt.
+  """
+  if branch_created:
+    return (
+      f"You are working in an isolated git worktree on branch `{branch}`. Commit ALL your work "
+      "to this branch before writing response.json — the worktree is removed after the job, and "
+      "only committed work survives. An uncommitted or empty result fails the job."
+    )
+  return (
+    f"You are working in an isolated git worktree on branch `{branch}`, which already carries "
+    "commits from an earlier round of this job — this is a continuation. Build on them, never "
+    "reset or rewrite them. Commit ALL new work before writing response.json — the worktree is "
+    "removed after the job, and only committed work survives."
+  )
+
+
 def pump(repo: Path) -> dict:
   """
   Run one pump tick over the expert-job queue.
 
-  The tick performs three actions in sequence: garbage-collect expired job
-  directories, mark jobs whose claimant process has died, then process at most one
-  READY job (lexicographically first across all expert directories). The single-spawn
-  ceiling matters because the daemon's per-routine timeout is the only bound on a
-  Claude subprocess.
+  Each tick garbage-collects expired job directories and marks jobs whose claimant process
+  has died, then handles at most one READY job: it processes the oldest READY job across
+  all expert directories, or defers without spawning anything when a job is waiting and the
+  host's rate-limit guard has flagged the account. The single-spawn ceiling matters because
+  the daemon's per-routine timeout is the only bound on a Claude subprocess.
 
   Args:
     repo: Repository root containing the expert job tree.
 
   Returns:
-    A summary dict with counts of experts seen, jobs processed, jobs cleaned, jobs newly
-    marked dead, and — when a halt fired — the offending expert and job_id.
+    A summary dict with counts of experts seen, jobs processed, jobs cleaned, and jobs newly
+    marked dead. On a deferred tick, adds `deferred` (True) and `resets_at` (the epoch-seconds
+    timestamp when the rate limit reopens) instead of processing a job. When a halt fires
+    instead, adds the offending expert and job_id.
   """
   repo = Path(repo)
   settings_path = repo / SettingsFile.REL
@@ -502,6 +605,29 @@ def pump(repo: Path) -> dict:
       ready_candidates.append((ready_marker.stat().st_mtime, name, jdir))
   # process the oldest ready job, if any surfaced above
   if ready_candidates:
+
+    # Decision: the rate-limit check lives here, in the pump, not inside `_process_one` — down
+    # there the PID marker is already written and `attempts` already incremented, so a deferred
+    # job would be marked DEAD two scans later and would fatten `jobs.jsonl` with an error line
+    # every polling interval. Standing before the spawn also covers a second checkout on this
+    # host, the window between a halt clearing and the next spawn, and a halt an operator lifted
+    # early via `/lazy-runtime.recover`.
+
+    # resolve the guard's effective triggers for this repository
+    guard = rate_limit_flag.config(daemon)
+    # one listing answers both questions — a record expiring between two reads would otherwise
+    # report a deferral with no reopening time attached
+    raised = rate_limit_flag.live() if guard[RateLimitGuardKey.ENABLED] else []
+    # guard: the subscription window is closed — postpone rather than burn the call
+    if raised:
+      # waiver: pump-summary subkeys, mirroring the sibling `halted` summary below
+      return {
+        "experts": expert_count, "processed": 0, "cleaned": cleaned,
+        "detected_dead": detected_dead, "deferred": True,
+        RateLimitRecordKey.RESETS_AT: max(float(e[RateLimitRecordKey.RESETS_AT]) for e in raised),
+      }
+
+    # plain FIFO across the whole queue — oldest READY marker wins
     ready_candidates.sort(key = lambda t: t[0])
     _mtime, name, jdir = ready_candidates[0]
     started = time.monotonic()
@@ -517,7 +643,103 @@ def pump(repo: Path) -> dict:
         "cleaned": cleaned, "detected_dead": detected_dead, "halted": True,
         "halt_expert": e.expert, "halt_job_id": e.job_id,
       }
+
+    # The pre-spawn check found the flag clear, so a flag up now went up during this run — by this
+    # run's own frames or a concurrent writer on the host; either way the window is closed. Halt
+    # the daemon until it reopens. The current job was never interrupted for it.
+    if guard[RateLimitGuardKey.ENABLED] and _halt_on_rate_limit(repo, name, jdir):
+      # waiver: pump-summary subkeys, mirroring the sibling dirty-tree halt summary above
+      return {
+        "experts": expert_count, "processed": processed, "cleaned": cleaned,
+        "detected_dead": detected_dead, "halted": True, "halt_reason": HaltReason.RATE_LIMIT,
+        "halt_expert": name, "halt_job_id": jdir.name,
+      }
   return { "experts": expert_count, "processed": processed, "cleaned": cleaned, "detected_dead": detected_dead }
+
+
+def _halt_on_rate_limit(repo: Path, expert_name: str, jdir: Path) -> bool:
+  """
+  Raise the rate-limit daemon halt when the host-local flag is up after a job's run.
+
+  A halt already standing — for example an unresolved dirty-tree halt — is never overwritten:
+  it carries its own reason the operator still has to see. The halt opens the daemon-halt
+  incident so `/error-list` reflects the stop, mirroring the automatic clear on the other side.
+
+  Args:
+    repo: Repository root whose daemon is halted.
+    expert_name: Name of the expert whose run raised the flag, recorded on the incident.
+    jdir: Path to the job directory of that run.
+
+  Returns:
+    True when the halt was raised by this call; False when the flag is down or a halt stood.
+  """
+  raised = rate_limit_flag.live()
+  # guard: the flag is not up — nothing this run has to act on
+  if not raised:
+    return False
+  # guard: a standing halt keeps its own reason; the flag alone still defers every next tick
+  if runtime_state.get_halted(repo) is not None:
+    return False
+  resets = max(float(e[RateLimitRecordKey.RESETS_AT]) for e in raised)
+  runtime_state.set_halted(repo, {
+    HaltKey.HALTED_SINCE: time.time(),
+    HaltKey.TRIGGERED_BY: "lazy-expert.pump",
+    HaltKey.REASON: HaltReason.RATE_LIMIT,
+    HaltKey.RESETS_AT: resets,
+    IncidentKey.EXPERT: expert_name,
+    IncidentKey.JOB_ID: jdir.name,
+  })
+  # human-facing detail line — the machine-readable epoch stays on the halt block
+  reopens = datetime.fromtimestamp(resets, tz = UTC).strftime("%Y-%m-%d %H:%M UTC")
+  # the loud line: the routine's stderr reaches the daemon journal's stderr_tail and the
+  # operator's terminal — a multi-hour stop must never be discoverable only via state.json
+  sys.stderr.write(
+      f"DAEMON HALTED (rate limit): expert {expert_name} job {jdir.name} — "
+      f"no routine runs until {reopens}; /lazy-runtime.recover lifts it early\n")
+  error_ledger.record(repo, {
+    IncidentKey.INCIDENT: f"halt:{repo.name}", IncidentKey.PHASE: IncidentPhase.OPENED,
+    IncidentKey.KIND: IncidentKind.DAEMON_HALT,
+    IncidentKey.CAUSE: HaltReason.RATE_LIMIT, IncidentKey.ACTOR: "lazy-expert.pump",
+    IncidentKey.EXPERT: expert_name, IncidentKey.JOB_ID: jdir.name,
+    IncidentKey.DETAIL: f"rate-limit window closed until {reopens}",
+  })
+  return True
+
+
+def _record_rate_limit(repo: Path, expert_name: str, stdout: str) -> int:
+  """
+  Read one spawn's stdout for rate-limit frames and raise the host-local flag when one trips.
+
+  Every trigger is evaluated against this repository's guard configuration, so an operator who
+  disabled a trigger here never writes a record for it. Recording is best-effort — a failure to
+  write never propagates into the job's own outcome.
+
+  Args:
+    repo: Repository root whose guard configuration governs the triggers.
+    expert_name: Name of the expert whose spawn produced the buffer, stored on any record written.
+    stdout: Raw stdout produced by the spawn.
+
+  Returns:
+    The number of rate-limit frames the buffer carried, regardless of whether any tripped.
+  """
+  frames = rate_limit_flag.frames(stdout or "")
+  # guard: the run carried no rate-limit signal to act on
+  if not frames:
+    return 0
+  cfg = rate_limit_flag.config(load_section(repo / SettingsFile.REL, SettingsKey.DAEMON))
+  # guard: the guard is switched off in this repository — frames are counted, never acted on
+  if not cfg[RateLimitGuardKey.ENABLED]:
+    return len(frames)
+  for info in frames:
+    trigger = rate_limit_flag.triggered(info, cfg)
+    # guard: this frame reports a healthy window
+    if trigger is None:
+      continue
+    try:
+      rate_limit_flag.record(info, trigger, writer = f"expert-pump:{expert_name}")
+    except OSError as e:
+      sys.stderr.write(f"rate-limit guard: cannot write flag: {e}\n")
+  return len(frames)
 
 
 def _read_rejection(jdir: Path) -> str | None:
@@ -546,6 +768,64 @@ def _read_rejection(jdir: Path) -> str | None:
     f"Reason: {record.get(JobResponseKey.MESSAGE, '')} "
     "Redo the work and write a response that satisfies the contract."
   )
+
+
+def _materialize_io(jdir: Path, cfg: dict, work_root: Path) -> str | None:
+  """
+  Copy a claimed job's declared source and context paths into its bundle directory.
+
+  A directory entry is copied whole under `<parent>-<name>`, so two asset folders that share a
+  slug across categories stay apart; a file entry lands directly in the bucket under its
+  basename. A bucket whose manifest is empty is not created. An entry resolving outside the
+  work tree is rejected rather than copied.
+
+  Guarantees:
+    - Every entry a bucket receives comes from inside the work tree; an entry whose resolved path
+      lies outside it is refused rather than copied.
+    - A directory entry lands under `<parent-directory-name>-<directory-name>`, never under its bare
+      name, so folders sharing a slug across categories stay apart.
+    - A file entry lands under its plain basename.
+
+  Args:
+    jdir: Job bundle directory the buckets are created under.
+    cfg: Parsed `config.json` carrying the two manifests.
+    work_root: Tree the entries are read from — the job's linked worktree when it has one,
+      otherwise the repository checkout.
+
+  Returns:
+    None when every declared entry was copied, or a one-line message naming the first entry
+    that could not be resolved.
+  """
+
+  # Contract:
+  # Every entry a bucket receives MUST come from inside the work tree; an entry whose resolved
+  # path lies outside it is refused rather than copied. A directory entry lands under
+  # `<parent-directory-name>-<directory-name>` and NEVER under its bare name, so folders sharing
+  # a slug across categories stay apart; a file entry lands under its plain basename.
+
+  # both buckets share one loop — the only difference is which manifest key feeds which dir
+  for key, bucket in ( ( JobConfigKey.SOURCE_PATHS, JobIODir.SOURCE ),
+                       ( JobConfigKey.CONTEXT_PATHS, JobIODir.CONTEXT ) ):
+    for rel in cfg.get(key) or []:
+      src = (work_root / rel).resolve()
+      # guard: a `../`-bearing entry would stage files from outside the checkout into a bundle the
+      # expert reads and may commit — the manifest arrives as JSON on stdin, so it is untrusted
+      if not src.is_relative_to(work_root.resolve()):
+        return f"{bucket}/: declared path {rel!r} escapes the work tree"
+      # guard: the entry vanished between dispatch and claim — deterministic, retry cannot help
+      if not src.exists():
+        return f"{bucket}/: declared path {rel!r} does not exist at claim time"
+      dst_dir = jdir / bucket
+      dst_dir.mkdir(exist_ok = True)
+      # a directory arrives whole under `<parent>-<name>`: two asset folders declared from
+      # different categories share their own name and would otherwise merge into one; a file goes
+      # flat, which is the layout every protocol's per-kind subdir declaration already describes
+      if src.is_dir():
+        shutil.copytree(src, dst_dir / f"{src.parent.name}-{src.name}", dirs_exist_ok = True)
+      else:
+        shutil.copy2(src, dst_dir / src.name)
+  # every declared entry landed — the caller may proceed to the spawn
+  return None
 
 
 def _compose_user_prompt(jdir: Path, *, protocols: list, aspects: list, arguments: dict) -> str:
@@ -780,8 +1060,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   # Idle-watchdog config is read per-job (cheap single-file read) so _process_one keeps
   # its 3-arg signature — pump()'s call site and the halt-test monkeypatch stay valid.
   daemon = load_section(repo / SettingsFile.REL, SettingsKey.DAEMON)
-  # waiver: small internal subkey, not a reusable domain key
-  idle_timeout_sec = int(daemon.get("stream_idle_timeout_sec", _STREAM_IDLE_TIMEOUT_DEFAULT))
+  idle_timeout_sec = int(daemon.get(DaemonKey.STREAM_IDLE_TIMEOUT_SEC, _STREAM_IDLE_TIMEOUT_DEFAULT))
   # waiver: small internal subkey, not a reusable domain key
   max_stall_retries = max(0, int(daemon.get("stream_max_retries", _STREAM_MAX_RETRIES_DEFAULT)))
   # Per-job config.json carries everything the pump needs: agent ref,
@@ -807,7 +1086,6 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   model          = cfg.get(JobConfigKey.MODEL)
   mcp_config     = cfg.get(JobConfigKey.MCP_CONFIG)
   setting_sources = cfg.get(JobConfigKey.SETTING_SOURCES)
-  hooks_enabled   = cfg.get(JobConfigKey.HOOKS_ENABLED) or []
   # guard: agent reference must be present in config
   if not agent_ref:
     # waiver: one-off human-facing message
@@ -815,7 +1093,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     return
 
   # Empty protocols + empty aspects is a valid config. Specific-domain
-  # agents (test-designer, lazy-review.historian, doc_doctor, …) are
+  # agents (test-designer, lazy-review.doc_doctor, …) are
   # self-contained — the .md frontmatter + body IS the full instruction.
   # The composition path (generic agent + aspects + protocol) is one
   # valid spawn shape, not the only one. No guard needed; pump spawns
@@ -837,120 +1115,271 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     _write_error(jdir, JobErrorCategory.LOGICAL, str(e))
     return
 
-  # the expert commits under its own identity, passed down through the environment
-  git_author = cfg.get(JobConfigKey.GIT_AUTHOR) or {}
-  env = os.environ.copy()
-  # waiver: environment-variable name, not a domain key
-  env["GIT_AUTHOR_NAME"]  = git_author.get("name",  "")
-  # waiver: environment-variable name, not a domain key
-  env["GIT_AUTHOR_EMAIL"] = git_author.get("email", "")
-  # Always export the hook allow-list — its mere presence flips every lazycortex
-  # hook into allow-list mode inside the spawn, so an expert with no `hooks.enabled`
-  # runs none of them (the ~40s check-public + git-guard tax vanishes). A non-empty
-  # value opts the named hooks back in.
-  env[EnvVar.HOOKS_ALLOW_LIST] = ",".join(hooks_enabled)
+  # `workspace: branch` enforcement — runtime-owned, invisible to the expert (it never
+  # runs git worktree commands itself; see lazy-core.expert-runtime-contract.md "What you
+  # must not touch"). `workspace: branch` is a CAPABILITY, not a mandate: it activates only
+  # when the caller's own payload names a `branch` (a launch-checkbox dispatch or its
+  # continuation, both of which the coordinator writes explicitly) — a job dispatched to
+  # the same expert without one (an ordinary review-rewrite from `review.coordinator`,
+  # say) runs on whatever is already checked out, byte-identical to `workspace: main`.
+  # The token stays `branch` for compatibility; since the worktree conversion the job runs
+  # in a linked worktree on that branch and the primary checkout never leaves base.
+  # `worktree_dir` stays None whenever enforcement doesn't apply.
+  worktree_dir: Path | None = None
+  workspace = cfg.get(JobConfigKey.WORKSPACE, WorkspaceMode.MAIN)
 
-  # Three parallel single-noun labels — protocols, aspects, arguments.
-  # `- protocol:` replaces the legacy `- protocol contract:` for parallelism.
-  # Arguments are key-sorted for byte-stable prompts (cache hits, snapshot tests).
-  prompt = _compose_user_prompt(jdir, protocols = protocol_paths, aspects = aspect_paths, arguments = arguments)
-  # waiver: filesystem path idiom, not a domain constant
-  contract_path = (Path(__file__).parent.parent / "references" / "lazy-core.expert-runtime-contract.md").resolve()
-  # Mark this job as ours: write PID before invoking the expert.
-  # The dead-job detector reads this to distinguish queued (no PID)
-  # from active (PID file present, alive) from stuck (PID dead).
-  (jdir / JobMarker.PID).write_text(f"{os.getpid()}\n")
-  # Bump attempts counter — persists across pump kills + recovery cycles.
-  # Recovery routine reads this to decide retry vs. permanent-fail.
-  attempts_file = jdir / JobArtifact.ATTEMPTS
+  # best-effort — dispatch_job always writes valid JSON, so an unreadable request.json is
+  # not this branch-capability check's problem to diagnose; it just reads as "no branch"
   try:
-    n = int(attempts_file.read_text().strip())
-  except (OSError, ValueError):
-    n = 0
-  attempts_file.write_text(f"{n + 1}\n")
-  # The spawn command line — permission mode, hermetic `--strict-mcp-config` +
-  # any per-expert `--mcp-config`, hermetic `--setting-sources`, plugin dirs,
-  # `--settings` sandbox, model, and `--agent` — is assembled by
-  # `build_expert_argv`, shared with the `lazy-runtime.preflight` launchability
-  # probe so the probe matches the real spawn.
-  # (`agent_path` is still resolved above and used for the read-only check below.)
-  claude_argv = build_expert_argv(
-    repo, env,
-    contract_path = contract_path, model = model, mcp_config = mcp_config,
-    agent_ref = agent_ref, prompt = prompt,
-    setting_sources = setting_sources,
-  )
-  # Idle-watchdog + bounded re-spawn. A `claude -p` stream can freeze (no first token,
-  # or mid-response silence) while the API/network hiccups; a single blocking wait would
-  # burn the whole routine timeout on a transient. Each spawn runs under an idle-stdout
-  # watchdog: silence past idle_timeout_sec kills the spawn's process group and we
-  # re-spawn a fresh session (the job dir is untouched — the expert redoes the work
-  # idempotently). These in-memory stall retries are SEPARATE from the on-disk `attempts`
-  # counter the recovery routine reads for permanent-fail decisions.
-  returncode = -1
-  stdout = stderr = ""
-  stalled = False
-  for stall_attempt in range(max_stall_retries + 1):
-    returncode, stdout, stderr, stalled = _spawn_with_idle_watchdog(
-      claude_argv, env = env, cwd = repo, idle_timeout_sec = idle_timeout_sec,
-    )
-    # guard: stream produced output / exited on its own — hand off to the outcome path
-    if not stalled:
-      break
-    _append_stream_stall_log(repo, expert_name, jdir, stall_attempt + 1, idle_timeout_sec)
+    job_branch = json.loads((jdir / JobFile.REQUEST).read_text()).get(JobRequestKey.BRANCH)
+  except (OSError, json.JSONDecodeError):
+    job_branch = None
+
+  # a workspace:main (or absent) expert never branches — a payload naming one anyway (the
+  # same expert also dispatched for review rewrites) is ignored, not refused
+  if workspace != WorkspaceMode.BRANCH and job_branch:
     sys.stderr.write(
-      f"stream-idle-stall: {expert_name}/{jdir.name} "
-      f"attempt {stall_attempt + 1}/{max_stall_retries + 1}\n"
+      f"workspace: {expert_name!r} is workspace:{workspace!r} — ignoring payload branch "
+      f"{job_branch!r}, job runs on the current checkout\n"
     )
-  # guard: every re-spawn stalled — record a transient error; the next tick re-dispatches
-  if stalled:
-    _write_error(
-      jdir, JobErrorCategory.TRANSIENT,
-      f"stream-idle-stall after {max_stall_retries + 1} spawn(s); no stdout for >{idle_timeout_sec}s",
+  # the reverse mismatch: a workspace:branch expert dispatched with no payload branch (an
+  # ordinary review-rewrite sharing the expert) runs on the current checkout too — logged for
+  # the same observability the reverse case above gets, since it is the same capability-not-
+  # mandate shape from the other side (M14)
+  elif workspace == WorkspaceMode.BRANCH and not job_branch:
+    sys.stderr.write(
+      f"workspace: {expert_name!r} is workspace:branch but this job carries no payload "
+      f"branch — job runs on the current checkout\n"
     )
-    return
-  # Persist the transcript — best-effort, never block DONE on a write failure.
-  try:
-    (jdir / JobArtifact.TRANSCRIPT).write_text(stdout or "")
-  except Exception as e:  # pragma: no cover — defensive
-    sys.stderr.write(f"transcript write failed: {e}\n")
-  if returncode == 0:
-    response_path = jdir / JobFile.RESPONSE
-    # Bug 99 fallback: agent exited cleanly but didn't write a usable response.json
-    # — recover the JSON object from the final assistant text frame of
-    # the stream-json transcript. LLMs sometimes describe their result in
-    # text instead of writing the file. Without this fallback the success-
-    # gate fails, the pump records a transient error, and the dispatcher
-    # re-dispatches until a roll of the dice lands a write-this-time run.
-    # The same salvage covers a written-but-envelope-violating response: the
-    # narrated payload is often well-formed even when the written file is not.
-    if not outcome_tokens(read_response(jdir)):
-      recovered = _extract_response_from_stdout(stdout or "")
-      if recovered is not None:
-        response_path.write_text(json.dumps(recovered, indent = 2))
-    # guard: no outcome survived the salvage — the envelope is violated, and a
-    # missing discriminator must never be read as completed work
-    if not outcome_tokens(read_response(jdir)):
-      _reject_response(jdir, _ENVELOPE_VIOLATION_MESSAGE)
+
+  # `branch` present AND this expert opted in — activate the capability for this dispatch;
+  # any other combination leaves worktree_dir None and the job runs on the current checkout
+  branch_created = False
+  mgr: WorktreeTaskManager | None = None
+  pre_spawn_tip: str | None = None
+  if workspace == WorkspaceMode.BRANCH and job_branch:
+    # the base branch is the fork point for a fresh job branch — without it there is nothing
+    # to fork from
+    base_branch = _resolve_base_branch(repo)
+    # guard: no configured base — refuse rather than fork a job branch off an arbitrary point
+    if not base_branch:
+      # waiver: one-off human-facing message
+      _write_error(jdir, JobErrorCategory.LOGICAL, "workspace: branch requires daemon.git.base_branch configured")
       return
-    # the envelope guard above already proved a parsed response with an outcome is on disk
-    # Token capture is best-effort — never block DONE.
+
+    # the job runs in its own linked worktree; the primary checkout never leaves base
+    git_cfg = load_section(repo / SettingsFile.REL, SettingsKey.DAEMON).get(DaemonKey.GIT) or {}
+    mgr = WorktreeTaskManager(
+      repo, base_branch,
+      # waiver: filesystem path idiom, not a domain constant
+      worktree_root = git_cfg.get(GitConfigKey.WORKTREE_ROOT, ".worktrees"),
+    )
     try:
-      usage = _extract_usage(stdout)
-      if usage is not None:
-        _append_tokens_log(repo, expert_name, usage)
+      worktree_dir, branch_created = mgr.create(jdir.name, job_branch)
+    except WorktreeStartError as e:
+      _write_error(jdir, JobErrorCategory.LOGICAL, f"workspace: branch worktree failed: {e}")
+      return
+
+    # rebuild the gitignored execution environment the worktree does not materialise
+    bootstrap_error = mgr.bootstrap(worktree_dir, git_cfg.get(GitConfigKey.WORKTREE_BOOTSTRAP_CMD))
+    # guard: a broken environment must fail the job before the spawn, not confuse the agent mid-run
+    if bootstrap_error is not None:
+      mgr.remove(worktree_dir)
+      _write_error(jdir, JobErrorCategory.TRANSIENT, f"workspace: branch {bootstrap_error}")
+      return
+
+    # the tip before the spawn anchors the did-anything-land check — on a continuation the
+    # branch already carries earlier rounds' commits, so "commits over base" would not do
+    pre_spawn_tip = _worktree_head(worktree_dir)
+
+  # From here on the job's worktree (if any) exists — every exit, including one raised by code
+  # below rather than returned, must remove it so a crashed spawn never leaves a stray worktree
+  # for the whole polling interval (the hourly sweep is the backstop, not the plan). The `try`
+  # opens right here, before the git-author dict access below, so a malformed `git_author` in a
+  # job's config.json (a string where a dict is expected) can't strand the worktree either.
+  # Removal is unconditional (operator decision 2026-08-14): the branch survives as the only
+  # durable product; an agent's uncommitted dirt disappears with the directory.
+  try:
+    # the expert commits under its own identity, passed down through the environment
+    git_author = cfg.get(JobConfigKey.GIT_AUTHOR) or {}
+    env = os.environ.copy()
+    # waiver: environment-variable name, not a domain key
+    env["GIT_AUTHOR_NAME"]  = git_author.get("name",  "")
+    # waiver: environment-variable name, not a domain key
+    env["GIT_AUTHOR_EMAIL"] = git_author.get("email", "")
+
+    # Decision: inherit the hook allow-list from the dispatching routine, not export it per spawn —
+    # the pump is itself a routine, so the daemon already put `hooks_enabled` into this process's
+    # environment. Exporting here would let a queued job override the routine that dispatched it,
+    # and would split the setting across two config surfaces again.
+
+    # Decision: pin the subagent-spawn depth explicitly, not the `claude` CLI's own default — a
+    # future default change must never silently change how deep a headless expert's own
+    # subagents may nest. `runtime_daemon.set_plugin_dirs` pins the same value onto the
+    # daemon's own subprocess environment, for routines that spawn outside this function.
+
+    # pin it on this spawn's own env
+    env[EnvVar.MAX_SUBAGENT_SPAWN_DEPTH] = EnvVar.SUBAGENT_SPAWN_DEPTH_PIN
+
+    # the buckets are filled now, not at dispatch — a job that waited in the queue starts from
+    # the tree as it stands at claim, which is what makes the serial queue safe against a
+    # stale snapshot
+    materialize_error = _materialize_io(jdir, cfg, worktree_dir or repo)
+    # guard: a declared path vanished or reaches outside the work tree — a logical fault the
+    # owning coordinator sorts out on its next wake
+    if materialize_error is not None:
+      _write_error(jdir, JobErrorCategory.LOGICAL, materialize_error)
+      return
+
+    # Three parallel single-noun labels — protocols, aspects, arguments.
+    # `- protocol:` replaces the legacy `- protocol contract:` for parallelism.
+    # Arguments are key-sorted for byte-stable prompts (cache hits, snapshot tests).
+    prompt = _compose_user_prompt(jdir, protocols = protocol_paths, aspects = aspect_paths, arguments = arguments)
+    # an isolated job carries its commit obligation in the prompt — the protocol files under the
+    # job dir are reached by absolute paths, so the worktree cwd changes nothing else
+    if worktree_dir is not None and job_branch:
+      prompt += "\n\n" + _isolation_prompt(job_branch, branch_created)
+    # waiver: filesystem path idiom, not a domain constant
+    contract_path = (Path(__file__).parent.parent / "references" / "lazy-core.expert-runtime-contract.md").resolve()
+
+    # Mark this job as ours: write PID before invoking the expert.
+    # The dead-job detector reads this to distinguish queued (no PID)
+    # from active (PID file present, alive) from stuck (PID dead).
+    (jdir / JobMarker.PID).write_text(f"{os.getpid()}\n")
+
+    # Bump attempts counter — persists across pump kills + recovery cycles.
+    # Recovery routine reads this to decide retry vs. permanent-fail.
+    attempts_file = jdir / JobArtifact.ATTEMPTS
+    try:
+      n = int(attempts_file.read_text().strip())
+    except (OSError, ValueError):
+      n = 0
+    attempts_file.write_text(f"{n + 1}\n")
+
+    # The spawn command line — permission mode, hermetic `--strict-mcp-config` +
+    # any per-expert `--mcp-config`, hermetic `--setting-sources`, plugin dirs,
+    # `--settings` sandbox, model, and `--agent` — is assembled by
+    # `build_expert_argv`, shared with the `lazy-runtime.preflight` launchability
+    # probe so the probe matches the real spawn.
+    # (`agent_path` is still resolved above and used for the read-only check below.)
+    claude_argv = build_expert_argv(
+      repo, env,
+      contract_path = contract_path, model = model, mcp_config = mcp_config,
+      agent_ref = agent_ref, prompt = prompt,
+      setting_sources = setting_sources,
+    )
+
+    # Idle-watchdog + bounded re-spawn. A `claude -p` stream can freeze (no first token,
+    # or mid-response silence) while the API/network hiccups; a single blocking wait would
+    # burn the whole routine timeout on a transient. Each spawn runs under an idle-stdout
+    # watchdog: silence past idle_timeout_sec kills the spawn's process group and we
+    # re-spawn a fresh session (the job dir is untouched — the expert redoes the work
+    # idempotently). These in-memory stall retries are SEPARATE from the on-disk `attempts`
+    # counter the recovery routine reads for permanent-fail decisions.
+    returncode = -1
+    stdout = stderr = ""
+    stalled = False
+
+    # Decision: rate-limit frames are read after EVERY attempt, not once after the loop — the
+    # stdout buffer is overwritten between attempts, so a frame from an early attempt would be
+    # lost, and a run the provider rejected exits non-zero, so binding the read to a clean exit
+    # (as token capture does) would miss the very case the guard exists for.
+
+    # frames seen across every attempt of this job, for the degradation warning below
+    seen_frames = 0
+    for stall_attempt in range(max_stall_retries + 1):
+      returncode, stdout, stderr, stalled = _spawn_with_idle_watchdog(
+        # an isolated job's agent works inside its worktree; every other job on the checkout
+        claude_argv, env = env, cwd = worktree_dir or repo, idle_timeout_sec = idle_timeout_sec,
+      )
+      seen_frames += _record_rate_limit(repo, expert_name, stdout)
+      # guard: stream produced output / exited on its own — hand off to the outcome path
+      if not stalled:
+        break
+      _append_stream_stall_log(repo, expert_name, jdir, stall_attempt + 1, idle_timeout_sec)
+      sys.stderr.write(
+        f"stream-idle-stall: {expert_name}/{jdir.name} "
+        f"attempt {stall_attempt + 1}/{max_stall_retries + 1}\n"
+      )
+    # guard: every re-spawn stalled — record a transient error; the next tick re-dispatches
+    if stalled:
+      _write_error(
+        jdir, JobErrorCategory.TRANSIENT,
+        f"stream-idle-stall after {max_stall_retries + 1} spawn(s); no stdout for >{idle_timeout_sec}s",
+      )
+      return
+
+    # Silence must not read as "all clear": the provider emits a rate-limit frame in every run,
+    # so a completed run carrying none means the signal the guard depends on has degraded.
+    if seen_frames == 0:
+      sys.stderr.write(
+        f"rate-limit guard: no rate_limit_event frame in {expert_name}/{jdir.name} "
+        f"(exit={returncode}) — guard blind for this run\n"
+      )
+
+    # Persist the transcript — best-effort, never block DONE on a write failure.
+    try:
+      (jdir / JobArtifact.TRANSCRIPT).write_text(stdout or "")
     except Exception as e:  # pragma: no cover — defensive
-      sys.stderr.write(f"token capture failed: {e}\n")
-    if not _agent_is_read_only(agent_path):
-      # guard: abort the tick when the expert left the working tree dirty
-      if _check_post_claude(repo, expert_name, jdir):
-        raise _ExpertLeftDirtyTree(expert_name, jdir.name, [])
-    # the correction landed — drop the rejection record so it cannot resurface
-    # in the prompt of a later attempt on this same bundle
-    (jdir / JobArtifact.ERROR_JSON).unlink(missing_ok = True)
-    (jdir / JobMarker.DONE).touch()
-    return
-  _write_error(jdir, JobErrorCategory.TRANSIENT, f"exit={returncode} stderr={stderr[-500:]}")
+      sys.stderr.write(f"transcript write failed: {e}\n")
+
+    # a clean exit still needs a usable response.json before this job can reach DONE
+    if returncode == 0:
+      response_path = jdir / JobFile.RESPONSE
+      # Bug 99 fallback: agent exited cleanly but didn't write a usable response.json
+      # — recover the JSON object from the final assistant text frame of
+      # the stream-json transcript. LLMs sometimes describe their result in
+      # text instead of writing the file. Without this fallback the success-
+      # gate fails, the pump records a transient error, and the dispatcher
+      # re-dispatches until a roll of the dice lands a write-this-time run.
+      # The same salvage covers a written-but-envelope-violating response: the
+      # narrated payload is often well-formed even when the written file is not.
+      if not outcome_tokens(read_response(jdir)):
+        recovered = _extract_response_from_stdout(stdout or "")
+        if recovered is not None:
+          response_path.write_text(json.dumps(recovered, indent = 2))
+      # guard: no outcome survived the salvage — the envelope is violated, and a
+      # missing discriminator must never be read as completed work
+      if not outcome_tokens(read_response(jdir)):
+        _reject_response(jdir, _ENVELOPE_VIOLATION_MESSAGE)
+        return
+
+      # the envelope guard above already proved a parsed response with an outcome is on disk
+      # Token capture is best-effort — never block DONE.
+      try:
+        usage = _extract_usage(stdout)
+        if usage is not None:
+          _append_tokens_log(repo, expert_name, usage)
+      except Exception as e:  # pragma: no cover — defensive
+        sys.stderr.write(f"token capture failed: {e}\n")
+
+      # Post-spawn verification splits by isolation: an isolated job is judged inside its own
+      # worktree (dirty tree OR an unmoved branch = job failure, never a daemon halt — the
+      # primary checkout was untouched throughout); a non-isolated job keeps the daemon-wide
+      # dirty-tree halt, whose rationale is exactly that it shares the operator's tree. A
+      # read-only agent never writes or commits, so it is exempt on both arms — an isolated
+      # read-only job would otherwise always fail the unmoved-branch check.
+      if not _agent_is_read_only(agent_path):
+        if worktree_dir is not None:
+          failure = _isolated_job_failure(worktree_dir, pre_spawn_tip)
+          # guard: the isolated job broke its commit obligation — fail it, keep the queue moving
+          if failure is not None:
+            _write_error(jdir, JobErrorCategory.LOGICAL, failure)
+            return
+        # guard: abort the tick when the expert left the shared working tree dirty
+        elif _check_post_claude(repo, expert_name, jdir):
+          raise _ExpertLeftDirtyTree(expert_name, jdir.name, [])
+      # the correction landed — drop the rejection record so it cannot resurface
+      # in the prompt of a later attempt on this same bundle
+      (jdir / JobArtifact.ERROR_JSON).unlink(missing_ok = True)
+      (jdir / JobMarker.DONE).touch()
+      return
+    _write_error(jdir, JobErrorCategory.TRANSIENT, f"exit={returncode} stderr={stderr[-500:]}")
+  finally:
+    # the worktree is removed on EVERY exit — success, failure, and exception alike; the branch
+    # is the durable product, uncommitted dirt goes with the directory (operator decision)
+    if mgr is not None and worktree_dir is not None:
+      mgr.remove(worktree_dir)
 
 
 def _pipe_reader(stream: IO[str], tag: str, out_q: queue.Queue) -> None:
@@ -1435,9 +1864,49 @@ def _reject_response(jdir: Path, message: str) -> None:
   (jdir / JobMarker.PID).unlink(missing_ok = True)
 
 
+def _spend_transient_budget(jdir: Path) -> bool:
+  """
+  Spend one unit of the job's transient-retry budget and report what remains.
+
+  Every call advances the persisted counter — calling twice spends two units, so the
+  caller invokes it exactly once per recorded transient failure.
+
+  Args:
+    jdir: Path to the job directory whose counter is read and advanced.
+
+  Returns:
+    True while the bundle's transient-error count stays below the configured budget
+    (`daemon.transient_max_retries`, default 5), False once the budget is exhausted.
+  """
+  # read the persisted counter; a missing or garbled file restarts the budget from zero,
+  # which errs toward retrying — the cap exists to stop storms, not to lose work
+  counter = jdir / JobArtifact.TRANSIENT_ERRORS
+  try:
+    count = int(counter.read_text().strip())
+  except (OSError, ValueError):
+    count = 0
+  count += 1
+  counter.write_text(f"{count}\n")
+
+  # the repo root is fixed by the queue layout: <repo>/.experts/.jobs/<expert>/<job>
+  # waiver: inline numeric literal — the shipped default budget (5), overridable in settings
+  daemon = load_section(jdir.parents[3] / SettingsFile.REL, SettingsKey.DAEMON)
+  return count < int(daemon.get(DaemonKey.TRANSIENT_MAX_RETRIES, 5))
+
+
 def _write_error(jdir: Path, category: str, message: str) -> None:
   """
-  Write an error outcome to the job and close it.
+  Write an error outcome to the job, closing it unless a transient retry is still due.
+
+  A transient failure with budget left releases the job's claim and leaves the bundle in the
+  documented READY+ERROR state — `DONE` untouched — so the next pump tick retries it as an
+  unclaimed job, until the bundle's transient budget (`daemon.transient_max_retries`) runs out
+  and the job closes like any other error. Every path records the ledger incident.
+
+  Guarantees:
+    - A transiently-errored bundle with retry budget left has its claim's `PID` marker unlinked,
+      so it is queued again, indistinguishable from a never-claimed READY job, and dead-claimant
+      reconciliation cannot finalize it to `DONE` while a retry is due.
 
   Args:
     jdir: Path to the job directory whose response.json is being written.
@@ -1448,7 +1917,24 @@ def _write_error(jdir: Path, category: str, message: str) -> None:
     JobResponseKey.OUTCOME: JobOutcome.ERROR,
     JobResponseKey.ERROR: { JobResponseKey.CATEGORY: category, JobResponseKey.MESSAGE: message },
   }, indent = 2))
-  (jdir / JobMarker.DONE).touch()
+
+  # a transient failure with budget left stays claimable — READY+ERROR, no DONE;
+  # everything else (logical, uncommitted, exhausted budget) closes the job
+  if category == JobErrorCategory.TRANSIENT and _spend_transient_budget(jdir):
+
+    # Contract:
+    # A transiently-errored bundle with retry budget left has its claim's PID marker unlinked,
+    # so it is queued again, indistinguishable from a never-claimed READY job; dead-claimant
+    # reconciliation cannot finalize it to DONE while a retry is due.
+
+    # release the claim: with the dead claimant's PID gone the bundle is queued again, so the
+    # dead-scan's "response present" reconciliation cannot finalize it out of its retry
+    (jdir / JobMarker.PID).unlink(missing_ok = True)
+    sys.stderr.write(
+      f"transient error on {jdir.parent.name}/{jdir.name} — left queued for retry\n")
+  else:
+    (jdir / JobMarker.DONE).touch()
+
   # job dirs always live at <repo>/.experts/.jobs/<expert>/<job> — derive the repo root
   # waiver: inline numeric/default literal, not a domain constant
   error_ledger.record(jdir.parents[3], {

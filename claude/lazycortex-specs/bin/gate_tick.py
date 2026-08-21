@@ -1,25 +1,47 @@
-"""Per-file gate-tick worker for the md-scan daemon.
+"""
+Per-file gate-tick worker for the md-scan daemon.
 
-Invoked once per matched asset status folder-note. It computes the lowest
-gate in `GATE_ORDER` that is currently false and whose precondition holds,
-then advances the asset one notch:
+Invoked once per matched asset status folder-note. `spec.coordinator` (per
+`lazy-spec.coordination-playbook.md`, dispatched by the sibling `coordinator_dispatch.py` routine, not
+by this one) now owns every inter- and intra-asset sequencing decision — which gate to flip,
+which sibling doc to promote, which checkbox-equivalent job to dispatch next, whether a change
+cascades into its targets. This worker keeps only the four concerns no LLM needs to be woken for:
 
-- A DERIVED gate (`spec_design_done` / `spec_plan_done`) is auto-flipped
-  by calling `flip_gate.flip_gate(..., auto=True)` IN-PROCESS. This
-  in-process call is the single code path and satisfies the
-  "canonical primitive" requirement — the worker does not re-subprocess
-  the CLI; it imports the sibling primitive and calls it directly so the
-  callout / history / log side effects are produced exactly once by the
-  one owner of those mutations.
-- A HUMAN-SIGNAL gate (`spec_develop_done` / `spec_tests_passing` /
-  `spec_released`) cannot be auto-derived: the worker appends a
-  `[!ready]` callout to `# Gates` (once — idempotent) telling the
-  operator how to flip it by hand.
-- A previously-appended `[!ready]` callout whose precondition has since
-  regressed is rewritten in place to a `[!info]` withdrawal callout.
+- Active-job polling (`spec_job_markers.py`'s `active_job`): an asset tracking the marker has its
+  job bundle's terminal marker (`DONE` / `DEAD` / `CANCELLED`, per the `lazycortex-core` job-runtime
+  layout, read file-wise — never imported across the plugin boundary) checked on every tick.
+  `DONE` and `CANCELLED` clear the marker, log a `# History` line, and retire the bundle
+  (`gate_dispatch.consume_stale_job`, freeing its dedup key so the checkbox can be re-dispatched);
+  `DEAD` additionally sets `spec_halted: true` and appends a persistent `[!failure]` callout to
+  `# Gates` (un-halting is a manual operator act, out of scope here), leaving its bundle unretired
+  for diagnostics. Every clear also raises `pending_wake: job-done` in the sidecar — that flag,
+  not a diff of the clearing commit, is what makes the transition visible to
+  `coordinator_dispatch.py`'s own `job-done` trigger. This worker opens no review itself; the
+  coordinator opens it with `lazy-review.submit` on the `job-done` wake this same poll raises.
+- Coordinator-job polling (`spec_job_markers.py`'s `coordinator_job`): the same terminal-marker
+  check, applied to the coordinator's own one-job-per-asset slot instead. `DONE` / `CANCELLED` retire the
+  bundle (`gate_dispatch.consume_stale_job`, freeing its dedup key) and clear the marker, touching
+  the note not at all — that branch's whole effect is runtime state, so it costs no commit; `DEAD`
+  clears the marker, writes a `# History` WARNING line, and never halts the asset — the
+  coordinator's own wake job is not a ladder expert job, so `spec_halted` stays untouched. This
+  sweep is `coordinator_dispatch.py`'s own backstop: that git-watch routine only re-checks a
+  coordinator job's marker when a NEW commit wakes it, so a job that dies with no further commit
+  landing would otherwise leave the marker stranded forever — this worker's periodic md-scan
+  cadence catches it regardless (4a debt, plan 4b Task 5).
+- Stuck-draft backstop: an authored sibling doc (`architecture.md` / `code-plan.md` /
+  `test-plan.md`) whose `Write <doc>` job's DONE is recorded in `# History` but whose review the
+  coordinator never opened — the doc sits at `spec_stage: draft` with no review trace and no
+  tracked job left on the asset — is submitted into review via the review CLI's idempotent
+  `submit` verb (state-sanitizers-design.md; only certain cases fire, doubt reads as
+  not-a-problem).
+- Structural note-check: `note_ops.note_check`'s violations (an unrecognized or mistyped
+  frontmatter key, a missing or misordered required section) are folded into this tick's own
+  result — read-only, repaired by the coordinator through its pen and `note-set-key`, never by
+  this worker.
 
-The worker never emits task checkboxes — readiness is a callout, not a
-to-do item.
+A no-op tick (no active job with a terminal marker yet, note structurally clean) reports
+`{"action": "noop"}`. `coordinator_dispatch.py` is this worker's own sibling routine, not a step
+of this tick — it wakes `spec.coordinator` on its own schedule.
 """
 from __future__ import annotations
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -44,200 +66,121 @@ if str(_BIN) not in sys.path:
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import flip_gate  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import gate_dispatch  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import iconize_inline  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import note_explainers  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_job_markers  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402
-    DERIVED_GATES,
-    GATE_ORDER,
+    GateCheckbox,
+    HaltReason,
+    HistoryEvent,
+    JobMarker,
+    PlanReview,
     Section,
     SiblingDoc,
+    SpecHaltKey,
     SpecKey,
     Stage,
     StageKey,
     TickAction,
 )
-# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from summary_render import parent_container_note, apply_container_stats  # noqa: E402
 
 
-# Marker fragments for locating the readiness callout in the body.
-_READY_MARK = "[!ready]"
-_READY_TAIL = " ready to flip"
+# The authored sibling docs whose review the coordinator's own `submit` call on a `Write <doc>`
+# DONE is the only opener (lazy-spec.coordination-playbook.md Chapter 3) — the docs the stuck-draft
+# backstop sweep (`_stuck_draft_docs`) re-checks, keyed to the checkbox label whose DONE History
+# line proves a job actually wrote them.
+_AUTHORED_DOC_CHECKBOX = {
+    SiblingDoc.ARCHITECTURE: GateCheckbox.WRITE_ARCHITECTURE,
+    SiblingDoc.CODE_PLAN: GateCheckbox.WRITE_CODE_PLAN,
+    SiblingDoc.TEST_PLAN: GateCheckbox.WRITE_TEST_PLAN,
+}
+
+# Regex template for locating a frontmatter key's line, shared by `_set_fm_json` / `_del_fm_key`.
+_FM_KEY_RE_TEMPLATE = r"(?m)^{key}\s*:.*$"
+# Trailing-newline suffix `_del_fm_key` appends to `_FM_KEY_RE_TEMPLATE` so the deleted key's
+# own line break goes with it, rather than leaving a blank line behind.
+_TRAILING_NEWLINE_RE = r"\n?"
+
+# The sibling CLI entry point's bare filename, resolved via `_BIN` (this module's own directory)
+# rather than `$LAZYCORTEX_PLUGIN_DIRS` — `_run_note_check` calls back into this same plugin, not
+# across the plugin boundary.
+_SPEC_CLI_NAME = "lazycortex-specs"
+_NOTE_CHECK_SUBVERB = "note-check"
+
+# `note_ops.note_check`'s result-dict key this worker folds into its own tick result.
+_VIOLATIONS_KEY = "violations"
+
+# The stuck-draft sweep's result-dict key listing the doc filenames it submitted into review.
+_DOCS_KEY = "docs"
 
 
-# Stage-promotion rules — `gate_tick` § Step 0.
-# Per `spec.lifecycle-protocol.md` Part 1: a doc whose review finalized as approved (or
-# approved-with-concerns) advances `spec_stage` from `draft` to `approved`. Other stages are
-# terminal (`approved`, `cancelled`) or operator-attention (`rejected`, `empty`); only `draft`
-# is auto-promotable. The promotion mirrors what `/spec.set-stage <doc> approved` does
-# interactively: rewrite the `spec_stage:` frontmatter value, update the `spec/<stage>` mirror
-# tag in lock-step, append one `# History` line to the asset's status folder-note.
-_APPROVED_REVIEW_RESULTS = frozenset({Stage.APPROVED, "approved-with-concerns"})
-_STAGEABLE_SIBLINGS = (
-    SiblingDoc.DESIGN,
-    SiblingDoc.BUG,
-    SiblingDoc.PLAN,
-    "tech.md",
-)
-# Match `spec_stage: <token>` on its own frontmatter line. Group-less replacement is enough —
-# the value is fully rewritten, no segment is preserved.
-_SPEC_STAGE_RE = re.compile(r"(?m)^spec_stage\s*:.*$")
-# Match a `- spec/<token>` mirror tag line under `tags:`. Group 1 captures the leading
-# whitespace + `- spec/` prefix so the rewrite preserves the file's existing tag indentation.
-_SPEC_TAG_RE = re.compile(r"(?m)^(\s+-\s+spec/)[A-Za-z0-9_\-]+\s*$")
+# Mirrored job-bundle terminal-marker filenames from `lazycortex-core`'s job runtime, read
+# file-wise only, per `dev.plugin-boundaries.md` § 2a — a cross-plugin Python import of
+# `lazycortex-core`'s own constants module would break in a consumer install where the two
+# plugins live at unrelated cache paths. Each is a bare filename `touch()`-ed empty by the
+# core expert pump inside a job's `.experts/.jobs/<expert>/<job_id>/` directory.
+_JOB_MARKER_DONE = "DONE"
+_JOB_MARKER_DEAD = "DEAD"
+_JOB_MARKER_CANCELLED = "CANCELLED"
 
-# Bot identity for the stage-promotion atomic commit. Mirrors the pattern used by
-# `spec.request-apply` / `spec.request-open` — promote-stage is an automated state advance,
-# attributable to the routine, not to the operator.
-_PROMOTE_AUTHOR_NAME = "spec.gate-tick"
-_PROMOTE_AUTHOR_EMAIL = "spec.gate-tick@bot.lazy-cortex"
+# Mirrored job-bundle directory layout: `<repo>/.experts/.jobs/<expert>/<job_id>/`.
+_JOBS_BASE = ".experts/.jobs"
+
+# Bot identity for this worker's own commits (job-marker application + History line).
+_PROMOTE_AUTHOR_NAME = "lazy-spec.gate-tick"
+_PROMOTE_AUTHOR_EMAIL = "lazy-spec.gate-tick@bot.invalid"
+
+# Regex templates for a YAML block-list frontmatter value (`key:\n  - a\n  - b\n`), shared by
+# `_read_fm_list` / `_write_fm_list`. `flip_gate._parse_frontmatter`'s flat scalar parse skips
+# bullet lines entirely, so a list-typed key needs its own reader/writer.
+_FM_LIST_BLOCK_RE_TEMPLATE = r"(?m)^{key}\s*:\s*\n(?:\s+-\s*.*\n)*"
+_FM_LIST_INLINE_RE_TEMPLATE = r"(?m)^{key}\s*:\s*\[\s*\]\s*$\n?"
+# Populated inline form (`key: ["a", "b"]` / `key: [a, b]`) — the wizard-documented shape for
+# `spec_targets`, read-only (never written by `_write_fm_list`, which only ever emits the block
+# or empty-inline forms above). `_read_fm_list` matches this only after the two above fail, so an
+# empty `[]` still takes the dedicated empty-inline path.
+_FM_LIST_INLINE_POPULATED_RE_TEMPLATE = r"(?m)^{key}\s*:\s*\[(.*)\]\s*$"
 
 
-def _rewrite_doc_for_promotion(doc_path: Path) -> bool:
+def _commit_note_change(asset_dir: Path, asset_note: Path, subject: str) -> None:
   """
-  Rewrite one sibling doc's `spec_stage` and mirror tag when its review approves promotion.
+  Atomically commit the rewritten status folder-note under the `lazy-spec.gate-tick` bot identity.
 
-  Conditions for the rewrite (ALL must hold): `review_result` is `approved` or
-  `approved-with-concerns`, AND `spec_stage` is exactly `draft`. Any other stage value
-  (`empty`, `approved`, `rejected`, `cancelled`) is left untouched — those are either
-  terminal or operator-attention states that auto-promotion must not overwrite.
-
-  Args:
-    doc_path: The sibling authored doc to consider.
-
-  Returns:
-    True when the file was actually mutated; False on every other path (sibling missing, no
-    frontmatter, review not approved, stage not `draft`).
-  """
-  # guard: sibling may not exist in this layout
-  if not doc_path.is_file():
-    return False
-  text = doc_path.read_text()
-  fm, fm_end = flip_gate._parse_frontmatter(text)
-  # guard: no parseable frontmatter — nothing to promote
-  if fm_end == 0:
-    return False
-  result_value = fm.get(SpecKey.REVIEW_RESULT, "").strip()
-  # guard: review must show approval (clean or with-concerns) before stage flips
-  if result_value not in _APPROVED_REVIEW_RESULTS:
-    return False
-  stage_value = fm.get(StageKey.STAGE, "").strip()
-  # guard: only `draft` is auto-promotable; terminal / operator-attention stages are skipped
-  if stage_value != Stage.DRAFT:
-    return False
-  fm_text = text[:fm_end]
-  body = text[fm_end:]
-  fm_text = _SPEC_STAGE_RE.sub(f"{StageKey.STAGE}: {Stage.APPROVED}", fm_text, count = 1)
-  fm_text = _SPEC_TAG_RE.sub(rf"\g<1>{Stage.APPROVED}", fm_text, count = 1)
-  doc_path.write_text(fm_text + body)
-  return True
-
-
-def _append_promotion_history(asset_note: Path, doc_name: str, today: str) -> None:
-  """
-  Append one `# History` line to the asset's status folder-note recording the promotion.
-
-  Mirrors the `spec.set-stage` history format so doctor-side tag-vs-history consistency checks
-  cannot tell auto-promotions from interactive ones.
-
-  Args:
-    asset_note: The status folder-note whose `# History` section receives the line.
-    doc_name: Bare filename of the promoted sibling (e.g. `design.md`).
-    today: ISO date string pinned into the history line.
-  """
-  text = asset_note.read_text()
-  _, fm_end = flip_gate._parse_frontmatter(text)
-  fm_text = text[:fm_end]
-  body = text[fm_end:]
-  line = (
-      f"- {today} — {_PROMOTE_AUTHOR_NAME} · {doc_name} "
-      f"spec_stage {Stage.DRAFT}→{Stage.APPROVED}"
-  )
-  body = flip_gate._append_under_heading(body, Section.HISTORY, line)
-  asset_note.write_text(fm_text + body)
-
-
-def _commit_promotions(asset_dir: Path, promoted_docs: list[str]) -> None:
-  """
-  Atomic git commit of the promoted sibling docs plus the folder-note history append.
-
-  Stages every promoted sibling file and the asset's status folder-note, then commits under
-  the dedicated bot identity. The commit subject names every promoted doc so the history
-  scrolls naturally.
-
-  Args:
-    asset_dir: The asset folder holding the siblings and the status folder-note.
-    promoted_docs: Bare filenames of the siblings that were just rewritten.
-  """
-  # the promoted siblings and the asset's own status folder-note ride in one commit
-  repo = flip_gate._repo_root(asset_dir)
-  paths = [str(asset_dir / name) for name in promoted_docs]
-  paths.append(str(asset_dir / f"{asset_dir.name}.md"))
-
-  # the parent container's stats line goes stale on promotion, so refresh it and carry it along
-  parent = parent_container_note(asset_dir)
-  if parent is not None and apply_container_stats(parent):
-    paths.append(str(parent))
-
-  # stage the whole set first so the commit below lands atomically
-  subprocess.run(
-      ["git", "add", "--", *paths],
-      cwd = str(repo), check = True, capture_output = True,
-  )
-
-  # naming every promoted doc in the subject keeps the history readable at a glance
-  joined = ", ".join(promoted_docs)
-  subject = (
-      f"{_PROMOTE_AUTHOR_NAME}: promote spec_stage "
-      f"{Stage.DRAFT}→{Stage.APPROVED} on {joined}"
-  )
-
-  # commit under the dedicated bot identity so the operator's authorship stays untouched
-  subprocess.run(
-      [
-          "git",
-          "-c", f"user.name={_PROMOTE_AUTHOR_NAME}",
-          "-c", f"user.email={_PROMOTE_AUTHOR_EMAIL}",
-          "-c", "commit.gpgsign=false",
-          "commit", "-q", "-m", subject,
-      ],
-      cwd = str(repo), check = True, capture_output = True,
-  )
-
-
-def _commit_readiness_change(
-    asset_dir: Path, asset_note: Path, gate: str, *, withdrawn: bool,
-) -> None:
-  """
-  Atomic git commit of a readiness callout drop or withdrawal under `spec.gate-tick`.
-
-  Without this commit the worker's `asset_note.write_text(...)` leaves the folder-note dirty,
-  tripping the daemon's dirty-tree-skip guard on the next iteration and silently halting every
-  routine on the asset. Defensive skip when the asset is not inside a git repository (the
-  unit-test fixture path that exercises the worker against a bare tmp dir).
+  Shared by every gate-tick mutation that touches only the single folder-note file. Without this
+  commit the worker's `asset_note.write_text(...)` leaves the folder-note dirty, tripping the
+  daemon's dirty-tree-skip guard on the next iteration and silently halting every routine on the
+  asset. Defensive skip when the asset is not inside a git repository (the unit-test fixture path
+  that exercises the worker against a bare tmp dir).
 
   Args:
     asset_dir: The asset folder; used to resolve the enclosing repo root for the `git` cwd.
     asset_note: The status folder-note path that was just rewritten.
-    gate: The gate whose readiness callout was dropped or withdrawn.
-    withdrawn: True when the prior `[!ready]` was replaced by `[!info] readiness withdrawn`;
-      False when a fresh `[!ready]` was appended. Drives the commit subject.
+    subject: The commit subject line.
   """
-  # an empty toplevel means there is no repo to commit into
   top = flip_gate._git_field(asset_dir, ["rev-parse", "--show-toplevel"], "")
   # guard: asset is not inside a git repository — skip commit (test-fixture path); the file
   # write above remains and is the entire mutation the bare-fixture caller observes
   if not top:
     return
 
-  # stage the rewritten folder-note so the tree is clean for the next daemon iteration
+  # the enclosing repo root anchors both the repaint and the git commands below
   repo = Path(top)
-  subprocess.run(
-      ["git", "add", "--", str(asset_note)],
-      cwd = str(repo), check = True, capture_output = True,
+
+  # fold the note's icon repaint into this same commit so no separate icons commit follows
+  extra_paths = iconize_inline.repaint_paths(
+      repo, [str(asset_note.resolve().relative_to(repo.resolve()))],
   )
 
-  # the subject distinguishes a withdrawal from a plain callout drop
-  action = "withdraw readiness" if withdrawn else "drop readiness callout"
-  subject = f"{_PROMOTE_AUTHOR_NAME}: {action} for {gate} on {asset_dir.name}"
+  # stage the rewritten folder-note so the tree is clean for the next daemon iteration
+  subprocess.run(
+      ["git", "add", "--", str(asset_note), *extra_paths],
+      cwd = str(repo), check = True, capture_output = True,
+  )
 
   # commit under the dedicated bot identity so the operator's authorship stays untouched
   subprocess.run(
@@ -246,239 +189,632 @@ def _commit_readiness_change(
           "-c", f"user.name={_PROMOTE_AUTHOR_NAME}",
           "-c", f"user.email={_PROMOTE_AUTHOR_EMAIL}",
           "-c", "commit.gpgsign=false",
-          "commit", "-q", "-m", subject,
+          "commit", "-q", "-m", subject, "--", str(asset_note), *extra_paths,
       ],
       cwd = str(repo), check = True, capture_output = True,
   )
 
 
-def _advance_stages_from_review(asset_dir: Path, asset_note: Path, today: str) -> list[str]:
+def _target_asset_dir(asset_dir: Path, raw_target: str) -> Path | None:
   """
-  Promote every sibling whose review approved the doc and whose stage is `draft`.
+  Resolve a `<category>/<slug>` cascade-target token to its asset folder.
 
-  Walks the four authored-doc siblings (`design.md`, `bug.md`, `plan.md`, `tech.md`), promotes
-  each whose conditions hold (see `_rewrite_doc_for_promotion`), appends one history line per
-  promotion to the asset's status folder-note, and atomically commits if anything was rewritten.
+  Mirrors `apply_request.py`'s `_resolve_change_target` layout convention (`<spec_path>/
+  <category>/<slug>/`, where `spec_path` is the owning product root, two levels above `asset_dir`)
+  without importing that module for one path join. `coordinator_dispatch.py`'s own
+  `spec_targets` context fold-in (`_build_bundle`) resolves each declared target through this
+  same primitive.
 
   Args:
-    asset_dir: The asset folder containing the siblings and the status folder-note.
-    asset_note: The asset's status folder-note path.
-    today: ISO date string forwarded into the history lines.
+    asset_dir: The asset folder the token is declared on.
+    raw_target: The `<category>/<slug>` token (e.g. `features/my-feature`).
 
   Returns:
-    Bare filenames of the promoted siblings, in walk order; empty when nothing was promoted.
+    The target asset folder, or None when the token is malformed or names no folder-note that
+    actually exists on disk.
   """
-  promoted: list[str] = []
-  for name in _STAGEABLE_SIBLINGS:
-    doc = asset_dir / name
-    # guard: this sibling did not meet the promotion conditions — skip without writing
-    if not _rewrite_doc_for_promotion(doc):
-      continue
-    promoted.append(name)
-    _append_promotion_history(asset_note, name, today)
-  # guard: nothing was promoted this tick — leave the index clean, skip the commit
-  if not promoted:
-    return promoted
-  _commit_promotions(asset_dir, promoted)
-  return promoted
+  parts = raw_target.split("/")
+  # guard: a target names exactly one category and one slug
+  if len(parts) != 2:
+    return None
+  category, slug = parts
+  target_dir = asset_dir.parent.parent / category / slug
+  # guard: a declared target whose folder-note has since disappeared has nothing to fold into
+  if not (target_dir / f"{slug}.md").is_file():
+    return None
+  return target_dir
 
 
-def _next_flippable(asset_dir: Path, fm: dict, stages: dict) -> str | None:
+def _find_active_job_marker(repo_root: Path, expert: str, job_id: str) -> str | None:
   """
-  Find the lowest false gate whose precondition currently holds.
+  Check which terminal marker, if any, is present in an active job's bundle directory.
+
+  Args:
+    repo_root: The repository root holding `.experts/.jobs/`.
+    expert: The dispatched expert name from the job marker.
+    job_id: The dispatched job id from the job marker.
 
   Returns:
-    The gate key to advance, or None when no gate is both false and ready.
+    The bare marker filename found (`"DONE"` / `"DEAD"` / `"CANCELLED"`), or None when the
+    job's bundle directory carries none of them yet (still running).
   """
-  for gate in GATE_ORDER:
-    # guard: only consider gates that are not already true
-    if flip_gate._is_true(fm, gate):
-      continue
-    if flip_gate.preconditions_met(asset_dir, gate, fm, stages):
-      return gate
+  job_dir = repo_root / _JOBS_BASE / expert / job_id
+  for marker in (_JOB_MARKER_DONE, _JOB_MARKER_DEAD, _JOB_MARKER_CANCELLED):
+    if (job_dir / marker).is_file():
+      return marker
   return None
 
 
-def _prev_gate(gate: str) -> str | None:
+def _stuck_draft_docs(asset_dir: Path, *, fm_values: dict, body: str, markers: dict) -> list[str]:
   """
-  Return the gate immediately preceding `gate` in `GATE_ORDER`.
+  Find authored sibling docs stranded at `spec_stage: draft` after their writing job finished.
+
+  The coordinator's `submit` call on a `Write <doc>` job's DONE is the only opener of review on
+  `architecture.md` / `code-plan.md` / `test-plan.md` (lazy-spec.coordination-playbook.md Chapter 3);
+  a skipped call strands the doc in draft forever. This sweep names only the certain cases: the
+  doc exists in draft with no review trace, the folder-note's `# History` proves the writing
+  job's DONE landed with no review-open record after it, and nothing on the asset is still
+  moving (no tracked job, no pending wake, not halted) — any doubt reads as not-a-problem.
+
+  Args:
+    asset_dir: The asset folder holding the sibling docs.
+    fm_values: The folder-note's parsed frontmatter values.
+    body: The folder-note's body text (post-frontmatter), holding `# History`.
+    markers: The asset's job-marker sidecar entry, as read by `spec_job_markers.read`.
 
   Returns:
-    The predecessor gate key, or None when `gate` is the first in order.
+    Bare filenames of the stranded docs, in `_AUTHORED_DOC_CHECKBOX` order; empty when nothing
+    is certainly stuck.
   """
-  idx = GATE_ORDER.index(gate)
-  # guard: first gate has no predecessor
-  if idx == 0:
-    return None
-  return GATE_ORDER[idx - 1]
+  # guard: any tracked job or pending wake means the loop is still moving — not stuck
+  if any(markers.get(key) for key in (JobMarker.ACTIVE_JOB, JobMarker.COORDINATOR_JOB, JobMarker.PENDING_WAKE)):
+    return []
+  # guard: a halted asset is out of every automatic sweep's reach
+  if flip_gate._is_true(fm_values, SpecHaltKey.HALTED):
+    return []
+
+  # a doc is certainly stuck only when every condition below holds; any miss skips it silently
+  stuck: list[str] = []
+  for doc_name, checkbox_label in _AUTHORED_DOC_CHECKBOX.items():
+    doc_path = asset_dir / doc_name
+    # guard: no doc on disk — nothing to submit
+    if not doc_path.is_file():
+      continue
+    # guard: no DONE History record for the doc's writing job — an operator hand-draft, skip;
+    # the record may have been written under any authoring language, so every variant counts
+    if not any(fragment in body
+               for fragment in note_explainers.history_fragments(HistoryEvent.JOB_DONE_SCAN,
+                                                                 label = checkbox_label)):
+      continue
+    # guard: a review-open record already landed for this doc — not stuck
+    if any(fragment in body
+           for fragment in note_explainers.history_fragments(HistoryEvent.REVIEW_OPENED_SCAN,
+                                                             doc = doc_name)):
+      continue
+    doc_fm, _ = flip_gate._parse_frontmatter(doc_path.read_text())
+    # guard: only a draft doc can be stranded pre-review
+    if doc_fm.get(StageKey.STAGE, "").strip() != Stage.DRAFT:
+      continue
+    # guard: any review trace on the doc itself (active loop, or a finalized verdict) — not stuck
+    if flip_gate._is_true(doc_fm, SpecKey.REVIEW_ACTIVE) or SpecKey.REVIEW_RESULT in doc_fm:
+      continue
+    stuck.append(doc_name)
+  return stuck
 
 
-def _ready_callout(gate: str, slug: str) -> str:
+def _submit_stuck_draft(asset_dir: Path, doc_name: str) -> bool:
   """
-  Build the multi-line `[!ready]` callout for a human-signal gate.
+  Open review on one stranded draft doc via the review CLI's idempotent `submit` verb.
+
+  Best-effort: any failure (CLI unresolvable, timeout, non-zero exit) degrades to a False
+  return, never raises — the doc stays stranded and the next tick retries.
+
+  Args:
+    asset_dir: The asset folder holding the doc.
+    doc_name: The stranded doc's bare filename.
 
   Returns:
-    The callout block text (no trailing newline).
+    True when review was actually opened; False on every failure path.
   """
-  prev = _prev_gate(gate)
-  pre_line = f"{prev} = true" if prev else "all derived gates resolved"
-  return (
-      f"> [!ready] {gate} ready to flip\n"
-      f"> preconditions met: {pre_line}.\n"
-      f"> to flip — run `/spec.flip-gate {slug} {gate}`."
+  cli = flip_gate._resolve_review_cli()
+  # guard: review CLI not resolvable on the env path — degrade to a skip
+  if cli is None:
+    return False
+  try:
+    proc = subprocess.run(
+        [str(cli), PlanReview.SUBMIT_VERB, str((asset_dir / doc_name).resolve())],
+        capture_output = True, text = True, timeout = PlanReview.START_TIMEOUT_S, check = False,
+    )
+  # waiver: fire-and-forget backstop — ANY review-open failure (CLI crash, timeout, bad path)
+  # must degrade to a skip the next tick retries, never raise out of the sweep
+  except (OSError, subprocess.SubprocessError):
+    return False
+  return proc.returncode == 0
+
+
+def _set_fm_json(fm_text: str, key: str, value: dict) -> str:
+  """
+  Set or insert `key: <compact-json>` in a frontmatter block.
+
+  Mirrors `flip_gate._set_bool`'s shape for a JSON-valued (rather than boolean-valued) key —
+  the hand-rolled frontmatter parser treats a value as an opaque string, so a one-line JSON
+  object round-trips through it without any schema change. Reused by `coordinator_dispatch.py`
+  for its own worker-internal dict-valued markers.
+
+  Args:
+    fm_text: The frontmatter block text (including its opening/closing `---` fences).
+    key: The frontmatter key to set.
+    value: The dict to serialize as the key's compact-JSON value.
+
+  Returns:
+    The updated frontmatter text.
+  """
+  literal = json.dumps(value)
+  pat = _compile_key_pattern(key)
+  if pat.search(fm_text):
+    return pat.sub(lambda _m: f"{key}: {literal}", fm_text, count = 1)
+  close_idx = fm_text.rfind("---\n")
+  # guard: malformed frontmatter without a closing fence
+  if close_idx < 0:
+    return fm_text
+  return fm_text[:close_idx] + f"{key}: {literal}\n" + fm_text[close_idx:]
+
+
+def _del_fm_key(fm_text: str, key: str) -> str:
+  """
+  Remove a frontmatter key's line, if present.
+
+  Mirrors `_set_fm_json`'s regex approach for the opposite operation — deleting rather than
+  writing a key. A no-op (returns `fm_text` unchanged) when the key is absent.
+
+  Args:
+    fm_text: The frontmatter block text (including its opening/closing `---` fences).
+    key: The frontmatter key to remove.
+
+  Returns:
+    The updated frontmatter text.
+  """
+  pat = re.compile(_FM_KEY_RE_TEMPLATE.format(key = re.escape(key)) + _TRAILING_NEWLINE_RE)
+  return pat.sub("", fm_text, count = 1)
+
+
+def _read_fm_list(fm_text: str, key: str) -> list[str]:
+  """
+  Read a YAML list-typed frontmatter value. Recognizes both the block form (`key:\\n  - a\\n
+  - b\\n`) and the wizard-documented populated inline form (`key: ["a", "b"]`).
+
+  Args:
+    fm_text: The frontmatter block text (including its opening/closing `---` fences), or any
+      larger text this block leads (the trailing body is never scanned).
+    key: The list-typed frontmatter key (e.g. `spec_targets`).
+
+  Returns:
+    The list's string members, in file order; empty when the key is an inline `[]`, absent, or
+    written with no members.
+  """
+  pat = re.compile(_FM_LIST_BLOCK_RE_TEMPLATE.format(key = re.escape(key)))
+  match = pat.search(fm_text)
+  if match is not None:
+    return [
+        stripped[1:].strip()
+        for stripped in (line.strip() for line in match.group(0).splitlines()[1:])
+        if stripped.startswith("-")
+    ]
+  # no block form — try the wizard-documented populated inline form (`key: ["a", "b"]`); an
+  # inline-`[]` or a genuinely absent key both fall through this to the empty return below
+  pat_inline = re.compile(_FM_LIST_INLINE_POPULATED_RE_TEMPLATE.format(key = re.escape(key)))
+  inline_match = pat_inline.search(fm_text)
+  # guard: no inline-populated form either — absent key, or written as empty inline `[]`
+  if inline_match is None:
+    return []
+  interior = inline_match.group(1).strip()
+  # guard: `key: []` matched here too (empty interior) — same empty result as the dedicated form
+  if not interior:
+    return []
+  # a trailing comma (`[a, b, ]`) splits to a final empty member — drop it rather than collect
+  # a blank token no caller declared
+  return [
+      stripped for member in interior.split(",")
+      if (stripped := member.strip().strip("'\""))
+  ]
+
+
+def _write_fm_list(fm_text: str, key: str, values: list[str]) -> str:
+  """
+  Set or insert a `key:` YAML block-list value in a frontmatter block.
+
+  Mirrors `apply_request.py`'s `_set_fm_list` (same replacement rule — an existing inline `[]`
+  or multi-line `- ` block is replaced in place, a missing key is appended before the closing
+  fence); duplicated here rather than imported per this `bin/` tree's own per-file small-helper
+  convention. Reused by `note_ops.note_set_key` (its `_Kind.LIST` writer).
+
+  Args:
+    fm_text: The frontmatter block text (including its opening/closing `---` fences).
+    key: The list-typed frontmatter key.
+    values: Replacement member list, rendered as unquoted `- <value>` lines.
+
+  Returns:
+    The updated frontmatter text.
+  """
+  block_lines = "\n".join(f"  - {value}" for value in values)
+  replacement = f"{key}:\n{block_lines}\n" if values else f"{key}: []\n"
+  pat_inline = re.compile(_FM_LIST_INLINE_RE_TEMPLATE.format(key = re.escape(key)))
+  pat_block = re.compile(_FM_LIST_BLOCK_RE_TEMPLATE.format(key = re.escape(key)))
+  if pat_inline.search(fm_text):
+    return pat_inline.sub(replacement, fm_text, count = 1)
+  if pat_block.search(fm_text):
+    return pat_block.sub(replacement, fm_text, count = 1)
+  close_idx = fm_text.rfind("---\n")
+  # guard: malformed frontmatter without a closing fence — leave untouched
+  if close_idx < 0:
+    return fm_text
+  return fm_text[:close_idx] + replacement + fm_text[close_idx:]
+
+
+def _compile_key_pattern(key: str) -> re.Pattern[str]:
+  """
+  Compile `_FM_KEY_RE_TEMPLATE` for one frontmatter key.
+
+  Args:
+    key: The frontmatter key to match a same-line value for.
+
+  Returns:
+    The compiled single-line `^key\\s*:.*$` pattern.
+  """
+  return re.compile(_FM_KEY_RE_TEMPLATE.format(key = re.escape(key)))
+
+
+def _run_note_check(asset_note: Path) -> list[dict]:
+  """
+  Run `note-check` on `asset_note` via the sibling CLI, for folding into this tick's own result.
+
+  Subprocessed rather than imported — `note_ops.py` already imports this module (for
+  `_set_fm_json` / `_write_fm_list`), so an in-process import here would be circular. Best-effort:
+  a missing or broken CLI degrades to reporting no violations rather than failing the tick, since
+  the structural check is advisory (the coordinator repairs what it finds, this worker never does).
+
+  Args:
+    asset_note: The status folder-note path to check.
+
+  Returns:
+    The `note-check` violations list; empty when the note is structurally clean, or the CLI
+    itself could not be resolved, run, or parsed.
+  """
+  cli = _BIN / _SPEC_CLI_NAME
+  # guard: sibling CLI missing from this checkout — degrade to a skip, never fail the tick
+  if not cli.is_file():
+    return []
+  try:
+    proc = subprocess.run(
+        [str(cli), _NOTE_CHECK_SUBVERB, str(asset_note)],
+        capture_output = True, text = True, check = False,
+    )
+  # waiver: best-effort follow-up — a broken subprocess must degrade to "nothing to report",
+  # never abort the tick that already handled the active-job polling pass above
+  except OSError:
+    return []
+  try:
+    result = json.loads(proc.stdout)
+  except json.JSONDecodeError:
+    return []
+  return result.get(_VIOLATIONS_KEY, [])
+
+
+def _apply_job_marker(
+    asset_note: Path, text: str, fm_end: int, *,
+    body: str, asset_dir: Path, repo_root: Path, marker: str, job_info: dict, today_str: str,
+) -> dict:
+  """
+  Apply an active expert job's terminal bundle marker to the asset.
+
+  Every marker clears the sidecar's `active_job` and raises `pending_wake: job-done` in its
+  place — runtime state, so that half costs no commit and is unreachable by a hand-edit. `DONE`
+  and `CANCELLED` then append one `# History` line each and retire the job bundle via
+  `gate_dispatch.consume_stale_job`, freeing its dedup key so the checkbox can be re-dispatched —
+  the bundle's files stay on disk either way. Opening review on the report a finished job wrote
+  is not this pass's business — the coordinator does it on the `job-done` wake this same call
+  raises. `DEAD` additionally sets `spec_halted: true`, appends a `[!failure]` callout to
+  `# Gates` that persists until an operator resolves it by hand (un-halting is a manual act, out
+  of scope here), and deliberately leaves the bundle unretired, kept for diagnostics. Deciding
+  what happens next on the asset — dispatching a replacement job, reacting to the DEAD halt — is
+  `spec.coordinator`'s call; this pass only records the terminal outcome.
+
+  Guarantees:
+    - On a `DONE` or `CANCELLED` marker, the job bundle is retired, freeing its dedup key for
+      re-dispatch while its files stay on disk.
+    - On a `DEAD` marker, the job bundle is left unretired, kept on disk for diagnostics.
+
+  Args:
+    asset_note: The status folder-note path.
+    text: The folder-note's full text as last read from disk.
+    fm_end: Index just past the frontmatter's closing `---` fence in `text`.
+    body: The folder-note's body text (post-frontmatter).
+    asset_dir: The asset folder the marker is being applied to.
+    repo_root: The repository root holding the job-marker sidecar.
+    marker: The terminal marker found in the job's bundle directory (`"DONE"` / `"DEAD"` /
+      `"CANCELLED"`).
+    job_info: The tracked active-job marker (`checkbox` / `expert` / `job_id`).
+    today_str: ISO date string pinned into the callout and history line.
+
+  Returns:
+    A result dict naming the applied `TickAction` plus the job's `checkbox` and `job_id`.
+  """
+
+  # Contract:
+  # On a `DONE` or `CANCELLED` marker, the job bundle is retired via
+  # `gate_dispatch.consume_stale_job`, freeing its dedup key so the same checkbox can be
+  # re-dispatched, while the bundle's files stay on disk for the coordinator's job-done wake
+  # to read. On a `DEAD` marker, the bundle is deliberately left unretired, kept for
+  # diagnostics alongside the asset halt.
+
+  checkbox_label = job_info[JobMarker.CHECKBOX]
+  job_id = job_info[JobMarker.JOB_ID]
+  # one language resolution serves every branch's narrative line (the resolver walks to the
+  # settings root and reads config)
+  note_lang = note_explainers.lang_for_note(asset_note)
+  fm_text = text[:fm_end]
+
+  # the job is over on every branch: retire the marker and raise the wake the coordinator's
+  # `job-done` trigger reads, before the note write below that the wake will accompany
+  spec_job_markers.update(
+      repo_root, asset_note,
+      { JobMarker.ACTIVE_JOB: None, JobMarker.PENDING_WAKE: JobMarker.JOB_DONE },
   )
 
+  # only the body/action/subject differ per marker kind
+  if marker == _JOB_MARKER_DONE:
+    # the localized narrative tail of the History line, in the note's authoring language
+    done_tail = note_explainers.history_line_for_lang(note_lang, HistoryEvent.JOB_DONE,
+                                                      job_id = job_id, label = checkbox_label)
+    body = flip_gate._append_under_heading(
+        body, Section.HISTORY, f"- {today_str} — {_PROMOTE_AUTHOR_NAME} · {done_tail}",
+    )
+    action = TickAction.JOB_DONE
+    subject = f"{_PROMOTE_AUTHOR_NAME}: job {job_id} ({checkbox_label}) done on {asset_dir.name}"
 
-def _withdrawn_callout(gate: str) -> str:
+    # retire the bundle so its dedup key frees for a retry — same move the coordinator-job
+    # branch already makes; the bundle's files stay on disk for the coordinator's wake to read
+    gate_dispatch.consume_stale_job(repo_root, job_info[JobMarker.EXPERT], job_id)
+  elif marker == _JOB_MARKER_CANCELLED:
+    # the localized narrative tail of the History line, in the note's authoring language
+    cancelled_tail = note_explainers.history_line_for_lang(note_lang, HistoryEvent.JOB_CANCELLED,
+                                                           job_id = job_id, label = checkbox_label)
+    body = flip_gate._append_under_heading(
+        body, Section.HISTORY, f"- {today_str} — {_PROMOTE_AUTHOR_NAME} · {cancelled_tail}",
+    )
+    action = TickAction.JOB_CANCELLED
+    subject = f"{_PROMOTE_AUTHOR_NAME}: job {job_id} ({checkbox_label}) cancelled on {asset_dir.name}"
+
+    # a cancelled bundle is equally spent — retire it so the checkbox can be re-dispatched
+    gate_dispatch.consume_stale_job(repo_root, job_info[JobMarker.EXPERT], job_id)
+  else:
+    # marker == _JOB_MARKER_DEAD — halt the asset via the shared text-core primitive, in this
+    # branch's own single write+commit (the marker clear above touched no note text)
+    reason = HaltReason.JOB_DIED.format(job_id = job_id, label = checkbox_label)
+    fm_text, body, _ = flip_gate.halt_asset_text(
+        fm_text, body, reason, author_name = _PROMOTE_AUTHOR_NAME, today = today_str,
+        lang = note_lang,
+    )
+    action = TickAction.ASSET_HALTED
+    subject = f"{_PROMOTE_AUTHOR_NAME}: halt {asset_dir.name} — {reason}"
+
+  # one write, one commit, shared by every branch above
+  asset_note.write_text(note_explainers.heal_note_text(asset_note, fm_text + body))
+  _commit_note_change(asset_dir, asset_note, subject)
+
+  # the applied marker's action plus the job identity it acted on, for every branch above
+  return {
+      TickAction.ACTION: action,
+      JobMarker.CHECKBOX: checkbox_label,
+      JobMarker.JOB_ID: job_id,
+  }
+
+
+# Decision: shared line-builder over per-caller formatting — two independent writers can
+# each be the one to observe the same DEAD marker first, and whichever wins must append
+# identical text (4b Task 5 fix round 1 — a duplicated formatter let one writer consume DEAD
+# identically to DONE/CANCELLED, silently dropping this line whenever it won the race).
+
+def _coordinator_job_dead_warning_line(
+    author_name: str, trigger: str, job_id: str, today_str: str, *, lang: str,
+) -> str:
   """
-  Build the `[!info]` readiness-withdrawal callout.
+  Build the `# History` WARNING line for a dead coordinator-job bundle.
+
+  Single owner of this line's exact wording, so concurrent writers append identical text
+  regardless of which one reaches the dead marker first.
+
+  Args:
+    author_name: The calling worker's own bot identity for the `· <author>` segment.
+    trigger: The `CoordinatorJobKey.TRIGGER` value recorded on the dead job.
+    job_id: The dead job's id.
+    today_str: ISO date string pinned into the line.
+    lang: The note's authoring language for the line's narrative tail.
 
   Returns:
-    The single-line callout text (no trailing newline).
+    The full `- <date> — <author> · WARNING: ...` History line text.
   """
-  return f"> [!info] readiness withdrawn — {gate} precondition no longer met"
+  # the localized narrative tail of the History line, in the note's authoring language
+  dead_tail = note_explainers.history_line_for_lang(lang, HistoryEvent.JOB_DEAD,
+                                                    job_id = job_id, trigger = trigger)
+  return f"- {today_str} — {author_name} · {dead_tail}"
 
 
-def _find_ready_block(body: str, gate: str) -> tuple[int, int] | None:
+def _apply_coordinator_job_marker(
+    asset_note: Path, text: str, fm_end: int, *,
+    body: str, asset_dir: Path, repo_root: Path, marker: str, job_info: dict, today_str: str,
+) -> dict:
   """
-  Locate the `[!ready]` callout block for `gate` in `body`.
+  Sweep a finished `coordinator_job` marker off the asset.
 
-  The block spans the `[!ready]` heading line and every immediately
-  following `>`-prefixed continuation line.
+  Mirrors `_apply_job_marker`'s shape, applied to the coordinator's own job slot instead of a
+  launch-checkbox job — but the coordinator's own wake job is not a ladder expert job, so a
+  `DEAD` bundle here never halts the asset (`spec_halted` is left untouched) and lands a
+  `# History` WARNING line instead of `_apply_job_marker`'s `[!failure]` callout, the one branch
+  that writes and commits the note at all; a `DONE` / `CANCELLED` bundle is additionally retired
+  via `gate_dispatch.consume_stale_job` so its dedup key frees for the coordinator's next
+  dispatch (`expert_runtime.dispatch_job`'s own dedup scan still treats a DONE-but-unconsumed
+  bundle as active — unlike a DEAD one, which the scan already excludes on its own, so no
+  retirement call is needed on that branch), and its whole effect is the marker clear and that
+  retirement, neither of which touches the note, so it costs no commit. Any `PENDING_WAKE`
+  sidecar flag (`job-done` or `declined`) raised while the swept job ran is left as-is on every
+  branch — it survives for the next genuine wake to redeem, never cleared here.
+
+  Args:
+    asset_note: The status folder-note path.
+    text: The folder-note's full text as last read from disk.
+    fm_end: Index just past the frontmatter's closing `---` fence in `text`.
+    body: The folder-note's body text (post-frontmatter).
+    asset_dir: The asset folder the commit's repo root is resolved from.
+    repo_root: The repository root holding the job-marker sidecar and `.experts/.jobs/`.
+    marker: The terminal marker found in the job's bundle directory (`"DONE"` / `"DEAD"` /
+      `"CANCELLED"`).
+    job_info: The tracked coordinator-job marker (`trigger` / `expert` / `job_id`).
+    today_str: ISO date string pinned into the History line.
 
   Returns:
-    A `(start_line, end_line)` half-open line-index range, or None when no
-    such block exists.
+    A result dict naming the applied `TickAction` plus the job's `trigger` and `job_id`.
   """
-  lines = body.splitlines()
-  head = f"> {_READY_MARK} {gate}{_READY_TAIL}"
-  for i, ln in enumerate(lines):
-    if ln.strip() == head:
-      end = i + 1
-      while end < len(lines) and lines[end].startswith(">"):
-        end += 1
-      return i, end
-  return None
+  trigger = job_info[JobMarker.TRIGGER]
+  job_id = job_info[JobMarker.JOB_ID]
+  spec_job_markers.update(repo_root, asset_note, { JobMarker.COORDINATOR_JOB: None })
 
+  # every marker clears the coordinator-job marker (already applied above); only DEAD owes the
+  # note a WARNING line, and only DONE / CANCELLED owe the bundle its dedup retirement
+  if marker == _JOB_MARKER_DEAD:
+    # one language resolution serves the WARNING line and the explainer heal (the resolver
+    # walks to the settings root and reads config)
+    note_lang = note_explainers.lang_for_note(asset_note)
+    body = flip_gate._append_under_heading(
+        body, Section.HISTORY,
+        _coordinator_job_dead_warning_line(_PROMOTE_AUTHOR_NAME, trigger, job_id, today_str,
+                                           lang = note_lang),
+    )
+    asset_note.write_text(text[:fm_end] + note_explainers.ensure_explainers(body, note_lang))
+    _commit_note_change(
+        asset_dir, asset_note,
+        f"{_PROMOTE_AUTHOR_NAME}: coordinator job {job_id} ({trigger}) died on {asset_dir.name}",
+    )
+    action = TickAction.COORDINATOR_JOB_DEAD
+  else:
+    # marker in (_JOB_MARKER_DONE, _JOB_MARKER_CANCELLED) — retire the bundle so its dedup key
+    # frees for the coordinator's next dispatch; nothing here reaches the note
+    gate_dispatch.consume_stale_job(repo_root, job_info[JobMarker.EXPERT], job_id)
+    action = TickAction.COORDINATOR_JOB_CONSUMED
 
-def _has_ready(body: str, gate: str) -> bool:
-  """
-  Return whether a `[!ready]` callout for `gate` already exists.
-
-  Returns:
-    True when the readiness callout is present in the body.
-  """
-  return _find_ready_block(body, gate) is not None
-
-
-def _append_callout(body: str, block: str) -> str:
-  """
-  Append a callout block under the `# Gates` section.
-
-  Returns:
-    The body text with the block inserted at the end of the Gates section.
-  """
-  lines = body.splitlines()
-  head_idx = None
-  for i, ln in enumerate(lines):
-    if ln.strip() == Section.GATES:
-      head_idx = i
-      break
-  # guard: no Gates section — append a fresh one at end of body
-  if head_idx is None:
-    suffix = "" if body.endswith("\n") else "\n"
-    return body + f"{suffix}\n{Section.GATES}\n\n{block}\n"
-  insert_at = len(lines)
-  for j in range(head_idx + 1, len(lines)):
-    # guard: stop before the next markdown heading
-    if lines[j].startswith("#"):
-      insert_at = j
-      break
-  end = insert_at
-  while end > head_idx + 1 and not lines[end - 1].strip():
-    end -= 1
-  new_lines = [*lines[:end], block, *lines[end:]]
-  return "\n".join(new_lines) + ("\n" if body.endswith("\n") else "")
-
-
-def _replace_block(body: str, span: tuple[int, int], block: str) -> str:
-  """
-  Replace the line range `span` in `body` with `block`.
-
-  Returns:
-    The body text with the spanned lines swapped for the block.
-  """
-  lines = body.splitlines()
-  start, end = span
-  new_lines = [*lines[:start], block, *lines[end:]]
-  return "\n".join(new_lines) + ("\n" if body.endswith("\n") else "")
+  # the applied marker's action plus the job identity it acted on, for every branch above
+  return {
+      TickAction.ACTION: action,
+      JobMarker.TRIGGER: trigger,
+      JobMarker.JOB_ID: job_id,
+  }
 
 
 def gate_tick(asset_note: Path, today: str | None = None) -> dict:
   """
-  Advance one asset's gates by a single notch.
+  Poll one asset's active expert job and coordinator job, then structurally check the
+  folder-note.
 
-  Auto-flips the next derived gate when ready, drops a one-time readiness
-  callout for the next human-signal gate, or withdraws a stale readiness
-  callout whose precondition has regressed. A no-op when nothing applies.
+  Step 0.6 — active-job polling: an asset whose sidecar tracks an `active_job` has that job
+  bundle's terminal marker checked before anything else this tick; a still-running job (no
+  marker yet) falls through to the coordinator-job poll below unaffected, and so does an asset
+  that tracks no job at all. Every other sequencing decision this worker used to make (stage
+  promotion, gate advancement, downward reconciliation, the launch-checkbox ladder,
+  change-cascade dispatch) now belongs to `spec.coordinator`, per `lazy-spec.coordination-playbook.md`.
+
+  Step 0.65 — coordinator-job polling: same terminal-marker check, applied to the sidecar's
+  `coordinator_job` instead — this worker's own backstop against a dead coordinator job
+  stranding the marker forever when no further commit wakes `coordinator_dispatch.py` to notice
+  (see this module's own docstring, plan 4b Task 5).
+
+  Step 0.7 — stuck-draft backstop: with no job tracked and no wake pending, any authored
+  sibling doc certainly stranded at `spec_stage: draft` (its writing job's DONE recorded, no
+  review ever opened) is submitted into review, with a `# History` line per doc.
 
   Args:
     asset_note: The status folder-note path; its parent is the asset dir.
-    today: Optional ISO date forwarded to the flip primitive for callouts.
+    today: Optional ISO date forwarded into the applied job-marker's callout and history line.
 
   Returns:
-    A result dict whose `action` is one of `auto-flipped`, `ready-callout`,
-    `readiness-withdrawn`, or `noop`, with the affected `gate` when not a no-op.
+    A result dict whose `action` is one of `job-done`, `job-cancelled`, `asset-halted`,
+    `coordinator-job-consumed`, `coordinator-job-dead`, `stuck-draft-submitted`, or `noop`;
+    every non-`noop` action carries the identity it acted on (`checkbox` + `job_id` for the
+    active-job branches, `trigger` + `job_id` for the coordinator-job branches, a `docs` list
+    for the stuck-draft branch); a `noop` carries an additional `violations` list when
+    `note-check` found any.
   """
   asset_dir = asset_note.parent
+  repo_root = flip_gate._repo_root(asset_dir)
   today_str = flip_gate._today(today)
-  # Step 0 — sibling-doc stage promotion (per README/overview promise: "Drive an asset's
-  # readiness gates AND per-file stages"). When a sibling doc's review finalized as approved
-  # and its `spec_stage` is still `draft`, flip the stage in lock-step with its mirror tag and
-  # append the asset's `# History`. Return early — the gate-flip pass on the next tick reads
-  # the freshly promoted stages and advances `spec_design_done` / `spec_plan_done` naturally.
-  promoted = _advance_stages_from_review(asset_dir, asset_note, today_str)
-  # guard: a promotion happened this tick — surface it and let the next tick advance gates
-  if promoted:
-    return {TickAction.ACTION: TickAction.STAGE_PROMOTED, "docs": promoted}
   text = asset_note.read_text()
-  fm, fm_end = flip_gate._parse_frontmatter(text)
+  fm_values, fm_end = flip_gate._parse_frontmatter(text)
   body = text[fm_end:]
-  stages = flip_gate._collect_stages(asset_dir)
-  # First reconcile any stale readiness callout against current preconditions.
-  for gate in GATE_ORDER:
-    span = _find_ready_block(body, gate)
-    # guard: only withdraw a present callout whose precondition no longer holds
-    if span is not None and not flip_gate.preconditions_met(asset_dir, gate, fm, stages):
-      new_body = _replace_block(body, span, _withdrawn_callout(gate))
-      asset_note.write_text(text[:fm_end] + new_body)
-      _commit_readiness_change(asset_dir, asset_note, gate, withdrawn = True)
-      return {TickAction.ACTION: TickAction.READINESS_WITHDRAWN, "gate": gate}
-  # `next_gate` (not `gate`) — the loop variable above narrows `gate` to `str`, so reassigning
-  # the variable to `_next_flippable(...)` (returns `str | None`) widens the type and trips
-  # mypy strict variable-narrowing on the loop-binding leak.
-  next_gate = _next_flippable(asset_dir, fm, stages)
-  # guard: nothing false-and-ready to advance
-  if next_gate is None:
-    return {TickAction.ACTION: TickAction.NOOP}
-  if next_gate in DERIVED_GATES:
-    source = flip_gate._design_doc_name(asset_dir) if next_gate == GATE_ORDER[0] else "plan.md"
-    flip_gate.flip_gate(
-        asset_dir, next_gate, auto = True, reason = f"{source} approved", today = today,
+  markers = spec_job_markers.read(repo_root, asset_note)
+
+  # Step 0.6 — active-job polling: an asset tracking an `active_job` marker has its job bundle's
+  # terminal marker checked before anything else this tick
+  job_info = markers[JobMarker.ACTIVE_JOB]
+  if isinstance(job_info, dict):
+    marker = _find_active_job_marker(repo_root, job_info[JobMarker.EXPERT], job_info[JobMarker.JOB_ID])
+    if marker is not None:
+      return _apply_job_marker(
+          asset_note, text, fm_end,
+          body = body, asset_dir = asset_dir, repo_root = repo_root,
+          marker = marker, job_info = job_info, today_str = today_str,
+      )
+
+  # Step 0.65 — coordinator-job polling: same terminal-marker check, applied to the
+  # coordinator's own one-job-per-asset slot
+  coord_job_info = markers[JobMarker.COORDINATOR_JOB]
+  if isinstance(coord_job_info, dict):
+    coord_marker = _find_active_job_marker(
+        repo_root, coord_job_info[JobMarker.EXPERT], coord_job_info[JobMarker.JOB_ID],
     )
-    return {TickAction.ACTION: TickAction.AUTO_FLIPPED, "gate": next_gate}
-  # Human-signal gate: append the readiness callout once.
-  if _has_ready(body, next_gate):
-    return {TickAction.ACTION: TickAction.NOOP}
-  new_body = _append_callout(body, _ready_callout(next_gate, asset_dir.name))
-  asset_note.write_text(text[:fm_end] + new_body)
-  _commit_readiness_change(asset_dir, asset_note, next_gate, withdrawn = False)
-  return {TickAction.ACTION: TickAction.READY_CALLOUT, "gate": next_gate}
+    if coord_marker is not None:
+      return _apply_coordinator_job_marker(
+          asset_note, text, fm_end,
+          body = body, asset_dir = asset_dir, repo_root = repo_root,
+          marker = coord_marker, job_info = coord_job_info, today_str = today_str,
+      )
+
+  # Step 0.7 — stuck-draft backstop: an authored doc whose writing job's DONE landed with no
+  # review ever opened on it (the coordinator skipped its mandatory `submit` call) is submitted
+  # into review here, since no other mechanism discovers it (state-sanitizers-design.md)
+  submitted = [
+      doc_name
+      for doc_name in _stuck_draft_docs(asset_dir, fm_values = fm_values, body = body, markers = markers)
+      if _submit_stuck_draft(asset_dir, doc_name)
+  ]
+  if submitted:
+    for doc_name in submitted:
+      # the localized narrative tail of the History line, in the note's authoring language
+      opened_tail = note_explainers.history_line(asset_note, HistoryEvent.REVIEW_OPENED,
+                                                 doc = doc_name)
+      body = flip_gate._append_under_heading(
+          body, Section.HISTORY, f"- {today_str} — {_PROMOTE_AUTHOR_NAME} · {opened_tail}",
+      )
+    asset_note.write_text(text[:fm_end] + note_explainers.ensure_explainers(
+        body, note_explainers.lang_for_note(asset_note)))
+    _commit_note_change(
+        asset_dir, asset_note,
+        f"{_PROMOTE_AUTHOR_NAME}: stuck-draft backstop opened review on "
+        f"{', '.join(submitted)} ({asset_dir.name})",
+    )
+    return { TickAction.ACTION: TickAction.STUCK_DRAFT_SUBMITTED, _DOCS_KEY: submitted }
+
+  # Structural check, folded into the tick result — repairing a violation is the coordinator's
+  # own job (through its pen and `note-set-key`), never this worker's.
+  violations = _run_note_check(asset_note)
+  result: dict = { TickAction.ACTION: TickAction.NOOP }
+  if violations:
+    result[_VIOLATIONS_KEY] = violations
+  return result
 
 
 def main(argv: list[str]) -> int:
   """
-  Advance one asset's gates from the command line, printing the result as JSON.
+  Poll one asset's active job and note-check it from the command line, printing the result as
+  JSON.
 
   Args:
     argv: Command-line arguments, excluding the program name.
@@ -496,12 +832,14 @@ def main(argv: list[str]) -> int:
                       help = "ISO date pinned into emitted callouts")
   args = parser.parse_args(argv)
   asset_note: Path = args.asset_note.resolve()
+
   # guard: asset status folder-note must exist
   if not asset_note.is_file():
     sys.stderr.write(f"no status folder-note: {asset_note}\n")
     return 2
-  result = gate_tick(asset_note, today = args.today)
-  print(json.dumps(result))
+
+  # run the tick and report the result the same way every other lazycortex-specs worker does
+  print(json.dumps(gate_tick(asset_note, today = args.today)))
   return 0
 
 

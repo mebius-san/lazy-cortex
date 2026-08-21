@@ -59,7 +59,7 @@ from constants import HookKey, HookName  # noqa: E402
 
 # --- Tool / command gating ----------------------------------------------------
 
-_GIT_INDEX_VERBS_RE = re.compile(r"^\s*git\s+(add|rm|mv|reset|commit)\b")
+_GIT_INDEX_VERBS_RE = re.compile(r"^\s*git\s+(add|rm|mv|reset|commit|checkout|restore)\b")
 # Coarse filter for the pathspec branch — a git invocation anywhere in the command, chained or
 # prefixed. The precise classification is `git_cmdline.parse_segments`.
 _GIT_WORD_RE = re.compile(r"\bgit\b")
@@ -102,6 +102,18 @@ _DENY_ADD = (
 _DENY_AUTO_STAGING = (
   "`git rm` / `git mv` auto-stage, which claims the operator's index. Use Bash `rm` / `mv` in "
   f"the worktree, then {_REQUIRED_FORM} naming the old and new paths."
+)
+_DENY_FILE_CHECKOUT = (
+  "`git checkout <tree-ish> -- <path>` writes the restored content into the operator's index as "
+  "well as the worktree, which claims an index that is not yours. Use `git restore --worktree "
+  "-- <path>` (restores from the index, index untouched) or `git restore --source=<tree-ish> "
+  "--worktree -- <path>` (restores from a revision, index untouched). Reverting your own edit "
+  "by hand with `Edit` is safer still when the file's pre-edit cleanliness is unproven."
+)
+_DENY_RESTORE_STAGED_SOURCE = (
+  "`git restore --staged --source=<tree-ish>` writes that revision's content into the operator's "
+  "index — that is staging, not un-staging. Drop `--source` to un-stage (equivalent to `git "
+  "reset -- <path>`), or drop `--staged` to touch the worktree alone."
 )
 _DENY_UNPARSEABLE = (
   "this command could not be parsed, so the guard cannot tell whether it snapshots the shared "
@@ -245,6 +257,12 @@ def main() -> int:
   cfg = staging_lock.load_config(repo)
   # guard: guard disabled for this repo
   if not cfg.enabled:
+    return 0
+
+  # guard: a linked worktree has its own index — the shared-index premise of both rows fails,
+  # so the discipline does not apply to an isolated job staging there. After the kill-switch,
+  # so a disabled repo never pays the two rev-parse spawns.
+  if _in_linked_worktree(repo):
     return 0
 
   # Pathspec row: the index belongs to the operator, the lock machinery stays dormant.
@@ -398,6 +416,25 @@ def _targets_this_repo(repo: Path, repo_dir: str) -> bool:
   return Path(probe.stdout.strip()).resolve() == repo.resolve()
 
 
+def _names_existing_path(repo: Path, segment: git_cmdline.GitSegment) -> bool:
+  """
+  Report whether any positional argument names a path that exists in the repository.
+
+  `git_cmdline.parse_segments` drops the `--` separator, so a revision and a pathspec arrive in
+  one positional tuple. Existence in the worktree is what tells a file-targeting invocation
+  (`git checkout HEAD -- a.md`) from a branch-targeting one (`git checkout main`) — a branch name
+  is not a path on disk, while the pathspec of a restore-a-file call is.
+
+  Args:
+    repo: Absolute path to the repository root.
+    segment: One parsed git invocation from the command line.
+
+  Returns:
+    True when at least one positional argument resolves to an existing file or directory.
+  """
+  return any((repo / p).exists() for p in segment.pathspecs)
+
+
 def _pathspec_violation(repo: Path, segment: git_cmdline.GitSegment) -> str | None:
   """
   Return the reason one git invocation breaks the pathspec discipline, or None when it is legal.
@@ -421,6 +458,18 @@ def _pathspec_violation(repo: Path, segment: git_cmdline.GitSegment) -> str | No
   # guard: both verbs stage as a side effect
   if segment.verb in _AUTO_STAGING_VERBS:
     return _DENY_AUTO_STAGING
+  # guard: a file-targeting checkout rewrites the index entry alongside the worktree file. A
+  # branch-targeting one does not name a path at all, so an existing path among the positionals is
+  # what separates the two — `git checkout main` passes, `git checkout HEAD -- a.md` does not.
+  # waiver: git CLI vocabulary, not a domain constant
+  if segment.verb == "checkout":
+    return _DENY_FILE_CHECKOUT if _names_existing_path(repo, segment) else None
+  # guard: `--staged` alone un-stages (the operator's own escape hatch, like `reset`); paired with
+  # `--source` it writes a revision's content INTO the index, which is staging.
+  # waiver: git CLI vocabulary, not a domain constant
+  if segment.verb == "restore":
+    staged_from_source = "--staged" in segment.flags and "--source" in segment.flags
+    return _DENY_RESTORE_STAGED_SOURCE if staged_from_source else None
   # guard: every other verb (reset, push, status, ...) leaves the index to the operator
   # waiver: git CLI vocabulary, not a domain constant
   if segment.verb != "commit":
@@ -468,6 +517,40 @@ def _git_at(cwd: Path, *args: str) -> subprocess.CompletedProcess:
   except (OSError, subprocess.SubprocessError):
     # waiver: inline numeric literal (git generic-failure exit code), not a domain constant
     return subprocess.CompletedProcess(args = [ "git", *args ], returncode = 128, stdout = "", stderr = "")
+
+
+def _in_linked_worktree(cwd: Path) -> bool:
+  """
+  Return True when `cwd` sits inside a linked git worktree rather than the primary checkout.
+
+  A linked worktree has its own index, so the shared-index premise behind both the pathspec
+  discipline and the staging-window mutex does not hold there — an isolated expert job staging
+  in its worktree contends with nobody.
+
+  Args:
+    cwd: Directory to resolve from.
+
+  Returns:
+    True when the resolved `--git-dir` differs from `--git-common-dir`; False otherwise,
+    including when either resolution fails.
+  """
+  # `--path-format=absolute` would need git >= 2.31 (the marketplace-wide git floor is 2.10), so both
+  # possibly-relative results are resolved against cwd before comparison instead
+  # waiver: git CLI vocabulary, not domain constants
+  own = _git_at(cwd, "rev-parse", "--git-dir")
+  # waiver: git CLI vocabulary, not domain constants
+  common = _git_at(cwd, "rev-parse", "--git-common-dir")
+  # guard: resolution failed — treat as the primary checkout so the guard stays in force
+  if own.returncode != 0 or common.returncode != 0:
+    return False
+  own_path = Path(own.stdout.strip())
+  common_path = Path(common.stdout.strip())
+  # relative outputs resolve against the directory the probe ran in
+  if not own_path.is_absolute():
+    own_path = (cwd / own_path).resolve()
+  if not common_path.is_absolute():
+    common_path = (cwd / common_path).resolve()
+  return own_path.resolve() != common_path.resolve()
 
 
 def _git_dir(cwd: Path) -> Path | None:
@@ -554,6 +637,9 @@ def _handle_stop(payload: dict) -> int:
   git_dir = _git_dir(cwd)
   # guard: not inside a git repository
   if git_dir is None:
+    return 0
+  # guard: a linked worktree's index is private — nothing here contends with the operator
+  if _in_linked_worktree(cwd):
     return 0
   # guard: mid merge / rebase / cherry-pick / revert
   if _mid_operation(git_dir):

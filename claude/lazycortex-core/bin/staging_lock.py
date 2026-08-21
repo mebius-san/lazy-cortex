@@ -64,6 +64,18 @@ class StagingConfig:
     max_idle_seconds: Index-idle threshold combined with `max_hold_seconds` to qualify a lock
       for the stale-and-idle break rule.
   """
+
+  # Domain(runtime.git-safety):
+  # # Pathspec discipline supersedes the staging mutex
+  # A repository operates under exactly one of two independent behaviours for keeping
+  # concurrent sessions from clobbering each other's staged changes: a staging-window
+  # mutex, or a pathspec discipline that requires every commit to name its own files and
+  # otherwise leaves the index alone. When both would apply, pathspec discipline wins
+  # outright rather than combining with the mutex, because the mutex's release condition
+  # is an empty index after a commit — a commit that only registers a new path without
+  # staging its content can never make that condition true, so composing the two would
+  # leave every session that adds a new file holding a lock nobody ever releases.
+
   enabled: bool = DEFAULT_ENABLED
   mutex_enabled: bool = DEFAULT_MUTEX_ENABLED
   pathspec_enabled: bool = DEFAULT_PATHSPEC_ENABLED
@@ -163,9 +175,28 @@ def resolve_session_id() -> str:
   the same lock file. Resolution prefers the `CLAUDE_SESSION_ID` environment variable, then
   falls back to a process-tree probe, then to the parent process id.
 
+  Guarantees:
+    - The returned identifier is a non-empty string, compared only for equality between
+      sessions sharing the same lock file.
+
   Returns:
     A non-empty string identifying the current session.
   """
+
+  # Contract:
+  # The returned identifier is opaque and MUST only be compared for equality between
+  # sessions sharing the same lock file; it is always a non-empty string.
+
+  # Domain(runtime.git-safety):
+  # # Staging lock holder identity
+  # A staging lock records its holder as an opaque identifier that is only ever compared
+  # for equality between sessions sharing one lock file; it carries no meaning beyond
+  # "the same session or not". The identifier favors one supplied directly by the hosting
+  # harness, falls back to locating the nearest ancestor process that is itself a Claude
+  # Code process, and only then falls back to the immediate parent process. A session that
+  # already holds the lock and requests it again is recognized purely by this identity
+  # match and re-enters without waiting or contending.
+
   env = os.environ.get("CLAUDE_SESSION_ID", "")
   # guard: explicit session id provided by the harness
   if env:
@@ -432,6 +463,19 @@ def _is_breakable(
     A pair of `(breakable, reason)` where `breakable` is True iff one of the rules matched
     and `reason` identifies the matching rule (or `held` when none matched).
   """
+
+  # Domain(runtime.git-safety):
+  # # Auto-break rules for a held staging lock
+  # A held lock is broken automatically under three conditions, tried in a fixed order,
+  # where the first match decides the outcome. A lock whose holder process no longer runs
+  # on this machine is broken immediately. A lock recorded by a different machine than the
+  # one now asking is broken immediately too, since a dead-process check only means
+  # something on the machine that owns the process table. Otherwise a lock becomes
+  # breakable only once it has both been held past a configured age threshold and shows no
+  # recent staging activity — the index has not advanced past where it stood when last
+  # observed, and has stayed unchanged past a configured idle threshold — so a holder that
+  # is still actively staging keeps its lock no matter how long the staging window is open.
+
   # Rule 1: dead PID
   # guard: holder process no longer exists on this host
   if not _pid_alive(state.pid):
@@ -463,6 +507,10 @@ def break_lock(repo_root: Path, reason: str) -> bool:  # pylint: disable=unused-
 
   The call is idempotent: invoking it when no lock exists is a no-op that returns False.
 
+  Guarantees:
+    - The lock file is deleted unconditionally, regardless of which session holds it, its
+      staleness, or the auto-break eligibility rules.
+
   Args:
     repo_root: Absolute path to the root of the repository.
     reason: Human-readable reason for the manual break, surfaced by callers in diagnostics.
@@ -470,6 +518,11 @@ def break_lock(repo_root: Path, reason: str) -> bool:  # pylint: disable=unused-
   Returns:
     True when a lock file existed and was removed, False when no lock file was present.
   """
+
+  # Contract:
+  # The lock file is deleted unconditionally, regardless of which session holds it, its
+  # staleness, or the auto-break eligibility rules — ownership is never checked.
+
   path = _lock_path(repo_root)
   existed = path.exists()
   _delete_lock(repo_root)
@@ -511,6 +564,14 @@ def acquire(
   the lock can be taken, the peer becomes breakable, or the configured wait deadline
   expires. Re-entry from the same session is a no-op that returns immediately.
 
+  Guarantees:
+    - When the mutex is disabled, the call succeeds immediately without reading or writing
+      the lock file on disk.
+    - A session that already holds the lock re-enters immediately without waiting or
+      rewriting the lock file.
+    - A refused attempt never modifies the lock file; the peer's lock is left exactly as
+      observed.
+
   Args:
     repo_root: Absolute path to the root of the repository.
     session_id: Identifier of the Claude Code session requesting the lock.
@@ -519,12 +580,27 @@ def acquire(
   Returns:
     An `AcquireResult` describing the outcome of the attempt.
   """
+
+  # Contract:
+  # When the mutex is disabled, the call succeeds immediately without reading or writing
+  # the lock file on disk.
+
   # guard: mutex is disabled in this repository — fast-path success
   if not cfg.enabled:
     # waiver: AcquireStatus token, single-source set in the AcquireStatus Literal, not a reusable cross-module key
     return AcquireResult(status = "acquired", held_by_us = True,
                          # waiver: one-off human-facing message
                          message = "staging lock disabled (lazy-core.git.enabled=false)")
+
+  # Domain(runtime.git-safety):
+  # # Waiting for a live staging lock
+  # When the staging lock is held by a peer that is not yet eligible to be broken, a
+  # session does not fail immediately; it polls with a short randomized delay between
+  # attempts for up to a configured wait budget. Only once that budget runs out, with the
+  # peer still live and still not stale, does the request come back refused instead of
+  # acquired — and the refusal names how much longer the peer would have to sit idle
+  # before it becomes eligible for automatic breaking, so a caller can decide whether to
+  # wait it out or break the lock by hand.
 
   # poll-loop bookkeeping: when to give up, how long we have waited, and whether this is the first look
   deadline = time.time() + cfg.wait_seconds
@@ -541,6 +617,10 @@ def acquire(
       _write_lock(repo_root, _new_lock_state(repo_root, session_id))
       status: AcquireStatus = "acquired" if first_pass else "waited_then_acquired"
       return AcquireResult(status = status, held_by_us = True, waited_seconds = waited)
+
+    # Contract:
+    # A session that already holds the lock re-enters it immediately without waiting or
+    # rewriting the lock file.
 
     # Lock is ours — re-entry.
     # guard: lock is already held by the requesting session
@@ -559,6 +639,10 @@ def acquire(
         status = "broke_then_acquired", held_by_us = True,
         break_reason = reason, peer = existing, waited_seconds = waited,
       )
+
+    # Contract:
+    # A refused attempt never modifies the lock file; the peer's lock is left exactly as
+    # observed.
 
     # Held by live peer; check deadline.
     now = time.time()
@@ -612,6 +696,10 @@ def release_if_index_empty(repo_root: Path, session_id: str) -> ReleaseResult:
   session, and the git index for the repository must contain no staged entries. When
   either precondition fails the lock is left untouched.
 
+  Guarantees:
+    - The lock file is deleted only when the caller's session holds it and the git index
+      has no staged entries; otherwise it is left completely unchanged.
+
   Args:
     repo_root: Absolute path to the root of the repository.
     session_id: Identifier of the Claude Code session requesting the release.
@@ -619,6 +707,20 @@ def release_if_index_empty(repo_root: Path, session_id: str) -> ReleaseResult:
   Returns:
     A `ReleaseResult` describing whether the lock was deleted and why.
   """
+
+  # Contract:
+  # The lock file is deleted only when the caller's session holds it and the git index
+  # has no staged entries; on either check failing, the lock file is left completely
+  # unchanged.
+
+  # Domain(runtime.git-safety):
+  # # Conditional release of the staging lock
+  # A session never simply drops its own lock; release happens only when its own staged
+  # changes have actually left the index, and only for the session recorded as the
+  # current holder. A release attempt made by any other session, or made while staged
+  # changes still remain, leaves the lock exactly as it was — the empty index is the
+  # caller-visible signal that the staging window this lock protects has genuinely closed.
+
   state = _read_lock(repo_root)
   # guard: no lock file currently exists for this repository
   if state is None:
@@ -651,12 +753,22 @@ def load_config(repo_root: Path) -> StagingConfig:
   keys fall back to module-level defaults. A malformed settings file produces a fully
   default configuration rather than an error.
 
+  Guarantees:
+    - A missing, unreadable, or malformed settings file never raises; the call always
+      returns a fully populated `StagingConfig`.
+
   Args:
     repo_root: Absolute path to the root of the repository.
 
   Returns:
     A `StagingConfig` reflecting the merged configuration.
   """
+
+  # Contract:
+  # A missing, unreadable, or malformed settings file NEVER raises; the call always
+  # returns a fully populated StagingConfig, falling back to module-level defaults for
+  # any section or key that cannot be read.
+
   settings_path = repo_root / _SETTINGS_REL
   section: dict = {}
   # guard: settings file exists for this repository

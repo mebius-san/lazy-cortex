@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, split behaviour, direct agent invocation, and install.
-last_regen: 2026-08-07
+last_regen: 2026-08-19
 no_diagram: true
 source_skills:
   - lazy-diagram.draw
@@ -9,6 +9,7 @@ source_skills:
   - lazy-diagram.draw-mermaid
   - lazy-diagram.draw-ascii
   - lazy-diagram.install
+source_sha: dd568a4ee2fbb367826851a45f41e55c5c10ad9f
 ---
 # Frequently asked questions
 
@@ -70,7 +71,13 @@ Fix uses the prose surrounding the existing fence — paragraphs between the anc
 
 ## Why does every node label in a flow/nav/tree-shaped mermaid diagram come out wrapped in double quotes?
 
-Mermaid reads the character right after a node's opening bracket as a shape modifier — `[/` opens a parallelogram, `[(` a cylinder, `[[` a subroutine, `{{` a hexagon — before it ever looks at your label text. A label that happens to start with a slash, such as a skill verb like `/wiki.install`, used to collide with that rule: `id[/wiki.install...]` reads as an unterminated parallelogram and the diagram silently failed to render. The mermaid writer now always quotes every node label (`id["/wiki.install"]`, `id{"text"}`, `id(("text"))`), with no exceptions, so slashes, brackets, parentheses, and `#`/`-` characters can appear in a label without breaking the shape. This is a rendering detail, not something you configure — quoting happens automatically whenever `/lazy-diagram.draw` or `/lazy-diagram.fix` produces or re-conforms a mermaid fence.
+Mermaid reads the character right after a node's opening bracket as a shape modifier — `[/` opens a parallelogram, `[(` a cylinder, `[[` a subroutine, `{{` a hexagon — before it ever looks at your label text. A label that happens to start with a slash, such as a skill verb like `/lazy-wiki.install`, used to collide with that rule: `id[/lazy-wiki.install...]` reads as an unterminated parallelogram and the diagram silently failed to render. The mermaid writer now always quotes every node label (`id["/lazy-wiki.install"]`, `id{"text"}`, `id(("text"))`), with no exceptions, so slashes, brackets, parentheses, and `#`/`-` characters can appear in a label without breaking the shape. This is a rendering detail, not something you configure — quoting happens automatically whenever `/lazy-diagram.draw` or `/lazy-diagram.fix` produces or re-conforms a mermaid fence.
+
+---
+
+## Why did the mermaid drawer return "failed:wrong-kind:<...>" for a layout, screen-scheme, or controls-scheme diagram?
+
+These three kinds render as mermaid's `block-beta` syntax, which expresses relationships through grid position rather than arrows. The drawer enforces three structural bounds on them. First, no edges (`-->`, `---`, `-.->`, `==>`) may appear anywhere in the fence — an edge in one of these kinds means the request actually needed a relationship diagram, and the drawer returns `failed:wrong-kind:<flow|architecture>` so the dispatcher can re-pick a kind that supports edges. Second, every declared ID — including a `block:<id>` container — must carry a `class <id> <role>` line; an unstyled ID renders on the host's default plate while its styled neighbours carry plate-coloured label text, so it comes out unreadable. Third, `kind=layout` specifically forbids a composite container — a `block:<id>` that opens its own `columns` and encloses child regions before `end` (a `block:<id>:<cells>` used only to span a leaf region is still fine); nested regions belong to `screen-scheme`, so the drawer returns `failed:wrong-kind:screen-scheme` instead. Rephrase the request to drop the relationship language for a flat `layout`, or switch to the kind the failure names.
 
 ---
 

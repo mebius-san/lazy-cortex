@@ -1,7 +1,7 @@
 ---
 name: lazy-memory.reflect
 description: "Run when the operator asks an expert to consolidate what it has learned — fold its recent run logs into its memory notes. Dispatches one `kind=reflect` job for that expert; refuses an expert that is not persona-marked (run `/lazy-memory.mark-persona` first)."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Write
+allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Write, Agent
 ---
 # Memory reflect
 

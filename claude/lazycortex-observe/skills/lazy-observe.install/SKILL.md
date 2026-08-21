@@ -1,7 +1,7 @@
 ---
 name: lazy-observe.install
 description: "Run when the operator asks to start shipping lazycortex runtime metrics off this host, to point the local daemons at their Prometheus / Mimir, or after `/lazy-observe.doctor` reports `not-installed`. Pre-flights for an existing collection stack and aborts untouched when one covers the host: pass `--integrate-only` when a Prometheus already runs here and only needs scrape targets, `--force-standalone` to install the shipper anyway. URL, auth, and agent kind are asked once and never re-asked; idempotent and quiet on re-run."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(test *), Bash(date *), Bash(brew *), Bash(which *), Bash(curl *), Bash(uname *), Bash(python3 *)
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(test *), Bash(date *), Bash(brew *), Bash(which *), Bash(curl *), Bash(uname *), Bash(python3 *), Agent
 ---
 # Install lazy-observe
 

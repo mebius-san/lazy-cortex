@@ -1,22 +1,23 @@
 ---
 chapter_type: walkthrough
 summary: Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
-last_regen: 2026-07-28
+last_regen: 2026-08-19
 diagram_spec:
   anchor: "How the flow works"
-  request: "End-to-end participant exchange when /lazy-repo.mark-public runs: user invokes the skill, skill checks git and GitHub visibility (preflight), determines scope (whole-repo vs. subtree), dispatches four parallel security scans (secrets, PII, infra, local paths) via /lazy-guard.check-public, presents unified findings table, loops per FAIL for resolution (encrypt/template/redact) and per WARN for fix/waive/skip, writes .guard-waivers.json with public_author and accepted waivers activating the pre-commit hook, then in whole-repo mode flips visibility via gh repo edit. Five participants: User, /lazy-repo.mark-public, /lazy-guard.check-public, Security Scan Agents, GitHub."
+  request: "End-to-end participant exchange when /lazy-repo.mark-public runs: user invokes the skill, skill checks git and GitHub visibility (preflight), determines scope (whole-repo vs. subtree), dispatches four parallel security scans (secrets, PII, infra, local paths) via /lazy-guard.check-public, presents unified findings table, loops per FAIL for resolution (encrypt/template/redact) and per WARN for fix/waive/skip, writes .guard-public.json with public_author and accepted waivers activating the pre-commit hook, then in whole-repo mode flips visibility via gh repo edit. Five participants: User, /lazy-repo.mark-public, /lazy-guard.check-public, Security Scan Agents, GitHub."
   kind_hint: sequence
 source_skills:
   - lazy-repo.mark-public
   - lazy-guard.check-public
+source_sha: 3cdbbae2caf723b935e9aa6694a744256adfe4f9
 ---
 # Making a Repo Public Safely
 
-You are about to make a private repository public. Before flipping the visibility switch you need to know what is hiding in those files — API keys, internal hostnames, personal email addresses, hardcoded paths that only exist on your machine, and your real name buried in a manifest. `/lazy-repo.mark-public` walks you through all of it in one session: security audit, guided resolution, waiver file creation, and an optional GitHub visibility flip. After the session, `/lazy-guard.check-public` fires automatically on every subsequent commit so new secrets never sneak in.
+You are about to make a private repository public. Before flipping the visibility switch you need to know what is hiding in those files — API keys, internal hostnames, personal email addresses, hardcoded paths that only exist on your machine, and your real name buried in a manifest. `/lazy-repo.mark-public` walks you through all of it in one session: security audit, guided resolution, waiver file creation, and an optional GitHub visibility flip. Literal secrets are blocked on every commit, in every repo, from the moment `lazycortex-core` is installed — that protection needs no setup from this walkthrough. What this walkthrough sets up is the second layer: catching PII, internal infrastructure details, and hardcoded local paths before they reach a public repo, and creating your public author identity record — protection that activates only once `.guard-public.json` exists.
 
 ## Outcome
 
-After completing this walkthrough you have a `.guard-waivers.json` committed at the repo root, every secret resolved (encrypted, templated, or redacted), your public author identity recorded so it auto-waives future author-field findings, and — in whole-repo mode — the repository flipped to public on GitHub. The pre-commit hook is active from the moment `.guard-waivers.json` lands: it watches for `git commit` anywhere you run it — a bare `git commit`, a chained command like `git add … && git commit … && git push`, or a flag form like `git -C <dir> commit` — and scans staged changes automatically, blocking on new secrets.
+After completing this walkthrough you have a `.guard-public.json` committed at the repo root, every secret resolved (encrypted, templated, or redacted), your public author identity recorded so it auto-waives future author-field findings, and — in whole-repo mode — the repository flipped to public on GitHub. The PII/infrastructure/local-paths pre-commit hook is active from the moment `.guard-public.json` lands: it watches for `git commit` anywhere you run it — a bare `git commit`, a chained command like `git add … && git commit … && git push`, or a flag form like `git -C <dir> commit` — and scans staged changes automatically, blocking on new findings that are not waived. This is a separate, additional layer: the secrets-blocking hook is already active in every repo regardless of `.guard-public.json`, and stays active even if you later delete the file.
 
 ## What you need
 
@@ -71,11 +72,11 @@ Verification gate: review the findings table before moving on. If a finding look
 
 You pick one and the skill applies it. The next step will not proceed until every FAIL is resolved.
 
-**For each WARN finding** you choose: fix it, waive it, or skip it for now. Waiving adds an entry to `.guard-waivers.json` with your justification. Skipping leaves the finding unresolved but does not block the next step.
+**For each WARN finding** you choose: fix it, waive it, or skip it for now. Waiving adds an entry to `.guard-public.json` with your justification. Skipping leaves the finding unresolved but does not block the next step.
 
-**Author identity findings (check B4)**: if the same name appears in multiple manifests, setting a `public_author` record once is better than writing one waiver per file. When you confirm your intended public name, the skill records it as a top-level `public_author` block in `.guard-waivers.json`. That single record auto-waives every B4 finding whose captured match equals your public name — including in files added later — without scattering individual waiver entries across the file.
+**Author identity findings (check B4)**: if the same name appears in multiple manifests, setting a `public_author` record once is better than writing one waiver per file. When you confirm your intended public name, the skill records it as a top-level `public_author` block in `.guard-public.json`. That single record auto-waives every B4 finding whose captured match equals your public name — including in files added later — without scattering individual waiver entries across the file.
 
-### 5 — Create `.guard-waivers.json`
+### 5 — Create `.guard-public.json`
 
 The skill writes the waiver file to the repo root with all accepted waivers from the previous step and commits it. The file structure the skill produces:
 
@@ -91,9 +92,9 @@ The skill writes the waiver file to the repo root with all accepted waivers from
 
 The `public_author` block is a top-level key separate from `waivers[]`. It governs every B4 author-field finding under the declared scopes automatically — no per-file waiver entry needed.
 
-Creating this file also activates the pre-commit hook: from this point forward, the hook scans staged changes and blocks on new secrets whenever a `git commit` shows up in a command you run — not just a bare `git commit` at the start. It also catches `git commit` buried in a chained command (`git add … && git commit … && git push`) and `git commit` invoked with flags before the subcommand (`git -C <dir> commit`), so there is no accidental gap between "the hook is on" and "the command I actually type gets scanned". To disable pre-commit scanning entirely, delete `.guard-waivers.json` via a tracked commit. To add new accepted exceptions later, re-run `/lazy-guard.check-public` and choose the waiver option for any finding you want to accept — the skill appends the entry.
+Creating this file activates the PII/infrastructure/local-paths pre-commit hook: from this point forward, that hook scans staged changes and blocks on new PII, infrastructure, or local-path findings that are not waived, whenever a `git commit` shows up in a command you run — not just a bare `git commit` at the start. It also catches `git commit` buried in a chained command (`git add … && git commit … && git push`) and `git commit` invoked with flags before the subcommand (`git -C <dir> commit`), so there is no accidental gap between "the hook is on" and "the command I actually type gets scanned". This is on top of, not instead of, the secrets-blocking hook — that one runs in every repo unconditionally and does not depend on this file existing. To disable the PII/infrastructure/local-paths scanning, delete `.guard-public.json` via a tracked commit; secrets scanning stays on regardless. To add new accepted exceptions later, re-run `/lazy-guard.check-public` and choose the waiver option for any finding you want to accept — the skill appends the entry.
 
-Verification gate: confirm `.guard-waivers.json` is committed and the hook is active before continuing.
+Verification gate: confirm `.guard-public.json` is committed and the hook is active before continuing.
 
 ### 6 — Go public on GitHub (whole-repo mode only)
 
@@ -111,7 +112,7 @@ The skill confirms the pre-commit hook is active and reminds you to run `/lazy-g
 
 ## After you're done
 
-The `.guard-waivers.json` file is the ongoing contract for this repo — keep it tracked in git. When a new accepted exception appears after a config change (a new email address, a new author field in a manifest), re-run `/lazy-guard.check-public` and add the waiver through the skill.
+The `.guard-public.json` file is the ongoing contract for this repo — keep it tracked in git. When a new accepted exception appears after a config change (a new email address, a new author field in a manifest), re-run `/lazy-guard.check-public` and add the waiver through the skill.
 
 Run `/lazy-guard.check-public` again after any major configuration change, after adding a new plugin, or after pulling in a third-party subtree that might introduce new paths or credentials.
 
@@ -148,7 +149,7 @@ sequenceDiagram
   loop per WARN
     user->>markPublic: fix, waive, or skip
   end
-  markPublic->>markPublic: write .guard-waivers.json with public_author and waivers
+  markPublic->>markPublic: write .guard-public.json with public_author and waivers
   Note over markPublic: pre-commit hook activated
   alt whole-repo mode
     markPublic->>github: gh repo edit visibility

@@ -3,32 +3,40 @@
 Checks performed (one finding per check):
 
 - `lazy.settings.json` is present and valid JSON.
-- `review.classes` is a list; each entry has `paths` (list of str)
+- `review.classes` is a list; each entry has `paths` (list of str) and a unique `class` identity token
   and `experts` (dict).
-- Every expert name referenced in `main` / `<section>` /
-  `history` / `final` is registered in the
-  top-level `experts` dict.
+- Every expert name referenced in `main` / `<section>` / `final` is
+  registered in the top-level `experts` dict.
 - Every registered expert has a non-empty `agent` AND a non-empty
   `git_author` block.
 - `review.edit_marker_style` is one of the four supported
   styles (`simple`/`diff`/`criticmarkup`/`html`).
 - New-schema `experts.validation` / `experts.terminal` writer objects
   satisfy the section-schema rules (Task 4.1).
+- Every `#review/<tag>` callout across the documents matched by
+  `review.classes[].paths` belongs to the closed vocabulary: `command`
+  / `question` / `concern` plus every `banner.py` state tag (Task 10).
 
 Output is a JSON record with `level` (PASS/WARN/FAIL) and a list of
 `findings`. Exit code: 0 on PASS, 1 on WARN, 2 on FAIL.
 """
 from __future__ import annotations
-# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # pylint: disable=import-error
 
 import argparse
 import json
+import os
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-from keys import Bucket, JobKey, Phase, Position, ReviewStatus, Style
+import banner as _banner
+# waiver: `claude/lazycortex-specs/bin/note_ops.py` shares this basename; in a whole-project mypy run the bare
+# `import note_ops` below resolves to that unrelated module instead (this dir's `__init__.py` makes review's
+# own copy package-qualified as `bin.note_ops`), so mypy checks the attribute against the wrong file's shape
+import note_ops as _note_ops  # type: ignore
+from keys import Bucket, JobKey, Phase, Position, ReviewStatus, Style, Tag
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -38,7 +46,21 @@ if TYPE_CHECKING:
 _VALID_STYLES = {"simple", "diff", "criticmarkup", "html"}
 _SECTION_ID_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 _FLAT_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
-_FLAT_PART_RE = re.compile(r"^[a-z0-9_-]+$")
+
+# Finding id for a duplicated `class` identity token. Unlike its per-entry siblings, which are
+# built as `f"class_{i}_..."`, this one names a collision between two entries and so carries no
+# single index.
+_CHECK_CLASS_IDENTITY_DUP = "class_identity_dup"
+
+# The closed vocabulary for `#review/<tag>` callouts (Task 10): the three operator/coordinator-
+# facing marker tags plus every banner state tag `banner.py` itself recognises. Computed from
+# `banner.State` rather than hardcoded so a future banner state stays in sync automatically.
+# The banner-state half never actually rejects anything today — `note_ops.build_report`'s own
+# `callouts` list already excludes tags in that same set (they are reported via `banner`
+# instead) — but the union is kept explicit rather than trimmed to the reachable subset, so this
+# check stays correct against the vocabulary the spec defines rather than against whatever
+# `note_ops` happens to pre-filter this release.
+_VALID_CALLOUT_TAGS = {"command", "question", "concern"} | {state.value for state in _banner.State}
 
 
 def _add(findings: list[dict], severity: str, check: str, message: str) -> None:
@@ -62,26 +84,6 @@ def _flatten_expert_name(name: str) -> str:
     The name with every `.` replaced by `-`.
   """
   return name.replace(".", "-")
-
-
-def _parse_expert_name(name: str) -> tuple[str, str]:
-  """
-  Split an `expert@repo` name into `(expert_part, repo_part)`.
-
-  Local mirror of the `expert_name` parser shipped by `lazycortex-core`;
-  cross-plugin import is an anti-pattern per the inter-plugin boundary contract.
-  Keep this implementation in sync with the upstream module.
-
-  Returns:
-    A two-tuple `(expert_part, repo_part)`. Returns `(name, ".")` when no `@` is
-    present. Returns `(name, "")` when the syntax is malformed (empty expert or repo part).
-  """
-  if "@" not in name:
-    return name, "."
-  expert, _, repo = name.rpartition("@")
-  if not expert or not repo:
-    return name, ""  # signal malformed; caller will FAIL
-  return expert, repo
 
 
 def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> None:
@@ -140,8 +142,8 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
         if "repo" in writer and writer["repo"] != ".":
           # waiver: one-off human-facing message
           _add(findings, ReviewStatus.FAIL,"repo-field-redundant",
-               f'writer {writer.get(JobKey.NAME, "")!r} has `repo` field — use @<repo> in `name` instead '
-               f'(this field is deprecated; "." is silently accepted)')
+               f'writer {writer.get(JobKey.NAME, "")!r} has `repo` field — drop it; every writer '
+               f'runs in this repo (the field is deprecated; "." is silently accepted)')
         # Rule 4: position enum
         position = writer.get(JobKey.POSITION)
         if position is not None and position not in (Position.TOP, Position.BOTTOM):
@@ -167,19 +169,6 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
             _add(findings, ReviewStatus.FAIL,"flat-name-alphabet",
                  f'expert "{name}" flattens to "{flat}"'
                  f" which violates tag-safe alphabet ^[a-z0-9_-]+$")
-        # Rule 6b (cross-repo): each part of expert@repo must pass alphabet check
-        if name and "@" in name:
-          expert_part, repo_part = _parse_expert_name(name)
-          if not _FLAT_PART_RE.match(expert_part):
-            # waiver: one-off human-facing message
-            _add(findings, ReviewStatus.FAIL,"flat-name-alphabet",
-                 f'expert part {expert_part!r} of {name!r} fails alphabet '
-                 f'^[a-z0-9_-]+$ (left side)')
-          if repo_part not in (".", "") and not _FLAT_PART_RE.match(repo_part):
-            # waiver: one-off human-facing message
-            _add(findings, ReviewStatus.FAIL,"flat-name-alphabet",
-                 f'repo part {repo_part!r} of {name!r} fails alphabet '
-                 f'^[a-z0-9_-]+$ (right side)')
         # Rule 7: name resolves in root experts catalog
         if name and name not in root_experts:
           # waiver: one-off human-facing message
@@ -189,9 +178,95 @@ def _check_section_writers_new_schema(settings: dict, findings: list[dict]) -> N
                f" is not registered in root experts catalog")
 
 
-def _check_all(settings: dict, findings: list[dict]) -> None:
+def _collect_review_files(repo_root: Path, paths: list[str]) -> list[Path]:
+  """
+  Walk `repo_root` and collect every file whose repo-relative path matches any glob in `paths`.
+
+  Mirrors `dispatcher.py`'s own `_iter_class_files` (that module is being retired — see
+  `collect_ops.py`'s module docstring), reimplemented here rather than imported per the
+  lazycortex-review coordinator migration's own-verbs-only boundary.
+
+  Args:
+    repo_root: Repository root the glob patterns are relative to.
+    paths: Glob patterns (e.g. `"request/*.md"`) a matching file's repo-relative path must satisfy.
+
+  Returns:
+    Absolute paths of matching files, in filesystem walk order.
+  """
+  matches: list[Path] = []
+  for base, subdirs, files in os.walk(str(repo_root)):
+    # dot-folders (.git, .claude, .logs, .experts, ...) never hold review documents
+    subdirs[:] = [sub for sub in subdirs if not sub.startswith(".")]
+    for name in files:
+      full = Path(base) / name
+      rel = full.relative_to(repo_root).as_posix()
+      # PurePosixPath.match honors shell-glob semantics where `*` does NOT cross `/`, unlike
+      # `fnmatch.fnmatch` (the recursive-glob idiom the `Path.glob`/`rglob` ban prescribes), whose `*` matches `/`
+      # too and would let a shallow class pattern (`request/*.md`) swallow files that belong to
+      # a deeper-nested class (`request/products/*/changes/*/design.md`) — same rationale as
+      # dispatcher.py's own `_iter_class_files`.
+      if any(PurePosixPath(rel).match(pat) for pat in paths):
+        matches.append(full)
+  return matches
+
+
+def _check_callout_tags(repo_root: Path, settings: dict, findings: list[dict]) -> None:
+  """
+  Collect every `#review/<tag>` callout across the documents matched by `review.classes[].paths`
+  and FAIL on any tag outside the closed vocabulary (Task 10).
+
+  Args:
+    repo_root: Repository root `review.classes[].paths` glob patterns are relative to.
+    settings: Parsed `lazy.settings.json` contents.
+    findings: Mutable findings list to append to.
+  """
+  classes = settings.get(JobKey.REVIEW, {}).get(JobKey.CLASSES) or []
+  seen: set[Path] = set()
+  for class_cfg in classes:
+    # guard: malformed class entries are already reported by _check_all's own shape check
+    if not isinstance(class_cfg, dict):
+      continue
+    paths = class_cfg.get(JobKey.PATHS)
+    # guard: a malformed/empty/non-string-entry paths list has no files to walk — the shape
+    # itself is already reported by _check_all's own class_i_paths check
+    if not isinstance(paths, list) or not paths or any(not isinstance(item, str) for item in paths):
+      continue
+    for file_path in _collect_review_files(repo_root, paths):
+      # guard: a file matched by more than one class is scanned only once
+      if file_path in seen:
+        continue
+      seen.add(file_path)
+
+      # parse the file's structural report once, to read off every callout it carries below
+      # waiver: type: ignore[attr-defined] — the basename collision with
+      # claude/lazycortex-specs/bin/note_ops.py (see the import comment above) makes mypy check
+      # this attribute access against the wrong module's shape
+      report = _note_ops.build_report(file_path.read_text())  # type: ignore[attr-defined]
+
+      # every callout not in the closed vocabulary FAILs, named by its repo-relative path and line
+      # waiver: 'callouts'/'tag'/'line' are note_ops.build_report's own wire-shape keys, not keys.py-promoted constants
+      for callout in report["callouts"]:
+        tag = callout["tag"]
+        # guard: known vocabulary — nothing to report
+        if tag[len(Tag.REVIEW_PREFIX):] in _VALID_CALLOUT_TAGS:
+          continue
+        # waiver: one-off human-facing message
+        _add(findings, ReviewStatus.FAIL, "callout-tag-unknown",
+             f'{file_path.relative_to(repo_root).as_posix()}:{callout["line"]}'
+             f' unknown callout tag "{tag}"'
+             f" — expected one of {sorted(_VALID_CALLOUT_TAGS)}")
+
+
+def _check_all(settings: dict, findings: list[dict], *, repo_root: Path | None = None) -> None:
   """
   Apply all audit rules to a parsed settings dict.
+
+  Args:
+    settings: Parsed `lazy.settings.json` contents.
+    findings: Mutable findings list to append to.
+    repo_root: Repository root to resolve `review.classes[].paths` against for the
+      callout-tag-vocabulary check; `None` skips that check (a bare settings dict, with no
+      repository to resolve paths against, per `run`'s own dict-input branch).
   """
   # edit_marker_style
   style = settings.get(JobKey.REVIEW, {}).get(JobKey.EDIT_MARKER_STYLE, Style.SIMPLE)
@@ -214,6 +289,9 @@ def _check_all(settings: dict, findings: list[dict]) -> None:
   experts_tbl = settings.get(JobKey.EXPERTS) or {}
   referenced: set[str] = set()
 
+  # identity tokens seen so far, mapped to the entry index that claimed each one
+  seen_tokens: dict[str, int] = {}
+
   # each class is checked in place, so one broken entry does not hide the rest
   for i, class_cfg in enumerate(classes):
     if not isinstance(class_cfg, dict):
@@ -224,6 +302,17 @@ def _check_all(settings: dict, findings: list[dict]) -> None:
     if not isinstance(paths, list) or not paths or any(not isinstance(p, str) for p in paths):
       _add(findings, ReviewStatus.FAIL,f"class_{i}_paths",
            f"class #{i} 'paths' must be a non-empty list of strings")
+
+    # `class` is the entry's identity: tooling addresses entries by it, globs stay routing-only
+    token = class_cfg.get(JobKey.CLASS)
+    if not isinstance(token, str) or not token:
+      _add(findings, ReviewStatus.WARN, f"class_{i}_identity",
+           f"class #{i} carries no 'class' identity token")
+    elif token in seen_tokens:
+      _add(findings, ReviewStatus.FAIL, _CHECK_CLASS_IDENTITY_DUP,
+           f"'class' token {token!r} used by classes #{seen_tokens[token]} and #{i}")
+    else:
+      seen_tokens[token] = i
     experts = class_cfg.get(JobKey.EXPERTS) or {}
     if not isinstance(experts, dict):
       _add(findings, ReviewStatus.FAIL,f"class_{i}_experts_shape",
@@ -231,50 +320,13 @@ def _check_all(settings: dict, findings: list[dict]) -> None:
       continue
     # validation and terminal use the new dict-of-writer-object schema;
     # they are validated separately by _check_section_writers_new_schema.
-    # history uses a single writer-object {"name": ...}; repo is not allowed.
+    # A leftover `history` group (the retired historian chain entry, Task
+    # 11) is not validated at all — it is simply ignored here, same as any
+    # other key this audit does not know about.
     new_schema_umbrellas = {Bucket.VALIDATION, Bucket.TERMINAL}
-    history_val = experts.get(Phase.HISTORY)
-    if history_val is not None:
-      if not isinstance(history_val, dict):
-        _add(findings, ReviewStatus.FAIL,f"class_{i}_history_shape",
-             f'class #{i} experts.history must be a single writer object {{"name": ...}};'
-             # waiver: reporting the type name of an arbitrary config value in an error message; type(x).__name__ is the right idiom — no class-system object here
-             f" got {type(history_val).__name__}")
-      else:
-        name_val = history_val.get(JobKey.NAME)
-        if not name_val or not isinstance(name_val, str):
-          _add(findings, ReviewStatus.FAIL,f"class_{i}_history_name",
-               f'class #{i} experts.history missing required field "name"'
-               f' (must be a non-empty string)')
-        else:
-          referenced.add(name_val)
-        # waiver: external-format field name, not an internal key
-        if "repo" in history_val:
-          _add(findings, ReviewStatus.FAIL,f"class_{i}_history_repo_forbidden",
-               f'class #{i} experts.history must be a single writer object {{"name": ...}};'
-               f' "repo" is not allowed (historian always runs in the local repo)')
-        # Rule (cross-repo): @<repo> syntax is forbidden on history.name
-        name_val = history_val.get(JobKey.NAME, "")
-        if isinstance(name_val, str) and "@" in name_val:
-          # waiver: one-off human-facing message
-          _add(findings, ReviewStatus.FAIL,"history-repo-syntax-forbidden",
-               f'experts.history.name {name_val!r} uses @<repo> syntax — '
-               f'historian must run locally, no cross-repo dispatch allowed')
-        # Rule (cross-repo): historian commits the Doc-Review trailer
-        # locally, so it MUST have can_commit_in_repo=true. Default
-        # (false) would inject the foreign-execution no-commit clause
-        # into the historian's prompt and silently break the trailer.
-        if name_val and isinstance(name_val, str) and name_val in experts_tbl:
-          h_entry = experts_tbl.get(name_val) or {}
-          # waiver: external-format field name, not an internal key
-          if isinstance(h_entry, dict) and not h_entry.get("can_commit_in_repo", False):
-            # waiver: one-off human-facing message
-            _add(findings, ReviewStatus.WARN,"history-needs-commit-permission",
-                 f'historian {name_val!r} has can_commit_in_repo=false (or unset) — '
-                 f'historian commits the Doc-Review trailer locally; set '
-                 f'experts.{name_val}.can_commit_in_repo=true')
     for group_key, members in experts.items():
-      # guard: new-schema umbrellas and history are validated elsewhere, not here
+      # guard: new-schema umbrellas are validated elsewhere; a leftover history
+      # group is intentionally unvalidated (Task 11 retired the historian chain)
       if group_key in new_schema_umbrellas or group_key == Phase.HISTORY:
         continue
       if not isinstance(members, list):
@@ -310,45 +362,13 @@ def _check_all(settings: dict, findings: list[dict]) -> None:
          # waiver: one-off human-facing message
          "no review.classes configured — run /lazy-review.configure")
 
-  # Rule (cross-repo): expert@repo names must reference a declared repos key
-  repos_block = (settings.get(JobKey.REPOS) or {})
-  declared_keys = {k for k in repos_block if k != JobKey.VERSION}
-  for i, class_cfg in enumerate(classes):
-    # guard: skip non-dict class entries — nothing to read experts from
-    if not isinstance(class_cfg, dict):
-      continue
-    experts_cfg = (class_cfg.get(JobKey.EXPERTS) or {})
-    # guard: malformed experts block (not a dict) has no groups to repo-check
-    if not isinstance(experts_cfg, dict):
-      continue
-    for group_key, members in experts_cfg.items():
-      collected_names: list[str] = []
-      if group_key in (Bucket.VALIDATION, Bucket.TERMINAL) and isinstance(members, dict):
-        collected_names = [w.get(JobKey.NAME, "") for w in members.values()
-                           if isinstance(w, dict)]
-      elif group_key == Phase.HISTORY:
-        # history is single writer; @-check handled above; skip repo-key check
-        continue
-      elif isinstance(members, list):
-        collected_names = [m.get(JobKey.NAME, "") for m in members
-                           if isinstance(m, dict)]
-      for name in collected_names:
-        # guard: skip empty names and plain (non-cross-repo) expert names
-        if not name or "@" not in name:
-          continue
-        _, repo_part = _parse_expert_name(name)
-        # guard: local-repo sentinel ("." / empty) needs no declared repos key
-        if repo_part in (".", ""):
-          continue
-        if repo_part not in declared_keys:
-          # waiver: one-off human-facing message
-          _add(findings, ReviewStatus.FAIL,"repo-key-not-declared",
-               f'expert {name!r} references repo {repo_part!r} '
-               f'not declared in `repos` — add `repos.{repo_part}: {{}}` '
-               f'to lazy.settings.json')
-
   # the section-writer schema has its own rules, checked as a separate pass
   _check_section_writers_new_schema(settings, findings)
+
+  # the callout-tag vocabulary check needs real files on disk; skipped when no repo_root was
+  # given (a bare settings dict has no repository to resolve `review.classes[].paths` against)
+  if repo_root is not None:
+    _check_callout_tags(repo_root, settings, findings)
 
 
 def run(settings_or_path: Path | dict) -> dict:
@@ -379,7 +399,9 @@ def run(settings_or_path: Path | dict) -> dict:
     # waiver: one-off human-facing message
     _add(findings, ReviewStatus.FAIL,"settings_parse", f"invalid JSON: {exc}")
     return _bundle(findings)
-  _check_all(settings, findings)
+  # the classic layout is <repo_root>/.claude/lazy.settings.json (Paths.CLAUDE_DIR /
+  # Paths.SETTINGS_FILE), so the settings file's grandparent is the repo root
+  _check_all(settings, findings, repo_root = settings_path.parent.parent)
   return _bundle(findings)
 
 

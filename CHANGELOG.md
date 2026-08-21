@@ -4,6 +4,32 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 7.0.0 — 2026-08-21 UTC
+
+- **Breaking:** `workspace:branch` expert jobs now run in isolated git worktrees — one linked worktree per job, with a bootstrap command and commit-obligation checks — replacing routine-side branch isolation; every workspace-enforced job gets its own branch, and routines gained an OR-filter plus a retry cursor for git-watch items.
+- **Breaking:** expert job directories now materialize their `source`/`context` files at claim time, after the worktree is created, instead of at dispatch time — a job starts from the tree as it looks when work begins, not when it was queued. Experts can also carry declared file attachments; a wiki-dispatch bug that silently wrote an unusable bare filename outside the repo now surfaces where the caller can see it.
+- **Breaking:** hook short names, expert keys, and skill/routine identifiers move to their canonical `<namespace>.<name>` form across the marketplace — e.g. hook `git-guard` → `lazy-core.git-guard`, expert key `lazy-review.coordinator` → `review.coordinator`, `spec.*` skills → `lazy-spec.*`. Existing `lazy.settings.json` entries and bot identities migrate automatically on next run; `lazy-core.doctor` gained a naming-canon-drift check for anything it can't safely migrate itself.
+- **Breaking:** the canonical `[!type]` callout / `#tag` / checkbox literal forms are now defined once in `lazy-core.markdown-style` instead of scattered across per-plugin protocols — includes new review-callout styling and vault-safe tag/checkbox conventions for Obsidian, plus angle-bracket placeholders now required in backticks so they aren't parsed as HTML. `[!decision-candidate]` also flips polarity: it now requires an explicit operator accept/reject verdict instead of defaulting to accepted until objected.
+- **Breaking:** `daemon.run_here` is now a `{hostname: checkout-path}` map instead of a boolean, and the daemon verifies it itself at startup, not just the installer — prevents two daemons racing dispatch on the same project.
+- **Breaking:** the secrets scan is split out of the public-only PII check into its own always-on `lazy-guard.secrets` hook (blocks real secrets in every repo, no opt-in file needed), and now also runs by default inside expert-spawned sessions, not just interactive ones. Hook gating moves from per-expert to per-routine config so routine-triggered git operations are covered too; the daemon only runs operator git hooks explicitly allow-listed in `daemon.git.allowed_hooks`, `lazy-core.doctor` flags any that never got a decision, and `git-guard` now also catches `checkout`/`restore` forms that silently write to the index.
+- **Breaking:** cross-repo expert dispatch (`expert@<repo-key>` addressing) is removed — it never saw real use, and the surface it required is gone.
+- New multi-stage rate-limit guard: the daemon halts around Anthropic API rate-limit windows and auto-resumes when they reopen, with a `lazy-claude` wrapper, an install step, and preflight probe capture. Fixed: a rate-limit warning now only halts the daemon at real utilization at or above the configured threshold — previously any warning status halted it regardless of usage.
+- The review-class settings ladder advanced several versions this cycle: `plan` split into `dev-plan`/`test-plan`, later renamed to `code-plan`/`code-report` (the retired `historian` class is dropped), a new `architecture` class was added, request routing points at `spec.coordinator`, and design/bug requests carry their source request into the writer's job context. `products.handoff` and `spec.imports[]` settings sections are retired. Every step migrates existing `lazy.settings.json` files forward automatically.
+- git-watch routines gained directory-level grouping (`group_globs`, one worker run per changed directory), automatic retry of failed items so a wake is never lost, author metadata (`author_name`/`author_email`) on file-watch triggers, and a `filter.any_of` / basename filter for more precise routing, with stricter validation of unknown filter keys and empty `any_of` lists.
+- New `remote-mirror` primitive is now the single transport for mirroring external repos, replacing the old handoff/imports path; supports `skip_fetch` to reuse an existing clone without hitting the network, and surfaces mount-overlap and postpone state directly on the source note.
+- Fixed the daemon killing live long-running jobs: the stream-idle watchdog timeout is raised from 90s to 900s (an existing seeded 90s value migrates automatically), a transient-error retry no longer gets silently marked done by the dead-job scanner, and a transient job now stays queued for retry, only marked DONE after its retry budget is exhausted.
+- Fixed several daemon-halt causes: loop-detection now keys on the patch instead of the touched file set, so a bot that legitimately re-commits the same files no longer halts the daemon for being productive; branch checkout/restore on workspace jobs is wrapped in try/finally; a broken `lazy.settings.json` at startup lands in the error ledger instead of crashing with a bare traceback; and an individually invalid routine entry is rejected at load instead of halting every routine in the repo.
+- Smaller reliability fixes: the inbox reconciler no longer deletes a freshly-dropped file that reuses a dedup key from an already-processed job (bank exports, trash restores); `remote-mirror`'s CLI reports malformed JSON as a structured error instead of a raw traceback; symlinked checkouts resolve consistently across every job-dispatch path again; and expert spawns now pin subagent recursion depth.
+- `lazy-core.doctor` gained checks for Agent-tool presence on agents, `allowed-tools` on skills, plugins enabled without a marketplace declaration, decisions-rule usage, and a new research-marker convention for flagging verify-before-answering points (also checked by `lazy-core.audit`) — and now auto-applies many findings directly (install-managed rule drift, stale template pointers, hardcoded paths, and more) instead of only reporting them.
+- New weekly `lazy-core.autocheckup` LLM-tier sanitizer pass backstops stuck drafts and drifted state across plugins, layered on top of each plugin's own deterministic sanitize step.
+- New headless `cancel-job` CLI lets a sibling plugin cancel a running expert job across the plugin boundary, mirroring `consume-job`'s stdin/stdout JSON shape, without importing the expert runtime directly.
+- New `/lazy-runtime.tick` skill and `runtime-tick` CLI let an operator force one named routine to run immediately, with `--drain`, push-deferral, and a refusal when a live daemon already owns the repo.
+- Install no longer offers optional protocols to system routines (those are seeded mandatorily); it now backfills routine keys an older install missed; and install-managed rule/template mirrors are byte-compared and overwritten rather than treated as a hand-merge target.
+- New `lazy-core.iterate` skill drives a fix-until-clean loop — audit, fix, repeat — with hard caps on cycle count and repeated findings.
+- Routine-spawned commands now run with `GIT_AUTHOR_*` set to the routine's configured author, and loop-detection is scoped per-routine rather than globally.
+- Default model tier for the `doc_doctor` role is raised to sonnet on new installs — repairing a broken document structure needs more than haiku.
+- `dispatch_job` now folds a routine's declared protocols into every job it queues automatically, so a `command:`-shape routine's plugin binary doesn't have to parse the environment itself.
+
 ### 6.2.1 — 2026-08-07 UTC
 
 - `lazy-log.bullets` now always calls out a changed skill / agent / command `description:` as a release note, rather than leaving it to a heuristic that could silently drop it — the description decides what the artifact matches, so a reword is a user-visible change even when nothing else in the artifact does.
@@ -513,6 +539,35 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 6.0.0 — 2026-08-21 UTC
+
+- **Breaking:** Documents in the spec catalog are now typed (`feature`, `change`, `bug`, `dev-plan` → `code-plan`, etc.) instead of loosely categorized — each type declares its own tools and playbook, `spec.doctor` validates assets against their declared type, `create-asset` takes a type and starter document, and a new `add-asset-type` wizard registers custom types.
+- **Breaking:** Document templates no longer ship a head "explicator" block and the designer no longer extends the skeleton — the template is the whole starting document.
+- **Breaking:** Catalog folder structure is free-form now — the `subsystem` layer and breadcrumb trail are gone.
+- **Breaking:** `decision-candidate` requires an explicit operator verdict before it can proceed. A new decisions registry (`decisions.md`, the `spec.decide` verb) assigns approved decisions a `D-NNN` id and moves them into the registry on approval.
+- `spec.upstream` replaces the old split-repo handoff/import for pulling in external design sources, with its own config schema, a doctor scan, an automatic fetch/detect worker, and postpone/cancel toggles for units still in flight.
+- New architecture stage: a dependency graph between assets, an acceptance cycle, and `spec.drive` — a session orchestrator that drives one spec through review end to end. The planner can now mark a request "already covered," and the architect's decomposition links back to its design doc.
+- **Breaking:** The coordinator now drives asset sequencing directly — the old `gate_tick` decision layer is gone. It reads each asset's declared type and tools and loads only the playbook chapters that type needs.
+- New `spec.lookup` (search the spec tree without spinning up an agent) and `spec.coverage` (gap-scan code against the spec tree) skills; `sync-with-code` now reconciles one asset at a time instead of a whole product.
+- Change assets now cascade their delta into the feature docs they touch, with a "Send to dev" handoff checkbox and a `push-question` verb for routing a design question back upstream through review.
+- Requesting a change against a feature that hasn't launched yet now offers a pre-launch rollback (cancel, stop, drop pending plans, walk gates back down) instead of forcing a full change cycle.
+- Dev-plan/test-plan/dev-report/test-report become an opt-in quartet — a request can scaffold with no plans at all, `gate-tick` promotes plans/reports directly, and test plans/reports now lead with their verdict.
+- New launch-checkbox ladder in `# Gates`: ticking a checkbox dispatches the right expert job with guidelines context, gates reconcile downward automatically, and a job that dies now halts the asset (with a plain-English halt reason) instead of leaving it stuck.
+- New automatic backstops for stuck state: a `sanitize` routine, `doctor --apply`, and a weekly autocheckup that find and repair stuck drafts and similar drift on their own.
+- **Fixed:** a completed launch job could get stuck "already queued" forever because its dedup key was never released, `gate-tick` could miss job completions outright, and a failed dispatch could silently lose its wake — a new `spec.collect` routine now wakes `gate-tick` on every finished job, and the git-watch routine retries failed items instead of dropping them.
+- Coordinators now detect when they're stuck cycling with no progress and stop instead of spinning forever.
+- Coordinator, upstream, and playbook bot commits now repaint status icons inline, and out-of-the-box iconize registries ship for every spec status.
+- `# History` lines and halt callouts are now localized to the product's configured language, driven by a single repo-wide language chain.
+- New alias categories (`alias_of`) — a category can point at another and inherit its templates and semantics.
+- New top-level `system-design`/`system-tech` asset types for system-level specs, with review roles regrouped to match.
+- Catalog container folders follow a three-tier coloring canon, and upstream/intake/product folders get default icons out of the box.
+- **Breaking:** `spec.default_language` is gone — only `spec.language` and the root `language` key control document language now.
+- **Breaking:** `spec_handoff_ready` is replaced by `spec_draft` — an asset is ready by default unless `spec_draft` says otherwise.
+- **Breaking:** Diagrams are now something an expert can choose to draw, not something every skill is obligated to produce.
+- **Breaking:** Every artifact was renamed from the old `spec.*` prefix to `lazy-spec.*` — commands, skills, and agents invoked by the old names no longer resolve.
+- Coordinator bookkeeping (busy-guard "declined" markers, job-completion markers) moved out of document frontmatter into internal runtime sidecars — spec documents stay clean of bot bookkeeping.
+- `spec.doctor` now checks the terms dictionary for consistency, and install seeds the mandatory terms aspect automatically.
+
 ### 3.6.3 — 2026-08-07 UTC
 
 - `/spec.help` is now found when you ask which verb creates or advances a spec, or how the readiness gates work, not just by an exact match on its own output.
@@ -622,6 +677,18 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 3.0.0 — 2026-08-21 UTC
+
+- **Breaking:** icon repainting no longer runs from a pre-commit hook — `.githooks/pre-commit` and its `sync-staged`/`install-hooks` subcommands are gone; a `lazy-obsidian.repaint` daemon routine repaints on each commit instead, fixing halts caused by leftover unstaged icon writes under automation. Upgrading from 2.x: rerun `/lazy-obsidian.iconize-install`, which now detects and removes the old shim automatically.
+- **Breaking:** shipped hook short names moved into the plugin's namespace (`iconize-sync` → `lazy-obsidian.iconize-sync`, `HOOK_VERSION` 4.0.0) — any `hooks_enabled`/`hooks.disabled` entry still using the old token silently stops matching.
+- Repaint commits now land under a dedicated `lazy-obsidian.repaint` bot identity and touch only notes whose sole working-tree change is the icon, so a repaint can no longer be mistaken for an operator edit or sweep up unrelated work; a new `sync-paths` op lets other coordinators fold repainting into their own commits.
+- The end-of-turn icon repaint (Stop hook) is gone — it could cost tens of seconds on a dirty vault for a result the next commit recomputes anyway; repainting still happens on write and on commit, with `reconcile-dirty` available as a manual command.
+- `/lazy-obsidian.install` no longer offers to merge a locally-edited rule against the shipped version — rule files are byte-compared and overwritten when they differ, while the tag-page template is seeded once on first install and never touched again.
+- The tag-page template moved to the plugin's own namespace (`.claude/templates/lazy-obsidian.tag-page-template.md`); a vault already carrying the old name is migrated automatically, so an existing customisation isn't orphaned.
+- New vault-markdown rule ships with every install: guidance on markdown constructs Obsidian silently reads as structure — bare `#` tokens, unquoted frontmatter values, `::` dataview fields, and angle-bracket placeholders.
+- `/lazy-obsidian.install` now installs the shared CSS snippets in one step (previously only wired by `/lazy-obsidian.diagram-install`), and ships a new `callouts.css` snippet styling `[!decision]` / `[!decision-candidate]` callouts.
+- Iconize fixes and additions: spec template trees are no longer painted; plugin-shipped icon registries can layer with priorities, a keep-on-no-match option, and new `when` predicates; a red matcher marks specs flagged `spec_halted`.
 
 ### 2.2.7 — 2026-08-07 UTC
 
@@ -757,6 +824,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.1.7 — 2026-08-21 UTC
+
+- Fixed five diagram kinds — `block-beta` layouts, ERD, and journey diagrams — that rendered unreadable after Obsidian's Mermaid 11.13 upgrade; dark-mode colouring is restored via `themeCSS` instead of the classDef path that mermaid now drops.
+- Layout diagrams (`kind=layout`) built with `block-beta` no longer render with stray edges or unstyled containers — the contract now forbids edges and composite blocks and requires every declared node to carry a class.
+- `/lazy-diagram.install` no longer offers to hand-merge a diverged install-managed rule or template: files are byte-compared and a genuine difference is overwritten outright, replacing the old merge-and-`AskUserQuestion` path that could silently drop content.
+
 ### 1.1.6 — 2026-08-07 UTC
 
 - `lazy-diagram.draw-mermaid` now quotes node labels, so a label starting with a character Mermaid reads as a shape modifier — a leading `/`, the natural shape for a node named after a slash-command — no longer produces an unterminated shape that fails to render. A pre-write check rejects unquoted labels before they ship.
@@ -800,6 +873,28 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.1.0 — 2026-08-21 UTC
+
+- **Breaking:** The review loop was rebuilt from the ground up — the old Python state-machine dispatcher and historian are gone, replaced by an LLM coordinator agent driving a documented playbook over a closed set of verbs. Existing repos need `/lazy-review.install` re-run to migrate.
+- **Breaking:** Job-tracking markers moved out of document frontmatter into a gitignored runtime sidecar, so hand-editing a document under review can no longer corrupt or stall the loop.
+- **Breaking:** An answered question or `[!decision-candidate]` callout is now a settled decision — re-asking it in a later round is flagged as a defect instead of repeating, and `[!decision-candidate]` now requires an explicit accept/reject verdict instead of defaulting to accepted.
+- **Breaking:** Which review class governs a document is now resolved from its `spec_doc_type` instead of path globs, and every class config requires an explicit `class` token.
+- Coordinators now detect their own no-progress loops (repeated dispatch, validation/gate ping-pong, self-echo) and escalate with a question instead of retrying forever.
+- Writer protocols — the shared markdown-style rules plus any per-class extras — are now configured via `review.protocols` / `review.classes[].protocols` instead of hardcoded in the coordinator.
+- Main and barrier writer dispatches now carry the product's/asset's recorded decisions as context, so writers stop re-litigating questions the operator already settled.
+- New review-specific Obsidian callout styling — question, todo, and attention callouts get distinct colors/icons in reading mode and Live Preview (previously grey and selector-broken); an approved-with-concerns banner now renders green like a plain approve.
+- New iconize callbacks (`review-awaits-operator`, `review-in-process`) paint folder/file icons by review state, so documents needing operator attention are visible at a glance in the file tree.
+- New per-class config key `context_from_frontmatter` resolves a document's frontmatter-referenced files straight into a writer's job context.
+- Review documents' language now follows the repo's configured spec/root language chain, with the choice explained in `# History`.
+- A review round now produces fewer, cleaner commits — one per coordinator wake, with inline Obsidian icon repaint folded in, instead of a chain of five.
+- Fixed: an unanswered `[!decision-candidate]` no longer leaves the banner stuck on "Ready" — it blocks like an open question until answered.
+- Fixed: an operator's tick landing in the same commit as an unrelated bot commit is no longer missed by the coordinator.
+- Fixed: a `#review/command` callout is now always executed on the commit that carries it, instead of sometimes being swallowed as an ordinary operator edit.
+- Fixed: a dead or stuck coordinator job could permanently brick a document; the coordinator now clears stale jobs and resumes on the next wake.
+- Fixed: symlinked repo paths (e.g. Dropbox path aliasing) no longer crash the coordinator's job-done dispatch.
+- Fixed: `lazy-review.collect` no longer errors out on another plugin's completed job sitting in the shared queue — it's silently skipped.
+- Fixed: the coordinator now fails loudly instead of silently misbehaving when `lazy.settings.json` can't be parsed.
 
 ### 5.2.10 — 2026-08-07 UTC
 
@@ -873,6 +968,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Unattended doc-review dispatcher — routes documents to specialist agents (shell or MCP) round-by-round; consumer plugins use the public API (rule + 4 verb skills).
 
 ## lazycortex-observe
+
+### 0.8.3 — 2026-08-21 UTC
+
+- Fixed: the `LazyCortexDaemonHalted` alert description now explains every halt cause — dirty tree, diverged or failed push, unreachable remote, suspected loop, invalid routine config — instead of only naming a dirty tree, and states plainly that the daemon never clears a halt itself.
+- `lazy-observe.audit`, `.doctor`, `.install`, and `.uninstall` skills can now dispatch subagents as part of their work.
 
 ### 0.8.2 — 2026-08-07 UTC
 
@@ -952,6 +1052,21 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+### 1.0.0 — 2026-08-21 UTC
+
+- **Breaking:** Role vocabulary renamed — `implementer` → `developer`, `data-implementer` → `data-writer` — plus a new `system-designer` role (served by the designer agent) for product- and project-level design docs; seeded expert keys, workspace routing, and commit rights all follow the new names.
+- New `architect` expert joins every technical class: owns module boundaries, dependency direction, public contract vs. internals, and migration cost for stored data. It now writes an asset's `architecture.md` from the approved design and the project's structure map, decomposes only by proposing child assets (create/link/reopen), and flags code capability the spec tree doesn't cover.
+- Two new writing agents: `docs-writer` turns an approved design straight into user-facing documentation, and `data-implementer` (`data-writer`) writes entity data files from an approved design — seeded automatically for `game-dev` projects.
+- New mandatory `research-aspect` requires every expert to actively gather context (spec tree, pull-skills, wiki, greps) before writing instead of writing from assumption; two more mandatory aspects, `terms-aspect` and `structure-aspect`, keep technical experts aligned with the project's term dictionary and structure map.
+- Every expert's discipline now includes two more iron laws: re-check its own output in a bounded loop until a pass comes back clean, and read accepted decisions before starting work, declaring any real fork instead of silently revisiting one.
+- Every writing expert now signals the spec coordinator only through explicit callouts — proposing assets, raising decision candidates and questions — instead of acting past its own document; the planner returns an `already-covered` verdict instead of writing a plan when a spec's goals are already implemented.
+- Interpreter, designer, architect, and planner now treat the goal as a first-class obligation — stated up front, never invented, and carried through end to end — while the designer additionally keeps concrete balance values (limits, thresholds, durations) out of design prose and stops inventing decoration around a template's skeleton.
+- Tester now owns its own vocabulary of test types (smoke/functional/regression/integration/performance) instead of drawing it from a template, and every test must name both its type and the risk it covers.
+- Architect and designer can now draw diagrams (architecture/class, flow/state/journey) where a section genuinely earns one, instead of that being a skill's separate obligation.
+- Tech-writing bans jargon, informal register, and homemade abbreviations from every document an expert writes.
+- Regression-first discipline: implementer writes the failing test before the fix, planner opens a bug plan with that task, and debugger's Fix phase requires the failure to reproduce for the established reason.
+- Fixed: writing roles (designer, architect, planner, implementer, debugger, tester, etc.) now seed `can_commit_in_repo: true` by default, so launch-job documents land in the tracked tree instead of stranding in the job's own result folder.
+
 ### 0.7.4 — 2026-08-07 UTC
 
 - `/lazy-experts.help` is now found when you ask what the plugin ships or which generic expert fits a piece of work, not just by an exact match on its own output.
@@ -1022,6 +1137,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.0.0 — 2026-08-21 UTC
+
+- New `lazy-python.domain-writer` and `lazy-python.contract-writer` agents write and refile domain-groups knowledge blocks; `lazy-python.knowledge-sweep` now grows the dictionary from parked `Domain(unfiled)` blocks, scoping itself from `wiki.domains.code` when configured, with the dictionary defaulting to `docs/guidelines/domain-groups.md`; the audit gained a check flagging a missing dictionary once sources carry `Domain(...)` blocks.
+- Every Python source file must be written in English — comments, docstrings, `Domain(...)`/`Contract:` blocks, log and error strings, identifiers — regardless of a project's own language; `pcf` gained a `check_language` check that flags non-English letters in comments and docstrings.
+- **Breaking:** `pcf`'s first-party import detection no longer hardcodes a package name — configure `[tool.pcf] project_package`, or let it autodetect a single top-level package; unconfigured multi-package layouts now disable the check instead of guessing.
+- **Breaking:** the guideline `review` phase moved out of `chk-py all` — it now runs on its own cadence via `chk-py review`, with `--base <ref>` to scope from a work-start point instead of just the last commit.
+- The module-docstring prohibition was lifted — module docstrings are now permitted in any module, not just those defining no classes.
+- The LaTeX/math-markup ban in Python source now covers every comment kind (`Domain(...)`, `Contract:`, `Decision:`, plain `#`), not just docstrings and `Domain(...)` blocks.
 
 ### 3.0.0 — 2026-08-11 UTC
 
@@ -1153,6 +1277,19 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 2.0.0 — 2026-08-21 UTC
+
+- **Breaking:** Mirror scopes replace the old cross-repo `@<repo-key>` link resolver — a scope's `mirror` block clones a foreign repo and syncs its markdown into the vault, preserving local wiki/pin frontmatter and the protected See-also section. Existing `@<repo-key>` links need migrating, and mirror-fetch failures now report as a clear message instead of a raw traceback.
+- `Domain(...)` and `Contract:` markers in code now materialize into a `docs/domains` tree via a git-watch routine and a writer agent — one doc per rule group with Terms/Principles/Mechanics, `Contract:` blocks attributed to their nearest `Domain(...)` header and rendered in a Contracts section, and docs generated in the vault's configured language regardless of the (English-only) source markers. The doctor gained checks for missing glosses, out-of-scope output, and orphaned groups — a doc whose group leaves the dictionary is removed instead of left stranded.
+- New `/lazy-wiki.domains` skill answers questions by walking the domain-group tree, and `/lazy-wiki.query` gains an agentless mode for one-shot contexts that have no `Agent` tool to fan out with.
+- New terms dictionary: `/lazy-wiki.terms` looks up an agreed term or checks a name against ones already taken, backed by a terms curator, a `/lazy-wiki.configure terms` branch, and a doctor section.
+- New project-structure map: `/lazy-wiki.structure` answers "where does X live" without scanning the tree by hand, backed by a structure curator (curate/rename/report), a `/lazy-wiki.configure structure` branch (profiles, exclude globs, scan routines), and a doctor section. `docs/structure.md` is now auto-excluded from a scope's own coverage when the scope's globs would otherwise catch it.
+- Wiki doctor gains a `--commit` mode (the `lazy-wiki.doctor-apply` routine) that repairs and commits fixable findings automatically on a weekly schedule.
+- **Breaking:** `wiki.tag_axes` is now one repository-wide list instead of a per-scope one (a scope only narrows it), and `wiki.exclude` now applies across every scope. Settings migrate automatically from v1 to v2; `ensure-axes` writes globally only, and a new `ensure-scope-config` verb seeds a scope's filters and excludes.
+- **Breaking:** Every wiki command and routine now lives under `/lazy-wiki.*` — ten routines (scans, relink, domain, mirror, per-scope terms) were renamed; re-register any routine still pointing at an old name.
+- Wiki-generated files (the topics catalog, the domain index, domain docs) now carry a localized one-line explainer under the title, making it clear the file is auto-rebuilt and hand edits won't survive.
+- The `wiki.scan` and `wiki.relink-weekly` routines now get the markdown-style protocol seeded automatically on install — re-run `/lazy-wiki.install` to pick it up.
 
 ### 1.8.1 — 2026-08-07 UTC
 

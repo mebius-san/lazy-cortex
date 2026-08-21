@@ -7,32 +7,34 @@ The plugin manages *structure* and *lifecycle*, not the prose — authoring stay
 ## Who it's for
 
 - **Teams who write specs and design docs alongside code** in the same repo and want skills that understand spec conventions, gate state, and source links.
-- **Non-software products** (games, books, courses) that model their work as operator-defined asset categories under the same gate-and-review machinery.
+- **Non-software products** (games, books, courses) that model their work as asset types of their own under the same gate-and-review machinery.
 
 ## Blocks
 
-- **authoring** — Create and populate spec assets of any category. Members: spec.create-asset, spec.create-feature, spec.create-change, spec.create-bug, spec.add-asset-category, spec.create-from-code, spec.create-request.
-- **gates** — Drive an asset's readiness gates and per-file stages. Members: spec.flip-gate, spec.gate-tick, spec.set-stage.
-- **code-sync** — Keep specs aligned with the source repo across commits and branch merges. Members: spec.sync-with-code, spec.finalize-branch.
-- **source-links** — Resolve repos, dependencies, and forge-correct source URLs. Members: spec.resolve-repo, spec.resolve-dependency, spec.source-url.
-- **requests** — Ingest free-form requests and route them into the spec tree. Members: spec.request-router, spec.request-classify, spec.request-find-candidates, spec.request-attach, spec.request-spawn.
-- **install-and-audit** — Bootstrap, configure a product, pull cross-repo design handoffs, and audit a spec in this repo. Members: spec.install, spec.product-config, spec.import, spec.doctor, spec.help.
+- **authoring** — Create and populate spec assets of any category. Members: lazy-spec.create-asset, lazy-spec.create-feature, lazy-spec.create-change, lazy-spec.create-bug, lazy-spec.add-asset-type, lazy-spec.create-from-code, lazy-spec.create-request, lazy-spec.decide.
+- **gates** — Drive an asset's readiness gates and per-file stages. Members: lazy-spec.flip-gate, lazy-spec.gate-tick, lazy-spec.set-stage.
+- **code-sync** — Keep specs aligned with the source repo across commits and branch merges. Members: lazy-spec.sync-with-code, lazy-spec.finalize-branch, lazy-spec.coverage.
+- **upstream** — Mirror external design sources and route their changes through the request pipeline. Members: lazy-spec.upstream-run.
+- **source-links** — Resolve repos, dependencies, and forge-correct source URLs. Members: lazy-spec.resolve-repo, lazy-spec.resolve-dependency, lazy-spec.source-url.
+- **requests** — Ingest free-form requests and route them into the spec tree. Members: spec.coordinator, lazy-spec.request-classify, lazy-spec.request-find-candidates.
+- **install-and-audit** — Bootstrap, configure a product, and audit a spec in this repo. Members: lazy-spec.install, lazy-spec.product-config, lazy-spec.doctor, lazy-spec.audit, lazy-spec.help.
+- **research** — Bounded lookups over the spec tree for agents and operators, without loading whole documents. Members: lazy-spec.lookup.
 
 ## Walkthroughs
 
-- **new-product-from-code** — Register a product and generate its spec from an existing codebase. Path: spec.product-config → spec.create-from-code → spec.create-feature.
-- **asset-to-release** — Take one asset from creation through its gates to release. Path: spec.create-asset → spec.set-stage → spec.flip-gate → spec.sync-with-code → spec.finalize-branch.
+- **new-product-from-code** — Register a product and generate its spec from an existing codebase. Path: lazy-spec.product-config → lazy-spec.create-from-code → lazy-spec.create-feature.
+- **asset-to-release** — Take one asset from creation through its gates to release. Path: lazy-spec.create-asset → lazy-spec.set-stage → lazy-spec.flip-gate → lazy-spec.sync-with-code → lazy-spec.finalize-branch.
 
 ## Requirements
 
 - **Claude Code** with plugin support.
-- **lazycortex-core** — provides the `products` / `spec` settings sections, the `settings-get` / `settings-set` CLI, and the runtime daemon that drives the `spec.gate-tick` md-scan routine.
-- **lazycortex-review** (v4) — the shared behavior-keyed review classes that `spec.product-config` generates once per vault (one class per doc-kind, right-anchored wildcard globs spanning every product and asset category; a product with divergent experts gets a per-product override).
+- **lazycortex-core** — provides the `products` / `spec` settings sections, the `settings-get` / `settings-set` CLI, and the runtime daemon that drives the `lazy-spec.gate-tick` md-scan routine.
+- **lazycortex-review** (v4) — the shared behavior-keyed review classes that `lazy-spec.product-config` generates once per vault (one class per doc-kind, right-anchored wildcard globs spanning every product and asset type; a product with divergent experts gets a per-product override).
 - **lazycortex-diagram** — draws the behavioral / architecture diagrams that creation skills request.
 - **lazycortex-experts** *(optional)* — supplies the designer / developer / tester personas wired into review classes.
 
 ## Quick start
 
-1. `/spec.install` — create consumer dirs, register the gate-tick routine, optionally seed the repo's default language.
-2. `/spec.product-config` — register your first product (path, source repo, icon, review experts) in `lazy.settings.json[products]`.
-3. `/spec.create-feature <product> <slug>` — scaffold your first asset, then let the gates and review cycle carry it forward.
+1. `/lazy-spec.install` — create consumer dirs, register the gate-tick routine, optionally seed the repo's default language.
+2. `/lazy-spec.product-config` — register your first product (path, source repo, icon, review experts) in `lazy.settings.json[products]`.
+3. `/lazy-spec.create-feature <product> <slug>` — scaffold your first asset, then let the gates and review cycle carry it forward.

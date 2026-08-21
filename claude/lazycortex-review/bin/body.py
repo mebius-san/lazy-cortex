@@ -134,6 +134,20 @@ def _owner_of_section(section_body: str) -> tuple[str, str] | None:
   return None
 
 
+def owner_of_section(section_body: str) -> tuple[str, str] | None:
+  """
+  Parse the ownership tag from the first non-empty line of `section_body`.
+
+  Args:
+    section_body: Text of the section whose ownership tag is being read.
+
+  Returns:
+    `(flat_name, section_id)` when the first non-empty line is a well-formed 2-part ownership
+    tag, or `None` when no tag line is found or the tag is malformed.
+  """
+  return _owner_of_section(section_body)
+
+
 def _section_tag_line(section_body: str) -> str | None:
   """
   Return the section's tag line — its first non-empty content line when that line is a tag.
@@ -630,55 +644,6 @@ def strip_owned_h1_sections(
       continue
     keep_ranges.append((start, end))
   return "".join(body[s:e] for s, e in keep_ranges)
-
-
-def strip_ownership_tag(body: str, *, section_ids: set[str]) -> str:
-  """
-  Remove the ownership-tag line from every owned H1 section whose section-id is in
-  `section_ids`, keeping the H1 heading and all section content.
-
-  Used at finalize-with-concerns so preserved validator sections survive as plain prose
-  rather than as review-owned sections carrying a dangling expert tag (Bug 88). The heading
-  and body below the head-pair are preserved verbatim; a single blank line separates the
-  heading from the kept content. Sections whose section-id is not in the set are untouched.
-
-  Returns:
-    `body` with the ownership-tag lines removed from matching sections, or `body` unchanged
-    when `section_ids` is empty or nothing matches.
-  """
-  if not section_ids:
-    return body
-  spans = _enumerate_h1_spans(body)
-  if not spans:
-    return body
-  out: list[str] = []
-  cursor = 0
-  for start, end, _title, _heading in spans:
-    out.append(body[cursor:start])
-    cursor = end
-    section_text = body[start:end]
-    heading_line = _heading_line_for(start, end, body)
-    owner_pair = _owner_of_section(section_text[len(heading_line):])
-    if owner_pair is None or owner_pair[1] not in section_ids:
-      out.append(section_text)
-      continue
-    lines = section_text.splitlines(keepends=True)
-    # head-pair = [H1 line, optional blanks, ownership-tag line]; drop
-    # the tag line, keep the heading + everything below it.
-    i = 0
-    if i < len(lines):
-      i += 1  # H1 heading line
-    head = "".join(lines[:i])
-    while i < len(lines) and lines[i].strip() == "":
-      i += 1  # blanks between heading and tag (rare)
-    if i < len(lines):
-      i += 1  # the ownership-tag line — dropped
-    rest = "".join(lines[i:])
-    if rest and not rest.startswith("\n"):
-      head += "\n"
-    out.append(head + rest)
-  out.append(body[cursor:])
-  return "".join(out)
 
 
 def _extract_history_section(body: str) -> str | None:

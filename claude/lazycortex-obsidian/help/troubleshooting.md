@@ -1,20 +1,20 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, and plugin updates.
-last_regen: 2026-08-06
+last_regen: 2026-08-19
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
-  kind_hint: decision-tree
+  request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin / gen-tag-pages); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
 source_skills:
   - lazy-obsidian.install
   - lazy-obsidian.iconize-install
   - lazy-obsidian.iconize-config
   - lazy-obsidian.iconize-sync
   - lazy-obsidian.diagram-install
+  - lazy-obsidian.gen-tag-pages
   - lazy-obsidian.update-plugin
   - lazy-obsidian.audit
-source_sha: a080c1ec8ba430f6f7ffaa2b62b17fe55e51c50e
+source_sha: 1b79c714d76efca72ce97419eb66c032923b60bc
 ---
 # Troubleshooting
 
@@ -64,7 +64,7 @@ source_sha: a080c1ec8ba430f6f7ffaa2b62b17fe55e51c50e
 
 **Likely cause**: `/lazy-obsidian.iconize-install` has not been run yet for this repo, so the icon-map has not been scaffolded.
 
-**Fix**: Run `/lazy-obsidian.iconize-install` to scaffold the icon-map, pre-commit shim, and dependency plugins. Then re-run `/lazy-obsidian.iconize-config` to add or edit registry entries.
+**Fix**: Run `/lazy-obsidian.iconize-install` to scaffold the icon-map and dependency plugins. Then re-run `/lazy-obsidian.iconize-config` to add or edit registry entries.
 
 ---
 
@@ -78,23 +78,13 @@ source_sha: a080c1ec8ba430f6f7ffaa2b62b17fe55e51c50e
 
 ---
 
-## `/lazy-obsidian.iconize-sync` exits with code 5 (hook version drift)
+## `/lazy-obsidian.iconize-sync` exits with code 5 (version drift)
 
-**Symptom**: The iconize-sync worker exits with code 5. The error message mentions MAJOR drift or an incompatible hook version between the installed `.githooks/pre-commit` shim and the current worker.
+**Symptom**: The iconize-sync worker exits with code 5. The error message mentions an incompatible icon-map schema.
 
-**Likely cause**: The plugin was updated via `/plugin update lazycortex-obsidian@lazycortex` but the pre-commit shim in `.githooks/pre-commit` was not refreshed to match the new worker's `HOOK_VERSION`. A MAJOR version bump in the worker renders the old shim inert (it exits 0 with a diagnostic but does not sync).
+**Likely cause**: The plugin was updated via `/plugin update lazycortex-obsidian@lazycortex` and the vault's icon-map declares a `schema_version` this worker no longer supports (or a `min_hook_version` the worker does not satisfy).
 
-**Fix**: Run `/lazy-obsidian.iconize-install` — it invokes `install-hooks` which rewrites the shim to the current `HOOK_VERSION`. Alternatively, run `/lazy-obsidian.iconize-sync check-versions` to confirm the drift report, then re-run `/lazy-obsidian.iconize-install`.
-
----
-
-## A note's icon frontmatter looks "one commit behind" after committing
-
-**Symptom**: You commit a change, and the `iconize_icon` / `iconize_color` frontmatter you'd expect from that commit shows up in the *next* commit instead — the icon on disk and in the vault is correct immediately, but `git log` on the note makes it look like the repaint lagged by one commit.
-
-**Likely cause**: This is expected, not a fault. `sync-staged` (the pre-commit hook) never stages into the git index — the index belongs to the operator — so a frontmatter rewrite it makes during a pre-commit run lands in the working tree but rides along in the *next* commit, not the one currently in flight.
-
-**Fix**: Nothing to fix. The icon is already correct in the vault and on disk right away. If you want the repaint folded into the commit you're about to make instead of the next one, run `/lazy-obsidian.iconize-sync reconcile-dirty` before committing — it walks `git status` for dirty `.md` files and reconciles them in one pass, so the rewrite is staged alongside your other changes.
+**Fix**: Run `/lazy-obsidian.iconize-sync check-versions` to confirm the drift report, then re-run `/lazy-obsidian.iconize-install` — it migrates the icon-map schema where a migration path exists.
 
 ---
 
@@ -150,11 +140,11 @@ source_sha: a080c1ec8ba430f6f7ffaa2b62b17fe55e51c50e
 
 ## `mermaid-popup` fails to install during `/lazy-obsidian.diagram-install`
 
-**Symptom**: `/lazy-obsidian.diagram-install` Step 4 reports `failed:<reason>` for the `mermaid-popup` plugin. The skill continues and completes, but click-to-zoom on mermaid fences is unavailable.
+**Symptom**: `/lazy-obsidian.diagram-install` Step 2 reports `failed:<reason>` for the `mermaid-popup` plugin. The skill continues and completes, but click-to-zoom on mermaid fences is unavailable.
 
 **Likely cause**: The Obsidian community registry was unreachable, or `mermaid-popup` was not found in it at the time of install.
 
-**Fix**: The CSS snippets (`mermaid-fit.css`, `ascii-fit.css`) are already installed and working — diagram rendering is fully functional without click-to-zoom. When network access is restored, run `/lazy-obsidian.update-plugin mermaid-popup` to install the plugin, or install it via Obsidian's Community Plugins UI. Re-running `/lazy-obsidian.diagram-install` later is also safe (idempotent).
+**Fix**: The mermaid/ascii fit CSS snippets are installed and enabled by `/lazy-obsidian.install`'s own shared snippet step (not by `diagram-install` itself) — so mermaid SVG fit and background/theme color already work without click-to-zoom, as long as you have run `/lazy-obsidian.install` at least once. When network access is restored, run `/lazy-obsidian.update-plugin mermaid-popup` to install the plugin, or install it via Obsidian's Community Plugins UI. Re-running `/lazy-obsidian.diagram-install` later is also safe (idempotent).
 
 ---
 

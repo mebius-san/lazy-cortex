@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime, memory, routines, git staging, MCP permissions, and change-history search.
-last_regen: 2026-08-06
+summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime (incl. manual ticks and new daemon authoring), memory, routines, git staging, MCP permissions, and change-history search.
+last_regen: 2026-08-21
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -14,6 +14,8 @@ source_skills:
   - lazy-guard.allow-mcp
   - lazy-routine.register
   - lazy-runtime.recover
+  - lazy-runtime.tick
+  - lazy-core.daemon-authoring
   - lazy-expert.dispatch-job
   - lazy-expert.collect-job
   - lazy-memory.mark-persona
@@ -23,6 +25,7 @@ source_skills:
   - lazy-log.recall
   - lazy-log.summary
   - lazy-log.timeline
+source_sha: ddfefb0f7c7cd9509a78bd86f8dc930e5e906a56
 ---
 # FAQ
 
@@ -44,7 +47,7 @@ No. `/lazy-core.setup` runs a settings migration as its first step (Step 0) befo
 
 ## Do I need to re-run `/lazy-core.install` after a plugin update?
 
-Yes. `/plugin update` refreshes the plugin cache but does not re-sync rule files into `.claude/rules/`. Your project keeps running the old rule content until you explicitly re-run `/lazy-core.install` (or `/lazy-core.setup`, which includes it). This is intentional: syncing can overwrite local edits, so the install skill walks you through each changed file one at a time — overwrite, keep-local, or delete if the file was removed upstream — before touching anything.
+Yes. `/plugin update` refreshes the plugin cache but does not re-sync rule files into `.claude/rules/`. Your project keeps running the old rule content until you explicitly re-run `/lazy-core.install` (or `/lazy-core.setup`, which includes it). The re-run itself is silent: rule files are plugin-owned mirrors, so the install skill byte-compares each one and overwrites whatever has fallen behind, without asking. If you want different content in a rule, write your own rule file rather than editing the mirror — an edited mirror is indistinguishable from a stale one and gets replaced. A rule the plugin no longer ships is left in place, never deleted.
 
 ---
 
@@ -84,7 +87,7 @@ The file exists separately because model-routing preferences are architectural d
 
 The tracked `settings.json` files (global `~/.claude/settings.json` and project `.claude/settings.json`) are for enablement-only entries: `enabledPlugins`, `enabledMcpjsonServers`, `hooks` registrations, non-secret `env` vars, model selection, and status-line config. Per-tool permission entries (`permissions.allow`, `permissions.ask`), `additionalDirectories`, and machine-specific `env` values belong in the gitignored `settings.local.json` files. Committing permission lists leaks your personal risk preferences to teammates who may have different policies. The `lazy-guard.settings` PreToolUse hook enforces this split by intercepting writes to settings files that violate it.
 
-The same split applies to `lazy.settings.json[daemon].metrics`: the `enabled` flag and `repo_label` are tracked (they're a shared design decision), while the allocated port lives only in the gitignored local overlay, because a port that is free on one machine can be taken on another.
+The same split applies to `lazy.settings.json[daemon].metrics`: the `enabled` flag and `repo_label` are tracked (they're a shared design decision), while the allocated port lives only in the gitignored local overlay, because a port that is free on one machine can be taken on another. `daemon.run_here` is the deliberate exception to "per-machine stays local" — it is a hostname-to-checkout-path map and lives in the **tracked** file on purpose, so the pairing travels to every clone (see the Dropbox/iCloud question below).
 
 ---
 
@@ -128,7 +131,7 @@ To enable it later without re-running the full install flow, run `/lazy-core.ins
 
 ## Does `/lazy-core.install` set up monitoring for the runtime daemon?
 
-Yes, but only on a checkout that actually runs the daemon locally. Once the earlier install wizard confirms this machine runs the daemon (`run_here`), a later step asks once whether to enable the daemon's Prometheus `/metrics` endpoint — exposing routine ticks, errors, tokens, and queue depth on a loopback HTTP port for a Prometheus-compatible scraper. Answering "No" is recorded permanently and you are never asked again on that checkout; re-running `/lazy-core.install` reuses the recorded answer instead of re-asking.
+Yes, but only on a checkout that actually runs the daemon locally. Once the earlier install wizard confirms this machine and checkout are the pair on record (`run_here`), a later step asks once whether to enable the daemon's Prometheus `/metrics` endpoint — exposing routine ticks, errors, tokens, and queue depth on a loopback HTTP port for a Prometheus-compatible scraper. Answering "No" is recorded permanently and you are never asked again on that checkout; re-running `/lazy-core.install` reuses the recorded answer instead of re-asking.
 
 Answering "Yes" allocates a free port sequentially starting from `9464` — reusing this checkout's already-recorded port on re-runs instead of picking a new one — and splits where the decision is written: the `enabled` flag and a human-readable `repo_label` (default `local-<folder name>`) go into the tracked `lazy.settings.json[daemon].metrics`, shared across machines, while the allocated port goes into the gitignored per-machine overlay, because a port that's free on one machine may be taken on another. The step then regenerates a host-wide Prometheus scrape-targets file so an external Prometheus with a `file_sd_configs` pointer picks up every locally running daemon with zero manual edits.
 
@@ -138,9 +141,11 @@ If the daemon later starts and finds its recorded port already taken by somethin
 
 ## My checkout is on Dropbox/iCloud/Syncthing and shows up on more than one machine — won't `run_here` start a daemon on all of them?
 
-It would, if `run_here` only accepted `true`/`false` — the gitignored per-checkout overlay that holds that flag (`.claude/lazy.settings.local.json`) is a plain file, so a file-synced checkout carries the same overlay to every machine holding that path. A bare `true` answered once during install would leak the daemon onto every synced machine, not just the one you meant.
+It would, if `run_here` only accepted `true`/`false` — but that shape is retired. `daemon.run_here` is now a hostname-to-checkout-path map, for example `{"nexus": "~/lazy-runtime/Money"}`, stored in the **tracked** `lazy.settings.json` so the pairing travels with the project to every clone (a gitignored overlay would never reach a machine that cloned the repo independently — exactly where a second daemon would appear). Neither half of the pair decides alone: the hostname says which machine, the path says which of that machine's checkouts drives the daemon — a single machine commonly holds more than one checkout of the same project (a working copy plus the one the daemon runs from), and naming only the host would collide between them the same way a bare `true` used to collide across synced machines.
 
-To avoid that, set `run_here` to a list of hostnames instead of a boolean, for example `["nexus"]`, naming the only machine(s) allowed to run this checkout's daemon. `/lazy-core.install` compares the list against each machine's own hostname: the named host installs the supervisor as normal, while every other host both skips the supervisor install AND tears down any supervisor unit it already has for that checkout — so re-running `/lazy-core.install` on a machine that shouldn't be running it self-heals a leaked daemon instead of leaving it running. Edit the overlay by hand to switch from a boolean to a hostname list, then re-run `/lazy-core.install` to apply it.
+`/lazy-core.install` compares the map against the machine's own hostname (lowercased) and the checkout's own resolved path (symlinks included, so a symlinked path still matches). The named pair installs the supervisor as normal. Every other machine — and every other checkout on the named machine — both skips the supervisor install AND tears down any supervisor unit it already has for that checkout, so re-running `/lazy-core.install` anywhere that shouldn't be running the daemon self-heals a leaked one instead of leaving it running. The daemon itself also refuses to start on a checkout the map doesn't name, even while `daemon.enabled` stays `true`, so a leaked supervisor can't outlive the map even if you never get around to re-running install there. An empty map (`{}`) names nothing at all — the project stays daemon-enabled but nothing drives it until you point the map at a checkout.
+
+Edit the map by hand — add or remove a `"<hostname>": "<path>"` entry — then re-run `/lazy-core.install` to apply it; entries recorded for other machines are left untouched. If the file still carries the retired shape (a bare boolean, or a plain list of hostnames from an install that predates the map), `/lazy-core.install` reports `run-here-invalid`, prints the offending value, and re-asks the Gate 2 question so your answer replaces it outright — the daemon refuses to start until the map is in the current shape.
 
 ---
 
@@ -207,6 +212,24 @@ The hook is fully isolated from the daemon's own tick: a non-zero exit, a timeou
 
 ---
 
+## How do I run routines and drain queued jobs on a checkout without a live daemon?
+
+Run `/lazy-runtime.tick [<routine-name>] [--drain]`. It runs the daemon's own primitives by hand, in the daemon's own serial order, on a checkout whose daemon is not running. With no arguments it runs a single iteration — every due routine in priority order, then at most one READY job through the pump (the daemon's own single-spawn ceiling). `--drain` repeats iterations, sleeping between them exactly as the daemon would, until nothing is due and the queue is empty — it stops early on a halt, a dirty tree, a raised rate-limit flag, or a pass that made no progress. Naming a routine runs only that one, ignoring both its interval and `--drain`.
+
+It refuses outright if the checkout's own supervisor unit already holds a live daemon — a concurrent manual tick would race it over the working tree, the git index, and the job queue; stop the supervisor first (or run the tick on a different checkout) rather than forcing it. Commits land exactly as the daemon's own would (per-routine, bot identities), but the push is deferred: nothing publishes during a manual tick, and the commits wait on the branch for the next pushing iteration the daemon itself runs after you restart it. If a routine halts mid-tick, `/lazy-runtime.recover` explains and clears it, same as it would for the daemon.
+
+---
+
+## I'm writing a new periodic process that calls an LLM — how do I avoid it getting rate-limited off my subscription?
+
+Run `/lazy-core.daemon-authoring` before the first line of the launch command exists. Its first question is whether the work needs a new daemon at all: if the target repo already runs the lazycortex runtime (a `routines` section in `lazy.settings.json`, or a `com.lazycortex.runtime.*` supervisor unit for the checkout), the answer is a **routine** — register it via `/lazy-routine.register` and let the existing daemon drive it, since it already carries the rate-limit guard, serial scheduling, git discipline, and the error ledger. Writing a second daemon next to a running one is the wrong move. Only a genuinely standalone process — no runtime present, or a lifecycle the runtime can't host — gets a new daemon.
+
+For a standalone daemon, every LLM call it makes must go through `~/.local/bin/lazy-claude` by absolute path, never the bare word — launchd and cron hand the process their own minimal `PATH`, which won't resolve a bare `lazy-claude`. Exit code 75 from the wrapper is not an error: it means the host's subscription rate-limit window is closed and the call was refused before burning tokens, so the daemon should treat it as a quiet skip and try again on the next schedule rather than retrying in a loop or alerting. Exit 69 means no real `claude` executable was found on `PATH` and is worth surfacing. Turning the guard off for one daemon means putting the bare word `claude` back in its launch command — the wrapper itself has no configuration to disable.
+
+`/lazy-core.daemon-authoring` also hands over a launchd plist skeleton (a systemd user timer/service pair on Linux) encoding the practices that keep a standalone daemon debuggable: `StartInterval` over `KeepAlive` for periodic work, an explicit `PATH` in the environment so both the wrapper and any tools the daemon shells out to resolve, and fixed stdout/stderr log paths since launchd captures nothing without them. This requires `/lazy-core.install` to have already run at least once on the host — that is what creates `~/.local/bin/lazy-claude` in the first place.
+
+---
+
 ## What routine types does `/lazy-routine.register` support?
 
 Five types, each suited to a different scheduling pattern:
@@ -253,15 +276,15 @@ The distinction is whether the finding represents a certain security boundary vi
 
 **FAILs are never waivable.** They cover secrets that would be directly exploitable if the repo went public: private keys, AWS access keys, API key or token literals, bearer tokens, high-entropy base64 on lines that look like credential assignments, and connection strings with embedded credentials. The scanner blocks the commit or the public-repo workflow and requires you to encrypt, template-ize, or redact the value before proceeding. There is no waiver path for these — the threat model does not have a "it's fine this time" branch.
 
-**WARNs are waivable with a documented reason.** They cover findings that are often real problems but sometimes legitimate: email addresses (yours on a public README is fine; a customer's in a config is not), service user IDs, Tailscale or public IP addresses, internal hostnames, and hardcoded local paths (`/Users/…` or `~/Dropbox/…` style). To accept a WARN, re-run `/lazy-guard.check-public` and pick the "Add waiver" option when the scanner presents the finding — the skill writes the waiver entry including check ID, scope glob, match pattern, reason, and date. Waivers live in `.guard-waivers.json` and are checked on every subsequent scan.
+**WARNs are waivable with a documented reason.** They cover findings that are often real problems but sometimes legitimate: email addresses (yours on a public README is fine; a customer's in a config is not), service user IDs, Tailscale or public IP addresses, internal hostnames, and hardcoded local paths (`/Users/…` or `~/Dropbox/…` style). To accept a WARN, re-run `/lazy-guard.check-public` and pick the "Add waiver" option when the scanner presents the finding — the skill writes the waiver entry including check ID, scope glob, match pattern, reason, and date. Waivers live in `.guard-public.json` and are checked on every subsequent scan.
 
-Author-name findings in tracked manifests (`plugin.json`, `package.json`, etc.) are also WARNs. Set your `public_author` by letting `/lazy-guard.check-public` prompt you for it on first use; it records the value in `.guard-waivers.json` and auto-waives matching literals on all future scans.
+Author-name findings in tracked manifests (`plugin.json`, `package.json`, etc.) are also WARNs. Set your `public_author` by letting `/lazy-guard.check-public` prompt you for it on first use; it records the value in `.guard-public.json` and auto-waives matching literals on all future scans.
 
 ---
 
 ## Can I use `lazy-guard.check-public` on a private repo that has a public subtree?
 
-Yes. The skill supports a `public_scopes` array in `.guard-waivers.json`. When that array is set, only files matching one of its globs are treated as the public surface — everything else is implicitly private and excluded from the scan. The pre-commit hook respects the same array, so commits that only touch files outside the public scopes are not scanned. Run `/lazy-repo.mark-public <glob>` with one or more scope glob arguments to set this up: it adds the globs to `public_scopes`, runs the audit scoped to those paths, walks you through fixes and waivers, and never touches your GitHub repo visibility.
+Yes. The skill supports a `public_scopes` array in `.guard-public.json`. When that array is set, only files matching one of its globs are treated as the public surface — everything else is implicitly private and excluded from the scan. The pre-commit hook respects the same array, so commits that only touch files outside the public scopes are not scanned. Run `/lazy-repo.mark-public <glob>` with one or more scope glob arguments to set this up: it adds the globs to `public_scopes`, runs the audit scoped to those paths, walks you through fixes and waivers, and never touches your GitHub repo visibility.
 
 ---
 

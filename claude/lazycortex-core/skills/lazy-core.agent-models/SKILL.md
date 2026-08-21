@@ -1,7 +1,7 @@
 ---
 name: lazy-core.agent-models
 description: "Run when the operator asks which model each subagent runs on or wants to set them — after adding agents, after a fresh `/lazy-core.install`, or when an audit reports missing `agent_models` entries. Also runs as Phase 7 of `/lazy-core.optimize`. Interactive wizard over the entries install did not already seed; also prunes entries whose agent file is gone. Cheap, standalone, safe to re-run."
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(date *), Bash(test *), Bash(python3 *)
+allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(date *), Bash(test *), Bash(python3 *), Agent
 lazy_setup_phase: post-install
 ---
 # Fill agent_models

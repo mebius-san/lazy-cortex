@@ -1,7 +1,7 @@
 ---
 name: <namespace.name>
 description: "<trigger FIRST — `Use when <task shape>` for a generally-dispatchable agent, or `Dispatched by /<skill>; not for direct use.` when one caller owns it — then whatever distinguishes it from a sibling agent>"
-tools: Read, Glob, Grep
+tools: Read, Glob, Grep, Agent
 model: inherit
 ---
 # <Agent Title>

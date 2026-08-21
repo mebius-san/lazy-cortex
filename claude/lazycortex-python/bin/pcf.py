@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import tokenize
+import unicodedata
 # noinspection PyCompatibility
 import tomllib
 
@@ -30,6 +31,23 @@ if TYPE_CHECKING:
 # hardcoded exclusions that should never be scanned
 HARDCODED_EXCLUDES = ['.venv', '__pycache__']
 
+# accepted `allowed_languages` names mapped to the unicode script prefixes their letters
+# carry in `unicodedata.name` -- a language is admitted by its script, so every latin-written
+# language shares one entry and adding a sibling never needs a new row.
+LANGUAGE_SCRIPTS = {
+  'english':    ('LATIN',),
+  'latin':      ('LATIN',),
+  'russian':    ('CYRILLIC',),
+  'ukrainian':  ('CYRILLIC',),
+  'cyrillic':   ('CYRILLIC',),
+  'greek':      ('GREEK',),
+  'hebrew':     ('HEBREW',),
+  'arabic':     ('ARABIC',),
+  'chinese':    ('CJK',),
+  'japanese':   ('CJK', 'HIRAGANA', 'KATAKANA'),
+  'korean':     ('HANGUL',),
+}
+
 # default configuration values
 DEFAULT_CONFIG = {
   'max_line_length': 117,
@@ -41,6 +59,11 @@ DEFAULT_CONFIG = {
   'check_block_comments': True,
   'check_assert': True,
   'check_magic_literal': True,
+  'check_language': True,
+  # languages whose letters may appear in comments and docstrings; a letter belonging to
+  # no listed language is reported. populated from pyproject.toml [tool.pcf]
+  # allowed_languages; see LANGUAGE_SCRIPTS for the accepted names.
+  'allowed_languages': ['english'],
   # extra docstring-content patterns rejected as banned (substring match, any section).
   # populated from pyproject.toml [tool.pcf] banned_docstring_phrases.
   'banned_docstring_phrases': [],
@@ -59,7 +82,31 @@ DEFAULT_CONFIG = {
   # extra string values never flagged as magic, merged onto the built-in trivial set.
   # populated from pyproject.toml [tool.pcf] allowed_magic_strings.
   'allowed_magic_strings': [],
+  # the consumer's first-party package name driving the project import block and the
+  # parent-import check. populated from pyproject.toml [tool.pcf] project_package;
+  # empty means autodetect a single top-level package (root or src/), and when neither
+  # yields a name both project-import checks are disabled.
+  'project_package': '',
 }
+
+
+def _scripts_for_languages(languages: list[str]) -> set[str]:
+  """
+  Resolve configured language names to the unicode script prefixes they admit.
+
+  An unknown name contributes nothing and is reported by the caller's own finding, so a typo
+  narrows the check rather than silently widening it.
+
+  Args:
+    languages: language names as written in `[tool.pcf] allowed_languages`.
+
+  Returns:
+    Script prefixes admitted by the named languages; empty when none of them is known.
+  """
+  scripts: set[str] = set()
+  for name in languages:
+    scripts.update(LANGUAGE_SCRIPTS.get(name.strip().lower(), ()))
+  return scripts
 
 
 def load_config(start_path: str | None = None) -> dict:
@@ -143,6 +190,69 @@ def resolve_config_for_file(base_config: dict,
   return effective
 
 
+def detect_project_package(project_root: str) -> str:
+  """
+  Autodetect the consumer's first-party package name from the project layout.
+
+  Scans the project root and its `src/` directory for top-level packages (directories
+  carrying an `__init__.py`), skipping hidden directories, virtualenvs, and test trees.
+
+  Args:
+    project_root: absolute path to the directory holding pyproject.toml.
+
+  Returns:
+    The single detected package name, or an empty string when zero or several candidates
+    exist — an ambiguous layout must not silently pick a winner.
+  """
+  candidates: list[str] = []
+
+  # the two conventional homes of a first-party package: the root itself and src/
+  for base in (project_root, os.path.join(project_root, 'src')):
+    # guard: skip absent bases
+    if not os.path.isdir(base):
+      continue
+    for entry in sorted(os.listdir(base)):
+      # guard: skip hidden dirs, venvs, caches, and test trees
+      if entry.startswith('.') or entry in HARDCODED_EXCLUDES or entry == 'tests':
+        continue
+      if os.path.isfile(os.path.join(base, entry, '__init__.py')):
+        candidates.append(entry)
+
+  # exactly one candidate is an unambiguous first-party package; anything else disables
+  return candidates[0] if len(candidates) == 1 else ''
+
+
+def resolve_project_package(config: dict) -> str:
+  """
+  Resolve the effective first-party package name from config or layout autodetection.
+
+  Args:
+    config: configuration dictionary from `load_config`.
+
+  Returns:
+    The configured `project_package` when set, else the autodetected package name, else
+    an empty string (project-import checks disabled).
+  """
+
+  # Domain(pytool.import-discipline): [project-package]
+  # # First-party package resolution
+  # A consumer's own package name drives which imports classify as project imports rather
+  # than third-party ones, and it is resolved by a strict precedence: an explicit
+  # configuration value always wins outright. Absent that, the project root is scanned for
+  # a single top-level directory carrying an `__init__.py`, looked for at the root itself
+  # and under a `src/` directory, skipping hidden directories, virtualenvs, caches, and
+  # test trees. Finding exactly one candidate resolves it; finding zero or more than one
+  # leaves the name empty, which turns off project-import classification and the
+  # parent-module-import check entirely rather than guessing at an ambiguous layout.
+
+  configured = config.get('project_package', '')
+  # guard: an explicit config value always wins over autodetection
+  if isinstance(configured, str) and configured:
+    return configured
+  root = config.get('_project_root', '')
+  return detect_project_package(root) if root else ''
+
+
 # type alias for a suggestion map
 SuggestionsMap = dict[str, list[tuple[int, str]]]
 
@@ -209,6 +319,13 @@ CONTRACT_MARKER_RE = re.compile(r'#\s*Contract:\s*$')
 # `Decision:`) -- the Capitalized family that owns a standalone block. `Contract:` with
 # text after the colon is prose referencing a contract, not the marker itself.
 BLOCK_MARKER_RE = re.compile(r'#\s*(Domain\s*\(|Contract:\s*$|Decision:)')
+
+# Decision: the unfiled check matches one literal, never the dictionary — the checker
+# stays overlay-independent; reading `domain-groups.md` here would couple every pcf run
+# to a consumer file that is free to be absent
+
+# regex matching a Domain block filed under the reserved `unfiled` group
+UNFILED_DOMAIN_RE = re.compile(r'#\s*Domain\s*\(\s*unfiled\s*\)')
 
 # regex matching a TMP marker comment (with or without colon)
 TMP_RE = re.compile(r'#\s*TMP\b')
@@ -288,6 +405,19 @@ def _has_waiver(source_lines: list[str], lineno: int) -> bool:
   Returns:
     True if a waiver comment with explanation text is present, False otherwise.
   """
+
+  # Domain(pytool.marker-grammar): [waiver]
+  # # Waiver comment grammar
+  # A waiver is granted by a `# waiver: <explanation>` comment carrying non-empty text
+  # after the colon, and it is recognized in four positions relative to the line it
+  # exempts: written inline on the line itself, on the line immediately above (including
+  # through a run of contiguous comment lines above that, so a multi-line waiver followed
+  # by suppression-directive comments still resolves), on the line immediately below, or as
+  # a class-level waiver -- a comment at the class body's own indentation, anywhere in the
+  # class body outside its methods, covering every direct class-body statement at once. A
+  # waiver with an empty clause after the colon grants nothing; the checker treats it as
+  # absent.
+
   idx = lineno - 1
 
   # check inline on the line itself
@@ -496,11 +626,22 @@ class ImportBlockType:
   Enum-like class for import block types.
   """
 
+  # Domain(pytool.import-discipline): [import-order]
+  # # Import block ordering
+  # A source file's imports fall into seven ordered categories, and every import at
+  # module scope must appear no earlier than the highest category already seen: the
+  # `__future__` import, then `typing` imports (except `TYPE_CHECKING`), then the standard
+  # library, then third-party packages, then the project's own first-party package, then
+  # relative (local) imports, and finally the `TYPE_CHECKING` guarded block, which always
+  # comes last. An `__init__.py` file is the one exception: a wildcard re-export import is
+  # allowed to sit ahead of the project/local block it would otherwise follow, since a
+  # package's `__init__.py` exists to re-export its own submodules first.
+
   FUTURE = 0        # from __future__ import annotations
   TYPING = 1        # from typing import ... (except TYPE_CHECKING)
   STDLIB = 2        # standard library imports
   THIRD_PARTY = 3   # third-party imports
-  PROJECT = 4   # from myapp.* imports
+  PROJECT = 4       # first-party imports from the configured project package
   LOCAL = 5         # relative imports (from .*, from ..*)
   TYPE_CHECKING = 6 # from typing import TYPE_CHECKING + if TYPE_CHECKING block
 
@@ -523,12 +664,24 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
   AST visitor that analyzes an import format according to project guidelines.
 
   Collects information about import statements and checks for format violations.
+
+  Subclassing:
+    - A `visit_*` override for a node that can contain nested imports (a class,
+      function, async-function, or `if` body) must call `self.generic_visit(node)`,
+      or import statements nested inside that node go undetected.
   """
 
-  def __init__(self, 
-               source_lines: list[str], 
+  # Contract:
+  # A subclass overriding a `visit_*` method for a node that can contain
+  # nested imports (a class, function, async-function, or `if` body) MUST call
+  # `self.generic_visit(node)`, or import statements nested inside that node
+  # go undetected.
+
+  def __init__(self,
+               source_lines: list[str],
                is_init_file: bool = False,
-               file_path: str | None = None) -> None:
+               file_path: str | None = None,
+               project_package: str = '') -> None:
     """
     Initialize the import format analyzer.
 
@@ -536,11 +689,16 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
       source_lines: list of source code lines for blank line analysis.
       is_init_file: whether the file is an __init__.py file.
       file_path: path to the file being analyzed, used for parent module import checks.
+      project_package: the consumer's first-party package name; empty disables the
+        project import block and the parent-import check.
     """
     # source lines for blank line analysis
     self.source_lines = source_lines
     self.is_init_file = is_init_file
     self.file_path = file_path
+
+    # first-party package name driving project-import classification
+    self.project_package = project_package
 
     # list of (line_number, block_type, node) for all imports
     self.imports: list[tuple[int, int, ast.Import | ast.ImportFrom]] = []
@@ -614,8 +772,10 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
       if module == 'types':
         return ImportBlockType.TYPING
 
-      # myapp project imports
-      if module.startswith('myapp.') or module == 'myapp':
+      # project imports (first-party package configured for this consumer)
+      if self.project_package and (
+        module == self.project_package or module.startswith(self.project_package + '.')
+      ):
         return ImportBlockType.PROJECT
 
       # check top-level module
@@ -645,8 +805,8 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
         if module in THIRD_PARTY_PACKAGES:
           return ImportBlockType.THIRD_PARTY
 
-        # myapp project
-        if module == 'myapp':
+        # project package
+        if self.project_package and module == self.project_package:
           return ImportBlockType.PROJECT
 
       # assume third-party for unknown
@@ -904,7 +1064,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
       if block_type < current_block_type:
         # special case for __init__.py files: allow project imports after
         # local wildcard imports (per guidelines, wildcard imports come first
-        # after future imports, then other imports including project)
+        # after future imports, then other imports including project ones)
         if self.is_init_file and current_block_type == ImportBlockType.LOCAL:
           # check if the "local" block was actually wildcard imports
           # if so, allow project and other imports after it
@@ -929,6 +1089,17 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     """
     Check blank line rules between import blocks.
     """
+
+    # Domain(pytool.import-discipline): [blank-lines] [type-checking]
+    # # Import block spacing
+    # A boundary between two different import categories carries exactly one blank line,
+    # never zero and never more than one -- inside the ordinary import list and inside the
+    # `TYPE_CHECKING` guarded block alike, since the guarded block follows the same category
+    # order and needs the same visual separation. The one exception is the `TYPE_CHECKING`
+    # import line itself: it must sit immediately above its `if TYPE_CHECKING:` line with
+    # zero blank lines and nothing else between them, because the two lines are read as one
+    # unit that opens the guarded block.
+
     # guard: at least two imports needed for blank line checks
     if not self.imports or len(self.imports) < 2:
       return
@@ -1099,8 +1270,10 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
       if module in ('typing', 'types'):
         return ImportBlockType.TYPING
 
-      # myapp project imports
-      if module.startswith('myapp.') or module == 'myapp':
+      # project imports (first-party package configured for this consumer)
+      if self.project_package and (
+        module == self.project_package or module.startswith(self.project_package + '.')
+      ):
         return ImportBlockType.PROJECT
 
       # check top-level module
@@ -1130,8 +1303,8 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
         if module in THIRD_PARTY_PACKAGES:
           return ImportBlockType.THIRD_PARTY
 
-        # myapp project
-        if module == 'myapp':
+        # project package
+        if self.project_package and module == self.project_package:
           return ImportBlockType.PROJECT
 
       # assume third-party for unknown
@@ -1251,31 +1424,42 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
 
   def _check_multiline_format(self) -> None:
     """
-    Check multi-line format rules for myapp/local imports.
+    Check multi-line format rules for project/local imports.
 
-    Per guidelines: For imports from the `myapp` package or for local package imports
+    Per guidelines: For imports from the project package or for local package imports
     always use multi-line with parentheses except for one item imports.
     """
+
+    # Domain(pytool.import-discipline): [multiline-format]
+    # # Multi-item import layout
+    # An import that names more than one symbol from the project's own package or from a
+    # relative (local) module is always written across multiple lines inside parentheses,
+    # never packed onto one line -- even when the whole statement would fit under the line
+    # length limit. A single-item import from those same sources is exempt: the
+    # parenthesized form only earns its keep once there is more than one name to align.
+
     for lineno, block_type, node in self.imports:
       # guard: only check ImportFrom nodes
       if not isinstance(node, ast.ImportFrom):
         continue
 
-      # to determine if this is a myapp or local import
+      # to determine if this is a project or local import
       # for TYPE_CHECKING block imports, we need to re-classify to check the actual type
       is_project_or_local = block_type in (ImportBlockType.PROJECT, ImportBlockType.LOCAL)
 
       # also check imports inside `TYPE_CHECKING` block
       if block_type == ImportBlockType.TYPE_CHECKING:
         module = node.module or ''
-        # check if it's a myapp import inside TYPE_CHECKING
-        if module.startswith('myapp.') or module == 'myapp':
+        # check if it's a project import inside TYPE_CHECKING
+        if self.project_package and (
+          module == self.project_package or module.startswith(self.project_package + '.')
+        ):
           is_project_or_local = True
         # check if it's a local (relative) import inside TYPE_CHECKING
         elif node.level > 0:
           is_project_or_local = True
 
-      # guard: only check myapp or local imports
+      # guard: only check project or local imports
       if not is_project_or_local:
         continue
 
@@ -1303,7 +1487,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
         names = [alias.name for alias in node.names]
         self.issues.append((
           lineno,
-          f"myapp/local import with multiple items must use multi-line format with parentheses: "
+          f"project/local import with multiple items must use multi-line format with parentheses: "
           f"'from {module_str} import {', '.join(names)}'"
         ))
 
@@ -1433,6 +1617,19 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     Per guidelines: each Python file MUST contain `from __future__ import annotations`.
     Skip __init__.py files as they are mainly for re-exporting.
     """
+
+    # Domain(pytool.import-discipline): [file-header]
+    # # Mandatory header shape
+    # Every source file, except a package's own `__init__.py`, opens with a
+    # `from __future__ import annotations` import and carries an `if TYPE_CHECKING:` guarded
+    # block, whether or not the file currently needs a forward reference -- the shape is
+    # required uniformly so a later edit that does need one never has to retrofit the
+    # header. An `__init__.py` is exempt from both because its role is re-exporting
+    # symbols, not declaring new forward-referenced types. The header itself is bounded by
+    # blank-line counts: exactly one blank line separates a leading comment header (and any
+    # module docstring below it) from the first import, and exactly two blank lines
+    # separate the last import from the first line of code or from a section separator.
+
     # guard: skip __init__.py files
     if self.is_init_file:
       return
@@ -1528,20 +1725,36 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     and relative imports should not go up to the parent package.
     Sibling imports like `from ..entity import X` are allowed.
     """
+
+    # Domain(pytool.import-discipline): [wildcard-position] [parent-import]
+    # # Wildcard placement and parent-import ban
+    # A wildcard import is legal only inside a package's own `__init__.py`, and only in one
+    # position there: after the mandatory `__future__` import and before every other import,
+    # since its purpose is re-exporting the package's public surface before anything else is
+    # pulled in. Separately, no submodule may import from an ancestor package -- neither by
+    # its absolute dotted name nor by a relative import whose dot-count walks up past the
+    # submodule's own package -- because that direction of dependency inverts the package
+    # hierarchy. A sibling import (`from ..entity import X` reaching a cousin package, not
+    # an ancestor) stays allowed; only imports that resolve to a strict prefix of the
+    # current package's own dotted path are rejected.
+
     # guard: file path provided
     if not self.file_path:
+      return
+    # guard: no project package configured or detected -- the check has no root to anchor on
+    if not self.project_package:
       return
 
     # normalize a path and extract module hierarchy
     norm_path = self.file_path.replace('\\', '/')
 
-    # find the myapp module root
-    pkg_idx = norm_path.find('/myapp/')
-    # guard: file is inside myapp package
+    # find the project package root in the file's path
+    pkg_idx = norm_path.find(f"/{self.project_package}/")
+    # guard: file is inside the project package
     if pkg_idx == -1:
       return
 
-    # get the relative path from myapp root
+    # get the relative path from the package root
     rel_path = norm_path[pkg_idx + 1:]  # e.g., "myapp/core/math/values.py"
 
     # remove the.py extension and convert to a module path
@@ -1678,6 +1891,8 @@ class CodeFormatAnalyzer:
                check_indentation: bool = True,
                check_assert: bool = True,
                check_block_comments: bool = True,
+               check_language: bool = True,
+               allowed_languages: list[str] | None = None,
                tree: ast.AST | None = None):
     """
     Initialize the CodeFormatAnalyzer.
@@ -1690,6 +1905,8 @@ class CodeFormatAnalyzer:
       check_indentation: whether to check indentation.
       check_assert: whether to check for assert statements.
       check_block_comments: whether to check purpose comments on code blocks.
+      check_language: whether to check the language of comments and docstrings.
+      allowed_languages: languages admitted in comments and docstrings; `None` means English.
       tree: parsed module AST; the block-comment check is skipped without it.
     """
     self.source_lines = source_lines
@@ -1699,6 +1916,9 @@ class CodeFormatAnalyzer:
     self.check_indentation = check_indentation
     self.check_assert = check_assert
     self.check_block_comments = check_block_comments
+    self.check_language = check_language
+    self.allowed_languages = allowed_languages if allowed_languages is not None else ['english']
+    self.allowed_scripts = _scripts_for_languages(self.allowed_languages)
     self.tree = tree
     self.issues: list[tuple[int, str]] = []
 
@@ -1760,6 +1980,17 @@ class CodeFormatAnalyzer:
 
     Per guidelines: use two spaces for indentation.
     """
+
+    # Domain(pytool.code-discipline):
+    # # Two-space indentation
+    # The project's indentation unit is two spaces, never a tab and never one or three
+    # spaces at a block's own opening level -- a tab character anywhere in leading
+    # whitespace is flagged on sight, and a line whose leading whitespace is exactly one
+    # space is flagged as a broken two-space step. Continuation lines inside a
+    # multi-line expression are deliberately not held to the same multiple-of-two rule,
+    # since their indentation exists to align with an opening bracket or a wrapped
+    # argument, not to mark a new block.
+
     for idx, line in enumerate(self.source_lines):
       line_num = idx + 1
 
@@ -1794,6 +2025,18 @@ class CodeFormatAnalyzer:
 
     Per guidelines: always put spaces around '=' in function calls with named arguments.
     """
+
+    # Domain(pytool.code-discipline):
+    # # Spaced named-argument equals
+    # A named argument in a function call carries spaces around its `=`, written
+    # `func(width = 10)` rather than `func(width=10)` -- the opposite of the tight spacing
+    # ordinary Python style guides recommend for keyword arguments, but consistent with how
+    # this project treats every `=` as a readable assignment rather than a syntactic
+    # attachment. The rule targets call sites only: a function or class definition's own
+    # parameter defaults, a plain assignment statement, and a decorator line are excluded,
+    # since those `=` signs are declaring a default or binding a name rather than passing
+    # one.
+
     # pattern for named arguments without spaces: name=value (but not ==, !=, <=, >=)
     # this is a simplified check - full check would require AST analysis
     named_arg_pattern = re.compile(r'[a-zA-Z_][a-zA-Z0-9_]*=[^=]')
@@ -1859,6 +2102,16 @@ class CodeFormatAnalyzer:
 
     Per guidelines: use exactly 2 blank lines between any class method and other code.
     """
+
+    # Domain(pytool.code-discipline):
+    # # Method spacing and separator lines
+    # A method definition inside a class is preceded by exactly two blank lines, unless it
+    # is the class's very first member (right after the class header, a decorator, or the
+    # class's own docstring, none of which need a gap before the first method). Separately,
+    # a visual section separator -- a comment line of the shape `# ` followed by dashes --
+    # is only valid at exactly 88 dashes; any other dash count on a line already shaped like
+    # a separator is a malformed separator, not a stylistic variant.
+
     in_class = False
     class_indent = 0
     prev_non_blank_line = 0
@@ -1944,6 +2197,20 @@ class CodeFormatAnalyzer:
     line above the `except` clause when the swallow is intentional per a documented contract
     (e.g. the error-ledger contract declares `error-record` to be fire-and-forget).
     """
+
+    # Domain(pytool.code-discipline):
+    # # Silent broad-except ban
+    # An exception handler is flagged only when both conditions hold together: its declared
+    # type is `Exception`, `BaseException`, a tuple containing either, or the clause is a
+    # bare `except:` with no type at all -- and its entire body, after stripping comments,
+    # is the single statement `pass`. Either condition alone is fine: a narrow handler
+    # (`except OSError`) may swallow silently when that is the documented contract, and a
+    # broad handler that does real work in its body (logs, returns a typed status, re-raises)
+    # is not silent. The combination is banned because it hides every failure the protected
+    # region can raise, including cancellation signals, behind no trace at all; a
+    # `# waiver: <reason>` on the line above the `except` exempts an intentional swallow that
+    # is part of a documented contract.
+
     try:
       tree = ast.parse('\n'.join(self.source_lines))
     # waiver: AST parsing failures are reported by the py_compile check; pcf must not block on them
@@ -1979,6 +2246,19 @@ class CodeFormatAnalyzer:
     `# pylint: disable-next` are forbidden without explicit user approval.
     PyCharm `# noinspection` directives are ignored (not flagged).
     """
+
+    # Domain(pytool.code-discipline):
+    # # Forbidden suppression comments
+    # A comment that tells a static checker to look away from the line it sits on --
+    # `# type: ignore`, a bare `noqa` directive comment, `# pylint: disable`, or
+    # `# pylint: disable-next` -- is rejected outright unless a `# waiver: <reason>`
+    # accompanies it, because silencing the
+    # checker without a stated reason hides whatever the checker was about to catch just as
+    # effectively as a silent except does. A PyCharm `# noinspection` directive is treated
+    # differently and never flagged: it silences the IDE's own inspection pass, not a project
+    # checker, and does not carry the same risk of hiding a real defect from the pipeline
+    # that gates a commit.
+
     suppression_pattern = re.compile(
       r'#\s*(?:type:\s*ignore|noqa|pylint:\s*disable(?:-next)?)\b'
     )
@@ -2025,6 +2305,15 @@ class CodeFormatAnalyzer:
     Per project guidelines, use single backticks for inline code references.
     Triple backticks (code fences) are allowed.
     """
+
+    # Domain(pytool.docstring-schema): [backticks]
+    # # Single-backtick inline code
+    # Inline code references in this project's documentation prose -- docstrings, comments,
+    # and Domain blocks alike -- are wrapped in a single backtick, never the double-backtick
+    # pair that reStructuredText uses for the same purpose. A run of exactly two backticks
+    # with no third backtick touching either side is flagged as the wrong flavour; a full
+    # triple-backtick code fence is a different construct entirely and is left alone.
+
     # match exactly two backticks that aren't preceded or followed by another backtick
     double_bt_pattern = re.compile(r'(?<!\x60)\x60\x60(?!\x60)')
 
@@ -2049,6 +2338,17 @@ class CodeFormatAnalyzer:
       message or records diagnostics before raising (but not normal branches that happen
       to end with `return` or `continue`).
     """
+
+    # Domain(pytool.marker-grammar): [guard]
+    # # Guard clause marking
+    # A conditional whose body only exits the current scope -- a lone `return`,
+    # `return None`, `continue`, a bare `raise`, or a short run of error-setup statements
+    # ending in `raise` with no nested branching -- is a guard clause, and it must carry a
+    # `# guard: <what is rejected>` comment on the line directly above the `if`. The marker
+    # states what the check rejects, not a narrative of what happens when it passes; an `if`
+    # whose body accumulates, mutates, or calls out to do real work is not a guard and must
+    # not carry this marker even when it happens to end in a `return`.
+
     lines = self.source_lines
     total = len(lines)
 
@@ -2194,6 +2494,17 @@ class CodeFormatAnalyzer:
     Only real comments are scanned. The same text inside a string literal is not a marker;
     inside a docstring it is a D7 violation and is reported by that check instead.
     """
+
+    # Domain(pytool.marker-grammar): [marker-clause]
+    # # Marker clause requirement
+    # Three annotation markers exist entirely for the text after their colon: `opt:` states
+    # why a non-obvious implementation choice was made for performance, `limit:` names the
+    # ceiling of a deliberate simplification together with its upgrade path, and
+    # `Decision:` states the thesis of a real design fork. A marker whose colon ends the
+    # comment line states none of these things and is rejected outright; whether the clause
+    # that is present actually names a real ceiling, fork, or performance reason is left to
+    # the review that reads the source, not decided here.
+
     # the tokenizer separates comments from string literals that merely look like them
     source = '\n'.join(self.source_lines)
     try:
@@ -2214,6 +2525,109 @@ class CodeFormatAnalyzer:
         ))
 
 
+  def _check_language(self) -> None:
+    """
+    Check that comments and docstrings are written in a configured language.
+
+    Every letter is admitted by the unicode script it belongs to, so the check states which
+    languages a source file may speak rather than which characters it may carry. Punctuation,
+    digits, symbols, and the box-drawing a separator line is made of belong to no script and
+    are always allowed, as is every string literal: a quoted foreign word is data the code
+    handles, not prose the reader has to follow.
+
+    One finding per line, naming the first offending letter — a sentence in another language
+    is one mistake, not one per character.
+    """
+
+    # Domain(pytool.code-discipline):
+    # # Configured comment and docstring languages
+    # A project declares which natural languages its comments and docstrings may be written
+    # in, and the check enforces it by unicode script rather than by a fixed character
+    # whitelist: every language name maps to one or more script families (Latin covers every
+    # Latin-alphabet language including English, Cyrillic covers Russian and Ukrainian, and
+    # so on for Greek, Hebrew, Arabic, and the CJK scripts), so admitting a language admits
+    # every letter that script family contains. Only letters carry a language at all --
+    # digits, punctuation, symbols, and the characters a separator line is drawn from belong
+    # to no script and are always allowed -- and a string literal is exempt entirely, since
+    # quoted foreign text is data the code handles, not prose a reader has to follow. One
+    # finding is reported per offending line, naming only the first letter that no
+    # configured language admits, because a whole foreign sentence is one mistake to fix,
+    # not one per character; a `# waiver: <reason>` exempts an intentional exception.
+
+    # guard: the check is off, or every script is allowed
+    if not self.check_language or not self.allowed_scripts:
+      return
+
+    # the tokenizer separates real comments from string literals that merely look like them
+    source = '\n'.join(self.source_lines)
+    try:
+      tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+      return
+
+    # comments carry the prose a reader follows line by line
+    for token in tokens:
+      # guard: string literals are data, and only comments are prose here
+      if token.type != tokenize.COMMENT:
+        continue
+      self._report_foreign_letter(token.string, token.start[0], 'comment')
+
+    # docstrings are prose too, and the tokenizer cannot tell one from any other literal
+    for lineno, text in self._docstring_spans():
+      self._report_foreign_letter(text, lineno, 'docstring')
+
+
+  def _docstring_spans(self) -> list[tuple[int, str]]:
+    """
+    Collect the line and text of every module, class, and function docstring.
+
+    Returns:
+      List of (line_number, docstring_text) pairs, empty when the module did not parse.
+    """
+    # guard: no AST means no way to tell a docstring from any other string literal
+    if self.tree is None:
+      return []
+
+    # a docstring is the first statement of a module, class, or function body
+    spans: list[tuple[int, str]] = []
+    for node in ast.walk(self.tree):
+      # guard: only these three bodies can open with a docstring
+      if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        continue
+      first = node.body[0] if node.body else None
+      if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+          and isinstance(first.value.value, str)):
+        spans.append((first.lineno, first.value.value))
+    return spans
+
+
+  def _report_foreign_letter(self, text: str, lineno: int, where: str) -> None:
+    """
+    Report the first letter of one prose fragment that no configured language admits.
+
+    Args:
+      text: prose to scan.
+      lineno: source line the fragment starts on.
+      where: fragment kind named in the message (`comment` or `docstring`).
+    """
+    for char in text:
+      # guard: only letters carry a language -- punctuation and symbols belong to none
+      if not unicodedata.category(char).startswith('L'):
+        continue
+      script = unicodedata.name(char, '').split()[0] if unicodedata.name(char, '') else ''
+      if script and script not in self.allowed_scripts:
+        # guard: the author declared the exemption on the line above
+        if _has_waiver(self.source_lines, lineno):
+          return
+        languages = ', '.join(self.allowed_languages)
+        self.issues.append((
+          lineno,
+          f"{where} is not written in a configured language -- '{char}' is {script}, "
+          f"allowed: {languages} (add '# waiver: <reason>' to exempt)"
+        ))
+        return
+
+
   def _check_contract_bodies(self) -> None:
     """
     Check that every `# Contract:` marker is followed by guarantee text.
@@ -2225,6 +2639,16 @@ class CodeFormatAnalyzer:
 
     Only real comments are scanned; the same text inside a string literal is not a marker.
     """
+
+    # Domain(pytool.marker-grammar): [contract]
+    # # Contract marker body requirement
+    # A `# Contract:` marker line carries no text of its own -- the colon ends the line by
+    # design -- so the guarantee it records must live on the very next `#` comment line.
+    # A bare marker with nothing after it, or followed by a comment line that is itself
+    # empty once its leading `#` is stripped, states no guarantee at all and is rejected;
+    # only the review that reads the guarantee text judges whether it names a real
+    # caller-visible invariant.
+
     # the tokenizer separates comments from string literals that merely look like them
     source = '\n'.join(self.source_lines)
     try:
@@ -2252,6 +2676,48 @@ class CodeFormatAnalyzer:
         ))
 
 
+  def _check_unfiled_domains(self) -> None:
+    """
+    Check that no Domain block is still filed under the reserved `unfiled` group.
+
+    The `unfiled` group is the writer's parking slot for a block whose real group is not
+    in the project's domain-groups dictionary yet. The finding burns on every run until
+    the operator adds the real group to the dictionary and renames the block, which is
+    what `/lazy-python.knowledge-sweep` does in bulk.
+
+    Only real comments are scanned; the same text inside a string literal is not a marker.
+    """
+
+    # Domain(pytool.marker-grammar): [unfiled]
+    # # Reserved parking group
+    # The group name `unfiled` inside a `Domain(...):` marker is reserved and never a real
+    # topic: it is where a block goes when the domain knowledge it records has no matching
+    # group yet in the project's own domain-groups dictionary. A block filed there is a
+    # standing finding on every run, never silently accepted, until an operator adds the
+    # real group to the dictionary and renames the block to use it -- the parking slot has
+    # no expiry and does not resolve itself.
+
+    # the tokenizer separates comments from string literals that merely look like them
+    source = '\n'.join(self.source_lines)
+    try:
+      tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+      return
+
+    # every comment filed under the reserved group is an unresolved parking slot
+    for token in tokens:
+      # guard: only real comments carry markers
+      if token.type != tokenize.COMMENT:
+        continue
+      if UNFILED_DOMAIN_RE.search(token.string):
+        self.issues.append((
+          token.start[0],
+          "unfiled domain block -- assign a real group from the project's "
+          "domain groups dictionary; /lazy-python.knowledge-sweep grows the "
+          "dictionary and refiles parked blocks"
+        ))
+
+
   def _check_block_marker_boundaries(self) -> None:
     """
     Check that every block marker opens a standalone comment block.
@@ -2264,6 +2730,17 @@ class CodeFormatAnalyzer:
 
     Only real comments are scanned; the same text inside a string literal is not a marker.
     """
+
+    # Domain(pytool.marker-grammar): [block-boundary]
+    # # Standalone block-marker boundary
+    # The Capitalized marker family -- `Domain(...):`, a bare `Contract:`, and `Decision:`
+    # -- opens a standalone comment block, never a comment attached to a line of code: every
+    # `#` line immediately touching the marker becomes part of the block's own text. That
+    # means the block needs a blank line above its opening line and a blank line below the
+    # last line of its comment body; a marker glued directly beneath a code statement or
+    # beneath an unrelated comment, or a block whose last line touches the code that follows
+    # it, breaks the boundary the block depends on to stay legible as its own unit.
+
     # the tokenizer separates comments from string literals that merely look like them
     source = '\n'.join(self.source_lines)
     try:
@@ -2373,6 +2850,20 @@ class CodeFormatAnalyzer:
     a clause header (`except` / `else` / `elif` / `finally` / `case`) or a continuation
     line of a multi-line call never opens a block, since neither starts a statement.
     """
+
+    # Domain(pytool.code-discipline):
+    # # Purpose comment per block
+    # A function or method body is read as a sequence of blocks, where a block is whatever
+    # chunk of code follows a blank separator line, and the first line of every block after
+    # the opening one must be a comment stating what that block accomplishes. The body's own
+    # opening block is exempt, since the docstring immediately above it already carries that
+    # purpose; a clause header that continues an enclosing statement (`elif`, `else`,
+    # `except`, `finally`, `case`) never opens a block of its own, since it does not start a
+    # new statement. A tooling directive -- `# waiver:`, a bare `noqa` comment, `# type:`,
+    # a `pylint: disable` comment, `# fmt:`, `# noinspection` -- never counts as the
+    # purpose comment even when it is the first line of a block, because it exempts a rule
+    # rather than states what the block is for.
+
     # guard: without the parsed tree there is no way to tell function bodies apart
     if self.tree is None:
       return
@@ -2440,6 +2931,22 @@ class CodeFormatAnalyzer:
     Per project guidelines, `typing.cast()` has zero runtime validation and is forbidden.
     Use `obj.cast_to(TargetClass)` or `isinstance()` instead.
     """
+
+    # Domain(pytool.code-discipline):
+    # # Type-erosion bans
+    # Three annotation shapes are rejected because each one erases a check that the type
+    # system would otherwise perform for free. `typing.cast(...)`, qualified or bare once
+    # imported, asserts a value's type with zero runtime validation -- an `isinstance` check
+    # or a project-specific narrowing method does the same job with an actual guarantee
+    # behind it. A bare `type` annotation, and its equally meaningless `type[object]` /
+    # `type[Any]` spellings, names "some class" without saying which one; a
+    # `type[SpecificClass]` annotation is required instead, everywhere except inside an
+    # `isinstance(x, type)` runtime check, which is a legitimate use of the bare builtin. And
+    # a bare `Any` annotation opts an entire value out of type checking; it is auto-exempt
+    # only for `*args: Any` / `**kwargs: Any` and inside a dunder method's own signature,
+    # where Python's data-model conventions already fix the shape. Each of the three accepts
+    # a `# waiver: <reason>` on the exempted line when the erosion is unavoidable.
+
     cast_import_re = re.compile(r'^\s*from\s+typing\s+import\s+.*\bcast\b')
     qualified_cast_re = re.compile(r'\btyping\.cast\s*\(')
     bare_cast_re = re.compile(r'\bcast\s*\(')
@@ -2521,6 +3028,18 @@ class CodeFormatAnalyzer:
     and `cls.__name__` are forbidden on CoreClass subclasses.
     Use `self.class_name`, `cls.get_class_name()`, `self.class_id`, etc.
     """
+
+    # Domain(pytool.code-discipline):
+    # # Class-identity access convention
+    # Reading a class's name off the raw Python data model -- `type(obj).__name__`,
+    # `self.__class__.__name__`, `cls.__name__`, or any other `<expr>.__name__` attribute
+    # access -- is forbidden in favor of the project's own class-identity accessors
+    # (`self.class_name`, `cls.get_class_name()`, `self.class_id`, or an equivalent
+    # resolver). The project's class hierarchy defines its own notion of a class's display
+    # or lookup name, which does not always coincide with the raw Python identifier the
+    # data model exposes, so reaching past the project's accessor risks a name that looks
+    # right but is not the one the rest of the system actually keys on.
+
     # type(X).__name__ or type(X) .__name__
     type_name_re = re.compile(r'type\s*\([^)]*\)\s*\.\s*__name__')
     # X.__name__ where X ends with a word character (covers cls.__name__,
@@ -2815,6 +3334,17 @@ class CodeFormatAnalyzer:
     Assert statements are stripped by `python -O` and should not be used
     for production validation logic.
     """
+
+    # Domain(pytool.code-discipline):
+    # # No assert for production validation
+    # A statement-leading `assert` is rejected wherever it appears in production code,
+    # because Python strips every `assert` when run with the `-O` optimization flag -- code
+    # that depends on an assertion to reject bad input silently stops validating anything
+    # the moment that flag is set. Explicit validation (an `if` that raises, or a dedicated
+    # check function) carries the same intent without depending on an interpreter flag the
+    # deployment environment controls, not the source. A `# waiver: <reason>` exempts a
+    # specific line when the assertion genuinely belongs there.
+
     assert_re = re.compile(r'^\s*assert\b')
     in_docstring = False
     docstring_delimiter = None
@@ -2875,6 +3405,8 @@ class CodeFormatAnalyzer:
     self._check_guard_comments()
     self._check_marker_clauses()
     self._check_contract_bodies()
+    self._check_unfiled_domains()
+    self._check_language()
     self._check_block_marker_boundaries()
     if self.check_block_comments:
       self._check_block_comments()
@@ -3179,6 +3711,18 @@ class DocstringAnalyzer(ast.NodeVisitor):
       start_line: line number where the docstring starts.
       node_name: name of the node for error messages.
     """
+
+    # Domain(pytool.docstring-schema): [section-order]
+    # # Canonical section order
+    # A docstring's sections follow one fixed rank, and any two sections present must
+    # appear in that rank's order regardless of which ones are actually used: for a class,
+    # Summary, Scope, Responsibilities, Guarantees, Subclassing, Notes, Type Parameters,
+    # Attributes; for a method, Summary, Scope, Guarantees, Overriding, Notes, Args,
+    # Returns, Yields, Raises. A project may register its own additional sections through
+    # its own configuration, each anchored `after` or `before` an existing section name (or
+    # appended at the end when its anchor does not resolve); once registered, a project
+    # section is ranked exactly like a built-in one for this check.
+
     section_names = [sec[0] for sec in sections]
     expected_indices = []
 
@@ -3300,6 +3844,20 @@ class DocstringAnalyzer(ast.NodeVisitor):
       start_line: line number where the docstring starts.
       node_name: name of the node for error messages.
     """
+
+    # Domain(pytool.docstring-schema): [list-style]
+    # # Section list styles
+    # A docstring section is written in exactly one of three list styles, and mixing them
+    # inside one section is wrong regardless of which style the section happens to use.
+    # A bulleted section (Responsibilities, Guarantees, Subclassing, Notes, Overriding) is a
+    # list of `- ` prefixed items, where a continuation line of one item is allowed to omit
+    # the prefix. A definition section (Attributes, Args, Raises, Type Parameters) is a list
+    # of `name: description` labels at one fixed indentation, where the label itself must
+    # never carry a bullet even though a continuation line describing it may. Every section,
+    # whichever style it uses, must be preceded by a blank line inside the docstring body --
+    # a section header glued directly to the line above it is a formatting violation on its
+    # own, independent of the style used inside the section.
+
     for section_name, rel_line, content in sections:
       if section_name in self.bulleted_sections:
         self._check_bulleted_section(section_name, content, start_line, rel_line, node_name)
@@ -3347,6 +3905,16 @@ class DocstringAnalyzer(ast.NodeVisitor):
       docstring: the docstring text.
       start_line: line number where the docstring starts.
     """
+
+    # Domain(pytool.docstring-schema): [property]
+    # # Property documentation shape
+    # A property is documented entirely through its Summary and, when meaningful, its
+    # Notes -- it never carries an Args, Returns, or Yields section, even though the
+    # underlying method returns a value like any other. The rule holds because a property
+    # is read like an attribute by its callers: describing it as a noun with a value, not as
+    # a call with parameters and a return contract, is what keeps the docstring honest about
+    # how the property is actually used.
+
     # check if this is a property
     is_property = any(
       isinstance(dec, ast.Name) and dec.id == 'property'
@@ -3384,6 +3952,17 @@ class DocstringAnalyzer(ast.NodeVisitor):
       start_line: line number where the docstring starts.
       node_name: name of the node for error messages.
     """
+
+    # Domain(pytool.docstring-schema): [what-not-how]
+    # # Describe what, not how
+    # A docstring's Summary and Scope answer what a class or method guarantees to its
+    # caller and why it exists, never a narration of the steps it takes to get there. A
+    # sentence built from a mechanical verb chain ("it validates", "it sets up", "it
+    # iterates", "internally, ...", "under the hood") is a symptom of narrating the
+    # algorithm instead of the contract, and it is rejected wherever it appears before the
+    # docstring's first named section -- the boundary past which Args, Returns, and the
+    # like are expected to get more procedural.
+
     impl_patterns = re.compile(
       r'(?:^|\.\s+)(?:It validates|It sets up|It assigns|It creates|It checks|It iterates'
       r'|It loops|It calls|It initializes|It processes|It parses|It computes'
@@ -3491,6 +4070,17 @@ class DocstringAnalyzer(ast.NodeVisitor):
       start_line: source line of the opening `\"\"\"`.
       node_name: enclosing class/function name for the message.
     """
+
+    # Domain(pytool.docstring-schema): [d1] [single-line]
+    # # No single-line docstring form
+    # Even a docstring whose entire content is one short sentence is written across at
+    # least two source lines: the opening triple-quote on its own line, then the text, then
+    # the closing triple-quote on its own line again. The compact one-line form, where both
+    # the opening and the closing triple-quote sit on the same source line as the text, is
+    # rejected regardless of how short the content is -- the two-line shape is what keeps
+    # every docstring in the project visually consistent whether it grows a dozen sections
+    # or stays one sentence.
+
     # guard: multi-line docstring is fine
     if '\n' in docstring:
       return
@@ -3525,6 +4115,19 @@ class DocstringAnalyzer(ast.NodeVisitor):
       start_line: source line of the docstring opening `\"\"\"`.
       node_name: enclosing class/function name for the message.
     """
+
+    # Domain(pytool.docstring-schema): [d2] [attributes]
+    # # Private names in Attributes
+    # The Attributes section documents the public surface a caller reads or writes, so a
+    # label starting with an underscore is rejected there by default -- documenting a
+    # private field invites callers to depend on something that is not part of the
+    # contract. Two named exemptions exist: a class that declares or mutates one of the
+    # project's configured D2-exempt marker attributes opts its whole Attributes section out
+    # of the check, and an individual private label is exempt on its own when it names a
+    # class-level constant declared in that same class body -- the project's established
+    # pattern for documenting class-versioning and type-shape metadata such as a private
+    # schema-version field.
+
     has_marker, class_consts = (
       self._class_ctx_stack[-1] if self._class_ctx_stack else (False, set())
     )
@@ -3567,6 +4170,18 @@ class DocstringAnalyzer(ast.NodeVisitor):
       sections: parsed docstring sections.
       start_line: source line of the docstring opening `\"\"\"`.
     """
+
+    # Domain(pytool.docstring-schema): [d4] [returns]
+    # # Returns section requirement
+    # A method whose signature declares a non-`None` return type must document that value
+    # in a Returns section, or a Yields section for a generator -- either satisfies the
+    # requirement. Five shapes never need one: an explicit `-> None` annotation, a bare or
+    # qualified `NoReturn` / `Never` annotation (the function never returns a value at all),
+    # a property (documented through Summary), and a dunder method (Python's own data-model
+    # semantics already say what it returns, so restating it would be noise). Without a
+    # return annotation at all the check cannot tell either way and stays silent rather than
+    # guessing.
+
     # guard: only function-like nodes have return annotations
     if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
       return
@@ -3666,6 +4281,17 @@ class DocstringAnalyzer(ast.NodeVisitor):
       start_line: source line of the docstring opening `\"\"\"`.
       node_name: enclosing class/function name for the message.
     """
+
+    # Domain(pytool.docstring-schema): [d5] [banned-phrases]
+    # # Configurable banned phrases
+    # A project may declare its own list of substrings that must never appear anywhere in a
+    # docstring body, in any section including the Summary -- the match is a plain
+    # case-sensitive substring test, not a whole-word or regex match, so the list is meant
+    # for phrases with no legitimate other reading in that project's own vocabulary. A
+    # section a project has explicitly declared exempt from reference-marker scanning is
+    # exempt from this check too, since that section's body is generator-owned content the
+    # project's own tooling manages, not hand-authored prose.
+
     # guard: nothing configured
     if not self.banned_docstring_phrases:
       return
@@ -3756,6 +4382,21 @@ class DocstringAnalyzer(ast.NodeVisitor):
       start_line: source line of the docstring opening `\"\"\"`.
       node_name: enclosing class/function name for the message.
     """
+
+    # Domain(pytool.docstring-schema): [d7] [markers]
+    # # No development markers in prose
+    # A docstring is caller-facing prose, never a place for the development-marker
+    # vocabulary that belongs to code comments -- `TODO:`, `TMP:`, `DBG:`, `ref:`, `opt:`,
+    # `guard:`, `limit:`, `Decision:`, and the `Domain(...):` tag are all rejected wherever
+    # they appear inside a docstring body. `Decision:` is recognized only when it opens a
+    # docstring line, since the bare word followed by a colon mid-sentence is ordinary
+    # English prose, not the marker. Three contexts are read as something other than a
+    # marker use and are exempt: a definition-section label naming a parameter or attribute
+    # that happens to share a marker's name (a field can legitimately be called `limit`), a
+    # section a project has declared exempt from marker scanning, and a marker token wrapped
+    # in backticks as a meta-reference to the marker syntax itself rather than an actual use
+    # of it.
+
     lines = docstring.split('\n')
     skip_idx = self._ref_exempt_line_indices(docstring)
     current_section: str | None = None
@@ -3828,6 +4469,21 @@ class DocstringAnalyzer(ast.NodeVisitor):
       start_line: source line of the docstring opening `\"\"\"`.
       node_name: enclosing class/function name for the message.
     """
+
+    # Domain(pytool.docstring-schema): [d9] [private-names]
+    # # No private names in narrative prose
+    # A leading-underscore lowercase token appearing in a docstring's free narrative text is
+    # read as the docstring narrating an internal component, which breaks the "describe what
+    # a caller sees, not how it is built" rule the same way an implementation-detail phrase
+    # does. The check applies only to caller-facing hosts -- a private class or method's own
+    # docstring is implementer-facing already, so referencing other private names there is
+    # legitimate. Several sections are exempt by their own nature: Subclassing and
+    # Overriding document hooks a subclass author must reach into, Notes carries
+    # advanced-usage detail, every definition-list section documents named items rather than
+    # narrating prose, and a project-declared reference-exempt section is generator-owned. A
+    # private token quoted inside a string literal or a template placeholder is a literal
+    # value, not a narrated reference, and does not count either.
+
     lines = docstring.split('\n')
     current_section: str | None = None
     for idx, line in enumerate(lines):
@@ -4557,6 +5213,24 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
     Args:
       node: the Constant AST node.
     """
+
+    # Domain(pytool.code-discipline):
+    # # Magic literal flagging positions
+    # A numeric or string literal is judged only when it sits in a position where a bare
+    # value is meaningful on its own: a call argument, either side of a comparison, a
+    # subscript index, a returned value, the right side of an augmented assignment, or one
+    # operand of a binary operation whose other operand is not itself a literal. Every other
+    # position -- a plain assignment's right-hand side, an element sitting inside a
+    # container literal -- is not judged at all, because a name or a container already
+    # supplies the context a bare literal would otherwise be missing. Before position is
+    # even checked, a handful of values are exempt outright regardless of where they sit: a
+    # small set of trivial numbers (powers of two, their reciprocals, -1, 0, 1), the empty
+    # string, a handful of universal literal-repr strings (`None`, `null`, `set()`, an
+    # underscore or double-underscore placeholder), a string made only of punctuation or
+    # whitespace, and any string carrying a `{`, `}`, or `%` character (a format-template
+    # marker). A project may widen the trivial sets with its own configured extra numbers
+    # and strings.
+
     value = node.value
 
     # guard: bools are Constant(True/False); never magic
@@ -4799,6 +5473,22 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
     Returns:
       True if the literal is used as a name reference that must be validated.
     """
+
+    # Domain(pytool.code-discipline):
+    # # Validated name-reference context
+    # A handful of string-literal positions are not judged as magic values at all but as
+    # name references that must resolve to something real in the project: the probed name
+    # in a member-name membership test or lookup (`'X' in obj.__dict__`, `vars(obj).get('X')`,
+    # a `dir(obj)` membership check), a forward-reference bound string on a `TypeVar` or
+    # `NewType`, the declared symbol name passed as the first positional of a type-machinery
+    # constructor (`TypeVar`, `NewType`, `NamedTuple`, an enum base, and similar), the field
+    # name passed to a project-specific field-lookup method, and the attribute-name
+    # positional of `getattr` / `setattr` / `hasattr` / `delattr`. Such a literal is checked
+    # against every identifier token declared anywhere in the project's own source; every
+    # token resolving is treated as a genuine reference and passes silently, while any token
+    # that does not resolve is flagged as a likely typo or a stale reference rather than as
+    # an ordinary magic literal.
+
     parent = getattr(node, 'parent', None)
 
     # member-name probe: LHS of `in`/`not in` Compare against __dict__ / vars / dir
@@ -4956,6 +5646,21 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
     Returns:
       True if the literal should be exempted from flagging.
     """
+
+    # Domain(pytool.code-discipline):
+    # # Structural skip contexts
+    # A literal is exempt from magic-literal flagging when its position marks it as
+    # something other than a domain value: a function's default-argument value, a piece of
+    # an f-string, a `match`/`case` pattern, a module/class/function docstring, the
+    # right-hand side of an assignment whose target is an ALL_CAPS name or a dunder (the
+    # named-constant escape hatch), a member of an enum class body, or a decorator
+    # expression. A handful of environment-variable idioms are exempt by shape rather than
+    # position: the `'0'`/`'1'`/`'true'`/`'false'`/`'yes'`/`'no'`/`'on'`/`'off'` tokens
+    # compared against an environment read are shell convention, not domain data; the
+    # `__name__ == '__main__'` guard is exempt on either side of the comparison; and a
+    # literal used as an environment-variable name, whether tested for membership in or
+    # subscripted out of the environment mapping, is exempt as well.
+
     # direct-parent checks (fast path)
     parent = getattr(node, 'parent', None)
     field_name = getattr(node, 'parent_field', None)
@@ -5138,6 +5843,26 @@ class MagicLiteralAnalyzer(ast.NodeVisitor):
     Returns:
       True if the call is one of the exempted forms (print, logger, re, TypeVar, etc.).
     """
+
+    # Domain(pytool.code-discipline):
+    # # Call-site exemption vocabulary
+    # A literal passed into a call is exempt from flagging when the call's own target
+    # identity says the literal is not a domain value: a logging or warning method (any
+    # argument is a message, not data), a small set of message-style builtins, `re`
+    # module functions where the exempt string is a pattern or replacement, a dataclass or
+    # pydantic field constructor's `default` / `default_factory` keyword, a filesystem-path
+    # constructor's first positional argument, an `open`-family call's mode positional or
+    # its `mode` / `encoding` keyword, the string token naming an infinity or not-a-number
+    # value passed to `float(...)`, and an environment-variable read's variable-name
+    # positional together with its shell-conventional boolean default. A callee may also opt
+    # itself into this exemption for its own callers: a body-level
+    # `pcf-external-callers-may-inline-literals` waiver -- a standalone comment carrying a
+    # non-empty reason after a double-dash, placed directly inside a function or method body
+    # (exempting calls to that function by name) or directly inside a class body
+    # (exempting calls through that class's own methods, including any `.logger.<method>`
+    # attribute chain regardless of receiver) -- lets every caller of that callee inline
+    # literals as its arguments without a per-call-site waiver of their own.
+
     tail = _resolve_func_tail(call.func)
     # guard: unresolvable call target
     if tail is None:
@@ -5330,6 +6055,14 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
   """
   Analyze a Python file for code format issues.
 
+  Guarantees:
+    - Never modifies the file at `path`; only reads it.
+    - Raises `SyntaxError` for a file with invalid Python syntax instead of
+      silently returning an empty or partial findings list.
+    - Returns findings sorted in ascending line-number order.
+    - Excludes any finding whose triggering line carries a covering
+      `# waiver: <reason>` comment.
+
   Args:
     path: path to the Python file to analyze.
     config: configuration dictionary with settings.
@@ -5337,6 +6070,15 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
   Returns:
     List of (line_number, message) tuples for each issue found.
   """
+
+  # Contract:
+  # This function NEVER writes to or otherwise modifies the file at `path`;
+  # it only reads it.
+
+  # Contract:
+  # A file with invalid Python syntax raises `SyntaxError` to the caller;
+  # the error is NEVER swallowed into an empty or partial findings list.
+
   # use default config if not provided
   if config is None:
     config = DEFAULT_CONFIG.copy()
@@ -5357,7 +6099,10 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
 
   # run import format checks if enabled
   if config.get('check_imports', True):
-    import_analyzer = ImportFormatAnalyzer(source_lines, is_init_file, file_path = path)
+    import_analyzer = ImportFormatAnalyzer(
+      source_lines, is_init_file, file_path = path,
+      project_package = resolve_project_package(config),
+    )
     import_analyzer.visit(tree)
     all_issues.extend(import_analyzer.analyze())
 
@@ -5430,6 +6175,12 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
   if check_code_format:
     mll_raw = config.get('max_line_length', 117)
     max_line_length = mll_raw if isinstance(mll_raw, int) else 117
+    # a malformed list leaves the default in place rather than disabling the check
+    languages_raw = config.get('allowed_languages', ['english']) or []
+    allowed_languages = (
+      [ lang for lang in languages_raw if isinstance(lang, str) ]
+      if isinstance(languages_raw, list) else ['english']
+    )
     # only check code line length if both check_code_format and check_line_length are enabled
     check_code_line_length = check_line_length_global
     code_analyzer = CodeFormatAnalyzer(
@@ -5440,9 +6191,18 @@ def analyze_file(path: str, config: dict | None = None) -> list[tuple[int, str]]
       check_indentation = True,
       check_assert = bool(config.get('check_assert', True)),
       check_block_comments = bool(config.get('check_block_comments', True)),
+      check_language = bool(config.get('check_language', True)),
+      allowed_languages = allowed_languages,
       tree = tree,
     )
     all_issues.extend(code_analyzer.analyze())
+
+  # Contract:
+  # The returned findings MUST be sorted in ascending line-number order.
+
+  # Contract:
+  # A finding whose triggering line carries a covering `# waiver: <reason>`
+  # comment is NEVER included in the returned list.
 
   # merge the per-analyzer findings into a single source-ordered report
   return sorted(all_issues, key = lambda x: x[0])
@@ -5454,6 +6214,12 @@ def walk_dir(root: str,
   """
   Walk the directory tree and analyze all Python files for code format issues.
 
+  Guarantees:
+    - A file that fails to parse is skipped and reported to stderr; the walk
+      continues over the remaining tree instead of aborting the scan.
+    - A path containing a hardcoded or caller-supplied exclude substring is
+      never analyzed.
+
   Args:
     root: root directory path to scan.
     exclude_substrings: list of substrings to exclude from file paths.
@@ -5462,6 +6228,15 @@ def walk_dir(root: str,
   Returns:
     Tuple containing issues map and files processed count.
   """
+
+  # Contract:
+  # A file that fails to parse is skipped and reported to stderr; the walk
+  # NEVER aborts the scan and continues over the remaining tree.
+
+  # Contract:
+  # A path containing a hardcoded or caller-supplied exclude substring is
+  # NEVER analyzed.
+
   # initialize containers for results
   all_issues: SuggestionsMap = defaultdict(list)
   files_processed = 0
@@ -5498,7 +6273,17 @@ def main() -> None:
   The main entry point for the Python code format checker CLI tool.
 
   Parse command line arguments, scan directories, and report findings.
+
+  Guarantees:
+    - Exits with status 1 only when the explicitly-targeted single file fails
+      to parse; the presence or count of findings never changes the exit status.
   """
+
+  # Contract:
+  # The process exits with status 1 only when the explicitly-targeted single
+  # file fails to parse; the presence or count of findings NEVER changes the
+  # exit status.
+
   # setup CLI parser
   parser = argparse.ArgumentParser(description = "Check Python code format in files")
   parser.add_argument('path', nargs = '?', default = '.',

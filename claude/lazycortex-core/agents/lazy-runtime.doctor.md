@@ -1,7 +1,7 @@
 ---
 name: lazy-runtime.doctor
 description: "Dispatched hourly by the `lazy-runtime.doctor` routine when something looks stuck in the lazycortex-core runtime — a DEAD-marked expert job the pump keeps skipping, or a dirty-tree halt sitting in state.json for over an hour; not for direct use. Decides retry vs permanent-fail vs commit-the-system-noise on its own and applies the fix via recover.py primitives, never asking the operator. One context bundle in, one response.json out."
-tools: Read, Bash, Glob, Grep
+tools: Read, Bash, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response autonomous triage — one context bundle in, one response.json out; the routine is the contract, not multi-phase orchestration"
 logging-waiver: "single-response autonomous triage — actions are recorded inline in response.json and in the git history of the commits this agent makes"

@@ -1,17 +1,15 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all seven Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-08-11
+last_regen: 2026-08-19
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads); agent writes test file covering all 7 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module; agent logs the run. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
 source_skills:
   - lazy-python.test-writer
-  - lazy-python.check-style
-  - lazy-python.docstring-writer
   - lazy-python.testing-guidelines
   - tst
-source_sha: 41539cc1c95f454532d9d9902144f9ca174df5db
+source_sha: 4c24d52c62e89604dafef09efd152239b2696e78
 ---
 # Generate tests that cover all seven Paranoid-Testing categories for a new class
 
@@ -94,7 +92,7 @@ The agent then runs its eight ordered steps:
 4. **Write tests** — writes the test file covering all 7 Paranoid-Testing categories (see Step 4 below for what that means). Outcome: `<N>-tests-written`.
 5. **Add class and method docstrings** — ensures every test class starts with `"Test unit for "` and every test method starts with `"Test that "`. Outcome: `done` or `already-present`.
 6. **Handle implementation-vs-spec mismatches** — if a test correctly reflects documented behavior but the implementation does not satisfy it yet, the agent adds a `# FAILS: <reason>` comment above that method and reports the divergence. It does not delete the test or fix production code. Outcome: `none` or `<N>-mismatches-flagged`.
-7. **Verify with toolchain** — runs `CHK_REVIEW=skip chk-py all <test_file>.py -q`, then `CHK_REVIEW=skip chk-py all -q` for the full project, then `tst-py <module> -q`. The agent always sets `CHK_REVIEW=skip` on both `chk-py` calls — a pending guideline review exits `2` and the agent has no way to dispatch `lazy-python.code-reviewer` or decide the verdict mid-run, so that decision is left to you (see Step 6). Outcome: `clean` or `<N>-violations-fixed`.
+7. **Verify with toolchain** — runs `chk-py all <test_file>.py -q`, then `chk-py all -q` for the full project, then `tst-py <module> -q`. Guideline review (`chk-py review`) is not a step of `chk-py all` at all — it runs on its own cadence, and the agent never touches it; that decision is left to you (see Step 6). Outcome: `clean` or `<N>-violations-fixed`.
 8. **Log the run** — writes a structured log to `.logs/claude/lazy-python.test-writer/`. Outcome: `logged`.
 
 Watch for the Step 3 outcome line. It tells you the exact test targets the agent found — if the count is lower than you expect, the missing targets are likely undocumented methods.
@@ -146,7 +144,7 @@ If your project aggregates its suites through re-export shims (a `test_all.py` t
 
 If your project has no such shims, no key ever repeats and the line never prints — the run behaves exactly as before.
 
-The agent's own verification skips the guideline-review phase both times it runs `chk-py all` (Step 3, outcome 7), so that phase — the seventh step of `chk-py all` — is still pending once the agent finishes. Close it before you commit by invoking `/lazy-python.check-style`: its own Step 4 runs `chk-py all -q` without the skip, so the pending review surfaces for real and gets dispatched and rendered as part of the skill's own gate-closing pass. Its Step 3 manual review additionally walks categories no automated checker proves on the file the agent just wrote — docstring quality, contract consistency between the new tests and the production signatures they exercise, and preservation of any `TODO:` / `TMP:` / `DBG:` / `ref:` markers. Skipping this step leaves the guideline layer — the rules no AST-based checker can prove, like naming semantics and your own overlay clauses — unchecked.
+The agent's own verification runs `chk-py all` twice (Step 7) but never touches guideline review — `chk-py review` is not a step of `all`; it runs on its own cadence, mandatory at the end of a full unit of planned work and recommended after any subagent cycle that produced substantial Python (a new test file qualifies). Run it yourself once the dispatch is done: `chk-py review --base <ref>` naming the commit your work started from, so a multi-commit unit of work gets reviewed in full instead of only its tail. The command prints a manifest and exits `2` while the review is pending — dispatch `lazy-python.code-reviewer` against that manifest, then render its findings with `chk-py review --render <findings.json>`; a `FAIL` finding blocks the commit exactly like a `pcf` FAIL. Its checks reach categories no automated checker proves on the file the agent just wrote — docstring quality, contract consistency between the new tests and the production signatures they exercise, and preservation of any `TODO:` / `TMP:` / `DBG:` / `ref:` markers. Skipping this step leaves the guideline layer — the rules no AST-based checker can prove, like naming semantics and your own overlay clauses — unchecked. `/lazy-python.check-style` (Steps 3–4) covers the same manual-review categories plus the automated `chk-py` gate for a batch of edits, but it does not run `chk-py review` either — that phase is invoked directly, on its own cadence, not through any wrapping skill.
 
 A green run with no `# FAILS:` comments means the class is fully covered and the implementation satisfies its contract. A run with `# FAILS:` comments means the agent found divergences between the docstring contract and the implementation — these need your attention before the tests can be considered passing.
 

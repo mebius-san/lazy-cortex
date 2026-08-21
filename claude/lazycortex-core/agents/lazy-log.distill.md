@@ -1,7 +1,7 @@
 ---
 name: lazy-log.distill
 description: "Use after meaningful commits land (per the lazy-log.logging cadence), or when the operator asks to catch the changelog up. Rewrites ./.logs/changelog.md as themed prose from .logs/commits.jsonl, throttled to 4h unless forced — the running internal narration, not lazy-log.bullets' per-release public block and not the read-only history searches of lazy-log.recall/summary/timeline."
-tools: Read, Write, Edit, Glob, Bash, TaskCreate, TaskUpdate, TaskList
+tools: Read, Write, Edit, Glob, Bash, TaskCreate, TaskUpdate, TaskList, Skill, Agent
 model: inherit
 logging-waiver: "work output IS the changelog rewrite — per-run log duplicates the artifact"
 ---
@@ -72,6 +72,7 @@ Do **not** group by file-path commonality — it's noisy and misleads when one c
 - One paragraph (1-3 sentences) per theme covering all of today's contributing commits, with SHAs in backticks at the end: `` (`a2739ff`, `b3320cc`, `c89aa12`) ``.
 - Singleton themes are fine — one commit, one paragraph.
 - For commits whose subject already reads as functional prose, paraphrase minimally.
+- **Any `#` token carried over from a commit subject goes in backticks** — issue and PR numbers (`` `#5` ``), hex colours, tag literals. The changelog lives in a vault, where a bare `#`-token is indexed as a tag. Wrap a run whole (`` `#10/#11/#12` ``), not one number at a time.
 
 **Internal work:**
 

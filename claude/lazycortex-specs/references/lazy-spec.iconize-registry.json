@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "matchers": [
+    {
+      "when": {
+        "frontmatter.spec_halted": true
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#fca5a5"
+      },
+      "priority": 550
+    },
+    {
+      "when": {
+        "frontmatter.spec_upstream_fetch_status": "failing"
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#fca5a5"
+      },
+      "priority": 540
+    },
+    {
+      "when": {
+        "frontmatter.spec_upstream_status": "orphaned"
+      },
+      "resolve": {
+        "iconName": "LiUnlink",
+        "iconColor": "#fdba74"
+      },
+      "priority": 430
+    },
+    {
+      "when": {
+        "frontmatter.spec_upstream_status": "drifted"
+      },
+      "resolve": {
+        "iconName": "LiRefreshCcw",
+        "iconColor": "#fdba74"
+      },
+      "priority": 425
+    },
+    {
+      "when": {
+        "frontmatter.spec_upstream_status": "new"
+      },
+      "resolve": {
+        "iconName": "LiInbox",
+        "iconColor": "#fdba74"
+      },
+      "priority": 420
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "status",
+        "frontmatter.spec_state": "waits-operator"
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#fdba74"
+      },
+      "priority": 415
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "status",
+        "frontmatter.spec_state": "in-review"
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#93c5fd"
+      },
+      "priority": 335
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "status",
+        "frontmatter.spec_state": "implementation"
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#c4b5fd"
+      },
+      "priority": 330
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "status",
+        "frontmatter.spec_state": "testing"
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#5eead4"
+      },
+      "priority": 325
+    },
+    {
+      "when": {
+        "frontmatter.spec_upstream_status": "in-review"
+      },
+      "resolve": {
+        "iconName": "LiFileClock",
+        "iconColor": "#93c5fd"
+      },
+      "priority": 320
+    },
+    {
+      "when": {
+        "frontmatter.spec_stage": "draft"
+      },
+      "resolve": {
+        "iconName": "LiFileEdit",
+        "iconColor": "#fde68a"
+      },
+      "priority": 260
+    },
+    {
+      "when": {
+        "frontmatter.spec_stage": "rejected"
+      },
+      "resolve": {
+        "iconName": "LiFileX",
+        "iconColor": "#fca5a5"
+      },
+      "priority": 255
+    },
+    {
+      "when": {
+        "frontmatter.spec_stage": "approved"
+      },
+      "resolve": {
+        "iconName": "LiFileCheck2",
+        "iconColor": "#86efac"
+      },
+      "priority": 250
+    },
+    {
+      "when": {
+        "frontmatter.spec_stage": "cancelled"
+      },
+      "resolve": {
+        "iconName": "LiFileMinus",
+        "iconColor": "#94a3b8"
+      },
+      "priority": 245
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "status",
+        "frontmatter.spec_cancelled": true
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#94a3b8"
+      },
+      "priority": 241
+    },
+    {
+      "when": {
+        "frontmatter.spec_upstream_status": "invalid"
+      },
+      "resolve": {
+        "iconName": "LiFileX",
+        "iconColor": "#94a3b8"
+      },
+      "priority": 240
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "status",
+        "frontmatter.spec_state": "blocked"
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#f9a8d4"
+      },
+      "priority": 236
+    },
+    {
+      "when": {
+        "frontmatter.spec_upstream_status": "postponed"
+      },
+      "resolve": {
+        "iconName": "LiPause",
+        "iconColor": "#94a3b8"
+      },
+      "priority": 230
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "request",
+        "frontmatter.request_status": "draft"
+      },
+      "resolve": {
+        "iconName": "LiMail",
+        "iconColor": "#fde68a"
+      },
+      "priority": 228
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "request",
+        "frontmatter.request_status": "accepted"
+      },
+      "resolve": {
+        "iconName": "LiMailCheck",
+        "iconColor": "#86efac"
+      },
+      "priority": 226
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "request",
+        "frontmatter.request_status": "rejected"
+      },
+      "resolve": {
+        "iconName": "LiMailX",
+        "iconColor": "#fca5a5"
+      },
+      "priority": 224
+    },
+    {
+      "when": {
+        "frontmatter.spec_upstream_status": "processed"
+      },
+      "resolve": {
+        "iconName": "LiBadgeCheck",
+        "iconColor": "#86efac"
+      },
+      "priority": 220
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "status",
+        "frontmatter.spec_state": "draft"
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#fde68a"
+      },
+      "priority": 216
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "status",
+        "frontmatter.spec_state": "done"
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#86efac"
+      },
+      "priority": 211
+    }
+  ]
+}

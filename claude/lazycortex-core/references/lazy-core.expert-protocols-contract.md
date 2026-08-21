@@ -29,6 +29,8 @@ It is referenced from a **routine entry** in `lazy.settings.json` (the routine d
 
 The protocol contract is the wire between dispatcher and expert. Anything that lives on either end of that wire (consumer config, state machine internals, agent persona, agent markup conventions) is out of scope. When in doubt: if the dispatcher does not parse / enforce / write the rule, it does not belong in the protocol.
 
+**One exception — the style protocol.** A reference that carries no `kind` / `mode` enum and no request/response shape at all, but states how the output of *any* job should be written (`lazy-core.markdown-style` is the one such file today), is a legitimate protocol class despite consisting entirely of markup conventions. It is attached the same way — routine-side, in `protocols` — because the answer to "which conventions apply here" is a property of the routine's output, not of the agent. The out-of-scope clause above still binds every protocol that does define a `kind`: a wire protocol may not smuggle markup rules in alongside its field shapes.
+
 **Versioning by filename** (§ 6). Incompatible changes ship as a new file with a new name; the old file stays until all consumers migrate.
 
 ---
@@ -42,8 +44,8 @@ Every job under `.experts/.jobs/<expert-name>/<job-id>/` follows this structure:
 ├── request.json     # consumer-written (dispatcher) — job parameters + file-list arrays
 ├── config.json      # consumer-written (dispatcher) — agent ref + resolved protocols + git_author
 ├── READY            # consumer-written marker — pump picks up only after this exists
-├── source/...       # consumer-written input files; layout is protocol's choice; may be absent
-├── context/...      # consumer-written reference files; layout is protocol's choice; may be absent
+├── source/...       # pump-written at claim from `config.json[source_paths]`; may be absent
+├── context/...      # pump-written at claim from `config.json[context_paths]`; may be absent
 ├── result/...       # expert-written output files; layout is protocol's choice; may be absent
 ├── PID              # pump-written while expert subprocess is running
 ├── response.json    # expert-written
@@ -59,14 +61,16 @@ File-role summary:
 | `request.json` | dispatcher | job parameters + file-list arrays |
 | `config.json` | dispatcher | agent path-ref, resolved protocols list, git_author (consumed by pump at spawn time — REQUIRED, pump aborts with `logical` error if absent) |
 | `READY` | dispatcher | signals job is ready for pickup |
-| `source/` | dispatcher | input files the expert processes |
-| `context/` | dispatcher | reference files the expert may read |
+| `source/` | pump | input files the expert processes — copied at claim from the repo-relative paths the dispatcher declared in `config.json[source_paths]`, beside whatever inline content the dispatcher wrote at dispatch |
+| `context/` | pump | reference files the expert may read — copied at claim from `config.json[context_paths]`, beside whatever inline content the dispatcher wrote at dispatch |
 | `result/` | expert | output files the expert writes |
 | `PID` | pump | process-id while expert is running; cleared on exit |
 | `response.json` | expert | outcome + optional result file-list |
 | `DONE` | pump | terminal marker — expert exited cleanly (success or `outcome=error`) |
 | `DEAD` | pump | terminal marker — pump killed the expert as stuck |
 | `dead.json` | pump | audit log of the kill (timestamps, signals) — paired with DEAD |
+
+**When the two input buckets are filled.** The dispatcher declares repo-relative paths; nothing is copied while the job is being queued. The pump copies each declared path when it **claims** the job, after any linked worktree for that job exists — a directory entry whole under `<parent-directory-name>-<directory-name>`, a file entry under its basename. So the buckets carry the work tree as it stands at claim time, not as it stood at dispatch. A declared entry that resolves outside the work tree, or that no longer exists when the pump claims the job, fails the job with an `outcome: error` of category `logical` — neither condition can resolve itself on a retry. The `source_inline` / `context_inline` pair remains dispatcher-written at dispatch time, for content that exists in no file.
 
 Any of the `source` / `context` / `result` subdirs may be absent when no files of that kind exist for the job. The corresponding arrays in JSON may be omitted or empty. When a subdir IS present but the matching `request.json` array is empty/absent, the expert receives the directory path in its prompt but no per-file descriptions — protocols should populate the array whenever the dir contains files.
 
@@ -205,13 +209,17 @@ and what to focus on. E.g. "Review walkthroughs/foo.md for accuracy and tone."
 ### 4.4 Per-kind subdir contents
 
 For each `kind`, specify:
-- what goes in `source/` (required files, naming conventions)
-- what goes in `context/` (optional supporting files)
+- what goes in `source/` (required files, naming conventions), **and the manifest that produces it** — which repo-relative paths the dispatcher declares as `source_paths`, each named as a file or a directory, since a directory lands under `<parent-directory-name>-<directory-name>` and a file under its basename
+- what goes in `context/` (optional supporting files), and the same manifest declaration for `context_paths`
 - what the expert writes to `result/` (output files, naming conventions)
+
+The manifest half is dispatcher-facing only. The expert-facing half is unchanged: the expert finds its input at `source/<file>` and never reads a manifest.
 
 ### 4.5 Extra `request.json` fields
 
 List any fields beyond the standard four (`kind`, `role`, `request`, and the three file-list arrays). For each: name, type, required/optional, semantics.
+
+The `source_paths` / `context_paths` manifests are not `request.json` fields and are not listed here — they live in `config.json` and are declared per `kind` in § 4.4.
 
 If none: state "No extra fields."
 
@@ -250,6 +258,20 @@ Declare which of the three standard categories this protocol uses:
 | `technical` | schema violation; missing required file |
 
 Protocols may subset to fewer categories. They may not introduce new category names.
+
+### 4.10 Attachments policy
+
+Every protocol declares whether the channel permits attachments — files an expert creates
+beside its target document rather than under `result/` — and, when it does:
+
+- **Where they live**, relative to the target document.
+- **Naming**, when the channel constrains it.
+- **The ownership key**, when the channel records which document an attachment belongs to:
+  the frontmatter key's name and what its value means. A channel whose attachments carry no
+  frontmatter says so and names where ownership is recorded instead.
+
+A protocol that permits no attachments says so in one line. Silence is not a policy: an
+expert reading a protocol with no § 4.10 has no place to put a file and must not invent one.
 
 ---
 

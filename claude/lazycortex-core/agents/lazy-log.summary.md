@@ -1,7 +1,7 @@
 ---
 name: lazy-log.summary
 description: "Use when the user wants the whole story of a feature, refactor, or area — 'how did the plugin system evolve', 'catch me up on the logging skills', 'explain the auth middleware migration'. Returns multi-paragraph prose clustered by sub-theme, deliberately not by date. Pick this over `lazy-log.recall` (ranked individual matches with SHAs) and `lazy-log.timeline` (dated what-happened-when list) when the answer is an explanation rather than a list."
-tools: Read, Glob, Grep, Bash
+tools: Read, Glob, Grep, Bash, Skill, Agent
 model: inherit
 logging-waiver: "single-response synthesizer — output IS the prose response, no mutations to record"
 ---

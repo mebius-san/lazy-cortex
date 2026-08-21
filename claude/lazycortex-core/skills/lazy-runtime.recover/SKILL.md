@@ -1,7 +1,7 @@
 ---
 name: lazy-runtime.recover
 description: "Run when the runtime daemon has stopped scheduling — routines no longer fire, or `.runtime/state.json` carries a `daemon_halted` block. Branches on the halt reason: `uncommitted_changes` walks the operator through commit / stash / discard of the dirt a routine left behind; `git_pull_diverged` / `git_push_failed` / `git_remote_unavailable` describes the remote-sync failure and waits for the operator to repair it externally. Ends by atomically clearing the halt so the daemon resumes."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(git status *), Bash(date -u *), Write, AskUserQuestion
+allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(git status *), Bash(date -u *), Write, AskUserQuestion, Agent
 dirty-tree-waiver: "applies operator-chosen cleanup ops to the working tree (commit/stash/discard) — the operator is the commit author, not this skill"
 ---
 # Runtime Recover
@@ -9,7 +9,7 @@ dirty-tree-waiver: "applies operator-chosen cleanup ops to the working tree (com
 The runtime daemon halts in two distinct families of situations:
 
 - **`uncommitted_changes`** — a routine or expert left the working tree dirty. The skill walks the operator through commit / stash / discard / abort.
-- **`git_pull_diverged` / `git_push_failed` / `git_remote_unavailable`** — pre- or post-tick remote sync hit an unrecoverable state. The skill describes the situation and asks the operator to repair it externally (manual git ops, network fix, etc.) before confirming resume.
+- **`git_pull_diverged` / `git_push_failed` / `git_remote_unavailable` / `routine_config_invalid` / `rate_limit`** — pre- or post-tick remote sync hit an unrecoverable state, a routine entry failed its schema, or the subscription rate-limit window closed. The skill describes the situation and asks the operator to repair it externally (manual git ops, network fix, a settings edit) — or, for `rate_limit`, simply to wait or resume early — before confirming resume.
 
 In both families the skill ends with an atomic clear of the `daemon_halted` block from `<repo>/.runtime/state.json`. The daemon resumes scheduling on its next iteration.
 
@@ -50,8 +50,9 @@ Otherwise, parse the JSON and surface to the operator:
 
 - `triggered_by` — which routine name, or `_git_pre` / `_git_post` for daemon-side remote-sync halts, or `lazy-expert.pump` for pump-internal halts.
 - `expert` + `job_id` — populated when the dirt came from inside an expert.
-- `reason` — one of: `uncommitted_changes`, `git_pull_diverged`, `git_push_failed`, `git_remote_unavailable`.
+- `reason` — one of: `uncommitted_changes`, `git_pull_diverged`, `git_push_failed`, `git_remote_unavailable`, `routine_config_invalid`, `rate_limit`.
 - `dirty_paths` — captured `git status --porcelain` lines (only populated when `reason == uncommitted_changes`; empty otherwise).
+- `resets_at` — epoch seconds when the rate-limit window reopens (only populated when `reason == rate_limit`; the daemon lifts this halt itself at that time).
 
 Outcome: `context-shown` or `not-halted`.
 
@@ -75,15 +76,17 @@ If `commit`: ask one follow-up via `AskUserQuestion`:
 
 Outcome: `commit`, `stash`, `discard`, or `aborted`.
 
-### Reason ∈ {`git_pull_diverged`, `git_push_failed`, `git_remote_unavailable`} — manual-fix path
+### Reason ∈ {`git_pull_diverged`, `git_push_failed`, `git_remote_unavailable`, `routine_config_invalid`, `rate_limit`} — manual-fix path
 
-The daemon does NOT attempt to fix remote-sync halts itself — automatic resolution could silently drop the operator's commits. Surface reason-specific guidance and ask the operator to repair the situation by hand, then confirm.
+The daemon does NOT attempt to fix remote-sync halts itself — automatic resolution could silently drop the operator's commits. A rejected routine entry is likewise never auto-corrected: an unknown field may be a typo, a leftover of an older schema, or an intent the schema has not grown yet, and only the operator knows which. Surface reason-specific guidance and ask the operator to repair the situation by hand, then confirm.
 
 Print the matching guidance block first:
 
 - `git_pull_diverged` — "Local branch and origin have diverged: each side has commits the other doesn't. Inspect with `git log --oneline HEAD origin/<branch>` and `git log --oneline origin/<branch> HEAD`, then either (a) `git reset --hard origin/<branch>` to drop local divergent commits, (b) rebase / merge by hand, or (c) push your local commits with `--force-with-lease` if you intend them to land."
 - `git_push_failed` — "Push to origin retried 3 times and kept failing. Likely causes: auth (try `git push origin <branch>` by hand and read the error), force-protection or branch protection rule on the remote, an unusually persistent operator-side push race. Resolve before resuming, or `git reset --hard origin/<branch>` to drop your local commits if you'd rather start over."
 - `git_remote_unavailable` — "Could not reach origin. Check network, VPN, and `git remote -v`. Run `git fetch origin <branch>` by hand to confirm the issue is gone before resuming."
+- `routine_config_invalid` — "The `routines.<triggered_by>` entry in `.claude/lazy.settings.json` (or its `.local.json` overlay) does not match its type's schema, so the daemon dropped it and stopped. Read the schema error in the routine's incident — `Bash(lazycortex-core error-list)`, or the newest `.logs/lazy-core/runtime/<date>.jsonl` record whose `name` is `<triggered_by>` — then fix the entry by hand or re-register it via `/lazy-routine.register --force`. Per-type required and optional fields: `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.runtime-schema.md` § 8."
+- `rate_limit` — "The subscription rate-limit window closed (`resets_at` in Step 1 says when it reopens, epoch seconds). Nothing is broken and no git repair is needed: the daemon lifts this halt itself once the window reopens. Resume early only if you want the queue moving again right away — the pump's pre-spawn flag check still refuses to spawn while the host-local flag at `${XDG_CACHE_HOME:-$HOME/.cache}/lazycortex/rate-limit/` holds a live record, so an early resume burns no tokens."
 
 Then ask via `AskUserQuestion`:
 

@@ -1,7 +1,7 @@
 ---
 name: lazy-core.scaffold-local
 description: "Run when the operator asks to add or drop a repo-specific template type — a `_local` scaffold entry with its own group, kind, and path globs, so new files matching those globs start from that template. Use instead of hand-editing the registry in `.claude/rules/lazy-core.scaffold.md`; plugin-shipped entries belong to `/lazy-core.scaffold-sync`."
-allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet
+allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Agent
 ---
 # Manage Local Scaffold Entries
 

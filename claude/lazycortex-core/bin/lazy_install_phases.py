@@ -281,6 +281,17 @@ def bootstrap_lazyignore(repo: Path | str, template: Path | str) -> str:
   # waiver: filesystem filename idiom, not a domain constant
   target = repo / ".lazyignore"
 
+  # The worktree-root gitignore entry is a precondition of every `workspace: branch` job, not a
+  # first-seed nicety: an untracked `<worktree_root>/job-<id>/` makes the primary checkout's
+  # `git status --porcelain` non-empty and the daemon halts on `uncommitted_changes`. So it runs
+  # on EVERY invocation, idempotently, before the seed-only guard below — repos installed before
+  # this line shipped get the entry on their next install/setup. The root is the configured one,
+  # not a hardcoded name.
+  git_cfg = load_tracked_section(repo / SettingsFile.REL, SettingsKey.DAEMON).get(DaemonKey.GIT) or {}
+  # waiver: filesystem path idiom, not a domain constant
+  worktree_root = str(git_cfg.get(GitConfigKey.WORKTREE_ROOT, ".worktrees")).strip("/")
+  ensure_gitignore_lines(repo, [ f"{worktree_root}/" ])
+
   # guard: consumer already has a .lazyignore — their copy is authoritative
   if target.exists():
     # waiver: install-phase outcome token, not a reusable domain key
@@ -294,10 +305,6 @@ def bootstrap_lazyignore(repo: Path | str, template: Path | str) -> str:
   # seed the consumer's copy from the shipped template
   # waiver: stdlib encoding idiom
   target.write_text(template.read_text(encoding = "utf-8"), encoding = "utf-8")
-
-  # ensure .worktrees/ is gitignored so in-tree worktrees don't dirty the tree
-  # and halt the daemon's _check_working_tree guard
-  ensure_gitignore_lines(repo, [ ".worktrees/" ])
 
   # the install chain distinguishes a phase that planted the file from one that found it
   # already there, so a re-run reads as quiet rather than as work redone

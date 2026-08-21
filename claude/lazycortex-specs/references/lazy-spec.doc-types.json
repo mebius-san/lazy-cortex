@@ -1,0 +1,97 @@
+{
+  "doc_types": {
+    "design": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiFileDashed",
+      "color": "#94a3b8",
+      "template": "design.md"
+    },
+    "system-design": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiFileDashed",
+      "color": "#94a3b8",
+      "template": "system-design.md"
+    },
+    "architecture": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiFileDashed",
+      "color": "#94a3b8",
+      "template": "architecture.md"
+    },
+    "code-plan": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiFileDashed",
+      "color": "#94a3b8",
+      "template": "code-plan.md"
+    },
+    "test-plan": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiFileDashed",
+      "color": "#94a3b8",
+      "template": "test-plan.md"
+    },
+    "bug": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiFileDashed",
+      "color": "#94a3b8",
+      "template": "bug.md"
+    },
+    "system-tech": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiFileDashed",
+      "color": "#94a3b8",
+      "template": "system-tech.md"
+    },
+    "code-report": {
+      "stages": false,
+      "review": true,
+      "append_only": true,
+      "icon": "LiScrollText",
+      "color": "#94a3b8",
+      "template": "code-report.md"
+    },
+    "test-report": {
+      "stages": false,
+      "review": true,
+      "append_only": true,
+      "icon": "LiClipboardCheck",
+      "color": "#94a3b8",
+      "template": "test-report.md"
+    },
+    "data-report": {
+      "stages": false,
+      "review": true,
+      "append_only": true,
+      "icon": "LiDatabase",
+      "color": "#94a3b8"
+    },
+    "docs-report": {
+      "stages": false,
+      "review": true,
+      "append_only": true,
+      "icon": "LiBookOpen",
+      "color": "#94a3b8"
+    },
+    "decisions": {
+      "stages": false,
+      "review": false,
+      "append_only": true,
+      "icon": "LiGavel",
+      "color": "#94a3b8"
+    }
+  }
+}

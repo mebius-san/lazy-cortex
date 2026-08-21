@@ -1,7 +1,7 @@
 ---
 name: lazy-core.agent-models-seed
 description: "Dispatched by a plugin's `<namespace>.install` skill (core, diagram, experts, obsidian, python, review, specs, wiki) to seed that plugin's agent-model tiers into the consumer's `lazy.settings.json`; not for direct use. Tiers come from `lazycortex-core`'s `default-tiers.json`, and an operator's existing value is never overwritten."
-allowed-tools: Read, Write, Glob, Bash(ls *), Bash(git rev-parse*), AskUserQuestion, TaskCreate, TaskUpdate, TaskList
+allowed-tools: Read, Write, Glob, Bash(ls *), Bash(git rev-parse*), AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent
 execution-discipline-waiver: "nested-from-install — the calling install skill owns step discipline; a preamble here would re-anchor the caller and drop its remaining steps (lazy-core.skill-writing § 1.5)"
 ---
 # Seed agent-model tiers for a plugin

@@ -140,7 +140,8 @@ def _is_safe_consolidate_path(repo: Path, target: Path) -> bool:
   return False
 
 
-_BOT_DOMAIN = "bot.lazy-cortex"
+# waiver: deliberate copy of constants.BOT_EMAIL_DOMAIN (sans "@") — skill-shipped script, no bin/ import path
+_BOT_DOMAIN = "bot.invalid"
 _MEMORY_PREFIX = "memory."
 
 

@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.update-plugin
 description: "Dispatched by `/lazy-obsidian.install` (for `dataview`) and `/lazy-obsidian.iconize-install` (for `obsidian-icon-folder`, `folder-notes`, `iconize-reloader`) to put one community plugin into the vault. Also run it directly when the operator asks to install, refresh, or update a single Obsidian plugin by id in this repo's vault, or when a vault plugin is reported as out of date. Version-aware — no-ops when the vault is already current; `--bundled` installs from the plugin's own bundled source instead of GitHub."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(mv *), Bash(test *), Bash(date *), Bash(jq *), Bash(curl *), AskUserQuestion
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(mv *), Bash(test *), Bash(date *), Bash(jq *), Bash(curl *), AskUserQuestion, Agent
 argument-hint: "<plugin-id> [--bundled]"
 ---
 # Install or update one Obsidian vault plugin

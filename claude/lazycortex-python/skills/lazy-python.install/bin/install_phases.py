@@ -309,8 +309,8 @@ class Phase4Pch:
 # ----------------------------------------------------------------------------------------
 class Phase5Overlay:
   """
-  Install phase that creates per-topic guideline overlay stub files under the consumer's
-  `docs/guidelines/` directory.
+  Install phase that creates per-topic guideline overlay stub files under the
+  consumer's `docs/guidelines/` directory.
   """
 
   TOPICS = ("coding", "documenting", "testing", "checking")
@@ -476,7 +476,7 @@ class Phase7Expert:
     "aspects": ["lazycortex-core:lazy-memory.persona-aspect"],
     "git_author": {
       "name": "Python Code Reviewer",
-      "email": "python.code-reviewer@lazycortex.local",
+      "email": "python.code-reviewer@bot.invalid",
     },
   }
 

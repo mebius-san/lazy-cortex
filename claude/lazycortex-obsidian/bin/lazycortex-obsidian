@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""lazycortex-obsidian CLI dispatcher."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+
+USAGE = ("usage: lazycortex-obsidian <subcommand> [args...]\n"
+         "Subcommands: every iconize_sync subcommand — sync, sync-paths, reconcile, "
+         "reconcile-plugin, reconcile-dirty, reconcile-commit, check-versions")
+
+
+def main(argv: list[str]) -> int:
+    """Route a subcommand to the iconize worker.
+
+    The daemon resolves a routine's ``command: ["lazycortex-obsidian", ...]`` to this file
+    by plugin name, so every worker subcommand a routine drives is reachable through it
+    without the routine knowing the plugin's on-disk layout.
+    """
+    if not argv or argv[0] in ("-h", "--help"):
+        print(USAGE)
+        return 0
+    from iconize_sync import main as _worker
+    return _worker(argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

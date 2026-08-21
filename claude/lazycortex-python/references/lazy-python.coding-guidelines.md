@@ -32,6 +32,12 @@ conventions.
   - an access chain reaching **two or more objects deep** (`self._place.place_grid`, `entity_data.state_b.position`) that is read more than once, and especially inside a loop — there the alias shortens every use site and saves the repeated walk.
   A local that must stay for any other reason carries a `# waiver: <reason>` line above it, since a bare `local = <accessor>` reads as a violation.
 
+### Knowledge Marker Rules
+- **Mark knowledge as you write it.** Knowledge markers are written by the author at writing time, not backfilled by a later sweep:
+  - Code that implements a **caller-visible guarantee** — behavior callers may rely on that must survive refactoring — gets a `Contract:` block at the load-bearing spot, and the owning docstring's **Guarantees** section is synced in the same pass.
+  - Code that implements **domain knowledge** — a mechanic, formula, or rule of the modeled subject area — gets a `Domain(<group>):` block. The group comes from the project's domain-groups dictionary; when no listed group fits, park the block under `Domain(unfiled):` — never invent a permanent group.
+  - Block shapes and boundaries: the documenting canon's Contract Comments / Domain Comments / Marker Comments sections. Whether an unmarked guarantee or mechanic slipped through is a review-phase finding.
+
 ### Communication Rules
 - **Always answer "why" questions before making any edits.** When the user asks "why did you do X?", explain first, then wait for approval before changing code.
 - **Never say, "I'll keep this in mind" or similar.** You have no persistent memory between sessions — only these guidelines persist. Be honest about this.
@@ -50,6 +56,13 @@ conventions.
 - Target Python 3.12+.
 - Use modern Python features like match / case statements where appropriate.
 - Leverage new union syntax (`|`) for type hints when suitable.
+
+## Source Language
+
+- **Every source file is written in English, in every project.** Comments, docstrings, `Domain(…)` and `Contract:` knowledge blocks, log messages, error strings, and identifiers — all of it, regardless of the language the project's documents, specs, and operator conversations are in, and regardless of any `language` key its settings declare.
+- **A project's language governs generated documents, not code.** The domain-spec writer reads a group's `Domain(…)` blocks and materialises them in the configured language, so the translation lives in the generated doc; the block it was translated from stays English. Writing the source in the target language moves the translation to the wrong end of the pipeline — the docs regenerate from scratch, the code does not.
+- **Why English holds even in a single-language team:** the toolchain, the traceback, the library names, and every third-party reader are English, so a mixed file forces a reader to switch alphabets mid-line; and `ruff`'s `RUF003` flags any comment word whose letters have Latin lookalikes, which most Cyrillic prose does.
+- A quoted foreign-language literal the code genuinely handles (a user-facing string, a test fixture, a term being matched) is data, not prose, and stays as it is.
 
 ## Code Style Philosophy
 - Prioritize readability and maintainability over brevity.
@@ -297,7 +310,7 @@ class StatsInit(BaseInit, Generic[FieldType]):
 ## Module Structure
 Organize modules in the following order:
 1. Copyright header.
-2. Module docstring — required in `__init__.py` (see __init__.py File Patterns below), permitted in a module that defines no classes, forbidden in a module that defines one or more. A class carries its own docstring, so a module docstring above it duplicates or contradicts that contract; a flat module of functions — a CLI entry point, a worker script — has no other place to state what the file is for.
+2. Module docstring — required in `__init__.py` (see __init__.py File Patterns below), permitted in any other module. It states what the file as a whole is for; it must not duplicate the contract prose of the classes inside (they carry their own docstrings).
 3. Imports (see Import Organization below).
 4. Module-level constants, TypeVars, TypeAliases, and enums.
 5. Classes and functions.
@@ -377,7 +390,7 @@ if TYPE_CHECKING:
   - **WRONG:** `from .gcl.sec_manager import SecretStoreGcl` — reaches into the subpackage's internal file.
   - **RIGHT:** `from .gcl import SecretStoreGcl` — imports via the subpackage's public `__init__.py`.
 - When adding a name from a package the file already imports from, add it to the existing `from <pkg> import (...)` block — never open a second import line for the same package.
-- Group multiple imports from the same module in a single blocķ.
+- Group multiple imports from the same module in a single block.
   - For imports from the main project package or for the local package imports always use multi-line with parentheses except for one item imports.
   - For standard library and third-party imports always use single-line imports.
 - Import specific items rather than entire modules when possible.

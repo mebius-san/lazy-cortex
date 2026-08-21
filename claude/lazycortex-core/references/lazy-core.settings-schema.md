@@ -47,7 +47,7 @@ Every section is a flat top-level key whose dict carries an `_version: int` fiel
     "_version": 2,
     "git": { ... },
     "polling_interval_sec": 5,
-    "stream_idle_timeout_sec": 90,
+    "stream_idle_timeout_sec": 900,
     "stream_max_retries": 3
   },
   "routines": {

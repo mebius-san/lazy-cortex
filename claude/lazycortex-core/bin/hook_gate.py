@@ -7,12 +7,12 @@ Each hook calls `is_enabled(<short-name>)` as its first action and returns witho
 gate answers False. Two mutually-exclusive modes, keyed on the presence of the
 `LAZYCORTEX_HOOKS_ALLOW_LIST` environment variable:
 
-- variable present (allow-list mode) — only the named hooks run. The pump sets it for every
-  expert spawn from the expert's `hooks.enabled` list, so a spawn runs no lazycortex hook unless
-  it is explicitly opted in; a present-but-empty value disables every hook. The variable is named
-  for the action it exerts, not for who set it — an operator can export it in a shell to get the
-  same behaviour. Resolved by a pure in-memory check, so an expert spawn short-circuits here
-  before touching stdin, git, or the network.
+- variable present (allow-list mode) — only the named hooks run. The daemon sets it for every
+  routine it dispatches, from that routine's `hooks_enabled` list, so nothing the daemon spawns
+  runs a lazycortex hook unless it is explicitly opted in; a present-but-empty value disables
+  every hook. The variable is named for the action it exerts, not for who set it — an operator
+  can export it in a shell to get the same behaviour. Resolved by a pure in-memory check, so a
+  spawn short-circuits here before touching stdin, git, or the network.
 - variable absent (interactive default) — every hook runs unless its short name is listed in
   `lazy.settings.json[hooks][disabled]` (tracked value with the local overlay merged on top).
 

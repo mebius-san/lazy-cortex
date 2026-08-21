@@ -1,9 +1,9 @@
 """
-Trigger for the autonomous lazy-runtime.doctor expert.
+Trigger for the autonomous runtime.doctor expert.
 
 Pure-Python tick (no reasoning) that runs hourly. Decides whether the
 daemon needs medical attention and, if so, dispatches a single
-`lazy-runtime.doctor` expert job to the queue. The agent itself
+`runtime.doctor` expert job to the queue. The agent itself
 performs every diagnosis + fix-or-give-up decision.
 
 Before evaluating the triggers, a halt raised because the git remote
@@ -303,18 +303,17 @@ def doctor_tick(repo: Path) -> dict:
   # pump; recycling here lets the next triggered tick retry instead of blocking
   # for days. In-flight bundles (READY without DONE) still deduplicate.
   # waiver: one-off expert name / dedup key for the doctor dispatch, not reusable domain constants
-  retired = retire_completed_jobs(repo, "lazy-runtime.doctor", "doctor", dispatched_from = repo)
+  retired = retire_completed_jobs(repo, "runtime.doctor", "doctor")
   context = _build_context(repo, halt, dead_jobs)
-  source = { "context.json": json.dumps(context, indent = 2) }
   payload = {
     "halt_present": halt is not None,
     "dead_job_count": len(dead_jobs),
   }
   result = dispatch_job(
-    # waiver: one-off routine name and dedup key for the doctor dispatch, not reusable domain constants
-    repo, "lazy-runtime.doctor", payload,
+    # waiver: one-off expert name and dedup key for the doctor dispatch, not reusable domain constants
+    repo, "runtime.doctor", payload,
     protocols = _all_known_protocols(repo),
-    source = source,
+    source_inline = { "context.json": json.dumps(context, indent = 2) },
     # waiver: one-off dedup key for the doctor dispatch, not a reusable domain constant
     dedup_key = "doctor",
   )

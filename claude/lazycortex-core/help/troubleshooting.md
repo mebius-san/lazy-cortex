@@ -1,14 +1,15 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-08-06
+last_regen: 2026-08-21
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor, scaffold registry, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, unpinned models), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
+  request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.agent-models
   - lazy-core.audit
+  - lazy-core.daemon-authoring
   - lazy-core.doctor
   - lazy-core.git-status
   - lazy-core.git-unlock
@@ -31,6 +32,8 @@ source_skills:
   - lazy-routine.unregister
   - lazy-runtime.preflight
   - lazy-runtime.recover
+  - lazy-runtime.tick
+source_sha: ddfefb0f7c7cd9509a78bd86f8dc930e5e906a56
 ---
 # Troubleshooting
 
@@ -120,33 +123,33 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## The daemon never starts for this checkout after install
 
-**Symptom**: `/lazy-core.install` completed without errors and reported a daemon supervisor installed, but the daemon does not appear to be running for this checkout.
+**Symptom**: `/lazy-core.install` completed without errors and reported a daemon supervisor installed, but the daemon does not appear to be running for this checkout — or a re-run reports `not-this-host` or `not-this-checkout` without asking anything.
 
-**Likely cause**: Gate 2 (`daemon.run_here`) is recorded as `false` in this checkout's gitignored `lazy.settings.local.json`. The install skill records the per-checkout decision once and never re-asks; if you declined at the prompt, the supervisor was skipped and will not start.
+**Likely cause**: `daemon.run_here` in the tracked `lazy.settings.json` is a hostname-to-checkout-path map (`{"nexus": "~/lazy-runtime/Money"}`), and a machine or checkout the map does not name gets no supervisor — the daemon refuses to start there even with `daemon.enabled: true`. `not-this-host` means this machine's hostname isn't a key in the map at all; `not-this-checkout` means this machine is in the map, but pointed at a different checkout's path than the one you're running from.
 
-**Fix**: Open `.claude/lazy.settings.local.json` in this checkout, set `daemon.run_here` to `true` (or delete the key), then re-run `/lazy-core.install`. The skill reads the flag on entry and, finding the decision reversed, proceeds to install the supervisor for this checkout.
+**Fix**: Decide which machine and checkout should drive the project, then edit the map — add `{"<hostname -s>": "<absolute path to that checkout>"}` (or correct the path on an existing host key) in the tracked `.claude/lazy.settings.json[daemon][run_here]`, then re-run `/lazy-core.install` from that checkout. The skill reads the map fresh on entry and, finding this host/path pair now named, installs the supervisor.
 
 ---
 
 ## `/lazy-core.install` never re-asks about the daemon
 
-**Symptom**: You want to change your daemon setup choices (enable it for a project, or start it on this checkout) but re-running `/lazy-core.install` silently skips all daemon questions.
+**Symptom**: You want to change your daemon setup choices (enable it for a project, or point at a different machine/checkout to drive it) but re-running `/lazy-core.install` silently skips all daemon questions.
 
-**Likely cause**: Both gates are already persisted — `daemon.enabled` in the tracked `lazy.settings.json` (shared with all clones) and `daemon.run_here` in this checkout's gitignored `lazy.settings.local.json`. The skill honours recorded decisions silently, so it never re-prompts.
+**Likely cause**: Both gates are already persisted in the tracked `lazy.settings.json` — `daemon.enabled` (Gate 1) and `daemon.run_here` (Gate 2, a hostname-to-checkout-path map), both shared with every clone. The skill honours recorded decisions silently, so it never re-prompts; re-pointing which checkout drives the project is a deliberate edit, not an install-time default.
 
-**Fix**: Edit the relevant flag directly and re-run `/lazy-core.install`:
-- To change the project-wide daemon policy, update `daemon.enabled` in `.claude/lazy.settings.json`.
-- To change the decision for this checkout only, update `daemon.run_here` in `.claude/lazy.settings.local.json` (or delete that key to let the next install re-ask).
+**Fix**: Edit the relevant key directly in `.claude/lazy.settings.json` and re-run `/lazy-core.install`:
+- To change the project-wide daemon policy, update `daemon.enabled`.
+- To change which machine/checkout drives it, edit `daemon.run_here` — add or correct the `{"<hostname>": "<checkout path>"}` entry for the machine that should drive it, or remove an entry (or empty the map to `{}`) to stop a machine from driving it. `/lazy-core.install` reacts to the new map state without asking.
 
 ---
 
-## A second machine on the same synced checkout bootstraps a duplicate daemon
+## An old `daemon.run_here` value blocks the daemon after an upgrade
 
-**Symptom**: You installed the daemon supervisor on one machine, and later, on a different machine that opens the same checkout over a file sync tool (Dropbox, iCloud Drive, Syncthing, or similar), a daemon turns out to be running there too — even though you never answered a daemon prompt on that second machine.
+**Symptom**: After upgrading `lazycortex-core`, `/lazy-core.install` reports **run-here-invalid** and asks the daemon question again, even though this checkout already answered it once — and the daemon refuses to start until you answer.
 
-**Likely cause**: `.claude/lazy.settings.local.json` is gitignored but not sync-ignored. When the checkout itself lives on a synced path, the `daemon.run_here: true` decision recorded on the first machine syncs into `lazy.settings.local.json` on every other machine holding that path. Each of those machines then sees the per-checkout gate as already answered and bootstraps its own supervisor, producing duplicate daemons for the same repo.
+**Likely cause**: `daemon.run_here` is recorded on disk as a plain boolean or a bare host list — the shape an older `lazy-core.install` wrote before the gate became a hostname-to-checkout-path map. Neither a boolean nor a bare hostname can say which checkout on a machine should drive the project (a machine commonly holds more than one clone of the same project), so the current install refuses to run the daemon against the old shape and asks again rather than guess.
 
-**Fix**: Set `daemon.run_here` to an explicit host list naming only the machine that should run the daemon, for example `["nexus"]`, instead of a plain `true`. Re-run `/lazy-core.install` on every other machine that shares the synced checkout — the skill reads the host list, sees its own hostname is not on it, and removes the stray supervisor unit it finds there instead of installing one.
+**Fix**: Answer the question `/lazy-core.install` asks — it writes the correct `{"<hostname>": "<checkout path>"}` map entry, preserving any other machine's entry already on record. Once the map carries this machine and checkout, re-runs proceed silently again.
 
 ---
 
@@ -244,7 +247,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause**: Another checkout already registered on this host runs an inbox routine that resolves to the same physical directory as one you're about to register here. Installing a second supervisor would mean two daemons dispatching every file in that inbox twice.
 
-**Fix**: Decide which checkout should actually drive that inbox. In the checkout that should not, set `daemon.run_here: false` in `.claude/lazy.settings.local.json` (or pin `run_here` to a host list that excludes this machine), then re-run `/lazy-core.install`.
+**Fix**: Decide which checkout should actually drive that inbox. In the tracked `.claude/lazy.settings.json[daemon][run_here]` of the project that should not, remove this host's entry (or empty the map to `{}`), then re-run `/lazy-core.install`. The install reads the map fresh, sees this host/checkout no longer named, and tears down any supervisor unit it already installed there instead of starting one.
 
 ---
 
@@ -254,7 +257,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause**: The guard is symmetric and permanent by design — each daemon detects the collision independently at its own startup and raises its own halt block, which is state rather than a live probe. Nothing auto-clears it; only a dirty-tree halt self-clears.
 
-**Fix**: Decide which checkout should drive the shared inbox. In the checkout that should not, set `daemon.run_here: false`. Then run `/lazy-runtime.recover` in the surviving checkout to clear its halt block explicitly — removing the losing checkout's supervisor alone does not do this for you.
+**Fix**: Decide which checkout should drive the shared inbox. In the checkout that should not, remove this host's entry from the tracked `.claude/lazy.settings.json[daemon][run_here]` map (or empty it to `{}`). Then run `/lazy-runtime.recover` in the surviving checkout to clear its halt block explicitly — removing the losing checkout's supervisor alone does not do this for you.
 
 ---
 
@@ -275,8 +278,6 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: A child skill (such as `/lazy-core.install`, `/lazy-guard.allow-mcp`, or `/lazy-core.agent-models`) encountered a failure that appears in its own report. `/lazy-core.setup` never aborts the chain on a child failure — it collects all results and surfaces them together.
 
 **Fix**: Read the reason listed per failed child in the setup report. Address the root cause for each (the other entries in this guide cover the most common child failure modes). Then re-run `/lazy-core.setup` — it is idempotent, so children that already succeeded will complete cleanly again and previously-failed ones will be retried.
-
----
 
 ---
 
@@ -369,8 +370,6 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Fix (not writable)**: Fix the file's permissions, then re-run `/lazy-core.doctor`.
 
 **Fix (reappears)**: If you don't want the routine at all, re-run `/lazy-core.install` and decline the relevant routine at the prompt (where the install flow offers one), rather than removing it after the fact via `/lazy-core.doctor`.
-
----
 
 ---
 
@@ -494,11 +493,11 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: You commit to a public repo and Claude Code does not scan staged changes.
 
-**Likely cause 1**: `.guard-waivers.json` is missing from the repo root. The pre-commit hook uses the presence of this file as the opt-in signal — without it, scanning is disabled.
+**Likely cause 1**: `.guard-public.json` is missing from the repo root. The pre-commit hook uses the presence of this file as the opt-in signal — without it, scanning is disabled.
 
-**Likely cause 2**: You committed with a chained or flag-form command — `git add . && git commit -m "..." && git push`, `git -C <dir> commit`, or `cd <dir> && git commit` — on a plugin version older than this fix. Earlier versions of the `lazy-guard.check-public` hook only recognized a `Bash` command that literally started with `git commit`, so any chained invocation slipped through unscanned even with `.guard-waivers.json` present.
+**Likely cause 2**: You committed with a chained or flag-form command — `git add . && git commit -m "..." && git push`, `git -C <dir> commit`, or `cd <dir> && git commit` — on a plugin version older than this fix. Earlier versions of the `lazy-guard.check-public` hook only recognized a `Bash` command that literally started with `git commit`, so any chained invocation slipped through unscanned even with `.guard-public.json` present.
 
-**Fix for cause 1**: Run `/lazy-repo.mark-public`. The skill creates `.guard-waivers.json` at the repo root with the correct schema, which is the opt-in signal that activates the hook. From the next commit onward, every `git commit` triggers the scan automatically.
+**Fix for cause 1**: Run `/lazy-repo.mark-public`. The skill creates `.guard-public.json` at the repo root with the correct schema, which is the opt-in signal that activates the hook. From the next commit onward, every `git commit` triggers the scan automatically.
 
 **Fix for cause 2**: Run `/plugin update lazycortex-core@lazycortex` to pick up the current hook, which detects `git commit` anywhere in the command — chained or flag-prefixed — not just at the start. Restart any open Claude Code sessions afterward; hook registrations are held in memory for the session's lifetime.
 
@@ -535,6 +534,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: Expert spawns run headless and hermetic (`claude -p ... --strict-mcp-config`) — by default an expert loads no MCP servers at all, only the ones declared per-expert via `mcp_config` in `lazy.settings.json[experts]`. If one of those declared servers hangs on initialization (a stdio server waiting on a socket that never connects, a remote server that needs interactive auth) or fails to spawn, the whole `claude -p` invocation stalls until the routine's timeout kills it. The expert never gets to write a response, so the job looks like it silently died.
 
 **Fix**: Run `/lazy-runtime.preflight` (optionally `/lazy-runtime.preflight <expert-name>` to target one expert). It emulates the same spawn the pump uses, with a trivial prompt that does no real work, and reports each declared MCP server's status — `connected`, `timed-out`, `auth-required`, or `spawn-failed`. For a timed-out or failing server it offers to drop the server from that expert's `mcp_config` (the expert then spawns hermetically without it) or, for a server that needs interactive login, prints the exact `claude mcp login <name>` command to run by hand before re-running. Re-run `/lazy-runtime.preflight` after applying a fix to confirm the expert is launchable, then re-dispatch the routine.
+
+---
+
+## A live expert job gets killed and re-spawned while it's still working
+
+**Symptom**: An expert job — especially one dispatched to an `opus`-tier agent producing a long response — gets killed and re-spawned partway through, sometimes several times in a row, even though the process was still working and never actually froze.
+
+**Likely cause**: The daemon's pump kills and re-spawns an expert's process group after `daemon.stream_idle_timeout_sec` seconds of stdout silence, treating a silent stream as a frozen one. An `opus`-tier expert composing a long document can legitimately think in silence for minutes, which the watchdog can't tell apart from a genuine freeze. Versions of `lazycortex-core` before this fix shipped (and seeded via `/lazy-core.install`) a 90-second default, which routinely fired on a live opus job — up to `stream_max_retries` times in a row before the job was left with a transient error. The shipped default is now 900 seconds. A `daemon` section that still carries exactly the old seeded literal `90` is raised to `900` automatically the next time settings are migrated; any other explicit value you set yourself, including one you happened to also pick as `90`, is left untouched, since the migration only recognises its own former seed by matching the literal, not the key's mere presence.
+
+**Fix**: If you never set `stream_idle_timeout_sec` yourself, no action is needed beyond being on a current `lazycortex-core` — the migration applies the next time `lazy.settings.json` is read (for example, on the next `/lazy-core.install` or `/lazy-core.setup` run, or the daemon's own next tick). If you deliberately set a low value and are now dispatching long-thinking `opus` jobs, raise `daemon.stream_idle_timeout_sec` in `.claude/lazy.settings.json` yourself — 900 seconds is the current shipped default and a reasonable floor for opus-tier work.
 
 ---
 
@@ -588,15 +597,13 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
----
-
 ## `/lazy-runtime.preflight` reports every expert `ok` but a `fail` line sits above the table
 
 **Symptom**: `/lazy-runtime.preflight` reports every individual expert as `ok`, but a `fail` line appears above the per-expert table and the overall run does not pass.
 
 **Likely cause**: Each expert is individually launchable, but the checkout as a whole is not — another daemon already registered on this host drives one of the same inboxes this checkout would use, so starting this checkout's daemon would double-dispatch every file that lands there.
 
-**Fix**: Set `daemon.run_here: false` in the checkout that must not drive the shared inbox (`.claude/lazy.settings.local.json`), then re-run `/lazy-runtime.preflight` to confirm.
+**Fix**: Remove this host's entry from the tracked `.claude/lazy.settings.json[daemon][run_here]` map in the checkout that must not drive the shared inbox (or empty the map to `{}`), then re-run `/lazy-runtime.preflight` to confirm.
 
 ---
 
@@ -814,6 +821,66 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## `/lazy-runtime.tick` refuses saying the daemon is running
+
+**Symptom**: Running `/lazy-runtime.tick` (with or without `--drain`, or a named routine) refuses immediately, telling you the daemon is running.
+
+**Likely cause**: The checkout's supervisor unit already holds a live daemon. A concurrent manual tick would race that daemon over the working tree, the git index, and the job queue, so the skill refuses outright rather than risk the collision.
+
+**Fix**: Either let the running daemon do the work, or stop its supervisor first — `launchctl stop com.lazycortex.runtime.<repo-name>` on macOS, `systemctl --user stop lazy-core-runtime-<repo-name>` on Linux — then re-run `/lazy-runtime.tick`. Alternatively, run the tick from a checkout that has no daemon supervisor installed.
+
+---
+
+## `/lazy-runtime.tick <name>` refuses with "unknown routine"
+
+**Symptom**: Running `/lazy-runtime.tick <routine-name>` fails, and the refusal lists the routines that are actually registered.
+
+**Likely cause**: The name passed does not match any key in `lazy.settings.json[routines]` — a typo, or a routine that was never registered (or was already unregistered).
+
+**Fix**: Check the refusal's listed names against what you intended to run. Pick one of those, or register the routine first via `/lazy-routine.register`, then re-run `/lazy-runtime.tick <name>`.
+
+---
+
+## `/lazy-runtime.tick` summary reports `halted: true`
+
+**Symptom**: The JSON summary `/lazy-runtime.tick` prints ends with `halted: true`, and no further routines ran that pass.
+
+**Likely cause**: A routine halted the runtime mid-tick — a dirty working tree, a closed rate-limit window, or a remote-sync failure. This is the same halt state the daemon itself would raise; `/lazy-runtime.tick` surfaces it rather than pushing through.
+
+**Fix**: Run `/lazy-runtime.recover` to see the halt reason explained and clear it. Until it clears, subsequent ticks run cleanly but skip every routine that isn't marked `ignore_halt`.
+
+---
+
+## A new daemon's headless calls all exit 75 immediately
+
+**Symptom**: You followed `/lazy-core.daemon-authoring` to wire a new standalone daemon through `~/.local/bin/lazy-claude`, but every headless call exits 75 right away and no tokens are spent.
+
+**Likely cause**: Exit 75 is not an error — it means the host's subscription rate-limit window is closed, and the wrapper refused the call before burning any tokens. A live record of the closed window sits under `${XDG_CACHE_HOME:-$HOME/.cache}/lazycortex/rate-limit/`. The daemon is healthy; retrying in a loop or alerting on 75 defeats the point of the guard.
+
+**Fix**: Wait for the window to reopen — the daemon's own next scheduled tick picks the work back up. If you need to know who raised the flag and until when, inspect the records under `${XDG_CACHE_HOME:-$HOME/.cache}/lazycortex/rate-limit/` directly.
+
+---
+
+## A new daemon exits 69 under launchd but works fine in a shell
+
+**Symptom**: A standalone daemon wired via `/lazy-core.daemon-authoring` runs correctly when you invoke its script by hand in a terminal, but exits 69 when launchd or systemd runs it.
+
+**Likely cause**: Exit 69 means the wrapper found no real `claude` executable on `PATH` — and launchd/cron hand a process their own minimal `PATH`, not your shell's. If the plist's `EnvironmentVariables` `PATH` key (or the systemd unit's `Environment=PATH=…` line) doesn't include the directory `claude` actually lives in, the wrapper can't find it even though it's called by absolute path.
+
+**Fix**: Add the directory containing the real `claude` binary to the plist's `EnvironmentVariables` `PATH` key (or the systemd unit's `Environment=PATH=…` line), then reload the supervisor unit.
+
+---
+
+## `/lazy-core.daemon-authoring` can't find `~/.local/bin/lazy-claude`
+
+**Symptom**: Following `/lazy-core.daemon-authoring` to wire a new daemon, the wrapper path `~/.local/bin/lazy-claude` the skill tells you to call doesn't exist on this host.
+
+**Likely cause**: `/lazy-core.install` has not run on this host since the `lazy-claude` wrapper shipped — it's the install skill that places the wrapper, not `/lazy-core.daemon-authoring` itself.
+
+**Fix**: Run `/lazy-core.install` once against any repo on this host (the wrapper is host-level, not per-repo), then re-check `~/.local/bin/lazy-claude` and continue with `/lazy-core.daemon-authoring`.
+
+---
+
 ## `/lazy-memory.write` or `/lazy-memory.reflect` rejects the expert as not marked persona
 
 **Symptom**: Running `/lazy-memory.write` or `/lazy-memory.reflect` aborts with "`<expert>` is not marked persona; run `/lazy-memory.mark-persona <expert>` first."
@@ -914,18 +981,18 @@ New sessions pick up the consolidated hook from `lazycortex-core` cleanly.
 ```mermaid
 %%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart TD
-  symptomGroup{Which symptom group is the reader in?}
+  symptomGroup{"Which symptom group?"}
 
-  installOrSetup[Install-or-setup: Python floor, plugin cache, settings writes, daemon supervisor, scaffold registry, audit and doctor findings]
-  agentModels[Agent-models: tier routing, scope flags, floor env, duplicate keys]
-  mcpOrSecurity[Mcp-or-security: allow-mcp server resolution, mark-public gates, pre-commit hook]
-  gitCoordination[Git-coordination: staging lock, pathspec discipline]
-  expertRuntime[Expert-runtime: dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, unpinned models]
-  routines[Routines: register and unregister, name format, protocol offers]
-  daemonOrRuntime[Daemon-or-runtime: stale daemon, halts and recovery, remote-sync backoff, post-push hook]
-  memory[Memory: persona marking, note frontmatter, index and reflect sources]
-  logClean[Log-clean: log dir resolution, commit recording]
-  migration[Migration: moving off the retired lazycortex-log plugin]
+  installOrSetup["Install-or-setup — Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, audit and doctor findings"]
+  agentModels["Agent-models — tier routing, scope flags, floor env, duplicate keys"]
+  mcpOrSecurity["MCP-or-security — allow-mcp server resolution, mark-public gates, pre-commit hook"]
+  gitCoordination["Git-coordination — staging lock, pathspec discipline"]
+  expertRuntime["Expert-runtime — dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models"]
+  routines["Routines — register and unregister, name format, protocol offers"]
+  daemonOrRuntime["Daemon-or-runtime — stale daemon, halts and recovery, remote-sync backoff, post-push hook"]
+  memory["Memory — persona marking, note frontmatter, index and reflect sources"]
+  logClean["Log-clean — log dir resolution, commit recording"]
+  migration["Migration — moving off the retired lazycortex-log plugin"]
 
   symptomGroup -->|install or setup| installOrSetup
   symptomGroup -->|agent models| agentModels

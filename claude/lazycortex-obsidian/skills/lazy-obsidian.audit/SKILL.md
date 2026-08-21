@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.audit
-description: "Run when the operator asks to audit the lazycortex-obsidian plugin, or when its machinery misbehaves after an update — icons stop being painted, the icon-map is rejected as the wrong schema, the pre-commit shim reports a version mismatch, or mermaid/ascii fences render unstyled in the vault. Checks the plugin's own shipped artifacts (worker version constants, icon-map and hook templates, the Iconize settings block, the render-glue CSS), not any one vault's installed state. Read-first; presents findings, then asks which to fix."
-allowed-tools: Read, Glob, Grep, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), AskUserQuestion, Write
+description: "Run when the operator asks to audit the lazycortex-obsidian plugin, or when its machinery misbehaves after an update — icons stop being painted, the icon-map is rejected as the wrong schema, or mermaid/ascii fences render unstyled in the vault. Checks the plugin's own shipped artifacts (worker version constants, icon-map template, the Iconize settings block, the render-glue CSS), not any one vault's installed state. Read-first; presents findings, then asks which to fix."
+allowed-tools: Read, Glob, Grep, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), AskUserQuestion, Write, Agent
 argument-hint: "(no arguments — runs the full plugin audit)"
 ---
 # lazycortex-obsidian audit
@@ -19,7 +19,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Phase 3 — Protocol template sanity`
    - `Phase 4 — Skill cross-refs`
    - `Phase 6 — Protocol doc content checks`
-   - `Phase 8 — Diagram render glue`
+   - `Phase 8 — Plugin snippets`
    - `Phase 5 — Report + fix loop`
    - `Phase 7 — Log the run`
 2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
@@ -30,7 +30,6 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 - Read `${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py`; extract `PROTOCOL_VERSION`, `HOOK_VERSION`, `SCHEMA_VERSION`, and `SUPPORTED_SCHEMA` constants.
 - Grep `HOOK_VERSION:` markers out of:
-  - `templates/iconize/pre-commit-shim.sh`
   - `hooks/hooks.json` (plugin-shipped PostToolUse entry)
 - **FAIL** if MAJOR differs between worker and any template/hook.
 - **WARN** if MINOR/PATCH differs.
@@ -44,6 +43,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
 - **FAIL** if required top-level keys missing (`schema_version`, `matchers`).
 - **FAIL** if `schema_version != 2` (the current worker schema). v1 icon-maps in the template are a release-blocking regression — consumers copy this file as their starter.
 - **FAIL** if any matcher contains an `emit` key (retired at schema 2; folder emission is now driven by Folder Notes template, not matcher output).
+- **WARN** per matcher whose `path_glob` does not end in a file extension (`specs/**` rather than `specs/**/*.md`). Icons live in frontmatter, so the worker only ever reaches `.md`; an extensionless glob claims a reach it does not have and hides the author's intent for non-markdown paths.
 
 The template ships with `matchers: []` by design (consumers author their own rules); matcher-coverage checks belong in a consumer-side audit, not here.
 
@@ -72,11 +72,11 @@ The template ships with `matchers: []` by design (consumers author their own rul
 
 - Enumerate `skills/*/SKILL.md`.
 - **FAIL** if any shipped skill's `allowed-tools` includes a Bash glob that hardcodes an absolute path (violates `lazy-core.hygiene`).
-- **WARN** if the `iconize-sync` SKILL.md does not document all five subcommands (`sync`, `sync-staged`, `reconcile`, `install-hooks`, `check-versions`).
+- **WARN** if the `iconize-sync` SKILL.md does not document all core subcommands (`sync`, `sync-paths`, `reconcile`, `reconcile-plugin`, `reconcile-dirty`, `check-versions`).
 
-## Phase 8 — Diagram render glue
+## Phase 8 — Plugin snippets
 
-The diagram render glue is shipped via `templates/obsidian/snippets/mermaid-fit.css` and the `mermaid-popup` override block in `templates/obsidian/plugin-settings.json`. Both are consumed by `/lazy-obsidian.diagram-install`. This phase verifies the shipped artifacts are well-formed; consumer-side state (CSS enabled in a specific vault, plugin actually installed) is the install skill's job, not the plugin audit.
+The plugin ships every CSS snippet consumers install under `templates/obsidian/snippets/` — diagram render glue (`mermaid-fit.css`, `ascii-fit.css`) plus the `mermaid-popup` override block in `templates/obsidian/plugin-settings.json`, and the custom-callout styles (`callouts.css`). `mermaid-fit.css`, `ascii-fit.css`, and `callouts.css` are synced and enabled by `/lazy-obsidian.install`'s shared snippet step; `mermaid-popup` is installed by `/lazy-obsidian.diagram-install`. This phase verifies the shipped artifacts are well-formed; consumer-side state (CSS enabled in a specific vault, plugin actually installed) is the install skill's job, not the plugin audit.
 
 - Read `templates/obsidian/snippets/mermaid-fit.css`.
 - **FAIL** if the file is absent — install skill cannot scaffold without it.
@@ -92,8 +92,12 @@ The diagram render glue is shipped via `templates/obsidian/snippets/mermaid-fit.
 - **FAIL** if the top-level `mermaid-popup` block is missing — `/lazy-obsidian.update-plugin mermaid-popup` would land the plugin with default settings (no zoom-step calibration).
 - **FAIL** if `mermaid-popup.ZoomRatioValue` is not a string equal to `"0.1"`. (The plugin schema uses string types for this field; numeric `0.1` would be coerced and break the override deep-merge.)
 
-- Grep `templates/obsidian/snippets/` for any file other than `mermaid-fit.css` or `ascii-fit.css`.
-- **WARN** for each unexpected file — this snippets folder is only for diagram render glue today; stragglers from a previous plugin version are stale config.
+- Read `templates/obsidian/snippets/callouts.css`.
+- **FAIL** if the file is absent — install skill cannot scaffold without it.
+- **FAIL** if the file does not contain both `.callout[data-callout="decision"]` and `.callout[data-callout="decision-candidate"]` selectors — those are the contract for the decisions-registry's custom callout vocabulary; missing either leaves that type unstyled.
+
+- Grep `templates/obsidian/snippets/` for any file other than `mermaid-fit.css`, `ascii-fit.css`, or `callouts.css`.
+- **WARN** for each unexpected file — this snippets folder is only for plugin-shipped snippets today; stragglers from a previous plugin version are stale config.
 
 - Grep the engine's authoring rule (`${CLAUDE_PLUGIN_ROOT}/../lazycortex-diagram/rules/lazy-diagram.authoring.md`, if `lazycortex-diagram` is also installed under `~/.claude/plugins/cache/`).
 - **WARN** if the file is not findable — the diagram-install skill expects the engine to ship the theme directive on every fence; a vault that installs render glue without the engine has no producer of well-formed fences. Heuristic only; not a hard fail (consumers may emit fences manually).

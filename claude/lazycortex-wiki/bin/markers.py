@@ -28,11 +28,19 @@ class Markers:
   Wiki owns the inner content; everything outside the markers is operator
   territory and is preserved byte-for-byte.
 
+  Guarantees:
+    - Every byte outside a managed region, the marker lines themselves included, survives any
+      operation on this class unchanged.
+
   Attributes:
     SEE_ALSO_MARKER_ID: Marker identifier for the canonical See-also managed region.
     SEE_ALSO_HEADING: Heading text for the canonical See-also section.
     SEE_ALSO_PROTECTED_TAG: Owner tag marking the See-also section as a protected cross-plugin region.
   """
+
+  # Contract:
+  # Every byte outside a managed region, including the two marker lines that delimit it,
+  # MUST survive unchanged; only the span between the delimiters is ever rewritten.
 
   # Marker-id for the canonical See-also section.
   SEE_ALSO_MARKER_ID = "see-also"
@@ -85,6 +93,10 @@ class Markers:
         <inner lines>
         <!-- auto:<marker_id>:end -->
 
+    Guarantees:
+      - Rewriting a region with the same `inner` twice produces byte-identical output.
+      - Text carrying no marker pair is returned unchanged, and no region is inserted.
+
     Args:
       text: Full document text (or body text) containing the markers.
       marker_id: Logical identifier of the managed region to rewrite.
@@ -95,8 +107,28 @@ class Markers:
       Document text with the inner region replaced.  Unchanged when the
       marker pair is not present.
     """
+
+    # Domain(wiki.graph):
+    # # Managed region ownership inside a node
+    # A node is split between two owners: the bounded regions the wiki maintains and everything else,
+    # which belongs to the operator. Each managed region carries a name of its own and is delimited by a
+    # hidden start and an end marker, so the boundary survives arbitrary hand edits made around it.
+    # Only the span between the two delimiters is the wiki's to replace; the delimiters themselves and
+    # every byte outside them are preserved exactly. Refreshing a region is idempotent — the same
+    # content yields the same node — so a region may be regenerated on every pass without churning the
+    # document. A node carrying no delimiters has no managed region at all, and a refresh leaves it
+    # untouched rather than guessing where the region would have belonged.
+
+    # Contract:
+    # Rewriting a region with the same content twice MUST produce byte-identical output,
+    # so a refresh may run on every pass without churning the document.
+
     start = self._start_marker(marker_id)
     end = self._end_marker(marker_id)
+
+    # Contract:
+    # A document carrying no marker pair MUST be returned unchanged;
+    # the managed region is never inserted here and never guessed at.
 
     # guard: marker pair absent — caller must insert via ensure_see_also
     if start not in text or end not in text:
@@ -130,6 +162,9 @@ class Markers:
     The returned content has surrounding newlines stripped, mirroring the
     normalization `rewrite_between` applies on write.
 
+    Guarantees:
+      - Reading a region back returns exactly the content a rewrite placed in it.
+
     Args:
       text: Full document text (or body text) that may contain the markers.
       marker_id: Logical identifier of the managed region to read; defaults
@@ -139,6 +174,11 @@ class Markers:
       The inner content with surrounding newlines stripped, or `None` when
       the marker pair is not present.
     """
+
+    # Contract:
+    # Reading a region MUST return exactly the content a rewrite placed in it,
+    # normalised identically on both sides.
+
     start = self._start_marker(marker_id)
     end = self._end_marker(marker_id)
 
@@ -172,6 +212,10 @@ class Markers:
         <inner lines>
         <!-- auto:see-also:end -->
 
+    Guarantees:
+      - A body never ends up with more than one canonical See-also section.
+      - A newly created section is placed at the end of the body.
+
     Args:
       body: Markdown body text (the part after the frontmatter fences, or the
         entire document when there is no frontmatter).
@@ -181,6 +225,22 @@ class Markers:
     Returns:
       Body text with the See-also section present and up-to-date.
     """
+
+    # Domain(wiki.graph):
+    # # Canonical See-also section of a node
+    # Every node carries exactly one canonical See-also section, holding its outbound links to
+    # neighbouring nodes. The section is created the first time a node has links to show and is
+    # refreshed in place from then on, so a node never accumulates a second copy of it.
+    # Its first content line is an ownership tag naming the wiki as the section's owner: any other tool
+    # that rewrites the same documents reads that tag as a claim and preserves the whole section, while
+    # the wiki itself manages only the delimited span inside it.
+    # The section belongs at the end of the body — links are a trailing appendix of a node, never an
+    # interruption of the prose above them.
+
+    # Contract:
+    # A body MUST never carry more than one canonical See-also section; an existing
+    # section is refreshed in place and NEVER duplicated by a second copy.
+
     mid = self.SEE_ALSO_MARKER_ID
     start = self._start_marker(mid)
     end = self._end_marker(mid)
@@ -204,6 +264,10 @@ class Markers:
       f"{inner_block}"
       f"{end}\n"
     )
+
+    # Contract:
+    # A newly created See-also section MUST be placed at the end of the body,
+    # never inserted between existing prose.
 
     # Append after a trailing newline (ensure exactly one blank separator)
     if body.endswith("\n"):

@@ -1,11 +1,11 @@
 ---
 name: lazy-memory.write
 description: "Invoked by a persona-marked expert whenever it records or updates a memory note (per `lazy-memory.persona-aspect`), and by the operator when merging notes by hand — the only blessed writer of `.memory/`. Direct `Write` / `Edit` under `.memory/` silently desyncs the tag index; this skill writes the note, regenerates the touched `.tags/` files, and commits atomically under the memory-bot identity."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Bash(git *), Write
+allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Bash(git *), Write, Agent
 ---
 # Memory write
 
-Write one memory note for an expert. Validates frontmatter, picks a non-colliding slug, regenerates touched `.tags/` files (local + global), optionally drops `--consolidate` log paths, and lands the change as a single atomic git commit under the memory-bot identity derived from the expert (`memory.<expert>` / `memory.<expert>@bot.lazy-cortex`). The caller and the expert that invoked the skill do NOT commit memory paths themselves — the subsystem owns its own git visibility.
+Write one memory note for an expert. Validates frontmatter, picks a non-colliding slug, regenerates touched `.tags/` files (local + global), optionally drops `--consolidate` log paths, and lands the change as a single atomic git commit under the memory-bot identity derived from the expert (`memory.<expert>` / `memory.<expert>@bot.invalid`). The caller and the expert that invoked the skill do NOT commit memory paths themselves — the subsystem owns its own git visibility.
 
 ## Execution discipline (MANDATORY — read before any action)
 

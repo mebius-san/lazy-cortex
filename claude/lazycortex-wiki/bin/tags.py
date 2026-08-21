@@ -67,11 +67,34 @@ class TagOps:
     """
     Survey the distinct tag values per axis across the scope.
 
+    Guarantees:
+      - Axes and their values are reported in sorted order, so two surveys of an unchanged scope return
+        identical results.
+      - The survey is read-only and never modifies any node in the scope.
+
     Returns:
       A dict `{"scope": <id>, "axes": {<axis>: [{"value", "count",
       "examples"}, ...]}}`. Axes and values are sorted; each value carries
       its node count and up to two example node summaries as light context.
     """
+
+    # Contract:
+    # Axes and their values are reported in sorted order; two surveys of an
+    # unchanged scope MUST return identical results.
+
+    # Contract:
+    # The survey is read-only and NEVER modifies any node in the scope.
+
+    # Domain(wiki.taxonomy):
+    # # The value census of an axis
+    # Normalising an axis is a judgement about meaning, and the evidence that judgement needs is a census: every
+    # distinct value the axis holds, how many nodes carry it, and a couple of those nodes' summaries. The counts
+    # expose the shape of the drift — a value worn by one node beside a near-synonym worn by thirty is the one to
+    # fold, never the reverse — while the summaries say what the rare value was meant to mean, which its name alone
+    # rarely settles. Axes and values are reported in a fixed order, so two censuses of an unchanged scope read the
+    # same and only a real change in the taxonomy shows up as a difference.
+
+    # tally the distinct values every axis holds across the scope
     axes: dict = {}
     for node_path in self._resolver.iter_nodes(self._cfg):
       node = _nodes.node_for(node_path)
@@ -111,12 +134,43 @@ class TagOps:
     existing one are de-duplicated. The write touches only the managed tag
     region, so a re-run with no further alias matches is a no-op.
 
+    Guarantees:
+      - Only tags whose axis and value the map lists are rewritten; every other tag a node carries is left
+        unchanged.
+      - Collapsing an alias onto a value a node already carries leaves a single copy of that tag, never a
+        duplicate.
+      - A repeated call with the same alias map after a successful one changes nothing.
+
     Args:
       alias_map: `{<axis>: {<old-value>: <new-value>}}`.
 
     Returns:
       A dict `{"scope": <id>, "nodes_changed": <n>, "tags_remapped": <m>}`.
     """
+
+    # Contract:
+    # Only tags whose axis and value the alias map lists are rewritten; every
+    # other tag a node carries MUST be left unchanged.
+
+    # Contract:
+    # Collapsing an alias onto a value a node already carries leaves a single
+    # copy of that tag; a rewrite NEVER duplicates a tag.
+
+    # Contract:
+    # A repeated call with the same alias map after a successful one changes
+    # nothing.
+
+    # Domain(wiki.taxonomy):
+    # # Normalising values within an axis
+    # An axis drifts once several names accumulate for a single meaning. Normalisation settles the drift by
+    # declaring one name canonical and every rival an alias of it, then rewriting each alias to the canonical name
+    # wherever a node carries it. The decision is confined to one axis: the same name under another axis means
+    # something else and is never touched, and neither is any value nobody declared an alias, so an axis can be
+    # normalised without disturbing the rest of the taxonomy. Folding an alias onto a value a node already carries
+    # leaves that node with one copy rather than two, and once every alias has been rewritten the same declaration
+    # has nothing left to change.
+
+    # count the nodes and tags the alias declaration actually rewrites
     nodes_changed = 0
     tags_remapped = 0
     for node_path in self._resolver.iter_nodes(self._cfg):

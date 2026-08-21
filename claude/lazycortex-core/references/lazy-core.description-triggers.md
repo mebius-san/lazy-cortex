@@ -40,7 +40,7 @@ For slash-invoked utilities where the operator names the verb: install, uninstal
 Run when the operator asks to <verb>.
 ```
 
-Do not stop at the verb the filename already carries. `lazy-wiki.install` is not summoned by "install" alone — it is summoned by "set up the wiki here", "why doesn't `/wiki.query` work", "the wiki rule isn't in my repo". Put those in.
+Do not stop at the verb the filename already carries. `lazy-wiki.install` is not summoned by "install" alone — it is summoned by "set up the wiki here", "why doesn't `/lazy-wiki.query` work", "the wiki rule isn't in my repo". Put those in.
 
 ## After the trigger
 

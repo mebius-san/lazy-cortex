@@ -1,7 +1,7 @@
 ---
 name: lazy-log.bullets
 description: "Use when one plugin is being released and its CHANGELOG.public.md needs a release block drafted from a commit range — dispatched by any release-drafting flow, or directly with plugin + range + version. Renders the `### <version> — <date> UTC` block of user-visible bullets: the per-release public counterpart to lazy-log.distill's running internal changelog."
-tools: Bash, Write, TaskCreate, TaskUpdate, TaskList
+tools: Bash, Write, TaskCreate, TaskUpdate, TaskList, Skill, Agent
 model: inherit
 logging-waiver: "single-response synthesizer — output IS the prose response, no mutations to record"
 ---
@@ -81,6 +81,7 @@ For each surviving commit (or scope-grouped cluster):
 - Group commits sharing a Conventional-commits scope (e.g. `feat(auth): …` + `fix(auth): …`) into one bullet when they describe one user-visible change.
 - Drop SHAs and internal jargon.
 - Lead with the outcome.
+- **Any `#` token surviving from a commit subject goes in backticks** — issue and PR numbers (`` `#5` ``), hex colours, tag literals. The changelog lives in a vault, where a bare `#`-token is indexed as a tag. Wrap a run whole (`` `#10/#11/#12` ``), not one number at a time.
 - Mark breaking changes with **Breaking:** lead-in.
 
 Example:

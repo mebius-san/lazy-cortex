@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-07-26
+last_regen: 2026-08-19
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -12,24 +12,25 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
+source_sha: a2062bca54f427d017f9acfce7dee26e2b1db066
 ---
 # Frequently asked questions
 
 ## What do I need before running `/lazy-review.install`?
 
-`lazycortex-core` must be installed and configured first. The expert runtime, the daemon, and the `lazy.settings.json` schema all live there — `lazycortex-review` is a hard dependent. Run `/lazy-core.install` in the same repo, confirm the daemon is enabled if you want automatic per-file dispatch, then run `/lazy-review.install`.
+`lazycortex-core` must be installed and configured first. The expert runtime, the daemon, and the `lazy.settings.json` schema all live there — `lazycortex-review` is a hard dependent. Run `/lazy-core.install` in the same repo, confirm the daemon is enabled (the review loop is entirely daemon-driven), then run `/lazy-review.install`.
 
 ---
 
-## I ran `/lazy-review.install` but the `lazy-review.scan` routine was not registered. Why?
+## I ran `/lazy-review.install` but the review routines were not registered. Why?
 
-The scan routine only works when `lazycortex-core`'s runtime daemon is enabled. If the `daemon.enabled` flag in `lazy.settings.json` is `false`, the install step removes the routine to avoid leaving dead config. The rest of the plugin — settings sections, directories, the CLI allow-pattern — is still installed. Enable the daemon via `/lazy-core.install` (or the relevant core configure skill), then re-run `/lazy-review.install` to register the routine.
+Three routines only work when `lazycortex-core`'s runtime daemon is enabled: `lazy-review.coordinator-watch`, which turns a commit into a coordinator wake; `lazy-review.collect`, which lands finished expert payloads; and `lazy-review.sanitize`, a daily deterministic sweep that repairs lost writer wakes, orphaned reviews, and markers on documents that have since vanished. If the `daemon.enabled` flag in `lazy.settings.json` is `false`, the install step removes all three to avoid leaving dead config. The rest of the plugin — settings sections, directories, the CLI allow-pattern — is still installed. Enable the daemon via `/lazy-core.install` (or the relevant core configure skill), then re-run `/lazy-review.install` to register them.
 
 ---
 
-## During install I was asked to pick optional protocols for `lazy-review.scan`. What are these?
+## During install I was asked to pick optional protocols for `lazy-review.coordinator-watch`. What are these?
 
-`lazy-review.scan` always carries two mandatory protocols — `lazy-review.doc-review-protocol` and `lazy-core.markdown-style` — that ship attached and are never asked about. Other plugins can ship references that are useful to a writer working on reviewed documents but aren't required (for example, a diagram-writing guide), and those self-flag as optional candidates. `/lazy-review.install` discovers them and lets you pick which ones to attach; declining just means the scan routine doesn't get that extra guidance. Nothing you pick changes the review state machine itself, only what the writer expert reads before drafting. If you skip one and change your mind later, re-run `/lazy-review.install` — anything not yet attached is offered again.
+`lazy-review.coordinator-watch` always carries two mandatory protocols — the coordination playbook the woken coordinator reasons from, and `lazy-core.markdown-style` — that ship attached and are never asked about. Other plugins can ship references that are useful while working on reviewed documents but aren't required (for example, a diagram-writing guide), and those self-flag as optional candidates. `/lazy-review.install` discovers them and lets you pick which ones to attach; declining just means the coordinator doesn't get that extra guidance. Nothing you pick changes how the loop behaves — that is the playbook's business. If you skip one and change your mind later, re-run `/lazy-review.install` — anything not yet attached is offered again. (`lazy-review.collect` and `lazy-review.sanitize` take no protocols; neither dispatches an agent.)
 
 ---
 
@@ -46,7 +47,7 @@ The runtime writes operator-private state into `.experts/` (job queue, trackers,
 
 ## What does `/lazy-review.configure` actually ask me?
 
-The wizard collects four things the plugin cannot derive on its own: which file globs belong to this review class, which experts act as main writers and historian, which additional sections (validation or terminal) to add and who owns them, and which edit-marker style to use (`simple`, `diff`, `criticmarkup`, or `html`). Every value already persisted in `lazy.settings.json` is reused silently — re-running the wizard on a fully-configured class re-validates without asking a single question.
+The wizard collects the things the plugin cannot derive on its own: which file globs belong to this review class and the short identity token that names it (e.g. `design`, `request`), which experts act as main writers, which additional sections (validation or terminal) to add and who owns them, and which edit-marker style to use (`simple`, `diff`, `criticmarkup`, or `html`). Every value already persisted in `lazy.settings.json` is reused silently — re-running the wizard on a fully-configured class re-validates without asking a single question. A class may also carry a `protocols` list attached automatically by the plugin that owns the document kind; the wizard never asks about it and always preserves whatever is on record.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Insert new diagrams and refresh existing ones — dispatcher picks kind and format from your prose, writer agents render against shipped templates and style schemes.
-last_regen: 2026-08-06
+last_regen: 2026-08-19
 diagram_spec:
   anchor: "## How draw and fix route a request"
   request: "Flow showing the dispatch path: user invokes draw or fix → dispatcher validates inputs and resolves kind/format → format-compatibility check → writer agent selected (mermaid or ASCII) → byte-compare → fence written or skipped. Include the split-into-N and skipped-below-threshold outcomes as exit branches."
@@ -10,6 +10,7 @@ source_skills:
   - lazy-diagram.fix
   - lazy-diagram.draw-mermaid
   - lazy-diagram.draw-ascii
+source_sha: dd568a4ee2fbb367826851a45f41e55c5c10ad9f
 ---
 # Insert and refresh diagrams in your documentation
 
@@ -47,7 +48,7 @@ Each agent reads two sources: the kind's template file (structure, roles, idioms
 
 The Mermaid agent covers flow, sequence, state, ERD, class, architecture, layout, nav, tree, controls-scheme, decision-tree, screen-scheme, journey, mindmap, Gantt, and timeline. The ASCII agent covers flow, fs-tree, and layout — kinds where character-art communicates structure more directly than a rendered graph would.
 
-Every node label the Mermaid agent emits in a `flowchart` or `graph` diagram is quoted — `id["text"]` — even when the label looks plain. This closes a real rendering bug: Mermaid reads the character right after the opening bracket as a shape modifier, so a label starting with a slash (natural when a node is named after a slash-command, e.g. `/wiki.install`) used to produce `[/wiki.install …]`, an unterminated parallelogram that never renders. Quoting also means a label can carry parentheses, brackets, `#`, and `-` without you escaping anything. Practically: you can name a flow/architecture node after any slash-command and trust it to render.
+Every node label the Mermaid agent emits in a `flowchart` or `graph` diagram is quoted — `id["text"]` — even when the label looks plain. This closes a real rendering bug: Mermaid reads the character right after the opening bracket as a shape modifier, so a label starting with a slash (natural when a node is named after a slash-command, e.g. `/lazy-wiki.install`) used to produce `[/lazy-wiki.install …]`, an unterminated parallelogram that never renders. Quoting also means a label can carry parentheses, brackets, `#`, and `-` without you escaping anything. Practically: you can name a flow/architecture node after any slash-command and trust it to render.
 
 Both agents enforce density bounds. A request that maps to more nodes, participants, or states than the kind's upper bound triggers `split-into-N`, which surfaces a suggested seam list. You then make separate `/lazy-diagram.draw` calls, one per seam, each targeting its own sub-heading.
 

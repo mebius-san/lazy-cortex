@@ -1,7 +1,7 @@
 ---
 name: lazy-core.scaffold-sync
 description: "Dispatched by a plugin's install skill (`lazy-core.install` Step 4, `lazy-python.install` Step 6) to copy that plugin's authoring templates into the consumer and upsert its scaffold-registry entries; not for direct use. Repo-specific `_local` entries are `/lazy-core.scaffold-local`'s business, not this skill's."
-allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(diff *), Bash(cp *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet
+allowed-tools: Read, Write, Glob, Bash(find *), Bash(ls *), Bash(diff *), Bash(cp *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), Bash(python3 *), TaskCreate, TaskUpdate, TaskList, TaskGet, Agent
 ---
 # Sync Scaffold Templates and Registry
 
@@ -63,22 +63,19 @@ Otherwise state outcome `discovered-N` where N is the number of manifests found.
 
 ## Step 3 — Copy templates per group
 
-For each `<group>` discovered in Step 2, sync the template files from `<installPath>/templates/<group>/` into the consumer's `.claude/templates/<group>/` directory (where "consumer" scope = `~/.claude/` for `user`, `<repo-root>/.claude/` for `project`) with the deterministic triage script — the current/not-current verdict comes from the receipt, never from impression:
+For each `<group>` discovered in Step 2, sync the template files from `<installPath>/templates/<group>/` into the consumer's `.claude/templates/<group>/` directory (where "consumer" scope = `~/.claude/` for `user`, `<repo-root>/.claude/` for `project`) with the deterministic sync script — the current/not-current verdict comes from the receipt, never from impression:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py --src <installPath>/templates/<group> --dst <consumerScope>/.claude/templates/<group> --exclude scaffold.entries.json
+python3 ${CLAUDE_PLUGIN_ROOT}/bin/file_sync.py --src <installPath>/templates/<group> --dst <consumerScope>/.claude/templates/<group> --copy-diverged --exclude scaffold.entries.json
 ```
 
-`scaffold.entries.json` is plugin-internal and must not land in the consumer tree. The script creates the target directory, copies absent targets (state **installed**), byte-compares the rest (**unchanged**), and lists every genuinely differing file in the receipt's `diverged` array without touching it. Subdirectories are ignored — template groups are flat.
+`scaffold.entries.json` is plugin-internal and must not land in the consumer tree. The script creates the target directory, copies absent targets (state **installed**), byte-compares the rest (**unchanged**), overwrites every stale target from the shipped source (**refreshed**), and re-compares each write before reporting it. Subdirectories are ignored — template groups are flat.
 
-An enabled plugin installs its whole template surface — no per-template "install this?" prompt. Apply judgment ONLY to the `diverged` list:
+**The script is the whole step — there is nothing here to judge.** An authoring template is plugin-owned: a consumer who wants a different template authors their own file and registers it under the registry's `_local` key, where it wins over the plugin entry at equal glob specificity. So a target that differs from the shipped source is a stale copy, not a customisation, and it is overwritten without a diff preview, a merge, or a question.
 
-1. **Drift, cleanly mergeable** — the shipped delta applies without contradicting local edits (new headings / list items / registry entries added; every local-only chunk preserved) → merge silently via `Edit`. Uncontroversial additions (new entries in a registry group that already exists locally with the same key) just land. State **merged**.
-2. **Conflict** — the same region (a heading body, a block, an entry value) was changed both in shipped and local in ways that cannot be reconciled automatically → the ONLY case that asks. `AskUserQuestion` quoting the conflicting region with a unified diff, options **merge-shipped** / **keep-local**. State **merged** or **kept-local**.
+Exit code 3 with a non-empty `failed` array means a write did not verify — report it as **failed** and never restate it as applied.
 
-"Conflict" means you cannot determine what should survive — not merely "the files differ". No contradiction → no question.
-
-State for the group as a whole: one line per file as `<group>/<filename>: <state>`.
+State for the group as a whole: one line per file as `<group>/<filename>: <state>`, plus the receipt's `counts` line verbatim.
 
 ## Step 4 — Merge entries
 
@@ -142,7 +139,7 @@ Templates synced:
 Registry upsert: <status>
 ```
 
-One line per template file. State one of: `installed`, `unchanged`, `merged`, `kept-local`. Then the upsert status line.
+One line per template file. State one of: `installed`, `unchanged`, `refreshed`, `failed`. Then the upsert status line.
 
 ## Failure modes
 

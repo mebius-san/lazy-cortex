@@ -217,7 +217,8 @@ def enumerate_local_daemons(platform: str | None = None) -> list[dict]:
   platform = platform or sys.platform
   base = _unit_dir(platform)
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import metrics
+  # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+  import metrics  # pylint: disable=import-error
   rows: list[dict] = []
   for name in _unit_names(platform):
     try:

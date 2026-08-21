@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "matchers": [
+    {
+      "when": { "frontmatter.wiki_role": "topics-index" },
+      "resolve": { "iconName": "LiLibrary", "iconColor": "#a855f7" },
+      "priority": 240
+    },
+    {
+      "when": { "frontmatter_has": "wiki_src_hash" },
+      "resolve": { "iconName": "LiCopy", "iconColor": "#94a3b8" },
+      "priority": 230
+    },
+    {
+      "when": { "frontmatter_has": "wiki_summary" },
+      "resolve": { "iconName": "LiFileText", "iconColor": "#94a3b8" },
+      "priority": 130
+    }
+  ]
+}

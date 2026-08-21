@@ -5,7 +5,8 @@ scaffold_registry — dependency-free owner of the lazy-core.scaffold `## Regist
 
 Parses / renders / surgical splices the rigid 3-level YAML mapping
 (plugin -> template-path -> [globs]) without a YAML library, and exposes
-upsert / remove / list / validate as the `lazycortex-core scaffold` subcommand.
+upsert / remove / list / validate / sync-rule as the `lazycortex-core scaffold`
+subcommand.
 """
 
 from __future__ import annotations
@@ -295,6 +296,30 @@ def splice_upsert(md: str, plugin: str, entries: dict) -> str:
   return _rewrite_block(md, new_body)
 
 
+def graft_registry(shipped_md: str, target_md: str) -> str:
+  """
+  Return the shipped rule text carrying the target's current Registry block body.
+
+  Everything outside the `## Registry` fence comes from the shipped source, so a
+  stale consumer copy is refreshed wholesale; the block body is the consumer's
+  own state — the customer-authored key plus every installed plugin's key — and
+  is carried over verbatim.
+
+  Args:
+    shipped_md: Full markdown source of the rule as the plugin ships it.
+    target_md: Full markdown source of the consumer's current copy.
+
+  Returns:
+    The shipped source with its Registry block body replaced by the target's.
+
+  Raises:
+    ValueError: If either source lacks a well-formed `## Registry` ```yaml block.
+  """
+  body = _body_lines(target_md)
+  # an empty consumer block carries no keys, so the shipped empty-dict sentinel stands in
+  return _rewrite_block(shipped_md, body or ["{}"])
+
+
 def validate(md: str) -> list[dict]:
   """
   Return a list of findings for the Registry block; an empty list means the block is clean.
@@ -458,16 +483,65 @@ def _load_entries(arg: str) -> dict:
   return json.loads(arg)
 
 
-# waiver: four cmd branches each with explicit early returns; linear dispatch is clearest here
+def _sync_rule(src: str, registry: str, *, exists: bool) -> int:
+  """
+  Refresh a consumer's scaffold rule file from the shipped source and report the outcome.
+
+  The whole file is taken from the shipped source; only the Registry block body
+  is carried over from the consumer's current copy. The written file is re-read
+  and compared before the outcome is reported.
+
+  Args:
+    src: Path of the shipped rule file.
+    registry: Path of the consumer's rule file.
+    exists: Whether the consumer's file is already present.
+
+  Returns:
+    Shell exit code: 0 on success, 1 on error or a failed post-write comparison.
+  """
+  # guard: without the shipped source there is nothing to refresh from
+  if not os.path.exists(src):
+    return _emit({ "status": "error", "msg": f"shipped source not found: {src}" })
+  with open(src, encoding = "utf-8") as fle:
+    shipped = fle.read()
+
+  # an absent target takes the shipped file whole, empty registry block included
+  if not exists:
+    _atomic_write(registry, shipped)
+    new_md = shipped
+    status = "installed"
+  else:
+    with open(registry, encoding = "utf-8") as fle:
+      current = fle.read()
+    try:
+      new_md = graft_registry(shipped, current)
+    except ValueError as err:
+      return _emit({ "status": "error", "msg": str(err) })
+    if new_md == current:
+      return _emit({ "status": "unchanged", "registry": registry })
+    _atomic_write(registry, new_md)
+    status = "refreshed"
+
+  # a write that did not land must never be reported as applied
+  with open(registry, encoding = "utf-8") as fle:
+    written = fle.read()
+  # guard: a target that does not hold the intended bytes is a failure, not a sync
+  if written != new_md:
+    _emit({ "status": "failed", "registry": registry })
+    return 1
+  return _emit({ "status": status, "registry": registry })
+
+
+# waiver: five cmd branches each with explicit early returns; linear dispatch is clearest here
 # pylint: disable=too-many-return-statements,too-many-branches
 def main(argv: list[str]) -> int:
   """
   Entry point for the `lazycortex-core scaffold` CLI.
 
-  Dispatches to one of four subcommands — `upsert`, `remove`, `list`, or
-  `validate` — each operating on a registry markdown file. All output is
-  emitted as a single JSON object on stdout. Exits with code 0 on success
-  and 1 on error.
+  Dispatches to one of five subcommands — `upsert`, `remove`, `list`,
+  `validate`, or `sync-rule` — each operating on a registry markdown file. All
+  output is emitted as a single JSON object on stdout. Exits with code 0 on
+  success and 1 on error.
 
   Args:
     argv: Argument list (typically `sys.argv[1:]`).
@@ -482,7 +556,7 @@ def main(argv: list[str]) -> int:
   arg_parser = argparse.ArgumentParser(prog = "lazycortex-core scaffold")
   # waiver: argparse CLI signature, not a domain key
   sub = arg_parser.add_subparsers(dest = "cmd", required = True)
-  for name in ("upsert", "remove", "list", "validate"):
+  for name in ("upsert", "remove", "list", "validate", "sync-rule"):
     sparser = sub.add_parser(name)
     # waiver: argparse CLI signature, not a domain key
     sparser.add_argument("--registry", required = True)
@@ -493,6 +567,10 @@ def main(argv: list[str]) -> int:
     if name == "upsert":
       # waiver: argparse CLI signature, not a domain key
       sparser.add_argument("--entries", required = True)
+    # waiver: argparse CLI signature, not a domain key
+    if name == "sync-rule":
+      # waiver: argparse CLI signature, not a domain key
+      sparser.add_argument("--src", required = True)
   args = arg_parser.parse_args(argv)
 
   # a missing registry file is a valid starting state for every subcommand below
@@ -516,6 +594,11 @@ def main(argv: list[str]) -> int:
       return _emit({"status": "unchanged", "plugin": args.plugin})
     _atomic_write(args.registry, new_md)
     return _emit({"status": "registered", "plugin": args.plugin})
+
+  # `sync-rule` — refresh the whole rule file from the shipped source, keeping the consumer's block
+  # waiver: argparse CLI signature, not a domain key
+  if args.cmd == "sync-rule":
+    return _sync_rule(args.src, args.registry, exists = exists)
 
   # `remove` — drop one plugin's block from the registry
   # waiver: argparse CLI signature, not a domain key

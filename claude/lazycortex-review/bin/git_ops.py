@@ -10,7 +10,7 @@ the remote (no push / pull / fetch / rebase / reset --hard) — that is
 Commit functions all share the same shape:
 
 - They expect the working tree to already reflect the desired state
-  (mutated by `body.py` / `banner.py` / `history.py`).
+  (mutated by `body.py` / `banner.py`).
 - They stage the single path argument (`git add <path>`) and commit
   it; nothing else is added.
 - The commit subject is taken from the `message` argument verbatim;
@@ -35,12 +35,8 @@ Phases used by each commit kind:
   Used when an agent returned `outcome: empty` so the next tick
   can move past this writer.
 - :func:`commit_mechanical` — phase `mechanical`. Used for bootstrap,
-  banner-tick, scaffold-strip commits.
-- :func:`commit_history` — phase `history:append` for an entry
-  appended to `# History`.
-- :func:`commit_history_placeholder` — phase `history:noop` with a
-  non-empty diff (one trailing empty line appended to `# History`)
-  so the commit is visible to `git log -- <file>`.
+  banner-tick, scaffold-strip commits, and the coordinator's own
+  `# History` / question / command writes.
 - :func:`commit_final` — phase `finalize`.
 
 :func:`history_for_file` returns most-recent-first list of commit records
@@ -50,8 +46,11 @@ from __future__ import annotations
 # waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # pylint: disable=import-error
 
+import json
+import os
 import subprocess
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from errors import GitOpsError
 from keys import BotIdentity, JobKey, Phase, Trailer
@@ -59,7 +58,6 @@ from keys import BotIdentity, JobKey, Phase, Trailer
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from collections.abc import Mapping, Sequence
-  from pathlib import Path
 
 
 # -------------------------------------------------------- data structures
@@ -261,6 +259,63 @@ def parse_phase_trailer(trailers: Mapping[str, str]) -> tuple[str, str, int | No
 # ----------------------------------------------------------- commit_* api
 
 
+def repaint_inline(repo: Path, paths: list[str]) -> list[str]:
+  """
+  Repaint icon frontmatter for `paths` via the obsidian plugin's `sync-paths` op.
+
+  Resolves the `lazycortex-obsidian` CLI through `$LAZYCORTEX_PLUGIN_DIRS` (the blessed
+  cross-plugin contract) and asks it to refresh the named repo-relative notes, so the
+  caller can fold the repainted files into the commit it is about to make — no separate
+  icons commit, no operator-edit wake from one.
+
+  Notes:
+    - Best-effort by design: a consumer without the obsidian plugin, an unset environment,
+      or a failing worker yields an empty list and never raises.
+
+  Args:
+    repo: Absolute path to the repository root.
+    paths: Repo-relative POSIX paths of the notes about to be committed.
+
+  Returns:
+    Repo-relative paths whose frontmatter the repaint actually changed; empty when the
+    repaint was unavailable, failed, or changed nothing.
+  """
+  # guard: nothing to repaint — skip the subprocess entirely
+  if not paths:
+    return []
+
+  # walk the plugin-dir registry for the obsidian CLI; absence means no repaint here
+  cli = None
+  for entry in os.environ.get("LAZYCORTEX_PLUGIN_DIRS", "").split(os.pathsep):
+    # guard: empty segments appear when the variable is unset or ends with a separator
+    if not entry:
+      continue
+    # waiver: sibling plugin's on-disk CLI layout per dev.plugin-boundaries § 1c, not a domain key
+    candidate = Path(entry) / "bin" / "lazycortex-obsidian"
+    if candidate.is_file():
+      cli = candidate
+      break
+  # guard: no obsidian plugin on this host — repaint silently unavailable
+  if cli is None:
+    return []
+
+  # run the repaint and read back which notes actually changed
+  try:
+    proc = subprocess.run(
+        # waiver: the obsidian CLI's subcommand vocabulary, owned by lazycortex-obsidian
+        [str(cli), "sync-paths", *paths],
+        cwd=repo, capture_output=True, text=True, check=False,
+    )
+    # guard: a failing worker must never block the caller's commit
+    if proc.returncode != 0:
+      return []
+    # waiver: the obsidian CLI's JSON result vocabulary, owned by lazycortex-obsidian
+    touched = json.loads(proc.stdout.strip().splitlines()[-1]).get("touched", [])
+  except (OSError, ValueError, IndexError):
+    return []
+  return [p for p in touched if isinstance(p, str)]
+
+
 def commit_review_round(
     repo: Path,
     path: Path,
@@ -300,9 +355,18 @@ def commit_mechanical(
   """
   Commit a dispatcher-side mechanical edit (bootstrap, banner repaint, scaffold strip).
 
+  The commit also carries the icon repaint for the committed note when the obsidian
+  plugin is available — one commit, payload and paint together.
+
   Returns:
     Full SHA of the new commit.
   """
+  # fold the note's icon repaint into this same commit so no separate icons commit follows
+  for extra in repaint_inline(repo, [str(path.relative_to(repo))]):
+    # waiver: git CLI vocabulary
+    _run_git(repo, "add", "--", extra)
+
+  # the mechanical-phase trailer marks the commit as the system's own for the recogniser
   trailers = [("Doc-Review-Phase", Phase.MECHANICAL)]
   return _add_and_commit(
       repo, path,
@@ -340,66 +404,6 @@ def commit_empty(
   _run_git(repo, *commit_args)
   # waiver: git CLI vocabulary
   return _run_git(repo, "rev-parse", "HEAD")
-
-
-def commit_history(
-    repo: Path,
-    path: Path,
-    *,
-    author: Mapping[str, str],
-    message: str,
-) -> str:
-  """
-  Commit a historian entry appended to the `# History` section.
-
-  Args:
-    repo: Absolute path to the repository root.
-    path: Absolute path to the file being committed.
-    author: Mapping with `name` and `email` keys for the commit author identity.
-    message: Commit subject line.
-
-  Returns:
-    Full SHA of the new commit.
-  """
-  trailers = [(Trailer.PHASE, Phase.HISTORY_APPEND)]
-  return _add_and_commit(
-      repo, path,
-      author=author,
-      message_text=_build_message(message, trailers),
-  )
-
-
-def commit_history_placeholder(
-    repo: Path,
-    path: Path,
-    *,
-    author: Mapping[str, str],
-    message: str,
-) -> str:
-  """
-  Commit a non-empty placeholder when the historian returned noop.
-
-  The placeholder ensures the commit touches the file and is visible to `git log -- <file>`.
-  Without a file-touching commit, the per-file phase-trailer scan used by the review loop
-  would encounter an `--allow-empty` commit that is silently filtered, preventing the loop
-  predicate from closing. The placeholder is an empty line appended at the end of the
-  `# History` section (the section is created if absent).
-
-  Returns:
-    Full SHA of the new commit.
-  """
-  text = path.read_text()
-  # Lazy import to avoid bin-path order surprises between callers.
-  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  import history as _history
-  text = _history.append_empty_marker(text)
-  path.write_text(text)
-  trailers = [(Trailer.PHASE, Phase.HISTORY_NOOP)]
-  return _add_and_commit(
-      repo, path,
-      author=author,
-      message_text=_build_message(message, trailers),
-  )
 
 
 def commit_final(

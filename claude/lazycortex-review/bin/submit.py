@@ -4,18 +4,19 @@ for review skipping the opening main-writer round.
 Same bootstrap as `start` (`review_active: true`, `review_round: 1`,
 `review_approved: false`, Waiting banner, `review_result` cleared),
 plus a skip-seed: `review_main_done` is pre-filled with every main
-writer of the document and `review_phase` is set to `main`. The
-dispatcher then computes an empty main-pending set, so the opening writer
-round never runs and the document lands on the operator's Ready banner
-(see the dispatch_state submit branch).
+writer of the document, `review_round` advances by that count, and
+`review_phase` lands on `awaiting-operator` — the coordinator's own
+bootstrap-on-`review-entry` (`lazy-review.coordination-playbook.md` §
+"Opening the loop") sees an already-settled main round and the
+document goes straight to the operator's Ready banner.
 
 `--expert` (optional) writes `review_expert` — a per-document
-override of the class `experts.main` honoured by the dispatcher. When
-given, the seeded writer set is `[expert]`; otherwise it is the class's
-`experts.main` list, resolved from `.claude/lazy.settings.json`.
+override of the class `experts.main`. When given, the seeded writer
+set is `[expert]`; otherwise it is the class's `experts.main` list,
+resolved from `.claude/lazy.settings.json`.
 
 The commit is made under the OPERATOR's git identity (no Doc-Review
-trailer) so the dispatcher's next tick sees a human commit.
+trailer) so the coordinator watch's next tick sees a human commit.
 
 Returns 0 on success, 2 when the file is not a markdown file, 3 when an
 `--expert` is given that is not in the global experts table, 4 when the
@@ -24,10 +25,12 @@ seed from).
 """
 from __future__ import annotations
 # waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# waiver: `import parser` is the local sibling parser.py, not the removed stdlib `parser` module
 # deferred imports below module code; position intentional (ruff E402 noqa guards it)
-# pylint: disable=import-error,wrong-import-position
+# pylint: disable=import-error,wrong-import-position,deprecated-module
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -42,11 +45,72 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import doc_class as _doc_class  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import Bucket, JobKey, Phase, ReviewKey, Trailer  # noqa: E402
+import note_ops as _note_ops  # type: ignore # noqa: E402
+# waiver: `claude/lazycortex-specs/bin/note_ops.py` shares this basename; in a whole-project mypy run the bare
+# `import note_ops` above resolves to that unrelated module instead (this dir's `__init__.py` makes review's
+# own copy package-qualified as `bin.note_ops`), so mypy checks the attribute against the wrong file's shape
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import parser as _parser  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from keys import Bucket, JobKey, Paths, Phase, ReviewKey, Trailer  # noqa: E402
 # waiver: deferred sibling imports follow the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import start as _start  # noqa: E402
+
+
+def _load_settings(repo: Path) -> dict:
+  """
+  Read `<repo>/.claude/lazy.settings.json`.
+
+  Local copy rather than a cross-module import — the coordinator migration's
+  own-verbs-only boundary (`coordinator_dispatch.py` carries the same copy).
+
+  Args:
+    repo: Repository root to resolve the settings path against.
+
+  Returns:
+    Parsed settings dict, or `{}` when the file is absent or unparseable.
+  """
+  path = repo / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE
+  # guard: no settings file at all — nothing registered
+  if not path.exists():
+    return {}
+  try:
+    return json.loads(path.read_text())
+  except json.JSONDecodeError:
+    return {}
+
+
+def _parse_main_done(value: str | None) -> list[str]:
+  """
+  Parse the `review_main_done` frontmatter value into a list of flat writer names.
+
+  Accepts a bracketed inline list (`[a, b]` / `[]`) or a bare comma-separated
+  form (`a, b`) for hand-edited fixtures. `None`, absent, or empty brackets
+  produce an empty list.
+
+  Returns:
+    List of flat writer name strings committed in the current round.
+  """
+  if value is None:
+    return []
+  raw = value.strip()
+  if raw.startswith("[") and raw.endswith("]"):
+    raw = raw[1:-1]
+  return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _serialize_main_done(names: list[str]) -> str:
+  """
+  Render a `review_main_done` list to its bracketed inline form (`[a, b]` / `[]`).
+
+  Returns:
+    Serialized string ready to write verbatim into frontmatter.
+  """
+  return "[" + ", ".join(names) + "]"
 
 
 def open_submit(
@@ -58,14 +122,15 @@ def open_submit(
   """
   Apply submit bootstrap and leapfrog to post-main-settled state.
 
-  Reuses `start.open_review` for the initial frontmatter set
-  (`review_active: true`, `review_round: 1`, `review_approved: false`, optional
-  `review_expert`) then invokes the dispatcher's shared `settle_post_main_round`
-  primitive — the same primitive the natural per-writer-commit cleanup path uses.
-  The result is the exact state the dispatcher produces when every main writer of
-  the round has just committed: `review_phase: awaiting-operator`,
-  `review_main_done: [<every main writer>]`, `review_round` bumped by the
-  writer-count, and the body banner replaced with `Ready to approve`.
+  Reuses `start.open_review` for the initial frontmatter set (`review_active:
+  true`, `review_round: 1`, `review_approved: false`, optional `review_expert`)
+  then seeds the post-main-settled state directly through the `note_ops`
+  verbs: `review_main_done` gets every main writer, `review_round` bumps by
+  the writer count, `review_phase` lands on `awaiting-operator`, and the
+  banner is repainted. This is the exact state the coordinator's own
+  bootstrap-on-`review-entry` produces when every main writer of the round
+  has already spoken (`lazy-review.coordination-playbook.md` § "Opening the
+  loop").
 
   This matches the lazy-review.submit contract: the operator hands a document
   whose body diffs are already pre-authored (a machine writer wrote them outside
@@ -81,49 +146,41 @@ def open_submit(
   Returns:
     `True` if the document changed; `False` on an idempotent re-run.
   """
-  # waiver: deferred sibling import — dispatcher pulls the full review stack, only needed on this primitive call; bare-name resolved at runtime (type: ignore)
-  import dispatcher as _d  # type: ignore
   text = file_path.read_text()
   # Reuse start's bootstrap (review_active / round / approved / banner /
   # review_result clear / optional review_expert).
   _start.open_review(file_path, expert=expert)  # bootstrap, writes in place, no commit
   bootstrapped = file_path.read_text()
-  meta, body = _fm.parse(bootstrapped)
-  fm_text = bootstrapped[: len(bootstrapped) - len(body)]
+  meta, _body = _fm.parse(bootstrapped)
   # Idempotency: detect already-settled state. When `review_phase: awaiting-operator`
   # AND every requested main writer is already present in `review_main_done`, the
-  # leapfrog was applied on a prior run; calling `settle_post_main_round` again would
-  # re-bump `review_round` (the helper bumps unconditionally per "writer commit"
-  # event). The early return preserves the on-disk content and surfaces no-op.
-  current_done_flat = { _d._flatten(n) for n in _d._parse_main_done(meta.get(ReviewKey.MAIN_DONE, "")) }
+  # leapfrog was applied on a prior run — re-seeding would re-bump `review_round`.
+  # The early return preserves the on-disk content and surfaces no-op.
+  current_done_flat = { _parser.flatten_expert_name(n) for n in _parse_main_done(meta.get(ReviewKey.MAIN_DONE)) }
   already_settled = (
       meta.get(ReviewKey.PHASE) == Bucket.AWAITING_OPERATOR
-      and all(_d._flatten(n) in current_done_flat for n in main_writers)
+      and all(_parser.flatten_expert_name(n) in current_done_flat for n in main_writers)
   )
   # a prior run already applied the leapfrog, so the bootstrapped content stands as-is
   if already_settled:
     new_text = bootstrapped
   else:
-    repo = _repo_root_for(file_path)
-    settings = _d.load_settings(repo)
-    class_cfg = _d._class_for_file(settings, repo, file_path)
-    # caller resolves the class before invoking; if class_cfg is absent here
-    # the bootstrap was idempotent (already opted-in) and the document is mid-cycle
-    # — nothing to settle.
-    if class_cfg is None:
-      new_text = bootstrapped
-    else:
-      review_round = int(meta.get(ReviewKey.ROUND, 1))
-      fm_text, body, _new_round = _d.settle_post_main_round(
-          fm_text = fm_text,
-          body = body,
-          meta = meta,
-          class_cfg = class_cfg,
-          add_done_writers = main_writers,
-          review_round = review_round,
-      )
-      new_text = fm_text + body
-      file_path.write_text(new_text)
+    # submit always seeds the FULL main-writer set in one shot, so the done-set
+    # covers every main writer by construction — the phase always lands on
+    # awaiting-operator (unlike the coordinator's own per-writer cleanup, which
+    # can leave the phase at `main` when writers remain).
+    flat_writers = [_parser.flatten_expert_name(n) for n in main_writers]
+    # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
+    new_text = _note_ops.set_key(  # type: ignore[attr-defined]
+        bootstrapped, ReviewKey.MAIN_DONE, _serialize_main_done(flat_writers))
+    new_round = int(meta.get(ReviewKey.ROUND, 1)) + max(1, len(main_writers))
+    # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
+    new_text = _note_ops.set_key(new_text, ReviewKey.ROUND, new_round)  # type: ignore[attr-defined]
+    # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
+    new_text = _note_ops.set_key(new_text, ReviewKey.PHASE, Bucket.AWAITING_OPERATOR)  # type: ignore[attr-defined]
+    # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
+    new_text = _note_ops.repaint_banner(new_text)  # type: ignore[attr-defined]
+    file_path.write_text(new_text)
   if new_text == text:
     return False
   return True
@@ -140,13 +197,11 @@ def _resolve_main_writers(file_path: Path, expert: str | None) -> list[str] | No
   Returns:
     List of expert names to seed, or `None` when no review class matches and no expert was given.
   """
-  # waiver: deferred sibling import — dispatcher pulls the full review stack, needed only on this class-resolution path; bare-name resolved at runtime (type: ignore)
-  import dispatcher as _d  # type: ignore
   if expert:
     return [expert]
   repo = _repo_root_for(file_path)
-  settings = _d.load_settings(repo)
-  class_cfg = _d._class_for_file(settings, repo, file_path)
+  settings = _load_settings(repo)
+  class_cfg = _doc_class.class_for_file(settings, repo, file_path)
   if not class_cfg:
     return None
   return [m[JobKey.NAME] for m in (class_cfg.get(JobKey.EXPERTS, {}).get(Phase.MAIN) or [])]
@@ -163,11 +218,9 @@ def _expert_known(file_path: Path, expert: str) -> bool:
   Returns:
     `True` if the name exists in the global experts table; `False` otherwise.
   """
-  # waiver: deferred sibling import — dispatcher pulls the full review stack, needed only on this lookup path; bare-name resolved at runtime (type: ignore)
-  import dispatcher as _d  # type: ignore
   repo = _repo_root_for(file_path)
-  settings = _d.load_settings(repo)
-  return expert in _d.experts_table(settings)
+  settings = _load_settings(repo)
+  return expert in (settings.get(JobKey.EXPERTS) or {})
 
 
 def _repo_root_for(file_path: Path) -> Path:

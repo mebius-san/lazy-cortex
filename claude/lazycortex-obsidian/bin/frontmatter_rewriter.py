@@ -43,6 +43,15 @@ def _format_color_line(value: str) -> str:
   Returns:
     A single newline-terminated YAML line of the form `iconize_color: "<value>"\n`.
   """
+
+  # Domain(obsidian.icon-repaint):
+  # # Icon and color value encoding
+  # An icon name is written as a bare YAML scalar because it only ever contains letters, digits,
+  # underscores, and hyphens, values YAML never misreads. A color value is always wrapped in
+  # double quotes, because color values are hex codes that start with a hash sign, and an
+  # unquoted `#` at the start of a YAML scalar reads as a comment marker and would silently
+  # drop everything after it.
+
   # Colors ALWAYS double-quoted so YAML doesn't read `#abc` as a comment.
   return f'iconize_color: "{value}"\n'
 
@@ -60,6 +69,12 @@ def rewrite_frontmatter(text: str, *, icon: str | None, color: str | None) -> st
   - If removing all managed keys leaves the frontmatter block empty, the entire fence is stripped.
   - When no change is required, the returned string is byte-identical to the input.
 
+  Guarantees:
+    - Every byte outside the `iconize_icon` / `iconize_color` lines is preserved unchanged.
+    - When neither key needs to change, the returned string is byte-identical to `text`.
+    - If removing the managed keys leaves the frontmatter block with no other content, the
+      entire fence is dropped rather than kept as an empty shell.
+
   Args:
     icon: New value for `iconize_icon`, or `None` to remove the key.
     color: New value for `iconize_color`, or `None` to remove the key.
@@ -67,6 +82,26 @@ def rewrite_frontmatter(text: str, *, icon: str | None, color: str | None) -> st
   Returns:
     The rewritten document text, or the original `text` if no change was needed.
   """
+
+  # Domain(obsidian.icon-repaint):
+  # # Managed-key frontmatter surgery
+  # Repainting a note's icon or color touches only the two managed keys that carry that state;
+  # every other line in the frontmatter block and the entire document body stay byte-for-byte
+  # identical. Setting a key writes or replaces its single line; clearing a key removes that line
+  # outright, and if clearing leaves the frontmatter block with nothing left in it, the whole
+  # fence is dropped rather than kept as an empty shell. A note with no frontmatter yet only gets
+  # a new block created when there is actually something to add. When nothing changes, the result
+  # is the exact same text the caller passed in, so a plain equality check tells a caller whether
+  # a rewrite happened.
+
+  # Contract:
+  # Every byte of `text` that lies outside the `iconize_icon` / `iconize_color` lines MUST be
+  # preserved unchanged, including the rest of the frontmatter block and the entire document body.
+
+  # Contract:
+  # When neither key needs to change, the returned string MUST be byte-identical to `text`, so
+  # callers can detect a no-op rewrite with a plain equality check.
+
   m = _FENCE_RE.match(text)
   # guard: no existing frontmatter fence — only act if we have something to add
   if m is None:
@@ -110,6 +145,10 @@ def rewrite_frontmatter(text: str, *, icon: str | None, color: str | None) -> st
   if color is not None and not color_present:
     new_block += _format_color_line(color)
 
+  # Contract:
+  # If removing the managed keys leaves the frontmatter block with no other content, the entire
+  # `---` fence MUST be dropped rather than kept as an empty shell.
+
   # if the block becomes empty, strip the whole fence
   if new_block.strip() == "":
     new = rest
@@ -128,6 +167,12 @@ def rewrite_file(path: Path, *, icon: str | None, color: str | None) -> bool:
   from the input, the file is replaced atomically via a sibling temp file so concurrent readers
   never observe a partial write; when the result matches, the file is left untouched.
 
+  Guarantees:
+    - A reader that opens the file while the rewrite is in progress observes either the
+      complete original content or the complete new content, never a partial write.
+    - If the computed content matches what is already on disk, the file is left untouched — no
+      write occurs and its modification time is not changed.
+
   Args:
     path: Path to the Markdown file whose frontmatter should be rewritten.
     icon: New value for `iconize_icon`, or `None` to remove the key.
@@ -143,9 +188,27 @@ def rewrite_file(path: Path, *, icon: str | None, color: str | None) -> bool:
   # waiver: stdlib encoding-mode idiom
   src = path.read_text(encoding = "utf-8")
   out = rewrite_frontmatter(src, icon = icon, color = color)
+
+  # Contract:
+  # If the computed content matches what is already on disk, the file MUST be left untouched —
+  # no write occurs and its modification time is not changed.
+
   # guard: no change needed — leave the file untouched
   if out == src:
     return False
+
+  # Contract:
+  # A reader that opens the file while the rewrite is in progress MUST observe either the
+  # complete original content or the complete new content, never a partial write.
+
+  # Domain(obsidian.icon-repaint):
+  # # Atomic repaint write
+  # A repainted note is never edited in place. The new content is written to a sibling file
+  # first and then swapped into place with a single filesystem rename, so a reader that opens
+  # the note mid-write always sees either the old content or the new content in full, never a
+  # partially written file. A note whose content would not change after repaint is left
+  # untouched on disk entirely.
+
   # atomic replace so concurrent readers never see a partial write
   # waiver: filesystem path idiom (.tmp)
   tmp = path.with_suffix(path.suffix + ".tmp")

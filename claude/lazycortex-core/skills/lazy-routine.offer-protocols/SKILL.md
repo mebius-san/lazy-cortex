@@ -1,12 +1,12 @@
 ---
 name: lazy-routine.offer-protocols
-description: "Dispatched by a plugin's install / configure skill (`lazy-review.install`, `spec.install`) right after it registers a writer-dispatching routine, to offer the operator the optional protocol references that fit that routine's context; not for direct use. Only ever appends to the routine's flat `protocols` list."
-execution-discipline-waiver: "nested helper invoked from install/configure skills via Skill dispatch — the parent skill owns step discipline; a MANDATORY preamble here would re-anchor the parent's step pointer (lazy-core.skill-writing § 1.5)"
-allowed-tools: Read, Glob, AskUserQuestion, Bash(lazycortex-core *)
+description: "Run when the operator asks to attach optional protocol references to a writer-dispatching routine — it discovers the flagged candidates, offers the contextually relevant ones, and unions the picks into the routine's flat `protocols` list. Operator-invoked only: install skills never dispatch it, a system routine's protocol set is fixed by design and seeded without questions."
+execution-discipline-waiver: "single offer-and-append interaction — a numbered step list would outweigh the one decision the skill mediates"
+allowed-tools: Read, Glob, AskUserQuestion, Bash(lazycortex-core *), Agent
 ---
 # lazy-routine.offer-protocols
 
-A configurator that sets up a writer-dispatching routine calls this to offer the operator optional protocol references for that routine. Mandatory protocols are whatever the configurator already seeded into the routine's `protocols` list — they are never analyzed and never offered. This helper only ever appends operator-chosen optional references; it never removes, reorders, or adds a field to the routine config, and the runtime keeps reading the same flat `protocols` list.
+The operator invokes this to attach optional protocol references to a writer-dispatching routine. Install and configure skills never dispatch it: a system routine's protocol set is fixed by design and seeded without questions, so the only optional attachments are the ones the operator asks for here. Mandatory protocols are whatever the owning install already seeded into the routine's `protocols` list — they are never analyzed and never offered. This helper only ever appends operator-chosen optional references; it never removes, reorders, or adds a field to the routine config, and the runtime keeps reading the same flat `protocols` list.
 
 ## Inputs
 

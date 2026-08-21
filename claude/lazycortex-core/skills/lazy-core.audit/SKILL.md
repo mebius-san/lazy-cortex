@@ -1,7 +1,7 @@
 ---
 name: lazy-core.audit
 description: "Run when the operator asks why sessions start heavy, what is loaded into context at startup, or whether this repo's skills / agents / rules follow the authoring and logging rules. Read-only, reports only — the sibling `/lazy-core.doctor` is the one that checks cross-artifact consistency and offers fixes."
-allowed-tools: Read, Glob, Grep, Bash(wc *), Bash(command -v python3), Bash(python3 --version), Bash(python3 *), Bash(test *)
+allowed-tools: Read, Glob, Grep, Bash(wc *), Bash(command -v python3), Bash(python3 --version), Bash(python3 *), Bash(test *), Agent
 ---
 # Context Audit
 
@@ -140,13 +140,15 @@ Emit WARN only when the match survives all three gates.
 
 **Naming hygiene** — for `.claude/skills/*/`, `.claude/agents/*.md`, `.claude/commands/*.md`, `.claude/hooks/*`, `.claude/rules/*.md`: filename (or directory name for skills) must use dot-namespace (`namespace.name`). `[WARN]` for anything missing a dot (e.g., `logging.md` → `<namespace>.logging.md`).
 
-**Skill-writing compliance** — see `lazy-core.skill-writing`. File set: `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md` (commands exempt from the preamble check). Five checks:
+**Skill-writing compliance** — see `lazy-core.skill-writing`. File set: `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md` (commands exempt from the preamble check). Six checks:
 
 1. **Preamble present** — grep each file for `^## Execution discipline (MANDATORY`. Absent AND no `execution-discipline-waiver:` in frontmatter → `[FAIL]`. Frontmatter carries a non-empty `execution-discipline-waiver: "<reason>"` string → `[INFO]` with the waiver reason (visible, not silent). Frontmatter carries `execution-discipline-waiver: true` / `yes` / `""` → `[FAIL]` (invalid waiver).
 2. **No "Optional" in phase/step headings** — grep for `^##+ .*[Pp]hase.*[Oo]ptional`, `^##+ .*[Ss]tep.*[Oo]ptional`, and any `^### .*[Oo]ptional`. Match → `[FAIL]`.
 3. **Narrative padding (heuristic)** — grep the body (exclude frontmatter) for the denylist: `\bv\d+\.\d+\.\d+`, `user had to`, `we got burned`, `in a past session`, `in a previous run`, `user had to patch`. Match → `[WARN]` with the offending line. Final decision is the author's — heuristic, not structural.
 4. **Valid `lazy_setup_phase` value** — grep frontmatter for `^lazy_setup_phase:`. Value outside `{pre-install, per-plugin, post-install}` → `[WARN]` with the offending value. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md` for the contract.
 5. **`description:` states when to invoke** — see `lazy-core.skill-writing § 8` and `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`. **Commands are in scope for this check**, unlike the preamble check above: widen the file set to `.claude/commands/*.md` and `claude/*/commands/*.md`. A command is routed by its description exactly as a skill is, and `<ns>.help` commands are the ones an operator most needs the router to find. Read each file's `description:` and judge it against the three trigger shapes; mechanism-only → `[WARN] description states mechanism, not a trigger — <artifact> will not be selected | <path>`. Absent `description:` → `[FAIL]`. This is a judgement call, not a grep — read the reference before ruling on a batch.
+6. **`allowed-tools` missing `Agent`** — grep frontmatter for `^allowed-tools:`. When present and `Agent` is absent from the list → `[WARN]` (`lazy-core.skill-writing § 9` — mandatory member when the field is used at all). A skill with no `allowed-tools:` field is untouched (inherits the caller's tools, per operator decision). Never flag `Agent`'s presence.
+7. **Research-marker semantics** — see `lazy-core.skill-writing § 10`. Judgement call (read the skill, don't just grep): a skill whose contract is search/pull-shaped (a mode that returns a bounded knowledge slice — a query over a map, tree, dictionary, or index) but carries neither `research: true` frontmatter nor the word "research" in its `description:` → `[WARN] skill has research-skill shape without the research marker | <path>`. A skill carrying the marker (frontmatter or description word) whose body documents no query-mode contract (no invocation shape returning a bounded slice rather than the whole document) → `[WARN] research marker present but no query-contract documented | <path>`.
 
 **Agent-writing compliance** — see `lazy-core.agent-writing`. File set: `.claude/agents/*.md`, `claude/*/agents/*.md`. Checks:
 
@@ -154,7 +156,7 @@ Emit WARN only when the match survives all three gates.
 2. **`description:` states when to dispatch** — same judgement as skill-writing check 5, against `lazy-core.agent-writing § 1`. An agent whose sole caller is one skill satisfies it by naming that caller. Mechanism-only → `[WARN]`.
 3. **Preamble present** (for multi-phase agents) — same check as skill-writing §1. Agents with `## Phase N` or `## Process` sections must carry the preamble OR a valid `execution-discipline-waiver:` string. Same FAIL/INFO vocabulary.
 4. **No `AskUserQuestion` in agent body** — grep for `AskUserQuestion` outside fenced code/frontmatter. Match → `[FAIL]` (agents have no user channel).
-5. **Tool allowlist hygiene** — `tools: ["*"]` → `[WARN]` (unless a justification comment on the same line).
+5. **Tool allowlist hygiene** — `tools: ["*"]` → `[WARN]` (unless a justification comment on the same line). `tools:` present but missing `Agent` → `[WARN]` (`Agent` is a mandatory member per `lazy-core.agent-writing § 5`); never flag its presence.
 6. **No "Optional" in phase/step headings** — same as skill-writing §2 → `[FAIL]`.
 7. **Narrative padding (heuristic)** — same denylist as skill-writing §3 → `[WARN]`.
 
@@ -439,7 +441,7 @@ print(json.dumps(check_inbox_collision(Path('.')), ensure_ascii=False))
 "
 ```
 
-- `[FAIL]` kind `inbox_collision` — `<detail>`; `fix: set daemon.run_here false in one of the two checkouts` (never auto-applied — which checkout drives it is the operator's decision).
+- `[FAIL]` kind `inbox_collision` — `<detail>`; `fix: daemon.run_here is a {hostname: checkout-path} map, not a boolean — in the checkout that should NOT run the daemon, point this host's entry at the OTHER checkout's path (or drop this host's key entirely) so the runtime's own start-gate refuses it here` (never auto-applied — which checkout drives it is the operator's decision).
 
 **D13 — Sandbox scope resolves**
 
@@ -479,6 +481,18 @@ The audit scans `.claude/references/*-protocol.md` (plus the same directory unde
 - `[FAIL] protocol <name> overrides the response envelope: <detail> | <path>`; `fix: delete the envelope block from the protocol and declare only the outcome values under \`## Outcome by kind\`; the envelope reaches the expert through the runtime contract`.
 
 No entries → emit nothing.
+
+**D15 — Operator git hooks undecided under the daemon**
+
+A hook the operator keeps in this repo is written for a person at a keyboard. Under the daemon the same hook fires on autonomous commits, and one that rewrites files after the commit is assembled leaves a dirty tree the runtime halts on. The daemon therefore runs only the hooks named in `daemon.git.allowed_hooks`; every other one is silently absent from its filtered directory. Silently is the problem — an operator who adds a guard hook expecting it to gate the daemon's commits gets no signal that it never ran.
+
+Skip the check when `daemon.enabled` is false. Otherwise resolve the operator's hook directory — `core.hooksPath` when set (relative values resolve against the repo root), else `<git-common-dir>/hooks` — and list the executable files in it, ignoring `*.sample`.
+
+- `[WARN]` per executable hook whose filename is absent from `daemon.git.allowed_hooks` — `operator hook <name> does not run under the daemon | <hooks-dir>/<name>`; `fix: add "<name>" to daemon.git.allowed_hooks, or leave it out deliberately — the daemon runs no unlisted hook`.
+
+A hook the plugin family itself installs is still reported: whether a shipped shim should run under the daemon is the operator's decision, not the plugin's, and the shim's own allow-list check is a second, independent gate.
+
+No hook directory, or every hook already listed → emit nothing.
 
 ### Structured report shape (Agents A, B, C — unchanged)
 
@@ -613,6 +627,8 @@ One line per Agent B naming `[WARN]`.
 - **Narrative-padding heuristic** (WARN) — one line per match with the offending line.
 - **Invalid `lazy_setup_phase` value** (WARN) — one line per match with the offending value.
 - **`description:` states mechanism, not a trigger** (WARN) — one line per skill or command, prefixed by a `<n> of <total>` count line. A skill the router cannot select is dead surface, so the ratio is the finding as much as the individual lines are.
+- **`allowed-tools` missing `Agent`** (WARN) — one line per file that declares `allowed-tools:` without `Agent` in the list.
+- **Research-marker semantics** (WARN) — one line per skill with a research-shaped contract missing the marker, or the marker present without a documented query contract.
 
 ### Agent-writing compliance
 
@@ -621,6 +637,7 @@ One line per Agent B naming `[WARN]`.
 - **Missing preamble** (FAIL) — multi-phase agents without preamble and without valid waiver.
 - **`AskUserQuestion` in agent body** (FAIL) — one line per match.
 - **`tools: ["*"]` without justification** (WARN) — one line per match.
+- **`tools:` missing `Agent`** (WARN) — one line per agent whose `tools:` list omits it.
 - **"Optional" in heading** (FAIL) — one line per match.
 - **Narrative-padding heuristic** (WARN) — one line per match.
 
@@ -699,7 +716,9 @@ Render Agent D findings, grouped by sub-check. Omit any sub-check whose findings
 
 **Sandbox scope** — one line per `[FAIL]` or `[WARN]` from D13. Omit the section when D13 produced no findings.
 
-**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D13 findings).
+**Operator git hooks** — one line per `[WARN]` from D15. Omit the section when D15 produced no findings.
+
+**Expert runtime summary**: `PASS: <n> | WARN: <n> | FAIL: <n>` (count across all D1–D15 findings).
 
 ### Logging compliance
 

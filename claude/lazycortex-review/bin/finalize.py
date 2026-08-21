@@ -46,11 +46,15 @@ import body as _body  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import edit_markup as _edit_markup  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import doc_class as _doc_class  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import git_ops as _git_ops  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from keys import JobKey, Paths, ResultValue, ReviewKey, Style  # noqa: E402
+import job_markers as _job_markers  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from keys import Bucket, JobKey, Paths, ResultValue, ReviewKey, Style  # noqa: E402
 
 
 _BANNER_RE = re.compile(
@@ -71,7 +75,7 @@ _APPROVE_LINE_RE = re.compile(
 )
 
 
-def _settings_edit_marker_style(file_path: Path) -> str:
+def settings_edit_marker_style(file_path: Path) -> str:
   """
   Return the configured edit-marker style for the repo containing `file_path`.
 
@@ -97,13 +101,62 @@ def _settings_edit_marker_style(file_path: Path) -> str:
   return Style.SIMPLE
 
 
+def _load_settings(repo: Path) -> dict:
+  """
+  Read `<repo>/.claude/lazy.settings.json`.
+
+  Local copy rather than a cross-module import — the coordinator migration's
+  own-verbs-only boundary (`coordinator_dispatch.py` and `submit.py` carry the same copy).
+
+  Args:
+    repo: Repository root to resolve the settings path against.
+
+  Returns:
+    Parsed settings dict, or `{}` when the file is absent or unparseable.
+  """
+  path = repo / Paths.CLAUDE_DIR / Paths.SETTINGS_FILE
+  # guard: no settings file at all — nothing registered
+  if not path.exists():
+    return {}
+  try:
+    return json.loads(path.read_text())
+  except json.JSONDecodeError:
+    return {}
+
+
+def _section_ids_for_finalize(
+    class_cfg: dict | None, *, with_concerns: bool,
+) -> set[str]:
+  """
+  Assemble the preserve section-id set one finalize pass needs.
+
+  Terminal section-ids (keys under the class's `experts.terminal`) always survive the
+  strip. Validation section-ids (keys under `experts.validation`) are added only under
+  `with_concerns` — preserved verbatim, ownership tag included, so the surviving
+  concern section keeps a visible author.
+
+  Args:
+    class_cfg: The document's matched review-class config, or `None` when no class
+      matches (nothing to preserve beyond what `finalize_text` already keeps).
+    with_concerns: Whether the document is being finalized with outstanding concerns
+      accepted.
+
+  Returns:
+    The set of section-ids whose owned H1 sections survive the finalize strip.
+  """
+  experts_cfg = (class_cfg or {}).get(JobKey.EXPERTS) or {}
+  preserve_section_ids = set(experts_cfg.get(Bucket.TERMINAL) or {})
+  if with_concerns:
+    preserve_section_ids |= set(experts_cfg.get(Bucket.VALIDATION) or {})
+  return preserve_section_ids
+
+
 def finalize_text(
     text: str,
     *,
     style: str,
     preserve_section_ids: set[str] | None = None,
     with_concerns: bool = False,
-    normalize_section_ids: set[str] | None = None,
 ) -> str:
   """
   Apply the finalize transforms to `text` and return the result.
@@ -119,11 +172,9 @@ def finalize_text(
     with_concerns: When `True`, stamp the `approved-with-concerns` status
       callout (info marker) instead of the clean `approved` (success marker).
       Validation-umbrella section-ids are assumed to already be in
-      `preserve_section_ids` (caller's responsibility).
-    normalize_section_ids: Optional set of section-id strings whose surviving
-      H1 sections keep their content but lose the `#expert/<flat>/<id>`
-      ownership-tag line. Pass the validation section-ids under `with_concerns`
-      so preserved concerns read as plain prose.
+      `preserve_section_ids` (caller's responsibility). Preserved sections
+      keep their `#expert/<flat>/<id>` ownership-tag line — the surviving
+      concern's author stays visible in the finalized document.
 
   Returns:
     Finalized document text with review-machinery markers, transient frontmatter
@@ -158,13 +209,6 @@ def finalize_text(
   # finalize transition strips them once its work is done.
   body = _body.strip_owned_h1_sections(body, preserve_section_ids=preserve_section_ids)
 
-  # Bug 88: validator sections preserved under `with_concerns` survive
-  # as plain prose — strip their `#expert/<flat>/<section-id>` ownership-
-  # tag line so the finalized document carries no review-machinery tags
-  # (heading + concern content kept verbatim).
-  if normalize_section_ids:
-    body = _body.strip_ownership_tag(body, section_ids=normalize_section_ids)
-
   # Bug 36: stamp a visible terminal-state status callout above the
   # first H1 so the operator sees what the review concluded the
   # moment they open the document — without having to read frontmatter
@@ -172,7 +216,7 @@ def finalize_text(
   # `#status/<state>` namespace (not under `#review/`) and
   # survives subsequent re-finalize passes (it's upserted, not
   # accumulated). Consumers that own a richer terminal state (e.g.
-  # `spec.request-apply` setting request_status to accepted /
+  # `lazy-spec.request-apply` setting request_status to accepted /
   # rejected) overwrite this callout with their own when their action
   # lands; the default is the review-side "approved & finalized"
   # record below.
@@ -257,9 +301,14 @@ def _status_callout_for_finalize(meta: dict, *, with_concerns: bool = False) -> 
   if approved_raw not in ("true", "yes", "1"):
     return None
   if with_concerns:
+
+    # Decision: marker success, not info — approved is approved, both approve outcomes wear
+    # the same green; the concerns live in the state token and title, not in the colour
+
+    # the concerns outcome differs from the clean approve only in state token and title
     return {
         JobKey.STATE:      ResultValue.APPROVED_WITH_CONCERNS,
-        JobKey.MARKER:     "info",
+        JobKey.MARKER:     "success",
         JobKey.TITLE:      "Document approved & finalized with outstanding concerns",
         JobKey.BODY_LINES: (),
     }
@@ -327,17 +376,29 @@ def main(argv: list[str]) -> int:
   if not file_path.exists():
     sys.stderr.write(f"file not found: {file_path}\n")
     return 2
-  style = _settings_edit_marker_style(file_path)
+  style = settings_edit_marker_style(file_path)
   original = file_path.read_text()
-  new_text = finalize_text(original, style=style)
+  meta, _body_text = _fm.parse(original)
+  with_concerns = str(meta.get(ReviewKey.APPROVED_WITH_CONCERNS, "")).strip().lower() in ("true", "yes", "1")
+  repo = _repo_root_for(file_path)
+  settings = _load_settings(repo)
+  class_cfg = _doc_class.class_for_file(settings, repo, file_path)
+  preserve_section_ids = _section_ids_for_finalize(class_cfg, with_concerns=with_concerns)
+  new_text = finalize_text(
+      original, style=style,
+      preserve_section_ids=preserve_section_ids,
+      with_concerns=with_concerns,
+  )
   if new_text == original:
     print(f"already finalized: {file_path}")
     return 0
   file_path.write_text(new_text)
+  # the finalized document carries no review machinery, and its runtime job markers are part
+  # of that machinery — a stale one would paint the next cycle's banner from a dead job
+  _job_markers.clear(repo, file_path)
   if args.no_commit:
     print(f"finalized (uncommitted): {file_path}")
     return 0
-  repo = _repo_root_for(file_path)
   sha = _commit_final(repo, file_path)
   print(f"finalized: {file_path} ({sha[:7]})")
   return 0

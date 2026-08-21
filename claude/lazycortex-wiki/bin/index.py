@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import explainers as _explainers
 import nodes as _nodes
 import scope as _scope
 
@@ -52,7 +53,16 @@ class TopicIndex:
 
   One instance per invocation; create, call `build`, discard.  The output
   file is idempotent: identical scope state → byte-identical file every run.
+
+  Guarantees:
+    - The written index lists a node under exactly the topics that node declares, and never under a topic
+      inferred for it.
   """
+
+  # Contract:
+  # The index is a projection of what the nodes declare about themselves: a node
+  # is listed under exactly the topic tags it carries, and NEVER under a topic
+  # inferred, guessed, or otherwise derived from anything but those tags.
 
   # Config key for the topics-index output path.
   _CFG_TOPICS_INDEX = "topics_index"
@@ -85,9 +95,25 @@ class TopicIndex:
     `wiki/*` tags but no summary appear under their tags with an empty
     gloss.  Files of an unsupported type are skipped gracefully.
 
+    Guarantees:
+      - Rebuilding an unchanged scope writes a byte-identical file; the output never depends on the order
+        in which the scope's files are encountered.
+      - A `wiki_synced_sha` anchor already present in the index survives the rebuild unchanged.
+
     Returns:
       Absolute path to the written `topics.md` file.
     """
+
+    # Contract:
+    # Rebuilding a scope whose state has not changed MUST produce a byte-identical
+    # file; the written content NEVER depends on the order in which the scope's
+    # files are encountered.
+
+    # Contract:
+    # A `wiki_synced_sha` anchor already present in the index MUST survive the
+    # rebuild unchanged; the builder never drops nor rewrites it.
+
+    # assemble the catalog from the scope's nodes and write it to the configured path
     node_paths = self._resolver.iter_nodes(self._cfg)
     index_path = self._resolve_index_path()
     synced_sha = self._read_synced_sha(index_path)
@@ -111,6 +137,16 @@ class TopicIndex:
     Returns:
       The current `wiki_synced_sha` value, or `None` when the file or key is absent.
     """
+
+    # Domain(wiki.graph):
+    # # Relink anchor of a scope
+    # Curation of a scope advances incrementally: the catalog carries an anchor naming the repository state
+    # the last relinking pass covered, and the next pass reclassifies and re-links only what changed since
+    # then. The anchor is bookkeeping owned by the curation pass rather than content derived from the nodes,
+    # so rebuilding the catalog carries whatever anchor it finds through untouched — dropping it would
+    # silently downgrade the next pass into a full re-curation of the whole scope. A scope with no anchor yet
+    # is one that has never been curated, and its first pass covers every node.
+
     # guard: no index file yet — there is no anchor to preserve
     if not index_path.is_file():
       return None
@@ -153,6 +189,19 @@ class TopicIndex:
       All outer and inner keys are in sorted order; inner lists are sorted
       by `rel_link`.
     """
+
+    # Domain(wiki.taxonomy):
+    # # Topic catalog of a scope
+    # A wiki scope is entered through a single categorical catalog that groups the scope's nodes by the topics
+    # they declare. The catalog is a projection of what the nodes say about themselves, never an independent
+    # judgement: a node is listed under exactly the topics it carries, and a node carrying several topics is
+    # listed once under each of them. A node earns a place by declaring at least one topic or a one-line
+    # gloss; one that declares neither says nothing about itself and stays out, as do files of a kind the wiki
+    # does not know how to read. Each listing shows the node's gloss, so a reader can judge whether to open
+    # the node without opening it, and the node's connector phrases follow it — the short facets by which the
+    # node can be reached from elsewhere — whenever it declares any. The catalog is derived from the current
+    # state of the scope alone and ordered stably, so the same state always yields the same catalog.
+
     # Raw accumulator: axis → value_path → list of (rel_link, link_text, summary, connectors)
     raw: dict[str, dict[str, list[tuple[str, str, str | None, list[str]]]]] = {}
 
@@ -219,6 +268,16 @@ class TopicIndex:
     Returns:
       `(axis, value_path)` or `(None, None)` when the tag is malformed.
     """
+
+    # Domain(wiki.taxonomy):
+    # # Shape of a topic tag
+    # A topic tag names one classification axis and the value a node takes on that axis, written as
+    # `wiki/<axis>/<value>`: the leading segment marks the tag as wiki-owned, so tags that belong to anything
+    # else are left alone. The first segment after that marker is the axis, and everything left over is the
+    # value, which may itself be nested — an axis carries a hierarchy of values rather than a flat list. A tag
+    # that names an axis with no value under it classifies nothing and is ignored rather than treated as an
+    # error, so one malformed tag never costs a node its other topics.
+
     # guard: does not start with the wiki prefix
     if not tag.startswith(_WIKI_TAG_PREFIX):
       return None, None
@@ -289,11 +348,14 @@ class TopicIndex:
     lines: list[str] = []
     lines.append("---")
     lines.append(f"{_KEY_WIKI_ROLE}: {_VAL_WIKI_ROLE}")
-    # guard: carry the anchor through only when the prior index had one
+    # carry the anchor through only when the prior index had one
     if synced_sha is not None:
       lines.append(f"{_KEY_WIKI_SYNCED_SHA}: {synced_sha}")
     lines.append("---")
     lines.append(f"# Topics — {self._scope_id}")
+    # the file self-describes for the operator, in the vault's language
+    lines.append(_explainers.explainer_line(
+        _explainers.SURFACE_TOPICS, _explainers.resolve_language(self._repo)))
 
     # one section per axis, each opened by a blank line so headings stay readable
     for axis, values in tree.items():
@@ -306,7 +368,7 @@ class TopicIndex:
             lines.append(f"- [{link_text}]({rel_link}) — {summary}")
           else:
             lines.append(f"- [{link_text}]({rel_link})")
-          # guard: emit the connectors sub-line only when the node has any
+          # emit the connectors sub-line only when the node has any
           if connectors:
             lines.append(f"{_CONNECTOR_PREFIX}{_CONNECTOR_SEP.join(connectors)}")
 

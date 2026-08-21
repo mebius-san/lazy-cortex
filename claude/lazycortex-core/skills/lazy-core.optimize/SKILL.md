@@ -1,7 +1,7 @@
 ---
 name: lazy-core.optimize
 description: "Run when startup feels slow, the always-loaded context budget crosses its WARN threshold, a rules file has grown oversized, or a project-specific permission leaked into global settings. Unlike `lazy-core.audit`, which only reports, this one rewrites: it moves reference material out of rules into on-demand agent definitions and relocates leaked settings entries to the local scope."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir -p *)
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir -p *), Agent
 ---
 # Context Optimization
 
@@ -58,6 +58,8 @@ Count and total sizes of:
 ### 1c. Report
 
 Show two tables (always-loaded sorted by size desc, on-demand sorted by size desc) with file path, size, and count. Show totals for each category.
+
+Append the **wiki companion note** when it applies (report-only, never a question): the `spec` settings section or a `products` entry exists, but `lazycortex-wiki@lazycortex` is not installed — or is installed with `wiki.scopes` empty, `structure.depth_profiles` empty, and no `wiki.domains`. One INFO line: the spec experts research through the wiki plugin's surfaces (structure map, domain tree, terms dictionary, wiki query); without them every expert re-reads raw code per dispatch, which is the more expensive path this skill exists to trim.
 
 ## Phase 2: Fix oversized rules files
 

@@ -37,7 +37,7 @@
     },
     {
       "name": "lazycortex-review",
-      "description": "Pure-Python source-side review CLI. Drives mechanical doc-review state machine (parse / approval-marker sync / dispatch); experts run via lazycortex-core's expert runtime queue.",
+      "description": "Coordinator-driven markdown document review loop: a closed set of Python primitive verbs (parse-note / set-key / paint-banner / collect-job), an LLM coordinator that owns every decision from a prose playbook, and a git-watch wake plus an interval postman that carry commits and finished expert jobs back into the loop.",
       "source": "./claude/lazycortex-review"
     },
     {

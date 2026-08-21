@@ -1,0 +1,43 @@
+{
+  "asset_types": {
+    "feature": {
+      "icon": "LiRocket",
+      "color": "#64748b",
+      "default_path": "features",
+      "start_doc": "design.md:design",
+      "playbook": "lazycortex-specs:lazy-spec.feature-playbook"
+    },
+    "change": {
+      "icon": "LiRefreshCcw",
+      "color": "#64748b",
+      "default_path": "changes",
+      "start_doc": "design.md:design",
+      "playbook": "lazycortex-specs:lazy-spec.change-playbook"
+    },
+    "bug": {
+      "icon": "LiBug",
+      "color": "#64748b",
+      "default_path": "bugs",
+      "start_doc": "bug.md:bug",
+      "playbook": "lazycortex-specs:lazy-spec.bug-playbook"
+    },
+    "content": {
+      "icon": "LiShapes",
+      "color": "#64748b",
+      "default_path": "content",
+      "start_doc": "design.md:design",
+      "default_tools": [
+        "data"
+      ],
+      "playbook": "lazycortex-specs:lazy-spec.content-playbook"
+    },
+    "research": {
+      "icon": "LiFlaskConical",
+      "color": "#64748b",
+      "default_path": "research",
+      "start_doc": "design.md:design",
+      "default_tools": [],
+      "playbook": "lazycortex-specs:lazy-spec.research-playbook"
+    }
+  }
+}

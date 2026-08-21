@@ -66,9 +66,6 @@ _MIN_QUOTED_LEN = 2
 # inner text) and code nodes (individual `<wiki>` see-also entries).
 _SEE_ALSO_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
-# Qualifier that marks a See-also target as living in another repo.
-_CROSS_REPO_PREFIX = "@"
-
 # Directory whose presence marks a repository root.
 _GIT_DIR = ".git"
 
@@ -97,32 +94,55 @@ def resolve_see_also_target(target: str, node_path: Path) -> Path | None:
   The canonical base is the directory of the node carrying the link. Targets written
   against a coarser base (the scope root, the repo root) still resolve: after the node
   directory, each ancestor directory up to and including the repo root is tried in turn,
-  nearest first. Cross-repo targets belong to `repos.resolve_link` and are not handled here.
+  nearest first.
+
+  Guarantees:
+    - A returned path names an existing file inside the repository that holds the node.
+    - A target matching no file under any base resolves to `None`, never to a path that does not exist.
 
   Args:
     target: Raw link target string from a See-also entry.
     node_path: Absolute path of the node file carrying the link.
 
   Returns:
-    Absolute path of the existing target file, or `None` when the target is cross-repo
-    or resolves to no file under any base.
+    Absolute path of the existing target file, or `None` when the target
+    resolves to no file under any base.
   """
-  # guard: cross-repo target — not a path relative to any local base
-  if target.startswith(_CROSS_REPO_PREFIX):
+
+  # Contract:
+  # A returned path always names an existing file inside the repository that holds the node;
+  # resolution never widens past that repository.
+
+  # Contract:
+  # A target that matches no file under any base resolves to `None`. An unresolved target is
+  # NEVER guessed at, and no path that does not exist is ever returned.
+
+  # Domain(wiki.graph):
+  # # Where a link between nodes is written from
+  # A link is addressed relative to the node that carries it, so one and the same edge between two nodes is
+  # spelled differently in every node that holds it. That node-relative spelling is the canonical one, and it
+  # is the only one curation ever writes.
+  # Older addressing forms wrote the target against a coarser starting point — the root of the scope or of the
+  # repository — and those links still name a real neighbour. A target is therefore looked for from the node's
+  # own place first and then from ever wider surroundings, the nearest one that finds a real file winning. The
+  # search never widens past the repository, and a node lying outside one has nowhere to widen to at all. A
+  # target found from no starting point is left written exactly as it stands, because rewriting it would
+  # invent a neighbour that does not exist.
+  # Comparing links stated by different nodes needs one shared spelling, so an edge is identified by the place
+  # of its target within the repository — the same string no matter which node states the link.
+
+  # every base is bounded by the repository, so a node outside one has nothing to resolve against
+  repo = _repo_root_for(node_path)
+  # guard: node lives outside any repository — no base to try
+  if repo is None:
     return None
 
   # the canonical base is the node's own directory — try it before widening
   node_dir = node_path.resolve().parent
   candidate = (node_dir / target).resolve()
-  # guard: already written against the canonical base
-  if candidate.is_file():
+  # guard: already written against the canonical base, and lands inside the repository
+  if candidate.is_file() and repo in candidate.parents:
     return candidate
-
-  # widening is bounded by the repository, so a node outside one has nowhere to go
-  repo = _repo_root_for(node_path)
-  # guard: node lives outside any repository — no coarser base to try
-  if repo is None:
-    return None
 
   # an older curator run may have written the target against a coarser base
   for base in node_dir.parents:
@@ -140,8 +160,12 @@ def normalize_see_also_target(target: str, node_path: Path) -> str:
   Rewrite a See-also target to the canonical node-directory-relative spelling.
 
   A target that already uses the canonical base is returned unchanged, so the rewrite
-  is idempotent. Cross-repo targets and targets that resolve to no file are returned
-  verbatim — a rewrite would either corrupt the qualifier or invent a path.
+  is idempotent. Targets that resolve to no file are returned verbatim — a rewrite
+  would invent a path.
+
+  Guarantees:
+    - Normalisation is idempotent: a target already in canonical spelling is returned unchanged.
+    - A target that resolves to no file is returned verbatim, byte for byte.
 
   Args:
     target: Raw link target string from a See-also entry.
@@ -150,8 +174,18 @@ def normalize_see_also_target(target: str, node_path: Path) -> str:
   Returns:
     The canonical target string.
   """
+
+  # Contract:
+  # Normalisation is idempotent: a target already written in the canonical spelling is
+  # returned unchanged, so repeated passes never churn a node.
+
+  # Contract:
+  # A target that resolves to no file is returned verbatim, byte for byte; the operator's
+  # string is NEVER rewritten into a path that does not exist.
+
+  # resolve first — the canonical spelling can only be derived from a real file
   abs_target = resolve_see_also_target(target, node_path)
-  # guard: cross-repo or unresolvable — leave the operator's string alone
+  # guard: unresolvable — leave the operator's string alone
   if abs_target is None:
     return target
   return os.path.relpath(abs_target, node_path.resolve().parent)
@@ -186,8 +220,11 @@ def repo_relative_see_also_target(target: str, node_path: Path) -> str:
   Express a See-also target as a repo-relative POSIX path for comparison purposes.
 
   This is the identity form used to compare edges across nodes (each node writes its
-  targets against its own directory, so the stored strings are not comparable). Cross-repo
-  targets and unresolvable targets are returned verbatim.
+  targets against its own directory, so the stored strings are not comparable).
+  Unresolvable targets are returned verbatim.
+
+  Guarantees:
+    - One target file yields one and the same string whichever node states the link to it.
 
   Args:
     target: Raw link target string from a See-also entry.
@@ -196,8 +233,14 @@ def repo_relative_see_also_target(target: str, node_path: Path) -> str:
   Returns:
     Repo-relative POSIX path string, or the original target when it cannot be resolved.
   """
+
+  # Contract:
+  # The returned string is the identity of an edge: one and the same target file yields one
+  # and the same string whichever node states the link to it.
+
+  # resolve first — an identity form can only be derived from a real file
   abs_target = resolve_see_also_target(target, node_path)
-  # guard: cross-repo or unresolvable — nothing to express
+  # guard: unresolvable — nothing to express
   if abs_target is None:
     return target
   repo = _repo_root_for(node_path)
@@ -735,6 +778,17 @@ def _markdown_source_for_hash(text: str) -> str:
   Returns:
     Normalised operator-source string suitable for a stable hash.
   """
+
+  # Domain(wiki.graph):
+  # # When a node counts as changed
+  # Curation must never make a node look edited, or every pass would hand the next one work to redo. What
+  # counts as a node's own content is therefore only what the operator wrote: the curated facets are cut away
+  # first, and the remainder is read with trailing spaces and blank edges ignored, so that reformatting noise
+  # and the gap left behind by a removed facet both pass unnoticed.
+  # A short fingerprint of that remainder is kept with the node. It records which curated state belongs to
+  # which authored text, so a pass that has lost its bearing in the repository history can still tell the
+  # nodes whose text has moved on from those whose text still stands as it was curated.
+
   stripped = _strip_managed_md(text)
   return _normalise_for_hash(stripped)
 
@@ -861,7 +915,31 @@ class MarkdownNode:
   un-managed sections are preserved byte-for-byte.  `apply` is the
   canonical write entry point; the read properties let callers inspect
   the current state without modifying the file.
+
+  Guarantees:
+    - Every part of the document outside the four wiki-owned regions survives a write byte-for-byte.
+    - The four operator-pin frontmatter keys are read and never written.
+    - Each write phase touches only the regions it owns: classifying leaves the `# See also` section
+      alone, and linking leaves frontmatter alone.
+    - Every write operation is idempotent: identical inputs leave byte-identical content on the second call.
   """
+
+  # Contract:
+  # Every part of the document outside the four wiki-owned regions survives a write byte-for-byte:
+  # other frontmatter keys with their block style, comments and quoting, non-`wiki/` tags, body
+  # prose, headings, and any section another tool owns.
+
+  # Contract:
+  # The four operator-pin keys — `wiki_pinned_topics`, `wiki_unrelated_topics`, `wiki_pinned_links`
+  # and `wiki_unrelated_links` — are read-only: they are read and NEVER written.
+
+  # Contract:
+  # Each write phase touches only the regions it owns. Classifying leaves the `# See also` section
+  # untouched, and linking leaves every frontmatter key untouched.
+
+  # Contract:
+  # Every write operation is idempotent: applying identical inputs twice leaves byte-identical file
+  # content on the second call.
 
   # Frontmatter key names wiki owns or reads.
   _KEY_WIKI_SUMMARY        = "wiki_summary"
@@ -972,7 +1050,7 @@ class MarkdownNode:
     Parses `[text](path)` link entries from the `# See also` marker block. Stored
     targets are relative to this node's own directory, so each one is re-expressed as
     a repo-relative POSIX path — the identity form in which edges from different nodes
-    are comparable. Cross-repo targets keep their `@<repo-key>/path` qualifier. Empty
+    are comparable. Unresolvable targets are kept verbatim. Empty
     when the See-also section is absent or empty. Used by `dispatch-link` to skip
     back-link dispatches for attractor nodes that already forward-link to the target.
     """
@@ -993,7 +1071,16 @@ class MarkdownNode:
     The hash is computed over the document with every wiki-managed region
     removed (`wiki_summary` / `wiki_src_hash` keys, `wiki/*` tags, and the
     `# See also` section), so re-curation never changes it.
+
+    Guarantees:
+      - The value changes only when operator-authored content changes; a wiki write never moves it.
     """
+
+    # Contract:
+    # The value covers operator-authored content only. A write to any wiki-managed region NEVER
+    # changes it, so a re-curated node still reads as unchanged.
+
+    # a short digest is enough to tell one authored revision from another
     source = _markdown_source_for_hash(self._text)
     digest = hashlib.sha256(source.encode(self._ENCODING)).hexdigest()
     return digest[:_SRC_HASH_LEN]
@@ -1051,7 +1138,8 @@ class MarkdownNode:
     Guarantees:
       - Applying identical `wiki_summary`, `topics`, and `connectors` twice produces
         byte-identical file content on the second call.
-      - Non-`wiki/`-prefixed tags survive untouched; only the `wiki/*` subset is replaced.
+      - Non-`wiki/`-prefixed tags survive untouched in their original relative order; only the
+        `wiki/*` subset is replaced.
       - A connectors-only change never perturbs the recorded `wiki_src_hash`, since
         `wiki_connectors` is excluded from `source_hash`.
 
@@ -1062,6 +1150,26 @@ class MarkdownNode:
       connectors: Short linkable-facet phrases for `wiki_connectors`; `None`
         leaves the existing block untouched, an empty list removes it.
     """
+
+    # Contract:
+    # Tags without the `wiki/` prefix survive the write in their original relative order.
+    # Only the `wiki/*` subset is ever replaced.
+
+    # Contract:
+    # A connectors-only change never perturbs the recorded source hash, because the connectors
+    # block is excluded from the operator-authored content the hash covers.
+
+    # Domain(wiki.graph):
+    # # Curated facets of a node
+    # Curation touches four facets of a node and nothing else: the one-line gloss that describes it, the
+    # topics that classify it, the connector phrases by which it can be reached from elsewhere, and its
+    # outbound links. Everything else the node carries — its prose, its headings, and any label or metadata
+    # another tool owns — stays exactly as the operator left it, so a curation pass is never a rewrite.
+    # Alongside those facets the operator may state standing preferences: topics and links pinned to the node,
+    # and topics and links declared unwanted there. Those statements are read by curation and never written
+    # by it. Curation is free to overwrite its own facets on every pass, and never free to overwrite intent
+    # the operator stated.
+
     text = self._text
 
     # Compute the source hash from the CURRENT content with managed regions
@@ -1112,6 +1220,12 @@ class MarkdownNode:
         See-also section, one per list item.  An empty list produces an
         empty (but present) managed block.
     """
+
+    # Contract:
+    # Every link target written into the section is in canonical node-directory-relative
+    # spelling, whatever base the caller spelled it against.
+
+    # the whole document is rewritten from the in-memory copy in one pass
     text = self._text
 
     # Step 1 — See-also section
@@ -1658,8 +1772,37 @@ class CodeNode:
   `MarkdownNode` — each rewrites only its managed fields, leaving code and
   other block fields untouched.  `apply` writes all fields in one pass.
   All three operations are idempotent.
+
+  Guarantees:
+    - Every line outside the `<wiki>` block survives a write byte-for-byte.
+    - A shebang line and the leading header comment stay above the block, so an executable file
+      stays executable.
+    - The four operator-pin fields are read and never written.
+    - Each write phase leaves the block fields it does not own untouched.
+    - Every write operation is idempotent: identical inputs leave byte-identical content on the second call.
   """
 
+  # Contract:
+  # Every line outside the `<wiki>` block survives a write byte-for-byte — code, imports,
+  # header comments, and the shebang alike.
+
+  # Contract:
+  # The block is NEVER written above a shebang line or the leading header comment; an executable
+  # file stays executable across any number of write passes.
+
+  # Contract:
+  # The four operator-pin fields — `pinned-topics`, `unrelated-topics`, `pinned-links` and
+  # `unrelated-links` — are read-only: they are read and NEVER written.
+
+  # Contract:
+  # Each write phase leaves the block fields it does not own untouched, so a classify pass and a
+  # link pass never overwrite each other's result.
+
+  # Contract:
+  # Every write operation is idempotent: applying identical inputs twice leaves byte-identical file
+  # content on the second call.
+
+  # File encoding for read/write.
   _ENCODING = "utf-8"
 
   def __init__(self, *, path: Path, prefix: str) -> None:
@@ -1753,8 +1896,8 @@ class CodeNode:
     Parses `[text](path)` link entries from every item in the `<wiki>` block's
     `see-also` list. Stored targets are relative to this node's own directory, so
     each one is re-expressed as a repo-relative POSIX path — the identity form in
-    which edges from different nodes are comparable. Cross-repo targets keep their
-    `@<repo-key>/path` qualifier. Empty when the `<wiki>` block has no see-also
+    which edges from different nodes are comparable. Unresolvable targets are
+    kept verbatim. Empty when the `<wiki>` block has no see-also
     items. Used by `dispatch-link` to skip back-link dispatches for attractor
     nodes that already forward-link to the target.
     """
@@ -1771,7 +1914,16 @@ class CodeNode:
 
     The hash is computed over the file with the entire `<wiki>` comment
     block removed, so re-curation never changes it.
+
+    Guarantees:
+      - The value changes only when operator-authored source changes; a wiki write never moves it.
     """
+
+    # Contract:
+    # The value covers operator-authored source only. A write to the `<wiki>` block NEVER changes
+    # it, so a re-curated file still reads as unchanged.
+
+    # a short digest is enough to tell one authored revision from another
     source = _code_source_for_hash(self._lines, self._prefix)
     digest = hashlib.sha256(source.encode(self._ENCODING)).hexdigest()
     return digest[:_SRC_HASH_LEN]
@@ -1857,12 +2009,29 @@ class CodeNode:
     `<wiki>` block, which is excluded from `source_hash` in full, so writing
     it never perturbs the recorded `src-hash`.
 
+    Guarantees:
+      - Topics are persisted bare, as `<axis>/<value>`; the `wiki/` prefix is never stored.
+
     Args:
       wiki_summary: One-line summary string (no newlines).
       topics: Full list of topic strings to set.
       connectors: Short linkable-facet phrases for the `connectors:` field;
         `None` leaves the existing value untouched.
     """
+
+    # Contract:
+    # Topics are persisted bare — `<axis>/<value>`, with no `wiki/` prefix — whichever of the two
+    # spellings the caller passes in.
+
+    # Domain(wiki.taxonomy):
+    # # How a code node states its topics
+    # A topic is written differently depending on the kind of file that states it. In a prose node the topic
+    # sits among the file's other labels, so it carries the marker that tells wiki-owned labels apart from
+    # foreign ones. In a code node everything the wiki owns already lives inside one clearly bounded block,
+    # where no foreign label can be mistaken for a topic, so the topic is stated bare — axis and value only.
+    # Both forms name the same topic, and the catalog restores the marker as it reads a code node, so how a
+    # node is classified never depends on the kind of file carrying it.
+
     # Compute the source hash from the CURRENT content with the wiki block
     # excluded, so the hash reflects only operator-authored code.
     src_hash = hashlib.sha256(
@@ -1897,9 +2066,18 @@ class CodeNode:
     untouched.  The operation is idempotent.  Link targets are normalised to the
     canonical node-directory-relative base, as in `MarkdownNode.apply_link`.
 
+    Guarantees:
+      - Every stored link target is in canonical node-directory-relative spelling.
+
     Args:
       see_also_lines: Lines to set as `see-also:` items.
     """
+
+    # Contract:
+    # Every link target written into the block is in canonical node-directory-relative spelling,
+    # whatever base the caller spelled it against.
+
+    # merge onto the existing block so fields this phase does not own survive
     current = self._read_block() or {}
     # Code see-also is stored bare — strip the leading markdown list bullet the
     # curator emits (`- [name](path) — gloss`) so the block renderer's own `  - `
@@ -1994,6 +2172,10 @@ def set_scalar_field(text: str, key: str, value: str) -> str:
   reaching into a private name across the module boundary.  Synthesises a
   frontmatter block when the document has none.
 
+  Guarantees:
+    - Only the named key's entry changes; every other byte of the document survives untouched,
+      including sibling keys, their block style, comments, and quoting.
+
   Args:
     text: Full document text (may be empty for a brand-new file).
     key: Top-level YAML key to set.
@@ -2002,6 +2184,12 @@ def set_scalar_field(text: str, key: str, value: str) -> str:
   Returns:
     Document text with the key set to `value`.
   """
+
+  # Contract:
+  # Only the named key's entry changes. Every other byte of the document survives untouched —
+  # sibling keys, their block style, comments, quoting, and the whole body below the fences.
+
+  # the surgical editor is the single implementation of the key-entry rewrite
   return _set_scalar_field(text, key, value)
 
 

@@ -1,7 +1,7 @@
 ---
 name: <namespace.name>
 description: "<trigger FIRST, one of: `Use when <request or situation>` / `Dispatched by /<skill>; not for direct use.` / `Run when the operator asks to <verb>.` — then mechanism only if a sibling skill's trigger overlaps this one>"
-allowed-tools: Read, Glob, Grep
+allowed-tools: Read, Glob, Grep, Agent
 ---
 # <Skill Title>
 

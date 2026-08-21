@@ -64,7 +64,7 @@ pass: <n>  warn: <n>  fail: <n>
 
 - Parse each returned block; split on `## scan:` headings.
 - Deduplicate findings across scans (same `<path>:<line>` + title = one).
-- Apply waivers / suppressions (e.g., `.guard-waivers.json`) at the coordinator level, not inside agent prompts.
+- Apply waivers / suppressions (e.g., `.guard-public.json`) at the coordinator level, not inside agent prompts.
 - Render the existing user-visible output format — the refactor must not change what the user sees.
 - Handle all Write / Edit operations in the main session after user confirmation.
 - Write the run log to `./.logs/claude/<skill-name>/YYYY-MM-DD_HH-MM-SS.md` per the logging rule. Agents are ephemeral and do not log.

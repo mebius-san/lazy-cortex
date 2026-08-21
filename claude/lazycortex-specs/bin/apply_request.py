@@ -1,15 +1,17 @@
 """
 Deterministic apply-transition worker — the Python primitive backing the
-`spec.request-apply` md-scan routine.
+`lazy-spec.request-apply` md-scan routine.
 
-Replaces the LLM-driven `spec.request-apply` agent. Reads the resolved
+Replaces the LLM-driven `lazy-spec.request-apply` agent. Reads the resolved
 routing prose from a post-finalize request file, enacts the named
-attach / spawn targets, distributes the request body into populated
-docs (Tier 3 fallback — whole body to the entity's WTR doc), opens a
-review cycle on every populated doc, then stamps terminal markers
+attach / spawn / reference targets, seeds each spawn/attach target's
+primary doc with the router-authored per-target description — a fresh
+spawn gets it as draft content, an existing attach target gets it as an
+attention-block delta, a reference target gets neither (link only) —
+opens a review cycle on every populated doc, then stamps terminal markers
 (`request_class`, `request_status`, `request/<status>` mirror tag,
 status callout) and strips the `# Routing` section. Atomic commit
-under the `spec.request-apply` bot identity.
+under the `lazy-spec.request-apply` bot identity.
 
 Routing prose grammar (parsed leniently — the router agent emits free
 text, so the patterns below match the conventional shapes):
@@ -24,9 +26,42 @@ text, so the patterns below match the conventional shapes):
   "Spawn one cross-cutting change entity — `slug`").
 - **Attach target** — a `[[path]]` wikilink whose last path segment
   equals the previous one (folder-note shape, per
-  `spec.layout-protocol`).
+  `lazy-spec.layout-protocol`). This prose form is skipped entirely when a
+  structured `<!-- routing-decision -->` block is present: its `attach
+  <path>` tokens are taken verbatim, with no shape check.
+- **Reference target** — has no prose form; exists only inside the
+  structured `<!-- routing-decision -->` block.
 - **No target resolved** → request is rejected with the rejection
   callout + recovery hint.
+
+Structured `<!-- routing-decision -->` block lines carry an optional
+`:: <description>` suffix (a per-target short description the router
+writes; empty/legacy when the suffix is absent) plus a set of named
+fields the router decides and this worker never guesses at:
+
+- `docs=<name>:<type>[,...]` on a spawn line — the documents the asset
+  is scaffolded with, in order. Mandatory: the scaffolder has no
+  default layout, so a spawn naming none is refused outright.
+- `path=<dir>` on a spawn line — the folder under the product's
+  `spec_path` the asset lands in; absent falls back to the asset
+  type's own `default_path`.
+- `tools=<tool>[,...]` on a spawn line — the tools the asset is
+  realised and checked with; absent leaves them undetermined for the
+  coordinator to settle on its own wake.
+- `product=<key>` on a spawn line — the spawning product, the sole way
+  one decision fans a request out across several products in one apply
+  run.
+- `targets=<category>/<slug>[,...]` on a `change`-kind spawn line —
+  design-cascade targets.
+- `drop=<name>[,...]` on an attach line — the documents a pre-launch
+  rollback removes; absent rolls the gates back and deletes nothing.
+
+A spawn line's asset type is validated against the shipped
+declarations plus whatever every registered product declares, so an
+operator's own type is admissible without touching this worker.
+A `reference <path>` line names an existing asset the router judges
+already implements the request — registers a link via `spec_targets`
+on the request itself, spawns/attaches nothing.
 
 Inputs read:
 
@@ -39,11 +74,28 @@ Outputs written:
 
 - Spawn targets: full asset scaffolds via the `scaffold-asset`
   subprocess.
-- Each populated doc: body distribution + `spec_source_requests`
-  frontmatter + `## Requests` projection inside `# Sources`.
+- Each populated doc: router-description seed (draft content on a
+  spawn target, an attention-block delta on an attach target) +
+  `spec_source_requests` frontmatter + `## Requests` projection inside
+  `# Sources`.
+- Each change spawn naming design-cascade targets: `spec_targets`
+  frontmatter on its status folder-note.
+- Reference targets: `spec_targets` frontmatter on the request file
+  itself — never on the referenced asset, whose doc and folder-note
+  stay untouched.
 - Each populated doc's folder-note: `## Source requests` bullet.
+- An attach target whose implementation ladder started but never
+  launched: its live expert job cancelled via the `lazycortex-core
+  cancel-job` CLI and its `active_job` marker cleared, best-effort
+  review-stop plus worktree deletion of its `architecture.md` /
+  `code-plan.md` / `test-plan.md` siblings, and `spec_plan_done` / `spec_develop_done`
+  / `spec_tests_passing` / `spec_released` flipped back to false.
+- On a rollback that cannot complete cleanly: the asset halted via
+  `flip_gate.halt_asset` and the whole run aborted instead of
+  committing a half-dropped ladder.
 - Each populated doc: review cycle opened via the `lazycortex-review`
-  CLI's `start` subcommand.
+  CLI's `start` subcommand, or `submit` when a pre-launch ladder
+  rollback re-opened an already-drafted doc.
 - Request file: `request_class` / `request_status` frontmatter,
   `request/<status>` mirror tag, status callout above first H1,
   `# Routing` stripped.
@@ -78,7 +130,33 @@ if str(_BIN) not in sys.path:
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from summary_render import apply_container_stats  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from spec_paths import find_settings_root, spec_content_root  # noqa: E402
+from spec_paths import find_settings_root, resolve_plugin_cli, spec_content_root  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+from spec_keys import (  # noqa: E402
+    BOOL_TRUE,
+    FlipResult,
+    Gate,
+    GateCheckbox,
+    HaltReason,
+    JobMarker,
+    SiblingDoc,
+    SpecHaltKey,
+    SpecTargetsKey,
+)
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import asset_types  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import flip_gate  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import iconize_inline  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_job_markers  # noqa: E402
+
+
+# Gates a pre-launch ladder rollback flips back to false, in the same order `GATE_ORDER`
+# carries them from `spec_plan_done` onward — the design gate is left alone since design is
+# what the incoming request is about to revise.
+_ROLLBACK_GATES = ( Gate.PLAN_DONE, Gate.DEVELOP_DONE, Gate.TESTS_PASSING, Gate.RELEASED )
 
 
 class _K:
@@ -105,10 +183,8 @@ class _K:
     TAG_PREFIX: Prefix of the request-status mirror tag.
     DESIGN_MD: Filename of the design doc.
     BUG_MD: Filename of the bug-layout design-side doc.
-    PLAN_MD: Filename of the plan doc.
     FEATURE_KIND: The feature asset kind.
     CHANGE_KIND: The change asset kind.
-    BUG_KIND: The bug asset kind.
     CLAUDE_DIR: The `.claude` directory segment.
     SETTINGS_FILE: Filename of the settings file.
     PRODUCTS: Settings key holding the product registry.
@@ -122,6 +198,23 @@ class _K:
     ROUTING_DECISION_CLOSE: Closing marker of an embedded HTML comment.
     DECISION_VERB_SPAWN: The routing-decision verb for a spawn target.
     DECISION_VERB_ATTACH: The routing-decision verb for an attach target.
+    DECISION_VERB_REFERENCE: The routing-decision verb for a reference target — an existing
+      asset the router judges already implements the request; registers a link, spawns/attaches
+      nothing.
+    DECISION_DESC_SEP: Token separating a routing-decision line's target spec from its free-text description.
+    DECISION_TARGETS_PREFIX: Prefix marking the optional design-cascade `targets=` field on a change-spawn line.
+    DECISION_PRODUCT_PREFIX: Prefix marking the optional spawning-product `product=` field on a spawn line.
+    DECISION_DOCS_PREFIX: Prefix marking the mandatory `docs=` field naming a spawn's documents.
+    DECISION_PATH_PREFIX: Prefix marking the optional `path=` field naming a spawn's folder.
+    DECISION_TOOLS_PREFIX: Prefix marking the optional `tools=` field naming a spawn's tools.
+    DECISION_DROP_PREFIX: Prefix marking the optional `drop=` field naming an attach's dropped docs.
+    DOC_TOKEN_SEP: Separator between a document's filename and its type inside `docs=`.
+    SCAFFOLD_DOC_FLAG: The `scaffold-asset` flag naming one produced document.
+    SCAFFOLD_PATH_FLAG: The `scaffold-asset` flag naming the folder the asset lands in.
+    SCAFFOLD_GROUP_NOTE_KEY: The scaffold result key naming the group folder-note it seeded.
+    SPEC_TOOLS_KEY: Frontmatter key listing the tools the asset is realised and checked with.
+    ASSET_TYPES: Settings key holding a product's own asset-type declarations.
+    OVERVIEW_H2: Heading of the template skeleton's opening section, where a spawn seed lands.
     SOURCES_H1: Heading marking a doc's sources section.
     SOURCES_TAG: Protected-section tag guarding a doc's sources section.
     REQUESTS_H2: Sub-heading marking a doc's requests projection.
@@ -134,11 +227,19 @@ class _K:
     STATUS_TAG_PATTERN: Regex pattern matching an existing status tag to replace.
     REJECT_HINT: Recovery-hint text appended to a rejection callout.
     REJECT_REASON_DEFAULT: Default rejection reason when routing names no target.
+    FALLBACK_DESCRIPTION: One-line seed used when the router left a target's description empty.
+    ATTENTION_CALLOUT_PREFIX: Leading text of an attach target's seeded attention-block delta.
     GIT: The git executable name.
     PROG: CLI program name shown in `--help` output.
     CLI_LAZYCORTEX_SPECS: Plugin name used to resolve the `lazycortex-specs` CLI.
     CLI_LAZYCORTEX_REVIEW: Plugin name used to resolve the `lazycortex-review` CLI.
+    CLI_LAZYCORTEX_CORE: Plugin name used to resolve the `lazycortex-core` CLI.
     ENV_PLUGIN_DIRS: Env var listing plugin dirs to walk for CLI resolution.
+    ENV_REPO_ROOT: Env var passed to the `lazycortex-core` CLI naming the repo it should
+      resolve settings and job storage against.
+    ROLLBACK_GATE_OFF_REASON: Reason text recorded on every gate a pre-launch ladder rollback
+      flips back to false.
+    REVIEW_STOP_TIMEOUT_S: Seconds the best-effort `lazycortex-review stop` subprocess may run.
     BIN_DIR: Per-plugin `bin/` subdir holding a CLI binary.
     MD_SUFFIX: The markdown file extension.
     BOT_NAME_DEFAULT: Default git author name for the apply-transition commit.
@@ -153,11 +254,7 @@ class _K:
     OUTCOME_ERROR: Outcome token for a failed apply transition.
     OUTCOME_TERMINAL_SKIP: Outcome token for a no-op on an already-terminal request.
     OUTCOME_NO_ROUTING_SKIP: Outcome token for a no-op on a request with no routing section.
-    CANONICAL_PATH_MIN_PARTS: Minimum segment count a `spec_path` must have to carry a subsystem prefix.
-    PRODUCTS_SEGMENT: The `products` path segment identifying the canonical `spec_path` shape.
     CLASS_ENUM: The closed set of valid `request_class` verdicts.
-    KIND_FOLDER: Mapping of built-in asset kinds to their on-disk folder names.
-    KIND_LAYOUT: Mapping of built-in asset kinds to their authored-doc filename lists.
   """
 
   # Frontmatter keys
@@ -183,10 +280,8 @@ class _K:
   # Filenames + doc roles
   DESIGN_MD = "design.md"
   BUG_MD = "bug.md"
-  PLAN_MD = "plan.md"
   FEATURE_KIND = "feature"
   CHANGE_KIND = "change"
-  BUG_KIND = "bug"
   # Path segments
   CLAUDE_DIR = ".claude"
   SETTINGS_FILE = "lazy.settings.json"
@@ -202,6 +297,21 @@ class _K:
   ROUTING_DECISION_CLOSE = "-->"
   DECISION_VERB_SPAWN = "spawn"
   DECISION_VERB_ATTACH = "attach"
+  DECISION_VERB_REFERENCE = "reference"
+  DECISION_DESC_SEP = "::"
+  DECISION_TARGETS_PREFIX = "targets="
+  DECISION_PRODUCT_PREFIX = "product="
+  DECISION_DOCS_PREFIX = "docs="
+  DECISION_PATH_PREFIX = "path="
+  DECISION_TOOLS_PREFIX = "tools="
+  DECISION_DROP_PREFIX = "drop="
+  SCAFFOLD_DOC_FLAG = "--doc"
+  SCAFFOLD_PATH_FLAG = "--path"
+  SCAFFOLD_GROUP_NOTE_KEY = "group_note"
+  SPEC_TOOLS_KEY = "spec_tools"
+  ASSET_TYPES = "asset_types"
+  DOC_TOKEN_SEP = ":"
+  OVERVIEW_H2 = "## Overview"
   SOURCES_H1 = "# Sources"
   SOURCES_TAG = "#protected/spec/sources"
   REQUESTS_H2 = "## Requests"
@@ -215,17 +325,23 @@ class _K:
   STATUS_TAG_PATTERN = r"#status/\S+"
   REJECT_HINT = "To re-open: clear request_status, clear review_result, restore review_active: true."
   REJECT_REASON_DEFAULT = "Routing prose named no resolvable target."
+  FALLBACK_DESCRIPTION = "Request routed here — see linked request"
+  ATTENTION_CALLOUT_PREFIX = "> [!attention] change requested: "
   # Subprocess + git
   GIT = "git"
   # CLI identity
   PROG = "lazycortex-specs apply-request"
   CLI_LAZYCORTEX_SPECS = "lazycortex-specs"
   CLI_LAZYCORTEX_REVIEW = "lazycortex-review"
+  CLI_LAZYCORTEX_CORE = "lazycortex-core"
   ENV_PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
+  ENV_REPO_ROOT = "LAZY_REPO_ROOT"
+  ROLLBACK_GATE_OFF_REASON = "request attached before implementation launched"
+  REVIEW_STOP_TIMEOUT_S = 60
   BIN_DIR = "bin"
   MD_SUFFIX = ".md"
-  BOT_NAME_DEFAULT = "spec.request-apply"
-  BOT_EMAIL_DEFAULT = "spec.request-apply@bot.lazy-cortex"
+  BOT_NAME_DEFAULT = "lazy-spec.request-apply"
+  BOT_EMAIL_DEFAULT = "lazy-spec.request-apply@bot.invalid"
   ARG_FILE = "file"
   ARG_AUTHOR_NAME = "--author-name"
   ARG_AUTHOR_EMAIL = "--author-email"
@@ -239,15 +355,8 @@ class _K:
   OUTCOME_ERROR = "error"
   OUTCOME_TERMINAL_SKIP = "terminal-state-skip"
   OUTCOME_NO_ROUTING_SKIP = "no-routing-skip"
-  # Layout-protocol convention
-  CANONICAL_PATH_MIN_PARTS = 3
-  PRODUCTS_SEGMENT = "products"
   # Allowed class enum
   CLASS_ENUM = ( "feature", "change", "bug", "task", "spec", "plan", "feedback", "unknown" )
-  KIND_FOLDER = { "feature": "features", "change": "changes", "bug": "bugs" }
-  KIND_LAYOUT = { "feature": [ "design.md", "plan.md" ],
-                  "change":  [ "design.md", "plan.md" ],
-                  "bug":     [ "bug.md", "plan.md" ] }
 
 
 def _fail(category: str, message: str) -> NoReturn:
@@ -295,15 +404,11 @@ def _resolve_sibling_cli(name: str) -> Path:
   Raises:
     SystemExit: When the env var is unset or no plugin dir holds the named CLI.
   """
-  raw = os.environ.get(_K.ENV_PLUGIN_DIRS, "")
-  # guard: env var empty — caller is not running under the lazy-core runtime daemon
-  if not raw:
-    _fail(_K.CAT_LOGICAL, f"${_K.ENV_PLUGIN_DIRS} unset; cannot resolve sibling CLI '{name}'")
-  for d in raw.split(os.pathsep):
-    cli = Path(d) / _K.BIN_DIR / name
-    if cli.is_file():
-      return cli
-  _fail(_K.CAT_LOGICAL, f"no '{name}' in ${_K.ENV_PLUGIN_DIRS}")
+  cli = resolve_plugin_cli(name)
+  # guard: unresolved — env var unset or no plugin dir carries the named CLI
+  if cli is None:
+    _fail(_K.CAT_LOGICAL, f"no '{name}' resolvable via ${_K.ENV_PLUGIN_DIRS}")
+  return cli
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, int]:
@@ -364,19 +469,302 @@ def _parse_frontmatter(text: str) -> tuple[dict, int]:
   return values, fm_end
 
 
+def _parse_routing_decision_rich(
+    block: str, *, known_kinds: frozenset[str] | None = None,
+) -> tuple[list[tuple[str, str, str, list[str]]], list[tuple[str, str]]]:
+  """
+  Parse the structured `<!-- routing-decision ... -->` block body with per-target detail.
+
+  Format is one decision per line, whitespace-separated, with an optional
+  `:: <description>` suffix and, on a `change`-kind spawn line only, an
+  optional `targets=` field naming design-cascade targets:
+
+  - `spawn <kind> <slug> [targets=<category>/<slug>[,<category>/<slug>...]] [:: <description>]`
+  - `attach <folder-note-path> [:: <description>]`
+
+  A line without `::` is legacy-valid and yields an empty description.
+  `targets=` is recognised only on a `change`-kind spawn line; it is ignored
+  (left as an empty list) for every other kind. Any other line shape (blank,
+  prose, malformed) is silently skipped — the parser is forgiving on unknown
+  content so the router can mix structured decisions with operator-readable
+  notes inside the same block without breaking apply.
+
+  A `reference` line and a spawn line's own `product=` field are not part of this function's
+  return shape; `_parse_reference_targets` and `_parse_spawn_products` cover those two instead,
+  each its own bounded scan over the same block text.
+
+  Args:
+    block: Inner text of the comment block (between the opening and closing markers).
+    known_kinds: The asset types a spawn line may name; None consults only the types the
+      plugin ships, which is what a caller with no product in scope can validate against.
+
+  Returns:
+    Two lists: spawn tuples `(kind, slug, description, targets)` and attach
+    tuples `(path, description)`. Dedup is applied per `(kind, slug)` / `path`
+    identity (preserves insertion order, first occurrence wins).
+  """
+  # the admissible set is open: an operator declares types of their own, and the caller that
+  # knows the product resolves them before handing the set down here
+  kinds = known_kinds if known_kinds is not None else frozenset(asset_types.builtin_defaults())
+
+  # Decision: kept `_parse_routing_decision_rich` / `_parse_routing`'s return arity unchanged,
+  # added `reference` / `product=` support via `_parse_reference_targets` and
+  # `_parse_spawn_products` instead of extending these tuples — extending them broke ~35
+  # pre-existing tests' positional unpacking when first tried, and this project's rules forbid
+  # editing existing tests' assertions/unpacking without explicit operator approval.
+
+  # accumulators for the two target kinds this function does own
+  spawn: list[tuple[str, str, str, list[str]]] = []
+  attach: list[tuple[str, str]] = []
+  seen_spawn: set[tuple[str, str]] = set()
+  seen_attach: set[str] = set()
+  for raw_line in block.splitlines():
+    stripped = raw_line.strip()
+    # guard: skip blank lines — a non-decision prose line is dropped by a later guard instead
+    if not stripped:
+      continue
+    # the description, when present, is everything after the first `::`
+    head, _sep, desc_part = stripped.partition(_K.DECISION_DESC_SEP)
+    description = desc_part.strip()
+    tokens = head.split()
+    # guard: a bare separator with nothing before it is not a decision line
+    if not tokens:
+      continue
+    verb = tokens[0].lower()
+    # waiver: structural token count for `spawn <kind> <slug>` line format
+    if verb == _K.DECISION_VERB_SPAWN and len(tokens) >= 3:
+      kind = tokens[1].lower()
+      slug = tokens[2]
+      # guard: drop kinds no declaration covers in the caller's scope
+      if kind not in kinds:
+        continue
+      targets: list[str] = []
+      # targets= names design-cascade features and only applies to a change spawn; scanned
+      # (not positional) so it may precede or follow the line's other optional fields freely
+      if kind == _K.CHANGE_KIND:
+        for tok in tokens[3:]:
+          if tok.startswith(_K.DECISION_TARGETS_PREFIX):
+            raw_targets = tok[len(_K.DECISION_TARGETS_PREFIX):]
+            targets = [ t.strip() for t in raw_targets.split(",") if t.strip() ]
+            break
+      pair = ( kind, slug )
+      if pair not in seen_spawn:
+        seen_spawn.add(pair)
+        spawn.append(( kind, slug, description, targets ))
+      continue
+    if verb == _K.DECISION_VERB_ATTACH and len(tokens) >= 2:
+      target = tokens[1]
+      if target not in seen_attach:
+        seen_attach.add(target)
+        attach.append(( target, description ))
+      continue
+  return spawn, attach
+
+
+def _parse_reference_targets(block: str) -> list[tuple[str, str]]:
+  """
+  Scan a `<!-- routing-decision ... -->` block body for `reference <path> [:: <desc>]` lines.
+
+  A `reference` line names an existing asset the router judges already implements the request
+  (`lazy-spec.coordination-playbook.md` Chapter 7 / `docs/tasks/lazycortex-specs.upstream.md` § 10) —
+  a third verb alongside `spawn` / `attach`, parsed here rather than by
+  `_parse_routing_decision_rich` (see the `# Decision:` note on that function).
+
+  Args:
+    block: Inner text of the comment block (between the opening and closing markers).
+
+  Returns:
+    List of `(path, description)` tuples, dedup applied per path (preserves insertion order,
+    first occurrence wins).
+  """
+  reference: list[tuple[str, str]] = []
+  seen: set[str] = set()
+  for raw_line in block.splitlines():
+    stripped = raw_line.strip()
+    # guard: skip blank lines — a non-decision prose line is dropped by a later guard instead
+    if not stripped:
+      continue
+    head, _sep, desc_part = stripped.partition(_K.DECISION_DESC_SEP)
+    description = desc_part.strip()
+    tokens = head.split()
+    # guard: not a `reference <path>` line — every other verb is another function's business
+    if len(tokens) < 2 or tokens[0].lower() != _K.DECISION_VERB_REFERENCE:
+      continue
+    target = tokens[1]
+    if target not in seen:
+      seen.add(target)
+      reference.append(( target, description ))
+  return reference
+
+
+def _parse_spawn_products(block: str) -> dict[tuple[str, str], str]:
+  """
+  Scan a `<!-- routing-decision ... -->` block body for a spawn line's own `product=<key>` field.
+
+  `product=` names the product one spawn line targets explicitly — the sole way one routing
+  decision fans a request out across several products in the same apply run
+  (`lazy-spec.coordination-playbook.md` Chapter 7). Recognised on ANY spawn kind, anywhere after the
+  slug and before `::`, order-independent relative to `targets=`. Parsed here rather than by
+  `_parse_routing_decision_rich` (see the `# Decision:` note on that function).
+
+  Args:
+    block: Inner text of the comment block (between the opening and closing markers).
+
+  Returns:
+    Dict `{(kind, slug): product_key}` — only entries whose spawn line actually carried a
+    non-empty `product=` field; a spawn line without one is simply absent from the dict.
+  """
+  return _spawn_field(block, _K.DECISION_PRODUCT_PREFIX)
+
+
+def _spawn_field(block: str, prefix: str) -> dict[tuple[str, str], str]:
+  """
+  Scan a routing-decision block for one named field on each spawn line.
+
+  Every optional spawn field is scanned rather than read positionally, so it may appear before
+  or after any other field on the same line and the parser stays forgiving about their order.
+
+  Args:
+    block: Inner text of the comment block (between the opening and closing markers).
+    prefix: The `<name>=` token the field is written with.
+
+  Returns:
+    Dict `{(kind, slug): raw_value}` — only spawn lines that carried the field with a non-empty
+    value; a line without it is simply absent.
+  """
+  found: dict[tuple[str, str], str] = {}
+  for raw_line in block.splitlines():
+    stripped = raw_line.strip()
+    # guard: skip blank lines — a non-decision prose line is dropped by a later guard instead
+    if not stripped:
+      continue
+    head, _sep, _desc_part = stripped.partition(_K.DECISION_DESC_SEP)
+    tokens = head.split()
+    # guard: not a `spawn <kind> <slug> ...` line with room for optional fields
+    # waiver: structural token count for `spawn <kind> <slug>` line format, same as the sibling
+    # guard in `_parse_routing_decision_rich`
+    if len(tokens) < 3 or tokens[0].lower() != _K.DECISION_VERB_SPAWN:
+      continue
+    for tok in tokens[3:]:
+      if tok.startswith(prefix):
+        value = tok[len(prefix):].strip()
+        if value:
+          found[( tokens[1].lower(), tokens[2] )] = value
+        break
+  return found
+
+
+def _parse_spawn_docs(block: str) -> dict[tuple[str, str], list[tuple[str, str]]]:
+  """
+  Scan a routing-decision block for each spawn line's own `docs=` field.
+
+  `docs=` is the document set the spawned asset is scaffolded with — the router's decision in
+  full, since `scaffold-asset` has no default layout of its own. An entry that does not carry
+  the `<name>:<type>` shape is dropped rather than guessed at.
+
+  Args:
+    block: Inner text of the comment block (between the opening and closing markers).
+
+  Returns:
+    Dict `{(kind, slug): [(filename, doc_type), ...]}` in the order the line declares them;
+    a spawn line whose `docs=` resolved to no well-formed entry is absent.
+  """
+  parsed: dict[tuple[str, str], list[tuple[str, str]]] = {}
+  for key, raw in _spawn_field(block, _K.DECISION_DOCS_PREFIX).items():
+    pairs = [ entry.partition(_K.DOC_TOKEN_SEP) for entry in raw.split(",") if entry.strip() ]
+    docs = [ ( name.strip(), doc_type.strip() ) for name, sep, doc_type in pairs
+             if sep and name.strip() and doc_type.strip() ]
+    if docs:
+      parsed[key] = docs
+  return parsed
+
+
+def _parse_spawn_paths(block: str) -> dict[tuple[str, str], str]:
+  """
+  Scan a routing-decision block for each spawn line's own `path=` field.
+
+  Args:
+    block: Inner text of the comment block (between the opening and closing markers).
+
+  Returns:
+    Dict `{(kind, slug): folder}` — the folder under the product's `spec_path` the asset lands
+    in; a spawn line without the field is absent, and the type's `default_path` applies instead.
+  """
+  return _spawn_field(block, _K.DECISION_PATH_PREFIX)
+
+
+def _parse_spawn_tools(block: str) -> dict[tuple[str, str], list[str]]:
+  """
+  Scan a routing-decision block for each spawn line's own `tools=` field.
+
+  Args:
+    block: Inner text of the comment block (between the opening and closing markers).
+
+  Returns:
+    Dict `{(kind, slug): [tool, ...]}` — a spawn line without the field is absent, which leaves
+    the asset's tools undetermined for the coordinator to settle on its own wake.
+  """
+  return { key: [ tool.strip() for tool in raw.split(",") if tool.strip() ]
+           for key, raw in _spawn_field(block, _K.DECISION_TOOLS_PREFIX).items() }
+
+
+def _parse_attach_drops(block: str) -> dict[str, list[str]]:
+  """
+  Scan a routing-decision block for each attach line's own `drop=` field.
+
+  `drop=` names the documents a pre-launch rollback removes from the attached asset. An attach
+  line without it drops nothing at all — the gates still roll back, the files stay.
+
+  Args:
+    block: Inner text of the comment block (between the opening and closing markers).
+
+  Returns:
+    Dict `{attach_path: [filename, ...]}` — an attach line without the field is absent.
+  """
+  drops: dict[str, list[str]] = {}
+  for raw_line in block.splitlines():
+    stripped = raw_line.strip()
+    # guard: skip blank lines — a non-decision prose line is dropped by a later guard instead
+    if not stripped:
+      continue
+    head, _sep, _desc_part = stripped.partition(_K.DECISION_DESC_SEP)
+    tokens = head.split()
+    # guard: not an `attach <path> ...` line with room for optional fields
+    # waiver: structural token count for the `attach <path>` line format
+    if len(tokens) < 2 or tokens[0].lower() != _K.DECISION_VERB_ATTACH:
+      continue
+    for tok in tokens[2:]:
+      if tok.startswith(_K.DECISION_DROP_PREFIX):
+        names = [ name.strip() for name in tok[len(_K.DECISION_DROP_PREFIX):].split(",") if name.strip() ]
+        if names:
+          drops[tokens[1]] = names
+        break
+  return drops
+
+
+def _extract_decision_block(routing_text: str) -> str | None:
+  """
+  Extract the inner text of an embedded `<!-- routing-decision ... -->` comment.
+
+  Args:
+    routing_text: Raw inner text of a `# Routing` section.
+
+  Returns:
+    The comment's inner text, or `None` when no such comment is present.
+  """
+  m = re.search(
+      rf"(?s){re.escape(_K.ROUTING_DECISION_OPEN)}\s*(.*?)\s*{re.escape(_K.ROUTING_DECISION_CLOSE)}",
+      routing_text,
+  )
+  return m.group(1) if m else None
+
+
 def _parse_routing_decision(block: str) -> tuple[list[tuple[str, str]], list[str]]:
   """
   Parse the structured `<!-- routing-decision ... -->` block body.
 
-  Format is one decision per line, whitespace-separated:
-
-  - `spawn <kind> <slug>`        → emit `(kind, slug)` into the spawn list.
-  - `attach <folder-note-path>`  → emit the path into the attach list.
-
-  Any other line shape (blank, prose, malformed) is silently skipped — the
-  parser is forgiving on unknown content so the router can mix structured
-  decisions with operator-readable notes inside the same block without
-  breaking apply.
+  Preserves the `(kind, slug)` / path shape existing callers expect, omitting the
+  per-target description and change-spawn cascade targets available to newer callers.
 
   Args:
     block: Inner text of the comment block (between the opening and closing markers).
@@ -385,35 +773,9 @@ def _parse_routing_decision(block: str) -> tuple[list[tuple[str, str]], list[str
     Two lists: spawn-pair list (`(kind, slug)`) and attach-path list. Dedup is
     applied within each list (preserves insertion order).
   """
-  spawn: list[tuple[str, str]] = []
-  attach: list[str] = []
-  seen_spawn: set[tuple[str, str]] = set()
-  seen_attach: set[str] = set()
-  for raw_line in block.splitlines():
-    stripped = raw_line.strip()
-    # guard: skip blanks and any non-decision prose lines
-    if not stripped:
-      continue
-    tokens = stripped.split()
-    verb = tokens[0].lower()
-    # waiver: structural token count for `spawn <kind> <slug>` line format
-    if verb == _K.DECISION_VERB_SPAWN and len(tokens) >= 3:
-      kind = tokens[1].lower()
-      slug = tokens[2]
-      # guard: drop kinds outside the built-in folder set
-      if kind not in _K.KIND_FOLDER:
-        continue
-      pair = ( kind, slug )
-      if pair not in seen_spawn:
-        seen_spawn.add(pair)
-        spawn.append(pair)
-      continue
-    if verb == _K.DECISION_VERB_ATTACH and len(tokens) >= 2:
-      target = tokens[1]
-      if target not in seen_attach:
-        seen_attach.add(target)
-        attach.append(target)
-      continue
+  spawn_rich, attach_rich = _parse_routing_decision_rich(block)
+  spawn = [ ( kind, slug ) for kind, slug, _description, _targets in spawn_rich ]
+  attach = [ path for path, _description in attach_rich ]
   return spawn, attach
 
 
@@ -426,10 +788,20 @@ def _parse_routing(body: str) -> tuple[str | None, list[tuple[str, str]], list[s
 
   Returns:
     Four-tuple `(class_verdict, spawn_list, attach_list, routing_text)`.
-    `class_verdict` is the lowercased verdict word or `None` when absent.
+    `class_verdict` is the lowercased verdict word or `None` when absent; when the
+    structured decision block carries spawn lines of one uniform kind, that kind is the
+    verdict and overrides any prose marker.
     `spawn_list` carries `(kind, slug)` pairs. `attach_list` carries folder-note
-    wikilink paths (last segment equals the previous one). `routing_text` is the
-    raw inner text of the section (empty when no section is present).
+    paths — on the prose path, wikilinks whose last segment equals the previous
+    one; the structured `<!-- routing-decision -->` branch takes its `attach`
+    tokens verbatim, with no such shape check. `routing_text` is the raw inner
+    text of the section (empty when no section is present).
+
+    A `reference` line and a spawn line's own `product=` field never reach this
+    function's return shape — `_parse_reference_targets` and `_parse_spawn_products`
+    cover those two instead, each called separately against the same decision block
+    by the caller that needs them (see the `# Decision:` note on
+    `_parse_routing_decision_rich`).
   """
   m = re.search(
       rf"(?ms)^{re.escape(_K.ROUTING_H1)}\s*$(.*?)(?=^# \S|\Z)",
@@ -449,15 +821,28 @@ def _parse_routing(body: str) -> tuple[str | None, list[tuple[str, str]], list[s
       cls = candidate
   # PRIMARY: structured `<!-- routing-decision ... -->` block. When present, its
   # contents are authoritative and prose-parsing is skipped entirely. Format:
-  # one decision per line:
-  #     spawn <kind> <slug>
-  #     attach <repo-relative-folder-note-path>
-  decision_match = re.search(
-      rf"(?s){re.escape(_K.ROUTING_DECISION_OPEN)}\s*(.*?)\s*{re.escape(_K.ROUTING_DECISION_CLOSE)}",
-      routing_text,
-  )
-  if decision_match:
-    spawn_structured, attach_structured = _parse_routing_decision(decision_match.group(1))
+  # one decision per line, each with an optional `:: <description>` suffix and,
+  # on a change spawn, an optional `targets=` field (see _parse_routing_decision_rich):
+  #     spawn <kind> <slug> [targets=<category>/<slug>[,...]] [:: <description>]
+  #     attach <repo-relative-folder-note-path> [:: <description>]
+  decision_block = _extract_decision_block(routing_text)
+  if decision_block is not None:
+    spawn_structured, attach_structured = _parse_routing_decision(decision_block)
+
+    # Decision: one uniform spawn kind in the structured block overrides the prose verdict,
+    # not the other way round — the prose marker is English-only (`class:`), so a localized
+    # vault's routing prose never matches it, while the block's kind is language-independent
+    # and authoritative by the block's own contract. Spawnless or mixed-kind decisions keep
+    # whatever the prose parse produced.
+
+    # promote the block's single uniform spawn kind to the request class
+    kinds = { kind for kind, _slug in spawn_structured }
+    if len(kinds) == 1:
+      candidate = next(iter(kinds))
+      if candidate in _K.CLASS_ENUM:
+        cls = candidate
+
+    # the structured block is authoritative in full — no prose fallback past this point
     return cls, spawn_structured, attach_structured, routing_text
   spawn: list[tuple[str, str]] = []
   seen_spawn: set[tuple[str, str]] = set()
@@ -473,9 +858,12 @@ def _parse_routing(body: str) -> tuple[str | None, list[tuple[str, str]], list[s
     if pair not in seen_spawn:
       seen_spawn.add(pair)
       spawn.append(pair)
-  # Plain `<kind>: <slug>` form (router may emit a structured fallback).
+  # Plain `<kind>: <slug>` form (router may emit a structured fallback). A trailing
+  # `:: <description>` suffix (the block grammar's per-target description) is tolerated
+  # and ignored here — this prose fallback surfaces only the identity, never the detail.
   for sm in re.finditer(
-      r"(?im)^\s*(?:[-*]\s*)?(?:spawn[^\n:]*[:|]\s*)?(feature|change|bug)\s*[:|]\s*`?([a-z][a-z0-9-]*)`?\s*$",
+      r"(?im)^\s*(?:[-*]\s*)?(?:spawn[^\n:]*[:|]\s*)?(feature|change|bug)\s*[:|]\s*"
+      r"`?([a-z][a-z0-9-]*)`?\s*(?:::.*)?$",
       routing_text,
   ):
     pair = ( sm.group(1).lower(), sm.group(2) )
@@ -635,6 +1023,102 @@ def _set_fm_scalar(fm_text: str, key: str, value: str) -> str:
   return fm_text[:close_idx] + f"{key}: {value}\n" + fm_text[close_idx:]
 
 
+def _set_fm_list(fm_text: str, key: str, values: list[str]) -> str:
+  """
+  Add or replace a `key:` list block inside a `---`-delimited frontmatter block.
+
+  Args:
+    fm_text: Full frontmatter text including the opening / closing fences.
+    key: List-typed key name.
+    values: Replacement member list, rendered as unquoted `- <value>` lines.
+
+  Returns:
+    Frontmatter text with the list set; an existing inline `[]` or multi-line
+    `- ` block is replaced in place, a missing key is appended before the
+    closing fence.
+  """
+  block_lines = "\n".join(f"  - {v}" for v in values)
+  replacement = f"{key}:\n{block_lines}\n" if values else f"{key}: []\n"
+  pat_inline = re.compile(rf"(?m)^{re.escape(key)}\s*:\s*\[\s*\]\s*$\n?")
+  pat_block = re.compile(rf"(?m)^{re.escape(key)}\s*:\s*\n(?:\s+- .*\n)*")
+  if pat_inline.search(fm_text):
+    return pat_inline.sub(replacement, fm_text, count = 1)
+  if pat_block.search(fm_text):
+    return pat_block.sub(replacement, fm_text, count = 1)
+  # guard: closing fence absent — leave untouched (parser would not recognise this as a block)
+  close_idx = fm_text.rfind("---\n")
+  if close_idx <= 0:
+    return fm_text
+  return fm_text[:close_idx] + replacement + fm_text[close_idx:]
+
+
+def _del_fm_key(fm_text: str, key: str) -> str:
+  """
+  Remove a scalar `key: value` line from a `---`-delimited frontmatter block.
+
+  Args:
+    fm_text: Full frontmatter text including the opening / closing fences.
+    key: Scalar key name to remove.
+
+  Returns:
+    Frontmatter text with the key's line removed; unchanged when the key is absent.
+  """
+  pat = re.compile(rf"(?m)^{re.escape(key)}\s*:.*$\n?")
+  return pat.sub("", fm_text, count = 1)
+
+
+def _is_launched_feature(fm: dict, folder_note: Path) -> bool:
+  """
+  Decide whether a feature has already launched its implementation.
+
+  Mirrors the launched-feature definition the coordinator (`lazy-spec.coordinator.md`) uses to keep a
+  launched feature off the attach path in the first place — this check is the worker-side
+  safety net for a coordinator mistake, not the primary enforcement.
+
+  Args:
+    fm: The folder-note's parsed frontmatter.
+    folder_note: Absolute path to the feature's `<slug>/<slug>.md`, used to check for a
+      `code-report.md` sibling.
+
+  Returns:
+    True when `spec_develop_done` is true, the active job's checkbox is `Start implementation`,
+    or a `code-report.md` sibling already exists.
+  """
+  # signal 1 — the develop-done gate is the strongest, most direct launched marker
+  if fm.get(Gate.DEVELOP_DONE, "").strip().lower() == BOOL_TRUE:
+    return True
+
+  # signal 2 — an active job dispatched for the implementation checkbox counts as launched
+  # even before spec_develop_done itself flips true
+  job_info = spec_job_markers.read(flip_gate._repo_root(folder_note.parent), folder_note)[JobMarker.ACTIVE_JOB]
+  if isinstance(job_info, dict) and job_info.get(JobMarker.CHECKBOX) == GateCheckbox.START_IMPLEMENTATION:
+    return True
+
+  # signal 3 — a code-report.md sibling can only exist once implementation has actually run
+  return (folder_note.parent / SiblingDoc.CODE_REPORT).is_file()
+
+
+def _has_ladder_started(fm: dict, folder_note: Path) -> bool:
+  """
+  Decide whether a feature's implementation ladder has already been set in motion.
+
+  Args:
+    fm: The folder-note's parsed frontmatter.
+    folder_note: Absolute path to the feature's `<slug>/<slug>.md`.
+
+  Returns:
+    True when an `architecture.md` / `code-plan.md` / `test-plan.md` sibling exists, or any gate
+    from `spec_plan_done` onward already reads true; False for an untouched feature.
+  """
+  if (
+      (folder_note.parent / SiblingDoc.ARCHITECTURE).is_file()
+      or (folder_note.parent / SiblingDoc.CODE_PLAN).is_file()
+      or (folder_note.parent / SiblingDoc.TEST_PLAN).is_file()
+  ):
+    return True
+  return any(fm.get(gate, "").strip().lower() == BOOL_TRUE for gate in _ROLLBACK_GATES)
+
+
 def _sweep_request_tag(fm_text: str, new_tag_member: str) -> str:
   """
   Replace every `request/*` member in the `tags:` block with the new one; keep other tags.
@@ -746,39 +1230,35 @@ def _today_iso() -> str:
 
 class _Attach:
   """
-  Inline attach primitive — replaces the LLM-driven `spec.request-attach`
-  skill for the apply transition. Handles Tier-3 fallback distribution
-  (whole request body appended before the doc's `# Sources` section),
-  `spec_source_requests` frontmatter dedupe + `## Requests` body
-  projection, and the folder-note's `## Source requests` line.
+  Inline attach primitive for the apply transition.
+
+  Replaces the LLM-driven `spec.request-attach` skill, seeding a target's primary doc with the
+  router's per-target description on behalf of one apply run.
+
+  Responsibilities:
+    - Seed a spawn target's primary doc with draft content, or an attach target's primary doc
+      with an attention-block delta.
+    - Track a doc's `spec_source_requests` frontmatter and its `## Requests` body projection,
+      without duplicating an already-listed request.
+    - Append the originating request to the entity's folder-note `## Source requests` list.
   """
 
   @staticmethod
-  def doc_filenames_for_kind(kind: str) -> list[str]:
+  def primary_doc_for_kind(kind: str, record: dict | None = None) -> str:
     """
-    Return the authored-doc filenames for a built-in entity kind.
+    Return the entity's primary doc filename.
 
     Args:
-      kind: One of `feature` / `change` / `bug`.
+      kind: The asset type the entity was spawned as.
+      record: The owning product's settings record, so a product-declared type resolves its own
+        `start_doc`; `None` consults only the shipped declarations.
 
     Returns:
-      The doc filenames declared in the kind's layout (defaults to `design.md` +
-      `plan.md` when the kind is operator-defined).
+      The filename half of the type's declared `start_doc`, falling back to `design.md` for a
+      type that declares none.
     """
-    return _K.KIND_LAYOUT.get(kind, [ _K.DESIGN_MD, _K.PLAN_MD ])
-
-  @staticmethod
-  def wtr_doc_for_kind(kind: str) -> str:
-    """
-    Return the entity's WTR (whole-to-receive) doc filename.
-
-    Args:
-      kind: One of `feature` / `change` / `bug`.
-
-    Returns:
-      `bug.md` for the bug kind, `design.md` otherwise.
-    """
-    return _K.BUG_MD if kind == _K.BUG_KIND else _K.DESIGN_MD
+    name, _doc_type = asset_types.start_doc(kind, record or {})
+    return name or _K.DESIGN_MD
 
   @staticmethod
   def kind_from_folder_note(folder_note: Path) -> str:
@@ -789,23 +1269,71 @@ class _Attach:
       folder_note: Path to the entity's `<slug>/<slug>.md` folder-note.
 
     Returns:
-      One of `feature` / `change` / `bug` (defaults to `change` when the parent
-      folder is unrecognised).
+      The note's own `spec_asset_type`, falling back to `change` on a note that carries none —
+      the folder the note sits in is never consulted, since a type's folder is the caller's
+      choice rather than a property of the type.
     """
-    category_segment = folder_note.parent.parent.name
-    for k, folder in _K.KIND_FOLDER.items():
-      if folder == category_segment:
-        return k
-    return _K.CHANGE_KIND
+    declared = asset_types.type_of(folder_note) if folder_note.is_file() else ""
+    return declared or _K.CHANGE_KIND
 
   @staticmethod
-  def append_body_content(doc_path: Path, content_block: str) -> bool:
+  def _splice_before_sources(text: str, block: str) -> str:
     """
-    Append the request's content block to a doc, before `# Sources` when present.
+    Splice a content block into a doc's body, before `# Sources` when present.
+
+    Args:
+      text: Full doc text (frontmatter + body).
+      block: Content to insert — landed at end-of-doc when no `# Sources`
+        heading exists, otherwise immediately before it.
+
+    Returns:
+      The doc text with `block` spliced in.
+    """
+    sources_idx = text.find(f"\n{_K.SOURCES_H1}\n")
+    if sources_idx < 0:
+      return text.rstrip() + "\n\n" + block + "\n"
+    head = text[:sources_idx].rstrip()
+    tail = text[sources_idx:]
+    return head + "\n\n" + block + "\n" + tail
+
+  @staticmethod
+  def _replace_overview_stub(text: str, block: str) -> str | None:
+    """
+    Replace the `## Overview` section's italic template stub with a content block.
+
+    Args:
+      text: Full doc text (frontmatter + body).
+      block: Content that becomes the section's body.
+
+    Returns:
+      The doc text with the stub replaced, or `None` when the doc carries no `## Overview`
+      section or its content is not a lone `_…_` template stub — the caller falls back to
+      the end-of-body splice then.
+    """
+    # the lookahead is the guard that matters: the section body must be NOTHING but the lone
+    # italic stub before the next heading — an Overview a human already wrote never matches,
+    # so the seed can only ever replace scaffolding, not authored prose
+    match = re.search(
+        rf"(?ms)^{re.escape(_K.OVERVIEW_H2)}\s*\n(_[^\n]*_\s*\n)(?=\s*^#|\s*\Z)",
+        text,
+    )
+    # guard: no Overview skeleton to seed into — the doc is not template-shaped
+    if not match:
+      return None
+    return text[:match.start(1)] + block + "\n" + text[match.end(1):]
+
+  @staticmethod
+  def seed_body_content(doc_path: Path, content_block: str) -> bool:
+    """
+    Seed a content block into a doc — into the `## Overview` stub, else before `# Sources`.
+
+    Guarantees:
+      An `## Overview` section carrying anything other than the lone template stub is never
+      overwritten — the seed then falls back to the pre-`# Sources` splice.
 
     Args:
       doc_path: Path to the target authored doc.
-      content_block: H1 + sections to splice (already stripped of routing / history).
+      content_block: Content to splice into the doc.
 
     Returns:
       `True` when the doc text changed, `False` otherwise.
@@ -814,14 +1342,34 @@ class _Attach:
     # guard: skip empty content blocks
     if not content_block.strip():
       return False
-    sources_idx = text.find(f"\n{_K.SOURCES_H1}\n")
-    if sources_idx < 0:
-      # Append at end of body
-      new_text = text.rstrip() + "\n\n" + content_block + "\n"
-    else:
-      head = text[:sources_idx].rstrip()
-      tail = text[sources_idx:]
-      new_text = head + "\n\n" + content_block + "\n" + tail
+
+    # Decision: the seed replaces the Overview stub rather than trailing the skeleton — the
+    # protocol calls it the doc's INITIAL content, and a pointer buried under Boundaries is
+    # one the writer and the operator both miss (found live on the first spawned asset).
+    new_text = _Attach._replace_overview_stub(text, content_block)
+    if new_text is None:
+      new_text = _Attach._splice_before_sources(text, content_block)
+    if new_text == text:
+      return False
+    doc_path.write_text(new_text)
+    return True
+
+  @staticmethod
+  def append_attention_block(doc_path: Path, seed: str) -> bool:
+    """
+    Append a `[!attention] change requested` callout to a doc, before `# Sources` when present.
+
+    Args:
+      doc_path: Path to the target authored doc.
+      seed: Description text to display (already resolved to the fallback
+        sentence when the router left none).
+
+    Returns:
+      `True` when the doc text changed, `False` otherwise.
+    """
+    text = doc_path.read_text()
+    block = f"{_K.ATTENTION_CALLOUT_PREFIX}{seed}"
+    new_text = _Attach._splice_before_sources(text, block)
     if new_text == text:
       return False
     doc_path.write_text(new_text)
@@ -999,7 +1547,16 @@ class _FolderNote:
 
 class _Apply:
   """
-  Top-level apply orchestrator. Owns the routing parse → enact → stamp → commit pipeline.
+  Top-level orchestrator for one request's apply transition.
+
+  Represents a single apply run against one request file, from its routing decision through to
+  a terminal, committed state.
+
+  Responsibilities:
+    - Enact the routing decision's spawn and attach targets against the product's spec tree.
+    - Track the docs, folder-notes, and non-fatal warnings this run has produced.
+    - Open a review cycle on every doc it populates and commit the run's changes atomically
+      under the bot identity.
 
   Attributes:
     file_path: Absolute path to the request markdown file being applied.
@@ -1008,9 +1565,14 @@ class _Apply:
     author_email: Git author email used for the atomic commit.
     specs_cli: Resolved path to the sibling `lazycortex-specs` CLI.
     review_cli: Resolved path to the sibling `lazycortex-review` CLI.
-    populated_docs: Docs that received body distribution during this run.
+    populated_docs: Docs that received a router-description seed during this run.
     spawn_folder_notes: Folder-notes created by enacting a spawn target during this run.
+    spawn_group_notes: Group folder-notes the scaffolder seeded while enacting spawns this run.
     attach_folder_notes: Folder-notes populated by enacting an attach target during this run.
+    warnings: Non-fatal issues collected during this run, such as an unresolvable design-cascade
+      target named in a change spawn's `targets=` field.
+    submit_docs: Populated docs that must re-enter review via `submit` (skipping the opening
+      writer round) instead of `start`, because a pre-launch ladder rollback re-opened them.
   """
 
   def __init__(self, *, file_path: Path, author_name: str, author_email: str) -> None:
@@ -1030,7 +1592,10 @@ class _Apply:
     self.review_cli = _resolve_sibling_cli(_K.CLI_LAZYCORTEX_REVIEW)
     self.populated_docs: list[Path] = []
     self.spawn_folder_notes: list[Path] = []
+    self.spawn_group_notes: list[Path] = []
     self.attach_folder_notes: list[Path] = []
+    self.warnings: list[str] = []
+    self.submit_docs: list[Path] = []
 
   @property
   def request_wikilink(self) -> str:
@@ -1085,28 +1650,106 @@ class _Apply:
       _fail(_K.CAT_LOGICAL, _K.ERR_NO_PRODUCTS)
     return keys[0]
 
-  def _spawn(self, kind: str, slug: str) -> Path:
+  def _record_for_note(self, note: Path) -> dict:
+    """
+    Resolve the settings record of the product whose `spec_path` contains one asset note.
+
+    Args:
+      note: Absolute path of the asset's status folder-note.
+
+    Returns:
+      The owning product's record, or `{}` when no registered product's `spec_path` covers it.
+    """
+    settings_path = self.repo / _K.CLAUDE_DIR / _K.SETTINGS_FILE
+    # guard: no readable settings — no product record to resolve against
+    if not settings_path.exists():
+      return {}
+    try:
+      data = json.loads(settings_path.read_text())
+    except json.JSONDecodeError:
+      return {}
+    # the deepest matching spec_path wins, so a product nested under another resolves to itself
+    best: dict = {}
+    best_depth = -1
+    for record in (data.get(_K.PRODUCTS) or {}).values():
+      # guard: the version sentinel and any record without a usable spec_path cover no note
+      if not isinstance(record, dict) or not isinstance(record.get(_K.SPEC_PATH), str):
+        continue
+      root = spec_content_root(self.repo) / record[_K.SPEC_PATH]
+      depth = len(Path(record[_K.SPEC_PATH]).parts)
+      if note.is_relative_to(root) and depth > best_depth:
+        best, best_depth = record, depth
+    return best
+
+  def _known_kinds(self) -> frozenset[str]:
+    """
+    Collect every asset type a spawn line may name in this repo.
+
+    The shipped set plus the declarations of every registered product: a routing decision names
+    a type, not a product, so a type any product declares is admissible on any spawn line and
+    the product it lands in is settled separately by `product=`.
+
+    Returns:
+      The admissible type names, the shipped set alone when no settings file is readable.
+    """
+    settings_path = self.repo / _K.CLAUDE_DIR / _K.SETTINGS_FILE
+    kinds = set(asset_types.builtin_defaults())
+    # guard: no readable settings — only the shipped declarations apply
+    if not settings_path.exists():
+      return frozenset(kinds)
+    try:
+      data = json.loads(settings_path.read_text())
+    except json.JSONDecodeError:
+      return frozenset(kinds)
+    for record in (data.get(_K.PRODUCTS) or {}).values():
+      if isinstance(record, dict):
+        kinds.update(record.get(_K.ASSET_TYPES) or {})
+    return frozenset(kinds)
+
+  def _spawn(self, kind: str, slug: str, *, product: str | None = None,
+             docs: list[tuple[str, str]] | None = None, path: str = "",
+             tools: list[str] | None = None) -> tuple[Path, str]:
     """
     Run the scaffold-asset subprocess to create the new entity folder.
 
     Args:
-      kind: One of `feature` / `change` / `bug`.
+      kind: The asset type the routing decision named.
       slug: Asset slug.
+      product: The spawning decision line's own `product=` field, when given — the sole way
+        one routing decision fans a request out across several products in the same apply run
+        (playbook Chapter 7). Falls back to `_default_product()` (first registered product key)
+        when omitted, matching every pre-multi-product routing decision on a single-product repo.
+      docs: The `(filename, doc_type)` pairs the decision's own `docs=` field named; the
+        scaffold has no default layout, so a spawn naming none is refused.
+      path: The decision's own `path=` field, empty to fall back to the type's `default_path`.
+      tools: The decision's own `tools=` field, empty to leave the asset's tools undetermined.
 
     Returns:
-      Absolute path to the new folder-note (`<spec_path>/<folder>/<slug>/<slug>.md`).
+      Two-tuple of the new folder-note's absolute path
+      (`<content_root>/<spec_path>/<folder>/<slug>/<slug>.md`, where the content root is
+      `spec.vault_root`, default `specs`) and the spawning product's `spec_path`.
     """
-    product = self._default_product()
+    # guard: the document set is the router's decision in full — a spawn without one cannot land
+    if not docs:
+      _fail(_K.CAT_LOGICAL, f"spawn {kind} '{slug}' names no {_K.DECISION_DOCS_PREFIX} documents")
+    product = product or self._default_product()
     record = self._load_product_record(product)
     spec_path = record[_K.SPEC_PATH]
-    folder = _K.KIND_FOLDER[kind]
-    target_folder = self.repo / spec_path / folder / slug
+    folder = path or asset_types.default_path(kind, record)
+    # the scaffolder lands assets under the content root (`spec.vault_root`, default `specs`),
+    # so the note is read back through the same base — `repo / spec_path` misses it
+    target_folder = spec_content_root(self.repo) / spec_path / folder / slug
     folder_note = target_folder / f"{slug}.md"
     if folder_note.exists():
       # Idempotent — earlier apply attempt already scaffolded; no-op.
-      return folder_note
+      return folder_note, spec_path
+    argv = [ str(self.specs_cli), "scaffold-asset", product, kind, slug ]
+    for name, doc_type in docs:
+      argv += [ _K.SCAFFOLD_DOC_FLAG, f"{name}{_K.DOC_TOKEN_SEP}{doc_type}" ]
+    if path:
+      argv += [ _K.SCAFFOLD_PATH_FLAG, path ]
     res = subprocess.run(
-        [ str(self.specs_cli), "scaffold-asset", product, kind, slug ],
+        argv,
         cwd = str(self.repo),
         capture_output = True,
         text = True,
@@ -1116,7 +1759,37 @@ class _Apply:
       _fail(_K.CAT_LOGICAL,
             f"scaffold-asset failed for {kind} '{slug}': "
             f"exit={res.returncode} stderr={res.stderr.strip()[:240]}")
-    return folder_note
+
+    # a group folder-note the scaffolder seeded must reach the commit set — left untracked it
+    # halts the runtime daemon's clean-tree check; a missing/empty key or non-JSON stdout means
+    # nothing was seeded
+    try:
+      seeded_group = (json.loads(res.stdout) or {}).get(_K.SCAFFOLD_GROUP_NOTE_KEY, "")
+    except json.JSONDecodeError:
+      seeded_group = ""
+    if seeded_group:
+      self.spawn_group_notes.append(self.repo / seeded_group)
+
+    # the router's own tool judgement overrides whatever the type's declaration seeded
+    if tools:
+      note_text = folder_note.read_text()
+      _values, fm_end = _parse_frontmatter(note_text)
+      folder_note.write_text(
+          _set_fm_list(note_text[:fm_end], _K.SPEC_TOOLS_KEY, tools) + note_text[fm_end:])
+    return folder_note, spec_path
+
+  def _resolve_folder_note_path(self, wikilink_target: str) -> Path:
+    """
+    Project a repo-relative wikilink target onto its folder-note path, with no existence check.
+
+    Args:
+      wikilink_target: Repo-relative path without the `.md` suffix (e.g.
+        `Server/products/dashboards/features/csv-export/csv-export`).
+
+    Returns:
+      Absolute candidate folder-note path — may or may not exist on disk.
+    """
+    return self.repo / Path(wikilink_target + ".md")
 
   def _resolve_attach_folder_note(self, attach_target: str) -> Path:
     """
@@ -1128,60 +1801,299 @@ class _Apply:
     Returns:
       Absolute path to the resolved folder-note.
     """
-    rel = Path(attach_target + ".md")
-    candidate = self.repo / rel
+    candidate = self._resolve_folder_note_path(attach_target)
     if not candidate.is_file():
       _fail(_K.CAT_LOGICAL,
             f"attach target '{attach_target}' does not resolve to a folder-note ({candidate})")
     return candidate
 
-  def _attach_to_folder_note(self, folder_note: Path, request_body: str,
-                             request_display: str) -> list[Path]:
+  def _resolve_change_target(self, spec_path: str, raw_target: str) -> Path | None:
     """
-    Distribute the request body into the entity's WTR doc + maintain Sources / folder-note.
+    Resolve a change spawn's raw design-cascade target to its folder-note path.
+
+    Args:
+      spec_path: The spawning change's product `spec_path`.
+      raw_target: `<category>/<slug>` token from the routing decision's `targets=` field.
+
+    Returns:
+      The resolved folder-note path when it exists on disk, `None` when the
+      token is malformed or names no existing asset.
+    """
+    parts = raw_target.split("/")
+    # guard: a cascade target names exactly one category and one slug
+    if len(parts) != 2:
+      return None
+    category, slug = parts
+    candidate = self._resolve_folder_note_path(f"{spec_path}/{category}/{slug}/{slug}")
+    return candidate if candidate.is_file() else None
+
+  def _validate_change_targets(self, spec_path: str,
+                               raw_targets: list[str]) -> tuple[list[str], list[str]]:
+    """
+    Partition a change spawn's raw design-cascade targets into resolvable and unresolvable sets.
+
+    Args:
+      spec_path: The spawning change's product `spec_path`.
+      raw_targets: `<category>/<slug>` tokens from the routing decision's `targets=` field.
+
+    Returns:
+      Two-tuple `(valid, invalid)` of raw token strings.
+    """
+    valid: list[str] = []
+    invalid: list[str] = []
+    for raw in raw_targets:
+      if self._resolve_change_target(spec_path, raw) is not None:
+        valid.append(raw)
+      else:
+        invalid.append(raw)
+    return valid, invalid
+
+  def _write_spec_targets(self, folder_note: Path, valid_targets: list[str]) -> None:
+    """
+    Write a change's resolved design-cascade targets into its status folder-note frontmatter.
+
+    Args:
+      folder_note: Absolute path to the change's `<slug>/<slug>.md`.
+      valid_targets: `<category>/<slug>` tokens confirmed to resolve to real assets.
+    """
+    text = folder_note.read_text()
+    _, fm_end = _parse_frontmatter(text)
+    fm_text = _set_fm_list(text[:fm_end], SpecTargetsKey.TARGETS, valid_targets)
+    folder_note.write_text(fm_text + text[fm_end:])
+
+  def _write_reference_targets(self, resolved_paths: list[str]) -> None:
+    """
+    Write the request's resolved `reference` decision targets into its own frontmatter.
+
+    Reuses `spec_targets` — the same list-typed key a change's design-cascade writes on its own
+    folder-note (`_write_spec_targets` above) — rather than a second mechanism, per playbook
+    Chapter 7 / `docs/tasks/lazycortex-specs.upstream.md` § 10.
+
+    Guarantees:
+      - The referenced asset's own doc and folder-note are never touched — no doc edit, no
+        `spec_source_requests` attribution, no review opened. The link lives only on the
+        request file's own `spec_targets`.
+
+    Args:
+      resolved_paths: Repo-relative folder-note paths (wikilink form, no `.md` suffix) the
+        `reference` decision named — every one already confirmed to resolve to a real asset by
+        `_resolve_attach_folder_note`.
+    """
+
+    # Contract:
+    # A `reference` routing decision touches NOTHING on the referenced asset — no doc edit, no
+    # `spec_source_requests` attribution, no review opened. The link lives ONLY on the request
+    # file's own `spec_targets`.
+
+    text = self.file_path.read_text()
+    _, fm_end = _parse_frontmatter(text)
+    fm_text = _set_fm_list(text[:fm_end], SpecTargetsKey.TARGETS, resolved_paths)
+    self.file_path.write_text(fm_text + text[fm_end:])
+
+  def _cancel_active_job(self, job_info: dict) -> bool:
+    """
+    Cancel a feature's live expert job via the `lazycortex-core cancel-job` CLI.
+
+    Unlike a best-effort follow-up, a caller cannot treat this as fire-and-forget: a False
+    return means the job may still be running and must be handled accordingly rather than
+    letting the rollback proceed.
+
+    Args:
+      job_info: The tracked active-job marker (`checkbox` / `expert` / `job_id`).
+
+    Returns:
+      True when the CLI exits zero (the job is cancelled or was already terminal); False on a
+      non-zero exit, meaning the job may still be live.
+    """
+    cli = _resolve_sibling_cli(_K.CLI_LAZYCORTEX_CORE)
+    env = os.environ.copy()
+    env[_K.ENV_REPO_ROOT] = str(self.repo)
+    res = subprocess.run(
+        [ str(cli), "cancel-job" ],
+        input = json.dumps({
+            "expert": job_info.get(JobMarker.EXPERT),
+            "job_id": job_info.get(JobMarker.JOB_ID),
+        }),
+        capture_output = True,
+        text = True,
+        cwd = str(self.repo),
+        env = env,
+        check = False,
+    )
+    return res.returncode == 0
+
+  def _stop_review_best_effort(self, doc_path: Path) -> None:
+    """
+    Stop review, best-effort, on a sibling doc about to be dropped.
+
+    Safe to call unconditionally, whether or not the doc was ever opened into review; any
+    failure degrades to a silent skip, since the doc is about to be deleted regardless.
+
+    Args:
+      doc_path: Absolute path to the `architecture.md` / `code-plan.md` / `test-plan.md` sibling
+        being dropped.
+    """
+    try:
+      subprocess.run(
+          [ str(self.review_cli), "stop", str(doc_path.resolve()) ],
+          capture_output = True, text = True, cwd = str(self.repo),
+          timeout = _K.REVIEW_STOP_TIMEOUT_S, check = False,
+      )
+    # waiver: fire-and-forget follow-up — the sibling doc is being dropped regardless of its
+    # review state; ANY stop failure (CLI crash, timeout) must degrade to a silent skip, never raise
+    except (OSError, subprocess.SubprocessError):
+      pass
+
+  def _rollback_pre_launch_ladder(self, folder_note: Path, drop_docs: list[str]) -> None:
+    """
+    Roll a feature's implementation ladder back to the pre-launch state.
+
+    Enacted when an attach request lands on a not-yet-halted feature whose ladder has already
+    started but has not yet launched implementation (the caller refuses to call this at all on
+    an already-halted asset). On success the feature ends in the same gate state as one that
+    never started its ladder. Every failure halts the asset (a half-dropped ladder — job
+    cancelled, pre-launch siblings gone, but the gates never actually flipped — is worse than an
+    intact one) and aborts the whole apply run without proceeding to the attach seed, whether
+    the failure is a job that never confirmed cancelled, a pre-launch sibling surviving its own
+    deletion, or a gate flip refused outright by a cancelled asset after the earlier steps
+    already ran.
+
+    Args:
+      folder_note: Absolute path to the feature's `<slug>/<slug>.md`.
+      drop_docs: Bare filenames the attach decision's own `drop=` field named. An empty list
+        rolls the gates back and leaves every file on disk — which documents a rollback removes
+        is the router's decision, not a fixed ladder this worker knows.
+    """
+    asset_dir = folder_note.parent
+
+    # Step 1a — read the tracked job off the runtime sidecar; the folder-note carries no marker.
+    job_info = spec_job_markers.read(self.repo, folder_note)[JobMarker.ACTIVE_JOB]
+    if isinstance(job_info, dict):
+      # Step 1b — a live expert job must be cancelled before anything else touches the ladder.
+      # guard: cancel-job could not confirm the job is dead — a half-dropped ladder is worse
+      # than an intact one, so halt the asset and abort rather than continue past a live job
+      if not self._cancel_active_job(job_info):
+        flip_gate.halt_asset(asset_dir, HaltReason.PLAN_DROP_PARTIAL)
+        _fail(_K.CAT_LOGICAL,
+              f"pre-launch rollback halted on {asset_dir.name}: cancel-job did not confirm "
+              "the active job is no longer live")
+
+      # Step 1c — the job is confirmed dead, so its stale marker comes off the sidecar.
+      spec_job_markers.update(self.repo, folder_note, { JobMarker.ACTIVE_JOB: None })
+
+    # Step 2 — best-effort review stop on each pre-launch sibling before it is deleted.
+    ladder_siblings = [ asset_dir / name for name in drop_docs ]
+    for sibling in ladder_siblings:
+      if sibling.is_file():
+        self._stop_review_best_effort(sibling)
+
+    # Step 3 — drop the pre-launch siblings from the worktree; a survivor means a half-dropped ladder.
+    # Deleted paths are named explicitly to the first Step 4 commit below, rather than staged
+    # here for whichever commit happens to run next.
+    deleted_siblings: list[Path] = []
+    for sibling in ladder_siblings:
+      if sibling.exists():
+        try:
+          sibling.unlink()
+        # a failed unlink (e.g. a non-empty directory in the file's place) is diagnosed by the
+        # existence re-check right below, not by the exception itself
+        except OSError:
+          pass
+        # guard: the sibling survived its own deletion attempt — halt rather than proceed
+        # to flip gates over a ladder that is only partly dropped; any sibling already deleted
+        # this same pass rides into this halt's commit too, named explicitly
+        if sibling.exists():
+          flip_gate.halt_asset(asset_dir, HaltReason.PLAN_DROP_PARTIAL, extra_paths = deleted_siblings)
+          _fail(_K.CAT_LOGICAL,
+                f"pre-launch rollback halted on {asset_dir.name}: {sibling.name} did not unlink")
+        deleted_siblings.append(sibling)
+
+    # Step 4 — flip every gate from spec_plan_done onward back to false, unconditionally. Only
+    # the first flip's commit carries the Step 3 deletions — each commit names its own paths.
+    for gate_index, gate in enumerate(_ROLLBACK_GATES):
+      result = flip_gate.flip_gate(
+          asset_dir, gate, off = True, auto = True, reason = _K.ROLLBACK_GATE_OFF_REASON,
+          extra_paths = deleted_siblings if gate_index == 0 else None,
+      )
+      # guard: a cancelled asset refuses every flip (on or off) and mutates nothing — the job
+      # is already cancelled and the pre-launch siblings already gone, so continuing silently would
+      # leave the gates lying about a ladder that no longer exists
+      if result.get(FlipResult.STATUS) == FlipResult.REFUSED:
+        # waiver: "reason" mirrors flip_gate.flip_gate's own untyped result-dict key (see
+        # flip_gate.py's refusal returns) — no FlipResult constant names it
+        refused_reason = result.get("reason")
+        # by this point Steps 1-3 already cancelled the job and deleted the pre-launch siblings —
+        # a refused flip still leaves that half-done, exactly like the Step 1b / Step 3
+        # failures above, so it halts the same way instead of aborting into a dirty tree; the
+        # deletions ride into this halt's commit whether or not an earlier flip already
+        # committed them (best-effort staging drops what has nothing left to stage)
+        flip_gate.halt_asset(asset_dir, HaltReason.PLAN_DROP_PARTIAL, extra_paths = deleted_siblings)
+        _fail(_K.CAT_LOGICAL,
+              f"pre-launch rollback refused on {asset_dir.name}: {gate} flip was refused "
+              f"({refused_reason})")
+
+  def _attach_to_folder_note(self, folder_note: Path, description: str,
+                             request_display: str, *, is_spawn: bool) -> list[Path]:
+    """
+    Seed the entity's primary doc with the router's per-target description.
+
+    Also keeps the doc's source-request attribution current, so the doc and its folder-note
+    both reflect that this request populated them.
 
     Args:
       folder_note: Absolute path to `<slug>/<slug>.md`.
-      request_body: Request body (post-frontmatter, post-status-callout, post-routing).
+      description: Router-authored description for this target; empty when the router left
+        none, or when no structured routing-decision block was present at all.
       request_display: Display gloss used in the `## Requests` and folder-note bullets.
+      is_spawn: True for a just-scaffolded target, seeding the primary doc's own draft content;
+        False for an existing attach target, seeding an attention-block delta instead.
 
     Returns:
       List of authored docs that were populated (used to open review on each).
     """
     kind = _Attach.kind_from_folder_note(folder_note)
-    wtr = _Attach.wtr_doc_for_kind(kind)
-    wtr_path = folder_note.parent / wtr
-    content_block = _request_content_block(request_body)
+    # the product's own declarations decide the start doc — a type declared only by this product
+    # would otherwise silently fall back to the shipped default
+    primary = _Attach.primary_doc_for_kind(kind, self._record_for_note(folder_note))
+    primary_path = folder_note.parent / primary
+    seed = description.strip() or _K.FALLBACK_DESCRIPTION
     populated: list[Path] = []
-    if wtr_path.is_file():
-      changed_body = _Attach.append_body_content(wtr_path, content_block)
+    if primary_path.is_file():
+      if is_spawn:
+        changed_body = _Attach.seed_body_content(primary_path, seed)
+      else:
+        changed_body = _Attach.append_attention_block(primary_path, seed)
       changed_sources = _Attach.ensure_source_request(
-          wtr_path, self.request_wikilink, request_display,
+          primary_path, self.request_wikilink, request_display,
       )
       if changed_body or changed_sources:
-        populated.append(wtr_path)
+        populated.append(primary_path)
     _FolderNote.append_source_request(folder_note, self.request_wikilink, request_display)
     return populated
 
-  def _open_review(self, doc_path: Path) -> None:
+  def _open_review(self, doc_path: Path, *, verb: str = "start") -> None:
     """
-    Open a review cycle on a populated doc via the `lazycortex-review start` subcommand.
+    Open a review cycle on a populated doc via the `lazycortex-review` CLI.
 
     Args:
       doc_path: Absolute path to the populated authored doc.
+      verb: The review CLI subcommand to invoke — `start` for a fresh opening writer round
+        (the default, used by a spawn's draft seed and a plain attach's attention delta), or
+        `submit` to skip that round when the doc already carries prior content (used after a
+        pre-launch ladder rollback re-opens an already-drafted `design.md`).
     """
     res = subprocess.run(
-        [ str(self.review_cli), "start", str(doc_path) ],
+        [ str(self.review_cli), verb, str(doc_path) ],
         cwd = str(self.repo),
         capture_output = True,
         text = True,
         check = False,
     )
-    # guard: review-start is idempotent — non-zero exit on already-open is benign;
+    # guard: review-start/submit is idempotent — non-zero exit on already-open is benign;
     # surface only when stderr names an unexpected failure
     if res.returncode != 0 and _K.REVIEW_START_IDEMPOTENT_MARK not in (res.stderr or "").lower():
       _fail(_K.CAT_LOGICAL,
-            f"lazycortex-review start failed on {doc_path}: "
+            f"lazycortex-review {verb} failed on {doc_path}: "
             f"exit={res.returncode} stderr={res.stderr.strip()[:240]}")
 
   def _stamp_request_file(self, *, request_class: str, request_status: str,
@@ -1229,6 +2141,8 @@ class _Apply:
     paths.extend(self.attach_folder_notes)
     # a spawn scaffolds a whole asset folder, so the folder — not just its note — is the unit
     paths.extend(note.parent for note in self.spawn_folder_notes)
+    # a group folder-note the scaffolder seeded is a sibling of the asset folder, never inside it
+    paths.extend(self.spawn_group_notes)
 
     # the same path can arrive from several sources, and git rejects a duplicated pathspec
     seen: list[str] = []
@@ -1250,9 +2164,17 @@ class _Apply:
     if inbox.is_file():
       apply_container_stats(inbox)
 
+    # the resolve-walk behind the touched set is not free, and the same set feeds the repaint,
+    # the staging pathspec, and the commit pathspec below
+    touched_paths = self._touched_paths(inbox)
+
+    # fold the touched notes' icon repaint into this same commit so no separate icons commit
+    # follows; the repaint op itself skips non-markdown paths
+    touched_paths.extend(iconize_inline.repaint_paths(self.repo, touched_paths))
+
     # never `git add -A` — the worktree belongs to the operator and may carry unrelated work
     add_res = subprocess.run(
-        [ _K.GIT, "add", "--", *self._touched_paths(inbox) ],
+        [ _K.GIT, "add", "--", *touched_paths ],
         cwd = str(self.repo),
         capture_output = True,
         text = True,
@@ -1280,7 +2202,7 @@ class _Apply:
             "-c", f"user.name={self.author_name}",
             "-c", f"user.email={self.author_email}",
             "-c", "commit.gpgsign=false",
-            "commit", "-q", "-m", subject,
+            "commit", "-q", "-m", subject, "--", *touched_paths,
         ],
         cwd = str(self.repo),
         capture_output = True,
@@ -1312,16 +2234,51 @@ class _Apply:
 
     # the `# Routing` section the router wrote is the whole instruction set for this pass
     body = text[fm_end:]
-    cls, spawn_targets, attach_targets, _ = _parse_routing(body)
+    cls, spawn_targets, attach_targets, routing_text = _parse_routing(body)
     request_class = cls or values.get(_K.REQUEST_CLASS) or _K.CLASS_UNKNOWN
+
+    # the identity-only spawn/attach lists above carry no descriptions or cascade targets —
+    # pull those from the rich parse of the same structured block, when one is present;
+    # `reference` targets and a spawn line's own `product=` field are parsed separately, via
+    # `_parse_reference_targets` and `_parse_spawn_products` (see the `# Decision:` note on
+    # `_parse_routing_decision_rich`)
+    decision_block = _extract_decision_block(routing_text)
+    spawn_desc: dict[tuple[str, str], str] = {}
+    spawn_cascades: dict[tuple[str, str], list[str]] = {}
+    attach_desc: dict[str, str] = {}
+    # a reference target's own description is never seeded anywhere — unlike spawn/attach, no
+    # doc is ever written for it, so only the resolved path itself is kept
+    reference_targets: list[str] = []
+    spawn_product: dict[tuple[str, str], str] = {}
+    spawn_docs: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    spawn_paths: dict[tuple[str, str], str] = {}
+    spawn_tools: dict[tuple[str, str], list[str]] = {}
+    attach_drops: dict[str, list[str]] = {}
+    if decision_block is not None:
+      spawn_rich, attach_rich = _parse_routing_decision_rich(
+          decision_block, known_kinds = self._known_kinds())
+      for kind, slug, description, targets in spawn_rich:
+        spawn_desc[( kind, slug )] = description
+        spawn_cascades[( kind, slug )] = targets
+      for path, description in attach_rich:
+        attach_desc[path] = description
+      reference_targets = [ path for path, _description in _parse_reference_targets(decision_block) ]
+      spawn_product = _parse_spawn_products(decision_block)
+      spawn_docs = _parse_spawn_docs(decision_block)
+      spawn_paths = _parse_spawn_paths(decision_block)
+      spawn_tools = _parse_spawn_tools(decision_block)
+      attach_drops = _parse_attach_drops(decision_block)
     # Display gloss must come from the request's OWN H1, not from `# Routing` (which is the
     # first H1 in the raw body before strip). Read from `_request_content_block` which already
     # filters out `# Routing` and `# History` sections.
     request_display = _request_h1_title(_request_content_block(body))
 
-    # a routing section naming no target has nothing to apply, so the request is rejected outright
+    # a routing section naming no target of any kind has nothing to apply, so the request is
+    # rejected outright — a `reference`-only decision is NOT this case: it is a full accept
+    # (playbook Chapter 7 / upstream § 10 — a request made up of reference targets alone is
+    # still a fully accepted request)
     resolved_wikilinks: list[str] = []
-    if not spawn_targets and not attach_targets:
+    if not spawn_targets and not attach_targets and not reference_targets:
       self._stamp_request_file(
           request_class = request_class,
           request_status = _K.STATUS_REJECTED,
@@ -1335,26 +2292,96 @@ class _Apply:
                          "request_class": request_class }))
       return 0
 
-    # a spawn target scaffolds its asset first, then receives the request body like any attach
+    # a spawn target scaffolds its asset first, then gets seeded with its own draft content
     for kind, slug in spawn_targets:
-      folder_note = self._spawn(kind, slug)
+      folder_note, spec_path = self._spawn(
+          kind, slug, product = spawn_product.get(( kind, slug )),
+          docs = spawn_docs.get(( kind, slug )), path = spawn_paths.get(( kind, slug ), ""),
+          tools = spawn_tools.get(( kind, slug )))
       rel = folder_note.relative_to(self.repo).with_suffix("")
       resolved_wikilinks.append(str(rel))
-      populated = self._attach_to_folder_note(folder_note, body, request_display)
+      description = spawn_desc.get(( kind, slug ), "")
+      populated = self._attach_to_folder_note(
+          folder_note, description, request_display, is_spawn = True,
+      )
       self.populated_docs.extend(populated)
       self.spawn_folder_notes.append(folder_note)
+      # a change spawn may cascade its design onto existing assets via routing's targets= field
+      if kind == _K.CHANGE_KIND:
+        raw_targets = spawn_cascades.get(( kind, slug ), [])
+        if raw_targets:
+          valid, invalid = self._validate_change_targets(spec_path, raw_targets)
+          for raw in invalid:
+            self.warnings.append(
+                f"spec_targets: '{raw}' does not resolve to an existing asset "
+                f"(change '{slug}')",
+            )
+          if valid:
+            self._write_spec_targets(folder_note, valid)
 
-    # an attach target already exists, so only the body projection applies
+    # an attach target already exists, so only the attention-block delta applies — but a feature
+    # whose ladder already started rolls back to the pre-launch state first (the rule that, before
+    # code is launched, a request edits the spec directly via gate rollback plus a new review);
+    # a launched feature must never reach this path at all (the router should have
+    # spawned a change instead, so a launched target here is a worker-side refusal, not a rollback)
     for target in attach_targets:
       folder_note = self._resolve_attach_folder_note(target)
+      fm_values, _ = _parse_frontmatter(folder_note.read_text())
+      # guard: a cancelled asset refuses every attach outright, before any rollback runs — a
+      # rollback would destroy the pre-launch siblings and only discover the refusal at its own
+      # step 4, and a plain (non-rollback) attach would otherwise reopen review on a dead asset
+      if fm_values.get(Gate.SPEC_CANCELLED, "").strip().lower() == BOOL_TRUE:
+        _fail(_K.CAT_LOGICAL,
+              f"attach target '{target}' is cancelled — automation is refused")
+      # guard: all automation stays off a halted asset until an operator resolves it by hand,
+      # regardless of ladder state — a plain attach must not seed + reopen review either
+      if fm_values.get(SpecHaltKey.HALTED, "").strip().lower() == BOOL_TRUE:
+        _fail(_K.CAT_LOGICAL,
+              f"attach target '{target}' is halted — automation is refused until an "
+              "operator resolves it")
+
+      # a feature whose ladder already started rolls back to the pre-launch state before the
+      # attach seed runs; every other kind (and a not-yet-started feature) attaches plainly
+      rolled_back = False
+      if _Attach.kind_from_folder_note(folder_note) == _K.FEATURE_KIND:
+        # guard: a launched feature must never be silently attached — the router should have
+        # spawned a change instead, so this is a refusal, not a rollback
+        if _is_launched_feature(fm_values, folder_note):
+          _fail(_K.CAT_LOGICAL,
+                f"attach target '{target}' is a launched feature — routing must spawn a "
+                "change instead of attaching")
+        if _has_ladder_started(fm_values, folder_note):
+          # not halted (checked above) — safe to roll the ladder back before the attach seed runs
+          self._rollback_pre_launch_ladder(folder_note, attach_drops.get(target, []))
+          rolled_back = True
+
+      # the attach-seed flow itself is unconditional — a rollback only changes what state it
+      # seeds onto, never whether it runs
       resolved_wikilinks.append(target)
-      populated = self._attach_to_folder_note(folder_note, body, request_display)
+      description = attach_desc.get(target, "")
+      populated = self._attach_to_folder_note(
+          folder_note, description, request_display, is_spawn = False,
+      )
       self.populated_docs.extend(populated)
+      # a rolled-back feature's primary doc already carries prior content, so it re-enters
+      # review via `submit` (skip the opening writer round) instead of `start`
+      if rolled_back:
+        self.submit_docs.extend(populated)
       self.attach_folder_notes.append(folder_note)
+
+    # a reference target registers only a link — no scaffold, no seed, no review, and the
+    # target's own doc/folder-note is never touched (playbook Chapter 7 / upstream § 10);
+    # existence is still validated, reusing the same resolver an attach target uses (any
+    # unresolvable target aborts the whole run via `_fail`, so every survivor here is real)
+    for target in reference_targets:
+      self._resolve_attach_folder_note(target)
+      resolved_wikilinks.append(target)
+    if reference_targets:
+      self._write_reference_targets(reference_targets)
 
     # every doc that received content enters the review loop
     for doc in self.populated_docs:
-      self._open_review(doc)
+      self._open_review(doc, verb = "submit" if doc in self.submit_docs else "start")
 
     # the stamp records where the request landed, and the commit makes the whole pass atomic
     self._stamp_request_file(
@@ -1376,6 +2403,7 @@ class _Apply:
         "spawn_count": len(self.spawn_folder_notes),
         "attach_count": len(self.attach_folder_notes),
         "populated_count": len(self.populated_docs),
+        "warnings": self.warnings,
     }))
     return 0
 

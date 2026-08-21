@@ -7,7 +7,9 @@ Authoritative source for clause-8 inversion checking. Templates' `## Color bindi
 
 ## The rule
 
-Obsidian's dark theme applies CSS `invert(1) hue-rotate(180deg)` to embedded SVG. Every source colour is therefore inverted before display: `#000` → renders white, `#fff` → renders black, dark blue → renders light cream, etc. The scheme is authored so that, *after* inversion, text remains readable on whatever surface it sits on.
+Obsidian core's `app.css` applies `filter: invert(100%) hue-rotate(180deg) saturate(1.25)` to `.theme-dark .mermaid > svg` — a whole-SVG raster filter applied *after* render, and it fires in **dark mode only**. This is the only mode-aware colouring mechanism in play: it is not the `img[src$="#invert"]` rule (that targets `<img>` elements, irrelevant to rendered mermaid SVGs), and it is not specific to any one Obsidian theme — any theme that leaves Obsidian in dark mode gets it, because it lives in core CSS, not a theme stylesheet. Obsidian calls `mermaid.initialize` with no `theme` key, so mermaid always renders its stock `theme:"default"`; neither Obsidian nor any theme colours mermaid nodes via CSS variables.
+
+In light mode there is no filter at all — source colours render literally. In dark mode, every source colour is inverted before display: `#000` → renders white, `#fff` → renders black, dark blue → renders light cream, etc. The scheme is authored so that a single source colour reads correctly in **both** modes at once: literally in light mode, inverted in dark mode. That is only possible for neutral-gray text (`R=G=B`, where hue-rotate is a no-op and invert is a clean lightness flip) — which is why every inversion-aware text binding in this doc is `#fff` or `#000`, never a hue.
 
 ## Surfaces
 
@@ -51,8 +53,10 @@ Clause-8 catches all three.
 | `primaryTextColor`              | `text-on-plate`      |
 | `primaryColor`                  | `plate-fill`         |
 | `primaryBorderColor`            | `plate-stroke`       |
-| `attributeBackgroundColorOdd`   | `plate-fill`         |
-| `attributeBackgroundColorEven`  | `plate-fill`         |
+| `attributeBackgroundColorOdd` (DEAD — replaced by `rowOdd` since mermaid 11.5's unified ER renderer; do not bind) | `plate-fill` |
+| `attributeBackgroundColorEven` (DEAD — replaced by `rowEven` since mermaid 11.5's unified ER renderer; do not bind) | `plate-fill` |
+| `rowOdd`                        | `plate-fill`         |
+| `rowEven`                       | `plate-fill`         |
 | `transitionColor`               | `line-on-canvas`     |
 | `transitionLabelColor`          | `text-on-canvas`     |
 | `labelBackgroundColor`          | `edge-label-bg`      |
@@ -72,7 +76,7 @@ Clause-8 catches all three.
 | `loopTextColor`                 | `accent-on-plate`    |
 | `cScale0..11`                   | `plate-fill`         |
 | `cScaleLabel0..11`              | `text-on-plate`      |
-| `fillType0..3`                  | `plate-fill`         |
+| `fillType0..3` (DEAD for `journey` — that kind no longer sets `themeVariables` at all; colour comes from `themeCSS` `rect.section-type-N`/`rect.task-type-N`, see the journey template's `## Color binding`) | `plate-fill` |
 | `mainBkg`                       | `plate-fill`         |
 | `nodeBorder`                    | `plate-stroke`       |
 | `faceColor`                     | `accent-on-plate`    |
@@ -100,40 +104,34 @@ The table above describes the *intended* surface for each key based on what the 
 
 | kind | key | canonical surface | empirical surface | reason |
 |---|---|---|---|---|
-| `erd` | `textColor` | `text-on-canvas` | **`text-on-plate`** (`#fff`) | mermaid's er styles.ts binds `.entityTitleText{fill:textColor}` — the entity title sits on the entity plate, not the canvas. Source `#fff` renders BLACK on the plate, matching all other kinds' text-on-plate convention. The canonical table maps `textColor` to `text-on-canvas` because most kinds use it as the generic canvas-text fallback; erd is the exception. |
-| `erd` | `themeCSS` selector `text.entityLabel` | (n/a — raw CSS) | **`text-on-plate`** (`#fff`) | mermaid's er styles.ts emits no CSS rule for `.entityLabel`, so SVG default `fill` (black) wins → renders WHITE on the dark plate (illegible). The class is applied to both the entity-name title and every attribute-row text node (verified in mermaid 11.4.1 renderer). Override via `themeCSS:'text.entityLabel{fill:#fff!important}'` so source `#fff` renders BLACK on the entity plate. |
-| `erd` | `themeCSS` selector `text.relationshipLabel` | (n/a — raw CSS) | **`text-on-canvas`** (`#000`) — sits on edge-label plate | mermaid's er styles.ts emits `.relationshipLabelBox{fill:tertiaryColor}` for the plate but **no fill rule for `.relationshipLabel`** itself. The text falls back to whatever generic mermaid CSS inherits (typically near-black), which inverts to near-white but blends into the 0.7-opacity plate. Override via `themeCSS:'text.relationshipLabel{fill:#000!important}'` so source `#000` renders WHITE on the black plate (`tertiaryColor:#fff` source → black). The "canonical" surface here is the relationship-label plate, which is rendered black via `tertiaryColor:#fff` — so source `#000` is correct (white text on black plate, like every other edge-label-text-on-edge-label-bg pair). |
-| `journey` | `sectionColours[*]` | (n/a — not a themeVariable) | **`text-on-canvas`** (`#000`) | mermaid's journey renderer (`packages/mermaid/src/diagrams/user-journey/journeyRenderer.ts:226,259-269`) sets task-label text fill via an **inline `fill="<colour>"` attribute** assigned from `conf.sectionColours[N % length]`. Inline attribute beats every CSS theme key. Mermaid default `['#fff']` renders BLACK on the dark inverted plate inside cards. Override `sectionColours` to `['#000']` so card text renders white. This is a `journey`-scoped config field, not a themeVariable. (Note: `sectionColours` is also array-typed and gets dropped by Obsidian's sanitizer — see § Obsidian sanitizer constraint. Cross-platform parity only; in Obsidian, override task-label color via `themeCSS` instead — see § foreignObject inversion exception below.) |
-| `journey` | `themeCSS` selector `.label` | (n/a — raw CSS) | **inverse of canvas text** (`#fff`) | mermaid 11.4.1 journey defaults `textPlacement:"fo"` — task labels render as `<div class="label">` **inside `<foreignObject>`**. HTML content inside `<foreignObject>` does NOT participate in the SVG's `filter: invert(100%) hue-rotate(180deg)` the way SVG children do. So the source color is the rendered color, **with no inversion compensation**. To get white-rendered card text in Obsidian dark, write `themeCSS:'.label{color:#fff!important}'` — straight, not flipped. The sibling `text.task{fill:#000!important}` rule (for the SVG `<text>` fallback inside `<switch>`) keeps the canonical inverted source `#000` because that path IS inverted. **Two paths, two source colors, opposite hexes.** Verified by user visual test in Obsidian dark. |
+| `erd` | `textColor` / `nodeTextColor` | `text-on-canvas` | **`text-on-plate`** (`#fff`) | mermaid's unified ER renderer (11.5+) binds both keys to text that sits on the entity plate (title and attribute rows), not the canvas. Source `#fff` renders BLACK on the plate, matching every other kind's text-on-plate convention. The canonical table maps `textColor` to `text-on-canvas` because most kinds use it as the generic canvas-text fallback; erd is the exception. |
+
+Two former rows in this table — `erd`'s `themeCSS` `text.entityLabel` override and `text.relationshipLabel` override, and `journey`'s `sectionColours[*]` config array and `themeCSS` `.label` override — documented workarounds for mechanisms that mermaid 11.13 no longer has:
+
+- `erd`'s relationship-label plate is now styled through the generic `.edgeLabel rect,.edgeLabel .labelBkg` / `.edgeLabel,.edgeLabel .label *,.edgeLabel text` selectors the unified renderer shares with other diagram kinds — the standard `edge-label-bg` (`#fff`) + `text-on-canvas` (`#000`) pairing from the canonical table above, no exception needed. See `diagram-erd.md`'s `## Color binding`.
+- `journey` no longer renders task/section labels through `<foreignObject>` at all (see § foreignObject inversion exception below) — the scheme forces `journey.textPlacement:'old'`, so labels are plain SVG `<text>` on a role-coloured plate, the standard `text-on-plate` (`#fff`) convention. `sectionColours` and every other array-typed journey config key are unused. See `diagram-journey.md`'s `## Color binding`.
 
 When a kind's template documents an empirical exception in its `## Color binding` section, the template overrides the canonical table for that key on that kind only. Clause-8 validators must consult the kind's template before flagging a "violation".
 
 ## Inline-fill caveats
 
-A handful of mermaid kinds bypass themeVariables entirely by emitting per-element inline `fill` / `style` attributes. These cannot be themed via `themeVariables`; they require kind-specific config blocks inside the init directive. Known cases:
-
-- `journey` — task-label text fill comes from the kind config field `sectionColours` (array). See empirical-exception row above.
+A handful of mermaid kinds bypass themeVariables entirely by emitting per-element inline `fill` / `style` attributes. These cannot be themed via `themeVariables`; they require either a `themeCSS` override (with `!important`, to beat the inline attribute's specificity) or a kind-specific config block inside the init directive. No currently-shipped kind hits this — `journey` used to (task-label fill via the array-typed `sectionColours` config field), until the scheme switched it to `journey.textPlacement:'old'`, which renders labels as plain SVG `<text>` styled by `themeCSS` instead of inline-attributed `<div>`/`<text>` content.
 
 When you discover a new inline-fill case while authoring a kind's template, append it here AND document the binding in that kind's `## Color binding` section.
 
 ## foreignObject inversion exception
 
-Some mermaid kinds emit text via SVG `<foreignObject>` containing HTML elements (`<div>`, `<span>`) instead of native SVG `<text>`. **HTML content inside `<foreignObject>` does NOT invert under Obsidian's `filter: invert(100%) hue-rotate(180deg)` filter the way SVG children do** — the source color is the rendered color (no flip).
+Some mermaid kinds can emit text via SVG `<foreignObject>` containing HTML elements (`<div>`, `<span>`) instead of native SVG `<text>`. **HTML content inside `<foreignObject>` does NOT invert under Obsidian's dark-mode-only `filter: invert(100%) hue-rotate(180deg) saturate(1.25)`** the way SVG children do — the source color is the rendered color (no flip). This is the opposite of the canonical inversion rule. When picking a `themeCSS` color that targets foreignObject-rendered text, use the **straight visual hex** (white = `#fff`, black = `#000`), not the inverted source.
 
-This is the opposite of the canonical inversion rule. When picking a `themeCSS` color that targets foreignObject-rendered text, use the **straight visual hex** (white = `#fff`, black = `#000`), not the inverted source.
+**No currently-shipped kind hits this.** `journey` used to: mermaid's default `textPlacement:"fo"` renders both section headers and task labels as `<div>` content inside `<foreignObject>`, and since section bands DO invert (native SVG `rect`) while `fo`-placed label text does NOT, a single source colour for the label text could never read correctly in both themes at once. Rather than author two source colours for two rendering paths, the scheme sidesteps the whole exception: it forces `journey.textPlacement:'old'`, which switches label rendering to plain SVG `<text>` — a path that DOES invert normally, so the ordinary text-on-plate convention applies with no exception needed. See `diagram-journey.md`'s `## Color binding`.
 
-Concrete impact:
+Detection: run `grep -oE 'textPlacement[^,}]{0,30}' /path/to/mermaid.min.js` against the bundled mermaid (extract `obsidian.asar` first). If a kind's renderer defaults to `textPlacement:"fo"` (or otherwise emits `<foreignObject>`) and the scheme has no scalar override forcing it to a native-SVG placement, this exception applies to any `themeCSS` rule that targets HTML elements inside it.
 
-- `journey` with `textPlacement:"fo"` (default in mermaid 11.4.1) → task labels render as `<div class="label">` inside `<foreignObject>`. To paint them white, write `themeCSS:'.label{color:#fff!important}'`.
-- The same diagram's SVG `<text class="task">` fallback (inside the `<switch>`) IS inverted normally → `text.task{fill:#000!important}` to render white.
-
-Detection: run `grep -oE 'textPlacement[^,}]{0,30}' /path/to/mermaid.min.js` against the bundled mermaid (extract `obsidian.asar` first). If the kind's renderer uses `textPlacement:"fo"` or otherwise emits `<foreignObject>`, this exception applies to any `themeCSS` rule that targets HTML elements inside it.
-
-When you discover a new kind that renders text via foreignObject, document its empirical-surface exception in the table above AND extend this section with the kind name.
+When you discover a new kind that renders text via foreignObject with no override available, document its empirical-surface exception in the table above AND extend this section with the kind name.
 
 ## Obsidian sanitizer constraint (verified)
 
-Obsidian wraps mermaid behind a sanitizer that walks an allowlist built by `keyify` over mermaid's *defaults*. Verified directly from the bundled bytes at `/Applications/Obsidian.app/Contents/Resources/obsidian.asar` → `lib/mermaid.min.js`:
+This is **mermaid's own** `sanitizeDirective` function, not something Obsidian layers on top — it runs inside mermaid itself whenever a `%%{init: ...}%%` directive is parsed, on every host that embeds stock mermaid (Obsidian included, since Obsidian calls `mermaid.initialize` with no custom `theme` and ships mermaid's bundled code unmodified). It walks an allowlist built by `keyify` over mermaid's *defaults*. Verified directly from the bundled bytes at `/Applications/Obsidian.app/Contents/Resources/obsidian.asar` → `lib/mermaid.min.js` (this is mermaid's shipped code as bundled by Obsidian, not an Obsidian-authored wrapper):
 
 ```javascript
 Bz=o((t,e="")=>Object.keys(t).reduce((r,n)=>
@@ -148,11 +146,9 @@ let r=["themeCSS","fontFamily","altFontFamily"];
 for(let n of r) e.includes(n) && (t[e]=tbe(t[e]))
 ```
 
-Consequences for any mermaid template that targets Obsidian:
+Consequences for any mermaid template, in Obsidian or anywhere else stock mermaid renders a directive:
 
-- **Array-typed init keys are silently dropped.** `journey.sectionColours`, `journey.sectionFills`, `journey.actorColours` — none take effect inside Obsidian. Keep them in the template for cross-platform parity (mermaid CLI, mermaid-live, GitHub all honour them) but never rely on them for Obsidian-readable output.
+- **Array-typed init keys are silently dropped, everywhere mermaid parses a directive.** `keyify` explicitly skips arrays (`Array.isArray(t[n])?r:…`) when building the allowlist, so `journey.sectionColours`, `journey.sectionFills`, `journey.actorColours` never take effect through this init path — not just inside Obsidian. This is mermaid's own sanitizer, so a host honouring "the full init schema" for arrays would have to bypass mermaid's directive parsing entirely (e.g. calling `mermaid.initialize` directly with a config object, which most embedding hosts — Obsidian included — do not do for user-authored fences). Do not rely on config arrays for custom colour on any host that renders a `%%{init: ...}%%` directive; `themeCSS` is the only reliable channel.
 - **Non-default themeVariable keys are dropped.** Only keys present in mermaid's default theme block survive. `actor0..5`, `fillType0..7`, `mainBkg`, `nodeBorder`, `faceColor`, `lineColor`, `textColor` are all defaults — those work. Made-up keys do not.
 - **`themeCSS` is the escape hatch.** Plus `fontFamily` / `altFontFamily`. These three are explicitly whitelisted as raw-string passthroughs (with a CSS sanitization pass via `tbe`). Use `themeCSS` to override mermaid's hardcoded class CSS rules (e.g. `.label text { fill: #333 }`) when no themeVariable controls the surface.
-- **Use `!important` inside `themeCSS`.** CSS specificity alone won't beat inline `fill` attributes that mermaid renderers write onto SVG elements (e.g. journey task labels via `sectionColours`). `!important` does — it elevates the rule above inline attribute precedence.
-
-Source-of-truth note: this constraint is Obsidian-specific. Standalone mermaid renderers (CLI, mermaid-live, GitHub's renderer) honour the full init schema, so cross-platform templates keep the kind-config block as a fallback.
+- **Use `!important` inside `themeCSS`.** CSS specificity alone won't beat inline `fill`/`style` attributes that some mermaid renderers write onto SVG elements. `!important` does — it elevates the rule above inline attribute precedence.

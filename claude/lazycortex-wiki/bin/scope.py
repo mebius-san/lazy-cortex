@@ -48,6 +48,9 @@ class GlobMatcher:
     matches zero or more whole components.  All patterns route through the same
     regex compiler so single-`*` patterns never leak across directory boundaries.
 
+    Guarantees:
+      - A single `*` never matches across a path separator; only `**` spans whole path components.
+
     Args:
       rel_posix: Repo-relative POSIX path string (no leading `/`).
       pattern: Shell glob pattern; `**` matches zero or more path components.
@@ -55,6 +58,22 @@ class GlobMatcher:
     Returns:
       True on a match, False otherwise.
     """
+
+    # Contract:
+    # A single `*` MUST NEVER match across a path separator; only `**` spans
+    # whole path components.
+
+    # Domain(wiki.scope):
+    # # How a coverage pattern reads a path
+    # Coverage is declared as shell-style patterns tested against a document's path relative to the
+    # repository root. A single star stands for any run of characters inside one path segment and never
+    # crosses a directory separator, so a pattern naming documents directly inside a directory does not
+    # reach anything nested deeper. A double star stands for zero or more whole segments, so it matches
+    # both a document lying at the top of the named directory and one buried several levels below it,
+    # including the case where no intermediate directory exists at all. A question mark stands for
+    # exactly one character within a segment. The two star meanings are what lets a single coverage list
+    # describe a shallow directory and a whole subtree without either reading as the other.
+
     # compile once per pattern — the same globs are re-tested for every walked file
     if pattern not in self._cache:
       self._cache[pattern] = self._compile(pattern)
@@ -286,7 +305,15 @@ class ScopeResolver:
 
   Scopes are read from `wiki.scopes` in the repo's `.claude/lazy.settings.json`.
   The `wiki` block may contain a version key; it is silently ignored.
+
+  Guarantees:
+    - A topics index is never a scope member: neither path resolution nor node enumeration ever
+      yields one, whatever the scope's `exclude_paths` declares.
   """
+
+  # Contract:
+  # A topics index is NEVER a member of any scope: neither resolution nor
+  # enumeration may ever return one, regardless of what `exclude_paths` names.
 
   _SETTINGS_PATH = ".claude/lazy.settings.json"
   _WIKI_KEY = "wiki"
@@ -294,6 +321,11 @@ class ScopeResolver:
   _VERSION_KEY = "_version"
   _PATHS_KEY = "paths"
   _EXCLUDE_PATHS_KEY = "exclude_paths"
+  _EXCLUDE_KEY = "exclude"
+  _TAG_AXES_KEY = "tag_axes"
+  _DOMAINS_KEY = "domains"
+  _OUTPUT_KEY = "output"
+  _SUBTREE_GLOB = "/**"
   _FILTER_KEY = "filter"
   _TOPICS_INDEX_KEY = "topics_index"
   _DEFAULT_TOPICS_INDEX = "wiki/topics.md"
@@ -314,6 +346,117 @@ class ScopeResolver:
     self._matcher = GlobMatcher()
 
   # ------------------------------------------------------------------
+  def load_wiki(self) -> dict:
+    """
+    Load and return the whole `wiki` section from the repo settings file.
+
+    Returns:
+      The section dict, or an empty dict when the settings file is absent, unreadable, or
+      carries no `wiki` key.
+    """
+    settings_file = self._repo / self._SETTINGS_PATH
+    # guard: settings file does not exist — nothing to read
+    if not settings_file.is_file():
+      return {}
+    # an unreadable or malformed file is the same "no configuration" case as an absent one —
+    # every caller treats the empty dict as unconfigured, never as an error to surface
+    try:
+      with settings_file.open(encoding = self._ENCODING) as fh:
+        data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+      return {}
+    wiki = data.get(self._WIKI_KEY, {})
+    # guard: section absent or malformed — treat as unconfigured
+    if not isinstance(wiki, dict):
+      return {}
+    return wiki
+
+  # ------------------------------------------------------------------
+  def global_excludes(self) -> list[str]:
+    """
+    Return the exclude globs that apply to every scope of this repository.
+
+    Two sources are unioned: the operator-authored `wiki.exclude` list, and the generated
+    domain-spec tree derived from `wiki.domains.output` when domains are configured.
+
+    Guarantees:
+      - The generated domain-spec tree is excluded whenever `wiki.domains.output` is set, so a
+        scope can never claim a file the domain build owns.
+
+    Returns:
+      List of repo-relative glob strings; empty when neither source contributes one.
+    """
+
+    # Domain(wiki.scope):
+    # # Exclusions that no scope may opt out of
+    # A vault carries exclusions that belong to the repository rather than to any one area of it: a document tree
+    # that another generator owns in full, a service directory nobody curates. Declaring them once for the whole
+    # vault, instead of repeating them in every area, is what keeps a newly created area from silently claiming
+    # them — the area author would have to remember a rule they never saw.
+    # The generated rule-group tree is exclusion of this kind and is not even declared: it follows from the fact
+    # that the tree is configured at all, so it can never fall out of step with where that tree currently lives.
+
+    # Contract:
+    # A generated domain-spec document is NEVER a member of any scope while
+    # `wiki.domains.output` is configured, regardless of what a scope's
+    # `paths` globs name.
+
+    # the operator's own list contributes first
+    wiki = self.load_wiki()
+    declared = wiki.get(self._EXCLUDE_KEY) or []
+    globs: list[str] = [ g for g in declared if isinstance(g, str) and g ]
+
+    # the domain tree is derived, never declared — a moved output directory carries its own exclusion
+    domains = wiki.get(self._DOMAINS_KEY)
+    if isinstance(domains, dict):
+      output = domains.get(self._OUTPUT_KEY)
+      if isinstance(output, str) and output:
+        globs.append(output.rstrip("/") + self._SUBTREE_GLOB)
+    return globs
+
+  # ------------------------------------------------------------------
+  def tag_axes(self, cfg: dict) -> list[str]:
+    """
+    Return the classification axes a scope may use.
+
+    The repository declares the closed axis vocabulary once in `wiki.tag_axes`. A scope's own
+    `tag_axes` list narrows that vocabulary; an absent or empty list means the scope uses all
+    of it. An axis a scope names that the repository does not declare is not an axis.
+
+    Guarantees:
+      - Every returned axis appears in `wiki.tag_axes`, so a scope can never widen the
+        repository's vocabulary.
+
+    Args:
+      cfg: A single scope-config dict (the value side of a `wiki.scopes` entry).
+
+    Returns:
+      The scope's effective axis list, in the order the repository declares them.
+    """
+
+    # Domain(wiki.taxonomy):
+    # # One vocabulary of axes for the whole vault
+    # Tags earn their keep by linking documents that live in different areas, which only works while both areas
+    # speak the same axis vocabulary. So the vocabulary is declared once for the repository, and an area may only
+    # narrow it to the axes it actually uses, never invent one of its own — an invented axis would produce tags no
+    # other area could ever match.
+    # Narrowing is opt-in: an area that declares nothing speaks the full vocabulary.
+
+    # Contract:
+    # Every axis returned appears in the repository-level `tag_axes` list; a
+    # scope can never widen the vocabulary, only narrow it.
+
+    # the repository's declaration is the whole universe of axes
+    declared = self.load_wiki().get(self._TAG_AXES_KEY) or []
+    axes: list[str] = [ a for a in declared if isinstance(a, str) and a ]
+    narrowing = cfg.get(self._TAG_AXES_KEY) or []
+    # guard: the scope declares no narrowing — it speaks the full vocabulary
+    if not narrowing:
+      return axes
+    wanted = { a for a in narrowing if isinstance(a, str) }
+    return [ a for a in axes if a in wanted ]
+
+  # ------------------------------------------------------------------
   def load_scopes(self) -> dict:
     """
     Load and return the `wiki.scopes` dict from the repo settings file.
@@ -322,14 +465,7 @@ class ScopeResolver:
       Dict of scope-id → scope-config entries.  Empty dict when the
       settings file is absent, unreadable, or carries no `wiki.scopes` key.
     """
-    settings_file = self._repo / self._SETTINGS_PATH
-    # guard: settings file does not exist — return empty scopes
-    if not settings_file.is_file():
-      return {}
-    with settings_file.open(encoding = self._ENCODING) as fh:
-      data = json.load(fh)
-    wiki = data.get(self._WIKI_KEY, {})
-    scopes_raw = wiki.get(self._SCOPES_KEY, {})
+    scopes_raw = self.load_wiki().get(self._SCOPES_KEY, {})
     # guard: scopes not a dict (config error) — treat as empty
     if not isinstance(scopes_raw, dict):
       return {}
@@ -367,6 +503,11 @@ class ScopeResolver:
     Overlapping scopes are a configuration error that `/wiki.doctor` flags
     separately; this method does not resolve them.
 
+    Guarantees:
+      - When several scopes match the same path, the first declared match owns it.
+      - A node its home scope's `filter` rejects resolves to `None` and is never offered to a
+        scope declared after that home.
+
     Args:
       path: Absolute or repo-relative path to the file being resolved.
 
@@ -387,6 +528,32 @@ class ScopeResolver:
 
     # the frontmatter filter reads the file, so it needs the absolute location
     abs_path = path if path.is_absolute() else self._repo / path
+
+    # Domain(wiki.scope):
+    # # Which scope a document belongs to
+    # A document belongs to a scope when at least one of that scope's include patterns matches its
+    # repository-relative path and none of its exclusion patterns does; a scope naming no include
+    # pattern claims nothing at all. Scopes are consulted in the order the project declared them and the
+    # first one that claims the document owns it — a document claimed by two scopes is a configuration
+    # error for the integrity checks to report, never something membership silently arbitrates. A
+    # document that lies outside the repository, or that no scope claims, simply has no home and takes
+    # no part in the wiki.
+    # A scope may also carry a frontmatter condition, and a document its home scope's condition rejects
+    # is withdrawn from the wiki for as long as the rejection holds. Withdrawal is neither reassignment
+    # nor exclusion: the document is not offered to the scopes declared after its home, and it rejoins
+    # the very scope that already matched its path as soon as the frontmatter that caused the rejection
+    # changes. This is how a document under active editing steps out of curation and comes back
+    # afterwards without anyone rewriting the coverage.
+
+    # Contract:
+    # When several scopes match the same path, the first declared match
+    # MUST own it.
+
+    # Contract:
+    # A node its home scope's filter rejects MUST resolve to nothing and
+    # MUST NEVER be offered to a scope declared after that home.
+
+    # first scope whose globs claim the path owns it
     scopes = self.load_scopes()
     for scope_id, cfg in scopes.items():
       # guard: path does not belong to this scope
@@ -413,6 +580,10 @@ class ScopeResolver:
     per the project tech conventions.  Results are deduped by resolved
     absolute path and returned sorted for determinism.
 
+    Guarantees:
+      - The enumeration is sorted and duplicate-free, so the same repository and scope config
+        always yield the same list in the same order.
+
     Args:
       cfg: A single scope-config dict (the value side of a `wiki.scopes` entry).
 
@@ -421,8 +592,13 @@ class ScopeResolver:
       `paths` glob, minus those an `exclude_paths` glob names, minus the topics index, minus
       whatever the scope's optional `filter` rejects.
     """
+
+    # Contract:
+    # The enumeration MUST be sorted and duplicate-free, so the same repository
+    # and scope config always yield the same list in the same order.
+
     paths_globs: list[str] = cfg.get(self._PATHS_KEY) or []
-    exclude_globs: list[str] = cfg.get(self._EXCLUDE_PATHS_KEY) or []
+    exclude_globs = self._effective_excludes(cfg)
 
     # overlapping globs can name the same file twice — dedupe on the resolved path
     seen_abs: set[Path] = set()
@@ -486,6 +662,20 @@ class ScopeResolver:
     Returns:
       True when the node is a topics index; False otherwise.
     """
+
+    # Domain(wiki.surfaces):
+    # # A generated index is not curated material
+    # The catalogue of a scope's topics is rebuilt in full from the documents the scope holds, so it is
+    # an output of the wiki rather than a document anyone writes by hand. It therefore belongs to no
+    # scope as a member: nothing is ever curated into it, and no upkeep pass may treat it as a document
+    # to classify or link. The exclusion is intrinsic to what the catalogue is — it does not depend on
+    # the operator remembering to name it among a scope's exclusions, and it holds even when a scope
+    # would otherwise exclude nothing.
+    # A catalogue is recognised by either of two independent signals, and one is enough: it lies at the
+    # location its scope declares for it, or it carries a role marker of its own naming it a catalogue.
+    # The marker is what keeps the exclusion working after the catalogue is moved or renamed, and for a
+    # neighbouring scope's catalogue that happens to fall inside this scope's coverage.
+
     # guard: the scope's own index path — no read needed
     if PurePath(cfg.get(self._TOPICS_INDEX_KEY) or self._DEFAULT_TOPICS_INDEX).as_posix() == rel_posix:
       return True
@@ -527,6 +717,20 @@ class ScopeResolver:
     return _match_filter(flt, _parse_frontmatter(text), abs_path)
 
   # ------------------------------------------------------------------
+  def _effective_excludes(self, cfg: dict) -> list[str]:
+    """
+    Return every exclude glob that applies to one scope.
+
+    Args:
+      cfg: A single scope-config dict (the value side of a `wiki.scopes` entry).
+
+    Returns:
+      The scope's own `exclude_paths` globs followed by the repository-wide ones.
+    """
+    own: list[str] = cfg.get(self._EXCLUDE_PATHS_KEY) or []
+    return [ *own, *self.global_excludes() ]
+
+  # ------------------------------------------------------------------
   def _matches_scope(self, rel_posix: str, cfg: dict) -> bool:
     """
     Return True when `rel_posix` matches at least one `paths` glob and no `exclude_paths` glob.
@@ -539,7 +743,7 @@ class ScopeResolver:
       True on a match, False otherwise.
     """
     paths_globs: list[str] = cfg.get(self._PATHS_KEY) or []
-    exclude_globs: list[str] = cfg.get(self._EXCLUDE_PATHS_KEY) or []
+    exclude_globs = self._effective_excludes(cfg)
     # guard: no paths globs means the scope can never match
     if not paths_globs:
       return False

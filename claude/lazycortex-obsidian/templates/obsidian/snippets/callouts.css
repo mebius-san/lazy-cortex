@@ -1,0 +1,19 @@
+/* Custom callout styles for lazycortex-authored callout types.
+ * Obsidian renders any `[!type]` callout, but an unrecognized type gets no
+ * icon/color of its own — this file is where lazycortex gives its own
+ * callout vocabulary a look. Grows as lazycortex adds custom callouts;
+ * one `.callout[data-callout="<type>"]` block per type, `--callout-color`
+ * as an "R, G, B" triple (Obsidian's custom-callout convention, no rgb()
+ * wrapper) and `--callout-icon` as a lucide icon name. */
+
+/* [!decision] — a settled, binding decision record (spec-decisions-design). */
+.callout[data-callout="decision"] {
+  --callout-color: 90, 90, 200;
+  --callout-icon: gavel;
+}
+
+/* [!decision-candidate] — a proposed decision awaiting promotion to a record. */
+.callout[data-callout="decision-candidate"] {
+  --callout-color: 200, 150, 60;
+  --callout-icon: lightbulb;
+}

@@ -1,11 +1,11 @@
 ---
 name: lazy-core.doctor
-description: "Run when the operator asks whether the project config is healthy, or when something feels off — a rule or skill is not firing, plugins may be behind the marketplace, settings / agents / memory / hooks / CLAUDE.md have drifted apart. Merges its own cross-artifact scan with the installed plugins' audits and offers per-finding fixes; the sibling `/lazy-core.audit` only measures context weight and authoring compliance and never fixes."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash(python3 *), mcp__*__recall, mcp__*__retain
+description: "Run when the operator asks whether the project config is healthy, or when something feels off — a rule or skill is not firing, plugins may be behind the marketplace, settings / agents / memory / hooks / CLAUDE.md have drifted apart. Merges its own cross-artifact scan with the installed plugins' audits, applies the repairs that follow mechanically from what it read, and asks per finding about the rest; the sibling `/lazy-core.audit` only measures context weight and authoring compliance and never fixes."
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash(python3 *), Bash(claude plugin update *), mcp__*__recall, mcp__*__retain, Agent
 ---
 # Project Health Check
 
-Coordinator skill. Dispatches three **Explore** subagents in parallel to scan the project, merges their reports, presents a unified report, then applies user-confirmed fixes.
+Coordinator skill. Dispatches three **Explore** subagents in parallel to scan the project, merges their reports, presents a unified report, applies the repairs a finding fully determines, and asks about the ones that encode a decision.
 
 Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispatching for the coordinator pattern. Severity vocabulary: `PASS` / `WARN` / `FAIL`, plus `INFO` (reserved for Phase 2.5 transient status lines — e.g. "marketplace unreachable, used cached manifest" — that don't require a user fix).
 
@@ -17,13 +17,14 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispat
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 0 — Mode detection`
    - `Phase 1 — Dispatch parallel scans`
    - `Phase 2 — Collect + merge`
    - `Phase 2.5 — Plugin version currency`
+   - `Phase 2.55 — Naming-canon drift in consumer state`
    - `Phase 2.6 — Release-mode outdated-plugin suppression`
    - `Phase 2.7 — Waiver reconciliation`
    - `Phase 3 — Delegated audits`
@@ -134,6 +135,52 @@ Checks the agent performs:
   - Per-tool permission entries are personal and should live in the paired `settings.local.json` (gitignored), not in tracked `settings.json` where they ship to every teammate who clones the repo / dotfiles.
   - `[WARN]` tracked file has a `permissions.allow` or `permissions.ask` array containing any entry. Finding: `tracked settings file owns per-tool permissions — these leak to teammates | <path>`; `detail:` count of entries in each list; `fix: migrate permissions.* block to <paired settings.local.json>` (coordinator-owned fix — see Phase 4).
   - Tracked `settings.json` may still own `enabledPlugins`, `enabledMcpjsonServers`, `enableAllProjectMcpServers`, `hooks`, `env` (non-secret), and similar enablement flags that teammates legitimately share. Only `permissions.*` is flagged.
+- **Plugin marketplace declaration** (project `./.claude/settings.json` + `./.claude/settings.local.json`):
+  - A `enabledPlugins` key has the form `<plugin>@<marketplace>`. The entry only resolves where `<marketplace>` is known — declared in the same settings scope under `extraKnownMarketplaces`, or registered globally on that machine. A project file that enables a plugin without declaring its marketplace works only for the operator who happens to have it globally; on a fresh clone or another machine the plugin is silently never loaded.
+  - Union the marketplaces declared under `extraKnownMarketplaces` in both project files → `declared`. For every `<plugin>@<marketplace>` with value `true` in either project file where `<marketplace>` ∉ `declared`:
+    - `[WARN]` Finding: `<plugin>@<marketplace> enabled but marketplace not declared in project settings — resolves only where <marketplace> is registered globally | <path>`.
+    - Resolve the marketplace source, in order: `$HOME/.claude/settings.json` `extraKnownMarketplaces.<marketplace>`, then `$HOME/.claude/plugins/known_marketplaces.json` `<marketplace>` (Read only — CRITICAL PATH RULE). Record the resolved block in the finding's `detail:` when found; `fix: add <marketplace> to extraKnownMarketplaces in <path>` (coordinator-owned fix — see Phase 4).
+    - Unresolvable at both sources → keep the WARN, mark `detail: source unknown` — the operator must supply the marketplace source (report-only).
+  - The mirror direction (a declared marketplace no enabled plugin references) is NOT a finding — operators pre-declare marketplaces ahead of enabling their plugins.
+- **Routine registry conformance** (project `.claude/lazy.settings.json` + its `.local.json` overlay) — every entry under `routines` is validated against its own type schema. A broken entry is invisible until the daemon reads it: it is then dropped, halts the daemon with `routine_config_invalid`, and stops every other routine of the repo until the settings are edited. Entries written by hand, seeded by a plugin's install skill, or left behind by a schema change are exactly the ones no write-time validator ever saw.
+  - Run the validator over the merged view — never re-implement the schema here; the checker is the same function the daemon and `/lazy-routine.register` call. Each printed line is one broken entry, tab-separated as `<name>\t<schema error>`:
+
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from pathlib import Path
+from lazy_settings import load_section
+from routine_types import RoutineConfigError, validate_routine_entry
+routines = load_section(Path('.claude/lazy.settings.json'), 'routines')
+routines.pop('_version', None)
+for name, cfg in routines.items():
+    if not isinstance(cfg, dict):
+        print(f'{name}\tnot an object')
+        continue
+    try:
+        validate_routine_entry(name, cfg)
+    except RoutineConfigError as e:
+        print(f'{name}\t{e}')
+")
+```
+
+  - `[FAIL]` one finding per printed line — `routine <name> does not conform to its type schema — daemon halts on read | .claude/lazy.settings.json`; `detail:` the validator's message verbatim, never paraphrased (it names the exact field).
+  - **Report-only, no fix.** An unknown field can be a typo, a leftover of an older schema, or an intent the schema has not grown yet; a missing required field can mean the entry was meant to be a different type entirely. The operator decides. Offer the two routes in the finding's `fix:` line — hand-edit the entry, or re-register it via `/lazy-routine.register --force` — and never rewrite the entry from the doctor.
+  - A non-dict value under `routines` (other than `_version`) is the same `[FAIL]`, phrased `routine <name> is not an object`.
+  - No entries, or no settings file → no finding. An empty registry is a legitimate state.
+- **Mandatory routine protocols** — protocols are routine-side: whatever a routine declares reaches every job it dispatches, and a job whose expert writes markdown into the vault without `lazy-core.markdown-style` produces prose in the wrong shape with nothing to catch it. A plugin's install seeds the protocol; an operator who hand-edits the routine, or a settings file restored from before the plugin shipped the seed, silently loses it.
+  - The routines whose jobs write markdown, and the protocol each must carry:
+
+| Routine | Mandatory protocol |
+|---|---|
+| `lazy-spec.coordinator-watch` | `lazycortex-core:lazy-core.markdown-style` |
+| `lazy-wiki.scan` | `lazycortex-core:lazy-core.markdown-style` |
+| `lazy-wiki.relink-weekly` | `lazycortex-core:lazy-core.markdown-style` |
+| `lazy-review.scan` | `lazycortex-core:lazy-core.markdown-style` |
+
+  - Check only the routines the merged registry actually contains — an absent routine means the plugin is not installed here and is never a finding. Read each one's `protocols` list (or the singular `protocol`); a missing entry is `[WARN] routine <name> is missing its mandatory protocol <id> — its jobs write markdown with no style contract | .claude/lazy.settings.json`.
+  - **Coordinator-owned fix**, mechanically derivable: `Bash(lazycortex-core add-protocols --routine <name> --ids <id>)`. The union only appends, so an operator's own additions survive.
+  - Optional protocols are never checked here and never offered — attaching them is the operator's call through `/lazy-routine.offer-protocols`.
+  - The table is the mandatory set the shipped installs seed; a plugin that adds a markdown-writing routine adds its row in the same change.
 - **Memory consistency** — locate project memory dir under `$HOME/.claude/projects/*/memory/` matching the current project path:
   - `[FAIL]` `MEMORY.md` references a missing file
   - `[WARN]` memory `.md` exists but is not indexed in `MEMORY.md`
@@ -245,10 +292,54 @@ Findings are emitted only for plugins where both sides carry a comparable versio
 
 Finding schema:
 
-- Outdated plugin: `[WARN] plugin <name>@<mp> is outdated (<installed> → <latest>) | installed_plugins.json` `detail: scope=<user|project> | path=<installPath>` `fix: run `/plugin update <name>` or `/plugin install <name>@<mp>` to upgrade`
+- Outdated plugin: `[WARN] plugin <name>@<mp> is outdated (<installed> → <latest>) | installed_plugins.json` `detail: scope=<user|project> | path=<installPath>` `fix: `claude plugin update <name>` (auto-applied in Phase 4; takes effect after a session restart)`
 - Marketplace cache fallback (one per unreachable marketplace): `[INFO] marketplace <mp> unreachable — using cached manifest (last updated <lastUpdated>)`
 
 Worst-case latency: 5 s × number of referenced marketplaces (sequential today; parallelize if it bites).
+
+## Phase 2.55 — Naming-canon drift in consumer state
+
+Coordinator-owned inline check. `lazy-core.hygiene` § Naming puts routine names and hook short names in the owning plugin's namespace; consumer state written before a plugin adopted that canon still carries the pre-namespace form. Nothing migrates by force — this phase names the drift and offers the rename, per plugin, in Phase 4. Doubt reads as not-a-problem: a name, key, or identity this phase cannot prove drifted stays unreported — a wrong rename is worse than a stale one.
+
+Scan four surfaces of the merged `lazy.settings.json`:
+
+1. **Routine keys** — a `routines[<name>]` whose first dot-segment is not a `lazy-*` namespace, while the plugin its `command[0]` (or `expert`) resolves to owns a `lazy-*` one. The canonical key is that plugin's namespace plus the existing verb and scope segments.
+1a. **Expert keys — the same canon read backwards.** An `experts[<key>]` whose first dot-segment IS a `lazy-*` namespace drifted the other way: § Naming keeps an expert key at `<domain>.<role>`, because it names a role in a domain rather than a file any plugin ships. The canonical key is the existing one with the leading `lazy-` stripped (`lazy-review.coordinator` → `review.coordinator`). Rename only when the entry's `agent` resolves to an installed plugin and the stripped key is free; a `lazy-*` key nothing serves is unresolvable, not drifted. Three things move as one unit or the dispatch breaks: the key, the `git_author` derived from it (only when its email is still `<old key>@bot.invalid` — a customised identity is the operator's), and every `routines[<name>].expert` naming it. The routine's own key is NOT touched — it is on the other side of the split and already canonical.
+2. **Hook short names** — entries in a routine's `hooks_enabled` or in `hooks.disabled` that are not a shipped hook's canonical name (the stem of its file under `<plugin>/hooks/`).
+3. **Seeded consumer files** — a file under `.claude/templates/` whose name matches a shipped template's pre-namespace form while the plugin now seeds it namespaced. The seeding install step only ever writes the canonical name; moving a consumer's customised copy is this phase's job, not the installer's, so one place owns every such rename rather than seven install skills each carrying their own.
+
+Emit one finding per drifted name. The fix is a rename in place — the settings key, or `mv` for a file — never a delete and never a fresh default written beside the old copy: the consumer's own content moves to the canonical name. A routine rename also carries its `last_run` entry in the daemon state, so the routine does not read as never-run and fire an unscheduled pass.
+
+Finding schema:
+
+- `[WARN] <kind> `<current>` is outside the naming canon (→ `<canonical>`) | <where>` `detail: <plugin> owns the `lazy-*` namespace for this key` `fix: rename in place (auto-applied in Phase 4)`
+- Expert key (surface 1a, reverse direction): `[WARN] expert key `<current>` carries a plugin namespace (→ `<canonical>`) | lazy.settings.json` `detail: an expert key is `<domain>.<role>`; `<plugin>:<agent>` stays the artifact reference` `fix: rename key + derived git_author + every routines[].expert naming it (auto-applied in Phase 4)`
+
+Silent when nothing drifted. A name whose owning plugin cannot be resolved is left alone — an unresolvable owner is not evidence of drift.
+
+**Dead settings keys (same pass, same finding style).** Keys of retired features are dead config — the precedent is the `agent_models` prune of deleted agents. Scan the merged `lazy.settings.json` for: `isolate` or `allow_merge` inside any `routines[<name>]` block, and `daemon.git.max_concurrent_tasks` (all retired with the routine-side worktree path; the runtime ignores them with a stderr warning). Emit one finding per occurrence:
+
+- `[WARN] dead key `<key>` in `<where>` — retired with the routine-side worktree path` `fix: delete the key (offered in Phase 4)`
+
+The fix deletes the key only, never the enclosing routine or git block. Silent when none present.
+
+**Bot-identity domain canon (same pass, same finding style).** Every automatic git identity uses the `@bot.invalid` domain (RFC 2606 — undeliverable by construction, and recognised as-is by every consumer that classifies commits by the `@bot.` substring). Scan the merged `lazy.settings.json` for any `experts[<name>].git_author.email` or `routines[<name>].git_author.email` that does not end in `@bot.invalid`. Emit one finding per occurrence:
+
+- `[WARN] bot identity `<email>` in `<where>` is off the `@bot.invalid` canon` `detail: loop-detect and coordinator operator-vs-bot checks key on the canonical domain` `fix: rewrite the domain, keeping the local part (offered in Phase 4)`
+
+Silent when every identity is canonical or no `git_author` blocks exist.
+
+**Sanitizer-routine registration (same pass, same finding style).** The state sanitizers only run when their routines are registered, and an install that predates them leaves a daemon-enabled repo silently unsanitized. When the merged settings carry `daemon.enabled: true`, check per enabled plugin (enabled-set per `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md`):
+
+- `lazycortex-core` → `routines["lazy-core.autocheckup"]` present.
+- `lazycortex-review` (with a `review` settings section) → `routines["lazy-review.sanitize"]` present.
+- `lazycortex-wiki` (with a non-empty `wiki.scopes`) → `routines["lazy-wiki.doctor-apply"]` present.
+
+Emit one finding per missing routine:
+
+- `[WARN] sanitizer routine `<name>` is not registered while the daemon is enabled | lazy.settings.json` `fix: re-run /<owning-namespace>.install (offered in Phase 4)`
+
+Silent when the daemon is disabled, the owning plugin is disabled or unconfigured, or every routine is present.
 
 ## Phase 2.6 — Release-mode outdated-plugin suppression
 
@@ -360,7 +451,7 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 
 **11a. Public-repo guard** → `lazy-guard.check-public`
 - *Availability*: `lazycortex-core` meets the canonical signal set above.
-- *Run condition*: `.guard-waivers.json` exists at the repo root.
+- *Run condition*: `.guard-public.json` exists at the repo root.
 - *On invoke*: fold guard's summary (category × severity counts, waivered count) and FAIL/WARN findings into a **Guard** subsection.
 
 **11b. Logging coverage** — inline, via `lazy-core.audit` Phase 1 checks
@@ -386,7 +477,7 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 **11f. Expert runtime** — inline, via `lazy-core.audit` Agent D findings
 - *Availability*: always (expert-runtime checks are part of `lazycortex-core` itself — no separate plugin probe needed).
 - *Run condition*: `.claude/lazy.settings.json` contains a non-empty `experts` section, a `lazy-core.runtime` section, **or a non-empty `external_dirs.paths` list**. Skip if none is present (no expert runtime configured — silent skip, no report entry). Test the `paths` list, never the section: a settings migration stamps a `{"_version": 1}` stub for every known section into every repo, so "non-empty section" would match everywhere and defeat the skip.
-- *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D13 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).
+- *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D15 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).
 
 **11g. Obsidian coverage** → `lazy-obsidian.audit`
 - *Availability*: `lazycortex-obsidian` meets the canonical signal set above.
@@ -402,6 +493,21 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 - *Availability*: always — the contract lives in `lazycortex-core` itself.
 - *Run condition*: at least one file in `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md`, `.claude/agents/*.md`, `claude/*/agents/*.md`, `.claude/commands/*.md`, or `claude/*/commands/*.md`. No local skills, agents, or commands → silent skip.
 - *On invoke*: `Read` `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`, then judge every one of those files' `description:` against it inline (do NOT dispatch a separate skill). One `[WARN]` per mechanism-only description, `[FAIL]` per missing one; fold into a **Description triggers** subsection. A description that will not fire is invisible to the router, so the count matters as much as the individual lines — lead the subsection with `<n> of <total> descriptions carry no trigger`.
+
+**11j. `Agent`-tool presence** — inline, via `lazy-core.audit` skill-writing check 6 + agent-writing check 5
+- *Availability*: always — the contract lives in `lazycortex-core` itself.
+- *Run condition*: at least one file in `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md`, `.claude/agents/*.md`, or `claude/*/agents/*.md`. No local skills or agents → silent skip.
+- *On invoke*: for each agent file, grep `^tools:` and flag `[WARN]` when present but missing `Agent`; for each skill file, grep `^allowed-tools:` and flag `[WARN]` the same way (a skill with no `allowed-tools:` field is out of scope — it inherits the caller's tools). Never flag `Agent`'s presence. Fold into an **Agent-tool coverage** subsection.
+
+**11k. Research-marker semantics** — inline, via `lazy-core.audit` skill-writing check 7
+- *Availability*: always — the contract lives in `lazycortex-core` itself.
+- *Run condition*: at least one file in `.claude/skills/*/SKILL.md` or `claude/*/skills/*/SKILL.md`. No local skills → silent skip.
+- *On invoke*: judge each skill's description/body against the research-marker convention per `lazy-core.skill-writing § 10` (do NOT dispatch a separate skill); flag `[WARN]` per missing-marker or marker-without-query-contract finding. Fold into a **Research markers** subsection.
+
+**11l. Specs plugin coverage** → `lazy-spec.audit`
+- *Availability*: `lazycortex-specs` meets the canonical signal set above.
+- *Run condition*: same as availability — plugin installation / enablement is the opt-in; no further gate.
+- *On invoke*: fold audit findings into a **Specs** subsection.
 
 ## Phase 4 — Present + fix + waive
 
@@ -430,33 +536,45 @@ File exists but has no index entry.
 - <check_id> | <normalized_path> — waived <YYYY-MM-DD>, backend=<file|mcp>, location=<abs path or mcp memory-id>, reason="<reason>"
 (omit the whole section when N == 0)
 
-### Fixes available
-- [ ] Fix 1: <description> (auto-fixable)
-- [ ] Fix 2: <description> (auto-fixable)
-- [ ] Fix 3: <description> (needs manual review)
+### Applied (<N>)
+- <check_id> | <path> — <what changed, one line>
+(omit the whole section when N == 0)
 
-Apply all auto-fixable? [y/N]
+### Fixes available
+- [ ] Fix 1: <description>
+- [ ] Fix 2: <description>
+
+Apply? [y/N]
 ```
 
-After the report, ask the user which fixes to apply. Apply only confirmed fixes. Then enter the **per-WARN waive loop** described in 4a below. Fixes available in-coordinator:
+Fixes split into two classes, marked per bullet below:
 
-- Rules oversized → suggest running `/lazy-core.optimize`; don't auto-slim here.
-- Rule drift / orphans → direct the user to run the owning plugin's install skill (`/<namespace>.install`; `lazy-log.*` rules are owned by `/lazy-core.install`). Do NOT auto-overwrite here — the install skill's per-rule `AskUserQuestion` is the sanctioned reconciliation flow.
-- Missing rules frontmatter → add `---\ndescription: ...\npaths:\n  - "<glob>"\n---` (YAML block-list per Claude Code docs) for scoped rules, or `---\ndescription: ...\nalways_loaded: <one-line reason>\n---` for rules that must load every turn.
-- Rule lacks scope AND waiver → ask the user, per rule, whether the rule is legitimately always-loaded. If yes, add `always_loaded: <reason>` (reason must be substantive — one line explaining *why* every turn needs it, not `true`). If no, add a `paths:` block-list narrowing it to the folders where it applies. Show the proposed frontmatter diff before writing. Never auto-pick a scope — only the user knows the rule's true audience.
-- Inline-array `paths:` shape (FAIL from `lazy-core.audit` rule-writing check 3) → in-place migration to canonical YAML block-list. Parse the existing `paths: ["a", "b", ...]` line, preserve all globs verbatim (including quote style), rewrite as a key on its own line followed by one `  - "<glob>"` per array element. The conversion is mechanical (no semantic change) but always show the diff before writing — the rule file is loaded into context for whoever's editing files in its scope, so even a YAML-shape change deserves explicit user confirmation. Apply per-rule via `AskUserQuestion`; batch only on explicit "apply all" from the user.
-- Authoring rule without template reference (WARN from `lazy-core.audit` rule-writing check 9) → ask the user, per finding, whether to scaffold a template. Two-step fix: (1) derive `<artifact-type>` from the rule filename (`*.writing.md` → strip `-writing`/`.writing` and pluralize as needed; e.g. `lazy-core.skill-writing.md` → `skill`), copy the matching base template (`<plugin>/templates/core/{rule,skill,agent}-template.md`) to `<plugin>/templates/<group>/<derived-name>-template.md` — default `<group>` to the plugin's primary namespace (`core` for `lazycortex-core`); ask the user if they prefer a different group name. (2) Prepend `**Template:** ${CLAUDE_PLUGIN_ROOT}/templates/<group>/<derived-name>-template.md — start here when creating a new <artifact-type>.` immediately after the rule's H1 + orientation paragraph, before the first `## ` section. Show the full diff (new template file + rule edit) before writing; apply only on explicit user confirmation. Per `lazy-core.scaffold`.
-- Mechanism-only `description:` (WARN from Phase 3 § 11i) → offer a rewrite, one finding at a time. First `Read` `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md` and the artifact's own body: the trigger has to come from what the file actually does and who actually calls it, so before proposing a caller trigger, grep the artifact's name across `.claude/` and `claude/` and name the caller you found. Compose the replacement `description:` line, show it beside the current one, and ask per finding via `AskUserQuestion` (`replace` / `keep` / `let me word it`). On confirmation `Edit` that one frontmatter line and nothing else — not the body, not another key. **Never batch this offer**: each description is a separate judgement about what the artifact is for, an "apply all auto-fixable" answer does not reach it, and a wrong trigger is worse than an honest mechanism line because it makes the router fire the skill on the wrong requests. A `FAIL` (absent `description:`) is reported, never fixed — a missing description means the author never said what the artifact is for, and that is not doctor's call.
-- Memory index: add missing entries, remove broken links; flag stale for review.
-- Settings leakage: offer to move entries between files (respect the split in `rules/lazy-core.hygiene.md`).
-- Permissions leakage into tracked `settings.json`: offer an in-place migration — move the entire `permissions.*` block (both `allow` and `ask` arrays) from tracked `settings.json` to the paired `settings.local.json`. Merge with any existing entries there, preserving order and deduplicating. Leave `enabledPlugins`, `hooks`, `env`, `enabledMcpjsonServers`, and similar enablement flags in the tracked file untouched. Show the diff before writing; apply only on explicit user confirmation.
-- Gitignore coverage: append missing patterns under a dedicated language section.
-- Path hygiene: replace hardcoded paths with relative equivalents; show diff before applying.
-- MCP enablement: either set `enableAllProjectMcpServers: true` in global settings or add `enabledMcpjsonServers` to project settings; remove stale entries.
-- MCP tools not whitelisted: invoke `lazy-guard.allow-mcp <server>` for each confirmed finding — do NOT write `permissions.allow` directly from doctor. `allow-mcp` owns scope-routing, dedup, and cross-scope cleanup; reusing it keeps both skills consistent.
-- Agents / skills / CLAUDE.md / hook scripts — report only, never auto-edit. The one carve-out is the `description:` frontmatter line, via the per-finding offer above; every other byte of a skill or agent stays report-only.
-- Plugin dependency warnings — report only; fixing requires enabling the missing plugin in `settings.json` (user's decision) or editing the declaring plugin's manifest.
-- Plugin outdated / unrecorded version (Phase 2.5) — report only; direct the user to run `/plugin update <name>` or reinstall. Doctor never shells out to `claude plugin update`. In release mode, Phase 2.6 suppresses content findings on this plugin's owned rules — the suppression counter is surfaced so the user knows to re-run after upgrading.
+- **(auto)** — the correct result follows from what the check already read; there is no second defensible answer. Doctor writes it during the run and records one line under `### Applied`. No prompt, no diff preview. The write is small, in-file, and recoverable from git.
+- **(ask)** — the fix encodes a decision the checks cannot derive (a rule's audience, whether a plugin should be enabled), or it deletes something. Doctor proposes and waits.
+
+After the report, ask the user which of the **(ask)** fixes to apply, and apply only those. Then enter the **per-WARN waive loop** described in 4a below. Fixes available in-coordinator:
+
+- Rules oversized (ask) → suggest running `/lazy-core.optimize`; don't auto-slim here.
+- Rule drift on an install-managed rule (auto) → restore the file from the owning plugin's shipped source. A plugin rule is not an editing surface: a project that needs different behaviour writes its own rule alongside it, so a divergence from the plugin source is stale content rather than a deliberate override, and preserving it means the consumer silently runs on a rule the plugin no longer ships. Identify install-managed status from the owning install skill's registry (`lazy-log.*` rules are owned by `/lazy-core.install`), never from the filename. Report which rules were restored so an operator who did mean to edit one sees it immediately.
+- Orphan rule — a `.claude/rules/*.md` no installed plugin claims (ask) → report; deleting a file whose owner is simply not installed right now is not doctor's call.
+- Missing rules frontmatter (mixed) → `description:` is derived from the rule body and written (auto). The scope key (`paths:` vs `always_loaded:`) is a separate decision — see the next bullet.
+- Rule lacks scope AND waiver (ask) → ask the user, per rule, whether the rule is legitimately always-loaded. If yes, add `always_loaded: <reason>` (reason must be substantive — one line explaining *why* every turn needs it, not `true`). If no, add a `paths:` block-list narrowing it to the folders where it applies. Show the proposed frontmatter diff before writing. Never auto-pick a scope — only the user knows the rule's true audience.
+- Inline-array `paths:` shape (FAIL from `lazy-core.audit` rule-writing check 3) (auto) → in-place migration to canonical YAML block-list. Parse the existing `paths: ["a", "b", ...]` line, preserve all globs verbatim (including quote style), rewrite as a key on its own line followed by one `  - "<glob>"` per array element. No glob is added, dropped, or reworded, so the rule's scope is byte-equivalent before and after.
+- Authoring rule without template reference (WARN from `lazy-core.audit` rule-writing check 9) (auto) → two-step scaffold. (1) Derive `<artifact-type>` from the rule filename (`*.writing.md` → strip `-writing`/`.writing` and pluralize as needed; e.g. `lazy-core.skill-writing.md` → `skill`), copy the matching base template (`<plugin>/templates/core/{rule,skill,agent}-template.md`) to `<plugin>/templates/<group>/<derived-name>-template.md`, with `<group>` = the plugin's primary namespace (`core` for `lazycortex-core`). (2) Prepend `**Template:** ${CLAUDE_PLUGIN_ROOT}/templates/<group>/<derived-name>-template.md — start here when creating a new <artifact-type>.` immediately after the rule's H1 + orientation paragraph, before the first `## ` section. Per `lazy-core.scaffold`. Both the derived name and the group follow from names already on disk; a maintainer who wants a different group renames the file afterwards.
+- `description:` without a trigger — WARN (mechanism-only) or FAIL (absent) from Phase 3 § 11i (auto) → rewrite the line. `Read` `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md` and the artifact's own body, then grep the artifact's name across `.claude/` and `claude/` before claiming a caller trigger — the trigger states what the file does and who invokes it, and both are already written in the body and the call sites. `Edit` that one frontmatter line and nothing else — not the body, not another key — and record old and new under `### Applied` so a wrong trigger is one line to spot and revert. The single exception is an artifact with no substantive body to read from (an empty or stub file): nothing to derive, so it stays a report.
+- Missing mandatory routine protocol (auto): `Bash(lazycortex-core add-protocols --routine <name> --ids <id>)` per finding. The routine and the protocol both come from the check's own table, and the union only appends — nothing the operator attached is touched.
+- Memory index (auto): add missing entries, remove broken links; flag stale for review.
+- Settings leakage (auto): move each misplaced key to the file the split in `rules/lazy-core.hygiene.md` assigns it.
+- Permissions leakage into tracked `settings.json` (auto): move the entire `permissions.*` block (both `allow` and `ask` arrays) from tracked `settings.json` to the paired `settings.local.json`. Merge with any existing entries there, preserving order and deduplicating. Leave `enabledPlugins`, `hooks`, `env`, `enabledMcpjsonServers`, and similar enablement flags in the tracked file untouched. The destination is fixed by the hygiene split, and the permission set itself is unchanged by the move.
+- Undeclared plugin marketplace (auto, only when the source resolved): add `<marketplace>` to `extraKnownMarketplaces` in the settings file that enables the plugin, copying the resolved block verbatim (`source`, plus `autoUpdate` when present — never `installLocation` / `lastUpdated` from `known_marketplaces.json`). Purely additive; touches nothing else in the file. When the source did not resolve, report only — inventing a marketplace source is the operator's call.
+- Gitignore coverage (auto): append missing patterns under a dedicated language section.
+- Path hygiene (auto): replace hardcoded paths with their relative or `$HOME`-anchored equivalents.
+- Stale `enabledMcpjsonServers` entry naming a server no `.mcp.json` defines (auto): remove it.
+- MCP enablement (ask): either set `enableAllProjectMcpServers: true` in global settings or add `enabledMcpjsonServers` to project settings — which servers this project trusts is the operator's call.
+- MCP tools not whitelisted (ask): invoke `lazy-guard.allow-mcp <server>` for each confirmed finding — do NOT write `permissions.allow` directly from doctor. `allow-mcp` owns scope-routing, dedup, and cross-scope cleanup; reusing it keeps both skills consistent.
+- Agents / skills / CLAUDE.md / hook scripts — report only, never auto-edit. The one carve-out is the `description:` frontmatter line, via the rewrite above; every other byte of a skill or agent stays report-only.
+- Plugin dependency warnings (ask) — report only; fixing requires enabling the missing plugin in `settings.json` (user's decision) or editing the declaring plugin's manifest.
+- Plugin outdated (Phase 2.5) (auto) → run `Bash(claude plugin update <name>)` and record the version delta under `### Applied`. The update itself is mechanical — the marketplace decides the target version, not doctor. What doctor cannot finish is the tail: the CLI applies the new files only after a session restart, and a MINOR bump means `/<namespace>.install` has to run against those new files, i.e. after the restart. So every applied update also emits a report line naming both follow-ups. In release mode, Phase 2.6 suppresses content findings on this plugin's owned rules — the suppression counter is surfaced so the user knows to re-run after upgrading.
 
 ### Loop runtime fix offers
 
@@ -530,7 +648,7 @@ Report one line per path. `not_a_symlink` and `source_missing` rows are never of
 
 **Fix L5 — Shared inbox** (trigger: D12 FAIL `inbox_collision`)
 
-Report only, no fix offer: print the conflicting `other_repo` and state that one of the two checkouts must set `daemon.run_here: false` (or pin a host list). Doctor does not choose which checkout drives a shared inbox.
+Report only, no fix offer: print the conflicting `other_repo` and state that one of the two projects must stop naming a checkout on this host in its `daemon.run_here`. Doctor does not choose which checkout drives a shared inbox.
 
 **Fix L6 — `daemon.git` unconfigured** (trigger: D3 FAIL "daemon.enabled is true but daemon.git is null" or "daemon.git missing required field base_branch")
 

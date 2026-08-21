@@ -3,15 +3,16 @@ tags:
   - {{product_tag}}
   - spec/draft
 spec_role: design
+spec_doc_type: design
+wiki_pinned_topics:
+  - wiki/doc-kind/design
+  - wiki/product/{{product}}
+  - wiki/category/{{category}}
 spec_stage: draft
 spec_source_requests: []
 spec_source_docs: []
 ---
 # {{slug}} — design
-
-> **{{subsystem}}** · **{{product}}** · **{{slug}}** — design
-
-_Populated by `spec.create-asset` (called directly or via `spec.create-change`). Behavior-only — describes WHAT the change does. No source URLs, file paths, or code identifiers here. Describes the intended target behavior, not what the code does today; only an explicit operator decision narrows scope, never the state of the implementation._
 
 ## Overview
 _What is being changed and why._
@@ -24,6 +25,12 @@ _How it is now — not necessarily behavior: architecture, configuration, struct
 
 ## Target State
 _How it will be. The diagram anchors here, when there is something to draw._
+
+## Known Limitations
+_Things the change does, but with a known ceiling — accepted constraints._
+
+## Boundaries
+_What the change deliberately does NOT do; seams with neighboring features, who owns what._
 
 # Sources
 #protected/spec/sources

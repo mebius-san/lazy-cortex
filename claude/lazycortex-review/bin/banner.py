@@ -133,6 +133,12 @@ _CONCERN_RE = re.compile(
     r"^>\s*\[!attention\].*#review/concern.*$",
     re.MULTILINE,
 )
+# A decision-candidate carries no #review/… tag — the type token itself is the whole match
+# (lazy-core.markdown-style: the accept/reject pair is mandatory on every candidate).
+_CANDIDATE_OPEN_RE = re.compile(
+    r"^>\s*\[!decision-candidate\].*$",
+    re.MULTILINE,
+)
 _TICKED_OPTION_RE = re.compile(r"^>\s*-\s*\[x\]", re.MULTILINE | re.IGNORECASE)
 
 
@@ -176,6 +182,38 @@ def _any_unanswered_question(body: str) -> bool:
   return False
 
 
+def _has_unanswered_candidate(body: str) -> bool:
+  """
+  Report whether `body` contains a decision-candidate callout with no operator tick.
+
+  Args:
+    body: Document text, scanned outside code fences for `[!decision-candidate]` callouts.
+
+  Returns:
+    True if at least one unanswered `[!decision-candidate]` callout is present, False otherwise.
+  """
+
+  # Domain(review.markup):
+  # # Decision-candidate identity and answered state
+  # A decision-candidate callout carries no `#review/…` tag; the callout type token itself is
+  # its identity. Every candidate must carry the mandatory accept/reject option pair, and it
+  # counts as answered only when a ticked option sits inside that same candidate's own block —
+  # no carve-outs apply, per callout. An unanswered candidate is an operator-facing block that
+  # holds the review banner at "Action needed" exactly like an unanswered question. Callout-
+  # shaped lines that appear inside a code fence are inert body content, never a live candidate.
+
+  # same per-callout gate as questions: a candidate is answered only by a tick inside its
+  # own block (the coordination playbook's finalize gate has no carve-outs)
+  # waiver: deferred sibling import matching this module's established parser-import shape
+  import parser as _parser
+  scan_body = _parser.strip_code_fences(body)
+  for match in _CANDIDATE_OPEN_RE.finditer(scan_body):
+    block = _find_callout_block(scan_body, match)
+    if not _TICKED_OPTION_RE.search(block):
+      return True
+  return False
+
+
 def _any_concern(body: str) -> bool:
   """
   Report whether `body` contains an open concern callout.
@@ -208,7 +246,7 @@ def desired_state(
        `review_validation_round >= concerns_decision_threshold` (per-class config, default 2) + no
        `review_approved_with_concerns: true`) → CONCERNS_DECISION (highest priority — operator must
        choose continue vs finalize-with-concerns before any other gate applies).
-    2. open `#review/question` or `#review/concern` → ACTION_NEEDED
+    2. open `#review/question`, unanswered `[!decision-candidate]`, or `#review/concern` → ACTION_NEEDED
     3. consumer's `domain_ready` predicate False → ACTION_NEEDED
     4. `approved == True` → phase-aware:
          - `review_phase in {"validators", "terminals"}` → `IN_PROCESS`. Validators (stage 5) and
@@ -244,7 +282,7 @@ def desired_state(
     return State.IN_PROCESS
   if concerns_decision_pending:
     return State.CONCERNS_DECISION
-  if _any_unanswered_question(body) or _any_concern(body):
+  if _any_unanswered_question(body) or _has_unanswered_candidate(body) or _any_concern(body):
     return State.ACTION_NEEDED
   if not domain_ready:
     return State.ACTION_NEEDED

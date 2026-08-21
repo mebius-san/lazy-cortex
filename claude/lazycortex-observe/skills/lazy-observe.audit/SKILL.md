@@ -1,7 +1,7 @@
 ---
 name: lazy-observe.audit
 description: "Run when the operator asks to audit the lazycortex-observe plugin's own shipped surface — rule bodies still encoding their invariants, execution-discipline preambles, logging conventions. Delegated from `lazy-core.doctor` Phase 3. Not the skill for 'are my metrics arriving' — that is `/lazy-observe.doctor`; this one never looks at the running shipper."
-allowed-tools: Read, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList
+allowed-tools: Read, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, Agent
 ---
 # lazy-observe.audit
 

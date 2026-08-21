@@ -17,6 +17,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/lazy-guard.secrets.py\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/lazy-guard.check-public.py\"",
             "timeout": 10
           },
@@ -30,6 +35,11 @@
       {
         "matcher": "mcp__git__git_commit",
         "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/lazy-guard.secrets.py\"",
+            "timeout": 10
+          },
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/lazy-guard.check-public.py\"",

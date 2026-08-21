@@ -25,9 +25,6 @@ if TYPE_CHECKING:
   pass
 
 
-# Cross-repo link prefix — such targets never resolve to a local deletion.
-_CROSS_REPO_PREFIX = "@"
-
 # Result dict keys.
 _K_SCOPE        = "scope"
 _K_DELETED      = "deleted"
@@ -41,7 +38,15 @@ class NodePruner:
   Pruner of dangling See-also links to one deleted node within a single scope.
 
   Instances are single-use: construct one, call `prune`, then discard it.
+
+  Guarantees:
+    - Pruning NEVER writes to version control and NEVER dispatches a curator; committing the edited
+      nodes and the rebuilt index stays the caller's responsibility.
   """
+
+  # Contract:
+  # Pruning NEVER writes to version control and NEVER dispatches a curator.
+  # Committing the edited nodes and the rebuilt index is the caller's own work.
 
   def __init__(self, *, repo: Path | str, scope_id: str, cfg: dict) -> None:
     self._repo = Path(repo).resolve()
@@ -54,6 +59,12 @@ class NodePruner:
   def prune(self, deleted_path: Path | str) -> dict:
     """
     Remove every See-also link to `deleted_path` and rebuild the topic index.
+
+    Guarantees:
+      - Only the See-also items resolving to the deleted node are removed; every other line of a
+        referring node survives untouched, and no node file is created, renamed, or deleted.
+      - The scope's topic index is rebuilt before the call returns, so it never names a topic that
+        only the pruned links carried.
 
     Args:
       deleted_path: Absolute or repo-relative path of the deleted node.
@@ -68,6 +79,19 @@ class NodePruner:
     deleted_abs = (deleted if deleted.is_absolute() else self._repo / deleted).resolve()
     pruned: list[str] = []
 
+    # Domain(wiki.graph):
+    # # Fallout of removing a node
+    # Removing a node from the wiki is not finished when its file is gone: every other node that
+    # named it in its See-also section is left holding a link to something that no longer exists.
+    # A link to an absent node is a broken edge, never a placeholder kept for a future restoration,
+    # so the removal propagates outward until no surviving node names the removed one. The loss is
+    # confined to the naming lines themselves — a referring node keeps everything else it says and
+    # every other neighbour it names.
+
+    # Contract:
+    # Only the See-also items that resolve to the deleted node are removed. Every other line of a
+    # referring node MUST survive untouched, and no node file is ever created, renamed, or deleted.
+
     # sweep every node in the scope, recording the ones that lost a link
     for node_path in self._resolver.iter_nodes(self._cfg):
       node = _nodes.node_for(node_path)
@@ -76,6 +100,10 @@ class NodePruner:
         continue
       if self._prune_node(node, node_path, deleted_abs):
         pruned.append(node_path.relative_to(self._repo).as_posix())
+
+    # Contract:
+    # The scope's topic index MUST be rebuilt before the call returns, so it never
+    # names a topic that only the pruned links carried.
 
     # the pruned See-also links may have removed a topic entirely — rebuild the index
     index_path = _index.TopicIndex(
@@ -118,8 +146,8 @@ class NodePruner:
     dropped = False
     for item in items:
       target, _gloss = _doctor._extract_link_target(item)
-      # guard: empty or cross-repo target — cannot be this local deletion
-      if not target or target.startswith(_CROSS_REPO_PREFIX):
+      # guard: empty target — nothing to resolve against the deletion
+      if not target:
         continue
       # guard: target does not resolve to the deleted file
       if not self._points_at(node_dir, target, deleted_abs):
@@ -147,6 +175,7 @@ class NodePruner:
     Returns:
       True on a match under either resolution, False otherwise.
     """
+
     # guard: node-relative resolution matches
     if (node_dir / target).resolve() == deleted_abs:
       return True

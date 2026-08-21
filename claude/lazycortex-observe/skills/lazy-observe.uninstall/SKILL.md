@@ -1,7 +1,7 @@
 ---
 name: lazy-observe.uninstall
 description: "Run when the operator asks to stop shipping metrics from this host, remove the lazycortex-observe service, or clean up before switching to a different observer. DESTRUCTIVE — it unloads a supervised launchd/systemd unit; the WAL, log, and operator-private-state deletions each ask first, and answers under `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` are kept by default. Idempotent — a clean host is a silent no-op."
-allowed-tools: Read, Glob, Bash(rm *), Bash(launchctl *), Bash(systemctl *), Bash(test *), Bash(date *), Bash(uname *), Bash(python3 *)
+allowed-tools: Read, Glob, Bash(rm *), Bash(launchctl *), Bash(systemctl *), Bash(test *), Bash(date *), Bash(uname *), Bash(python3 *), Agent
 ---
 # Uninstall lazy-observe
 

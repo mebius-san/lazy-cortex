@@ -1,16 +1,27 @@
 ---
 chapter_type: faq
-summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, tests, and the checker stack.
-last_regen: 2026-08-11
+summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
+last_regen: 2026-08-19
 no_diagram: true
 source_skills:
   - lazy-python.install
   - lazy-python.audit
   - lazy-python.check-style
+  - lazy-python.knowledge-sweep
   - lazy-python.docstring-writer
   - lazy-python.test-writer
   - lazy-python.code-reviewer
-source_sha: 41539cc1c95f454532d9d9902144f9ca174df5db
+  - lazy-python.domain-writer
+  - lazy-python.contract-writer
+  - chk
+  - tst
+  - pcf.py
+  - toi.py
+  - pch.py
+  - review.py
+  - lazy-python.coding-guidelines
+  - lazy-python.checking-guidelines
+source_sha: 7e55c7700a727bafa0a894c538571d86f4359c7b
 ---
 # Frequently asked questions
 
@@ -74,7 +85,7 @@ That is the guideline-review phase, the seventh and final step of `chk-py all`. 
 
 ## `chk-py all` is failing with `review: PENDING` even though every other check is clean. How do I clear it?
 
-A pending review now fails the gate instead of passing silently past it: `review.py` exits a distinct `PENDING` code (2) whenever the scope has changed since its last review and nobody has decided it yet. Dispatch the `lazy-python.code-reviewer` agent against the manifest path printed just above the `PENDING` line, then run `chk-py review --render <findings.json>` — that render step is what actually clears the gate, and it exits non-zero itself if the agent found a `FAIL`. If you genuinely cannot dispatch an agent in that context — a nested writer agent, a scripted sweep — set `CHK_REVIEW=skip` for that single invocation; it exits 0 but records no decision, so the same scope is still pending the next time anyone runs `chk-py all` against it. For CI or automation where the `claude` CLI is installed but no one is present to dispatch manually, set `CHK_REVIEW=headless` instead — `review.py` dispatches the reviewer agent itself through the CLI and renders its findings in the same run. Neither flag is a substitute for an actual review decision; a scope that has not changed since its last real review reuses those findings rather than re-manifesting.
+A pending review now fails the gate instead of passing silently past it: `review.py` exits a distinct `PENDING` code (2) whenever the scope has changed since its last review and nobody has decided it yet. Dispatch the `lazy-python.code-reviewer` agent against the manifest path printed just above the `PENDING` line, then run `chk-py review --render <findings.json>` — that render step is what actually clears the gate, and it exits non-zero itself if the agent found a `FAIL`. `review.py` also takes a `--base <ref>` flag to resolve the scope against a landed range (a unit of work that shipped intermediate commits) instead of the current diff plus untracked files. If you genuinely cannot dispatch an agent in that context — a nested writer agent, a scripted sweep — set `CHK_REVIEW=skip` for that single invocation; it exits 0 but records no decision, so the same scope is still pending the next time anyone runs `chk-py all` against it. For CI or automation where the `claude` CLI is installed but no one is present to dispatch manually, set `CHK_REVIEW=headless` instead — `review.py` dispatches the reviewer agent itself through the CLI and renders its findings in the same run. Neither flag is a substitute for an actual review decision; a scope that has not changed since its last real review reuses those findings rather than re-manifesting.
 
 ---
 
@@ -88,23 +99,27 @@ To disable the check, set `[tool.pcf] check_block_comments = false` in `pyprojec
 
 ---
 
-## What are the `Contract:`, `Decision:`, and `Domain(...)` markers, and how do I write them?
+## `chk-py` is flagging a comment or docstring line for not being written in a configured language. What is this check?
 
-These are the three "block" markers — Capitalized names that open a standalone comment block rather than annotate a single line. (Contrast the lowercase one-line markers `opt:`, `guard:`, `limit:`, `ref:`, `waiver:`, and the CAPS temporary markers `TODO:`, `TMP:`, `DBG:`.)
+`pcf` proves the *language* of every comment and docstring, on top of proving content and format: `check_language` (on by default, admitting only `english`) walks each letter in a comment or docstring and reports the first one whose Unicode script belongs to no configured language — one finding per offending line, naming the character and the languages the project allows. Punctuation, digits, and symbols carry no language and never trip the check.
 
-- **`# Contract:`** marks a caller-visible guarantee that must survive refactoring — data ownership, transaction requirements, thread-safety, index alignment. The marker line carries no text after the colon; the guarantee itself follows on subsequent `#` lines. `Contract:` comments are the *only* source `lazy-python.docstring-writer` may draw a method's `Guarantees:` docstring section from (plus the public protocol itself) — it never infers a guarantee from the method body.
-- **`# Decision:`** records a real design fork worth keeping next to the code: the thesis is mandatory on the marker line itself — `# Decision: <chose X, not Y> — <why>` — with any longer rationale continuing on following `#` lines. `pcf` only proves the thesis is non-empty; whether it records a genuine fork (not the only viable move, not a repo convention, not something obvious from the code) is a `chk-py review` judgement.
-- **`# Domain(group):`** marks a comment describing domain rules, mechanics, or algorithms — never method implementation. The group name categorizes the comment by topic (grep for existing `# Domain(` groups before inventing a new one) and dot-separated subcategories map to a documentation folder tree.
+This backs the coding canon's *Source Language* rule: every source file — comments, docstrings, `Domain(…)` and `Contract:` blocks, log messages, error strings, identifiers — is written in English regardless of the language a project's own documents, specs, or operator conversations are in. A project's configured language governs *generated* documents (the domain-spec writer translates a group's `Domain(…)` blocks into that language when it materialises the doc); the source block it translates from stays English. A quoted foreign-language literal the code genuinely handles — a user-facing string, a test fixture, a term being matched — is data, not prose, and is exempt.
 
-All three are standalone blocks: a blank line separates them from the code above, from the code below, and from any other comment — never glue one to a statement in place of the block's own purpose comment. `pcf`'s block-marker check enforces that boundary mechanically (see the next question); whether the content itself is correct stays a review-phase judgement.
+To admit an additional language, set `[tool.pcf] allowed_languages = ["english", "<language>"]` in `pyproject.toml`; a letter belonging to any listed language's script is accepted. A genuinely one-off exception (a proper noun, a quoted foreign term inline in prose) takes a `# waiver: <reason>` comment like any other pcf finding — propose the change and get the user's explicit approval rather than widening `allowed_languages` on your own judgement, per the checking guidelines' rule against silently loosening a checker.
 
 ---
 
-## `pcf` reports a marker block as "glued to the line above" or "touches the code below its body". What does that mean?
+## `chk-py` reports import-classification findings differently than before. What changed with `project_package`?
 
-`pcf` treats every `Domain(...)`, `Contract:`, and `Decision:` block as a standalone unit, not a comment attached to the statement next to it: every contiguous `#` line adjacent to the marker is read as part of the block's own text. The check requires a blank line both above the block (separating it from preceding code or an unrelated comment) and below it (separating the block's last `#` line from the code that follows). A marker sitting directly under a line of code, or a block whose last line touches the next statement with no blank line between them, trips this finding.
+`pcf` classifies every import as stdlib, third-party, or project (first-party) to enforce import ordering and grouping — and it used to key that classification off a hardcoded package name. It now resolves the consumer's first-party package via `project_package`: an explicit `[tool.pcf] project_package = "<name>"` in `pyproject.toml` always wins; when that key is unset, `pcf` autodetects a single top-level package under the project root or `src/` and uses it. When neither the config key nor autodetection yields exactly one candidate, project-import classification is disabled — imports that would have been "project" findings are simply not flagged, since there is no root to anchor them on.
 
-Fix it by adding the missing blank line — above the marker, below the block's last comment line, or both, depending on which side the finding names. This is purely a boundary issue; it does not change what the block says, and the marker keywords themselves (`Contract:`, `Decision:`, `Domain(...)`) are unaffected. If the finding appears alongside `# REF:`, `# DOC(...)`, or `# Contract!` in older code, those are the pre-rename spellings — see the marker question above for the current form (`ref:`, `Domain(...)`, `Contract:`).
+If your repo has more than one top-level package (a monorepo, a `src/` layout with several packages) and you were relying on project-import findings, set `project_package` explicitly in `pyproject.toml`. A repo with exactly one top-level package needs no configuration — autodetection already covers it.
+
+---
+
+## `pcf.py` is flagging LaTeX math markup in a comment. Why?
+
+LaTeX markup (`$...$`, `\frac{}{}`, and similar) is forbidden in every code comment, including `Domain(…):` blocks describing formulas — the canon requires plain prose with backticked identifiers instead. This is a guideline the `lazy-python.domain-writer` and `lazy-python.contract-writer` agents follow when they write a block, and `chk-py review`'s guideline-review phase (backed by `lazy-python.code-reviewer`) is what actually catches a violation slipping through — `pcf` itself does not run a dedicated mechanical LaTeX check. Rewrite the formula as prose (`the result is` `base` `times` `multiplier`, with backticks around the real identifiers) rather than embedding math notation.
 
 ---
 
@@ -145,6 +160,34 @@ No. The agent omits sections that would be empty — that is correct behaviour p
 No. Module docstrings belong to `__init__.py` files only — regular source files carry no module docstring by canon. A regular `.py` file scaffolds from `python-template.py`, which has no docstring block, and `lazy-python.docstring-writer` will not add one to a non-`__init__.py` file. Only `**/__init__.py` files get a module-level docstring, scaffolded from the dedicated `init-template.py` (the more specific glob wins over the general `**/*.py` template) and describing the package per the canon's `__init__.py` File Patterns.
 
 If a new `__init__.py` in your project is not picking up the dedicated template, re-run `/lazy-python.install` — Step 6 syncs both scaffold templates and registers the `**/__init__.py` entry alongside the general one. An older module that still carries a leftover module docstring is left as-is; the agent does not retroactively strip it.
+
+---
+
+## Should I write `Domain(…):` or `Contract:` blocks by hand, or use an agent?
+
+Always use `lazy-python.domain-writer` for a `Domain(…):` block and `lazy-python.contract-writer` for a `Contract:` block. Both agents read the documenting canon and the project's domain-groups dictionary (for domain-writer) on every dispatch, validate against them, and verify their own edits with `chk-py all <file>.py -q` before finishing — a hand-written block reliably drifts from the format canon or, for domain blocks, uses a group that is not in the project's dictionary. `lazy-python.contract-writer` also carries the one sanctioned exception to "docstrings go through `lazy-python.docstring-writer`": it syncs the owning docstring's `Guarantees` (or `Subclassing`) section in the same pass, since that section's content is authoritative from the contract block it was written for.
+
+Neither agent invents a domain group: when no listed group in the dictionary fits a mechanic, `lazy-python.domain-writer` parks the block under the reserved `Domain(unfiled):` group and reports a candidate name and gloss for you to file. That parked block shows up as a checker finding on every run until it is filed — see the next question for the sweep that clears a backlog of them.
+
+---
+
+## What is `/lazy-python.knowledge-sweep`, and when do I need it?
+
+The canon expects `Domain(…):` and `Contract:` markers to be written at the same time as the code they describe — `lazy-python.domain-writer` and `lazy-python.contract-writer` are the per-edit route. `/lazy-python.knowledge-sweep` is the backfill route for code that predates that discipline, or for a repo whose domain-groups dictionary just grew: it walks a scope of Python sources, first growing the dictionary from whatever `Domain(unfiled):` blocks and subject-area vocabulary are already parked in the sources (proposing candidate groups to you one `AskUserQuestion` at a time — nothing is added without your tick), then dispatches the two writer agents file by file against the grown dictionary, and finally re-verifies and commits everything it touched.
+
+Run it when: a batch of `Domain(unfiled):` findings has piled up and nobody is clearing them by hand one file at a time; you just adopted domain/contract markers in an existing repo and want a first pass; or the dictionary grew (new groups accepted) and you want the sweep's `refile=true` dispatch to re-file blocks that are still parked under `Domain(unfiled):` against the new groups. It never invents a permanent group on its own — every accepted group in the dictionary traces back to your explicit choice.
+
+---
+
+## Where does the domain-groups dictionary live, and who owns it?
+
+The default path is `docs/guidelines/domain-groups.md`, beside the project's other guideline documents — a language-neutral registry of `## <group>` headings with one-line glosses, shared by every language's knowledge markers (not just Python's). `.claude/lazy.settings.json[wiki.domains.dictionary]` overrides that convention when set. `/lazy-python.install` deliberately does not seed this file — it is either created by the wiki plugin's domain configurator (for a repo that runs that tooling) or by `/lazy-python.knowledge-sweep` the first time it grows a dictionary from parked knowledge. Both `lazy-python.domain-writer` and `/lazy-python.knowledge-sweep` read whatever path the dispatch or settings name, falling back to the `docs/guidelines/domain-groups.md` convention only when nothing else is configured.
+
+---
+
+## `/lazy-python.audit` warns about the domain-groups dictionary (Check 12). What does that mean?
+
+Check 12 fires when your sources already carry `Domain(…):` blocks but no dictionary exists at the configured (or conventional) path. The style checker deliberately never reads the dictionary itself — it only recognises the reserved `unfiled` literal — so marked code with no dictionary passes every checker while validating its groups against nothing. The fix is `/lazy-python.knowledge-sweep`: it builds the dictionary from whatever knowledge is already parked and refiles the blocks against it. A repo with no `Domain(…)` blocks yet, or one whose dictionary already exists, reports `PASS` here regardless.
 
 ---
 
@@ -193,3 +236,9 @@ Re-run `/lazy-python.install` — Phase 2 deploys `cli/chk-py` and `cli/tst-py` 
 ## `pyproject.toml` is missing the checker sections after install.
 
 Run `/lazy-python.audit` Check 5 to confirm which of the six always-on sections (`[tool.pcf]`, `[tool.toi]`, `[tool.pytest]`, `[tool.mypy]`, `[tool.pylint]`, `[tool.ruff]`) are absent, then re-run `/lazy-python.install` (`[tool.pch]` is separate — added only when PyCharm is present, never a Check 5 finding). The install merges only the missing sections from `pyproject-defaults.toml` into your `pyproject.toml`; existing sections are never overwritten. If your `pyproject.toml` does not exist at all, it is created with the defaults.
+
+---
+
+## `/lazy-python.install` mentions registering a "code-reviewer expert". What is that for?
+
+Step 7.6 registers `lazy-python.code-reviewer` as an expert in `.claude/lazy.settings.json`, additively and only if nothing is on record yet. This makes the review phase dispatchable two ways: directly (as `chk-py review` already names the agent) and through the expert runtime, the same dispatch path other plugins use for background or queued work. If the entry is already on record — you configured it yourself, or a previous install already added it — this step leaves it untouched; your own expert configuration is always authoritative.

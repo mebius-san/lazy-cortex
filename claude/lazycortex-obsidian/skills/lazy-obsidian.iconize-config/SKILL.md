@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.iconize-config
 description: "Use when the iconize resolver misses a value — a role, step, or request status with no icon — or when the operator wants to change or drop one. Wizard over the vault's local `.claude/iconize/obsidian-icon-map.json`; the canonical way to seed a registry entry instead of hand-editing that JSON. Requires `lazy-obsidian.iconize-install` to have run first."
-allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(date *), AskUserQuestion
+allowed-tools: Read, Write, Edit, Bash(mkdir -p *), Bash(git rev-parse*), Bash(date *), AskUserQuestion, Agent
 argument-hint: "[registry-name] — e.g. roles | steps | requests.classification | requests.status_color"
 ---
 # Configure iconize-sync icon-map

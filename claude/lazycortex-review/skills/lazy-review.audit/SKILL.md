@@ -1,7 +1,7 @@
 ---
 name: lazy-review.audit
 description: "Run when the operator asks whether the review setup is sane, or when review misbehaves in a way that smells like config — a document never enters the loop, a class points at an expert that was never registered, commits land under the wrong identity. Read-only check of the `review` section in `.claude/lazy.settings.json`; reports PASS/WARN/FAIL and never writes — fixes come from `/lazy-review.configure` or `/lazy-review.install`."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date *)
+allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Agent
 ---
 # lazy-review.audit
 

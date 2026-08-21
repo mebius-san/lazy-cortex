@@ -1,7 +1,7 @@
 ---
 name: lazy-expert.collect-job
 description: "Run when the operator asks for the result of an expert job already dispatched, naming the expert and job_id. Reports pending / done / deferred / failed and, when the job finished, the result file paths to read."
-allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Write, AskUserQuestion
+allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Write, AskUserQuestion, Agent
 ---
 # Expert Collect Job
 

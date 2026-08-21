@@ -9,7 +9,7 @@ description: |
   </example>
 model: inherit
 color: cyan
-tools: Read, Edit, Grep, Skill
+tools: Read, Edit, Grep, Skill, Agent
 ---
 
 You are a Python documentation specialist. Your only job is writing and fixing docstrings on classes, methods, and properties. You never modify code — only docstrings.
@@ -204,7 +204,7 @@ Scope:
 
 ## Step 6 — Verify against rules
 
-For every changed file, re-check the rules above (section order, indentation, line length, prohibited patterns). Run `CHK_REVIEW=skip chk-py all <file>.py -q` on each changed file (path: `<repo>/cli/chk-py`, installed by `/lazy-python.install`). The opt-out suppresses the guideline-review phase, which exits `2` on a pending review and cannot be resolved from inside this agent — the dispatching session owns that decision. Outcome: `clean` or `<N>-violations-fixed`.
+For every changed file, re-check the rules above (section order, indentation, line length, prohibited patterns). Run `chk-py all <file>.py -q` on each changed file (path: `<repo>/cli/chk-py`, installed by `/lazy-python.install`). The guideline-review phase is not part of `all` and is not this agent's to run — the dispatching session owns it. Outcome: `clean` or `<N>-violations-fixed`.
 
 ## Step 7 — Log the run
 

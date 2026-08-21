@@ -30,11 +30,11 @@ if TYPE_CHECKING:
 _TAG_PREFIX = Tag.EXPERT_PREFIX
 _TAG_LINE = re.compile(rf"^{re.escape(_TAG_PREFIX)}([A-Za-z0-9._-]+)\s*$")
 
-# The historian's owned section is identified by THIS tag on its first
-# non-empty content line — never by its H1 title. `HISTORIAN_FLAT` is the
-# flat (dot→dash) form of the `lazy-review.historian` dispatch name.
-HISTORIAN_FLAT = "lazy-review-historian"
-_HISTORIAN_TAG = f"{_TAG_PREFIX}{HISTORIAN_FLAT}"
+# The review-owned `# History` section is identified by THIS tag on its first
+# non-empty content line — never by its H1 title. The `#protected/` form marks
+# it persistent under the cross-plugin protected-section contract: it survives
+# every pass, including finalize.
+_HISTORY_TAG = Tag.HISTORY
 
 
 # ----------------------------------------------------- code-fence stripping
@@ -86,7 +86,7 @@ def flatten_expert_name(dispatch_name: str) -> str:
   name forward and compare strings.
 
   Args:
-    dispatch_name: Expert dispatch name in dot-namespace form, e.g. `lazy-review.historian`.
+    dispatch_name: Expert dispatch name in dot-namespace form, e.g. `lazy-review.doc_doctor`.
 
   Returns:
     Flat form with every `.` replaced by `-`.
@@ -203,28 +203,25 @@ def _detect_owner(section_body: str) -> str | None:
 
 def is_historian_section(section_content: str) -> bool:
   """
-  Return `True` when the first non-empty line of `section_content` is the historian tag.
+  Return `True` when the first non-empty line of `section_content` is the History tag.
 
-  The historian tag is `#expert/lazy-review-historian`, with or without a trailing
-  `/<section-id>`. The historian section is recognised by this tag, never by its H1
-  title: a document whose own prose carries an H1 titled `History` must not be mistaken
-  for the historian's owned section.
+  The History tag is `#protected/review/history`. The History section is recognised by
+  this tag, never by its H1 title: a document whose own prose carries an H1 titled
+  `History` must not be mistaken for the review-owned History section.
 
   Args:
     section_content: Section body text following the H1 heading line.
 
   Returns:
-    `True` when the first non-empty line matches the historian ownership tag, `False`
+    `True` when the first non-empty line matches the History ownership tag, `False`
     otherwise.
   """
   for raw in section_content.splitlines():
     stripped = raw.strip()
-    # guard: skip leading blank lines so the historian tag is matched on the first line with content
+    # guard: skip leading blank lines so the History tag is matched on the first line with content
     if not stripped:
       continue
-    if stripped == _HISTORIAN_TAG:
-      return True
-    return stripped.startswith(f"{_HISTORIAN_TAG}/")
+    return stripped == _HISTORY_TAG
   return False
 
 
@@ -270,7 +267,7 @@ def _enumerate_sections(body: str) -> list[Section]:
 
 def find_history(body: str) -> Section | None:
   """
-  Return the historian-owned H1 section of `body`, identified by its ownership tag.
+  Return the review-owned `# History` H1 section of `body`, identified by its ownership tag.
 
   Detection is tag-based, not title-based; see `is_historian_section` for the matching
   rule.
@@ -279,7 +276,7 @@ def find_history(body: str) -> Section | None:
     body: Document body text to search.
 
   Returns:
-    The historian-owned `Section`, or `None` when no section carries the tag.
+    The review-owned History `Section`, or `None` when no section carries the tag.
   """
   return next(
       (s for s in _enumerate_sections(body) if is_historian_section(s.content)),

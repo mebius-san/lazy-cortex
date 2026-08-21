@@ -1,16 +1,17 @@
 ---
 chapter_type: block
 summary: Keep a Tags/ folder in sync with every tag used across your vault — pages created, updated, and pruned automatically.
-last_regen: 2026-06-10
+last_regen: 2026-08-19
 no_diagram: true
 source_skills:
   - lazy-obsidian.gen-tag-pages
+source_sha: e0de95ed7c570c235e9fdeac8399442dafd08fb7
 ---
 # Tag page generation
 
 When a vault accumulates tags across dozens or hundreds of notes, navigating by tag becomes friction: you can search, but you can't browse a tag the way you browse a note. Tag pages solve that — one page per tag, auto-populated by a Dataview query, sitting in a `Tags/` folder whose hierarchy mirrors the tag hierarchy. The `lazy-obsidian.gen-tag-pages` agent builds and maintains that folder for you: it scans every `.md` file's frontmatter, derives the full set of tags (including implicit parent segments for nested tags like `rpg/effects/layers`), and creates, keeps, or removes pages to match reality.
 
-The template each page is rendered from lives in your repo at `.claude/templates/obsidian.tag-page-template.md`. It ships with a DataviewJS `Index` block that lists every note carrying the tag. You can edit the template freely — the agent reads it fresh each run and never overwrites pages it has already created, so your customised summaries survive regeneration.
+The template each page is rendered from lives in your repo at `.claude/templates/lazy-obsidian.tag-page-template.md`. It ships with a DataviewJS `Index` block that lists every note carrying the tag. You can edit the template freely — the agent reads it fresh each run and never overwrites pages it has already created, so your customised summaries survive regeneration.
 
 ## When you'd use this
 
@@ -33,11 +34,11 @@ Before the agent can run, the template must exist. If it's missing, the agent st
 
 ## Common adjustments
 
-**Changing how pages look.** Edit `.claude/templates/obsidian.tag-page-template.md` directly — the DataviewJS block, any frontmatter you want each page to carry, extra headings. The agent reads the template fresh on every run.
+**Changing how pages look.** Edit `.claude/templates/lazy-obsidian.tag-page-template.md` directly — the DataviewJS block, any frontmatter you want each page to carry, extra headings. The agent reads the template fresh on every run.
 
 **Resetting a page's summary.** Delete the page under `Tags/` (or the whole `Tags/` folder). The next run treats those tags as new and regenerates the pages with freshly inferred summaries.
 
-**Bootstrapping the template.** If the template is absent or you want to reset it to the plugin default, run `/lazy-obsidian.install`. It scaffolds the template via quiet file-sync — no-ops when the file already exists and is unchanged, asks only on a genuine conflict.
+**Bootstrapping the template.** If the template is absent, run `/lazy-obsidian.install` — it writes the plugin default and never prompts. Once the file exists it is yours: install leaves it alone on every later run, so your edits survive plugin updates. To reset it to the plugin default, delete it and re-run the install.
 
 ## See also
 

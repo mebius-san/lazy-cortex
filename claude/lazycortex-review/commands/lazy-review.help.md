@@ -1,10 +1,10 @@
 ---
-description: "Run when the operator asks what lazycortex-review does, how a document gets into or out of the unattended review loop, or where its logs and errors land — lists the doc-review dispatcher's surface: the start / submit / stop / status / finalize verbs, the install → configure → audit setup order, and the per-run log, error-stream, and lock paths."
+description: "Run when the operator asks what lazycortex-review does, how a document gets into or out of the unattended review loop, or where its state and logs land — lists the review loop's surface: the start / submit / stop / status / finalize verbs, the install → configure → audit setup order, the two routines that wake the coordinator, and the job-queue and log paths."
 logging-waiver: "static text — no executable steps"
 ---
 # /lazy-review.help
 
-`lazycortex-review` is the doc-review dispatcher. It runs unattended, finds documents marked for review (`review_active: true` in frontmatter), routes each to the configured specialists round-by-round, and commits their proposals.
+`lazycortex-review` runs an unattended review loop over documents marked `review_active: true` in frontmatter. Decisions belong to the `review.coordinator` agent, which wakes on a commit, reads its playbook, and acts through a closed set of Python verbs; the verbs do the mechanics and decide nothing.
 
 ## Public verbs
 
@@ -12,20 +12,27 @@ logging-waiver: "static text — no executable steps"
 - `/lazy-review.submit <file> [--expert <name>]` — opt the doc into review skipping the opening writer round, landing straight on a reviewer.
 - `/lazy-review.stop <file>` — opt out.
 - `/lazy-review.status <file>` — print state JSON.
-- `/lazy-review.finalize <file>` — set `approved: true` and Form C; next scan finalizes.
+- `/lazy-review.finalize <file>` — strip the review markup and stamp the `review_result` verdict.
 
 ## Setup flow (per repo)
 
-1. `/lazy-review.install` — write skeleton config and dirs.
-2. `/lazy-review.configure` — wizard: classes, executors, triggers.
+1. `/lazy-review.install` — write skeleton config, routines, and dirs.
+2. `/lazy-review.configure` — wizard: classes, expert chains, section owners, marker style.
 3. `/lazy-review.audit` — verify everything is reachable.
+
+## What runs unattended
+
+- `lazy-review.coordinator-watch` — git-watch routine; turns a commit on an opted-in document into one coordinator wake.
+- `lazy-review.collect` — interval routine; lands finished expert payloads, clears the runtime job marker, raises the job-done wake, commits the batch.
+
+Both need the `lazycortex-core` runtime daemon; with the daemon off, nothing wakes.
 
 ## Where things land
 
-- Per-run logs: `.logs/claude/lazy-review.{dispatcher,process-file}/<ts>.md`.
-- Errors stream: `.logs/lazy-review/errors.jsonl` (gitignored; tail with Prometheus / Loki).
-- Lock file: `.lazycortex-review/scan.lock`.
-- Dispatch contract: `claude/lazycortex-review/references/lazy-review.doc-review-protocol.md`.
+- Job queue: `.experts/.jobs/<expert>/<job_id>/` (request, response, and the terminal `DONE` / `DEAD` marker).
+- Per-run logs: `.logs/lazy-review/runs/`.
+- Failures: the `lazycortex-core` error registry — read it with `lazycortex-core error-list`.
+- Expert wire contract: `references/lazy-review.doc-review-protocol.md`; the coordinator's own law: `references/lazy-review.coordination-playbook.md`.
 
 <!-- help-block:start -->
 **Documentation:**

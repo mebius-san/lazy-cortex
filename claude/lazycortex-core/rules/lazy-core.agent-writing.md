@@ -38,6 +38,7 @@ Minimum tools. Dispatch cost scales with surface.
 
 - `tools: ["*"]` without justification → `WARN`.
 - Tools listed but never invoked in the body → `WARN` (dead surface).
+- `Agent` is a MANDATORY member of every agent's `tools:` list (operator decision, 2026-08-12) — sub-dispatching a further subagent is a supported design for any agent, headless experts included, not dead surface even on a run that never invokes it. A `tools:` list missing `Agent` → `WARN`.
 
 ## 6. Shared rules (cross-reference, do not duplicate)
 
@@ -62,6 +63,6 @@ If `lazy.settings.json` does not exist at either scope (uninstalled / opted out)
 
 ## Enforcement
 
-`lazy-core.audit` Agent B enforces §§ 1, 2, 5, 8 (frontmatter complete, no AskUserQuestion, tool allowlist, model tier registered when config exists) on `.claude/agents/*.md` and `claude/*/agents/*.md`. Preamble presence per § 4 reuses the skill-writing check.
+`lazy-core.audit` Agent B enforces §§ 1, 2, 5, 8 (frontmatter complete, no AskUserQuestion, tool allowlist including the mandatory `Agent` member, model tier registered when config exists) on `.claude/agents/*.md` and `claude/*/agents/*.md`. Preamble presence per § 4 reuses the skill-writing check.
 
 Dirty-tree heuristic (no write-without-commit) reuses the skill-writing § 6 check; agents are scanned alongside skills in the same Agent B pass.
