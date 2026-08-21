@@ -15,7 +15,7 @@ source_skills:
   - lazy-experts.debugger
   - lazy-experts.reviewer
   - lazy-experts.tester
-source_sha: 159ac1288fe27b2672a13bdafc577c34c46cb8d5
+source_sha: 05f6f9a9fc372840e99c4cdcda9b7f182e336140
 ---
 # Troubleshooting
 
@@ -53,9 +53,9 @@ source_sha: 159ac1288fe27b2672a13bdafc577c34c46cb8d5
 
 **Symptom**: You picked `sci-fi` (or `fantasy`) when `/lazy-experts.install` asked which classes to register, but only one expert entry appeared — `sci-fi.fiction-writer` (or `fantasy.fiction-writer`) — with no interpreter, designer, system-designer, architect, planner, developer, debugger, reviewer, or tester for that class.
 
-**Likely cause**: This is the intended behaviour, not a bug. The class map seeds roles differently by class kind: technical classes (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, and any future non-fiction class) get all nine engineering roles — `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `developer`, `debugger`, `reviewer`, `tester` — plus `data-writer` for `game-dev` specifically; fiction classes (`sci-fi`, `fantasy`) get only `fiction-writer`, because the other roles assume an engineering lifecycle (design specs, code architecture, implementation plans, code review) that doesn't apply to literary work. Fiction classes also never receive `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, or `lazy-experts.structure-aspect` — those three assume a technical repository, which a scene has nothing to do with.
+**Likely cause**: This is the intended behaviour, not a bug. The class map seeds roles differently by class kind: technical classes (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, and any future non-fiction class) get all nine engineering roles — `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `developer`, `debugger`, `reviewer`, `tester` — plus `data-writer` for `game-dev` specifically; fiction classes (`sci-fi`, `fantasy`) get only `fiction-writer`, because the other roles assume an engineering lifecycle (design specs, code architecture, implementation plans, code review) that doesn't apply to literary work. Fiction classes also never receive `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, or `lazy-experts.structure-aspect` — those three assume a technical repository, which a scene has nothing to do with.
 
-**Fix**: Nothing to fix if you're working purely in a fiction domain — `fiction-writer` is the complete role set for `sci-fi`/`fantasy`. If your project also spans a technical domain (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`), register at least one expert of that class by hand in `lazy.settings.json[experts]`, or clear the `experts` section and re-run `/lazy-experts.install` so it asks again and seeds both class kinds together.
+**Fix**: Nothing to fix if you're working purely in a fiction domain — `fiction-writer` is the complete role set for `sci-fi`/`fantasy`. If your project also spans a technical domain (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`), register at least one expert of that class by hand in `lazy.settings.json[experts]`, or clear the `experts` section and re-run `/lazy-experts.install` so it asks again and seeds both class kinds together.
 
 ---
 

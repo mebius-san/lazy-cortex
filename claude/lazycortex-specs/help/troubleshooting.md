@@ -25,7 +25,7 @@ source_skills:
   - lazy-spec.set-stage
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
-source_sha: 159ac1288fe27b2672a13bdafc577c34c46cb8d5
+source_sha: 302cf4ffd01e473afa10f9a3f323feae9ee06b31
 ---
 # Troubleshooting
 
@@ -106,6 +106,46 @@ source_sha: 159ac1288fe27b2672a13bdafc577c34c46cb8d5
 **Likely cause**: The expert re-verification immediately before the write (above) already rules out dangling expert names, so a post-write audit FAIL points at something else — a section-writer schema violation in the generated `experts.validation` / `experts.terminal` structure.
 
 **Fix**: Read the audit output for the offending class and field, then re-run `/lazy-spec.product-config` — Step 12 regenerates the review classes fresh each time, so fixing the upstream cause (e.g. correcting a role assignment) resolves it on the next pass.
+
+---
+
+## `/lazy-spec.doctor` refuses to check a product
+
+**Symptom**: The doctor run stops immediately at Check 0, reporting the product key is not in `lazy.settings.json[products]`.
+
+**Likely cause**: The product key you passed (or resolved from a path) has no registration — it was never created, or the key was mistyped.
+
+**Fix**: Run `/lazy-spec.product-config` to register the product, then re-invoke `/lazy-spec.doctor <product>`.
+
+---
+
+## `/lazy-spec.doctor` reports a reserved product slug with no fix offered
+
+**Symptom**: Check 0 fails, naming the product folder leaf as `design`, `tech`, or `decisions`, and even `--apply` offers no auto-fix for it.
+
+**Likely cause**: The product folder's basename collides with the product-level `design.md` / `tech.md` / `decisions.md` files that live at the product root — a structural naming conflict the skill deliberately refuses to resolve on its own.
+
+**Fix**: Rename the product's folder (and its `spec_path` entry via `/lazy-spec.product-config` edit mode) to a leaf that isn't `design`, `tech`, or `decisions`, then re-run `/lazy-spec.doctor`.
+
+---
+
+## `/lazy-spec.doctor` runs clean but never fixes anything
+
+**Symptom**: The report lists warnings and errors, but re-checking the product afterward shows nothing changed.
+
+**Likely cause**: `/lazy-spec.doctor` is read-only by default — every run stops after the Report step. The fix loop that actually writes changes only runs when you pass `--apply`.
+
+**Fix**: Re-run `/lazy-spec.doctor <product> --apply` and answer the `AskUserQuestion` the fix loop raises for each finding you want resolved.
+
+---
+
+## `/lazy-spec.doctor --apply` still leaves a finding after I confirmed a fix
+
+**Symptom**: You ran `--apply`, confirmed the proposed fix for some other finding, but a layout or body-shape finding (a stray `docs/` subfolder, an old-shape note body, content outside the vault root) is still reported on the next run.
+
+**Likely cause**: Layout and body-shape findings are report-only by design — the skill never auto-migrates or moves existing content, even under `--apply`. Only frontmatter-level and reference fixes (wikilinks, stage/tag sync, icon drift, gate booleans) are ever written automatically.
+
+**Fix**: Resolve the finding by hand — move the files, rewrite the section — following the instruction the report gives for that specific finding, then re-run `/lazy-spec.doctor` to confirm it clears.
 
 ---
 
@@ -556,5 +596,3 @@ source_sha: 159ac1288fe27b2672a13bdafc577c34c46cb8d5
 **Likely cause**: The `render-container-stats` CLI isn't on `PATH` — the specs tool isn't installed, or the shell environment can't see it.
 
 **Fix**: Re-run `/lazy-spec.install` to restore the CLI, then re-invoke `/lazy-spec.refresh-sources` if you need the stats block refreshed too. The `# Sources` rewrite and précis already landed even without the stats step.
-
----

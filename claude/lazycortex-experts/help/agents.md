@@ -17,7 +17,7 @@ source_skills:
   - lazy-experts.reviewer
   - lazy-experts.tester
   - lazy-experts.fiction-writer
-source_sha: 363c10b71ead3c2a5577cc0c34d87fb3879699fe
+source_sha: 302cf4ffd01e473afa10f9a3f323feae9ee06b31
 ---
 # Generic lifecycle agents
 

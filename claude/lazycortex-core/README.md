@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#fca5a5"
+iconize_color: "#93c5fd"
 ---
 # lazycortex-core
 
@@ -95,14 +95,6 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 
 Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
 
-- [agent-models](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/agent-models.md) — Assign model tiers to every agent in your vault, prune dead entries for deleted agents, and route dispatches automatically.
-- [change-history](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/change-history.md) — Run-log housekeeping and change-history access — clean up orphaned log directories, distill commits into themed prose, and ask "why was X changed?" across every source at once.
-- [experts](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/experts.md) — Dispatch jobs to named expert workers, keep the main session free, and collect results — including deferred and fail-closed outcomes.
-- [git-coordination](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/git-coordination.md) — Protect your repo's git index from Claude Code — pathspec-only commits by default, an optional staging lock for concurrent sessions, and the two skills to inspect and break it.
-- [guardian](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/guardian.md) — Catch secrets, PII, and internal paths before they reach a public repo; stop per-tool allow prompts for new MCP servers in one step.
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/install-and-audit.md) — Bootstrap and verify lazycortex-core — the shared scaffolding layer every other plugin depends on.
-- [memory](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/memory.md) — Per-expert long-term memory tracked in git — experts consult notes before primary work, write new notes as a side-effect of jobs, and consolidate via reflect passes.
-- [runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/runtime.md) — Register, unregister, tick, preflight, and recover routines in the per-repo serial daemon — six skills keep the async team running in order, decide when a new periodic job needs the daemon at all, and validate broken expert configs before they run live.
 - [add-memory-to-expert](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/add-memory-to-expert.md) — Opt an existing expert into the memory subsystem, dispatch jobs to accumulate runs, run the first reflect pass, and verify the expert's first durable notes land in .memory/.
 - [make-repo-public](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/make-repo-public.md) — Step-by-step guide to making a repo public safely — audit, fix secrets, set your public author identity, create the waiver file, and flip GitHub visibility.
 - [setup-expert](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-expert.md) — Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
@@ -152,12 +144,12 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Hook | Trigger | Description |
 |---|---|---|
-| `lazy-core.git-guard` | `Bash`, `mcp__git__git_add`, `mcp__git__git_commit`, `mcp__git__git_reset`, `Stop`, `SubagentStop` | Pre/PostToolUse + Stop/SubagentStop hook guarding the shared git index against agent sessions. |
+| `lazy-core.git-guard` | `Bash`, `mcp__git__git_commit`, `mcp__git__git_add`, `mcp__git__git_reset`, `Stop`, `SubagentStop` | Pre/PostToolUse + Stop/SubagentStop hook guarding the shared git index against agent sessions. |
 | `lazy-core.model-router` | `Agent` | PreToolUse hook — route Agent dispatches to a configured model. |
-| `lazy-guard.check-public` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: warn about PII and infrastructure leaks staged for a public repo (or for |
+| `lazy-guard.check-public` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: warn about PII and infrastructure leaks staged for a public repo (or for the public subtree of a partially-public repo). |
 | `lazy-guard.secrets` | `Bash`, `mcp__git__git_commit` | PreToolUse hook: block any git commit whose staged diff contains a secret. |
-| `lazy-guard.settings` | `Edit\|Write` | PreToolUse hook: guard Claude Code settings files against dangerous changes. |
-| `lazy-log.commit-recorder` | `Bash`, `mcp__git__git_commit` | PostToolUse hook that records every successful git commit to `.logs/commits.jsonl`. |
+| `lazy-guard.settings` | `Edit|Write` | PreToolUse hook: guard Claude Code settings files against dangerous changes. |
+| `lazy-log.commit-recorder` | `Bash` | PostToolUse hook that records every successful git commit to `.logs/commits.jsonl`. |
 
 ## Installation
 

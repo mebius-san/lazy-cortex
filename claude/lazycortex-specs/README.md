@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#fca5a5"
+iconize_color: "#93c5fd"
 ---
 # lazycortex-specs
 
@@ -91,14 +91,6 @@ Requires these plugins from the same marketplace:
 
 Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
 
-- [authoring](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/authoring.md) — Create spec assets of any type — features, changes, bugs, and operator-declared kinds — record the decisions behind them, and capture raw ideas into the requests inbox.
-- [code-sync](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/code-sync.md) — Keep a product spec aligned with its source repo — pull in-flight code changes into the tech doc, rebase branch pins after a merge, and gap-scan for capabilities the spec tree never documented.
-- [gates](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/gates.md) — Drive an asset's readiness gates and per-file doc stages from creation through release using a two-layer progression model.
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/install-and-audit.md) — Bootstrap the plugin, register products, and audit both the plugin's own sources and a product's spec health.
-- [requests](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/requests.md) — Ingest free-form requests and route them into the right place in the spec tree — classify, find candidates, then let the deterministic apply worker attach, spawn, or link.
-- [research](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/research.md) — Answer one question against the spec tree without loading whole documents into your context.
-- [source-links](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/source-links.md) — Resolve repos, dependencies, and build forge-correct source URLs so every spec link stays accurate regardless of where code is hosted.
-- [upstream](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/upstream.md) — Mirror external design repos into your vault and keep a spec doc's visible source list matching its frontmatter.
 - [asset-to-release](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/walkthroughs/asset-to-release.md) — Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
 - [new-product-from-code](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/walkthroughs/new-product-from-code.md) — Register a product bound to an existing codebase, generate its design and tech docs from source, then scaffold the first feature.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-specs/help/troubleshooting.md) — Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.

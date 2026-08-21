@@ -1,6 +1,6 @@
 ---
 name: lazy-observe.install
-description: "Run when the operator asks to start shipping lazycortex runtime metrics off this host, to point the local daemons at their Prometheus / Mimir, or after `/lazy-observe.doctor` reports `not-installed`. Pre-flights for an existing collection stack and aborts untouched when one covers the host: pass `--integrate-only` when a Prometheus already runs here and only needs scrape targets, `--force-standalone` to install the shipper anyway. URL, auth, and agent kind are asked once and never re-asked; idempotent and quiet on re-run."
+description: "Run when the operator asks to start shipping lazycortex runtime metrics off this host, to point the local daemons at their Prometheus / Mimir, or after `/lazy-observe.doctor` reports `not-installed` or `covered-unconfigured`. Pre-flights for an existing collection stack: a foreign collector already covering the host flips the run into integrate mode automatically — scrape targets regenerated, no questions asked; pass `--integrate-only` to force that mode explicitly, `--force-standalone` to install the shipper anyway. URL, auth, and agent kind are asked only when a shipper is actually installed, once, and never re-asked; idempotent and quiet on re-run."
 allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(test *), Bash(date *), Bash(brew *), Bash(which *), Bash(curl *), Bash(uname *), Bash(python3 *), Agent
 ---
 # Install lazy-observe
@@ -11,7 +11,7 @@ The plugin ships **observer-server-blind** templates only. This skill collects o
 
 **Invocation modes** (from the skill arguments):
 
-- *(no flag)* — full pre-flight: abort untouched when collection is already covered on this host.
+- *(no flag)* — full pre-flight: a foreign collector already covering the host switches the run into integrate mode automatically; our own already-installed shipper aborts the run untouched.
 - `--integrate-only` — do not install a shipper at all; regenerate the Prometheus file_sd scrape-targets file and print the one-time `file_sd_configs` snippet for the operator's existing Prometheus.
 - `--force-standalone` — skip the pre-flight verdict and install the shipper anyway (the findings are still printed).
 
@@ -65,15 +65,16 @@ print(json.dumps(install.detect_existing_coverage(), indent = 2))
 The probe is read-only and looks at three local signal classes: an installed lazycortex-observe service unit, running scraper processes (prometheus / otelcol / alloy / grafana-agent), and live established connections to the daemons' metrics ports. A lone scraper process does NOT flip the verdict (it may serve something unrelated); an observe unit, an active scrape connection, or two independent process signals do.
 
 - **Verdict `clear`** → state `clear`, mark Step 0.5 `skipped-not-integrate`, continue with Step 1.
-- **Verdict `already-covered`, no flag** → print every detected signal verbatim, then **abort without asking a single question**: mark Steps 0.5–10 `skipped-already-covered` and jump to the Report. Tell the operator the two deliberate ways forward — re-run as `/lazy-observe.install --integrate-only` (feed the existing stack a target list, install nothing) or `/lazy-observe.install --force-standalone` (install a shipper anyway). The default action on a working stack is to not touch it.
+- **Verdict `already-covered`, no flag, signals include `observe-service-unit-installed`** → our own shipper already runs here; print the signals and **abort untouched**: mark Steps 0.5–10 `skipped-already-covered` and jump to the Report. The default action on our own working shipper is to not touch it; `--force-standalone` re-renders it anyway.
+- **Verdict `already-covered`, no flag, no `observe-service-unit-installed` signal** → a foreign collector (local or remote Prometheus / otelcol / alloy) already collects this host's metrics. Coverage in fact, not `observe.toml`, is the state that counts — **switch into integrate mode automatically, without asking a single question**: print the signals, state `auto-integrate`, persist `mode = "integrate"` into `observe.toml` via `install.write_answer_file({ **install.read_answer_file(), "mode": "integrate" })`, continue with Step 0.5.
 - **Verdict `already-covered`, `--force-standalone`** → print the signals, state `force-standalone`, continue with Step 1.
-- **`--integrate-only`** (any verdict) → state `integrate-mode`, persist `mode = "integrate"` into `observe.toml` via `install.write_answer_file`, continue with Step 0.5.
+- **`--integrate-only`** (any verdict) → state `integrate-mode`, persist `mode = "integrate"` into `observe.toml` via `install.write_answer_file({ **install.read_answer_file(), "mode": "integrate" })`, continue with Step 0.5.
 
-Outcome: `clear` / `already-covered-aborted` / `force-standalone` / `integrate-mode`.
+Outcome: `clear` / `already-covered-aborted` / `auto-integrate` / `force-standalone` / `integrate-mode`.
 
 ## Step 0.5 — Integrate-only: publish scrape targets
 
-Runs only in integrate mode; otherwise `skipped-not-integrate`.
+Runs only in integrate mode (explicit `--integrate-only`, or Step 0's `auto-integrate` on a host a foreign collector covers); otherwise `skipped-not-integrate`.
 
 No shipper, no service unit, no agent binary. Regenerate the host's scrape-targets file through the core CLI:
 
@@ -237,7 +238,7 @@ Per the project's `lazy-log.logging` rule, log this run to `./.logs/claude/lazy-
 
 ## Failure modes
 
-- **`/lazy-observe.install` stops immediately saying "collection is already covered on this host"** — the Step 0 pre-flight found a working stack (its signals are listed in the output) → this is the intended default on a host with an existing Prometheus/collector; re-run with `--integrate-only` to feed that stack a target list, or `--force-standalone` to install a shipper anyway.
+- **`/lazy-observe.install` stops immediately saying "collection is already covered on this host"** — the Step 0 pre-flight found our own shipper unit already installed (its signals are listed in the output) → this is the intended default on a working standalone install; re-run with `--force-standalone` to re-render it anyway. A foreign collector never produces this abort — it auto-switches the run into integrate mode instead.
 - **Step 2 aborts: "no metrics-enabled daemons registered"** — no local daemon has `daemon.metrics.enabled: true` → enable metrics via `/lazy-core.install` (its metrics step allocates the port and label), then re-run.
 - **Operator already has a different shipper running on the same launchctl label / unit name** — symptom: `bootstrap` / `enable` errors with "already loaded" → cause: previous install or operator-managed copy → fix: run `/lazy-observe.uninstall` first, then re-run install.
 - **lazycortex-core daemon down** — symptom: Step 2 returns `core-metrics-disabled` even after enabling `metrics.enabled: true` → cause: daemon not started or not reloaded after settings flip → fix: restart the daemon supervisor (`launchctl kickstart -k gui/$UID com.lazycortex.runtime` or `systemctl --user restart lazycortex-runtime.service`).

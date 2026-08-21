@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#fca5a5"
+iconize_color: "#86efac"
 ---
 # lazycortex-python
 
@@ -61,13 +61,6 @@ Requires these plugins from the same marketplace:
 
 Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
 
-- [agents](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/agents.md) — Manual review via /lazy-python.check-style, the chk-py review guideline phase and its lazy-python.code-reviewer agent, docstring/test writer agents, a Domain/Contract knowledge-marker pair, and the knowledge-sweep skill that backfills markers across an existing codebase.
-- [checkers](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/checkers.md) — chk-py runs pcf, toi, cmp, mypy, ruff, pylint plus guideline review; tst-py runs pytest; both share a venv resolver that works anywhere.
-- [discipline](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/discipline.md) — Three always-loaded rules shape every Python edit; five reference guidelines back the writer agents and chk-py/tst-py with the full canon.
-- [hook](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/hook.md) — The PostToolUse hook that runs `pcf.py` on every `.py` edit and surfaces style violations inline in the next turn — zero install steps, zero config writes.
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/install-and-audit.md) — Bootstrap lazycortex-python with a 10-step install wizard (incl. env_source detection) and verify with the 12-check read-only audit.
-- [overlay](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/overlay.md) — Project-specific guideline files in docs/guidelines/ plus [tool.pcf] declarations in pyproject.toml let you extend the project-neutral canon per repo.
-- [scaffold](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/scaffold.md) — Canonical Python file skeletons — python-template.py for regular files, init-template.py for __init__.py — installed once via /lazy-python.install Step 6.
 - [add-project-overlay](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/add-project-overlay.md) — Register a documentation-guideline clause in the project overlay, then confirm lazy-python.docstring-writer honors it in the generated docstring.
 - [install-and-first-check](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/install-and-first-check.md) — Install lazycortex-python, then run chk-py all -q directly to build the project venv and prove the six-step checker gate is clean.
 - [migrate-existing-repo](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-python/help/walkthroughs/migrate-existing-repo.md) — Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation (including pcf's language and project-package checks), then backfill Domain/Contract markers with knowledge-sweep.
@@ -105,7 +98,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Hook | Trigger | Description |
 |---|---|---|
-| `lazy-python.check-style` | `Edit\|Write` | PostToolUse hook for lazy-python. |
+| `lazy-python.check-style` | `Edit|Write` | PostToolUse hook for lazy-python: runs pcf.py style checks on the edited .py file and surfaces violations inline. |
 
 ## Installation
 

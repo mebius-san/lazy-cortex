@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-observe install, uninstall, and doctor — symptoms, likely causes, and fixes.
-last_regen: 2026-08-19
+last_regen: 2026-08-21
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree rooted at the operator's situation: top-level branch on whether the shipper is installed at all (answer file present?); if not-installed, branch further on whether the Step 0 pre-flight found an already-covered host (routes to --integrate-only or --force-standalone guidance) versus a genuinely clear host (routes to plain install); if installed, branch on whether the host runs in integrate mode (scrape-targets file present and current vs missing/stale) or standalone mode — standalone then branches on whether the service is active, whether local /metrics is reachable, whether agent self-metrics show successful remote_write (token vs observer-reachability vs WAL-recovery sub-branches), and whether WAL is oversized. Separate top-level branch for uninstall failures (launchctl error 5 vs systemctl unit-not-found). Each leaf cites the troubleshooting entry that resolves it."
@@ -11,17 +11,27 @@ source_skills:
   - lazy-observe.uninstall
   - lazy-observe.doctor
   - lazy-observe.audit
-source_sha: 66d0c0daf39decef55aac6f4e299996a8722c5fe
+source_sha: 17a88aa0af208b34c00f6e34d3303f4611911f6f
 ---
 # Troubleshooting
 
 ## Install stops immediately: "collection is already covered on this host"
 
-**Symptom**: `/lazy-observe.install` prints a list of detected signals (an existing lazycortex-observe service unit, a running scraper process such as Prometheus/otelcol/Alloy/grafana-agent, or an active scrape connection to a daemon's metrics port) and aborts without asking a single question.
+**Symptom**: `/lazy-observe.install` prints a list of detected signals — specifically an already-installed lazycortex-observe service unit — and aborts without asking a single question, without running with `--force-standalone`.
 
-**Likely cause**: The Step 0 pre-flight found a metrics-collection stack already working on this host. Installing a second shipper would be redundant, so the skill refuses by default.
+**Likely cause**: The Step 0 pre-flight found lazycortex-observe's own shipper unit already registered on this host. Registering a second copy under the same launchctl label / unit name would fail, so the skill refuses by default. This abort is now specific to our own already-installed shipper — a foreign collector (Prometheus, otelcol, Alloy, or grafana-agent already scraping this host, with no lazycortex-observe unit of its own) no longer triggers this abort; see the next entry.
 
-**Fix**: This is the intended behavior on a host that's already covered — don't fight it. If the existing stack should also scrape this host, re-run `/lazy-observe.install --integrate-only`; it publishes a Prometheus file_sd scrape-targets file for your existing stack and installs no shipper of its own. If you genuinely want a dedicated lazycortex-observe shipper anyway, re-run with `/lazy-observe.install --force-standalone`.
+**Fix**: This is the intended behavior on a host that already runs the shipper — don't fight it. If you genuinely want to re-render the shipper anyway (for example after editing a template), re-run `/lazy-observe.install --force-standalone`.
+
+---
+
+## Install silently switches into integrate mode without asking
+
+**Symptom**: `/lazy-observe.install` with no flags prints detected coverage signals, states outcome `auto-integrate`, writes `mode = "integrate"` into `observe.toml`, and jumps straight to publishing a scrape-targets file — no shipper gets installed and no question is asked.
+
+**Likely cause**: The Step 0 pre-flight found a foreign collector (a local or remote Prometheus, otelcol, Alloy, or grafana-agent process) already scraping this host, with no lazycortex-observe service unit present. Coverage in fact — not whether `observe.toml` exists — is what the pre-flight acts on, so it switches the run into integrate mode automatically instead of asking or aborting.
+
+**Fix**: This is the intended default — a host already covered by another stack gets fed a scrape-targets file, not a second shipper. If you want a dedicated lazycortex-observe shipper anyway, re-run `/lazy-observe.install --force-standalone`.
 
 ---
 
@@ -29,9 +39,19 @@ source_sha: 66d0c0daf39decef55aac6f4e299996a8722c5fe
 
 **Symptom**: `/lazy-observe.doctor` immediately returns `FAIL not-installed` and skips all subsequent checks.
 
-**Likely cause**: The answer file at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` is absent. The shipper has never been installed on this host, or the file was deleted during a previous uninstall.
+**Likely cause**: The answer file at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` is absent, and doctor's own coverage probe (the same one install runs) found nothing collecting this host's metrics either. The shipper has never been installed on this host, no foreign collector covers it, or the answer file was deleted during a previous uninstall.
 
 **Fix**: Run `/lazy-observe.install`. It walks through all setup steps and writes the answer file before loading the service.
+
+---
+
+## Doctor reports "covered-unconfigured"
+
+**Symptom**: `/lazy-observe.doctor` reports `WARN covered-unconfigured` on Step 1 and skips all subsequent checks.
+
+**Likely cause**: The answer file is absent, but doctor's coverage probe found this host is already covered by a foreign collector — collection is working, doctor just has no record of it because install was never run here.
+
+**Fix**: Run `/lazy-observe.install`. It re-detects the same coverage and records integrate mode automatically, without asking any questions.
 
 ---
 

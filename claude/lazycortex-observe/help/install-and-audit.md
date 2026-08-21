@@ -1,14 +1,14 @@
 ---
 chapter_type: block
 summary: Install, verify health, and tear down the lazycortex-observe metrics shipper on any host.
-last_regen: 2026-08-19
+last_regen: 2026-08-21
 no_diagram: true
 source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
   - lazy-observe.doctor
   - lazy-observe.audit
-source_sha: 66d0c0daf39decef55aac6f4e299996a8722c5fe
+source_sha: 17a88aa0af208b34c00f6e34d3303f4611911f6f
 ---
 # Install and audit
 
@@ -16,7 +16,7 @@ Getting lazycortex-observe running on a new host — and keeping it running reli
 
 ## What's in this block
 
-**`/lazy-observe.install`** is the entry point for every new host. Before asking anything, it pre-flight-checks whether this host already has a working collection stack (an installed observe service, a running scraper process, or a live scrape connection to your daemons) and, if so, aborts untouched rather than layering a second shipper on top — it prints the signals it found and points you at the two deliberate ways forward instead. From there it works through a wizard — detecting the platform, verifying every metrics-enabled lazycortex-core daemon's `/metrics` endpoint on this host, collecting your choice of agent (Grafana Alloy or the OpenTelemetry Collector), remote_write URL, and auth kind — then renders the agent config and the supervisor unit (launchd on macOS, systemd user unit on Linux) from the plugin's shipped templates, covering every local daemon in one scrape set. Operator-private values (the remote_write URL, bearer token or basic-auth credentials) land exclusively in `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` and never in the plugin tree. Two flags change the default behavior: `--integrate-only` skips installing a shipper entirely and instead publishes a Prometheus file_sd scrape-targets file for a stack you already run; `--force-standalone` installs the shipper anyway even when the pre-flight found existing coverage. The skill is idempotent: re-running it rewrites the rendered configs and reloads the service, so it doubles as the update path when you need to change the agent kind, rotate the URL, or pick up a daemon added since the last run.
+**`/lazy-observe.install`** is the entry point for every new host. Before asking anything, it pre-flight-checks whether this host already has a working collection stack — an installed observe service, a running scraper process, or a live scrape connection to your daemons. If its own shipper unit is already installed, it aborts untouched rather than layering a second shipper on top, printing the signals it found (re-run with `--force-standalone` if you want it re-rendered anyway). If instead a *foreign* collector already covers the host — an existing Prometheus, otelcol, or Alloy instance you didn't set up through this plugin — install owns that state itself: it switches into integrate mode automatically, with no question asked, and publishes the Prometheus file_sd scrape-targets file for that stack. Short of one of those two coverage findings, it works through a wizard — detecting the platform, verifying every metrics-enabled lazycortex-core daemon's `/metrics` endpoint on this host, collecting your choice of agent (Grafana Alloy or the OpenTelemetry Collector), remote_write URL, and auth kind — then renders the agent config and the supervisor unit (launchd on macOS, systemd user unit on Linux) from the plugin's shipped templates, covering every local daemon in one scrape set. Operator-private values (the remote_write URL, bearer token or basic-auth credentials) land exclusively in `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` and never in the plugin tree. `--integrate-only` forces integrate mode explicitly, regardless of what the pre-flight finds; `--force-standalone` installs the shipper anyway even when the pre-flight found existing coverage. The skill is idempotent: re-running it rewrites the rendered configs and reloads the service, so it doubles as the update path when you need to change the agent kind, rotate the URL, or pick up a daemon added since the last run.
 
 **`/lazy-observe.doctor`** is a read-only diagnostic you run any time the pipeline feels off. It checks the answer file, service unit state, agent process, every metrics-enabled daemon's local `/metrics` endpoint on this host, the agent's own remote_write success counters, observer URL reachability, and WAL directory size, reporting each as `PASS`, `WARN`, or `FAIL` with a one-line fix suggestion. When the host is running in integrate mode (no local shipper), doctor adjusts: instead of checking a service and agent process, it verifies the published scrape-targets file exists, parses, and its target count matches the live daemon count. It never restarts services or mutates anything; all it does is tell you what it sees. Run it right after install to confirm the smoke test passed, and again any time samples stop arriving in your observer.
 
@@ -28,7 +28,7 @@ Getting lazycortex-observe running on a new host — and keeping it running reli
 
 The typical lifecycle on a fresh machine is a straight line: run `/lazy-observe.install`, then `/lazy-observe.doctor` to confirm the pipeline is end-to-end healthy, then import the shipped Grafana dashboard and alert rules. After that, doctor becomes your ongoing pulse check — bookmark it for whenever you notice a gap in your dashboards or an alert fires.
 
-If you already run a Prometheus or collector stack on the host, skip the standalone shipper: `/lazy-observe.install --integrate-only` publishes the scrape-targets file and prints the one-time `file_sd_configs` snippet to add to your existing config, and doctor adapts its checks to that mode automatically — no separate skill to learn.
+If you already run a Prometheus or collector stack on the host, you usually don't need to do anything special: `/lazy-observe.install` detects that coverage on its own and switches into integrate mode automatically, publishing the scrape-targets file and printing the one-time `file_sd_configs` snippet to add to your existing config. Pass `--integrate-only` only when you want to force that path explicitly, regardless of what the pre-flight finds. Either way, doctor adapts its checks to integrate mode automatically — no separate skill to learn.
 
 When you need to change something — a new remote_write URL, a different agent kind, a rotated token, or a daemon that just got metrics enabled — re-run `/lazy-observe.install`. Because the skill is idempotent, it rewrites only what changed, picks up any new daemon automatically, and reloads the service. You do not need to uninstall first unless the service label or unit name itself is changing (and the install skill will tell you if it is, citing the existing loaded label).
 
@@ -36,7 +36,7 @@ Use `/lazy-observe.uninstall` when you are decommissioning the host or switching
 
 `/lazy-observe.audit` sits slightly apart from the operational loop — it inspects the plugin itself, not the running service. Run it after a minor-version upgrade of the plugin (a minor bump means re-running install to pick up new templates or settings, and audit confirms the plugin files landed correctly) or any time you have edited a plugin file locally and want to verify it still meets conventions.
 
-If doctor reports a `FAIL not-installed`, the next step is always `/lazy-observe.install`. If it reports a service unit that is inactive (`FAIL inactive`), check the agent binary's own logs before restarting — doctor gives you the log path for both launchd and systemd. If it reports `WARN zero-rate` on the remote_write counter, check the observer URL reachability step in the same report: that step catching `FAIL unreachable` explains the zero rate and the fix is on the network side, not in the plugin.
+If doctor reports a `FAIL not-installed`, the next step is always `/lazy-observe.install`. If it reports `WARN covered-unconfigured` — a collector already scrapes this host but `observe.toml` has no record of it — the fix is the same: `/lazy-observe.install` detects the coverage and records integrate mode without asking any questions. If it reports a service unit that is inactive (`FAIL inactive`), check the agent binary's own logs before restarting — doctor gives you the log path for both launchd and systemd. If it reports `WARN zero-rate` on the remote_write counter, check the observer URL reachability step in the same report: that step catching `FAIL unreachable` explains the zero rate and the fix is on the network side, not in the plugin.
 
 ## Where this fits
 

@@ -34,3 +34,31 @@ In practice: reach for `/lazy-spec.upstream-run` when you want to know right now
 `spec.upstream` sources are independent of the `products[<key>].source` binding that ties a product to its own code repository, and independent of the `repos` table that source-links resolves against — an upstream source is a foreign *design* repo, cloned into its own runtime scratch space and tracked entirely separately. What upstream-run and refresh-sources hand off to is the same request review pipeline the requests block documents: an upstream-opened request is body-only and unclassified exactly like a request an operator files by hand, and it's routed and attached the same way from there.
 
 ## How an upstream unit becomes part of a spec
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  upstreamRunMirrorsUnit["Upstream-run mirrors and diffs a unit from a foreign repo"]
+  operatorTicksCheckbox["Operator ticks Take into work / Process update checkbox"]
+  requestOpensAndFreezesUnit["Body-only request opens and freezes the unit to in-review"]
+  requestLandsAgainstAsset["Request lands against an asset (recorded in spec_source_requests)"]
+  refreshSourcesReprojects["refresh-sources re-projects the attachment"]
+  sourcesListUpdated["Asset doc's visible Sources list updated"]
+
+  upstreamRunMirrorsUnit -->|surfaces diff| operatorTicksCheckbox
+  operatorTicksCheckbox -->|ticked| requestOpensAndFreezesUnit
+  requestOpensAndFreezesUnit -->|opens| requestLandsAgainstAsset
+  requestLandsAgainstAsset -->|recorded| refreshSourcesReprojects
+  refreshSourcesReprojects -->|re-projects| sourcesListUpdated
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+
+  class upstreamRunMirrorsUnit entry
+  class operatorTicksCheckbox action
+  class requestOpensAndFreezesUnit action
+  class requestLandsAgainstAsset action
+  class refreshSourcesReprojects action
+  class sourcesListUpdated success
+```

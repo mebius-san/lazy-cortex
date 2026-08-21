@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#93c5fd"
+iconize_color: "#86efac"
 ---
 # lazycortex-diagram
 
@@ -52,8 +52,6 @@ Requires these plugins from the same marketplace:
 
 Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
 
-- [drawing](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/drawing.md) — Insert new diagrams and refresh existing ones — dispatcher picks kind and format from your prose, writer agents render against shipped templates and style schemes.
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/install-and-audit.md) — Bootstrap lazycortex-diagram in your project — sync the authoring rule, seed agent-model tiers, and clean up orphans.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/troubleshooting.md) — Common failure modes across lazycortex-diagram skills — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-diagram/help/faq.md) — Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, split behaviour, direct agent invocation, and install.
 

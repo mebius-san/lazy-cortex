@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: From a clean checkout to your first dashboard panel — install the runtime daemon with metrics enabled, produce traffic, install the shipper, verify the pipeline.
-last_regen: 2026-08-19
+last_regen: 2026-08-21
 diagram_spec:
   anchor: "How it flows"
   request: "Sequence diagram: operator → lazy-core.install installs the runtime daemon and auto-registers any expert candidates found; near the end of the same run the install wizard asks whether to enable the Prometheus metrics endpoint for this checkout, operator says yes, the skill allocates a free port sequentially from 9464, writes enabled+repo_label into the tracked lazy.settings.json and the allocated port into this checkout's gitignored local overlay, then the operator restarts the daemon supervisor so the one-shot metrics.init() picks up the new setting and the daemon now exposes /metrics on the allocated loopback port; operator dispatches an expert job via /lazy-expert.dispatch-job; daemon picks up the job, runs the expert, records a tick → metrics counter increments; operator runs /lazy-observe.install which pre-flight-checks for an already-covered host, finds none, walks the agent-kind/URL/auth wizard, renders agent config + service unit covering every metrics-enabled daemon on the host, loads the supervised service; agent scrapes /metrics and remote_writes to operator's Prometheus; operator runs /lazy-observe.doctor; doctor verifies service active + local /metrics reachable for every daemon + agent self-metrics show successful remote_write + observer URL reachable + WAL bounded; final state: charts populated in operator's Grafana."
@@ -11,7 +11,7 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-observe.install
   - lazy-observe.doctor
-source_sha: 66d0c0daf39decef55aac6f4e299996a8722c5fe
+source_sha: 17a88aa0af208b34c00f6e34d3303f4611911f6f
 ---
 # Ship your first runtime metric to a self-hosted Prometheus stack
 
@@ -31,7 +31,7 @@ You have a fresh checkout. You want runtime metrics from this repo flowing into 
 
 Run `/lazy-core.install`. Answer yes to "does this project use the background daemon" (Gate 1) and yes to "run it for this checkout" (Gate 2) — that installs the daemon supervisor. Expert registration itself asks no questions: the skill silently registers every candidate it finds carrying `expert_protocol:` frontmatter, plus one built-in candidate it always adds regardless of scan results — `lazy-runtime.doctor`, the runtime doctor expert (dispatched only by its own hourly health-check tick, not something you invoke manually for traffic).
 
-Near the end of the same run, the wizard asks one more question: *"Enable the Prometheus `/metrics` endpoint for this checkout's daemon?"* Answer yes. The skill allocates a free port sequentially from `9464` (reusing this checkout's already-recorded port on any later re-run), writes `enabled` and a human-readable `repo_label` (default `local-<folder name>`) into the tracked `lazy.settings.json`, and stores the actual allocated port only in this checkout's gitignored local overlay — a port free on one machine can be taken on another, so it never travels through git. The install report's final line for this step reads `metrics-enabled port=<port> label=<label> scrape-targets=<count>` — note the port, you need it next.
+Near the end of the same run, the wizard asks one more question: *"Enable the Prometheus `/metrics` endpoint for this checkout's daemon?"* Answer yes. The skill allocates a free port sequentially from `9464` (reusing this checkout's already-recorded port on any later re-run), writes `enabled` and a human-readable `repo_label` (default: the folder name) into the tracked `lazy.settings.json`, and stores the actual allocated port only in this checkout's gitignored local overlay — a port free on one machine can be taken on another, so it never travels through git. The install report's final line for this step reads `metrics-enabled port=<port> label=<label> scrape-targets=<count>` — note the port, you need it next.
 
 The daemon supervisor was loaded earlier in this same run, before the metrics question was answered, and `metrics.init()` only runs once at process start — so restart the supervisor now to pick up the setting: `launchctl kickstart -k gui/$UID <label from the plist path the report named>` on macOS, or `systemctl --user restart <unit name from the report>` on Linux.
 
@@ -51,7 +51,9 @@ Re-run `curl http://127.0.0.1:<port>/metrics | grep ticks_total` — the counter
 
 ### Step 3 — Install the shipper
 
-Run `/lazy-observe.install`. The skill first checks, read-only, whether metric collection is already covered on this host — an installed lazycortex-observe service, a running scraper process, or a live connection to a daemon's metrics port. On a clean host this reports clear and the wizard proceeds; if you already run a Prometheus/collector stack it aborts untouched instead, and names two deliberate ways forward: re-run with `--integrate-only` (feed your existing stack a target list, install no shipper) or `--force-standalone` (install anyway).
+Run `/lazy-observe.install`. The skill first checks, read-only, whether metric collection is already covered on this host — an installed lazycortex-observe service, a running scraper process, or a live connection to a daemon's metrics port. On a clean host this reports clear and the wizard proceeds to the four questions below.
+
+If a collector already covers the host, the outcome depends on which one: our own previously-installed lazycortex-observe shipper aborts the run untouched (re-run with `--force-standalone` to re-render it anyway); a foreign collector already scraping this host — an existing Prometheus, otelcol, or Alloy instance — switches the run into integrate mode automatically instead, no questions asked. In that case the wizard below is skipped entirely: the skill regenerates the Prometheus file_sd scrape-targets file and prints the one-time `file_sd_configs` snippet for you to add to your existing stack. Pass `--integrate-only` to force that mode explicitly even on a clean host, or `--force-standalone` to install the shipper despite detected coverage.
 
 Assuming a clean host, the wizard asks four things in sequence (one `AskUserQuestion` each, in operator-driven order):
 

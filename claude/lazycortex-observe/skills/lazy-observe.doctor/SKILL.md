@@ -26,9 +26,12 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Step 1 — Read answer file
 
-Call `claude/lazycortex-observe/bin/install.read_answer_file()`. If the file is absent, report `FAIL not-installed` and skip the rest of the steps with outcome `n/a`.
+Call `claude/lazycortex-observe/bin/install.read_answer_file()`. If the file is absent, the verdict comes from the fact of collection, not from the file: run `install.detect_existing_coverage()` first.
 
-Outcome: `PASS` (with the relevant fields echoed) / `FAIL not-installed`.
+- Coverage verdict `already-covered` → collection works on this host but observe has no record of it — report `WARN covered-unconfigured` (echo the detected signals) and skip the rest of the steps with outcome `n/a`. The fix is `/lazy-observe.install`, which records integrate mode automatically.
+- Coverage verdict `clear` → report `FAIL not-installed` and skip the rest of the steps with outcome `n/a`.
+
+Outcome: `PASS` (with the relevant fields echoed) / `WARN covered-unconfigured` / `FAIL not-installed`.
 
 ## Step 2 — Service unit loaded
 
@@ -101,7 +104,8 @@ Per the project's `lazy-log.logging` rule, log this run to `./.logs/claude/lazy-
 
 ## Failure modes (with suggested fixes)
 
-- **FAIL not-installed** → run `/lazy-observe.install`.
+- **FAIL not-installed** → nothing collects this host's metrics and no shipper is configured → run `/lazy-observe.install`.
+- **WARN covered-unconfigured** → a collector already scrapes this host but `observe.toml` is absent → run `/lazy-observe.install`; it detects the coverage and records integrate mode without questions.
 - **FAIL inactive (Step 2)** → `launchctl kickstart -k gui/$UID com.lazycortex.observe` (darwin) or `systemctl --user restart lazycortex-observe.service` (linux). Check journal/Console for crash reason first.
 - **FAIL no-pid (Step 3)** → service unit thinks it's running but the process exited; check the agent's stderr in `~/Library/Logs/lazycortex-observe/` (darwin) or via `journalctl --user -u lazycortex-observe.service` (linux).
 - **FAIL endpoint-down (Step 4)** → lazycortex-core daemon is down OR `metrics.enabled: false`. Check `references/lazy-core.runtime-schema.md § 12`.

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Ingest free-form requests and route them into the right place in the spec tree — classify, find candidates, then let the deterministic apply worker attach, spawn, or link.
-last_regen: 2026-08-19
+last_regen: 2026-08-21
 diagram_spec:
   anchor: "How the block flows"
   request: "Flow diagram showing the requests block pipeline: spec.coordinator, in its routing mode, orchestrates — it calls lazy-spec.request-classify (returns a class token), then lazy-spec.request-find-candidates (returns a ranked candidate list), then writes a short per-target description into the routing decision. Show an operator confirmation step, then a single lazy-spec.request-apply node that branches internally into attach (seeds the description onto an existing entity's primary doc) or spawn (scaffolds a new entity first, then seeds the same way) — both paths converge into 'doc's own writer builds from source in its review job'."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-spec.create-request
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
-source_sha: f0d1d05881fc28c5febe28cfef1bf57bc7bd3879
+source_sha: 302cf4ffd01e473afa10f9a3f323feae9ee06b31
 ---
 # Requests
 

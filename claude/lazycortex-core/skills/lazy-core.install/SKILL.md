@@ -959,7 +959,7 @@ print((sec.get('metrics') or {}).get('enabled', 'unset'))
 AskUserQuestion:
   header: "Metrics?"
   question: "Enable the Prometheus /metrics endpoint for this checkout's daemon?"
-  description: "Exposes runtime health (routine ticks, errors, tokens, queue depth) on a loopback HTTP port for a Prometheus-compatible scraper. A free port is picked automatically and recorded per-machine; the repo label defaults to `local-<folder name>`. 'No' is recorded and never re-asked."
+  description: "Exposes runtime health (routine ticks, errors, tokens, queue depth) on a loopback HTTP port for a Prometheus-compatible scraper. A free port is picked automatically and recorded per-machine; the repo label defaults to the folder name. 'No' is recorded and never re-asked."
   options: ["Yes — enable metrics", "No — this checkout stays unscraped"]
 ```
 
@@ -982,7 +982,7 @@ p = Path('<repo-root>/.claude/lazy.settings.json')
 tracked = load_tracked_section(p, 'daemon')
 m = tracked.setdefault('metrics', {})
 m['enabled'] = True
-m.setdefault('repo_label', '<repo_label>')  # default: local-<basename>; keep an existing value
+m.setdefault('repo_label', '<repo_label>')  # default: the folder basename verbatim; keep an existing value
 m.setdefault('bind', '127.0.0.1')
 if 'port' in m: print('tracked-port-leaked: ' + str(m['port']))
 save_section(p, 'daemon', tracked)

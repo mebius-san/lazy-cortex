@@ -27,7 +27,7 @@ source_skills:
   - lazy-spec.source-url
   - lazy-spec.lookup
   - lazy-spec.coordinator
-source_sha: 159ac1288fe27b2672a13bdafc577c34c46cb8d5
+source_sha: 302cf4ffd01e473afa10f9a3f323feae9ee06b31
 ---
 # Frequently asked questions
 
@@ -115,7 +115,7 @@ The primitive checks exactly one thing on its own: whether the asset is cancelle
 
 Yes, two ways, both on the asset's own folder-note. Write anything into its `# Coordinator commands` section and the coordinator treats it as an operator instruction the next time it wakes on that asset — it unfolds your ask into a numbered mini-plan in the same section, marking each step's progress, and moves the whole plan into `# History` once every step finishes (or locks it there with what failed, if one step doesn't). A command runs even on a halted asset — halt only silences automatic dispatch, never a direct instruction.
 
-The second way is answering one of the coordinator's own `[!question]` callouts — tick the option you want and it acts on that answer, then removes the callout and records the choice in `# History`. Both surfaces are the coordinator's own pen; you never need to hand-edit the rest of the note to get its attention.
+The second way is answering one of the coordinator's own `[!question]` callouts — tick the option you want and it acts on that answer, then removes the callout and records the choice in `# History`. Both surfaces are the coordinator's own pen; you never need to hand-edit the rest of the note to get its attention. When a decision doesn't follow unambiguously from its playbook and the rule layers in scope, the coordinator does not guess or act "just in case" — it raises exactly this kind of `[!question]` with concrete options and stops on that asset until your tick.
 
 ---
 

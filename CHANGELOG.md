@@ -4,6 +4,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 7.0.1 — 2026-08-21 UTC
+
+- Fixed the default repo label to use the checkout folder's exact name, casing preserved, instead of prefixing it with `local-`; a directory with no origin remote and no other way to name it now falls back to `unnamed`.
+
 ### 7.0.0 — 2026-08-21 UTC
 
 - **Breaking:** `workspace:branch` expert jobs now run in isolated git worktrees — one linked worktree per job, with a bootstrap command and commit-obligation checks — replacing routine-side branch isolation; every workspace-enforced job gets its own branch, and routines gained an OR-filter plus a retry cursor for git-watch items.
@@ -539,6 +543,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 6.0.1 — 2026-08-21 UTC
+
+- Fixed the draft-stage document icon in Obsidian: newly created spec documents no longer trigger an Iconize error from a nonexistent icon.
+
 ### 6.0.0 — 2026-08-21 UTC
 
 - **Breaking:** Documents in the spec catalog are now typed (`feature`, `change`, `bug`, `dev-plan` → `code-plan`, etc.) instead of loosely categorized — each type declares its own tools and playbook, `spec.doctor` validates assets against their declared type, `create-asset` takes a type and starter document, and a new `add-asset-type` wizard registers custom types.
@@ -969,6 +977,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 0.8.4 — 2026-08-21 UTC
+
+- When a foreign collector already scrapes this host, `install` now auto-switches into integrate mode instead of aborting — scrape targets regenerated, no questions asked. `doctor` reports this case distinctly as `WARN covered-unconfigured` instead of misreporting `FAIL not-installed`.
+
 ### 0.8.3 — 2026-08-21 UTC
 
 - Fixed: the `LazyCortexDaemonHalted` alert description now explains every halt cause — dirty tree, diverged or failed push, unreachable remote, suspected loop, invalid routine config — instead of only naming a dirty tree, and states plainly that the daemon never clears a halt itself.
@@ -1051,6 +1063,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.1.0 — 2026-08-21 UTC
+
+- New `software-product` generic expert class for software projects with no narrower domain — a matching aspect, class-map entry, and updated install/help enumeration make it selectable alongside the existing generic classes.
 
 ### 1.0.0 — 2026-08-21 UTC
 

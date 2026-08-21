@@ -4,7 +4,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFileDashed",
+      "icon": "LiFile",
       "color": "#94a3b8",
       "template": "design.md"
     },
@@ -12,7 +12,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFileDashed",
+      "icon": "LiFile",
       "color": "#94a3b8",
       "template": "system-design.md"
     },
@@ -20,7 +20,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFileDashed",
+      "icon": "LiFile",
       "color": "#94a3b8",
       "template": "architecture.md"
     },
@@ -28,7 +28,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFileDashed",
+      "icon": "LiFile",
       "color": "#94a3b8",
       "template": "code-plan.md"
     },
@@ -36,7 +36,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFileDashed",
+      "icon": "LiFile",
       "color": "#94a3b8",
       "template": "test-plan.md"
     },
@@ -44,7 +44,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFileDashed",
+      "icon": "LiFile",
       "color": "#94a3b8",
       "template": "bug.md"
     },
@@ -52,7 +52,7 @@
       "stages": true,
       "review": true,
       "append_only": false,
-      "icon": "LiFileDashed",
+      "icon": "LiFile",
       "color": "#94a3b8",
       "template": "system-tech.md"
     },

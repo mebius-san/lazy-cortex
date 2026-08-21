@@ -902,15 +902,15 @@ def resolve_repo_label(repo_root: Path, override: str | None) -> str:
     override: Explicit label provided by configuration; when non-empty, returned as-is.
 
   Returns:
-    The override when supplied; otherwise `local-<name>` derived from the directory name
-    (human-readable — this is the key operators tell daemons apart by on dashboards);
+    The override when supplied; otherwise the directory name verbatim (human-readable, casing
+    preserved — this is the key operators tell daemons apart by on dashboards);
     otherwise, when the directory name falls outside the label charset, the first 12 hex
     chars of the SHA-1 of the `origin` remote URL.
   """
   # guard: explicit override wins
   if override:
     return override
-  candidate = f"local-{repo_root.name}"
+  candidate = repo_root.name
   # guard: the readable default is used only when it satisfies the closed label charset
   if _LABEL_VALUE_RE.match(candidate):
     return candidate
@@ -929,7 +929,7 @@ def resolve_repo_label(repo_root: Path, override: str | None) -> str:
     # git binary not present on PATH — fall through to the last-resort constant
     pass
   # waiver: last-resort label for a checkout with an unlabelable name and no origin remote
-  return "local-unnamed"
+  return "unnamed"
 
 
 # --- Queue-depth filesystem scan (Task A3) -----------------------------------

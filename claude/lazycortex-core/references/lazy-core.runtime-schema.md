@@ -607,7 +607,7 @@ The daemon can serve a Prometheus-format `/metrics` HTTP endpoint covering routi
 | `enabled` | bool | `false` | Master switch. When false the metrics module is dormant — `import metrics` is free, no HTTP server runs. |
 | `bind` | string | `"127.0.0.1"` | Listening address. **Default is loopback** — never expose off-host without an explicit operator decision. |
 | `port` | int | `9464` | TCP port. `0` lets the OS pick (used in tests). On multi-daemon hosts the install skill allocates ports sequentially from 9464 and records each checkout's port in the **local overlay** (`lazy.settings.local.json`) — a port is a per-host operational fact and must not travel to other machines through the tracked file. |
-| `repo_label` | string or null | `null` | Override for the `repo` label. Default is the human-readable `local-<basename>` (this is the key operators tell daemons apart by on dashboards); when the directory name falls outside the label charset `[A-Za-z0-9._-]`, a 12-char SHA1 prefix of `git remote get-url origin` is used instead. |
+| `repo_label` | string or null | `null` | Override for the `repo` label. Default is the human-readable `<basename>` — the checkout directory name verbatim (this is the key operators tell daemons apart by on dashboards); when the directory name falls outside the label charset `[A-Za-z0-9._-]`, a 12-char SHA1 prefix of `git remote get-url origin` is used instead. |
 | `daemon_name` | string or null | `null` | Override for the `daemon_name` label. Default constant `"lazycortex-runtime"`. **The daemon never reads `os.uname()`** — operator hostname must not leak into the metric stream. |
 
 ### Example

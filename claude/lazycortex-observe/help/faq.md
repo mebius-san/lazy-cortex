@@ -1,14 +1,14 @@
 ---
 chapter_type: faq
 summary: Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
-last_regen: 2026-08-19
+last_regen: 2026-08-21
 no_diagram: true
 source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
   - lazy-observe.doctor
   - lazy-observe.audit
-source_sha: 66d0c0daf39decef55aac6f4e299996a8722c5fe
+source_sha: 17a88aa0af208b34c00f6e34d3303f4611911f6f
 ---
 # Frequently asked questions
 
@@ -20,7 +20,10 @@ Three things must be in place. First, `lazycortex-core` version 1.2.0 or later m
 
 ## Why did the installer stop and say collection is already covered on this host?
 
-`/lazy-observe.install` checks for an already-working collection stack — a running `prometheus`, `otelcol`, `alloy`, or `grafana-agent` scraping your daemons, or a live connection into one of their metrics ports — before asking a single question. If it finds one, it prints the detected signals and aborts without installing anything or reading any config: the default on a host that's already covered is to leave it alone. You have two deliberate ways to override this: `/lazy-observe.install --integrate-only` regenerates a Prometheus `file_sd` scrape-targets file so your existing stack picks up every local lazycortex-core daemon, with no shipper installed at all; `/lazy-observe.install --force-standalone` installs the shipper anyway, alongside whatever is already running.
+`/lazy-observe.install` checks for an already-working collection stack — a running `prometheus`, `otelcol`, `alloy`, or `grafana-agent` scraping your daemons, or a live connection into one of their metrics ports — before asking a single question. What happens next depends on *whose* coverage it found:
+
+- **Our own shipper is already running** (the detected signals include an installed lazycortex-observe service unit) — the installer prints the signals and **aborts untouched**: the default on a working standalone install is to leave it alone. Re-run with `--force-standalone` to re-render it anyway.
+- **A foreign collector is already running** (Prometheus, otelcol, Alloy, or grafana-agent you set up yourself — no observe service unit among the signals) — the installer no longer aborts here. It prints the detected signals and **switches into integrate mode automatically, without asking a single question**: it regenerates a Prometheus `file_sd` scrape-targets file so your existing stack picks up every local lazycortex-core daemon, installs no shipper at all, and records `mode = "integrate"` so future runs stay silent about it. `/lazy-observe.install --integrate-only` forces this same mode explicitly on any host, and `/lazy-observe.install --force-standalone` installs the shipper anyway, alongside whatever is already running.
 
 ---
 
@@ -32,7 +35,7 @@ Yes. `/lazy-observe.install` renders the agent config with scrape targets for ev
 
 ## Which agent should I pick — Alloy or otelcol?
 
-Pick **Grafana Alloy** if you're already on the Grafana / Mimir stack. Pick **OpenTelemetry Collector** (`otelcol`) for everything else. Both agents scrape the same loopback endpoints and emit identical metric series shapes, so dashboards and alert rules work unchanged with either. Your choice is genuine config — it's collected once, persisted, and reused silently on every later `/lazy-observe.install` run (you won't be asked again). To switch agents later, see "How do I change my agent kind, remote_write URL, or auth after the first install?" below.
+Pick **Grafana Alloy** if you're already on the Grafana / Mimir stack. Pick **OpenTelemetry Collector** (`otelcol`) for everything else. Both agents scrape the same loopback endpoints and emit identical metric series shapes, so dashboards and alert rules work unchanged with either. Your choice is genuine config — it's collected once, persisted, and reused silently on every later `/lazy-observe.install` run (you won't be asked again). This question is only asked when a shipper is actually being installed — a host that auto-integrates with a foreign collector never sees it. To switch agents later, see "How do I change my agent kind, remote_write URL, or auth after the first install?" below.
 
 ---
 
@@ -87,7 +90,13 @@ Nothing breaks. Every step treats an already-absent target as a silent no-op, ne
 
 ## How do I check whether the pipeline is working end-to-end?
 
-Run `/lazy-observe.doctor`. It performs seven checks in sequence without touching any file or service state: reads your answer file, confirms the service unit is loaded and the agent process is up, verifies every local lazycortex-core daemon's `/metrics` endpoint contains `lazycortex_runtime_*` series, checks the agent's own self-metrics for a non-zero remote_write success rate, reaches out to your observer URL to confirm it's reachable, and reports the WAL directory size. Each check resolves to `PASS`, `WARN`, or `FAIL` with a one-line suggested fix. It is safe to run at any time.
+Run `/lazy-observe.doctor`. It performs eight checks in sequence without touching any file or service state: reads your answer file (or, if that file is absent, checks whether collection is already working on this host anyway — see the next question), confirms the service unit is loaded and the agent process is up, verifies every local lazycortex-core daemon's `/metrics` endpoint contains `lazycortex_runtime_*` series, checks the agent's own self-metrics for a non-zero remote_write success rate (or, in integrate mode, that the scrape-targets file exists and matches the daemon count), reaches out to your observer URL to confirm it's reachable, and reports the WAL directory size. Each check resolves to `PASS`, `WARN`, or `FAIL` with a one-line suggested fix. It is safe to run at any time.
+
+---
+
+## Doctor reports `WARN covered-unconfigured` instead of `FAIL not-installed`. What's the difference?
+
+`FAIL not-installed` means nothing is collecting this host's metrics at all — no shipper, no foreign collector, no scrape-targets file. `WARN covered-unconfigured` is a narrower, less urgent finding: when doctor can't find an `observe.toml` answer file, it doesn't stop there — it checks whether metrics are being collected anyway, the same way the installer's pre-flight does. If a foreign collector (Prometheus, otelcol, Alloy, or grafana-agent) is already scraping this host but observe has never recorded that fact, doctor reports `WARN` rather than `FAIL`, because your metrics are, in fact, flowing. The fix in both cases is `/lazy-observe.install` — on a `covered-unconfigured` host it detects the existing coverage and records integrate mode automatically, with no questions asked.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#fca5a5"
+iconize_color: "#86efac"
 ---
 # lazycortex-obsidian
 
@@ -80,10 +80,6 @@ Requires these plugins from the same marketplace:
 
 Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
 
-- [diagram-rendering](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/diagram-rendering.md) — Install click-to-zoom for mermaid diagram fences in your Obsidian vault; the fit-CSS that keeps diagrams inside the column lives in the shared install step, not here.
-- [iconize](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/iconize.md) — Scaffold, configure, and run the iconize-sync system to keep Obsidian file and folder icons in sync with your vault's frontmatter-driven icon registry.
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/install-and-audit.md) — Install, keep current, and audit the lazycortex-obsidian plugin — vault bootstrap, Obsidian plugin management, and semantic integrity checks in one pass.
-- [tag-pages](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/tag-pages.md) — Keep a Tags/ folder in sync with every tag used across your vault — pages created, updated, and pruned automatically.
 - [vault-bootstrap](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/walkthroughs/vault-bootstrap.md) — Go from a bare repo to a fully-wired Obsidian vault — tag pages, Iconize sync, diagram glue, click-to-zoom — one chained install.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/troubleshooting.md) — Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, and plugin updates.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/faq.md) — Answers to common questions about vault setup, Iconize, diagram render glue, plugin updates, and tag pages for lazycortex-obsidian.
@@ -112,7 +108,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Hook | Trigger | Description |
 |---|---|---|
-| `iconize_sync` | `Write\|Edit` | Generic iconize-sync worker for the lazycortex-obsidian plugin. |
+| `iconize_sync` | `Write|Edit` | PostToolUse hook: resolve and write iconize_icon/iconize_color frontmatter for an edited markdown note via the icon-map registry. |
 
 ## Installation
 

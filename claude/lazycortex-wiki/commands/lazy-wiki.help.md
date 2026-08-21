@@ -44,13 +44,6 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 <!-- help-block:start -->
 **Documentation:**
 
-- [audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/audit.md) — Run integrity checks across a wiki scope, its terms dictionary, structure map, mirrors, and domain tree — with optional auto-repair.
-- [curation](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/curation.md) — Curate wiki nodes in-session via /lazy-wiki.relink or via daemon routines — classify summaries and topic tags, normalise the tag vocabulary, build glossed See-also links, and prune links to deleted nodes.
-- [domains](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/domains.md) — Query a generated reference tree built from code's Domain(…) comments — one section or one term at a time, never the whole tree.
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/install-and-audit.md) — Bootstrap and maintain lazycortex-wiki — install, configure scopes plus vault-wide axes/domains/mirror/terms/structure, and audit everything for integrity.
-- [query](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/query.md) — Associative Q&A over the wiki graph — /lazy-wiki.query runs in dispatcher mode (seeker + gatherer subagents) when the Agent tool is available, and agentless mode otherwise.
-- [structure](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/structure.md) — Keep one repo-wide map, docs/structure.md, current — rebuild it wholesale, query a slice of it, or let git-watch routines patch it per commit.
-- [terms](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/terms.md) — One agreed dictionary per scope, consulted at write-time and kept honest by a curator and a doctor audit, so a concept never grows a second name.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/troubleshooting.md) — Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/faq.md) — Answers to common questions about setting up scopes, running relinks, querying the wiki, the terms dictionary, the structure map, and the domain-spec tree.
 

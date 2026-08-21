@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.install
-description: "Run when the operator asks to set up lazycortex-experts in a repo, to add or complete an expert class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `sci-fi`, `fantasy`), or when dispatching an expert fails because `lazy.settings.json` has no matching `experts` entry or no model tier for a generic agent. Unlike the sibling install skills, it syncs no rules — it only seeds composed expert entries per the class map plus agent-model tiers, asks for classes only on a project that has none yet, and never overwrites what an operator chose — the one thing it completes on an existing entry is a missing mandatory cross-cutting aspect. Idempotent and quiet on re-run; install scope is detected."
+description: "Run when the operator asks to set up lazycortex-experts in a repo, to add or complete an expert class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), or when dispatching an expert fails because `lazy.settings.json` has no matching `experts` entry or no model tier for a generic agent. Unlike the sibling install skills, it syncs no rules — it only seeds composed expert entries per the class map plus agent-model tiers, asks for classes only on a project that has none yet, and never overwrites what an operator chose — the one thing it completes on an existing entry is a missing mandatory cross-cutting aspect. Idempotent and quiet on re-run; install scope is detected."
 allowed-tools: Read, Write, Edit, Glob, Skill, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(ls *), Bash(python3 *), Bash(lazycortex-core *), Agent
 ---
 # Install lazycortex-experts
@@ -28,7 +28,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 This skill is **idempotent and quiet on re-run**. It asks exactly one thing, and only on a fresh project:
 
-- **Expert classes** — which domain aspects to register (e.g. `claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `sci-fi`, `fantasy`). Asked ONLY when the `experts` section holds no domain-class entries — a fresh project, or one that so far carries only system experts seeded by sibling plugins (`wiki.curator`, `review.doc_doctor`, …). When domain-class entries exist, the skill derives the classes already present from their `aspects` and completes those — never re-asking, never silently dragging in classes you didn't choose.
+- **Expert classes** — which domain aspects to register (e.g. `claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`). Asked ONLY when the `experts` section holds no domain-class entries — a fresh project, or one that so far carries only system experts seeded by sibling plugins (`wiki.curator`, `review.doc_doctor`, …). When domain-class entries exist, the skill derives the classes already present from their `aspects` and completes those — never re-asking, never silently dragging in classes you didn't choose.
 - **Install scope** is derived from where the plugin is *enabled* (see Step 1); a project-scope enablement wins even when the install record's `scope` is `user`.
 - **Expert git identity** is a deterministic bot id (`{name: <title-cased expert>, email: <expert-key>@bot.invalid}`), never the operator's `git config`.
 - **Existing entries are never overwritten**, including hand-customized composed experts. A missing mandatory cross-cutting aspect is appended to `aspects[]` and nothing else is touched — completing a mandatory list is not overwriting a choice (Step 5).
@@ -71,7 +71,7 @@ The expert "classes" are the domain aspects this plugin ships. Enumerate the ava
 ### Enumerate available classes and roles
 
 - `<installPath>` is the `installPath` field from `~/.claude/plugins/installed_plugins.json` for `lazycortex-experts@lazycortex`.
-- **Classes (domain aspects)**: `Glob <installPath>/references/lazy-experts.*-aspect.md`, minus the cross-cutting aspects `discipline`, `research`, `tech-writing`, `terms`, and `structure` (they compose onto experts, they are not classes). The class key is the basename minus the `lazy-experts.` prefix and the `-aspect.md` suffix — currently `claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `sci-fi`, `fantasy`.
+- **Classes (domain aspects)**: `Glob <installPath>/references/lazy-experts.*-aspect.md`, minus the cross-cutting aspects `discipline`, `research`, `tech-writing`, `terms`, and `structure` (they compose onto experts, they are not classes). The class key is the basename minus the `lazy-experts.` prefix and the `-aspect.md` suffix — currently `claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`.
 - **Roles (agents)**: `Glob <installPath>/agents/lazy-experts.*.md`. The agent basenames minus the `lazy-experts.` prefix and `.md` suffix are the agent set — currently `interpreter`, `designer`, `architect`, `planner`, `implementer`, `data-implementer`, `docs-writer`, `debugger`, `reviewer`, `tester`, `fiction-writer`. Which roles a class seeds — and which agent each role resolves to (three roles map onto an agent of a different basename, see Step 5's mapping table) — is decided by the class map in Step 5.
 
 If either glob is empty, abort with `plugin-cache-incomplete: <missing-dir>`.
@@ -92,7 +92,7 @@ AskUserQuestion:
   question: "Which expert classes should this project register?"
   description: "Each class is a domain the generic experts specialise in (the aspect they load). Pick the domain(s) this project works in — re-run later to add more. Roles are seeded per the class map: technical classes get all eight engineering roles; sci-fi/fantasy get fiction-writer."
   multiSelect: true
-  options: one per available class (e.g. "claude-plugin", "game-dev", "dotfiles", "obsidian-plugin", "data-pipeline", "sci-fi", "fantasy")
+  options: one per available class (e.g. "claude-plugin", "game-dev", "dotfiles", "obsidian-plugin", "data-pipeline", "software-product", "sci-fi", "fantasy")
 ```
 
   The chosen classes are the class set. State `asked: <classes>`.
@@ -121,7 +121,7 @@ Seed one composed expert entry per (class × role) pair from the **class map** b
 
 | Class kind | Classes | Roles seeded | Cross-cutting aspects (appended after the domain aspect) |
 |---|---|---|---|
-| technical | `claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, and any future class not listed as fiction | `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `developer`, `debugger`, `reviewer`, `tester` | `lazy-experts.discipline-aspect`, `lazy-experts.research-aspect`, `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, `lazy-experts.structure-aspect`, `lazy-memory.persona-aspect` |
+| technical | `claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, and any future class not listed as fiction | `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `developer`, `debugger`, `reviewer`, `tester` | `lazy-experts.discipline-aspect`, `lazy-experts.research-aspect`, `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, `lazy-experts.structure-aspect`, `lazy-memory.persona-aspect` |
 | data | `game-dev` | `data-writer` | the same cross-cutting aspects the technical row assigns |
 | fiction | `sci-fi`, `fantasy` | `fiction-writer` | `lazy-experts.discipline-aspect`, `lazy-experts.research-aspect`, `lazy-memory.persona-aspect` |
 
@@ -140,11 +140,12 @@ For each `(class, role)` pair from the class map (restricted to the Step 3 class
 | `dotfiles` | `dotfiles` |
 | `obsidian-plugin` | `obsidian-plugin` |
 | `data-pipeline` | `data-pipeline` |
+| `software-product` | `software` |
 | `sci-fi` | `sci-fi` |
 | `fantasy` | `fantasy` |
 | *(other / future)* | `<class>` (verbatim) |
 
-The expert key is `<domain>.<role>` — dot-separated. Examples: `claude-plugin.designer`, `game.interpreter`, `dotfiles.planner`. The domain map is closed-set for the seven shipped classes (five technical + two fiction); future classes fall through to the verbatim class name. This is the marketplace-wide expert-key convention `<domain>.<role>` (cf. `review.doc_doctor`, `wiki.curator`, `spec.coordinator`).
+The expert key is `<domain>.<role>` — dot-separated. Examples: `claude-plugin.designer`, `game.interpreter`, `dotfiles.planner`. The domain map is closed-set for the eight shipped classes (six technical + two fiction); future classes fall through to the verbatim class name. This is the marketplace-wide expert-key convention `<domain>.<role>` (cf. `review.doc_doctor`, `wiki.curator`, `spec.coordinator`).
 
 Three roles do not share their agent's basename — the role names the job, the agent stays under its own name:
 

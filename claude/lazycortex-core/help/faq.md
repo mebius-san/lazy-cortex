@@ -25,7 +25,7 @@ source_skills:
   - lazy-log.recall
   - lazy-log.summary
   - lazy-log.timeline
-source_sha: ddfefb0f7c7cd9509a78bd86f8dc930e5e906a56
+source_sha: 8e1778242c1d07b5ae5e6fee24b46b72873fefdc
 ---
 # FAQ
 
@@ -133,7 +133,7 @@ To enable it later without re-running the full install flow, run `/lazy-core.ins
 
 Yes, but only on a checkout that actually runs the daemon locally. Once the earlier install wizard confirms this machine and checkout are the pair on record (`run_here`), a later step asks once whether to enable the daemon's Prometheus `/metrics` endpoint — exposing routine ticks, errors, tokens, and queue depth on a loopback HTTP port for a Prometheus-compatible scraper. Answering "No" is recorded permanently and you are never asked again on that checkout; re-running `/lazy-core.install` reuses the recorded answer instead of re-asking.
 
-Answering "Yes" allocates a free port sequentially starting from `9464` — reusing this checkout's already-recorded port on re-runs instead of picking a new one — and splits where the decision is written: the `enabled` flag and a human-readable `repo_label` (default `local-<folder name>`) go into the tracked `lazy.settings.json[daemon].metrics`, shared across machines, while the allocated port goes into the gitignored per-machine overlay, because a port that's free on one machine may be taken on another. The step then regenerates a host-wide Prometheus scrape-targets file so an external Prometheus with a `file_sd_configs` pointer picks up every locally running daemon with zero manual edits.
+Answering "Yes" allocates a free port sequentially starting from `9464` — reusing this checkout's already-recorded port on re-runs instead of picking a new one — and splits where the decision is written: the `enabled` flag and a human-readable `repo_label` (default: the folder name) go into the tracked `lazy.settings.json[daemon].metrics`, shared across machines, while the allocated port goes into the gitignored per-machine overlay, because a port that's free on one machine may be taken on another. The step then regenerates a host-wide Prometheus scrape-targets file so an external Prometheus with a `file_sd_configs` pointer picks up every locally running daemon with zero manual edits.
 
 If the daemon later starts and finds its recorded port already taken by something else, it does not crash-loop — it records the conflict as an incident and keeps running without metrics until the conflict is resolved.
 

@@ -1,10 +1,10 @@
 ---
 chapter_type: block
-summary: Twelve aspect files (seven domain, five cross-cutting) that layer knowledge and rigor onto experts via lazy.settings.json composition.
+summary: Thirteen aspect files (eight domain, five cross-cutting) that layer knowledge and rigor onto experts via lazy.settings.json composition.
 last_regen: 2026-08-21
 diagram_spec:
   anchor: "Domain aspects feed the composition entry"
-  request: "Flow diagram: the seven domain aspect files — claude-plugin-aspect, game-dev-aspect, dotfiles-aspect, obsidian-plugin-aspect, data-pipeline-aspect, sci-fi-aspect, fantasy-aspect — each feed into a single lazy.settings.json[experts] composition entry node. The five technical domain aspects carry the edge label 'technical class'; the two genre aspects sci-fi-aspect and fantasy-aspect carry the edge label 'fiction class'. No other nodes."
+  request: "Flow diagram: the eight domain aspect files — claude-plugin-aspect, game-dev-aspect, dotfiles-aspect, obsidian-plugin-aspect, data-pipeline-aspect, software-product-aspect, sci-fi-aspect, fantasy-aspect — each feed into a single lazy.settings.json[experts] composition entry node. The six technical domain aspects carry the edge label 'technical class'; the two genre aspects sci-fi-aspect and fantasy-aspect carry the edge label 'fiction class'. No other nodes."
   kind_hint: flow
 source_skills:
   - lazy-experts.claude-plugin-aspect
@@ -12,6 +12,7 @@ source_skills:
   - lazy-experts.dotfiles-aspect
   - lazy-experts.obsidian-plugin-aspect
   - lazy-experts.data-pipeline-aspect
+  - lazy-experts.software-product-aspect
   - lazy-experts.sci-fi-aspect
   - lazy-experts.fantasy-aspect
   - lazy-experts.discipline-aspect
@@ -20,13 +21,13 @@ source_skills:
   - lazy-experts.terms-aspect
   - lazy-experts.structure-aspect
   - lazy-experts.install
-source_sha: 159ac1288fe27b2672a13bdafc577c34c46cb8d5
+source_sha: 05f6f9a9fc372840e99c4cdcda9b7f182e336140
 ---
 # Domain aspects and the cross-cutting aspects
 
 The aspects block is a set of pure prompt layers — each one adds a body of knowledge or behavioral discipline to whichever generic expert (`interpreter`, `designer`, `architect`, `planner`, `implementer`, `debugger`, `reviewer`, `tester`, or `fiction-writer`) you pair it with. You declare the pairing in `lazy.settings.json[experts]` and the expert runtime merges the aspect bodies into the agent's system prompt at dispatch time. The result is a named specialist — for example a `claude-plugin-planner`, a `game-designer`, an `obsidian-plugin-implementer`, or a `sci-fi-writer` — without authoring a fresh agent for each domain.
 
-`lazycortex-experts` ships twelve aspects across two categories. Seven are **domain aspects**: you pick the ones relevant to a project and wire them into the specialists you want. Five are **cross-cutting aspects** that compose automatically per class rather than by hand-pick: `discipline` and `research` onto every seeded expert, and `tech-writing`, `terms`, and `structure` onto every seeded expert in a technical class only. `/lazy-experts.install` handles all of it — it asks which classes to register (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `sci-fi`, `fantasy`), then seeds the roles the class map assigns for each chosen class, wiring `lazycortex-experts:lazy-experts.discipline-aspect` and `lazycortex-experts:lazy-experts.research-aspect` onto every entry, and `lazycortex-experts:lazy-experts.tech-writing-aspect`, `lazycortex-experts:lazy-experts.terms-aspect`, and `lazycortex-experts:lazy-experts.structure-aspect` onto technical-class entries only. All twelve aspects are public-marketplace-safe and composable with aspects your own plugins ship.
+`lazycortex-experts` ships thirteen aspects across two categories. Eight are **domain aspects**: you pick the ones relevant to a project and wire them into the specialists you want. Five are **cross-cutting aspects** that compose automatically per class rather than by hand-pick: `discipline` and `research` onto every seeded expert, and `tech-writing`, `terms`, and `structure` onto every seeded expert in a technical class only. `/lazy-experts.install` handles all of it — it asks which classes to register (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), then seeds the roles the class map assigns for each chosen class, wiring `lazycortex-experts:lazy-experts.discipline-aspect` and `lazycortex-experts:lazy-experts.research-aspect` onto every entry, and `lazycortex-experts:lazy-experts.tech-writing-aspect`, `lazycortex-experts:lazy-experts.terms-aspect`, and `lazycortex-experts:lazy-experts.structure-aspect` onto technical-class entries only. All thirteen aspects are public-marketplace-safe and composable with aspects your own plugins ship.
 
 ## What's in this block
 
@@ -50,17 +51,19 @@ The aspects block is a set of pure prompt layers — each one adds a body of kno
 
 **`lazy-experts.data-pipeline-aspect`** adds data-synchronization and pipeline engineering expertise — idempotency, incremental state, resumability, quota and rate-limit budgeting, integrity verification, and source-data safety. The aspect is neutral on transport, storage, and scheduler; it is opinionated on what state marks progress, what happens on re-run, what happens on interruption, and how the result is verified against the source. It obliges the agent to name the idempotency mechanism per stage, state the incremental-state model and when the progress marker is written relative to the side-effect, design for mid-batch interruption as the normal case, budget external quotas explicitly with a backoff strategy, keep source data read-only until the destination copy is proven, verify by reconciling counts/hashes/samples rather than by absence of errors, and park per-item failures in a visible quarantine instead of letting them block the run. Use it to build a specialist that interprets a sync or pipeline request, writes a pipeline design, or plans a migration that survives interruption.
 
+**`lazy-experts.software-product-aspect`** adds general software-product expertise — the fallback technical class for a project whose domain doesn't match one of the other five shipped classes, or hasn't crystallized yet. It is neutral on language, stack, and delivery form (CLI, service, app, library); opinionated on the product-shaped questions any piece of software must answer regardless of domain — who uses it, where it runs, what its compatibility promises are, where its state lives, what its configuration surface costs, and what happens when it fails. It obliges the agent to name the user and their actual workflow in every design, declare supported platforms and runtime version floors explicitly, state each user-touchable change's compatibility effect and its deprecation or migration path when the surface was promised stable, give every persisted-format change a migration story (including what a half-migrated state looks like), budget new configuration knobs against a working default, design failure to be user-visible (what the user sees, what lands in logs, what a maintainer needs to reproduce it), and verify a shipped behavior change in its released form — a smoke check, version output, telemetry — not only in the test suite. A project whose domain later crystallizes keeps this class and stacks a repo-local domain aspect on top of it rather than replacing it. Use it to build a specialist for a project no narrower shipped class covers.
+
 **`lazy-experts.sci-fi-aspect`** adds science-fiction genre expertise to whichever expert composes it — in practice, `fiction-writer`. It treats the story's speculative premise as a system with consequences rather than a backdrop: name the novum (the one invented difference the story runs on) and work its second-order effects through plot, society, and scene; keep extrapolation coherent with whatever the story has already stated about its own technology; let the technology's limits — cost, latency, scarcity, failure — create the dramatic pressure instead of dissolving it. It is neutral on subgenre (hard SF, space opera, cyberpunk, near-future) and matches its plausibility rigor to whichever pin the brief sets.
 
 **`lazy-experts.fantasy-aspect`** adds fantasy genre expertise to whichever expert composes it — in practice, `fiction-writer`. It treats the invented world as a constraint on every scene: magic shows or implies a cost every time it's used, world details that don't change a character's choices or stakes are cut, and established rules, geography, history, and names bind every later sentence — a contradiction with earlier text or the story bible is a defect, not a creative choice. Names and languages stay coherent with their culture's established conventions, and wonder is anchored in what a marvel does to characters and stakes rather than in unattached adjectives. It is neutral on subgenre (epic, urban, dark, fairy-tale).
 
 ## How they work together
 
-The five cross-cutting aspects and the seven domain aspects serve different purposes and compose along different rules.
+The five cross-cutting aspects and the eight domain aspects serve different purposes and compose along different rules.
 
-**Discipline and research are universal; tech-writing, terms, and structure are class-gated.** `/lazy-experts.install` adds `lazycortex-experts:lazy-experts.discipline-aspect` and `lazycortex-experts:lazy-experts.research-aspect` to every entry it seeds, technical or fiction — both are role-independent working habits that apply whether the specialist writes a spec or a scene. It adds `lazycortex-experts:lazy-experts.tech-writing-aspect`, `lazycortex-experts:lazy-experts.terms-aspect`, and `lazycortex-experts:lazy-experts.structure-aspect` only to entries in a technical class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, and any future non-fiction class) — fiction-class entries (`sci-fi`, `fantasy`) never receive any of the three, because banning metaphor and atmospheric openings would gut the craft `fiction-writer` exists to practice, and an obligation to call a thing by its registered term or ground every location claim in a repository map has nothing to say inside a scene. When you hand-author a specialist entry, follow the same rule: include discipline and research always, include tech-writing/terms/structure only if the specialist writes technical documents.
+**Discipline and research are universal; tech-writing, terms, and structure are class-gated.** `/lazy-experts.install` adds `lazycortex-experts:lazy-experts.discipline-aspect` and `lazycortex-experts:lazy-experts.research-aspect` to every entry it seeds, technical or fiction — both are role-independent working habits that apply whether the specialist writes a spec or a scene. It adds `lazycortex-experts:lazy-experts.tech-writing-aspect`, `lazycortex-experts:lazy-experts.terms-aspect`, and `lazycortex-experts:lazy-experts.structure-aspect` only to entries in a technical class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, and any future non-fiction class) — fiction-class entries (`sci-fi`, `fantasy`) never receive any of the three, because banning metaphor and atmospheric openings would gut the craft `fiction-writer` exists to practice, and an obligation to call a thing by its registered term or ground every location claim in a repository map has nothing to say inside a scene. When you hand-author a specialist entry, follow the same rule: include discipline and research always, include tech-writing/terms/structure only if the specialist writes technical documents.
 
-**Domain aspects split into two families that don't mix.** The five technical domain aspects (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`) compose onto the engineering roles the install skill's class map seeds — `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `developer`, `debugger`, `reviewer`, `tester` (nine roles; `system-designer` shares the `designer` agent with the `designer` role under a second composed entry, and `developer` maps to the `implementer` agent). `game-dev` additionally seeds a `data-writer` role — mapped to the `data-implementer` agent, for writing entity data files — as an addition on top of the nine, not a replacement for any of them. The two genre aspects (`sci-fi`, `fantasy`) compose onto `fiction-writer`. You can combine multiple technical domain aspects on one engineering agent, and you can combine both genre aspects on `fiction-writer` for a story that blends sci-fi and fantasy elements, but a genre aspect on an engineering agent (or a technical domain aspect on `fiction-writer`) has no defined effect — the class map never seeds that pairing, and hand-authoring it does not make it meaningful. The aspect resolver (part of `lazycortex-core`'s expert runtime) merges whichever aspect bodies you list into the agent's system prompt before dispatch, in declaration order; order matters only when obligations conflict, and earlier aspects take precedence in any ambiguous obligation.
+**Domain aspects split into two families that don't mix.** The six technical domain aspects (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`) compose onto the engineering roles the install skill's class map seeds — `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `developer`, `debugger`, `reviewer`, `tester` (nine roles; `system-designer` shares the `designer` agent with the `designer` role under a second composed entry, and `developer` maps to the `implementer` agent). `game-dev` additionally seeds a `data-writer` role — mapped to the `data-implementer` agent, for writing entity data files — as an addition on top of the nine, not a replacement for any of them. `software-product` is the fallback of the six: reach for it when a project's own domain doesn't match one of the other five, or hasn't taken shape yet — stacking a repo-local domain aspect on top later, once it does, rather than dropping this one. The two genre aspects (`sci-fi`, `fantasy`) compose onto `fiction-writer`. You can combine multiple technical domain aspects on one engineering agent, and you can combine both genre aspects on `fiction-writer` for a story that blends sci-fi and fantasy elements, but a genre aspect on an engineering agent (or a technical domain aspect on `fiction-writer`) has no defined effect — the class map never seeds that pairing, and hand-authoring it does not make it meaningful. The aspect resolver (part of `lazycortex-core`'s expert runtime) merges whichever aspect bodies you list into the agent's system prompt before dispatch, in declaration order; order matters only when obligations conflict, and earlier aspects take precedence in any ambiguous obligation.
 
 The `lazy.settings.json[experts]` entry is the composition point. A hand-authored technical entry names one engineering agent, discipline, research, tech-writing, terms, structure, and one or more domain aspects; a hand-authored fiction entry names `fiction-writer`, discipline, research, and one or more genre aspects with no tech-writing, terms, or structure:
 
@@ -103,7 +106,7 @@ The aspect bodies carry no side-effects and add no new write permissions beyond 
 
 ## Domain aspects feed the composition entry
 
-Each domain aspect is a file the composition entry names; the five technical ones pair with the engineering agents, the two genre ones pair with `fiction-writer`.
+Each domain aspect is a file the composition entry names; the six technical ones pair with the engineering agents, the two genre ones pair with `fiction-writer`.
 
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
@@ -113,6 +116,7 @@ flowchart LR
   dotfilesAspect["dotfiles-aspect"]
   obsidianPluginAspect["obsidian-plugin-aspect"]
   dataPipelineAspect["data-pipeline-aspect"]
+  softwareProductAspect["software-product-aspect"]
   sciFiAspect["sci-fi-aspect"]
   fantasyAspect["fantasy-aspect"]
   expertsCompositionEntry["lazy.settings.json[experts] composition entry"]
@@ -122,20 +126,21 @@ flowchart LR
   dotfilesAspect -->|technical class| expertsCompositionEntry
   obsidianPluginAspect -->|technical class| expertsCompositionEntry
   dataPipelineAspect -->|technical class| expertsCompositionEntry
+  softwareProductAspect -->|technical class| expertsCompositionEntry
   sciFiAspect -->|fiction class| expertsCompositionEntry
   fantasyAspect -->|fiction class| expertsCompositionEntry
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
-
-  class claudePluginAspect action
-  class gameDevAspect action
-  class dotfilesAspect action
-  class obsidianPluginAspect action
-  class dataPipelineAspect action
-  class sciFiAspect action
-  class fantasyAspect action
-  class expertsCompositionEntry entry
+  class claudePluginAspect entry
+  class gameDevAspect entry
+  class dotfilesAspect entry
+  class obsidianPluginAspect entry
+  class dataPipelineAspect entry
+  class softwareProductAspect entry
+  class sciFiAspect entry
+  class fantasyAspect entry
+  class expertsCompositionEntry action
 ```
 
 ## Cross-cutting aspects and the two outcomes
@@ -175,4 +180,3 @@ flowchart LR
   class technicalSpecialist success
   class fictionSpecialist success
 ```
-

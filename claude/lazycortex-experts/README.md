@@ -1,10 +1,10 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#fca5a5"
+iconize_color: "#fde68a"
 ---
 # lazycortex-experts
 
-Generic lifecycle experts (interpreter, designer, planner, implementer, debugger, reviewer, tester) plus a fiction-writer agent, a starter set of domain aspects (claude-plugin, game-dev, dotfiles, obsidian-plugin, data-pipeline, sci-fi, fantasy), and two cross-cutting aspects (discipline, tech-writing). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
+Generic lifecycle experts (interpreter, designer, architect, planner, implementer, data-implementer, docs-writer, debugger, reviewer, tester) plus a fiction-writer agent, a starter set of domain aspects (claude-plugin, game-dev, dotfiles, obsidian-plugin, data-pipeline, sci-fi, fantasy), and five cross-cutting aspects (discipline, research, tech-writing, terms, structure). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
 
 ## Why this plugin
 
@@ -19,7 +19,7 @@ LazyCortex experts run as queued jobs through `lazycortex-core`'s expert runtime
 
 - **install-and-audit** — Bootstrap `lazycortex-experts` in your project. `/lazy-experts.install` seeds agent-model tiers for the generic agents from `lazycortex-core`'s defaults and composes experts per the class map — technical classes seed eight roles with the mandatory cross-cutting aspects (discipline, research, tech-writing, terms, structure), fiction classes (sci-fi, fantasy) seed fiction-writer with discipline + research only; a re-run appends any mandatory cross-cutting aspect an existing entry lacks. It asks for classes only when no domain-class experts exist yet (system experts seeded by sibling plugins don't count), and checks system-expert completeness against the sibling-plugin registry, reporting gaps without seeding them. No health-audit skill — health verification routes through `/lazy-core.doctor`. Members: lazy-experts.install.
 - **agents** — Eleven generic agents. Each is persona-only; the protocol comes from whichever routine dispatches the job. Four design-time (lazy-experts.interpreter, lazy-experts.designer, lazy-experts.architect, lazy-experts.planner), six execution-stage (lazy-experts.implementer, lazy-experts.data-implementer, lazy-experts.docs-writer, lazy-experts.debugger, lazy-experts.reviewer, lazy-experts.tester), and one literary (lazy-experts.fiction-writer).
-- **aspects** — Domain aspect files plus five cross-cutting aspects, composed into the generic agents via `lazy.settings.json[experts][<expert>].aspects[]`. Domain members (operator picks per project): lazy-experts.claude-plugin-aspect, lazy-experts.game-dev-aspect, lazy-experts.dotfiles-aspect, lazy-experts.obsidian-plugin-aspect, lazy-experts.data-pipeline-aspect, lazy-experts.sci-fi-aspect, lazy-experts.fantasy-aspect. Cross-cutting: lazy-experts.discipline-aspect and lazy-experts.research-aspect (auto-composed onto every seeded expert), lazy-experts.tech-writing-aspect, lazy-experts.terms-aspect, and lazy-experts.structure-aspect (auto-composed onto technical-class experts only; fiction classes never carry them).
+- **aspects** — Domain aspect files plus five cross-cutting aspects, composed into the generic agents via `lazy.settings.json[experts][<expert>].aspects[]`. Domain members (operator picks per project): lazy-experts.claude-plugin-aspect, lazy-experts.game-dev-aspect, lazy-experts.dotfiles-aspect, lazy-experts.obsidian-plugin-aspect, lazy-experts.data-pipeline-aspect, lazy-experts.software-product-aspect, lazy-experts.sci-fi-aspect, lazy-experts.fantasy-aspect. Cross-cutting: lazy-experts.discipline-aspect and lazy-experts.research-aspect (auto-composed onto every seeded expert), lazy-experts.tech-writing-aspect, lazy-experts.terms-aspect, and lazy-experts.structure-aspect (auto-composed onto technical-class experts only; fiction classes never carry them).
 - **composition** — How to assemble a concrete specialist (e.g. `game-designer`, `claude-plugin-planner`) by pairing one agent with one or more aspects in `lazy.settings.json[experts]`. No skills in this block — it's documentation only.
 
 ## Requirements
@@ -53,16 +53,12 @@ Requires these plugins from the same marketplace:
 
 | Skill | Description |
 |---|---|
-| `lazy-experts.install` | Run when the operator asks to set up lazycortex-experts in a repo, to add or complete an expert class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `sci-fi`, `fantasy`), or when dispatching an expert fails because `lazy.settings.json` has no matching `experts` entry or no model tier for a generic agent. Unlike the sibling install skills, it syncs no rules — it only seeds composed expert entries per the class map plus agent-model tiers, asks for classes only on a project that has none yet, and never overwrites what an operator chose — the one thing it completes on an existing entry is a missing mandatory cross-cutting aspect. Idempotent and quiet on re-run; install scope is detected. |
+| `lazy-experts.install` | Run when the operator asks to set up lazycortex-experts in a repo, to add or complete an expert class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), or when dispatching an expert fails because `lazy.settings.json` has no matching `experts` entry or no model tier for a generic agent. Unlike the sibling install skills, it syncs no rules — it only seeds composed expert entries per the class map plus agent-model tiers, asks for classes only on a project that has none yet, and never overwrites what an operator chose — the one thing it completes on an existing entry is a missing mandatory cross-cutting aspect. Idempotent and quiet on re-run; install scope is detected. |
 
 ## Documentation
 
 Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
 
-- [agents](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/agents.md) — Eleven persona-only agents — four design-time, six execution-stage, and one literary agent for fiction deliverables.
-- [aspects](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/aspects.md) — Twelve aspect files (seven domain, five cross-cutting) that layer knowledge and rigor onto experts via lazy.settings.json composition.
-- [composition](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/composition.md) — Assemble a named specialist by pairing one generic agent with aspects in lazy.settings.json[experts], following the technical/fiction class map.
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/install-and-audit.md) — Bootstrap lazycortex-experts by seeding agent-model tiers and class-mapped composed expert entries into lazy.settings.json.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/troubleshooting.md) — Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, the class map, composing specialists, and the eleven generic agents' lane boundaries.
 
@@ -88,7 +84,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Command | Description |
 |---|---|
-| `lazy-experts.help` | Run when the operator asks what lazycortex-experts ships, which generic expert fits a piece of work, or how to assemble a named specialist — lists the nine persona agents (interpreter, designer, architect, planner, implementer, debugger, reviewer, tester, fiction-writer), the domain and cross-cutting aspects that layer onto them, and the `lazy.settings.json[experts]` composition shape. |
+| `lazy-experts.help` | Run when the operator asks what lazycortex-experts ships, which generic expert fits a piece of work, or how to assemble a named specialist — lists the eleven persona agents (interpreter, designer, architect, planner, implementer, data-implementer, docs-writer, debugger, reviewer, tester, fiction-writer), the domain and cross-cutting aspects that layer onto them, and the `lazy.settings.json[experts]` composition shape. |
 
 ## Installation
 

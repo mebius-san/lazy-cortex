@@ -13,7 +13,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 - `lazy-observe.audit` — audit the lazycortex-observe plugin: verify any rule files still encode their invariants and cross-check artifact conventions. Read-first; presents findings, asks before fixing. Severity: PASS / WARN / FAIL.
 - `lazy-observe.doctor` — read-only health check for the lazycortex-observe shipper on this host. Verifies service status, agent process, local /metrics endpoint, agent's own remote_write success counter, observer URL reachability, and WAL bounds. Reports each as PASS / WARN / FAIL with a one-line fix suggestion. Never mutates filesystem or service state.
-- `lazy-observe.install` — bootstrap the lazycortex-observe shipper for this host: pick agent kind (Alloy / otelcol), collect remote_write URL + auth, render the agent config + service unit from shipped templates, install + load the supervised service, smoke-test the local /metrics endpoint. Operator-private values stay in `${XDG_CONFIG_HOME:-~/.config}/lazycortex/`. Idempotent — re-running rewrites the rendered configs and reloads the service.
+- `lazy-observe.install` — bootstrap metrics collection for this host. A foreign collector already covering the host switches the run into integrate mode automatically: scrape targets regenerated, no questions asked. Otherwise it installs the standalone shipper: pick agent kind (Alloy / otelcol), collect remote_write URL + auth, render the agent config + service unit from shipped templates, install + load the supervised service, smoke-test the local /metrics endpoint. Operator-private values stay in `${XDG_CONFIG_HOME:-~/.config}/lazycortex/`. Idempotent — re-running rewrites the rendered configs and reloads the service.
 - `lazy-observe.uninstall` — tear down the lazycortex-observe shipper on this host: unload the launchd agent or systemd user unit, remove rendered configs and the WAL dir. Operator-private state under `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` is preserved by default — re-installing later picks it up. Idempotent — re-running on an already-clean host is a no-op.
 
 No agents. No other commands.
@@ -21,7 +21,6 @@ No agents. No other commands.
 <!-- help-block:start -->
 **Documentation:**
 
-- [install-and-audit](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/install-and-audit.md) — Install, verify health, and tear down the lazycortex-observe metrics shipper on any host.
 - [ship-metrics-end-to-end](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/walkthroughs/ship-metrics-end-to-end.md) — From a clean checkout to your first dashboard panel — install the runtime daemon with metrics enabled, produce traffic, install the shipper, verify the pipeline.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/troubleshooting.md) — Common failure modes across lazycortex-observe install, uninstall, and doctor — symptoms, likely causes, and fixes.
 - [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-observe/help/faq.md) — Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
