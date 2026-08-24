@@ -18,6 +18,8 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 - *"I want Iconize set up in this vault from scratch."* — `/lazy-obsidian.iconize-install` installs all three iconize-sync hard-dependency plugins via `/lazy-obsidian.update-plugin` (`obsidian-icon-folder`, `folder-notes`, `iconize-reloader --bundled`), then scaffolds the icon-map registry and repaint routine into the vault.
 - *"I need to edit which folders get which icons."* — `/lazy-obsidian.iconize-config` is a wizard for editing the Iconize registry (the declarative mapping of paths to icons).
 - *"I need to apply the current registry to my notes."* — `/lazy-obsidian.iconize-sync` wraps the worker (`bin/iconize_sync.py`) to reconcile the registry into each matched note's `iconize_icon` / `iconize_color` frontmatter; Iconize and the bundled `iconize-reloader` repaint from there.
+- *"My vault config keeps fighting git."* — `/lazy-obsidian.capture` snapshots the whole `.obsidian/` surface into one tracked `.obsidian.manifest.json` and commits it, so the config travels as a single reviewed file instead of the hundred-odd files the mobile app rewrites on its own.
+- *"Fresh clone, no vault config."* — `/lazy-obsidian.deploy` rebuilds `.obsidian/` from that manifest: every plugin at its latest release, the captured settings on top, snippets, theme, and the top-level config files.
 - *"What does this plugin do?"* — `/lazy-obsidian.help`.
 
 ## Blocks
@@ -25,6 +27,7 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 - **iconize** — Folder-icon system for the vault: a declarative path→icon registry, a wizard to edit it, and a sync worker that paints each note's `iconize_icon` / `iconize_color` frontmatter. Members: lazy-obsidian.iconize-install, lazy-obsidian.iconize-config, lazy-obsidian.iconize-sync.
 - **diagram-rendering** — Click-to-zoom for diagram fences in Obsidian (the `mermaid-popup` vault plugin). The mermaid/ascii fit CSS snippets it declares are installed and enabled by `lazy-obsidian.install`'s shared snippet step, not by this skill. Members: lazy-obsidian.diagram-install.
 - **tag-pages** — Generate and refresh Obsidian tag pages from the tags used across the vault's notes, keeping the `Tags/` hierarchy in sync. Members: lazy-obsidian.gen-tag-pages.
+- **vault-manifest** — Carry a vault's whole Obsidian configuration as one tracked file: capture snapshots `.obsidian/` into `.obsidian.manifest.json`, deploy rebuilds `.obsidian/` from it on a clean checkout, and the audit reports how far a live vault has drifted from what its manifest records. Members: lazy-obsidian.capture, lazy-obsidian.deploy.
 - **install-and-audit** — Bootstrap the vault (rules, tag-page template, Dataview, chained iconize + diagram install), install or refresh an individual community plugin by id, and audit vault config. Members: lazy-obsidian.install, lazy-obsidian.audit, lazy-obsidian.update-plugin.
 
 ## Walkthroughs
@@ -36,7 +39,7 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 - **Claude Code** with plugin support.
 - **Obsidian** (the app) — for the config to take effect. The skills run without Obsidian running.
 - **git** — `lazy-obsidian.update-plugin` resolves the vault target via `git rev-parse --show-toplevel`.
-- **Python 3** — the iconize-sync worker (`bin/iconize_sync.py`) is Python-stdlib only.
+- **Python 3** — the iconize-sync worker (`bin/iconize_sync.py`) and the vault-manifest worker (`bin/vault_manifest.py`) are Python-stdlib only. The manifest worker reaches GitHub directly, so `curl` and `jq` are not needed for capture or deploy.
 - **`jq`** — used by `lazy-obsidian.update-plugin` for deep-merging the opinionated override block onto plugin `data.json`.
 - **`curl`** — used by `lazy-obsidian.update-plugin` to resolve the Obsidian community registry and fetch plugin binaries from GitHub releases.
 - **`lazycortex-core` (required)** — dependency declared in `plugin.json`; `lazy-obsidian.install` reuses the install pattern.

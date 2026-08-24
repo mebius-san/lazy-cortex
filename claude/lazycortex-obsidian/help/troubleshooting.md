@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
-summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, and plugin updates.
-last_regen: 2026-08-19
+summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, and vault manifest capture/deploy.
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin / gen-tag-pages); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
@@ -14,7 +14,9 @@ source_skills:
   - lazy-obsidian.gen-tag-pages
   - lazy-obsidian.update-plugin
   - lazy-obsidian.audit
-source_sha: 1b79c714d76efca72ce97419eb66c032923b60bc
+  - lazy-obsidian.capture
+  - lazy-obsidian.deploy
+source_sha: 1424b48a2f90138fef84328e2fd33c138e6a0f23
 ---
 # Troubleshooting
 
@@ -145,6 +147,96 @@ source_sha: 1b79c714d76efca72ce97419eb66c032923b60bc
 **Likely cause**: The Obsidian community registry was unreachable, or `mermaid-popup` was not found in it at the time of install.
 
 **Fix**: The mermaid/ascii fit CSS snippets are installed and enabled by `/lazy-obsidian.install`'s own shared snippet step (not by `diagram-install` itself) — so mermaid SVG fit and background/theme color already work without click-to-zoom, as long as you have run `/lazy-obsidian.install` at least once. When network access is restored, run `/lazy-obsidian.update-plugin mermaid-popup` to install the plugin, or install it via Obsidian's Community Plugins UI. Re-running `/lazy-obsidian.diagram-install` later is also safe (idempotent).
+
+---
+
+## `/lazy-obsidian.audit` reports vault manifest drift
+
+**Symptom**: `/lazy-obsidian.audit` reports `drift: <N>` and lists entries where the live vault config and `.obsidian.manifest.json` disagree.
+
+**Likely cause**: Something changed on one side since the manifest was last captured — you installed or updated a plugin, tweaked a setting, or added a snippet locally without recapturing, or you pulled a manifest change from another checkout without deploying it here yet.
+
+**Fix**: The audit never auto-resolves drift — only you know which side is right. If the live vault is correct, run `/lazy-obsidian.capture` to record it. If the manifest is correct (for example, you just pulled a teammate's change), run `/lazy-obsidian.deploy` to restore it here.
+
+---
+
+## `/lazy-obsidian.capture` aborts: "No `.obsidian/` under `<repo_root>`"
+
+**Symptom**: `/lazy-obsidian.capture` aborts immediately, reporting no `.obsidian/` directory at the repo root.
+
+**Likely cause**: The checkout has no vault config to capture yet — either the repo was never opened as a vault in Obsidian, or the vault should be rebuilt from an existing manifest instead.
+
+**Fix**: If `.obsidian.manifest.json` already exists in the repo, run `/lazy-obsidian.deploy` to build `.obsidian/` from it. Otherwise, open the repo folder as a vault in Obsidian first, then re-run `/lazy-obsidian.capture`.
+
+---
+
+## `/lazy-obsidian.capture` report lists `secrets_omitted`
+
+**Symptom**: The capture report includes entries under `secrets_omitted`.
+
+**Likely cause**: This is expected, not an error — the skill found an API token or password value in the vault config and deliberately left it out of the manifest.
+
+**Fix**: Nothing to fix. Whoever deploys the vault on another machine enters that value by hand after `/lazy-obsidian.deploy` runs.
+
+---
+
+## `/lazy-obsidian.capture`'s manifest diff is huge on a vault that barely changed
+
+**Symptom**: Committing after `/lazy-obsidian.capture` shows a large diff in `.obsidian.manifest.json` even though you only changed one setting.
+
+**Likely cause**: A plugin rewrote its whole settings file — most commonly a schema migration triggered by a plugin update.
+
+**Fix**: Read the diff before committing; the manifest is a reviewed file precisely so a wholesale rewrite like this is visible instead of landing silently. If the rewrite looks legitimate (matches a plugin update you just did), commit as usual.
+
+---
+
+## `/lazy-obsidian.deploy` aborts: "No `.obsidian.manifest.json`"
+
+**Symptom**: `/lazy-obsidian.deploy` aborts immediately, reporting no manifest file in the repo.
+
+**Likely cause**: This vault was never captured — nobody has run `/lazy-obsidian.capture` for this repo yet, so there is nothing to deploy from.
+
+**Fix**: On a machine where the vault is already configured, run `/lazy-obsidian.capture` there, commit the manifest, pull it here, then re-run `/lazy-obsidian.deploy`.
+
+---
+
+## `/lazy-obsidian.deploy` reports a plugin `served from cache`
+
+**Symptom**: The deploy report shows one or more plugins as `served from cache` instead of fetched fresh.
+
+**Likely cause**: GitHub was unreachable, or the plugin's latest release had no attached binary assets, so deploy fell back to a vendored copy under the user's local cache.
+
+**Fix**: Nothing is broken — the vault still works. Re-run `/lazy-obsidian.deploy` once network access to GitHub is available to pull the actual latest release.
+
+---
+
+## `/lazy-obsidian.deploy` reports a plugin `not in the community catalog`
+
+**Symptom**: The deploy report shows a plugin as `not in the community catalog`.
+
+**Likely cause**: The plugin the manifest references has no public Obsidian community-plugins catalog entry, so deploy has no `owner/name` repo to resolve it from.
+
+**Fix**: Add a `repo` key (`owner/name`) to that plugin's entry in `.obsidian.manifest.json`, or, if the plugin ships bundled inside lazycortex-obsidian's own templates, deploy it via that bundled path instead.
+
+---
+
+## `/lazy-obsidian.deploy` reports a theme `not installed and not bundled`
+
+**Symptom**: The deploy report shows the vault's theme as `not installed and not bundled`.
+
+**Likely cause**: The manifest records only the theme's name, not its CSS — deploy cannot fabricate a theme it does not ship.
+
+**Fix**: Install the theme once from Obsidian's own Appearance settings; the manifest picks it up correctly on the next `/lazy-obsidian.capture`.
+
+---
+
+## Icons and folder colours are missing right after `/lazy-obsidian.deploy`
+
+**Symptom**: `.obsidian/` rebuilds successfully, but files and folders show no icons immediately afterward.
+
+**Likely cause**: Expected — icons are painted live by Iconize and the bundled `iconize-reloader` from note frontmatter, not written by the deploy skill itself.
+
+**Fix**: Open Obsidian (it repaints on load), or run `/lazy-obsidian.iconize-sync reconcile` to force the frontmatter reconciliation immediately.
 
 ---
 

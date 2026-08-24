@@ -1,7 +1,7 @@
 ---
 name: lazy-diagram.fix
 description: "Use when a diagram fence that already exists has drifted from the current contract — hardcoded palette, missing theme directive, node labels that no longer match the prose around them — or when `/lazy-diagram.audit` offers to repair an offending file. Infers (kind, format) from the fence's syntax marker, re-renders it against the host section's prose, and replaces it in place. For inserting a NEW fence under a heading, see `/lazy-diagram.draw`."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, Agent
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 ---
 # lazy-diagram.fix
 
@@ -11,7 +11,7 @@ Recompose an existing diagram fence so it satisfies the current drawer-agent con
 
 This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Validate inputs and locate fence`
    - `Step 2 — Infer kind and format`
    - `Step 3 — Extract host-section prose as request`
@@ -20,8 +20,8 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 6 — Byte-compare and replace`
    - `Step 7 — Report`
    - `Step 8 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome line for it".
-3. **Do not reach Step 7 (Report) until `TaskList` shows every prior task `completed`.**
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome line for it".
+3. **Do not reach Step 7 (Report) until the ledger shows every prior task `completed`.**
 4. **The Report step is a structural verifier.** Output one line per task — gaps are a bug.
 
 ## Input

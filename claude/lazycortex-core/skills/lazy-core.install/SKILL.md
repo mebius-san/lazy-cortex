@@ -1,7 +1,7 @@
 ---
 name: lazy-core.install
 description: "Run when the operator asks to set up lazycortex-core in a repo (or globally), or when core artifacts are missing — the plugin's rules are not in `.claude/rules/`, `lazy.settings.json` has no runtime section, `.experts/` is not initialised, or the daemon was never wired. Installs this plugin only; `/lazy-core.setup` is the one that runs every plugin's install. Idempotent and quiet on re-run — decisions are persisted and never re-asked."
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(find *), Bash(date *), Bash(diff *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *), Agent
+allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git init*), Bash(cp *), Bash(rm *), Bash(test *), Bash(find *), Bash(date *), Bash(diff *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(python3 *), Agent
 ---
 # Install lazycortex-core
 
@@ -11,7 +11,7 @@ Bootstrap the plugin in the right scope: copy every rule template shipped by the
 
 This skill has 21 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 0 — Verify Python ≥ 3.12 (floor)`
    - `Step 1 — Detect install scope`
    - `Step 2 — Determine paths`
@@ -29,13 +29,13 @@ This skill has 21 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 11 — Register expert candidates`
    - `Step 12 — Bootstrap built-in routines (expert pump, doctor tick, weekly autocheckup)`
    - `Step 12.5 — Restore externally-sourced working directories`
-   - `Step 13 — Gate 2 (run_here) + daemon supervisor install`
+   - `Step 13 — Daemon gate (enabled + run_here) + supervisor install`
    - `Step 13.5 — Configure expert-spawn sandbox in .runtime/sandbox.settings.json`
    - `Step 13.6 — Provision metrics (port + repo label + scrape-targets file)`
    - `Step 14 — Report`
    - `Step 15 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
-3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
 ## Decisions are remembered, never re-asked
@@ -43,9 +43,10 @@ This skill has 21 ordered steps. The executing agent MUST NOT skip, merge, reord
 This skill is **idempotent and quiet on re-run**. Every choice it makes is persisted, and on the next run the persisted value is read first and honoured silently — the user is asked again only when nothing is on record yet.
 
 - **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-rule "install this rule?" prompt and no per-artifact opt-in — wanting the plugin means wanting its surface.
-- **Two daemon gates, asked once each:**
-  - `daemon.enabled` (tracked `lazy.settings.json`) — does *this project* use the background daemon at all? Set false → the daemon-only steps (routines, supervisor, sandbox, runtime plumbing) are skipped for the project and never re-raised. Experts, `agent_models` tiers, rules, skills, and manual commands still install — they are not daemon-bound.
-  - `daemon.run_here` (tracked `lazy.settings.json`) — which machine drives this project and from which checkout on it, as a hostname-to-path map (`{"nexus": "~/lazy-runtime/Money"}`). Never a boolean, never a bare host list: the map travels with the project to every clone, and it takes both halves to pick one daemon — the hostname says which machine, the path says which of that machine's checkouts of the project. A machine or checkout it does not name gets no supervisor and no sandbox, and the daemon refuses to start there, even though the project keeps `daemon.enabled = true`. `{}` names nothing at all.
+- **The daemon is never required to install anything.** The whole runtime layer — the `daemon` and `routines` sections, the built-in routines, `.experts/`, the expert registry, the spawn sandbox — is driven by `/lazy-runtime.tick` just as well as by a background daemon, so none of it is gated. Only what cannot exist without a live daemon process is: the supervisor unit (Step 13) and the metrics endpoint it serves in-process (Step 13.6).
+- **Two daemon gates, neither of them asked:**
+  - `daemon.enabled` (tracked `lazy.settings.json`) — does a background daemon supervise this project, or does the operator tick it by hand? **Seeded `false` when absent, silently** — a repo says yes by writing the flag, never by answering a question at install time. False leaves every routine registered and every runtime artifact in place; it withholds only the supervisor unit and metrics.
+  - `daemon.run_here` (tracked `lazy.settings.json`) — which machine drives this project and from which checkout on it, as a hostname-to-path map (`{"nexus": "~/lazy-runtime/Money"}`). Never a boolean, never a bare host list: the map travels with the project to every clone, and it takes both halves to pick one daemon — the hostname says which machine, the path says which of that machine's checkouts of the project. A machine or checkout it does not name gets no supervisor, and the daemon refuses to start there, even though the project keeps `daemon.enabled = true`. `{}` names nothing at all. Reached only when `daemon.enabled` is true.
 - **Everything derivable is derived, not asked:** install scope (from where the plugin is *enabled* — see Step 1), supervisor kind (from platform), dev-mode (from whether this repo ships plugin sources), expert git identity (a deterministic bot id).
 
 ## File-sync policy (applies to every file this skill writes)
@@ -317,61 +318,22 @@ Idempotent: a second run on already-clean files is a no-op. Report one line per 
 
 Steps 9–13 set up the per-repo runtime layer (`.experts/`, expert wizard, daemon supervisor). They operate on the **current working repo**, independent of the plugin's install scope — runtime artifacts are always per-repo, even when the plugin is installed at user scope.
 
-For Steps 9–13, `<repo-root>` is the cwd's git toplevel (resolved in 9a, initialized in 9b only if the daemon is enabled and the cwd is not yet a repo), even if Step 1 detected install scope as `user`.
+For Steps 9–13, `<repo-root>` is the cwd's git toplevel (resolved in 9a, initialized in 9b when the cwd is not yet a repo), even if Step 1 detected install scope as `user`.
 
 ### 9a. Resolve the runtime repo
 
-Run `git rev-parse --show-toplevel` in cwd. If it succeeds, set `<repo-root>` to the returned path and `is_git = true`. If it fails (cwd is not inside a git repo), set `<repo-root>` to cwd and `is_git = false`. Do NOT prompt to initialize git here — that question (if needed at all) is deferred to 9b's Gate-1-enabled branch, so a project that declines the daemon is never asked to create a repo it doesn't need.
+Run `git rev-parse --show-toplevel` in cwd. If it succeeds, set `<repo-root>` to the returned path and `is_git = true`. If it fails (cwd is not inside a git repo), set `<repo-root>` to cwd and `is_git = false`. Do NOT prompt to initialize git here — that question is 9b's.
 
-### 9b. Gate 1 — does this project use the daemon? (`daemon.enabled`)
+### 9b. Ensure a repo root for the runtime layer
 
-Whether the background daemon (routines, supervisor) runs **in this project at all** is a per-project decision, recorded once in the tracked `daemon.enabled` flag and honoured silently on every re-run. Read it first; ask only when nothing is on record. Note: this gates only daemon-only artifacts — expert registration (Step 11) and the `.memory/` dir (Step 10.5) run regardless, since experts are dispatched interactively too.
+The runtime layer is **not** gated on the daemon. Routines, `.experts/`, the expert registry, and the spawn sandbox are what `/lazy-runtime.tick` drives on a checkout with no daemon at all, so every one of Steps 9c–13.5 runs regardless of `daemon.enabled`; the flag is read once, at Step 13, and withholds only the supervisor unit and the metrics endpoint. There is no project-policy question here and none is ever asked — `daemon.enabled` is seeded `false` by 9c when absent.
 
-```bash
-PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
-from lazy_settings import load_tracked_section
-from pathlib import Path
-sec = load_tracked_section(Path('<repo-root>/.claude/lazy.settings.json'), 'daemon')
-print(sec.get('enabled', 'unset'))
-"
-```
-
-- Output `True` → daemon used in this project; proceed to 9c and run Steps 10–13.5 (each still subject to Gate 2 for this checkout). Do NOT ask.
-- Output `False` → daemon not used in this project; mark the daemon-only steps (9c, 10, 12, 13, 13.5) with outcome `skipped-daemon-disabled`, but STILL run Steps 10.5 (`.memory/`) and 11 (expert registration) — experts and their memory dir are dispatch-routing config used by interactive flows too, NOT daemon-gated — then go to Step 14. Do NOT ask.
-- Output `unset` → ask once:
-
-This is a **project-policy** question, NOT an operational one — keep all "run" / "here" / "this machine" language OUT of it (that belongs to Gate 2). Ask whether the daemon is part of the project's design at all:
+What the runtime layer does need is a repo: `.experts/`, the routine commits, and the tracked settings all live in one. When `is_git = false` (from 9a), ask once:
 
 ```
 AskUserQuestion:
-  header: "Use daemon?"
-  question: "Does this project use the background daemon at all? (project-wide policy — NOT about starting it on your machine)"
-  description: "Recorded in the project's tracked `lazy.settings.json` as `daemon.enabled`, shared with everyone who clones the repo — it declares whether the daemon is part of this project's design. Whether to actually START it on this particular working copy is a SEPARATE question (Gate 2, asked next, per-checkout). 'No' permanently skips all daemon-only setup for the project; rules, skills, experts, and manual commands still install. Change it later by editing the flag and re-running `/lazy-core.install`."
-  options: ["Yes — this project is daemon-driven", "No — this project never uses a daemon"]
-```
-
-  Persist the answer into the tracked `daemon` section, then branch:
-
-```bash
-PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
-from lazy_settings import load_tracked_section, save_section
-from pathlib import Path
-p = Path('<repo-root>/.claude/lazy.settings.json')
-sec = load_tracked_section(p, 'daemon')
-sec['enabled'] = <True|False>
-save_section(p, 'daemon', sec)
-"
-```
-
-  - `No` → outcome `daemon-disabled (project)`; skip the daemon-only steps (9c, 10, 12, 13, 13.5) but STILL run Steps 10.5 and 11 (experts are not daemon-gated), then go to Step 14.
-  - `Yes` → outcome `daemon-enabled (project)`; continue below.
-
-When the daemon is enabled but `is_git = false` (from 9a), the runtime layer needs a repo root. Ask once:
-
-```
-AskUserQuestion:
-  question: "Initialize a git repository here so the daemon's runtime config can be tracked?"
-  description: "The current directory is not a git repo, but the daemon you just enabled needs one for `.experts/` and supervisor units. 'Initialize' runs `git init` here; 'Skip' leaves the project daemon-enabled but bypasses runtime/experts setup on this run (re-run after `git init`)."
+  question: "Initialize a git repository here so the runtime config can be tracked?"
+  description: "The current directory is not a git repo, but the runtime layer needs one for `.experts/`, the tracked settings, and the commits routines make — with or without a background daemon. 'Initialize' runs `git init` here; 'Skip' bypasses runtime/experts setup on this run (re-run after `git init`)."
   options: ["Initialize git here", "Skip — no runtime setup this run"]
 ```
 
@@ -384,7 +346,7 @@ When `is_git = true`, continue straight to 9c and run Steps 10–13.5.
 
 The runtime daemon reads its config from **flat top-level section keys** — `runtime_daemon.py` calls `load_section(path, "daemon")` and `load_section(path, "routines")` directly, and `expert_runtime.register_routine` writes the flat `routines` section. Seed those two sections (never a nested `lazy-core.runtime` object — nothing reads that shape).
 
-Seed the default daemon keys with `setdefault` (so 9b's `enabled` flag and any existing values are preserved — never overwrite), seed an empty `routines` section when absent, and derive the `daemon.git` block from the checkout:
+Seed the default daemon keys with `setdefault` (so any existing value is preserved — never overwrite), seed an empty `routines` section when absent, and derive the `daemon.git` block from the checkout. `enabled` is one of the seeded defaults and its default is `false`: a project declares itself daemon-supervised by writing the flag, and until it does, the runtime still installs whole and is ticked by hand.
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
@@ -396,7 +358,7 @@ root = Path('<repo-root>')
 p = root / '.claude/lazy.settings.json'
 sec = load_tracked_section(p, 'daemon')
 before = dict(sec)
-for k, v in {'polling_interval_sec': 5, 'cleanup_completed_after': '7d',
+for k, v in {'enabled': False, 'polling_interval_sec': 5, 'cleanup_completed_after': '7d',
              'cleanup_failed_after': '30d', 'cleanup_dead_after': '7d',
              'stream_idle_timeout_sec': 900, 'stream_max_retries': 3}.items():
     sec.setdefault(k, v)
@@ -416,11 +378,11 @@ else:
 
 This runs at 9c, not next to Step 13: `daemon.git` is config every machine driving the project needs, while Step 13's `run_here` gate names the one that actually drives it. Gating the block on `run_here` would leave it unseeded on exactly the machines that clone the repo and expect the config to travel with it.
 
-State **bootstrapped** if any default key or the routines section was newly written; **already-present** if everything was already present; **skipped-not-in-git-repo** or **skipped-daemon-disabled** if 9a/9b chose to skip. Report the `daemon.git` outcome verbatim from the receipt: **seeded**, **kept-local**, or **skipped-no-branch** (detached `HEAD` — re-run after checking out a branch).
+State **bootstrapped** if any default key or the routines section was newly written; **already-present** if everything was already present; **skipped-not-in-git-repo** if 9b left the checkout without a repo. Report the `daemon.git` outcome verbatim from the receipt: **seeded**, **kept-local**, or **skipped-no-branch** (detached `HEAD` — re-run after checking out a branch).
 
 ## Step 10: Bootstrap experts directory
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), inherit the same outcome and skip this step.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo`), inherit the same outcome and skip this step.
 
 Otherwise, perform the following three idempotent operations:
 
@@ -453,7 +415,7 @@ Read `<repo-root>/.gitignore` (or treat as empty if missing). Ensure it contains
 
 ## Step 10.5: Bootstrap .memory/ directory
 
-If Step 9 resolved no repo (outcome `skipped-not-in-git-repo`), inherit that outcome and skip this step. Otherwise run it **even when the daemon is disabled** (`skipped-daemon-disabled`) — registered experts write memory under `.memory/<self>/` when dispatched interactively too, so the dir must exist regardless of the daemon.
+If Step 9 resolved no repo (outcome `skipped-not-in-git-repo`), inherit that outcome and skip this step.
 
 Otherwise, ensure `.memory/` exists at the repo root and strip any legacy `!.memory/` line from `.gitignore` (older versions of this skill wrote a defensive un-ignore line; the line was selective paranoia and is now retired — memory notes track in git the normal way):
 
@@ -481,7 +443,7 @@ State = the receipt's state verbatim: **installed** (was absent), **refreshed** 
 
 ## Step 11: Register expert candidates
 
-If Step 9 resolved no repo (outcome `skipped-not-in-git-repo`), inherit that outcome and skip this step (there is no settings file to write). Otherwise run it **even when the daemon is disabled** (`skipped-daemon-disabled`) — experts are dispatch-routing config resolved by interactive flows (spec / review / direct dispatch) as well as the daemon, so they are registered regardless of `daemon.enabled`.
+If Step 9 resolved no repo (outcome `skipped-not-in-git-repo`), inherit that outcome and skip this step (there is no settings file to write).
 
 Register every expert candidate the enabled plugins ship — there is no per-candidate prompt and no scan confirmation; an enabled plugin's experts are installed whole.
 
@@ -571,7 +533,7 @@ State one line per candidate: `<expert_key>: registered`.
 
 ## Step 12: Bootstrap built-in routines (expert pump, doctor tick, weekly autocheckup)
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), inherit the same outcome and skip this step.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo`), inherit the same outcome and skip this step. A registered routine is not daemon-only config: `/lazy-runtime.tick` runs the same set, in the same priority order, on a checkout that never starts a daemon.
 
 Otherwise, check one condition: the `experts` section of `<repo-root>/.claude/lazy.settings.json` contains at least one expert entry (a key that is not `_version` and whose value is a dict).
 
@@ -718,9 +680,23 @@ for f in check_inbox_collision(Path('<repo-root>')):
 
 Outcome: `no-declaration` / `linked` / `unchanged` / `declined-on-record` / `ignores-ok` / `ignores-updated` / `ignores-declined` / `inbox-conflict`. The repair outcome and the ignore-coverage outcome are both stated — `linked, ignores-updated` is a normal pair.
 
-## Step 13: Gate 2 (run_here) + daemon supervisor install
+## Step 13: Daemon gate (enabled + run_here) + supervisor install
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), or Step 12.5 stated `inbox-conflict`, inherit the same outcome and skip this step.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo`), or Step 12.5 stated `inbox-conflict`, inherit the same outcome and skip this step.
+
+This is the ONE step `daemon.enabled` gates, together with Step 13.6. A supervisor unit is a live background process and nothing else can stand in for it; every other runtime artifact this skill installs is already in place and already runnable through `/lazy-runtime.tick`. Read the flag first — 9c seeded it, so `unset` cannot occur on a repo this skill has finished:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from lazy_settings import load_tracked_section
+from pathlib import Path
+sec = load_tracked_section(Path('<repo-root>/.claude/lazy.settings.json'), 'daemon')
+print(sec.get('enabled', False))
+"
+```
+
+- Output `False` → this project is ticked by hand, not supervised. State **daemon-disabled**, skip the rest of this step and Step 13.6, and continue with Step 13.5 — the sandbox is not daemon-bound. Do NOT ask; flipping the flag is a deliberate edit followed by a re-run, never an install-time prompt.
+- Output `True` → continue with Gate 2 below.
 
 Which machine drives this project, and from which checkout on it, (Gate 2) is recorded once in the tracked `lazy.settings.json` as `daemon.run_here` and honoured silently on every re-run. Read it first; ask only when nothing is on record.
 
@@ -748,12 +724,12 @@ else:
 ```
 
 - Output `run-here` → this machine and this checkout are the pair on record; proceed to 13a and install the supervisor. Do NOT ask.
-- Output `not-this-host` → the map is on record and this machine is not in it; go to **13d** (teardown), state **not-this-host**, then skip the supervisor install and Step 13.5. Do NOT ask.
-- Output `not-this-checkout` → this machine is on record but drives a different checkout of the project; go to **13d** (teardown), state **not-this-checkout**, print the path the map names, then skip the supervisor install and Step 13.5. Do NOT ask — which checkout drives the project is already answered, and re-pointing it is a deliberate edit, not an install-time default.
+- Output `not-this-host` → the map is on record and this machine is not in it; go to **13d** (teardown), state **not-this-host**, then skip the supervisor install. Do NOT ask.
+- Output `not-this-checkout` → this machine is on record but drives a different checkout of the project; go to **13d** (teardown), state **not-this-checkout**, print the path the map names, then skip the supervisor install. Do NOT ask — which checkout drives the project is already answered, and re-pointing it is a deliberate edit, not an install-time default.
 - Output `invalid-shape` → `run_here` is on record as a boolean or a bare host list, left by an install that predates the map. State **run-here-invalid**, print the offending value, and ask the question below — the answer replaces it. The daemon refuses to start until it is replaced, so never leave it as found.
 - Output `unset` → ask once:
 
-This is the **operational** question — it OWNS the "run / start / this machine" language (Gate 1 had none). The project already opted into the daemon; this decides which machine and checkout actually drive it:
+The project has `daemon.enabled` on record as true; this decides which machine and checkout actually drive the supervisor:
 
 ```
 AskUserQuestion:
@@ -782,7 +758,7 @@ save_section(p, 'daemon', sec)
 "
 ```
 
-  - `No` → state **run-here-declined**; skip the supervisor install and Step 13.5.
+  - `No` → state **run-here-declined**; skip the supervisor install.
   - `Yes` → state **run-here**; continue with 13a.
 
 The tracked file is now dirty — fold `<repo-root>/.claude/lazy.settings.json` into whatever commit this install run makes.
@@ -879,9 +855,9 @@ Never touch a unit whose `<REPO_ID>` differs — that id belongs to another chec
 
 ## Step 13.5: Configure expert-spawn sandbox in .runtime/sandbox.settings.json
 
-If Step 9 was skipped (outcome `skipped-not-in-git-repo` or `skipped-daemon-disabled`), OR Step 12.5 stated `inbox-conflict`, OR Step 13 stated `run-here-declined` or `not-this-host`, inherit the skip with outcome `skipped-not-run-here` and move to Step 14 — there is no daemon running here to sandbox.
+If Step 9 was skipped (outcome `skipped-not-in-git-repo`), OR Step 12.5 stated `inbox-conflict`, inherit the skip and move to Step 14. Step 13's outcome does **not** gate this step: the sandbox confines expert spawns, and the expert pump spawns them under `/lazy-runtime.tick` on a checkout with no daemon and no supervisor exactly as it does under one. A checkout left unsandboxed because the daemon is off is a checkout whose manual ticks run unconfined.
 
-Otherwise, the runtime daemon spawns `claude -p --permission-mode dontAsk` subprocesses for every expert job, passing `--settings <repo-root>/.runtime/sandbox.settings.json`. The sandbox scope lives in that daemon-owned runtime file — NOT in `.claude/settings.local.json` — because `.claude/settings.local.json` is loaded by EVERY Claude session in the checkout, so a `sandbox.enabled: true` there would also confine the operator's interactive session (e.g. breaking `git push` over SSH, which the sandbox's HTTP/HTTPS proxy cannot carry). `--settings` is passed only on the spawn, so the sandbox reaches the expert subprocess and never the interactive session.
+Otherwise, the expert pump spawns `claude -p --permission-mode dontAsk` subprocesses for every expert job, passing `--settings <repo-root>/.runtime/sandbox.settings.json`. The sandbox scope lives in that daemon-owned runtime file — NOT in `.claude/settings.local.json` — because `.claude/settings.local.json` is loaded by EVERY Claude session in the checkout, so a `sandbox.enabled: true` there would also confine the operator's interactive session (e.g. breaking `git push` over SSH, which the sandbox's HTTP/HTTPS proxy cannot carry). `--settings` is passed only on the spawn, so the sandbox reaches the expert subprocess and never the interactive session.
 
 The spawn loads `--settings` AND the cwd's `.claude/settings.local.json`, merged (CLI layer wins on conflict). So the split is: the **sandbox** block goes to `.runtime/sandbox.settings.json`; the **permission scope** (`permissions` + `additionalDirectories`) stays in `.claude/settings.local.json`, where it serves both the spawn (via the merge) and the operator's interactive session (which needs those allows when running plugin CLIs manually).
 
@@ -891,7 +867,7 @@ Both writes are clean, non-contradictory merges — apply the File-sync policy *
 
 The sandbox file is written by `lazycortex-core sandbox-sync`, never by hand. The sandbox compares the **resolved** path, so an allowlist entry reached through a symlink grants nothing where the data actually lives — the CLI records the resolved location of every entry plus the targets of the symlinks directly inside it (an external-dirs `Data` / `-Inbox` slot), which is exactly what a hand-written allowlist misses.
 
-Substitute `<repo-root>` with the absolute path of the current repo. Substitute `<plugin-source-N>` with one entry per plugin source directory the daemon will pass via `--plugin-dir` (Step 13a's derived `dev_mode` dictates whether these are in-repo `<repo-root>/claude/<plugin>/` paths or `~/.claude/plugins/cache/...` paths — list what the supervisor unit will actually use).
+Substitute `<repo-root>` with the absolute path of the current repo. Substitute `<plugin-source-N>` with one entry per plugin source directory a spawn will pass via `--plugin-dir`; `dev_mode` dictates whether these are in-repo `<repo-root>/claude/<plugin>/` paths or `~/.claude/plugins/cache/...` paths. Take the value Step 13a derived and persisted; when Step 13 stopped before 13a (any outcome other than **run-here**), derive it here with 13a's own probe — `Bash(find <repo-root>/claude -maxdepth 3 -path '*/.claude-plugin/plugin.json' -print -quit)` returning a path means True — and do not persist it, since no supervisor unit is being written.
 
 ```bash
 lazycortex-core sandbox-sync --repo-root <repo-root> \
@@ -906,7 +882,7 @@ Block 2 — `<repo-root>/.claude/settings.local.json` (permission scope; loaded 
 {
   "additionalDirectories": ["<plugin-source-1>", "<plugin-source-2>", "..."],
   "permissions": {
-    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "Bash(lazycortex-core *)"],
+    "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "Bash(lazycortex-core *)"],
     "deny":  ["Bash(find /*)", "Bash(find /Users/*)", "Bash(grep -r /*)", "Bash(grep -R /*)", "Bash(rg /*)", "Bash(rg --files /*)", "Bash(ls /Users/*)"]
   }
 }
@@ -935,11 +911,11 @@ Never replace an entire key with the recommended value. The consumer's existing 
 
 ### Outcome
 
-One line combining the sandbox-file state, the permissions-file state, and the migration state — e.g. `sandbox-created · perms-merged · no-legacy-sandbox`, or `skipped-not-run-here`.
+One line combining the sandbox-file state, the permissions-file state, and the migration state — e.g. `sandbox-created · perms-merged · no-legacy-sandbox`, or `skipped-not-in-git-repo`.
 
 ## Step 13.6: Provision metrics (port + repo label + scrape-targets file)
 
-If Step 12.5 ended in `inbox-conflict`, or Step 13 ended in `run-here-declined` or `not-this-host` (or was skipped), inherit the outcome and state **skipped-not-run-here** — metrics are provisioned only for checkouts that actually run the daemon on this machine.
+If Step 12.5 ended in `inbox-conflict`, or Step 13 ended in anything other than **run-here** — `daemon-disabled`, `run-here-declined`, `not-this-host`, `not-this-checkout`, or a skip — inherit the outcome and state **skipped-not-run-here**. This is the second and last step `daemon.enabled` gates: the endpoint is an HTTP server the daemon process serves in-process, so a checkout with no daemon running here has nothing to scrape.
 
 Read-first, like every gate in this skill:
 
@@ -1051,14 +1027,14 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Step 13 fails: supervisor template not found** — `${CLAUDE_PLUGIN_ROOT}/templates/runtime/com.lazycortex.runtime.plist` or `lazy-core-runtime.service` is missing from the plugin cache → run `/plugin update lazycortex-core@lazycortex` to restore templates, then re-run.
 - **Step 13 fails: `launchctl load` error** — the plist was written but `launchctl load` returned a non-zero exit code → inspect the plist at `~/Library/LaunchAgents/` for substitution errors, then run `launchctl load <path>` manually.
 - **Step 13 fails: `systemctl --user enable --now` error** — the service unit was written but `systemctl` returned a non-zero exit code → run `systemctl --user status lazy-core-runtime-<REPO_ID>.service` to inspect the error, then correct and re-enable manually.
-- **Daemon never starts for this checkout after install** — Gate 2 (`daemon.run_here`) names a different machine or a different checkout, so no supervisor was installed → point the map at this checkout (`{"<this host>": "<this path>"}`) in the tracked `lazy.settings.json` and re-run `/lazy-core.install`.
+- **Daemon never starts for this checkout after install** — either `daemon.enabled` is `false` (the seeded default: routines are registered and run through `/lazy-runtime.tick`, no supervisor is installed), or it is true and `daemon.run_here` names a different machine or checkout → set the flag to `true`, point the map at this checkout (`{"<this host>": "<this path>"}`) in the tracked `lazy.settings.json`, and re-run `/lazy-core.install`.
 - **A second machine or checkout started its own daemon for the same project** — the map was left as a boolean or a bare host list by an older install, which cannot say which checkout drives the project → replace it with a hostname-to-path map naming the one checkout that should drive it, and re-run `/lazy-core.install` on the others; each removes its stray supervisor unit instead of installing one.
 - **A declared external directory stays absent after install** — the checkout has no `external_dirs.root` on record and the operator answered "Leave as is", so `declined` is set in the local overlay and Step 12.5 never asks again → delete `external_dirs.declined` from `.claude/lazy.settings.local.json` and re-run `/lazy-core.install` to be asked once more.
 - **The daemon halts with `uncommitted_changes` right after install, and `git status` lists the external directories** — the links are visible to git: either Step 12.5 stated `ignores-declined`, or `.gitignore` covers the names as directories only (`Data/`) while the slots hold symlinks → re-run `/lazy-core.install` and accept the ignore-coverage question, which appends the anchored slashless lines (`/Data`) next to the existing ones.
 - **Step 12.5 reports `inbox-conflict` and no supervisor is installed** — another checkout on this host registers an inbox routine that resolves to the same physical directory, so both daemons would dispatch every file twice → point that project's `daemon.run_here` at a checkout on another machine, or empty it to `{}`, then re-run.
 - **Both checkouts' daemons are halted with `inbox_collision` and removing one supervisor does not release the other** — the halt is symmetric and permanent by design: each daemon raises it at its own startup, and the halt block is state, not a live probe. Nothing auto-clears it (only a dirty-tree halt does) → decide which checkout drives the inbox, take the other out of its project's `daemon.run_here`, then run `/lazy-runtime.recover` in the survivor to clear its halt block.
 - **A declared external directory is reported `skipped (was missing: PermissionError …)`** — the filesystem refused the link (a read-only parent, a slot held by another process); the remaining declared paths were still repaired → fix the permission and re-run `/lazy-core.install`, or accept Fix L4 in `/lazy-core.doctor`.
-- **Re-run never asks about the daemon again** — both gates are already on record in tracked settings (`daemon.enabled`, `daemon.run_here`); this is the intended quiet-on-re-run behaviour → to revisit a decision, edit or delete the relevant key and re-run.
+- **Install never asks about the daemon at all** — `daemon.enabled` is seeded `false` and `run_here` is reached only once the flag is true; this is intended, not a dropped question → to make the project daemon-supervised, set the flag in the tracked `lazy.settings.json` and re-run.
 
 ## Notes
 
@@ -1066,5 +1042,5 @@ Use two separate steps: `Bash(mkdir -p ...)` then the `Write` tool. Never chain 
 - **Re-run after `/plugin update`**: `/plugin update` refreshes the plugin cache but does **not** re-sync rule files into `.claude/rules/`. Re-run this skill after every plugin update to pick up rule changes — otherwise projects keep running the old rule content.
 - **Scope independence**: running at project scope does not affect other projects or the global config.
 - **Runtime is per-repo, not per-scope**: Steps 3–8 follow the plugin's install scope (`user` writes to `~/.claude/`, `project` writes to `<repo-root>/.claude/`). Steps 9–13 always target the current working repo (cwd's git toplevel) regardless of install scope, because runtime artifacts (`.experts/`, daemon supervisor units) are inherently per-repo. Run `/lazy-core.install` from inside each repo where you want runtime to be set up.
-- **Re-run after `git clone`**: rules/templates/`lazy.settings.json`/`lazy.runtime.sh` are committed into the repo, so both gates travel with the clone — `daemon.enabled` (Gate 1) and the `daemon.run_here` map (Gate 2). The supervisor units (launchd plist / systemd service) do not; they are per-checkout and per-machine. Re-run this skill after cloning: a clone the map does not name reads both gates silently, installs nothing, and tears down any stray unit it finds. Only a clone that should take over the daemon edits the map.
+- **Re-run after `git clone`**: rules/templates/`lazy.settings.json`/`lazy.runtime.sh` are committed into the repo, so both `daemon.enabled` and the `daemon.run_here` map travel with the clone. The supervisor units (launchd plist / systemd service) do not; they are per-checkout and per-machine. Re-run this skill after cloning: a clone the map does not name reads both gates silently, installs nothing, and tears down any stray unit it finds. Only a clone that should take over the daemon edits the map.
 - **Next steps shown to user**: if any rule was **created** or **updated**, remind the user to restart Claude Code (rules are loaded on session start).

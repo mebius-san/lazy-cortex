@@ -1,18 +1,17 @@
 ---
 chapter_type: walkthrough
 summary: Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
-last_regen: 2026-08-21
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "How the journey flows"
   request: "Sequence diagram showing the five-skill lifecycle of one asset: lazy-spec.create-asset scaffolds and authors the asset, lazy-spec.set-stage marks the design approved and then the plan approved, lazy-spec.flip-gate advances each gate (spec_design_done through spec_tests_passing), lazy-spec.sync-with-code reconciles code reality and proposes spec_develop_done, lazy-spec.finalize-branch rebases branch pins and proposes spec_released."
-  kind_hint: sequence
 source_skills:
   - lazy-spec.create-asset
   - lazy-spec.set-stage
   - lazy-spec.flip-gate
   - lazy-spec.sync-with-code
   - lazy-spec.finalize-branch
-source_sha: 159ac1288fe27b2672a13bdafc577c34c46cb8d5
+source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
 ---
 # How do I take an asset from creation all the way to release?
 
@@ -156,35 +155,22 @@ Run `/lazy-spec.doctor <product>` periodically to catch drift: missing stage mir
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
-  participant operator as Operator
-  participant createAsset as lazy-spec.create-asset
-  participant setStage as lazy-spec.set-stage
-  participant flipGate as lazy-spec.flip-gate
-  participant syncCode as lazy-spec.sync-with-code
-  participant finalize as lazy-spec.finalize-branch
+  participant creator as lazy-spec.create-asset
+  participant stager as lazy-spec.set-stage
+  participant gater as lazy-spec.flip-gate
+  participant syncer as lazy-spec.sync-with-code
+  participant finalizer as lazy-spec.finalize-branch
+  participant asset as Asset
 
-  operator->>createAsset: invoke — scaffold new asset
-  createAsset-->>operator: asset directory created with stub files
-  operator->>createAsset: invoke — author asset body
-  createAsset-->>operator: asset spec authored and saved
-
-  operator->>setStage: invoke — mark design approved
-  setStage-->>operator: design stage set to approved
-  operator->>setStage: invoke — mark code-plan approved (if authored)
-  setStage-->>operator: code-plan stage set to approved
-
-  Note over operator,flipGate: Gate advancement begins
-
-  operator->>flipGate: invoke — advance spec_design_done
-  flipGate-->>operator: gate spec_design_done flipped
-  operator->>flipGate: invoke — advance spec_tests_passing
-  flipGate-->>operator: gate spec_tests_passing flipped
-
-  operator->>syncCode: invoke — reconcile code reality
-  syncCode->>syncCode: inspect code vs spec drift
-  syncCode-->>operator: drift report produced — proposes spec_develop_done
-
-  operator->>finalize: invoke — rebase and pin branch
-  finalize->>finalize: rebase branch onto main
-  finalize-->>operator: branch pins updated — proposes spec_released
+  creator->>asset: scaffold asset
+  creator->>asset: author asset content
+  stager->>asset: mark design approved
+  stager->>asset: mark plan approved
+  loop spec_design_done through spec_tests_passing
+    gater->>asset: advance gate
+  end
+  syncer->>asset: reconcile code reality
+  syncer->>asset: propose spec_develop_done
+  finalizer->>asset: rebase branch pins
+  finalizer->>asset: propose spec_released
 ```

@@ -236,6 +236,8 @@ Three kinds of breakage, and they are handled differently:
 
 **The one block that is not a line.** A finished command block moves into `# History` whole (Chapter 5). It is a record of an operator instruction and its outcome, not a review round, and it is the only exception to the one-line form.
 
+**Finalize is gated on the line.** A wake whose move is finalize checks `# History` before the transition: when the cycle now closing has produced an approved state and no line records it, write the line first, in the same wake, before finalize — after the transition there is no wake left to write it. An empty `# History` on a finalized document is a coordinator failure, never a valid outcome, and the gate has no document-kind carve-outs: the report journals (`code-report.md` / `test-report.md`) get their line exactly as a design does — the line narrates what the journal now records that it did not before, which is content, not process.
+
 ## 8. Wire formats (pointer)
 
 This playbook owns the coordinator's reasoning. It does not own a single shape, and where it appears to describe one, the sources below win:

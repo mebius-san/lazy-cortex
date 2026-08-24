@@ -15,14 +15,14 @@ Prerequisites: `/lazy-wiki.install` has run and at least one scope is configured
 
 This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Run the audit`
    - `Phase 2 — Audit the terms scopes + the structure map`
    - `Phase 3 — Present findings`
    - `Phase 4 — Confirm and apply fixes`
    - `Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced. No-ops must emit an explicit outcome (`asserted`, `unchanged`, `skipped-per-user-choice`, …).
-3. **Do not reach the Log step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.**
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced. No-ops must emit an explicit outcome (`asserted`, `unchanged`, `skipped-per-user-choice`, …).
+3. **Do not reach the Log step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 4. **The Log step is a structural verifier.** Its output MUST contain one line per task above.
 
 ## Phase 1 — Run the audit
@@ -50,7 +50,7 @@ For each terms scope, run both halves. Nothing here writes.
 
 **Then the structure map, same pattern.** No CLI here either. From the merged settings take the `structure` section; `depth_profiles` empty AND `docs/structure.md` absent → state `no-structure` and move on. Otherwise, two halves, nothing written:
 
-- **Configuration — judged here.** `docs/structure.md` missing from the section's own `exclude` (the curator's commit would wake the scan in a loop); two `depth_profiles` classes' globs overlapping (first-by-key-order wins on a shared path — the precedence should be chosen, not discovered); any of the three routines `lazy-wiki.structure-scan` / `lazy-wiki.structure-scan-deletes` / `lazy-wiki.structure-scan-renames` absent, or carrying the wrong `watch`, in a repo where `daemon.enabled` is true; `docs/structure.md` missing from the repository-wide `wiki.exclude` while some wiki scope's `paths` cover it (the map has no frontmatter to defend itself, and the exclusion is the vault's, not any one scope's).
+- **Configuration — judged here.** `docs/structure.md` missing from the section's own `exclude` (the curator's commit would wake the scan in a loop); two `depth_profiles` classes' globs overlapping (first-by-key-order wins on a shared path — the precedence should be chosen, not discovered); any of the three routines `lazy-wiki.structure-scan` / `lazy-wiki.structure-scan-deletes` / `lazy-wiki.structure-scan-renames` absent, or carrying the wrong `watch`; `docs/structure.md` missing from the repository-wide `wiki.exclude` while some wiki scope's `paths` cover it (the map has no frontmatter to defend itself, and the exclusion is the vault's, not any one scope's).
 - **Map vs tree — dispatched.** Send `lazy-wiki.structure-curator` in `report` mode with the `Agent` tool, naming the map path, the `depth_profiles`, and the `exclude` in the prompt. No job dir on this path. It returns `missing-dir`, `missing-file`, `dead-entry`, `divergence`, and `depth` findings and writes nothing. Skip the dispatch when `docs/structure.md` does not exist — report that single fact instead (the fix is `/lazy-wiki.structure rebuild`).
 
 Outcome: `terms-audited` / `no-terms-scopes` plus `structure-audited` / `no-structure`.

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-08-21
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -33,7 +33,7 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 8e1778242c1d07b5ae5e6fee24b46b72873fefdc
+source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
 ---
 # Troubleshooting
 
@@ -123,23 +123,21 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## The daemon never starts for this checkout after install
 
-**Symptom**: `/lazy-core.install` completed without errors and reported a daemon supervisor installed, but the daemon does not appear to be running for this checkout — or a re-run reports `not-this-host` or `not-this-checkout` without asking anything.
+**Symptom**: `/lazy-core.install` completed without errors, but no daemon supervisor is running for this checkout — no plist or systemd unit, and no complaint about it either. Or a re-run reports `not-this-host` or `not-this-checkout` without asking anything.
 
-**Likely cause**: `daemon.run_here` in the tracked `lazy.settings.json` is a hostname-to-checkout-path map (`{"nexus": "~/lazy-runtime/Money"}`), and a machine or checkout the map does not name gets no supervisor — the daemon refuses to start there even with `daemon.enabled: true`. `not-this-host` means this machine's hostname isn't a key in the map at all; `not-this-checkout` means this machine is in the map, but pointed at a different checkout's path than the one you're running from.
+**Likely cause**: Two independent reasons produce the same symptom. First, `daemon.enabled` is seeded `false` by default and install never asks about it — a project only becomes daemon-supervised once something sets the flag to `true` in the tracked `lazy.settings.json`. This is not a bug: with the flag left `false`, every routine, the expert registry, and the runtime plumbing still install and work — they just run on demand via `/lazy-runtime.tick` instead of on a schedule via a background process. Second, once `daemon.enabled` is `true`, `daemon.run_here` in the same tracked file is a hostname-to-checkout-path map (`{"nexus": "~/lazy-runtime/Money"}`), and a machine or checkout the map does not name gets no supervisor — the daemon refuses to start there. `not-this-host` means this machine's hostname isn't a key in the map at all; `not-this-checkout` means this machine is in the map, but pointed at a different checkout's path than the one you're running from.
 
-**Fix**: Decide which machine and checkout should drive the project, then edit the map — add `{"<hostname -s>": "<absolute path to that checkout>"}` (or correct the path on an existing host key) in the tracked `.claude/lazy.settings.json[daemon][run_here]`, then re-run `/lazy-core.install` from that checkout. The skill reads the map fresh on entry and, finding this host/path pair now named, installs the supervisor.
+**Fix**: If you want this project to run on a schedule rather than by hand, set `daemon.enabled: true` in the tracked `.claude/lazy.settings.json`, then re-run `/lazy-core.install` — the run_here question is asked at that point. If `daemon.enabled` is already `true` and the supervisor still isn't running, decide which machine and checkout should drive the project, then edit the map — add `{"<hostname -s>": "<absolute path to that checkout>"}` (or correct the path on an existing host key) in `.claude/lazy.settings.json[daemon][run_here]`, then re-run `/lazy-core.install` from that checkout. The skill reads the map fresh on entry and, finding this host/path pair now named, installs the supervisor. Until the daemon is set up, run due routines and expert jobs by hand with `/lazy-runtime.tick`.
 
 ---
 
-## `/lazy-core.install` never re-asks about the daemon
+## `/lazy-core.install` never asks whether to use the daemon
 
-**Symptom**: You want to change your daemon setup choices (enable it for a project, or point at a different machine/checkout to drive it) but re-running `/lazy-core.install` silently skips all daemon questions.
+**Symptom**: You want this project to run on a schedule via the background daemon, but `/lazy-core.install` never asks the question — not on a first run, not on a re-run.
 
-**Likely cause**: Both gates are already persisted in the tracked `lazy.settings.json` — `daemon.enabled` (Gate 1) and `daemon.run_here` (Gate 2, a hostname-to-checkout-path map), both shared with every clone. The skill honours recorded decisions silently, so it never re-prompts; re-pointing which checkout drives the project is a deliberate edit, not an install-time default.
+**Likely cause**: `daemon.enabled` is not an install-time question at all. It is seeded `false` silently the first time install writes the tracked `daemon` section, and the skill never prompts for it — a project opts in only when someone sets the flag to `true` directly in `.claude/lazy.settings.json`. Everything else the runtime layer needs — routines, `.experts/`, the expert registry, the spawn sandbox — installs and works regardless of this flag; it gates only the supervisor unit and the metrics endpoint.
 
-**Fix**: Edit the relevant key directly in `.claude/lazy.settings.json` and re-run `/lazy-core.install`:
-- To change the project-wide daemon policy, update `daemon.enabled`.
-- To change which machine/checkout drives it, edit `daemon.run_here` — add or correct the `{"<hostname>": "<checkout path>"}` entry for the machine that should drive it, or remove an entry (or empty the map to `{}`) to stop a machine from driving it. `/lazy-core.install` reacts to the new map state without asking.
+**Fix**: Set `daemon.enabled: true` yourself in the tracked `.claude/lazy.settings.json`, then re-run `/lazy-core.install`. With the flag now `true`, the skill asks which machine and checkout should drive the project (`daemon.run_here`) if that map is still empty, and installs the supervisor once it is answered. To change which machine/checkout drives an already-enabled project, edit `daemon.run_here` directly — add or correct the `{"<hostname>": "<checkout path>"}` entry for the machine that should drive it, or remove an entry (or empty the map to `{}`) to stop a machine from driving it — then re-run `/lazy-core.install`; it reacts to the new map state without asking.
 
 ---
 
@@ -189,7 +187,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause**: Earlier versions of `/lazy-core.install` seeded `daemon.git` as `null` and nothing else ever filled it in, so a daemon-enabled repo with no remote-sync configuration silently committed locally forever. Install now derives both fields when the block is absent — `base_branch` from the checkout's current branch, `remote_sync: pull_push` when an `origin` remote exists — but a repo installed under the older behaviour keeps its already-recorded `git: null` block, since the derivation only fills an absent block and never overwrites a value already on record.
 
-**Fix**: Add a remote if you don't have one yet (`git remote add origin <url>`). If `.claude/lazy.settings.json` still shows `daemon.git` as literally `null`, delete the block so install has something to derive into, then re-run `/lazy-core.install`. `/lazy-core.audit` also flags a daemon-enabled repo whose `git` block is null or missing `base_branch`, and `/lazy-core.doctor` offers a fix to apply the same derivation directly.
+**Fix**: Add a remote if you don't have one yet (`git remote add origin <url>`). If `.claude/lazy.settings.json` still shows `daemon.git` as literally `null`, delete the block so install has something to derive into, then re-run `/lazy-core.install`. `/lazy-core.audit` flags a `null` or incomplete `git` block regardless of whether `daemon.enabled` is set — a manual `/lazy-runtime.tick` commits through the same block a supervised daemon would — and `/lazy-core.doctor` offers a fix (Fix L6) to apply the same derivation directly.
 
 ---
 

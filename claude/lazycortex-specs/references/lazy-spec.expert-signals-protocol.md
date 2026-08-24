@@ -1,9 +1,9 @@
 ---
 name: lazy-spec.expert-signals-protocol
-version: 3
-description: The wire this file owns — two `request.json` extra fields naming files the expert reads in place, two `response.json` extra fields, and the closed list of things an expert dispatched against a spec asset is forbidden to do. Every markup shape an expert writes to signal the coordinator (asset proposals, in-doc questions, decision-candidate markers) is owned by the callout and tag registry in `lazycortex-core:lazy-core.markdown-style`, pointed to below by name.
+version: 4
+description: The wire this file owns — two `request.json` extra fields naming files the expert reads in place, two `response.json` extra fields, the language obligation every writer resolves via the `resolve-language` primitive, and the closed list of things an expert dispatched against a spec asset is forbidden to do. Every markup shape an expert writes to signal the coordinator (asset proposals, in-doc questions, decision-candidate markers) is owned by the callout and tag registry in `lazycortex-core:lazy-core.markdown-style`, pointed to below by name.
 ---
-# Expert → coordinator signal protocol v3
+# Expert → coordinator signal protocol v4
 
 This is the wire contract for the one-directional channel every expert dispatched against a spec asset (designer, architect, planner, developer, tester — any class, any product) uses to reach `spec.coordinator` without ever acting on the spec system directly. `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md` is the coordinator's own reasoning about what to DO once a signal arrives; `lazy-core.markdown-style.md`'s callout and tag registry owns the concrete markup shape of every signal named below. This file owns only the two `request.json` extra fields, the two `response.json` extra fields, and the hard prohibitions — on a disagreement about a markup FORMAT, the markdown-style doc wins (playbook § 12).
 
@@ -43,6 +43,14 @@ This channel permits attachments — files an expert creates beside its target d
 
   These record two different facts and are not one fact under two names. A file may be missing either one independently, and each omission is escalated on its own.
 - **A non-markdown attachment carries no frontmatter.** Its ownership is recorded instead by the coordinator, in the `# Attachments` section of the asset's status folder-note.
+
+## Language
+
+Before writing any prose into its target document, the expert resolves the document's effective language itself: run `lazycortex-specs resolve-language <target relpath>` — the CLI resolved by walking `$LAZYCORTEX_PLUGIN_DIRS` for a directory whose path contains `lazycortex-specs` — and write every line of prose in the language the primitive returns. The language never arrives in the payload and is never inferred from the source documents' own language: settings are the source of truth, and the verb is how the writer reads them.
+
+The obligation covers scaffolded content too. A template explainer, a seeded section stub, or any other shipped English boilerplate the writer keeps in the document is translated into the resolved language when it differs — a finished document half in the vault's language and half in the templates' English is the failure this clause exists to prevent. When editing existing prose, keep its language — never retranslate.
+
+What is translated and what always stays English (frontmatter keys and values, canonical headings, identifiers, paths, wikilink targets) is owned by `lazy-spec.config-protocol.md` Part 3 — on a disagreement about the split, that file wins.
 
 ## Hard prohibitions
 

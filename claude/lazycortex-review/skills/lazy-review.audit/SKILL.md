@@ -2,6 +2,7 @@
 name: lazy-review.audit
 description: "Run when the operator asks whether the review setup is sane, or when review misbehaves in a way that smells like config — a document never enters the loop, a class points at an expert that was never registered, commits land under the wrong identity. Read-only check of the `review` section in `.claude/lazy.settings.json`; reports PASS/WARN/FAIL and never writes — fixes come from `/lazy-review.configure` or `/lazy-review.install`."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Agent
+logging-waiver: "read-only check — nothing to record"
 ---
 # lazy-review.audit
 
@@ -11,11 +12,11 @@ Read-only validation of the consumer's settings. Never writes anything; never as
 
 This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. Canonical titles:
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Canonical titles:
    - `Phase 1 — Run audit script`
    - `Phase 2 — Render findings`
    - `Report`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** Outcomes: `audited` / `rendered` / `report-emitted`.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Outcomes: `audited` / `rendered` / `report-emitted`.
 3. **Do not reach the Report step until every prior task is `completed`.**
 
 ## Phase 1 — Run audit script

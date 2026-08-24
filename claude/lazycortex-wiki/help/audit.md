@@ -1,11 +1,11 @@
 ---
 chapter_type: block
 summary: Run integrity checks across a wiki scope, its terms dictionary, structure map, mirrors, and domain tree — with optional auto-repair.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 no_diagram: true
 source_skills:
   - lazy-wiki.doctor
-source_sha: e758792cb8f978c3f3e230b8233d46a2da076903
+source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
 ---
 # Wiki integrity audit
 

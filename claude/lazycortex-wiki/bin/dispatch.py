@@ -7,11 +7,16 @@ lazycortex-core exclusively via its published CLI binary, never by
 importing core Python modules.
 """
 from __future__ import annotations
+# waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
+# pylint: disable=import-error
 
 import json
 import os
 import subprocess
 from pathlib import Path
+
+import tags as _tags
+
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
@@ -38,9 +43,11 @@ class CoreDispatch:
   Attributes:
     EXPERT_NAME: Expert name as it appears in `lazy.settings.json[experts]`.
     EXPERT_DOMAIN_WRITER: Domain-spec writer expert name in `lazy.settings.json[experts]`.
+    EXPERT_TAG_CURATOR: Tag-curator expert name in `lazy.settings.json[experts]`.
     KIND_CLASSIFY: Payload `kind` value requesting node classification.
     KIND_LINK: Payload `kind` value requesting node linking.
     KIND_DOMAIN_SPEC: Payload `kind` value requesting a domain-spec (re)generation.
+    KIND_NORMALIZE_TAGS: Payload `kind` value requesting a surface's tag-value canon.
   """
 
   # Contract:
@@ -54,8 +61,18 @@ class CoreDispatch:
   # Domain-spec writer expert name as it appears in `lazy.settings.json[experts]`.
   EXPERT_DOMAIN_WRITER = "wiki.domain-writer"
 
+  # Tag-curator expert name as it appears in `lazy.settings.json[experts]`.
+  EXPERT_TAG_CURATOR = "wiki.tag-curator"
+
   # Payload `kind` value requesting a domain-spec (re)generation.
   KIND_DOMAIN_SPEC = "domain-spec"
+
+  # Payload `kind` value requesting one surface's tag-value canon.
+  KIND_NORMALIZE_TAGS = "normalize-tags"
+
+  # Job-dir filenames the tag-curator protocol names for its context and its result.
+  _CONTEXT_COLLECTED_TAGS = "collected_tags.json"
+  _RESULT_ALIAS_MAP       = "alias_map.json"
 
   # Subcommand forwarded to lazycortex-core.
   _CMD_DISPATCH = "dispatch-job"
@@ -78,6 +95,12 @@ class CoreDispatch:
 
   # Payload field naming the curation kind, which also scopes the dedup key.
   _PAYLOAD_KIND = "kind"
+
+  # Payload field carrying the classify anchor, and the keys of its entries.
+  _PAYLOAD_EXISTING_TAGS = "existing_tags"
+  _ANCHOR_VALUE          = "value"
+  _ANCHOR_COUNT          = "count"
+  _ANCHOR_EXAMPLES       = "examples"
 
   def __init__(self) -> None:
     """
@@ -105,15 +128,19 @@ class CoreDispatch:
     composition, READY ordering, and git_author/aspects/model
     resolution — none of those leak into this caller (§1c §3).
 
-    The caller's `payload` is forwarded verbatim; core writes it to
-    `request.json` unchanged.  The curation `kind` (`classify` /
-    `link`) MUST be carried inside `payload["kind"]` by the caller so
-    it reaches the curator's `request.json` — this method never injects
-    or mutates the payload.
+    The caller's `payload` is forwarded to `request.json`; the curation
+    `kind` (`classify` / `link`) MUST be carried inside `payload["kind"]`
+    by the caller so it reaches the curator's `request.json` — this
+    method never injects it.  A `classify` payload's `existing_tags`
+    anchor is the one field this method extends: the advisory tag
+    dictionary's per-axis values are unioned into it, so a value that
+    was canonised but is worn by no node today still anchors the
+    curator.
 
     Guarantees:
-      - The caller's `payload` reaches `request.json` unchanged; no field is added, renamed, or
-        removed here.
+      - The caller's `payload` reaches `request.json` unchanged except for a `classify` payload's
+        `existing_tags` anchor, which gains the dictionary's values; no field is added, renamed, or
+        removed beyond that.
       - The `dedup_key` combines the curation `kind` with the absolute node path, so repeated
         dispatches for the same kind and node collapse into one pending job while classify and
         link for the same node remain independent jobs.
@@ -136,8 +163,9 @@ class CoreDispatch:
     """
 
     # Contract:
-    # The caller's `payload` reaches `request.json` unchanged — this method NEVER adds, renames, or
-    # removes a payload field, so a curation `kind` the caller omits is absent for the curator too.
+    # The caller's `payload` reaches `request.json` unchanged apart from the `classify` anchor —
+    # this method NEVER adds, renames, or removes any other payload field, so a curation `kind` the
+    # caller omits is absent for the curator too.
 
     # Contract:
     # The `dedup_key` MUST combine the curation `kind` with the absolute node path, so repeated
@@ -179,12 +207,114 @@ class CoreDispatch:
     # the bundle core reads off stdin — layout, config.json and READY ordering stay core's
     bundle: dict = {
       "expert":    self.EXPERT_NAME,
-      "payload":   payload,
+      "payload":   self._merge_dictionary_anchor(repo, payload),
       "source":    [ node_rel ],
       "result":    [ "curation.json" ],
       "dedup_key": dedup_key,
     }
     return self._call_core(self._CMD_DISPATCH, bundle, repo)
+
+  # ------------------------------------------------------------------
+  def dispatch_tag_curator(
+    self,
+    *,
+    repo: Path,
+    surface: str,
+    payload: dict,
+    collected_tags: dict,
+  ) -> dict:
+    """
+    Queue a `wiki.tag-curator` job for one tag surface via `dispatch-job`.
+
+    Forwards the caller's `payload` verbatim (core writes it to
+    `request.json` unchanged) and stages the surface's tag census as the
+    job's `context/collected_tags.json`, which no file on disk holds.
+
+    Guarantees:
+      - The caller's `payload` reaches `request.json` unchanged; no field is added, renamed, or
+        removed here.
+      - The `dedup_key` combines the normalize-tags kind with the surface id, so repeated
+        dispatches for one surface collapse into one pending job while other surfaces stay
+        independent.
+
+    Args:
+      repo: Absolute path to the repository root.
+      surface: Tag-surface id the job canonises — a configured wiki scope id,
+        or the reserved id of the generated domain-doc tree.
+      payload: Caller-assembled request dict (`kind`, surface, dictionary path).
+      collected_tags: The surface's tag census, staged as the job's
+        `context/collected_tags.json`.
+
+    Returns:
+      Parsed JSON response from `dispatch-job`, typically
+      `{"job_id": "<id>", "queue_path": "<abs-path>"}`.
+    """
+
+    # Contract:
+    # The caller's `payload` reaches `request.json` unchanged — this method NEVER adds, renames, or
+    # removes a payload field.
+
+    # Contract:
+    # The `dedup_key` MUST combine the normalize-tags kind with the surface id, so repeated
+    # dispatches for one surface collapse into one pending job while other surfaces stay independent.
+
+    # the census exists only in memory, so it rides as inline context rather than a path manifest
+    bundle: dict = {
+      "expert":         self.EXPERT_TAG_CURATOR,
+      "payload":        payload,
+      "context_inline": { self._CONTEXT_COLLECTED_TAGS: json.dumps(collected_tags) },
+      "result":         [ self._RESULT_ALIAS_MAP ],
+      "dedup_key":      f"{self.KIND_NORMALIZE_TAGS}:{surface}",
+    }
+    return self._call_core(self._CMD_DISPATCH, bundle, repo)
+
+  # ------------------------------------------------------------------
+  @classmethod
+  def _merge_dictionary_anchor(cls, repo: Path, payload: dict) -> dict:
+    """
+    Union the advisory dictionary's values into a classify payload's anchor.
+
+    Args:
+      repo: Absolute path to the repository root.
+      payload: The caller's curation payload.
+
+    Returns:
+      The payload with every dictionary value present in `existing_tags`
+      (dictionary-only values carrying a zero count and no examples), or the
+      caller's own payload object when the kind is not `classify` or the
+      dictionary holds nothing.
+    """
+
+    # Domain(wiki.taxonomy):
+    # # Anchoring a classification to the settled vocabulary, not only the live one
+    # A classification anchors to the values already spoken for, so it reuses one instead of coining a
+    # synonym beside it. Read from the nodes alone, that set is only what is worn right now: a value
+    # settled by an earlier canon but currently worn by nobody is invisible, and the very drift the canon
+    # resolved starts again. The settled vocabulary is therefore folded in beside the live census, each
+    # value appearing once whichever side it came from, and a value the census never saw is marked as worn
+    # by no one — evidence enough to reuse it, and honest about how little is behind it.
+
+    # guard: only classify carries an anchor — every other kind is forwarded verbatim
+    if payload.get(cls._PAYLOAD_KIND) != cls.KIND_CLASSIFY:
+      return payload
+    listed = _tags.dictionary_values(repo)
+    # guard: no dictionary on disk — the collected census stands as the whole anchor
+    if not listed:
+      return payload
+
+    # fold each recorded value into its axis, keeping the census entry when both sides carry it
+    anchor = payload.get(cls._PAYLOAD_EXISTING_TAGS)
+    anchor = anchor if isinstance(anchor, dict) else {}
+    axes = dict(anchor.get(_tags.COLLECT_AXES) or {})
+    for axis, values in listed.items():
+      entries = list(axes.get(axis) or [])
+      known = { e.get(cls._ANCHOR_VALUE) for e in entries if isinstance(e, dict) }
+      entries += [
+        { cls._ANCHOR_VALUE: value, cls._ANCHOR_COUNT: 0, cls._ANCHOR_EXAMPLES: [] }
+        for value in values if value not in known
+      ]
+      axes[axis] = entries
+    return { **payload, cls._PAYLOAD_EXISTING_TAGS: { **anchor, _tags.COLLECT_AXES: axes } }
 
   # ------------------------------------------------------------------
   def dispatch_domain_writer(

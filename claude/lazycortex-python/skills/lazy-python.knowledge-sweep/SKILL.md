@@ -1,7 +1,7 @@
 ---
 name: lazy-python.knowledge-sweep
 description: "Run when the operator asks to update or grow the domain-groups dictionary — 'add these groups', 'the dictionary is missing half our domains', 'file the unfiled blocks' — or when parked `Domain(unfiled):` findings have piled up in the checker output and nobody can clear them by hand. Also the backfill route for a repo that just adopted domain markers: clusters the parked knowledge into candidate groups, writes the ones the operator accepts into the dictionary, then sweeps the sources so every block lands under a real group."
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, TaskCreate, TaskUpdate, TaskList
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion
 user-invocable: true
 ---
 # Python knowledge sweep — backfill domain and contract markers
@@ -12,7 +12,7 @@ Sweeps the repo's Python sources with the `lazy-python.domain-writer` and `lazy-
 
 This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Resolve dictionary`
    - `Step 2 — Grow the dictionary from parked knowledge`
    - `Step 3 — Enumerate files`
@@ -20,8 +20,8 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5 — Verify`
    - `Step 6 — Commit`
    - `Step 7 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means the step's logic ran AND emitted a one-word outcome. A step the run skips must be marked explicitly with the outcome that justified the skip (`no-files`, …).
-3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly skipped with an outcome.** A still-`pending` task is a bug — execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means the step's logic ran AND emitted a one-word outcome. A step the run skips must be marked explicitly with the outcome that justified the skip (`no-files`, …).
+3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly skipped with an outcome.** A still-`pending` task is a bug — execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above.
 
 ## Step 1 — Resolve dictionary

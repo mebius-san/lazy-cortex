@@ -25,6 +25,7 @@ The operator and every Claude session on a checkout share **one git index**; a b
 - **MCP `git_add` / `git_commit`** cannot carry a pathspec — unusable here; use Bash.
 - **Revert a file** → `git restore --worktree -- <path>` (from the index) or `git restore --source=<tree-ish> --worktree -- <path>` (from a revision). Never `git checkout <tree-ish> -- <path>` — it also rewrites the index entry, staging content you did not author. `git restore --staged` un-stages and is fine; `git restore --staged --source=<tree-ish>` stages a revision's content and is not.
 - `git reset` stays allowed — the operator may need to un-park from inside a session.
+- **Commit requires a clean index.** Sessions never stage, so any staged content is the operator's (mid-work or a poisoned index). The hook polls briefly and then denies the commit; on that deny, stop and escalate to the operator — never `git reset` their content on your own. Intent-to-add entries don't count as content and never block. Mass staged deletions with intact files are either a swapped index (a failed partial commit's temporary index) or the operator's own intentional `git rm --cached` untrack — a session cannot tell them apart, so recovery is always the operator's move, never the session's.
 - **Exceptions:** a bare commit mid-merge (git refuses a partial commit there), and `--amend` either with a pathspec or against a clean index.
 
 A skill that stages for you returns the paths it touched — fold them into your commit pathspec.

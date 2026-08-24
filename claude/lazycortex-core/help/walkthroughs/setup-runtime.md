@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover from any of its halt reasons — dirty tree, remote sync, bad routine config, or a closed rate-limit window.
-last_regen: 2026-08-21
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, answers yes to the runtime-daemon wizard, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh, daemon starts and polls .experts/.jobs/ on interval, user checks .runtime/state.json for a recent last_run; (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks a cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
@@ -9,11 +9,11 @@ diagram_spec:
 source_skills:
   - lazy-core.install
   - lazy-runtime.recover
-source_sha: 8e1778242c1d07b5ae5e6fee24b46b72873fefdc
+source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
 ---
 # How do I bootstrap the runtime daemon and recover it if it halts?
 
-The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines. Getting from zero to a daemon that runs in the background is a short journey: install and start it, confirm every registered expert is actually launchable, confirm the daemon is polling, then know how to unblock it if it halts — from a dirty working tree, a failed remote sync, a routine config gone invalid, or a closed subscription rate-limit window.
+The expert runtime gives you a serial, per-repo daemon that drains a job queue and runs registered plugin routines. Getting from zero to a daemon that runs in the background is a short journey: install the runtime layer, confirm every registered expert is actually launchable, confirm the daemon is polling, then know how to unblock it if it halts — from a dirty working tree, a failed remote sync, a routine config gone invalid, or a closed subscription rate-limit window.
 
 ## Outcome
 
@@ -27,13 +27,16 @@ After completing this walkthrough you have a running runtime daemon that polls f
 
 ## The journey
 
-### Step 1 — Install and start the daemon
+### Step 1 — Install the runtime layer, then decide whether you want a background daemon
 
-Run `/lazy-core.install` inside the repo and answer **Yes** to the runtime-daemon wizard. The wizard's full sequence — what it writes to `lazy.settings.json`, the expert-discovery scan, the daemon-supervisor offer, the expert-spawn sandbox question, the git-guard flags it now seeds into `lazy.settings.json` (`git.enabled`, `git.pathspec_enabled`, `git.mutex_enabled`), and the optional Prometheus metrics endpoint — is covered in the **Install, audit, and maintain lazycortex-core** block chapter; work through Steps there before continuing here. Come back once the wizard has finished.
+Run `/lazy-core.install` inside the repo. Install seeds the whole runtime layer unconditionally, on every run — routines, `.experts/`, the expert registry, and the flat `daemon` and `routines` settings sections all land regardless of whether a background daemon ever runs; `daemon.enabled` is seeded `false` and nothing prompts you about it at this stage. The install's full sequence — what it writes to `lazy.settings.json`, the expert-discovery scan, the expert-spawn sandbox, the git-guard flags it seeds (`git.enabled`, `git.pathspec_enabled`, `git.mutex_enabled`), and the optional Prometheus metrics endpoint — is covered in the **Install, audit, and maintain lazycortex-core** block chapter; work through Steps there before continuing here. Come back once install has finished.
 
-If this repo declares externally-sourced working directories (e.g. a shared inbox it does not carry in git) via `external_dirs.paths`, the wizard resolves them before it touches the supervisor. On a fresh checkout it asks once where they live on this machine and remembers the answer for every future run. It also refuses to install a supervisor when two checkouts would end up driving the same physical inbox directory — it names the other checkout and asks you to set `daemon.run_here: false` on one of them before continuing.
+If this repo declares externally-sourced working directories (e.g. a shared inbox it does not carry in git) via `external_dirs.paths`, install resolves them before it touches anything daemon-related. On a fresh checkout it asks once where they live on this machine and remembers the answer for every future run. It also refuses to install a supervisor when two checkouts would end up driving the same physical inbox directory — it names the other checkout and asks you to set `daemon.run_here: false` on one of them before continuing.
 
-If you chose a supervisor during install, the daemon is already running — skip to Step 2. Otherwise start it by hand from the repo root:
+With the runtime layer in place, decide how you want it driven:
+
+- **By hand, no background process** — run `/lazy-runtime.tick` whenever you want the due routines and job queue processed once; it uses the same primitives and the same serial order a daemon would. Nothing further to install here — skip to Step 2.
+- **A background daemon that polls on its own** — set `daemon.enabled: true` in `<repo-root>/.claude/lazy.settings.json` and re-run `/lazy-core.install`. With the flag true, install asks which host and checkout should drive the project (`daemon.run_here`) — the only place a daemon question is ever asked — and installs the supervisor unit once you confirm. Or skip the supervisor and start the daemon directly from the repo root:
 
 ```
 .claude/bin/lazy.runtime.sh

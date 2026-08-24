@@ -1,5 +1,5 @@
 ---
-description: "Run when the operator asks what lazycortex-experts ships, which generic expert fits a piece of work, or how to assemble a named specialist — lists the eleven persona agents (interpreter, designer, architect, planner, implementer, data-implementer, docs-writer, debugger, reviewer, tester, fiction-writer), the domain and cross-cutting aspects that layer onto them, and the `lazy.settings.json[experts]` composition shape."
+description: "Run when the operator asks what lazycortex-experts ships, which generic expert fits a piece of work, or how to assemble a named specialist — lists the thirteen persona agents (interpreter, designer, architect, planner, use-case-writer, ui-designer, implementer, data-implementer, docs-writer, debugger, reviewer, tester, fiction-writer), the domain and cross-cutting aspects that layer onto them, and the `lazy.settings.json[experts]` composition shape."
 execution-discipline-waiver: "static help text — no executable steps"
 logging-waiver: "static text — no executable steps"
 ---
@@ -7,7 +7,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 ---
 
-**lazycortex-experts** — generic lifecycle experts plus a starter set of domain aspects. Nine persona-only agents (interpreter / designer / architect / planner / implementer / debugger / reviewer / tester / fiction-writer) combine with composable aspect files (claude-plugin / game-dev / dotfiles / obsidian-plugin / data-pipeline / software-product / sci-fi / fantasy) and five cross-cutting aspects (discipline, research, tech-writing, terms, structure) to form specialists you assemble in `lazy.settings.json[experts]`. No protocols, routines, or dispatcher ship from this plugin — the dispatching routine supplies the protocol and the agent follows it.
+**lazycortex-experts** — generic lifecycle experts plus a starter set of domain aspects. Thirteen persona-only agents (interpreter / designer / architect / planner / use-case-writer / ui-designer / implementer / data-implementer / docs-writer / debugger / reviewer / tester / fiction-writer) combine with composable aspect files (claude-plugin / game-dev / dotfiles / obsidian-plugin / data-pipeline / software-product / sci-fi / fantasy) and five cross-cutting aspects (discipline, research, tech-writing, terms, structure) to form specialists you assemble in `lazy.settings.json[experts]`. No protocols, routines, or dispatcher ship from this plugin — the dispatching routine supplies the protocol and the agent follows it.
 
 **Agents** (invoke via Agent tool, normally only via a routine that dispatches expert jobs):
 
@@ -15,7 +15,11 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-experts.designer` — takes a brief, produces a detailed design specification with premise-led structure, scope discipline, and declarative-over-prescriptive language. Stays out of implementation choices.
 - `lazy-experts.architect` — takes a settled brief or design spec, produces a code-structure design: module boundaries and the direction of the dependencies between them, public contract versus internals, migrations for every change to stored data, and what breaks for existing callers. Refuses an abstraction with only one consumer. Stays out of the designer's lane (what the system does) and the planner's lane (task ordering).
 - `lazy-experts.planner` — takes a design spec, produces an ordered bite-sized implementation plan with file-level tasks, test plan, and rollback. Models its output on `superpowers:writing-plans`. Stays out of design choices.
+- `lazy-experts.use-case-writer` — takes a settled brief or request, produces formal use cases: actors, goals, main and alternative flows, pre- and postconditions, written in the actor's language with no system internals. Stays out of the tester's acceptance-criteria lane.
+- `lazy-experts.ui-designer` — takes an approved design, settles its user interface: screens, states, navigation, and interaction decisions in a ui-design document, with self-contained HTML mockups laid down beside it as attachments. Mockups approve a look and a flow; never production frontend code.
 - `lazy-experts.implementer` — takes an ordered plan, executes it task by task against a working journal, test-first (RED→GREEN→REFACTOR), one task at a time. Writes code as a side-effect; surfaces blockers in the journal rather than guessing. Models its discipline on `superpowers:test-driven-development` + `executing-plans`.
+- `lazy-experts.data-implementer` — takes an approved content design of one entity, writes its data files into the product's own repository, in the project's own schemas. Stays out of the implementer's lane; a gap the design leaves unsettled becomes a `[!decision-candidate]` in the report, never an invented value.
+- `lazy-experts.docs-writer` — takes an approved design, writes the product's user-facing documentation straight from it, with no plan in between. Stays out of the fiction-writer's lane — the text is user-facing documentation, never literary prose.
 - `lazy-experts.debugger` — investigates a bug to its root cause before any fix, one hypothesis at a time, four phases (investigate / pattern / hypothesis / fix). After repeated failed fixes, surfaces the architecture itself as the open question. Models its discipline on `superpowers:systematic-debugging`.
 - `lazy-experts.reviewer` — reviews a change for correctness and quality, returns ranked findings (location + cause + severity) with evidence, verifying each against the codebase before asserting it. Stays out of the implementer's lane. Models its discipline on `superpowers:requesting-code-review` + `receiving-code-review`.
 - `lazy-experts.tester` — discovers the testing mechanisms the repository actually ships (runners, fixtures, harnesses, Makefile / CI targets) and works only through them: writes risk-to-coverage test plans, executes plans step by step recording actual vs expected, writes evidence-grade bug reports, minimizes failures to the shortest deterministic steps-to-reproduce. Finds and documents defects; never fixes them.
@@ -39,7 +43,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 **Skills** (invoke as `/<name>` or via Skill tool):
 
-- `lazy-experts.install` — bootstrap the plugin for the current project (or globally). Seeds agent-model tiers from `lazycortex-core`'s defaults into `lazy.settings.json[agent_models].lazycortex` and composes expert entries per the class map (technical classes: eight roles, discipline + tech-writing; sci-fi/fantasy: fiction-writer, discipline only). Also checks system-expert completeness against sibling plugins' registrations and reports gaps. Idempotent.
+- `lazy-experts.install` — bootstrap the plugin for the current project (or globally). Seeds agent-model tiers from `lazycortex-core`'s defaults into `lazy.settings.json[agent_models].lazycortex` and composes expert entries per the class map (technical classes: twelve roles, discipline + tech-writing; sci-fi/fantasy: fiction-writer, discipline only). Also checks system-expert completeness against sibling plugins' registrations and reports gaps. Idempotent.
 
 **Commands**:
 
@@ -67,7 +71,7 @@ The expert never runs until a routine elsewhere dispatches a job to it — by de
 **Documentation:**
 
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/troubleshooting.md) — Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, the class map, composing specialists, and the eleven generic agents' lane boundaries.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-experts/help/faq.md) — Common questions about installing lazycortex-experts, the class map, composing specialists, and the thirteen generic agents' lane boundaries.
 
 Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-experts/help/`.
 <!-- help-block:end -->

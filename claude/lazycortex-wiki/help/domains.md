@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Query a generated reference tree built from code's Domain(…) comments — one section or one term at a time, never the whole tree.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "How the domain tree stays current"
   request: "Flow diagram: code Domain(…)/Contract: comments feed domain-plan detection, which dispatches the domain-spec writer per changed group to (re)write docs/domains/<group>.md, then rebuilds the domains.md index; /lazy-wiki.domains reads that generated tree to answer group and term queries."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
   - lazy-wiki.domain-spec-writer
-source_sha: c301465a877136aa8d703e42c792fceacbe77b87
+source_sha: 00ffbba3bd46320dd2f71f198fb2e7eff6b4a079
 ---
 # Domain knowledge lookup
 
@@ -33,6 +33,8 @@ The tree behind those queries is generated, not maintained by hand. When your pr
 
 The domain-spec writer is the piece that actually produces a doc. For each group it reads every source file its `Domain(…)` blocks name, verifies the formulas and rules against the real implementation, and writes the group's document as a synthesised story — not a block-by-block transcript — with formulas recorded as proper math notation. It never mentions file paths or symbol names in that prose; the one exception is the Contracts section, where each guarantee is anchored back to `path:symbol` so you can jump to the code the guarantee governs. If the group carries no `Contract:` blocks, that section is left out entirely rather than padded with a placeholder.
 
+Every generated doc also carries a `tags:` line in its frontmatter, drawn from your project's repository-wide tag-axis vocabulary (`wiki.tag_axes`, the same vocabulary a wiki scope narrows from). On a regeneration the writer carries a doc's existing tags forward unchanged; it only adds a tag when the doc now covers an aspect none of its current tags reflect, and it checks the advisory tag-values dictionary first so a new value reuses wording already in use elsewhere rather than coining a near-duplicate. Nothing about this changes how you query the tree — the tags exist for the wiki's own classification, not as another query key.
+
 Source comments stay English regardless of the project's documentation language — the writer translates them into the target language you configured (via `/lazy-wiki.configure domains`) when it composes each doc, favouring a term the project has already agreed on over a literal rendering.
 
 ## Common adjustments
@@ -41,9 +43,35 @@ Source comments stay English regardless of the project's documentation language 
 - **Forcing an immediate refresh** — run `/lazy-wiki.domain-sync` instead of waiting for the background routines, e.g. right after a batch of `Domain(…)` edits or a terminology sweep.
 - **A group reports "not in the domain tree"** — the group key is new, misspelled, or not yet generated; check the group list `/lazy-wiki.domains group` returns for a doc, or the `domains.md` index directly.
 - **New groups show up as "unknown"** during a sync — the dictionary doesn't list them yet. Add the group to the dictionary via `/lazy-wiki.configure domains`, or run a knowledge sweep to have code markers refiled under accepted groups automatically.
+- **`/lazy-wiki.doctor` reports a domain doc using an axis your project never declared** — a generated doc's `tags:` frontmatter carries a `wiki/<axis>/…` tag whose axis isn't in `wiki.tag_axes`. That's not fixed by re-running the sync; extend the axis vocabulary via `/lazy-wiki.configure vault`, or treat it as a typo and let the next regeneration replace the tag once the doc's coverage genuinely changes.
 
 ## How the domain tree stays current
 
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  domainCommentsDetected["Domain(...)/Contract comments detected"]
+  dispatchDomainSpecWriter["Dispatch domain-spec writer per changed group"]
+  rewriteDomainGroupDoc["Rewrite docs/domains/&lt;group&gt;.md"]
+  rebuildDomainsIndex["Rebuild domains.md index"]
+  lazyWikiDomainsAnswers["/lazy-wiki.domains answers group and term queries"]
+
+  domainCommentsDetected -->|detects changed groups| dispatchDomainSpecWriter
+  dispatchDomainSpecWriter -->|writes| rewriteDomainGroupDoc
+  rewriteDomainGroupDoc -->|triggers| rebuildDomainsIndex
+  rebuildDomainsIndex -->|reads generated tree| lazyWikiDomainsAnswers
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+
+  class domainCommentsDetected entry
+  class dispatchDomainSpecWriter action
+  class rewriteDomainGroupDoc action
+  class rebuildDomainsIndex action
+  class lazyWikiDomainsAnswers success
+```
 ## See also
 
 - [install-and-audit](install-and-audit.md) — bootstrap the plugin before configuring domain generation.

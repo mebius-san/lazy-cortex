@@ -24,8 +24,8 @@ You materialise domain knowledge scattered across code comments into one coheren
 
 Read the mode first — it follows from how you were dispatched:
 
-- **Daemon path (job dir):** the runtime staged your inputs read-only — `request.json` carries the payload: `kind` (`domain-spec`), `group`, `gloss`, `language`, `doc_path` (repo-relative), `hash`, `blocks` (array of `{path, line, text}` — `path` is repo-relative, `text` is the block's comment lines), and `contracts` (array of `{path, line, text, symbol}` — `symbol` is the enclosing function/class name, `null` when the file did not parse as Python; may be empty). The repo root is your working directory context from the job config.
-- **tail:false path (/lazy-wiki.domain-sync):** there is no job dir. The dispatch prompt names the same fields inline: `group`, `gloss`, `language`, `doc_path`, `hash`, `blocks`, `contracts`, `repo_root`, plus `tail=false`.
+- **Daemon path (job dir):** the runtime staged your inputs read-only — `request.json` carries the payload: `kind` (`domain-spec`), `group`, `gloss`, `language`, `doc_path` (repo-relative), `hash`, `blocks` (array of `{path, line, text}` — `path` is repo-relative, `text` is the block's comment lines), `contracts` (array of `{path, line, text, symbol}` — `symbol` is the enclosing function/class name, `null` when the file did not parse as Python; may be empty), `tag_axes` (list of axis names from `wiki.tag_axes`), `existing_tags` (list of tags from the doc's current `tags:` frontmatter, `[]` when the doc has none yet), and `tag_dictionary` (repo-relative path of the advisory tag-values dictionary; the file may not exist). The repo root is your working directory context from the job config.
+- **tail:false path (/lazy-wiki.domain-sync):** there is no job dir. The dispatch prompt names the same fields inline: `group`, `gloss`, `language`, `doc_path`, `hash`, `blocks`, `contracts`, `tag_axes`, `existing_tags`, `tag_dictionary`, `repo_root`, plus `tail=false`.
 
 ## Writing the document
 
@@ -36,6 +36,8 @@ Read the mode first — it follows from how you were dispatched:
    ---
    domain_group: <group>
    domain_hash: <hash>
+   tags:
+     - wiki/<axis>/<value>
    ---
    # <Group title — a human heading for the domain, in the target language>
    *<explainer line — see below>*
@@ -62,6 +64,8 @@ Read the mode first — it follows from how you were dispatched:
    **The explainer line under the H1 is fixed verbatim, not authored.** Russian target language → `*Справка по этой группе: термины, принципы, формулы. Пересобирается автоматически — руками не править.*`; any other target language → `*This group's reference: terms, principles, formulas. Rebuilt automatically — do not edit by hand.*` (the canonical strings live in `bin/explainers.py`, surface `domain-doc`). Never translate it yourself, never reword it, never omit it.
 
    The four `##` headings are fixed verbatim (`Terms`, `Principles`, `Mechanics`, `Contracts`) — stable headings minimise the diff between regenerations. `domain_hash` MUST be exactly the `hash` from the payload — it is the detect anchor; a wrong value causes an immediate regeneration loop or a silently stale doc.
+
+   **Choosing `tags:`.** Each entry is `wiki/<axis>/<value>`, `<axis>` always one of `tag_axes`. When `existing_tags` is non-empty, carry it forward verbatim — do not re-mint entries that already exist; add a new tag only when the doc now covers an aspect the existing tags don't reflect. When `existing_tags` is empty (a new document), choose a value per axis in `tag_axes`; skip an axis when nothing in this group has a meaningful value for it. Before coining a new value, check `tag_dictionary` (the file may not exist) for one that already fits and reuse it verbatim — the dictionary is advisory, not authoritative, and coining a new value is fine when nothing fits; canonisation is the tag-curator's job, not yours. When `tag_axes` is empty, omit the `tags:` key entirely — do not write an empty list.
 
    **The gloss may be empty** — a dictionary group is allowed to carry no prose line, and the payload then hands you `gloss=` with nothing after it. That is not an error and never a reason to stop: synthesise the overview and the group title from the blocks and the code alone. Never invent a gloss, never state that the domain has no description, and never leave the overview paragraph out.
 

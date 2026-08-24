@@ -1,20 +1,19 @@
 ---
 name: lazy-review.install
 description: "Run when the operator asks to set up document review in this repo, after a lazycortex-review update, or when review skills fail because `lazy.settings.json` has no `review` section, the `.experts/.jobs/` queue is missing, or the coordinator routines were never registered. Per-repo bootstrap only — wiring the first document class is `/lazy-review.configure`. Idempotent and quiet on re-run."
-allowed-tools: Read, Write, AskUserQuestion, Skill, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(cp *), Bash(test *), Bash(diff *), Bash(git rev-parse*), Bash(lazycortex-core *), Agent
+allowed-tools: Read, Write, AskUserQuestion, Skill, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(cp *), Bash(test *), Bash(diff *), Bash(git rev-parse*), Bash(lazycortex-core *), Agent
 lazy_setup_phase: install
 ---
 # lazy-review.install
 
-Per-repo bootstrap: gets a clean checkout to the point where the daemon can start ticking. The bin script does the actual mutation; this skill is the operator-facing pipeline that runs it, gates the daemon-dependent routine pair behind the project's `daemon.enabled` flag, installs the review callout styling into the Obsidian vault, points at `/lazy-review.configure` for class wiring, and prints the optional `.gitignore` entries the operator may want to add by hand (the skill never touches `.gitignore` without explicit permission).
+Per-repo bootstrap: gets a clean checkout to the point where the review loop can start ticking. The bin script does the actual mutation; this skill is the operator-facing pipeline that runs it, installs the review callout styling into the Obsidian vault, points at `/lazy-review.configure` for class wiring, and prints the optional `.gitignore` entries the operator may want to add by hand (the skill never touches `.gitignore` without explicit permission).
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
+This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. Canonical titles:
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Canonical titles:
    - `Step 1 — Bootstrap settings + dirs`
-   - `Step 2 — Gate the coordinator routine pair on daemon.enabled`
    - `Step 3 — Attach routine protocols`
    - `Step 4 — Surface gitignore suggestions`
    - `Step 5 — Register the plugin-CLI Bash allow-pattern`
@@ -22,7 +21,7 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5.6 — Install the review-callouts CSS snippet`
    - `Step 6 — Point user at /lazy-review.configure`
    - `Report`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** Each step emits a one-word outcome (`installed` / `already-installed` / `registered` / `already-present` / `skipped-daemon-disabled` / `attached` / `surfaced` / `cli-allow-added` / `cli-allow-already-present` / `seeded` / `unchanged` / `merged` / `kept-local` / `enabled` / `already-enabled` / `deferred` / `no-vault` / `pointed` / `report-emitted`).
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Each step emits a one-word outcome (`installed` / `already-installed` / `registered` / `already-present` / `attached` / `surfaced` / `cli-allow-added` / `cli-allow-already-present` / `seeded` / `unchanged` / `merged` / `kept-local` / `enabled` / `already-enabled` / `deferred` / `no-vault` / `pointed` / `report-emitted`).
 3. **Do not reach the Report step until every prior task is `completed`.**
 
 ## Decisions are remembered, never re-asked
@@ -31,7 +30,7 @@ This skill is **idempotent and quiet on re-run**. Every choice is derived or rea
 
 - **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-artifact opt-in.
 - **Scope is not asked.** lazy-review is per-repo — all runtime artifacts land under the cwd's git root regardless of where the plugin is enabled, so there is no user-vs-project branch to resolve here. (Scope detection for plugins that DO branch their target lives in `lazy-core.install` Step 1, keyed on enablement rather than the install record's `scope`.)
-- **Daemon gate is read-first.** Step 2 reads the tracked `daemon.enabled` flag and never re-raises Gate 1 (that gate belongs to `lazy-core.install`).
+- **No daemon gate.** The routine trio is registered unconditionally. `/lazy-runtime.tick` fires the same interval, git-watch, and cron routines on a checkout with no daemon, so gating registration on `daemon.enabled` would only withhold config the manual tick needs. The flag governs the supervisor unit and the metrics endpoint, both `lazy-core.install`'s business.
 - **No Python re-probe.** The Python ≥ 3.12 floor is enforced once by `lazy-core.install`; this skill does NOT re-probe it.
 
 ## File-sync policy (applies to every file this skill writes)
@@ -52,7 +51,7 @@ Run `python3 claude/lazycortex-review/bin/install.py --cwd .`. The script applie
 - Creates `.experts/.jobs/` and `.logs/lazy-review/runs/` if missing.
 - Prints a JSON report of what changed, including a `migrated` list.
 
-The script's default seed includes the routine trio the loop runs on — `routines["lazy-review.collect"]` (the interval postman that lands finished expert payloads), `routines["lazy-review.coordinator-watch"]` (the git-watch that turns a commit into a coordinator wake), and `routines["lazy-review.sanitize"]` (the daily deterministic sanitizer that repairs lost writer wakes, orphaned reviews, and markers on vanished documents) — plus `review.watch_root`, `review.coordination_rules`, and the `experts["review.coordinator"]` identity. Step 2 gates whether the routines survive.
+The script's default seed includes the routine trio the loop runs on — `routines["lazy-review.collect"]` (the interval postman that lands finished expert payloads), `routines["lazy-review.coordinator-watch"]` (the git-watch that turns a commit into a coordinator wake), and `routines["lazy-review.sanitize"]` (the daily deterministic sanitizer that repairs lost writer wakes, orphaned reviews, and markers on vanished documents) — plus `review.watch_root`, `review.coordination_rules`, and the `experts["review.coordinator"]` identity. All three routines stay registered whatever the project's daemon posture is.
 
 **Migration on a repo installed before the coordinator.** The bin applies it in the same run, unconditionally — none of the three steps below reads a version number — and the `migrated` list names each change:
 
@@ -63,43 +62,7 @@ The script's default seed includes the routine trio the loop runs on — `routin
 
 Outcome: `installed` (anything was created or merged) or `already-installed` (no-op).
 
-## Step 2 — Gate the coordinator routine pair on daemon.enabled
-
-`lazy-review.collect`, `lazy-review.coordinator-watch`, and `lazy-review.sanitize` ONLY work with the `lazycortex-core` runtime daemon — an interval routine, a git-watch whose cursor the daemon keeps, and a cron schedule the daemon fires. With the daemon off, all three are dead config. So before leaving them registered, read the tracked `daemon.enabled` flag. Resolve the core bin via `$LAZYCORTEX_PLUGIN_DIRS` (fall back to the cache glob when unset, as at install time):
-
-```bash
-COREBIN=""
-IFS=":" read -ra DIRS <<< "${LAZYCORTEX_PLUGIN_DIRS:-}"
-for d in "${DIRS[@]}"; do
-  if [[ "$d" == *"/lazycortex-core" ]] && [ -d "$d/bin" ]; then COREBIN="$d/bin"; break; fi
-done
-[ -z "$COREBIN" ] && COREBIN=$(ls -d ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/bin 2>/dev/null | sort -V | tail -1)
-PYTHONPATH="$COREBIN" python3 -c "
-from lazy_settings import load_tracked_section
-from pathlib import Path
-sec = load_tracked_section(Path('.claude/lazy.settings.json'), 'daemon')
-print(sec.get('enabled', 'unset'))
-"
-```
-
-Do NOT ask the user here — Gate 1 (`daemon.enabled`) is owned by `lazy-core.install`. Branch on the read value:
-
-- **`False`** → the daemon is off for this project. Unregister the routines that Step 1's seed wrote, so the project carries no dead routine config. The non-daemon parts (settings sections, directories, the CLI allow-pattern, the CSS snippet) stay installed. State **skipped-daemon-disabled**.
-
-```bash
-PYTHONPATH="$COREBIN" python3 -c "
-from expert_runtime import unregister_routine
-from pathlib import Path
-for name in ('lazy-review.collect', 'lazy-review.coordinator-watch', 'lazy-review.sanitize'):
-  unregister_routine(Path('.'), name)
-"
-```
-
-- **`unset` or `True`** → proceed; leave the routines registered as seeded by Step 1. Do NOT re-seed if already present. State **registered** (newly seeded by Step 1) or **already-present** (the routines pre-existed).
-
 ## Step 3 — Attach routine protocols
-
-If Step 2 unregistered the pair (outcome **skipped-daemon-disabled**), skip this step with the same outcome — there is no routine to attach protocols to.
 
 Step 1's seed gives `lazy-review.coordinator-watch` its **mandatory** protocol, the coordination playbook the woken coordinator reasons from. The doc-review protocol is NOT attached here: the coordinator attaches it to each expert job it dispatches, and the routine's own job carries the playbook instead. Attach the shared markdown-style protocol too, since every wake produces markdown in the vault — a mandatory protocol is not an operator choice, so no question is asked:
 
@@ -111,7 +74,7 @@ That is the whole step. The coordinator is a system expert: its protocol set is 
 
 `lazy-review.collect` takes no protocols — it is a mechanical sweep that dispatches no agent.
 
-Outcome: **attached** (the mandatory set is now on the routine, whether newly added or already present) or **skipped-daemon-disabled** when Step 2 removed the routine.
+Outcome: **attached** (the mandatory set is now on the routine, whether newly added or already present).
 
 ## Step 4 — Surface gitignore suggestions
 
@@ -183,7 +146,6 @@ One line per task in the canonical list with its outcome word.
 
 - **Step 1 fails with permission error on `.claude/lazy.settings.json`** — operator's shell user can't write there → fix file ownership, re-run.
 - **JSON parse error on existing settings** — operator's `.claude/lazy.settings.json` is hand-edited and malformed → fix the JSON manually, re-run.
-- **Step 2 cannot resolve the core bin** — `$LAZYCORTEX_PLUGIN_DIRS` is unset and no `lazycortex-core` cache exists → install `lazycortex-core` first (`/lazy-core.install`), then re-run.
 - **Step 1 reports `review.watch_root` as `.` on a repo that used to scan a narrow subtree** — the retired routine's `paths` shared no literal directory prefix, so the watch fell back to the whole repo → set `review.watch_root` by hand and re-run; the bin never re-derives an operator-set value.
 - **Step 5.6 states `no-vault`** — this repo has no `.obsidian/` directory → nothing to style; review still works, the callouts just render with Obsidian's default look.
 - **Review callouts still look alike after install** — `appearance.json` changed while Obsidian was running → reload the vault, or click ↻ next to `review-callouts` in Settings → Appearance → CSS snippets.

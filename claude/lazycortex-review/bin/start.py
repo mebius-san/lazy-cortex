@@ -241,8 +241,9 @@ def _atomic_commit(file_path: Path) -> None:
       ["git", "add", "--", str(file_path.name)],
       cwd=cwd, check=True, capture_output=True,
   )
+  # the pathspec keeps a concurrently staged foreign file out of the opt-in commit
   subprocess.run(
-      ["git", "commit", "-q", "-m", f"review: opt-in {file_path.name}"],
+      ["git", "commit", "-q", "-m", f"review: opt-in {file_path.name}", "--", str(file_path.name)],
       cwd=cwd, check=True, capture_output=True,
   )
 

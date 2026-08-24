@@ -4,6 +4,7 @@ description: "Use when an approved design settles what the user gets and the pro
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"
+logging-waiver: "expert-runtime job — the job dir is the record"
 ---
 # lazy-experts.docs-writer
 

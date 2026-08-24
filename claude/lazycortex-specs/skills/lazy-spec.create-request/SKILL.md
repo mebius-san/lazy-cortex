@@ -12,14 +12,14 @@ This skill is the human-facing intake helper. It wraps a 3–5 question wizard a
 
 This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. Canonical list:
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Canonical list:
    - `Step 0 — Confirm intent + collect raw idea`
    - `Step 1 — Resolve slug`
    - `Step 2 — Wizard refinement (3-5 questions)`
    - `Step 3 — Write body-only file`
    - `Step 4 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.**
-3. **Do not finalise until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.**
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.**
+3. **Do not finalise until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 
 ## Input
 

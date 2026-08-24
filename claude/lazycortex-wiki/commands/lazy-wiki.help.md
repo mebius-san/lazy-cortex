@@ -45,7 +45,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 **Documentation:**
 
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/troubleshooting.md) — Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/faq.md) — Answers to common questions about setting up scopes, running relinks, querying the wiki, the terms dictionary, the structure map, and the domain-spec tree.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-wiki/help/faq.md) — Answers to common questions about setting up scopes, running relinks, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, and the tag-values canon.
 
 Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-wiki/help/`.
 <!-- help-block:end -->

@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fde68a"
 ---
 # lazycortex-obsidian
 
@@ -26,6 +26,8 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 - *"I want Iconize set up in this vault from scratch."* — `/lazy-obsidian.iconize-install` installs all three iconize-sync hard-dependency plugins via `/lazy-obsidian.update-plugin` (`obsidian-icon-folder`, `folder-notes`, `iconize-reloader --bundled`), then scaffolds the icon-map registry and repaint routine into the vault.
 - *"I need to edit which folders get which icons."* — `/lazy-obsidian.iconize-config` is a wizard for editing the Iconize registry (the declarative mapping of paths to icons).
 - *"I need to apply the current registry to my notes."* — `/lazy-obsidian.iconize-sync` wraps the worker (`bin/iconize_sync.py`) to reconcile the registry into each matched note's `iconize_icon` / `iconize_color` frontmatter; Iconize and the bundled `iconize-reloader` repaint from there.
+- *"My vault config keeps fighting git."* — `/lazy-obsidian.capture` snapshots the whole `.obsidian/` surface into one tracked `.obsidian.manifest.json` and commits it, so the config travels as a single reviewed file instead of the hundred-odd files the mobile app rewrites on its own.
+- *"Fresh clone, no vault config."* — `/lazy-obsidian.deploy` rebuilds `.obsidian/` from that manifest: every plugin at its latest release, the captured settings on top, snippets, theme, and the top-level config files.
 - *"What does this plugin do?"* — `/lazy-obsidian.help`.
 
 ## Blocks
@@ -33,6 +35,7 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 - **iconize** — Folder-icon system for the vault: a declarative path→icon registry, a wizard to edit it, and a sync worker that paints each note's `iconize_icon` / `iconize_color` frontmatter. Members: lazy-obsidian.iconize-install, lazy-obsidian.iconize-config, lazy-obsidian.iconize-sync.
 - **diagram-rendering** — Click-to-zoom for diagram fences in Obsidian (the `mermaid-popup` vault plugin). The mermaid/ascii fit CSS snippets it declares are installed and enabled by `lazy-obsidian.install`'s shared snippet step, not by this skill. Members: lazy-obsidian.diagram-install.
 - **tag-pages** — Generate and refresh Obsidian tag pages from the tags used across the vault's notes, keeping the `Tags/` hierarchy in sync. Members: lazy-obsidian.gen-tag-pages.
+- **vault-manifest** — Carry a vault's whole Obsidian configuration as one tracked file: capture snapshots `.obsidian/` into `.obsidian.manifest.json`, deploy rebuilds `.obsidian/` from it on a clean checkout, and the audit reports how far a live vault has drifted from what its manifest records. Members: lazy-obsidian.capture, lazy-obsidian.deploy.
 - **install-and-audit** — Bootstrap the vault (rules, tag-page template, Dataview, chained iconize + diagram install), install or refresh an individual community plugin by id, and audit vault config. Members: lazy-obsidian.install, lazy-obsidian.audit, lazy-obsidian.update-plugin.
 
 ## Walkthroughs
@@ -44,7 +47,7 @@ Obsidian vaults accumulate configuration over time — plugins, icons, themes, h
 - **Claude Code** with plugin support.
 - **Obsidian** (the app) — for the config to take effect. The skills run without Obsidian running.
 - **git** — `lazy-obsidian.update-plugin` resolves the vault target via `git rev-parse --show-toplevel`.
-- **Python 3** — the iconize-sync worker (`bin/iconize_sync.py`) is Python-stdlib only.
+- **Python 3** — the iconize-sync worker (`bin/iconize_sync.py`) and the vault-manifest worker (`bin/vault_manifest.py`) are Python-stdlib only. The manifest worker reaches GitHub directly, so `curl` and `jq` are not needed for capture or deploy.
 - **`jq`** — used by `lazy-obsidian.update-plugin` for deep-merging the opinionated override block onto plugin `data.json`.
 - **`curl`** — used by `lazy-obsidian.update-plugin` to resolve the Obsidian community registry and fetch plugin binaries from GitHub releases.
 - **`lazycortex-core` (required)** — dependency declared in `plugin.json`; `lazy-obsidian.install` reuses the install pattern.
@@ -68,7 +71,9 @@ Requires these plugins from the same marketplace:
 
 | Skill | Description |
 |---|---|
-| `lazy-obsidian.audit` | Run when the operator asks to audit the lazycortex-obsidian plugin, or when its machinery misbehaves after an update — icons stop being painted, the icon-map is rejected as the wrong schema, or mermaid/ascii fences render unstyled in the vault. Checks the plugin's own shipped artifacts (worker version constants, icon-map template, the Iconize settings block, the render-glue CSS), not any one vault's installed state. Read-first; presents findings, then asks which to fix. |
+| `lazy-obsidian.audit` | Run when the operator asks to audit the lazycortex-obsidian plugin, or when its machinery misbehaves after an update — icons stop being painted, the icon-map is rejected as the wrong schema, or mermaid/ascii fences render unstyled in the vault. Checks the plugin's own shipped artifacts (worker version constants, icon-map template, the Iconize settings block, the render-glue CSS), plus — when the repo carries a vault manifest — how far this vault's live config has drifted from it. Read-first; presents findings, then asks which to fix. |
+| `lazy-obsidian.capture` | Run when the operator changed this vault's Obsidian configuration and wants it recorded — new plugin installed, settings tweaked, snippet added, theme or palette changed — or asks to snapshot / capture the vault config. Writes the whole `.obsidian/` surface into the tracked `.obsidian.manifest.json` and commits it, so the config reaches other checkouts as one reviewed file. The sibling `/lazy-obsidian.deploy` rebuilds `.obsidian/` from what this skill wrote. |
+| `lazy-obsidian.deploy` | Run on a checkout whose vault config is missing or stale — a fresh clone of a vault repo, a machine that never opened this vault, a teammate setting up from the repo alone — or when the operator asks to deploy / restore / rebuild the Obsidian config. Rebuilds `.obsidian/` from the tracked `.obsidian.manifest.json`, fetching every plugin bundle at its latest release. The sibling `/lazy-obsidian.capture` is what wrote that manifest. |
 | `lazy-obsidian.diagram-install` | Run when the operator asks to make click-to-zoom work on lazycortex diagrams in Obsidian, or when they report that clicking a mermaid diagram doesn't zoom. Installs the `mermaid-popup` vault plugin. Does NOT install the fit-CSS snippets (mermaid fences overflowing the column, sitting on a white box, or clipped ASCII diagrams) — those are installed and enabled by `/lazy-obsidian.install`'s shared snippet step; run that instead for those symptoms. Project scope only, idempotent, and chained from `/lazy-obsidian.install`. |
 | `lazy-obsidian.iconize-config` | Use when the iconize resolver misses a value — a role, step, or request status with no icon — or when the operator wants to change or drop one. Wizard over the vault's local `.claude/iconize/obsidian-icon-map.json`; the canonical way to seed a registry entry instead of hand-editing that JSON. Requires `lazy-obsidian.iconize-install` to have run first. |
 | `lazy-obsidian.iconize-install` | Run when the operator asks to set up folder and file icons in this Obsidian vault, or when `/lazy-obsidian.iconize-sync` refuses because the icon-map is missing, or the Iconize / folder-notes / iconize-reloader vault plugins aren't there. Scaffolds the vault-side pieces (icon-map, gitignore entry, schema migration, repaint routine) and installs those three plugins. Chained from `/lazy-obsidian.install`; idempotent, and must be run from the vault's git root. |
@@ -81,8 +86,8 @@ Requires these plugins from the same marketplace:
 Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenarios above:
 
 - [vault-bootstrap](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/walkthroughs/vault-bootstrap.md) — Go from a bare repo to a fully-wired Obsidian vault — tag pages, Iconize sync, diagram glue, click-to-zoom — one chained install.
-- [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/troubleshooting.md) — Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, and plugin updates.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/faq.md) — Answers to common questions about vault setup, Iconize, diagram render glue, plugin updates, and tag pages for lazycortex-obsidian.
+- [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/troubleshooting.md) — Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, and vault manifest capture/deploy.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/faq.md) — Answers to common questions about vault setup, Iconize, diagram render glue, the vault manifest, plugin updates, and tag pages for lazycortex-obsidian.
 
 (`mebius-san` resolves from `.guard-public.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
@@ -108,7 +113,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 
 | Hook | Trigger | Description |
 |---|---|---|
-| `iconize_sync` | `Write|Edit` | PostToolUse hook: resolve and write iconize_icon/iconize_color frontmatter for an edited markdown note via the icon-map registry. |
+| `iconize_sync` | `Write|Edit` | Generic iconize-sync worker for the lazycortex-obsidian plugin. |
 
 ## Installation
 
@@ -128,6 +133,8 @@ Invoke skills with slash commands:
 
 ```
 /lazy-obsidian.audit
+/lazy-obsidian.capture
+/lazy-obsidian.deploy
 /lazy-obsidian.diagram-install
 /lazy-obsidian.iconize-config
 /lazy-obsidian.iconize-install

@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.diagram-install
 description: "Run when the operator asks to make click-to-zoom work on lazycortex diagrams in Obsidian, or when they report that clicking a mermaid diagram doesn't zoom. Installs the `mermaid-popup` vault plugin. Does NOT install the fit-CSS snippets (mermaid fences overflowing the column, sitting on a white box, or clipped ASCII diagrams) — those are installed and enabled by `/lazy-obsidian.install`'s shared snippet step; run that instead for those symptoms. Project scope only, idempotent, and chained from `/lazy-obsidian.install`."
-allowed-tools: Write, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), TaskCreate, TaskUpdate, TaskList, Agent
+allowed-tools: Write, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Agent
 argument-hint: "(no arguments — scaffolds into <repo-root>/.obsidian/)"
 ---
 # Install diagram render glue (Obsidian)
@@ -27,14 +27,14 @@ Project-local only. There is no global scope — Obsidian render glue is inheren
 
 This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Locate repo root and vault`
    - `Step 2 — Install/update mermaid-popup`
    - `Step 3 — Detect legacy mermaid-no-bg.css`
    - `Step 4 — Report`
    - `Step 5 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome word (e.g. `updated`, `unchanged`, `kept-orphan`, `absent`).
-3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome word (e.g. `updated`, `unchanged`, `kept-orphan`, `absent`).
+3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
 ## Step 1 — Locate repo root and vault

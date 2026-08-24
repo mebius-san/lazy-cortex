@@ -7,7 +7,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 
 ---
 
-**lazycortex-obsidian** — bootstrap and manage an Obsidian vault (`.obsidian/`) from inside a repo. Ships a curated vault snapshot plus skills that bring the project's vault into alignment — safely, with per-plugin drift prompts, and without blanket-ignoring `.obsidian/`. Also ships a standalone iconize-sync worker (`bin/iconize_sync.py`) with templates under `templates/iconize/`.
+**lazycortex-obsidian** — bootstrap and manage an Obsidian vault (`.obsidian/`) from inside a repo. Ships a curated vault snapshot plus skills that bring the project's vault into alignment, and a manifest workflow that carries a vault's whole configuration as one tracked file instead of a hundred that the mobile app rewrites behind git's back. Also ships two standalone workers: iconize-sync (`bin/iconize_sync.py`, templates under `templates/iconize/`) and the vault-manifest worker (`bin/vault_manifest.py`).
 
 **Skills** (invoke as `/<name>` or via Skill tool):
 
@@ -16,7 +16,9 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-obsidian.iconize-install` — scaffold-into-vault wizard. Installs all three iconize-sync hard-dependency plugins via `/lazy-obsidian.update-plugin` (`obsidian-icon-folder`, `folder-notes`, `iconize-reloader --bundled`), then scaffolds the icon-map registry from `templates/iconize/` and registers the repaint routine. Idempotent.
 - `lazy-obsidian.iconize-config` — registry-editing wizard; add / remove / update entries in the declarative Iconize registry without hand-editing JSON.
 - `lazy-obsidian.iconize-sync` — worker wrapper; applies the registry to each matched note's `iconize_icon` / `iconize_color` frontmatter via `bin/iconize_sync.py` (Iconize + the bundled `iconize-reloader` repaint from there); callable standalone or from other skills.
-- `lazy-obsidian.audit` — read-only semantic audit of the plugin surface, delegated from `lazy-core.doctor`.
+- `lazy-obsidian.capture` — snapshot the vault's whole `.obsidian/` configuration into the tracked `.obsidian.manifest.json` and commit it. Plugin settings, snippets, theme, palette, and top-level config travel as one reviewed file; per-device state, credentials, and Iconize's own database are deliberately left out.
+- `lazy-obsidian.deploy` — rebuild `.obsidian/` from that manifest on a checkout that has none: every plugin at its latest release, the captured settings on top, snippets, theme, and the top-level config files. Never pins a version.
+- `lazy-obsidian.audit` — read-only semantic audit of the plugin surface, delegated from `lazy-core.doctor`. Also reports how far a live vault's config has drifted from its manifest, when the repo carries one.
 
 **Agents** (invoke by name via the Agent tool):
 
@@ -32,8 +34,8 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 **Documentation:**
 
 - [vault-bootstrap](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/walkthroughs/vault-bootstrap.md) — Go from a bare repo to a fully-wired Obsidian vault — tag pages, Iconize sync, diagram glue, click-to-zoom — one chained install.
-- [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/troubleshooting.md) — Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, and plugin updates.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/faq.md) — Answers to common questions about vault setup, Iconize, diagram render glue, plugin updates, and tag pages for lazycortex-obsidian.
+- [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/troubleshooting.md) — Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, and vault manifest capture/deploy.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-obsidian/help/faq.md) — Answers to common questions about vault setup, Iconize, diagram render glue, the vault manifest, plugin updates, and tag pages for lazycortex-obsidian.
 
 Offline copy at `~/.claude/plugins/cache/.../claude/lazycortex-obsidian/help/`.
 <!-- help-block:end -->

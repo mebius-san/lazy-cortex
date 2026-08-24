@@ -12,7 +12,7 @@ Read-only health check that walks the 12 invariants the Python surface promises 
 
 This skill has 13 ordered steps (12 checks plus the log write). The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Check 1 — Rules mirror integrity`
    - `Check 2 — References resolve`
    - `Check 3 — Artifacts present`
@@ -26,8 +26,8 @@ This skill has 13 ordered steps (12 checks plus the log write). The executing ag
    - `Check 11 — Venv bootstrap state`
    - `Check 12 — Domain-groups dictionary`
    - `Step 13 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND captured an outcome word for it" — `PASS` / `WARN` / `FAIL` for the check steps, `logged` for Step 13.
-3. **Do not reach the Report block until `TaskList` shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND captured an outcome word for it" — `PASS` / `WARN` / `FAIL` for the check steps, `logged` for Step 13.
+3. **Do not reach the Report block until the ledger shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report block is a structural verifier.** Its output MUST contain one line per check above with its severity. A missing line is a bug; do not render the report with gaps.
 
 ## Check 1: Rules mirror integrity

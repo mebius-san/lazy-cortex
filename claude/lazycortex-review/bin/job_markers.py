@@ -13,7 +13,8 @@ POSIX path:
       "specs/proposal.md": {
         "coordinator_job": "<job id>" | null,
         "active_job":      "<job id>" | null,
-        "pending_wake":    "job-done" | null
+        "pending_wake":    "job-done" | null,
+        "last_seen_sha":   "<commit sha>" | null
       }
     }
 
@@ -46,7 +47,10 @@ from keys import JobMarker, Paths  # noqa: E402
 
 # The closed field schema of one document's entry. A field outside it is refused the way
 # `set-key` refuses a frontmatter key outside its own schema — a typo must not become state.
-_FIELDS = (JobMarker.COORDINATOR_JOB, JobMarker.ACTIVE_JOB, JobMarker.PENDING_WAKE)
+_FIELDS = (
+    JobMarker.COORDINATOR_JOB, JobMarker.ACTIVE_JOB, JobMarker.PENDING_WAKE,
+    JobMarker.LAST_SEEN_SHA,
+)
 
 # Maps the `mark-job` CLI's kind token to the entry field it writes.
 _FIELD_BY_KIND = {

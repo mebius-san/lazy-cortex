@@ -1,7 +1,7 @@
 ---
 name: lazy-wiki.domain-sync
 description: "Use when the domain-spec tree needs regenerating right now — this checkout runs no runtime daemon, domain markers or the dictionary just changed and the operator wants the docs current, or a `/lazy-python.knowledge-sweep` backfill has landed. Computes the domain plan, dispatches the domain-spec writer synchronously per changed group, removes orphaned docs, rebuilds `domains.md`, and makes one commit under the operator identity."
-allowed-tools: Read, Bash(lazycortex-wiki *), Bash(date -u *), Bash(git *), Bash(mkdir -p *), Bash(rm *), Write, Agent, TaskCreate, TaskUpdate, TaskList
+allowed-tools: Read, Bash(lazycortex-wiki *), Bash(date -u *), Bash(git *), Bash(mkdir -p *), Bash(rm *), Write, Agent
 ---
 # lazy-wiki.domain-sync
 
@@ -15,15 +15,15 @@ Prerequisites: `/lazy-wiki.install` has run and `wiki.domains` is configured in 
 
 This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Compute the domain plan`
    - `Step 2 — Write each changed group`
    - `Step 3 — Remove orphaned docs`
    - `Step 4 — Rebuild the index`
    - `Step 5 — Commit touched files`
    - `Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced. No-ops must emit an explicit outcome (`empty-set`, `unchanged`, …).
-3. **Do not reach the Log step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced. No-ops must emit an explicit outcome (`empty-set`, `unchanged`, …).
+3. **Do not reach the Log step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug.
 
 ## Step 1 — Compute the domain plan
@@ -36,7 +36,7 @@ Bash(lazycortex-wiki domain-plan --repo <repo-root>)
 
 A non-zero exit means `wiki.domains` is not configured — surface the message, point at `/lazy-wiki.configure domains`, and stop.
 
-Parse the JSON: `changed_groups` (each entry: `group`, `hash`, `files`, `doc_path`, `gloss`, `blocks`, `contracts`), `orphaned_docs`, `unlisted_docs`, `unknown_groups`, `index_path`, `index_needs_update`, `language`, `dictionary`, `output`. Report any `unknown_groups` to the operator verbatim (groups used in code but absent from the dictionary — `/lazy-wiki.doctor` territory; this run skips them, never generates them).
+Parse the JSON: `changed_groups` (each entry: `group`, `hash`, `files`, `doc_path`, `gloss`, `blocks`, `contracts`, `tag_axes`, `existing_tags`, `tag_dictionary` — the last three are the tag-canon inputs the writer needs), `orphaned_docs`, `unlisted_docs`, `unknown_groups`, `index_path`, `index_needs_update`, `language`, `dictionary`, `output`. Report any `unknown_groups` to the operator verbatim (groups used in code but absent from the dictionary — `/lazy-wiki.doctor` territory; this run skips them, never generates them).
 
 `contracts` is the group's attributed `Contract:` blocks (each entry: `path`, `line`, `text`, `symbol` — `symbol` may be `null` when the file did not parse as Python). A `Contract:` marker carries no group of its own; a block is attributed to the nearest `Domain(…)` header in the same file, so `contracts` may be empty even when `blocks` is not.
 
@@ -52,7 +52,7 @@ For each entry in `changed_groups`, dispatch the writer synchronously — **no j
 
 ```
 Agent(subagent_type: "lazycortex-wiki:lazy-wiki.domain-spec-writer",
-      prompt: "kind=domain-spec, tail=false. repo_root=<repo-root>, group=<group>, gloss=<gloss>, language=<language>, doc_path=<doc_path>, hash=<hash>, blocks=<the entry's blocks JSON>, contracts=<the entry's contracts JSON>. Read the source files the blocks name, verify every formula against the code, and write the doc at doc_path whole (frontmatter domain_group + domain_hash=<hash>, fixed Terms/Principles/Mechanics sections, Obsidian LaTeX formulas, no source references, target language; a trailing Contracts section listing every contract's guarantee text with its path:symbol anchor when contracts is non-empty). STOP after writing — do NOT touch the index, do NOT run git. Report the outcome.")
+      prompt: "kind=domain-spec, tail=false. repo_root=<repo-root>, group=<group>, gloss=<gloss>, language=<language>, doc_path=<doc_path>, hash=<hash>, blocks=<the entry's blocks JSON>, contracts=<the entry's contracts JSON>, tag_axes=<the entry's tag_axes JSON>, existing_tags=<the entry's existing_tags JSON>, tag_dictionary=<the entry's tag_dictionary>. Read the source files the blocks name, verify every formula against the code, and write the doc at doc_path whole (frontmatter domain_group + domain_hash=<hash>, fixed Terms/Principles/Mechanics sections, Obsidian LaTeX formulas, no source references, target language; a trailing Contracts section listing every contract's guarantee text with its path:symbol anchor when contracts is non-empty). STOP after writing — do NOT touch the index, do NOT run git. Report the outcome.")
 ```
 
 If a writer reports an error, skip that group and continue; it is re-detected on the next run. Track each written `doc_path` for the Step 5 commit. A `doc_path` that did not exist before this run must be registered with `Bash(git add -N <doc_path>)` so the commit pathspec can see it.

@@ -41,9 +41,9 @@ See [`claude/lazycortex-diagram/`](claude/lazycortex-diagram/) for details.
 
 ### lazycortex-experts
 
-Generic lifecycle experts (interpreter, designer, architect, planner, implementer, data-implementer, docs-writer, debugger, reviewer, tester) plus a fiction-writer agent, a starter set of domain aspects (claude-plugin, game-dev, dotfiles, obsidian-plugin, data-pipeline, sci-fi, fantasy), and five cross-cutting aspects (discipline, research, tech-writing, terms, structure). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
+Generic lifecycle experts (interpreter, use-case-writer, designer, architect, ui-designer, planner, implementer, data-implementer, docs-writer, debugger, reviewer, tester) plus a fiction-writer agent, a starter set of domain aspects (claude-plugin, game-dev, dotfiles, obsidian-plugin, data-pipeline, sci-fi, fantasy), and five cross-cutting aspects (discipline, research, tech-writing, terms, structure). Building blocks — compose specialists in lazy.settings.json[experts] with one agent + one or more aspects.
 
-1 skill, 11 agents.
+1 skill, 13 agents.
 
 Requires: lazycortex-core
 
@@ -63,7 +63,7 @@ See [`claude/lazycortex-observe/`](claude/lazycortex-observe/) for details.
 
 Obsidian vault bootstrap and configuration management for Claude Code
 
-7 skills, 1 agent, 1 hook.
+9 skills, 1 agent, 1 hook.
 
 Requires: lazycortex-core
 
@@ -103,7 +103,7 @@ See [`claude/lazycortex-specs/`](claude/lazycortex-specs/) for details.
 
 Maintains a curated, LLM-navigable semantic wiki over a markdown+code base — summaries, hierarchical topic tags, and glossed See-also links, kept in sync via git-watch and weekly full-scan routines.
 
-9 skills, 6 agents.
+9 skills, 7 agents.
 
 Requires: lazycortex-core
 

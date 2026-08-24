@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime (incl. manual ticks and new daemon authoring), memory, routines, git staging, MCP permissions, and change-history search.
-last_regen: 2026-08-21
+summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime (incl. manual ticks and new daemon authoring), memory, routines, git staging (incl. the clean-index precondition), MCP permissions, and change-history search.
+last_regen: 2026-08-24
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -25,7 +25,7 @@ source_skills:
   - lazy-log.recall
   - lazy-log.summary
   - lazy-log.timeline
-source_sha: 8e1778242c1d07b5ae5e6fee24b46b72873fefdc
+source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
 ---
 # FAQ
 
@@ -123,15 +123,17 @@ By default the skill writes to the gitignored `settings.local.json` at the appro
 
 ## Do I need to enable the expert runtime, or is it on by default?
 
-The expert runtime is opt-in per repo. When you run `/lazy-core.install`, a wizard phase asks whether to bootstrap runtime and experts for the current repo. If you answer yes, the skill writes the flat `daemon` and `routines` sections into `.claude/lazy.settings.json`, creates `lazy.settings.json[experts]`, copies the `lazy.runtime.sh` shim to `.claude/bin/`, and adds `.experts/` to `.gitignore`. It also offers to install a daemon supervisor (macOS launchd or Linux systemd) and registers the `lazy-expert.pump` routine automatically once you add at least one expert. If you skip that phase or answer no, none of those files are created and the `/lazy-expert.*` skills will abort at Step 2 with "`.experts/` not initialised — run `/lazy-core.install` first."
+No install-time question gates it anymore. `/lazy-core.install` always writes the flat `daemon` and `routines` sections into `.claude/lazy.settings.json`, creates `lazy.settings.json[experts]`, copies the `lazy.runtime.sh` shim to `.claude/bin/`, bootstraps `.experts/`, and registers the built-in `lazy-expert.pump` routine — the only precondition is that the current directory is (or can become) a git repo, since the runtime's tracked config and commits need one. All of it is driven by `/lazy-runtime.tick` just as well as by a background daemon, so none of it waits on a daemon to exist.
 
-To enable it later without re-running the full install flow, run `/lazy-core.install` again — it is idempotent and will offer the runtime wizard phase again.
+What is still opt-in is `daemon.enabled` — whether a background daemon actually supervises the project, versus you ticking it by hand. It is seeded `false` on first install, silently, with no wizard question: a project declares itself daemon-supervised by having the flag flipped, not by answering a prompt at install time. With it `false`, every routine, expert, and runtime artifact is already in place and runnable — `/lazy-expert.dispatch-job` and the rest of the `/lazy-expert.*` skills work immediately, and you drive routines and queued jobs by hand with `/lazy-runtime.tick`.
+
+To make a project daemon-supervised, set `daemon.enabled: true` in the tracked `lazy.settings.json` and re-run `/lazy-core.install` — that is what unlocks the `run_here` question and the supervisor/metrics install described in the next two questions.
 
 ---
 
 ## Does `/lazy-core.install` set up monitoring for the runtime daemon?
 
-Yes, but only on a checkout that actually runs the daemon locally. Once the earlier install wizard confirms this machine and checkout are the pair on record (`run_here`), a later step asks once whether to enable the daemon's Prometheus `/metrics` endpoint — exposing routine ticks, errors, tokens, and queue depth on a loopback HTTP port for a Prometheus-compatible scraper. Answering "No" is recorded permanently and you are never asked again on that checkout; re-running `/lazy-core.install` reuses the recorded answer instead of re-asking.
+Yes, but only on a project that is daemon-supervised (`daemon.enabled: true` — see the previous question) and a checkout that actually runs the daemon locally. With the seeded default of `false`, install never reaches this step at all. Once `daemon.enabled` is true and the earlier `run_here` question confirms this machine and checkout are the pair on record, a later step asks once whether to enable the daemon's Prometheus `/metrics` endpoint — exposing routine ticks, errors, tokens, and queue depth on a loopback HTTP port for a Prometheus-compatible scraper. Answering "No" is recorded permanently and you are never asked again on that checkout; re-running `/lazy-core.install` reuses the recorded answer instead of re-asking.
 
 Answering "Yes" allocates a free port sequentially starting from `9464` — reusing this checkout's already-recorded port on re-runs instead of picking a new one — and splits where the decision is written: the `enabled` flag and a human-readable `repo_label` (default: the folder name) go into the tracked `lazy.settings.json[daemon].metrics`, shared across machines, while the allocated port goes into the gitignored per-machine overlay, because a port that's free on one machine may be taken on another. The step then regenerates a host-wide Prometheus scrape-targets file so an external Prometheus with a `file_sd_configs` pointer picks up every locally running daemon with zero manual edits.
 
@@ -141,11 +143,11 @@ If the daemon later starts and finds its recorded port already taken by somethin
 
 ## My checkout is on Dropbox/iCloud/Syncthing and shows up on more than one machine — won't `run_here` start a daemon on all of them?
 
-It would, if `run_here` only accepted `true`/`false` — but that shape is retired. `daemon.run_here` is now a hostname-to-checkout-path map, for example `{"nexus": "~/lazy-runtime/Money"}`, stored in the **tracked** `lazy.settings.json` so the pairing travels with the project to every clone (a gitignored overlay would never reach a machine that cloned the repo independently — exactly where a second daemon would appear). Neither half of the pair decides alone: the hostname says which machine, the path says which of that machine's checkouts drives the daemon — a single machine commonly holds more than one checkout of the same project (a working copy plus the one the daemon runs from), and naming only the host would collide between them the same way a bare `true` used to collide across synced machines.
+It would, if `run_here` only accepted `true`/`false` — but that shape is retired. `daemon.run_here` is now a hostname-to-checkout-path map, for example `{"nexus": "~/lazy-runtime/Money"}`, stored in the **tracked** `lazy.settings.json` so the pairing travels with the project to every clone (a gitignored overlay would never reach a machine that cloned the repo independently — exactly where a second daemon would appear). Neither half of the pair decides alone: the hostname says which machine, the path says which of that machine's checkouts drives the daemon — a single machine commonly holds more than one checkout of the same project (a working copy plus the one the daemon runs from), and naming only the host would collide between them the same way a bare `true` used to collide across synced machines. This question is only reached once `daemon.enabled` is `true` — see the two questions above.
 
 `/lazy-core.install` compares the map against the machine's own hostname (lowercased) and the checkout's own resolved path (symlinks included, so a symlinked path still matches). The named pair installs the supervisor as normal. Every other machine — and every other checkout on the named machine — both skips the supervisor install AND tears down any supervisor unit it already has for that checkout, so re-running `/lazy-core.install` anywhere that shouldn't be running the daemon self-heals a leaked one instead of leaving it running. The daemon itself also refuses to start on a checkout the map doesn't name, even while `daemon.enabled` stays `true`, so a leaked supervisor can't outlive the map even if you never get around to re-running install there. An empty map (`{}`) names nothing at all — the project stays daemon-enabled but nothing drives it until you point the map at a checkout.
 
-Edit the map by hand — add or remove a `"<hostname>": "<path>"` entry — then re-run `/lazy-core.install` to apply it; entries recorded for other machines are left untouched. If the file still carries the retired shape (a bare boolean, or a plain list of hostnames from an install that predates the map), `/lazy-core.install` reports `run-here-invalid`, prints the offending value, and re-asks the Gate 2 question so your answer replaces it outright — the daemon refuses to start until the map is in the current shape.
+Edit the map by hand — add or remove a `"<hostname>": "<path>"` entry — then re-run `/lazy-core.install` to apply it; entries recorded for other machines are left untouched. If the file still carries the retired shape (a bare boolean, or a plain list of hostnames from an install that predates the map), `/lazy-core.install` reports `run-here-invalid`, prints the offending value, and re-asks the question so your answer replaces it outright — the daemon refuses to start until the map is in the current shape.
 
 ---
 
@@ -214,7 +216,7 @@ The hook is fully isolated from the daemon's own tick: a non-zero exit, a timeou
 
 ## How do I run routines and drain queued jobs on a checkout without a live daemon?
 
-Run `/lazy-runtime.tick [<routine-name>] [--drain]`. It runs the daemon's own primitives by hand, in the daemon's own serial order, on a checkout whose daemon is not running. With no arguments it runs a single iteration — every due routine in priority order, then at most one READY job through the pump (the daemon's own single-spawn ceiling). `--drain` repeats iterations, sleeping between them exactly as the daemon would, until nothing is due and the queue is empty — it stops early on a halt, a dirty tree, a raised rate-limit flag, or a pass that made no progress. Naming a routine runs only that one, ignoring both its interval and `--drain`.
+Run `/lazy-runtime.tick [<routine-name>] [--drain]`. It runs the daemon's own primitives by hand, in the daemon's own serial order, on a checkout whose daemon is not running — including a checkout where `daemon.enabled` has never been flipped to `true` at all, since routines and experts install unconditionally (see the runtime-opt-in question above). With no arguments it runs a single iteration — every due routine in priority order, then at most one READY job through the pump (the daemon's own single-spawn ceiling). `--drain` repeats iterations, sleeping between them exactly as the daemon would, until nothing is due and the queue is empty — it stops early on a halt, a dirty tree, a raised rate-limit flag, or a pass that made no progress. Naming a routine runs only that one, ignoring both its interval and `--drain`.
 
 It refuses outright if the checkout's own supervisor unit already holds a live daemon — a concurrent manual tick would race it over the working tree, the git index, and the job queue; stop the supervisor first (or run the tick on a different checkout) rather than forcing it. Commits land exactly as the daemon's own would (per-routine, bot identities), but the push is deferred: nothing publishes during a manual tick, and the commits wait on the branch for the next pushing iteration the daemon itself runs after you restart it. If a routine halts mid-tick, `/lazy-runtime.recover` explains and clears it, same as it would for the daemon.
 
@@ -240,7 +242,7 @@ Five types, each suited to a different scheduling pattern:
 - **git** — watches local HEAD for new commits, new files, changed files, deleted files, or renamed files and dispatches an expert job per matched event.
 - **md-scan** — scans markdown files matching vault-relative globs, filters by frontmatter key/value, and fires in-place (no file move) on each match. Good for processing items whose lifecycle state is tracked in their own frontmatter.
 
-All five require a dot-namespaced `name` (e.g. `acme-lint.tick`). The wizard in `/lazy-routine.register` asks for the type first, then prompts only for the fields that type needs.
+All five require a dot-namespaced `name` (e.g. `acme-lint.tick`). The wizard in `/lazy-routine.register` asks for the type first, then prompts only for the fields that type needs. Registration itself never depends on `daemon.enabled` — a routine registered on a project ticking by hand (see the runtime-opt-in question above) is picked up the next time you run `/lazy-runtime.tick`, exactly as it would by a live daemon.
 
 ---
 
@@ -320,6 +322,16 @@ In both cases, `--dry-run` is purely read-only: no files are created or modified
 The git-guard hook's default behavior changed: **pathspec discipline** is now the default mode (`lazy.settings.json["git"]["pathspec_enabled"]` defaults to `true`), and it replaces the staging-window mutex as what most sessions actually hit. Under pathspec discipline the shared git index is treated as the operator's own space — a Claude session never leaves content parked there for a later commit to accidentally sweep up. Concretely: a bare `git commit` (or `-a`/`-am`/`.`/`:/`/a directory pathspec) is refused; every commit must name explicit paths, e.g. `git commit -m "..." -- <path> <path>`. A new file is registered with `git add -N <path>` (no content staged) rather than a plain `git add`; renames and deletes go through Bash `mv`/`rm`, never `git mv`/`git rm` (both auto-stage); `git reset` still works normally if something needs un-parking. The only exceptions are a bare commit mid-merge (git itself refuses a partial commit there) and `--amend` when a pathspec is given or the index is already clean.
 
 If a session's own tooling staged content for you (a skill, a pre-commit pipeline step), fold the paths it reports into your commit pathspec rather than falling back to a bare commit. You don't need to change anything to opt in — the hook enforces the new default and tells you the pathspec form to use whenever it refuses a bare commit.
+
+---
+
+## Why did my commit get denied even though I named explicit paths?
+
+Naming paths is necessary but not sufficient under pathspec discipline — a session commit also requires an index that is otherwise clean. A session never stages content itself, so anything already sitting in the index belongs to someone else: the operator's parked work, an intentional `git rm --cached` untrack, or (rarer) a shared index left in a bad state by an earlier failed partial commit. When a commit fires and finds staged content, the hook polls briefly — 15 seconds by default, overridable via the `LAZYCORTEX_GIT_GUARD_WAIT_SECONDS` environment variable — in case the dirt is just the tail end of the operator's own staging burst, then denies if it's still there once the window closes.
+
+The denial deliberately does not prescribe a fix, because a session has no way to tell the three causes apart: stop and escalate to the operator, and do not retry until `git diff --cached` comes back empty. Never run `git reset` on the operator's behalf to clear the way. Intent-to-add registrations (`git add -N <path>`, the only kind a session may create) never count as staged content and never trigger this denial.
+
+Separately, if a commit succeeds but the index is non-empty again immediately afterward — even though it started clean — that is the signature of a partial commit's temporary index getting written into place as the real one, typically from a crash or a race mid-commit. The hook raises an ALARM for this case instead of blocking, since the commit already landed; surface it to the operator, who runs `git reset` to rebuild the index from `HEAD` (worktree untouched) — never something a session does on its own.
 
 ---
 

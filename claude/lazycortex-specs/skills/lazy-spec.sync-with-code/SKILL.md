@@ -1,7 +1,7 @@
 ---
 name: lazy-spec.sync-with-code
 description: Use when source code has changed since the last spec sync — compares a registered code-bound product's source commits against the last synced commit, updates the product tech doc, surfaces behavior changes for the product design doc, reconciles branch pins, and proposes flat-gate / per-file-stage corrections from the code state. No-ops on a design-only product. Given an `<asset>` argument instead of a bare product key, runs in asset mode instead: reconciles ONE feature/change asset's design.md / architecture.md against the current code by anchor (source-links, domain-groups, structure) rather than by commit diff, and never edits spec content silently — every drift finding becomes an `[!attention]` callout, a change-asset proposal, or a gate-correction proposal.
-allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Skill, Task, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent
+allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Skill, AskUserQuestion, Agent
 ---
 # Spec Sync
 
@@ -16,9 +16,9 @@ Product config, the five flat gates, per-file stages, source URLs, and pin recon
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 11 ordered steps. The diagram seam set is **runtime-computed** — it depends on which sections were actually rewritten in Step 4 — so the preamble TaskCreate list contains one meta-step (`Step 4a — Compute runtime seam list`) that fans out into one dynamic task per discovered seam (`diagram <file>:<anchor>:<kind>` × N) before Step 5 begins. In **asset mode** (Step 0 resolves `mode = asset`), most of these 11 steps are `skipped-per-mode` — see each step's own **Asset mode:** note and Step 5's **Asset mode — anchor reconciliation** subsection. The executing agent MUST NOT skip, merge, reorder, or silently omit any step — including a mode-skip, which still needs its own explicit outcome, not a silent absence.
+This skill has 11 ordered steps. The diagram seam set is **runtime-computed** — it depends on which sections were actually rewritten in Step 4 — so the preamble ledger contains one meta-step (`Step 4a — Compute runtime seam list`) that fans out into one dynamic task per discovered seam (`diagram <file>:<anchor>:<kind>` × N) before Step 5 begins. In **asset mode** (Step 0 resolves `mode = asset`), most of these 11 steps are `skipped-per-mode` — see each step's own **Asset mode:** note and Step 5's **Asset mode — anchor reconciliation** subsection. The executing agent MUST NOT skip, merge, reorder, or silently omit any step — including a mode-skip, which still needs its own explicit outcome, not a silent absence.
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per static step below. Use these canonical titles verbatim:
+1. **Before calling any other tool**, write out the step ledger — one line per static step below, each marked `pending`. Use these canonical titles verbatim:
    - `Step 0 — Resolve the product`
    - `Step 1 — Determine scope`
    - `Step 2 — Get relevant changes`
@@ -26,7 +26,7 @@ This skill has 11 ordered steps. The diagram seam set is **runtime-computed** �
    - `Step 3 — Analyze each commit`
    - `Step 4 — Route updates by file role (rewrite prose per operator approval)`
    - `Step 4a — Compute runtime seam list` (output: a list of `{target_file, anchor_section, kind, facts}` triples — one per section whose prose was rewritten)
-   - `Step 4b — Dispatch diagram per computed seam` (this single task expands into N additional `TaskCreate` calls right after Step 4a runs — one task per computed seam, titled `diagram <relative-path>:<anchor>:<kind>` — and only Step 5 may begin once they are all `completed` or `skipped` with an outcome word)
+   - `Step 4b — Dispatch diagram per computed seam` (this single entry expands into N additional ledger lines right after Step 4a runs — one line per computed seam, titled `diagram <relative-path>:<anchor>:<kind>` — and only Step 5 may begin once they are all `completed` or `skipped` with an outcome word)
    - `Step 5 — Reconcile asset status (folder-note scaffold + gate/stage proposals)`
    - `Step 5a — Reconcile branch pins`
    - `Step 6 — Update state`
@@ -34,13 +34,13 @@ This skill has 11 ordered steps. The diagram seam set is **runtime-computed** �
    - `Step 8 — Verify`
    - `Step 9 — Log the run`
 
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". For dynamically-created `Step 4b` child tasks, the outcome word IS the `lazycortex-diagram:lazy-diagram.draw` return value (`created` | `replaced` | `unchanged` | `failed:<reason>` | `split-into-N`). When Step 4 rewrites zero sections (no commits touched documented prose), `Step 4a` produces the empty list and `Step 4b` records outcome `no-seams-this-run` — the task list still resolves cleanly.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". For dynamically-created `Step 4b` child tasks, the outcome word IS the `lazycortex-diagram:lazy-diagram.draw` return value (`created` | `replaced` | `unchanged` | `failed:<reason>` | `split-into-N`). When Step 4 rewrites zero sections (no commits touched documented prose), `Step 4a` produces the empty list and `Step 4b` records outcome `no-seams-this-run` — the task list still resolves cleanly.
 
-3. **Do not reach Verify until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task — including any dynamically-created `Step 4b` child — is a bug; stop and execute it first.
+3. **Do not reach Verify until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task — including any dynamically-created `Step 4b` child — is a bug; stop and execute it first.
 
 4. **Verify is a structural verifier** (per the `## Verify` section below). In **product mode** it diffs the runtime-computed seam list (the output of `Step 4a`) against the seams actually logged to `.logs/claude/lazy-diagram.draw/` for this run — any non-empty diff is a Verify failure. In **asset mode** the seam-diff logic does not apply (`seams[]` is always empty per Step 4a's `skipped-per-mode`); Verify instead checks that every anchor-driven finding from Step 5's Asset mode subsection produced exactly one of the legal outcome words.
 
-5. **The same canonical step titles cover both modes** — asset mode does not get its own parallel TaskCreate list. Steps that don't apply are marked `skipped` with outcome `skipped-per-mode` (per-step notes above name exactly which); Step 5 branches internally on the resolved mode instead of duplicating itself as a separate step.
+5. **The same canonical step titles cover both modes** — asset mode does not get its own parallel ledger. Steps that don't apply are marked `skipped` with outcome `skipped-per-mode` (per-step notes above name exactly which); Step 5 branches internally on the resolved mode instead of duplicating itself as a separate step.
 
 ## Input
 
@@ -165,7 +165,7 @@ Anchors not in this map, and anchors without an existing fence, are NOT seams �
 
 **Asset mode:** skipped, outcome `skipped-per-mode` — `seams[]` is empty per Step 4a.
 
-Before invoking the skill, call `TaskCreate` once per entry in `seams[]` with the canonical title `diagram <relative-path>:<anchor>:<kind>` (path is `<target_file>` relative to the vault root). Then, for each task in declaration order, mark `in_progress`, invoke `lazycortex-diagram:lazy-diagram.draw` (via the `Skill` tool) with the matching `target_file`, `anchor_section`, `kind`, `format="mermaid"`, and `request=` a one-sentence summary of what the diagram should depict followed by `facts: <bullet list>` (terminology parity with the host section is the only contract). Pass `exemplar_override_dir=<spec_path>/.claude/templates/spec.diagrams/<compound-key>` if that directory exists (`<exemplar_override_dir>/diagram.mermaid/diagram-<kind>.md`). Mark the task `completed` with the skill's return value as the outcome word (`created` | `replaced` | `unchanged` | `failed:<reason>` | `split-into-N`).
+Before invoking the skill, add one ledger line per entry in `seams[]` with the canonical title `diagram <relative-path>:<anchor>:<kind>` (path is `<target_file>` relative to the vault root). Then, for each ledger line in declaration order, mark `in_progress`, invoke `lazycortex-diagram:lazy-diagram.draw` (via the `Skill` tool) with the matching `target_file`, `anchor_section`, `kind`, `format="mermaid"`, and `request=` a one-sentence summary of what the diagram should depict followed by `facts: <bullet list>` (terminology parity with the host section is the only contract). Pass `exemplar_override_dir=<spec_path>/.claude/templates/spec.diagrams/<compound-key>` if that directory exists (`<exemplar_override_dir>/diagram.mermaid/diagram-<kind>.md`). Mark the ledger line `completed` with the skill's return value as the outcome word (`created` | `replaced` | `unchanged` | `failed:<reason>` | `split-into-N`).
 
 `lazycortex-diagram:lazy-diagram.draw` is idempotent: a fence with the same `%% intent:` line is replaced in place when its body bytes differ, returns `unchanged` when bytes match, or appends a new fence when the intent line differs. Sections whose prose was NOT rewritten in Step 4 leave their existing diagrams untouched (they never enter `seams[]`).
 

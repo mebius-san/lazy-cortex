@@ -183,7 +183,7 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
       node: the If AST node to process
     """
 
-    # Domain(pytool.import-discipline): [type-only-imports]
+    # Domain(pytool.import-discipline):
     # # Type-checking-only conditional block
     # A conditional block that tests a single well-known guard name is a type-checking-only region:
     # code inside it never executes at runtime, so any import located there already carries
@@ -375,7 +375,7 @@ class TypeOnlyImportAnalyzer(ast.NodeVisitor):
       node: the Call AST node to process
     """
 
-    # Domain(pytool.import-discipline): [type-only-imports]
+    # Domain(pytool.import-discipline):
     # # Runtime type-check exemption
     # A name passed as the subject of a runtime type check counts as genuine runtime usage, not
     # annotation-only usage, even though it reads exactly like a type reference. Treating it as
@@ -464,7 +464,7 @@ def _waiver_status(source_lines: list[str], header_line: int, name_line: int) ->
     waiver marker applies, `active` otherwise.
   """
 
-  # Domain(pytool.marker-grammar): [waiver]
+  # Domain(pytool.marker-grammar):
   # # Waiver scope for a type-only import finding
   # A finding is silenced only by a waiver carrying a non-empty reason, placed either on the
   # imported name's own line (silencing that one name) or on the import statement's header line
@@ -508,7 +508,7 @@ def analyze_file(
     and the list of findings carrying an invalid (empty-reason) waiver marker.
   """
 
-  # Domain(pytool.import-discipline): [type-only-imports]
+  # Domain(pytool.import-discipline):
   # # Type-only import candidacy
   # An import is a candidate for moving behind a type-checking-only guard only when the name it
   # introduces never appears in a runtime expression and appears exclusively inside type annotations.
@@ -555,7 +555,7 @@ def analyze_file(
       invalid.append((header_line, mod, name))
     suggestions.append((header_line, mod, name))
 
-  # Domain(pytool.import-discipline): [type-only-imports]
+  # Domain(pytool.import-discipline):
   # # Deferred annotation evaluation requirement
   # A module that carries a type-checking-only conditional block relies on annotations that
   # reference names available only inside that block. Those annotations must never be evaluated
@@ -665,7 +665,7 @@ def main() -> None:
   # get a path from CLI or use the current directory
   base_path = os.path.abspath(args.path)
 
-  # Domain(pytool.scan-exclusions): [scan-exclusions]
+  # Domain(pytool.scan-exclusions):
   # # Scan exclusion precedence
   # A baseline set of paths is always excluded from analysis and cannot be re-included by
   # configuration. Configured exclusions extend that baseline, and command-line exclusions extend

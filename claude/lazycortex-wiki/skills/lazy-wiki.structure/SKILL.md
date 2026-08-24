@@ -2,7 +2,7 @@
 name: lazy-wiki.structure
 description: "Use when an agent doing research (an architect deciding where a new file belongs, any expert asking 'where does X live in this repo') needs the project's structure map, or when the operator asks to resync `docs/structure.md` with the tree after files moved. Two modes: `rebuild` walks the tracked tree and rewrites the map; `query [<path>]` returns just the slice under `<path>` — the whole file is never loaded into the caller's context."
 research: true
-allowed-tools: Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Bash(git ls-files *), Bash(git add -N *), Bash(git commit *), Bash(git rev-parse *), Bash(test -f *), Bash(mkdir -p *), Bash(date -u *), TaskCreate, TaskUpdate, TaskList
+allowed-tools: Read, Write, Edit, Glob, Grep, Agent, AskUserQuestion, Bash(git ls-files *), Bash(git add -N *), Bash(git commit *), Bash(git rev-parse *), Bash(test -f *), Bash(mkdir -p *), Bash(date -u *)
 ---
 # lazy-wiki.structure
 
@@ -12,14 +12,14 @@ One file per repository, `docs/structure.md` — a compact map of what lives whe
 
 This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Load structure config`
    - `Phase 2 — Resolve mode and target`
    - `Phase 3 — Rebuild the map`
    - `Phase 4 — Answer a query`
    - `Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced. The phase that does not match the resolved mode is marked `skipped` with outcome `skipped-per-mode` — not left `pending`.
-3. **Do not reach the Log step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.**
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced. The phase that does not match the resolved mode is marked `skipped` with outcome `skipped-per-mode` — not left `pending`.
+3. **Do not reach the Log step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 4. **The Log step is a structural verifier.** Its output MUST contain one line per task above.
 
 ## Phase 1 — Load structure config

@@ -4,6 +4,7 @@ description: "Use when something fails, returns a wrong result, or behaves unexp
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"
+logging-waiver: "expert-runtime job — the job dir is the record"
 ---
 # lazy-experts.debugger
 

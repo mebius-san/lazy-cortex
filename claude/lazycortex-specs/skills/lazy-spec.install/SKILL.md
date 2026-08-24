@@ -10,7 +10,7 @@ Bootstrap the plugin in the right scope: ensure the consumer dir exists where pe
 ## Install philosophy (read before any action)
 
 - **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-part "wire this?" opt-in — wanting the plugin means wanting its surface. The only questions this skill asks collect GENUINE project config that cannot be derived (the repo authoring language; the first product) and are read-first (Read-first / never re-ask).
-- **Daemon gate.** Every step that registers a daemon routine first reads the tracked `daemon.enabled` flag; if the project has opted out of the daemon, that registration is skipped silently (see § Daemon gate). `lazy-core.install` owns the first-time daemon question — this skill never re-asks it.
+- **No daemon gate.** Every routine this skill registers is registered unconditionally — the manual tick drives them just as the daemon does (see § Routines are registered unconditionally). The daemon's own question belongs to `lazy-core.install`, which does not ask it either.
 - **Scope is derived, never asked.** Install scope comes from where the plugin is *enabled* (see Step 1); a project-scope enablement wins even when the install record's `scope` is `user`. Python floor is owned by `lazy-core.install`'s first phase — this skill never re-probes it.
 
 ## File-sync policy (applies to every file this skill writes)
@@ -23,21 +23,15 @@ Every file this skill creates or updates — settings sections, routine entries,
 
 "Conflict" means you cannot determine what should survive — not merely "the bytes differ". No contradiction → no question. A no-longer-shipped entry (orphan) is left in place silently (`kept-orphan`); this skill never deletes consumer config.
 
-## Daemon gate (read before Steps 5, 5b, and 6)
+## Routines are registered unconditionally — there is no daemon gate
 
-Steps 5, 5b, and 6 register daemon routines (`lazy-spec.gate-tick`, `lazy-spec.coordinator-watch`, `lazy-spec.request-open`, `lazy-spec.request-apply`). Before any of them writes, read the tracked `daemon.enabled` flag once:
-
-```
-Bash(PYTHONPATH=<core-bin> python3 -c "from lazy_settings import load_tracked_section; from pathlib import Path; print(load_tracked_section(Path('<repo-root>/.claude/lazy.settings.json'),'daemon').get('enabled','unset'))")
-```
-
-`<core-bin>` is `<installPath-of-lazycortex-core>/bin` (resolve `lazycortex-core@lazycortex`'s `installPath` from `installed_plugins.json`). If the flag prints `False` → skip the routine registration silently, state `skipped-daemon-disabled` for that step. If it prints `unset` or `True` → proceed (do NOT ask — `lazy-core.install` Gate 1 owns the first-time daemon question).
+Steps 5, 5b, and 6 register routines (`lazy-spec.gate-tick`, `lazy-spec.coordinator-watch`, `lazy-spec.request-open`, `lazy-spec.request-apply`). None of them is gated on `daemon.enabled`: `/lazy-runtime.tick` runs the registered set in the daemon's own priority order on a checkout that never starts one, so an unregistered routine is not a saved dead entry, it is a routine the operator cannot tick. The flag governs only what a live daemon process must own — the supervisor unit and the metrics endpoint — and both belong to `lazy-core.install`. Never read it here, and never ask about it.
 
 ## Execution discipline (MANDATORY — read before any action)
 
 This skill has 15 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. Canonical list (titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Canonical list (titles verbatim):
    - `Step 1 — Detect install scope`
    - `Step 2 — Determine paths`
    - `Step 3 — Ensure consumer dirs`
@@ -55,8 +49,8 @@ This skill has 15 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 8 — Register the plugin-CLI Bash allow-pattern`
    - `Step 9 — Verify`
    - `Step 10 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `created`, `already-exists`, `skipped-per-user-choice`).
-3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `created`, `already-exists`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
 ## Step 1: Detect install scope
@@ -161,8 +155,6 @@ Outcome: `language-set:<code>`. Why read-patch-write rather than emit a bare `{l
 
 The daemon clears finished job markers and structurally checks every asset's status folder-note (`spec_role: status`) — `spec.coordinator` (Step 5b) is what decides and flips gates. This step registers the `lazy-spec.gate-tick` md-scan routine via the blessed `/lazy-routine.register` skill — it does NOT hand-write the routine JSON into settings.
 
-**Daemon gate.** Read the tracked `daemon.enabled` flag first (see § Daemon gate). If `False` → skip this registration silently, outcome `skipped-daemon-disabled`, continue to Step 6. If `unset` / `True` → proceed.
-
 Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool, passing a `cfg` dict so the wizard runs programmatically (no per-field prompts). The exact routine:
 
 ```json
@@ -196,8 +188,6 @@ If `/lazy-routine.register` reports the routine is already registered, accept it
 ## Step 5b: Register the coordinator-watch routine
 
 `spec.coordinator` wakes on: a non-`@bot.`-authored commit reaching this checkout and changing an asset's status folder-note (the operator's own gesture — a tick, an edit — committed and pushed from wherever the operator works, then pulled in by this checkout's next daemon iteration); a non-empty `# Coordinator commands` section; a ticked option under one of the coordinator's own `[!question]` callouts; a launch-checkbox job's terminal marker landing, raised by `lazy-spec.gate-tick` as a `job-done` wake in the runtime sidecar and fired whoever authored the commit it landed alongside (`lazy-spec.coordination-playbook.md` § 1); or a sibling authored doc's own `review_result` appearing or changing, also regardless of that commit's authorship (`CoordinatorTrigger.DOC_TRANSITION`, same § 1). This step registers the `lazy-spec.coordinator-watch` **git-watch** routine via the blessed `/lazy-routine.register` skill — it does NOT hand-write the routine JSON into settings. Unlike `lazy-spec.gate-tick` (Step 5, an `md-scan` routine that re-scans every candidate file each tick), this routine watches the spec content root's own git history: the daemon computes each changed markdown file's last-changing commit and author once per tick (`lazy-core.runtime-schema.md` § 8 `git` / `watch: changed_files`) and hands that to the worker directly — there is no dirty-tree signal to read in the daemon's own checkout, and no separate "have I seen this commit" marker for the worker to maintain (the git-watch routine keeps its own cursor in `state.json`).
-
-**Daemon gate.** Read the tracked `daemon.enabled` flag first (see § Daemon gate). If `False` → skip this registration silently, outcome `skipped-daemon-disabled`, continue to Step 6. If `unset` / `True` → proceed.
 
 Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool, passing a `cfg` dict so the wizard runs programmatically (no per-field prompts). The routine's `filter.any_of` matches two shapes, scoped to the spec content root via `path_filter` rather than `paths`: the same set of live asset status folder-notes `lazy-spec.gate-tick` (Step 5) watches (one composite member, unchanged), OR any typed document of the content root (the other member) — `worker.py` resolves each matched sibling to its owning asset before deciding anything:
 
@@ -257,13 +247,13 @@ Bash(lazycortex-core add-protocols --routine lazy-spec.coordinator-watch --ids l
 
 No question is asked here: a mandatory protocol is not an operator choice, and the step must also land under `lazy-core.autosetup`, where every question-gated step is skipped.
 
-Skip when the daemon gate above skipped the registration. This sub-step carries no outcome of its own — it rolls into Step 5b's, which reads `routine-registered+protocol-seeded`, `routine-already-present+protocol-seeded`, or `skipped-daemon-disabled`.
+This sub-step carries no outcome of its own — it rolls into Step 5b's, which reads `routine-registered+protocol-seeded` or `routine-already-present+protocol-seeded`.
 
 ### 5b-b. Verify the coordinator's output can actually leave this checkout
 
 The coordinator's every write — `# Status brief`, `[!question]` callouts, gate flips, `# Coordinator commands` locking — is a local commit in the daemon's own checkout. It reaches the operator only through the daemon's post-iteration `_git_post` push, which itself only runs when `daemon.git.remote_sync == "pull_push"` (`runtime_daemon.py`'s `_git_post`). A checkout with `remote_sync` unset or set to anything else piles up every coordinator commit locally, forever invisible to the operator.
 
-Skip this check when the daemon gate above skipped the routine registration (`skipped-daemon-disabled` — nothing dispatches without the daemon anyway). Otherwise, read the tracked `daemon.git` block:
+Read the tracked `daemon.git` block. `<core-bin>` is `<installPath-of-lazycortex-core>/bin` — resolve `lazycortex-core@lazycortex`'s `installPath` from `installed_plugins.json`:
 
 ```
 Bash(PYTHONPATH=<core-bin> python3 -c "from lazy_settings import load_tracked_section; from pathlib import Path; print(load_tracked_section(Path('<repo-root>/.claude/lazy.settings.json'),'daemon').get('git',{}).get('remote_sync','unset'))")
@@ -274,8 +264,6 @@ When the printed value is anything other than `pull_push`, REPORT it plainly in 
 ## Step 5c: Register the collect routine
 
 A finished expert job leaves its terminal marker (`DONE` / `DEAD` / `CANCELLED`) inside `.experts/.jobs/<expert>/<job_id>/` — a path no md-scan signature covers, so `lazy-spec.gate-tick` (Step 5, an md-scan routine gated on the note's own directory changing) never wakes on it: the note's folder is untouched when a job finishes. This routine is the delivery channel — the specs-side analog of `lazy-review.collect`. Every tick it reads the job-marker sidecar (`.runtime/lazy-specs.jobs.json`), and for each note with a recorded marker runs the same per-note `gate-tick` in-process; gate-tick's own job-done commit is what then wakes `lazy-spec.coordinator-watch`.
-
-**Daemon gate.** Same as Step 5: `daemon.enabled == False` → skip silently, outcome `skipped-daemon-disabled`.
 
 Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool with:
 
@@ -306,8 +294,6 @@ Request files at `<vault-root>/requests/` are processed by three runtime channel
 Without all three wired, the request inbox is dead from the daemon's perspective. The request runtime is part of the plugin's own surface — enabling the plugin means wanting it — so this step writes the blocks unconditionally; there is no `wire-now` / `skip` opt-in (per § Install philosophy).
 
 **Project-scope only.** Request files live in `<vault-root>/requests/` per-vault; wiring at user scope would point the daemon at the wrong path. If Step 1 detected user scope, skip this step silently — outcome `skipped-user-scope`.
-
-**Daemon gate.** The 6a/6b routines are daemon routines. Read the tracked `daemon.enabled` flag first (see § Daemon gate). If `False` → skip the routine writes (6a, 6b) and the `lazy-review.scan` sync (6f) silently; still write the expert + review classes (6c–6e), which are inert without the daemon but harmless and read by `lazy-review.configure`. State outcome `wiring-applied:<N> (daemon-disabled)`. If `unset` / `True` → write all blocks.
 
 Read `lazy.settings.json` (create the file if missing) and merge the blocks per the File-sync policy: absent → write silently; present and cleanly mergeable → merge silently; genuine conflict (an existing entry whose shape contradicts the shipped one) → the only case that asks. Report `wiring-applied:<count-added>` (count of blocks newly added/merged; 0 means everything was already in place).
 
@@ -410,9 +396,26 @@ If `review` section is absent, create `{_version: 1, classes: [<entry>]}`. If `c
 
 The `lazy-spec.request-apply` worker scaffolds entity folders (`features/<slug>/`, `changes/<slug>/`, `bugs/<slug>/`) under each registered product's `<spec_path>` and opens a review cycle on every populated authored doc. Those docs (`design.md`, `bug.md`, the opt-in `code-plan.md` / `test-plan.md`, and the opt-in `code-report.md` / `test-report.md` journals the launch ladder later opens for review on job completion) need their own review classes so the daemon dispatches the right writer for each one — without these classes, spawned or later-authored docs sit at `[!hint] Waiting #review/in-process` forever because no class matches their paths. The same applies to the two **system-level** classes: the product-root `design.md` / `tech.md` pair and the identical pair at the spec content-root (the project-wide spec — no config key declares it; the files' existence is the declaration) are typed `system-design` / `system-tech` and reviewed under their own classes, never under the asset-level `design` class.
 
-Under `review.classes` append the entries below if no existing entry's `paths` already covers them. **Each entry carries a `class:` key with the exact bare doc-kind token** (`design`, `system-design`, `system-tech`, `architecture`, `code-plan`, `test-plan`, `code-report`, `test-report`) — the asset tokens are the same closed set `lazycortex-core`'s settings-migration ladder keys off (`ReviewClassName` in `claude/lazycortex-core/bin/constants.py`). Omitting it, as an earlier revision of this seed did for the path-only siblings, makes a fresh install diverge from a migrated-in-place vault: `migrate_all`'s `_add_architecture_class` / `_add_planner_review_to_design` steps both search for `entry.get("class") == "<token>"` and, finding no match on a `class`-less entry, append a SECOND `architecture` class and silently skip `design`'s `planner_review` slot. Glob `<spec_path_prefix>/products/*` is illustrative — the real `paths` glob each consumer writes mirrors the `spec_path` shape they registered (e.g. `Server/products/*` for a `spec_path: Server/products/<key>` product). For a vault with multiple products, the globs cover them all uniformly because the product key is a single path segment under the same prefix.
+Under `review.classes` append the entries below if no existing entry's `paths` already covers them. **Each entry carries a `class:` key with the exact bare doc-kind token** (`use-cases`, `design`, `system-design`, `system-tech`, `architecture`, `ui-design`, `code-plan`, `test-plan`, `code-report`, `test-report`). A review class is declared by this config, not by a code-side enum: only the subset the settings-migration ladder keys off carries a token in `ReviewClassName` (`claude/lazycortex-core/bin/constants.py`) — `design`, `bug`, `architecture`, `code-plan`, `test-plan`, `code-report`, `test-report` — and the rest (`use-cases`, `system-design`, `system-tech`, `ui-design`) are review classes the ladder never touches, so a matching constant is neither present nor needed. Omitting the `class:` key, as an earlier revision of this seed did for the path-only siblings, makes a fresh install diverge from a migrated-in-place vault: `migrate_all`'s `_add_architecture_class` / `_add_planner_review_to_design` steps both search for `entry.get("class") == "<token>"` and, finding no match on a `class`-less entry, append a SECOND `architecture` class and silently skip `design`'s `planner_review` slot. Glob `<spec_path_prefix>/products/*` is illustrative — the real `paths` glob each consumer writes mirrors the `spec_path` shape they registered (e.g. `Server/products/*` for a `spec_path: Server/products/<key>` product). For a vault with multiple products, the globs cover them all uniformly because the product key is a single path segment under the same prefix.
 
 ```yaml
+# use-cases.md class (asset-level) — use-case-writer writes; one designer_review validation slot
+# (opt-in sibling, like architecture/ui-design below: it is never spawned by request-apply — which
+# stamps spec_source_requests on the asset's start doc only — but created by a ticked launch
+# checkbox, so no context_from_frontmatter key would fold anything into the writer's bundle)
+- class: use-cases
+  protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
+  paths:
+    - "<spec_path_prefix>/products/*/features/*/use-cases.md"
+    - "<spec_path_prefix>/products/*/changes/*/use-cases.md"
+  experts:
+    main:
+      - name: <use-case-writer-expert>
+    validation:
+      designer_review:
+        name: <designer-expert>
+        section: Designer review
+        position: bottom
 # design.md class (asset-level) — designer writes; one architect_review validation slot
 # (structural feasibility judged while the behavior is still on paper; operator still approves)
 - class: design
@@ -472,6 +475,24 @@ Under `review.classes` append the entries below if no existing entry's `paths` a
       planner_review:
         name: <planner-expert>
         section: Planner review
+        position: bottom
+# ui-design.md class — ui-designer writes; one architect_review validation slot (screen/navigation
+# shape checked against the architecture before implementation). Opt-in sibling like architecture
+# above: never spawned by request-apply — which stamps spec_source_requests on the asset's start doc
+# only — but created by a ticked launch checkbox, so no context_from_frontmatter key would fold
+# anything into the writer's bundle
+- class: ui-design
+  protocols: ["lazycortex-specs:lazy-spec.expert-signals-protocol"]
+  paths:
+    - "<spec_path_prefix>/products/*/features/*/ui-design.md"
+    - "<spec_path_prefix>/products/*/changes/*/ui-design.md"
+  experts:
+    main:
+      - name: <ui-designer-expert>
+    validation:
+      architect_review:
+        name: <architect-expert>
+        section: Architect review
         position: bottom
 # code-plan.md class — planner writes; tester + architect validate (the plan is checked against
 # the architecture before execution)
@@ -546,13 +567,13 @@ Under `review.classes` append the entries below if no existing entry's `paths` a
       - name: <docs-writer-expert>
 ```
 
-`<designer-expert>` / `<system-designer-expert>` / `<architect-expert>` / `<planner-expert>` / `<developer-expert>` / `<tester-expert>` / `<data-writer-expert>` / `<docs-writer-expert>` are placeholders for the consumer-supplied COMPOSED expert key (typically `<domain>.<role>` from `lazycortex-experts`, e.g. `claude-plugin.designer` — never a bare role word like `designer`; a project-local override expert key works the same way). `<content_root>` in the system-class globs is the spec content-root (`spec.vault_root`, default `specs`) — the project-wide pair lives loose at that root, beside `requests/`. When the consumer has not registered one of them yet, omit that class until the expert exists — without a registered `main`, the dispatcher logs a no-writer warning per-tick. For built-in `bug.md` docs (bug-kind layout substitutes `bug.md` for `design.md`), extend the design class's `paths` with the matching bug glob or add a separate `class: bug` class with a bug-specific main writer — carry the same `context_from_frontmatter: [spec_source_requests]` key onto that class too.
+`<use-case-writer-expert>` / `<designer-expert>` / `<system-designer-expert>` / `<architect-expert>` / `<ui-designer-expert>` / `<planner-expert>` / `<developer-expert>` / `<tester-expert>` / `<data-writer-expert>` / `<docs-writer-expert>` are placeholders for the consumer-supplied COMPOSED expert key (typically `<domain>.<role>` from `lazycortex-experts`, e.g. `claude-plugin.designer` — never a bare role word like `designer`; a project-local override expert key works the same way). `<content_root>` in the system-class globs is the spec content-root (`spec.vault_root`, default `specs`) — the project-wide pair lives loose at that root, beside `requests/`. When the consumer has not registered one of them yet, omit that class until the expert exists — without a registered `main`, the dispatcher logs a no-writer warning per-tick. For built-in `bug.md` docs (bug-kind layout substitutes `bug.md` for `design.md`), extend the design class's `paths` with the matching bug glob or add a separate `class: bug` class with a bug-specific main writer — carry the same `context_from_frontmatter: [spec_source_requests]` key onto that class too.
 
 The `design` and `test-plan` classes' `main` experts carry one requirement beyond ordinary review-writing: `spec.coordinator`'s change-cascade dispatch (`lazy-spec.coordination-playbook.md` Chapter 4, wire shape in `lazy-spec.lifecycle-protocol.md` Part 4) dispatches them to fold a change's design delta into a *different* asset's own `design.md` / `test-plan.md` in place, and an in-place edit only lands a commit when the dispatched expert's own `experts.<name>` settings entry carries `can_commit_in_repo: true` — the dispatch primitive reads that flag from the expert's own registration, never from the wire bundle (a state-mutating op never takes caller-side a field its owner can read itself). Set `can_commit_in_repo: true` on whichever expert each product wired into those two classes' `main[0].name`. Skipping this leaves the cascade's edits uncommitted — the daemon's dirty-tree guard then blocks every subsequent routine on that repo.
 
 `context_from_frontmatter` is a generic class-config key (not spawned-doc-specific): at main-job dispatch, the dispatcher reads each named frontmatter key off the document under review, resolves wikilink (`[[path]]`) or bare repo-relative values to repo files, and folds every resolved file into the job bundle's `context/`. `spec_source_requests` is the frontmatter key `lazy-spec.request-apply`'s `ensure_source_request` writer stamps onto a spawned doc — carrying it here means the design writer's job bundle includes the originating request file(s), the same distribution pattern plan 2 uses for guideline context. An unresolvable value is never silent — it surfaces as a warning on the tick summary, never a dispatch failure.
 
-Validator composition follows one rule: the architect is the standing validator of everything design-shaped (`design`, `system-design`, and `code-plan` against the architecture), the developer validates the plans that will drive execution (`test-plan`), and no class is validated by its own main writer. `architecture` keeps its `planner_review` slot (the planner checking whether the doc holds enough decisions to decompose into a plan). The report classes (`code-report`, `test-report`, `data-report`, `docs-report`) and `system-tech` wire no validators — their doc is approved by the operator directly through the standard review UI. No class carries a `terminal` block — these classes have no post-approve routing (the apply transition completes the request lifecycle; downstream is the per-asset gate machine, not another review round). The settings-migration ladder's older steps (`_add_architecture_class` / `_add_planner_review_to_design` in `claude/lazycortex-core/bin/lazy_settings_migrations/review.py`) predate this composition — they migrate old vaults to the pre-`system-design` shape; the current composition reaches an existing vault by manual migration, not by ladder.
+Validator composition follows one rule: the architect is the standing validator of everything design-shaped (`design`, `system-design`, `ui-design`, and `code-plan` against the architecture), the designer validates the actors/flows that precede design (`use-cases`), the developer validates the plans that will drive execution (`test-plan`), and no class is validated by its own main writer. `architecture` keeps its `planner_review` slot (the planner checking whether the doc holds enough decisions to decompose into a plan). The report classes (`code-report`, `test-report`, `data-report`, `docs-report`) and `system-tech` wire no validators — their doc is approved by the operator directly through the standard review UI. No class carries a `terminal` block — these classes have no post-approve routing (the apply transition completes the request lifecycle; downstream is the per-asset gate machine, not another review round). The settings-migration ladder's older steps (`_add_architecture_class` / `_add_planner_review_to_design` in `claude/lazycortex-core/bin/lazy_settings_migrations/review.py`) predate this composition — they migrate old vaults to the pre-`system-design` shape; the current composition reaches an existing vault by manual migration, not by ladder.
 
 **`tech.md` carries no review class, and gains no planner-validation slot here.** `ReviewClassName` (`claude/lazycortex-core/bin/constants.py`) is a closed set — `plan` (legacy), `code-plan`, `test-plan`, `code-report`, `test-report`, `design`, `bug`, `architecture` — with no `tech` token, and no `class: tech` entry exists anywhere in this seed or in the settings-migration ladder (`claude/lazycortex-core/bin/lazy_settings_migrations/review.py`). A product's `tech.md` is authored inline by `lazy-spec.create-from-code` (product-level) or by hand (feature/change-level — `lazy-spec.doctor`'s own source-staleness check reads it as a plain file, never as a review-dispatched one); it is never dispatched through review, so there is no review class for a planner-validation slot to attach to. Nothing in this seed changes for `tech`.
 
@@ -594,8 +615,6 @@ The `upstream/` fetch/detect pass (mirror external design sources, diff against 
 
 **Read first — register only when a source is configured.** Run `Bash(lazycortex-core settings-get spec)` and inspect `upstream`. An absent section, or one carrying only the reserved limit keys (`max_units_per_tick`, `max_text_file_bytes`, `fetch_failure_threshold`) with no `<repo-key>` entry, means no upstream source is configured — a schedule routine with nothing to do is dead weight, so skip silently with outcome `skipped-no-upstream-configured` and continue to Step 7. Only when at least one non-reserved key is present does this step proceed. No question — the presence of a configured source is genuine project state, not a choice this step re-asks. Re-run this check on every re-invocation of `/lazy-spec.install` (not just the first) so a source added later still gets the routine wired without a separate manual step.
 
-**Daemon gate.** Read the tracked `daemon.enabled` flag first (see § Daemon gate). If `False` → skip this registration silently, outcome `skipped-daemon-disabled`. If `unset` / `True` and a source is configured → proceed.
-
 Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool, passing a `cfg` dict so the wizard runs programmatically (no per-field prompts). The exact routine:
 
 ```json
@@ -611,7 +630,7 @@ Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool, passing a `
 
 The daemon resolves `command[0]` (`lazycortex-specs`) to the plugin's bin script and runs `lazycortex-specs upstream-tick` on the configured cadence — the same primitive `/lazy-spec.upstream-run` invokes manually; both share one implementation, so a scheduled pass and a manual run behave identically. No `hooks_enabled` entry is set — the routine schema's empty default already silences every lazycortex hook inside its own subprocesses, which is what this routine's atomic per-unit commits need.
 
-If `/lazy-routine.register` reports the routine is already registered, accept its outcome (`unchanged` / `present`) — do not force-overwrite. Outcome: `routine-registered`, `routine-already-present`, `skipped-no-upstream-configured`, or `skipped-daemon-disabled`.
+If `/lazy-routine.register` reports the routine is already registered, accept its outcome (`unchanged` / `present`) — do not force-overwrite. Outcome: `routine-registered`, `routine-already-present`, or `skipped-no-upstream-configured`.
 
 ## Step 7: Offer first product registration
 
@@ -629,7 +648,7 @@ If `register-now`: invoke `lazy-spec.product-config` via the `Skill` tool. Repor
 
 `product` and `category` are the two classification axes a spec catalog needs. `lazycortex-wiki` owns `tag_axes`, which is repository-wide — one vocabulary for the whole vault, narrowed per scope — and this plugin never writes it directly: it goes through the blessed CLI-subprocess contract (the `$LAZYCORTEX_PLUGIN_DIRS` binary lookup). `lazycortex-wiki` is NOT a dependency of `lazycortex-specs`, so this whole step is conditional and silent on absence: no question, no abort, no partial-install warning.
 
-**Locate the wiki CLI.** Same two-stage lookup `lazycortex-review/bin/coordinator_dispatch.py`'s own `_resolve_core_cli` uses for a sibling plugin's binary — deliberately NOT this skill's own § Daemon gate resolution (that one reads `installed_plugins.json`'s `installPath` directly, a different mechanism suited to a hard dependency this skill already knows is installed; `lazycortex-wiki` is optional here, so its absence from `installed_plugins.json` and an unset `$LAZYCORTEX_PLUGIN_DIRS` both need a graceful miss, which the glob-based lookup gives for free): `$LAZYCORTEX_PLUGIN_DIRS` first — empty at plain interactive install-time, since only the daemon exports it — then a version-sorted glob over the plugin cache:
+**Locate the wiki CLI.** Same two-stage lookup `lazycortex-review/bin/coordinator_dispatch.py`'s own `_resolve_core_cli` uses for a sibling plugin's binary — deliberately NOT the `<core-bin>` resolution Step 5b-b uses (that one reads `installed_plugins.json`'s `installPath` directly, a different mechanism suited to a hard dependency this skill already knows is installed; `lazycortex-wiki` is optional here, so its absence from `installed_plugins.json` and an unset `$LAZYCORTEX_PLUGIN_DIRS` both need a graceful miss, which the glob-based lookup gives for free): `$LAZYCORTEX_PLUGIN_DIRS` first — empty at plain interactive install-time, since only the daemon exports it — then a version-sorted glob over the plugin cache:
 
 Every sub-step below uses only `Bash(test *)` / `Bash(ls *)` — already on this skill's `allowed-tools` line — rather than a single compound multi-line script, so no new Bash pattern needs whitelisting for this step:
 
@@ -740,12 +759,12 @@ Outcome: `cli-allow-added` or `cli-allow-already-present`.
   - Consumer dir state from Step 3
   - Step 3b outcome (`rules-mirrored:<N>`)
   - Step 4 outcome (`language-on-record:<code>`, `language-default-en`, or `language-set:<code>`)
-  - Step 5 outcome (`routine-registered`, `routine-already-present`, or `skipped-daemon-disabled`)
-  - Step 5b outcome (`routine-registered+protocol-seeded`, `routine-already-present+protocol-seeded`, or `skipped-daemon-disabled`), plus 5b-b's `remote-sync-ok` or `remote-sync-not-pull-push:<value>`
-  - Step 5c outcome (`routine-registered`, `routine-already-present`, or `skipped-daemon-disabled`)
-  - Step 6 outcome (`wiring-applied:<N>`, `wiring-applied:<N> (daemon-disabled)`, or `skipped-user-scope`)
+  - Step 5 outcome (`routine-registered` or `routine-already-present`)
+  - Step 5b outcome (`routine-registered+protocol-seeded` or `routine-already-present+protocol-seeded`), plus 5b-b's `remote-sync-ok` or `remote-sync-not-pull-push:<value>`
+  - Step 5c outcome (`routine-registered` or `routine-already-present`)
+  - Step 6 outcome (`wiring-applied:<N>` or `skipped-user-scope`)
   - Step 6.5 outcome (`seeded` or `unchanged`), with the primitive's report block folded in verbatim; surface `sot-missing` / `no-entries` if returned
-  - Step 6.7 outcome (`routine-registered`, `routine-already-present`, `skipped-no-upstream-configured`, or `skipped-daemon-disabled`)
+  - Step 6.7 outcome (`routine-registered`, `routine-already-present`, or `skipped-no-upstream-configured`)
   - Step 7 outcome (`registered: <compound-key>` or `skipped-per-user-choice`)
   - Step 7b outcome (`skipped-no-wiki` or `ensured: <N-scopes> (no-scope: <M-products>, cli-failed: <K>)`)
   - Step 7c outcome (`backfilled: <touched>/<skipped>`)
@@ -770,4 +789,3 @@ Use two separate steps: `Bash(mkdir -p ...)` then `Write` tool. Never chain with
 - **Scope independence**: running at project scope does not affect other projects or the global config.
 - **Per-product overrides** are NOT created by this skill — they live under `.claude/templates/spec.<category>/<compound-key>/` (one folder per category that the operator wants to customize), scaffolded by `lazy-spec.product-config` when the user opts into customization.
 - **User-scope skip**: Step 6 (request runtime wiring) is a project-scope-only step. Request files live in `<vault-root>/requests/` per-vault; wiring at user scope would point the daemon at the wrong path. The skill detects user scope at Step 1 and silently skips Step 6 (`skipped-user-scope`).
-- **Daemon-disabled skip**: Steps 5, 5b, and 6 read the tracked `daemon.enabled` flag; when the project has opted out of the daemon, the routine registrations are skipped silently (`skipped-daemon-disabled`). `lazy-core.install` owns the first-time daemon question — this skill never re-asks it.

@@ -1,16 +1,16 @@
 ---
 chapter_type: block
 summary: Insert new diagrams and refresh existing ones — dispatcher picks kind and format from your prose, writer agents render against shipped templates and style schemes.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 diagram_spec:
-  anchor: "## How draw and fix route a request"
+  anchor: "How draw and fix route a request"
   request: "Flow showing the dispatch path: user invokes draw or fix → dispatcher validates inputs and resolves kind/format → format-compatibility check → writer agent selected (mermaid or ASCII) → byte-compare → fence written or skipped. Include the split-into-N and skipped-below-threshold outcomes as exit branches."
 source_skills:
   - lazy-diagram.draw
   - lazy-diagram.fix
   - lazy-diagram.draw-mermaid
   - lazy-diagram.draw-ascii
-source_sha: dd568a4ee2fbb367826851a45f41e55c5c10ad9f
+source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
 ---
 # Insert and refresh diagrams in your documentation
 
@@ -68,4 +68,53 @@ The shipped template and scheme files are the contract: every fence drawn by thi
 
 ## How draw and fix route a request
 
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  userInvokesDrawOrFix["User invokes draw or fix"]
+  dispatcherValidatesInputs["Dispatcher validates inputs, resolves kind/format"]
+  inputsValid{"Inputs valid?"}
+  formatCompatible{"Format compatible with kind?"}
+  reportValidationError["Report validation error"]
+  writerAgentComposes["Writer agent selected (mermaid or ASCII), composes diagram"]
+  densityCheck{"Density within bounds?"}
+  splitIntoN["Return split-into-N"]
+  skippedBelowThreshold["Return skipped-below-threshold"]
+  byteCompare{"Fence changed?"}
+  writeFence["Fence written"]
+  skipWrite["Write skipped, no-op"]
+
+  userInvokesDrawOrFix -->|invoke| dispatcherValidatesInputs
+  dispatcherValidatesInputs -->|resolve| inputsValid
+  inputsValid -->|invalid| reportValidationError
+  inputsValid -->|valid| formatCompatible
+  formatCompatible -->|incompatible| reportValidationError
+  formatCompatible -->|compatible| writerAgentComposes
+  writerAgentComposes -->|compose| densityCheck
+  densityCheck -->|exceeds density| splitIntoN
+  densityCheck -->|below threshold| skippedBelowThreshold
+  densityCheck -->|within bounds| byteCompare
+  byteCompare -->|changed| writeFence
+  byteCompare -->|identical| skipWrite
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
+
+  class userInvokesDrawOrFix entry
+  class dispatcherValidatesInputs action
+  class inputsValid guard
+  class formatCompatible guard
+  class reportValidationError error
+  class writerAgentComposes action
+  class densityCheck guard
+  class splitIntoN error
+  class skippedBelowThreshold error
+  class byteCompare guard
+  class writeFence success
+  class skipWrite success
+```
 <!-- /lazy-diagram.draw lands the fence here; do not author a code block manually. -->

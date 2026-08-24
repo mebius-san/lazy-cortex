@@ -559,7 +559,7 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 
 ## Domain Comments
 - Domain comments (`# Domain(group name):`) are special documentation comments that describe domain rules, mechanics, algorithms, or other domain-specific principles.
-- The **group name** in parentheses categorizes the comment by topic. **Always use a group listed in the project's domain-groups dictionary** (`docs/guidelines/domain-groups.md` — a language-neutral project registry shared by every language's markers); the same dictionary lists the legal tags. Do not invent new groups without explicit user approval.
+- The **group name** in parentheses categorizes the comment by topic. **Always use a group listed in the project's domain-groups dictionary** (`docs/guidelines/domain-groups.md` — a language-neutral project registry shared by every language's markers). Do not invent new groups without explicit user approval.
 - The group `unfiled` is **reserved**: it marks a block whose real group is not in the dictionary yet. It is never listed in the dictionary, and the checker flags every `Domain(unfiled)` block until the operator adds the real group and renames the block.
 - Domain comments explain **principles and concepts**, not method implementation details.
 - Domain comments must always be placed **inside methods or functions**, near the code that implements the described mechanic, or **at class body level** when documenting enum members, class-level constants, or weight mappings that are not tied to a single method. Never place Domain comments between class definitions, above class definitions, or at module level outside a class or function. When a constant or mapping is used by only one method, prefer placing the Domain comment inside that method.
@@ -568,20 +568,20 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 - **Never reference code constructs** (class names, method names, variable names, constants, module paths) in Domain comments. Domain comments describe domain concepts and rules in plain language, not code.
 - Domain comments are written for human reading and for extraction: the wiki plugin's domain routine collects the blocks of one group and regenerates that group's document from them, so a block's wording is published prose, not a private note.
 - Format:
-  - Start with `# Domain(group):` followed by optional tags in square brackets.
+  - Start with `# Domain(group):`.
   - The group name must be lowercase. It can be a single word (e.g., `mechanics`, `principles`, `algorithms`) or dot-separated for subcategories (e.g., `mechanics.fighting`, `mechanics.skills`). Dots lay the group out in the generated documentation tree: every segment but the last is a directory and the last is the document itself, under the configured output root (`docs/domains` unless the project sets its own) — `Domain(mechanics.fighting)` becomes the `fighting` document inside the `mechanics` directory.
   - Use `# #` for the title line.
   - Continue with `#` for the body text describing the principles.
 - Example format:
 ```python
-# Domain(mechanics): [tag1] [tag2]
+# Domain(mechanics):
 # # Title of the concept
 # Description of the domain mechanics, principles, or rules.
 # Additional details about how the system works conceptually.
 ```
 - Correct (describes domain principles):
 ```python
-# Domain(mechanics.skills): [rpg.attributes.*] [skill]
+# Domain(mechanics.skills):
 # # Skill execution chance check
 # When a skill is used, there is a chance that the skill use may fail at the moment of invocation.
 # This chance is determined by the skill's control chance value altered by any relevant modifiers.
@@ -590,7 +590,7 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 ```
 - Wrong (describes method behavior):
 ```python
-# Domain(mechanics.skills): [rpg.attributes.*] [skill]
+# Domain(mechanics.skills):
 # # Skill execution chance check
 # This method checks if the skill invocation succeeds. It retrieves the invoke_chance from state
 # and compares it with a random roll. If the check fails, the method sets the run_phase to FAILED

@@ -1,14 +1,14 @@
 ---
 chapter_type: block
 summary: Mirror external design repos into your vault and keep a spec doc's visible source list matching its frontmatter.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "How an upstream unit becomes part of a spec"
   request: "flow diagram: upstream-run mirrors and diffs a unit from a foreign repo, an operator ticks its Take into work / Process update checkbox, a body-only request opens and freezes the unit to in-review, the request lands against an asset (recorded in spec_source_requests), and refresh-sources re-projects that attachment into the asset doc's visible Sources list"
 source_skills:
   - lazy-spec.upstream-run
   - lazy-spec.refresh-sources
-source_sha: 80e73e18e264de362567002f96b3f548b26969de
+source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
 ---
 
 Some design material for your product doesn't start life in your spec vault — it lives in someone else's repository, updated on its own schedule. This block covers two jobs that keep your specs honest about material like that: pulling in what changed in a mirrored external source, and making sure a doc's visible list of sources actually matches what its frontmatter says it's built from.

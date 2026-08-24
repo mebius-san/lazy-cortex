@@ -1,17 +1,17 @@
 ---
 name: lazy-wiki.install
-description: "Run when the operator asks to set up the wiki in a repo, after a lazycortex-wiki update, or when wiki skills fail because the `lazy-wiki.navigation` rule, the `wiki`, `structure`, or `terms` settings section, or the `wiki.curator` / `wiki.terms-curator` / `wiki.structure-curator` expert is missing from the project. Bootstrap only — defining what the wiki covers is `/lazy-wiki.configure`, what the terms dictionary covers is `/lazy-wiki.configure terms`, and the structure map's profiles and routines are `/lazy-wiki.configure structure`. Idempotent and quiet on re-run; install scope is detected, never asked."
-allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(ls *), Bash(python3 *), Bash(lazycortex-core *), Bash(lazycortex-wiki *), Agent
+description: "Run when the operator asks to set up the wiki in a repo, after a lazycortex-wiki update, or when wiki skills fail because the `lazy-wiki.navigation` rule, the `wiki`, `structure`, or `terms` settings section, or the `wiki.curator` / `wiki.terms-curator` / `wiki.structure-curator` / `wiki.tag-curator` expert is missing from the project. Bootstrap only — defining what the wiki covers is `/lazy-wiki.configure`, what the terms dictionary covers is `/lazy-wiki.configure terms`, and the structure map's profiles and routines are `/lazy-wiki.configure structure`. Idempotent and quiet on re-run; install scope is detected, never asked."
+allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(cp *), Bash(rm *), Bash(test *), Bash(date *), Bash(diff *), Bash(ls *), Bash(python3 *), Bash(lazycortex-core *), Bash(lazycortex-wiki *), Agent
 ---
 # Install lazycortex-wiki
 
-Bootstrap the plugin in the right scope: create the wiki template directory, sync the rules shipped by the plugin (`lazy-wiki.navigation`, `lazy-wiki.structure`) into the consumer's rules directory, seed the `wiki`, `structure`, and `terms` settings sections, seed agent model tiers for the curators and the domain-spec writer, compose the `wiki.curator`, `wiki.terms-curator`, and `wiki.structure-curator` experts (unconditionally — they are dispatch-routing config, not daemon-only), and — only when this project uses the background daemon — register the four wiki routines (`lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`, `lazy-wiki.doctor-apply`). When `wiki.domains` is configured, additionally compose the `wiki.domain-writer` expert and (daemon-gated) register the two domain routines (`lazy-wiki.domain-scan`, `lazy-wiki.domain-full`). For every scope carrying a `mirror` block, additionally (daemon-gated) register its `lazy-wiki.mirror-sync.<scope-id>` schedule routine. The structure map's three scan routines are per-repo wiring owned by `/lazy-wiki.configure structure`, alongside the terms scopes' scan routines owned by `/lazy-wiki.configure terms` — neither family is registered here. Idempotent and quiet on re-run.
+Bootstrap the plugin in the right scope: create the wiki template directory, sync the rules shipped by the plugin (`lazy-wiki.navigation`, `lazy-wiki.structure`) into the consumer's rules directory, seed the `wiki`, `structure`, and `terms` settings sections, seed agent model tiers for the curators and the domain-spec writer, compose the `wiki.curator`, `wiki.terms-curator`, `wiki.structure-curator`, and `wiki.tag-curator` experts (unconditionally — they are dispatch-routing config, not daemon-only), and register the five wiki routines (`lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`, `lazy-wiki.doctor-apply`, `lazy-wiki.tag-normalize`). When `wiki.domains` is configured, additionally compose the `wiki.domain-writer` expert and register the two domain routines (`lazy-wiki.domain-scan`, `lazy-wiki.domain-full`). For every scope carrying a `mirror` block, additionally register its `lazy-wiki.mirror-sync.<scope-id>` schedule routine. The structure map's three scan routines are per-repo wiring owned by `/lazy-wiki.configure structure`, alongside the terms scopes' scan routines owned by `/lazy-wiki.configure terms` — neither family is registered here. Idempotent and quiet on re-run.
 
 ## Execution discipline (MANDATORY — read before any action)
 
 This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Detect install scope`
    - `Step 2 — Determine paths`
    - `Step 3 — Create template directory`
@@ -19,10 +19,10 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 5 — Seed wiki + structure + terms settings sections`
    - `Step 6 — Ensure the doc-kind wiki axis`
    - `Step 7 — Seed agent_models`
-   - `Step 8 — Register curator experts + (daemon-gated) routines`
+   - `Step 8 — Register curator experts + routines`
    - `Step 9 — Register the plugin-CLI Bash allow-pattern`
    - `Step 10 — Verify / Report + Log`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they produced an explicit outcome (`unchanged`, `merged`, `kept-local`, `skipped-daemon-disabled`, `already-present`, …).
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". No-ops count only if they produced an explicit outcome (`unchanged`, `merged`, `kept-local`, `already-present`, …).
 3. **Do not reach the Report step until every prior task is `completed`.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
@@ -31,7 +31,7 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
 This skill is **idempotent and quiet on re-run**. Every choice it makes is persisted, and on the next run the persisted value is read first and honoured silently — the user is asked again only when nothing is on record yet.
 
 - **Plugin enabled = full functionality.** An enabled plugin is installed whole. There is no per-rule "install this rule?" prompt and no per-artifact opt-in.
-- **Daemon gate applies to routines only.** The `wiki.curator` expert is dispatch-routing config and is registered unconditionally; only the three wiki *routines* depend on the background daemon. This skill reads the tracked `daemon.enabled` flag and gates the routine registration on it silently — it never asks the daemon question itself (Gate 1 belongs to `lazy-core.install`).
+- **No daemon gate.** Experts and routines alike are registered unconditionally. A registered routine fires under `/lazy-runtime.tick` on a checkout with no daemon, so `daemon.enabled` withholds nothing this skill writes; the flag reaches only `lazy-core.install`'s supervisor unit and metrics endpoint.
 - **Everything derivable is derived, not asked:** install scope (from where the plugin is *enabled* — see Step 1), curator git identity (a deterministic bot id), the watched branch.
 
 ## File-sync policy (applies to every file this skill writes)
@@ -200,9 +200,9 @@ Fold the primitive's returned `agent-models-seed(...)` block into the Step 10 re
 
 Outcome: `agent-models: <seeded-N|unchanged|no-entries>`.
 
-## Step 8: Register curator experts + (daemon-gated) routines
+## Step 8: Register curator experts + routines
 
-The `wiki.curator` and `wiki.terms-curator` **experts** are dispatch-routing config — the entries that resolve which agent + aspects run when each curator is dispatched. Both are registered **unconditionally**, exactly like any other expert (not daemon-gated). The three wiki **routines** (`lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`) only ever *fire* under the background daemon, so their registration is gated on the project's `daemon.enabled` flag. The non-daemon parts of this install (rule, settings section, doc-kind axis, `agent_models`, template dir, CLI allow-pattern) are done by Steps 3–7 and Step 9.
+The `wiki.curator` and `wiki.terms-curator` **experts** are dispatch-routing config — the entries that resolve which agent + aspects run when each curator is dispatched. Both are registered **unconditionally**, exactly like any other expert (not daemon-gated). The three wiki **routines** (`lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`) are registered unconditionally too: `/lazy-runtime.tick` fires them on a checkout with no daemon, so `daemon.enabled` gates nothing here. The non-daemon parts of this install (rule, settings section, doc-kind axis, `agent_models`, template dir, CLI allow-pattern) are done by Steps 3–7 and Step 9.
 
 ### Expert (always registered)
 
@@ -260,20 +260,27 @@ The `wiki.structure-curator` **expert** is registered on the same terms — disp
 
 State `experts.wiki.structure-curator: <seeded|kept-local>`.
 
-### Daemon gate for the routines (read-first, never ask)
+The `wiki.tag-curator` **expert** is registered on the same terms — dispatch-routing config, not daemon-gated, absent-only:
 
-Gate 1 (`daemon.enabled`) is owned by `lazy-core.install`. This skill only **reads** the tracked flag and honours it silently — it never opens an `AskUserQuestion`. Resolve `<core-bin>` (the `bin/` dir of the newest `lazycortex-core` — walk `$LAZYCORTEX_PLUGIN_DIRS` for `*/lazycortex-core/bin`, falling back to `ls ~/.claude/plugins/cache/lazycortex/lazycortex-core/*/bin | sort -V | tail -1`), then read the flag:
-
-```bash
-PYTHONPATH=<core-bin> python3 -c "from lazy_settings import load_tracked_section; from pathlib import Path; print(load_tracked_section(Path('<repo-root>/.claude/lazy.settings.json'),'daemon').get('enabled','unset'))"
+```json
+"wiki.tag-curator": {
+  "agent": "lazycortex-wiki:lazy-wiki.tag-curator",
+  "aspects": ["lazycortex-core:lazy-memory.persona-aspect"],
+  "git_author": {
+    "name": "Tag Curator",
+    "email": "wiki.tag-curator@bot.invalid"
+  },
+  "can_commit_in_repo": true
+}
 ```
 
-- Output `False` → the project does not use the daemon. **Skip ONLY the routine registration silently** (a routine that can't fire is dead config; the expert above stays registered). State the routine outcomes `skipped-daemon-disabled` and jump straight to the *First scope pointer* below.
-- Output `True` or `unset` → register the routines below (do NOT ask; `lazy-core.install` owns Gate 1, and `unset` means the user has not yet run it — register so they are ready when the daemon is enabled).
+`can_commit_in_repo: true` is load-bearing here for the same reason as above: the curator writes `docs/tags.md` and the retagged files it normalizes into the working tree itself. The tag-normalize **routine** (`lazy-wiki.tag-normalize`) is registered below, in the same unconditional pass as the rest.
+
+State `experts.wiki.tag-curator: <seeded|kept-local>`.
 
 ### Routines
 
-Ensure `routines` exists as an object (create `{"_version": 1}` if absent — never overwrite existing content). For each of the four routines below, apply absent-only semantics (present → **kept-local**, absent → **seeded**):
+Ensure `routines` exists as an object (create `{"_version": 1}` if absent — never overwrite existing content). For each of the five routines below, apply absent-only semantics (present → **kept-local**, absent → **seeded**):
 
 **`lazy-wiki.scan`** — event-driven git-watch routine, processes changed files:
 
@@ -333,6 +340,19 @@ Same `<current-branch>` substitution as `lazy-wiki.scan`. No `filter` block — 
 
 The consumer is deterministic (no expert dispatch), so no protocol is attached. `--commit` makes the CLI commit its own repairs — without it the routine's worktree writes would trip the daemon's dirty-tree guard; `git_author` stamps those commits with the routine's own bot identity.
 
+**`lazy-wiki.tag-normalize`** — weekly tag-value consolidation, dispatches `wiki.tag-curator` jobs per scope:
+
+```json
+"lazy-wiki.tag-normalize": {
+  "type": "schedule",
+  "cron": "0 6 * * 1",
+  "command": ["lazycortex-wiki", "tag-tick"],
+  "protocols": ["lazycortex-wiki:lazy-wiki.tag-curator-protocol"]
+}
+```
+
+The curator dispatch carries the plugin's own `lazy-wiki.tag-curator-protocol` so the expert sees its request/response contract — the mandatory-protocol seeding below does not reach this routine (that sub-step is scoped to `lazy-wiki.scan` and `lazy-wiki.relink-weekly`), so the reference is written inline in the seed JSON above instead of via a separate `add-protocols` call.
+
 ### Domain-spec expert + routines (only when `wiki.domains` is configured)
 
 Read `wiki.domains` from the target `lazy.settings.json`. Absent → skip this whole sub-step silently with outcome `skipped-no-domains` (the section is created by `/lazy-wiki.configure domains`; re-running this install afterwards registers everything below). Present → apply absent-only semantics to each entry:
@@ -351,7 +371,7 @@ Read `wiki.domains` from the target `lazy.settings.json`. Absent → skip this w
 }
 ```
 
-**Routines** (same daemon gate as the three wiki routines above — `skipped-daemon-disabled` when the gate is off):
+**Routines**:
 
 **`lazy-wiki.domain-scan`** — event-driven git-watch routine; every changed file ticks the consumer, which itself skips paths outside the configured `code` globs and the dictionary, and exits 0 with zero work when every group hash matches:
 
@@ -386,7 +406,7 @@ Bash(lazycortex-core add-protocols --routine lazy-wiki.domain-full --ids lazycor
 
 ### Mirror-sync routines (only for scopes with a `mirror` block)
 
-Read `wiki.scopes` from the target `lazy.settings.json`. For every scope whose entry carries a `mirror` block, register one schedule routine named `lazy-wiki.mirror-sync.<scope-id>` (same daemon gate as the other routines — `skipped-daemon-disabled` when the gate is off; absent-only semantics):
+Read `wiki.scopes` from the target `lazy.settings.json`. For every scope whose entry carries a `mirror` block, register one schedule routine named `lazy-wiki.mirror-sync.<scope-id>` (absent-only semantics):
 
 ```json
 "lazy-wiki.mirror-sync.<scope-id>": {
@@ -414,9 +434,9 @@ Bash(lazycortex-core add-protocols --routine lazy-wiki.relink-weekly --ids lazyc
 
 No question is asked: a mandatory protocol is not an operator choice, and the step must also land under `lazy-core.autosetup`, where every question-gated step is skipped. Optional protocols remain `/lazy-routine.offer-protocols`' business — do NOT offer them for these routines, the curator writes frontmatter and one-line glosses, and no flagged candidate fits that.
 
-Skip both calls with the routines when the daemon gate skipped their registration. This sub-step carries no outcome of its own — each seeded routine's line below gains a `+protocol` suffix.
+This sub-step carries no outcome of its own — each seeded routine's line below gains a `+protocol` suffix.
 
-Outcome (one line per seeded entry): `experts.wiki.curator: <seeded|kept-local>` (always), `experts.wiki.domain-writer: <seeded|kept-local|skipped-no-domains>`, `routines.<key>: <seeded|kept-local|skipped-daemon-disabled|skipped-no-domains|skipped-no-mirrors>`, with `+protocol` appended on `lazy-wiki.scan`, `lazy-wiki.relink-weekly`, `lazy-wiki.domain-scan`, and `lazy-wiki.domain-full` whenever the seeding above ran.
+Outcome (one line per seeded entry): `experts.wiki.curator: <seeded|kept-local>` (always), `experts.wiki.domain-writer: <seeded|kept-local|skipped-no-domains>`, `routines.<key>: <seeded|kept-local|skipped-no-domains|skipped-no-mirrors>`, with `+protocol` appended on `lazy-wiki.scan`, `lazy-wiki.relink-weekly`, `lazy-wiki.domain-scan`, and `lazy-wiki.domain-full` whenever the seeding above ran.
 
 ### First scope pointer
 
@@ -445,15 +465,15 @@ Outcome: `cli-allow-added` or `cli-allow-already-present`.
 
 - Read back the written `lazy.settings.json` and confirm it parses.
 - Confirm `wiki`, `structure`, `terms`, and `agent_models.lazycortex` are present, that `wiki.exclude` carries `docs/structure.md`, and that `wiki.tag_axes` includes `doc-kind` — the last one holds on a fresh install too, since the vocabulary is the repository's and does not wait for a scope. Do NOT expect `doc-kind` in any scope's own `tag_axes`: a scope list is a narrowing, and an absent or empty one means the scope uses the whole vocabulary.
-- Confirm `experts.wiki.curator`, `experts.wiki.terms-curator`, and `experts.wiki.structure-curator` are present (all always registered; the terms and structure curators carry `can_commit_in_repo: true`). Do NOT expect any `routines.wiki.terms-scan-*` or `routines.wiki.structure-scan*` key — those families belong to `/lazy-wiki.configure terms` / `/lazy-wiki.configure structure`. When the daemon gate passed (enabled or unset): also confirm `routines.wiki.scan`, `routines.wiki.scan-deletes`, `routines.wiki.relink-weekly`, and `routines.lazy-wiki.doctor-apply` are present, and that `lazy-wiki.scan` / `lazy-wiki.relink-weekly` carry `lazycortex-core:lazy-core.markdown-style` in their `protocols`. When the routines were `skipped-daemon-disabled`, do NOT expect those routine keys — their absence is correct; `experts.wiki.curator` must still be present.
-- When `wiki.domains` is configured: confirm `experts.wiki.domain-writer` is present, and — daemon gate permitting — `routines.wiki.domain-scan` / `routines.wiki.domain-full` with the markdown-style protocol. When `wiki.domains` is absent, do NOT expect any of them.
-- For every scope with a `mirror` block — daemon gate permitting — confirm `routines.wiki.mirror-sync.<scope-id>` is present. When no scope carries one, do NOT expect any.
+- Confirm `experts.wiki.curator`, `experts.wiki.terms-curator`, `experts.wiki.structure-curator`, and `experts.wiki.tag-curator` are present (all always registered; the terms, structure, and tag curators carry `can_commit_in_repo: true`). Do NOT expect any `routines.wiki.terms-scan-*` or `routines.wiki.structure-scan*` key — those families belong to `/lazy-wiki.configure terms` / `/lazy-wiki.configure structure`. Confirm `routines.wiki.scan`, `routines.wiki.scan-deletes`, `routines.wiki.relink-weekly`, `routines.lazy-wiki.doctor-apply`, and `routines.lazy-wiki.tag-normalize` are present, that `lazy-wiki.scan` / `lazy-wiki.relink-weekly` carry `lazycortex-core:lazy-core.markdown-style` in their `protocols`, and that `lazy-wiki.tag-normalize` carries `lazycortex-wiki:lazy-wiki.tag-curator-protocol` in its `protocols`.
+- When `wiki.domains` is configured: confirm `experts.wiki.domain-writer` is present, along with `routines.wiki.domain-scan` / `routines.wiki.domain-full` with the markdown-style protocol. When `wiki.domains` is absent, do NOT expect any of them.
+- For every scope with a `mirror` block, confirm `routines.wiki.mirror-sync.<scope-id>` is present. When no scope carries one, do NOT expect any.
 - Report to the user:
   - Scope detected.
   - Plugin version + commit synced from `installed_plugins.json`.
   - Defaults file path used.
   - Per-rule outcome from Step 4.
-  - Settings-section outcomes from Steps 5–8 (including the Step 8 daemon-gate outcome).
+  - Settings-section outcomes from Steps 5–8.
 
 Log to `./.logs/claude/lazy-wiki.install/<UTC-timestamp>.md` per `lazy-log.logging`. Required frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input`.
 
@@ -470,4 +490,4 @@ One line per task in the canonical list above, with its outcome word.
 - **`/lazy-wiki.install` aborts: "plugin not enabled"** — `lazycortex-wiki@lazycortex` absent or empty in `~/.claude/plugins/installed_plugins.json` → add `"lazycortex-wiki@lazycortex": true` to `enabledPlugins`, restart Claude Code, re-run.
 - **`/lazy-wiki.install` aborts: "lazycortex-core not installed"** — `default-tiers.json` not found → install `lazycortex-core` first, then re-run.
 - **`/lazy-wiki.install` aborts: "plugin cache is empty"** — rule glob returned zero files → run `/plugin update lazycortex-wiki@lazycortex`, then re-run.
-- **Curator never runs after install (no routines)** — Step 8 read `daemon.enabled = false` in the tracked `lazy.settings.json` and skipped the three wiki *routines* (outcome `skipped-daemon-disabled`); the `wiki.curator` expert, rule, settings section, and CLI allow-pattern still installed → enable the daemon via `/lazy-core.install` (Gate 1), then re-run `/lazy-wiki.install` to register the curator routines.
+- **Curator never runs after install** — the routines are registered but nothing fires them: this checkout has no daemon supervising it → tick them by hand with `/lazy-runtime.tick`, or set `daemon.enabled` plus `daemon.run_here` in the tracked `lazy.settings.json` and re-run `/lazy-core.install` to install a supervisor.

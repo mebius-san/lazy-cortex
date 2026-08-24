@@ -10,12 +10,12 @@ Run one full upstream tick over every source configured under the `spec` setting
 
 This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. Canonical list:
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Canonical list:
    - `Step 1 — Run the fetch/detect pass`
    - `Step 2 — Render the summary`
    - `Step 3 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.**
-3. **Do not finalise until `TaskList` shows every prior task `completed`.**
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.**
+3. **Do not finalise until the ledger shows every prior task `completed`.**
 
 ## Step 1 — Run the fetch/detect pass
 

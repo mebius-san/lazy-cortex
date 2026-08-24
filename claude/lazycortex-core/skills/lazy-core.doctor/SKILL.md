@@ -19,7 +19,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispat
 
 This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 0 — Mode detection`
    - `Phase 1 — Dispatch parallel scans`
    - `Phase 2 — Collect + merge`
@@ -30,8 +30,8 @@ This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Phase 3 — Delegated audits`
    - `Phase 4 — Present + fix + waive (Report)`
    - `Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
-3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
 ## Phase 0 — Mode detection
@@ -329,7 +329,7 @@ The fix deletes the key only, never the enclosing routine or git block. Silent w
 
 Silent when every identity is canonical or no `git_author` blocks exist.
 
-**Sanitizer-routine registration (same pass, same finding style).** The state sanitizers only run when their routines are registered, and an install that predates them leaves a daemon-enabled repo silently unsanitized. When the merged settings carry `daemon.enabled: true`, check per enabled plugin (enabled-set per `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md`):
+**Sanitizer-routine registration (same pass, same finding style).** The state sanitizers only run when their routines are registered, and an install that predates them leaves a repo silently unsanitized whether a daemon supervises it or the operator ticks it by hand. Check per enabled plugin (enabled-set per `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md`):
 
 - `lazycortex-core` → `routines["lazy-core.autocheckup"]` present.
 - `lazycortex-review` (with a `review` settings section) → `routines["lazy-review.sanitize"]` present.
@@ -337,7 +337,7 @@ Silent when every identity is canonical or no `git_author` blocks exist.
 
 Emit one finding per missing routine:
 
-- `[WARN] sanitizer routine `<name>` is not registered while the daemon is enabled | lazy.settings.json` `fix: re-run /<owning-namespace>.install (offered in Phase 4)`
+- `[WARN] sanitizer routine `<name>` is not registered | lazy.settings.json` `fix: re-run /<owning-namespace>.install (offered in Phase 4)`
 
 Silent when the daemon is disabled, the owning plugin is disabled or unconfigured, or every routine is present.
 
@@ -650,9 +650,9 @@ Report one line per path. `not_a_symlink` and `source_missing` rows are never of
 
 Report only, no fix offer: print the conflicting `other_repo` and state that one of the two projects must stop naming a checkout on this host in its `daemon.run_here`. Doctor does not choose which checkout drives a shared inbox.
 
-**Fix L6 — `daemon.git` unconfigured** (trigger: D3 FAIL "daemon.enabled is true but daemon.git is null" or "daemon.git missing required field base_branch")
+**Fix L6 — `daemon.git` unconfigured** (trigger: D3 FAIL "daemon.git is null" or "daemon.git missing required field base_branch")
 
-`AskUserQuestion`: "The daemon is enabled but `daemon.git` carries no `base_branch`, so it rides no branch and never syncs with origin — routine commits stay in this checkout. Derive the block from this checkout?"
+`AskUserQuestion`: "`daemon.git` carries no `base_branch`, so routine commits ride no branch and never sync with origin — they stay in this checkout. Derive the block from this checkout?"
 
 Options: `Derive`, `Skip`.
 

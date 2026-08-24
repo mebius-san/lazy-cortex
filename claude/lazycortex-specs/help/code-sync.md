@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Keep a product spec aligned with its source repo — pull in-flight code changes into the tech doc, rebase branch pins after a merge, and gap-scan for capabilities the spec tree never documented.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "How the three skills relate"
   request: "Decision-tree showing when to reach for lazy-spec.sync-with-code vs lazy-spec.finalize-branch vs lazy-spec.coverage — inputs are 'code changed since last sync', 'branch just merged or deleted', and 'looking for capabilities the spec tree never documented'; outputs are tech-doc updates, gate proposals, pin rewrites, spec_released proposals, and gap-candidate reports with proposed category+slug."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.finalize-branch
   - lazy-spec.coverage
-source_sha: 522bc82e8dac7b5ac17bbd8ff1b716af21da31f2
+source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
 ---
 # Keeping specs aligned with source code
 

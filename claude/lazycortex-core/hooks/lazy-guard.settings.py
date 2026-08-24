@@ -202,7 +202,7 @@ def extract_permission_entries(text: str) -> set[str]:
     - Full JSON settings documents — entries are pulled from the `allow`, `deny`, and `ask`
       arrays under the `permissions` block.
     - Partial Edit fragments — entries that look like permission specifiers are pulled
-      heuristically: PascalCase tool names (`Read`, `TaskCreate`), tool-with-pattern
+      heuristically: PascalCase tool names (`Read`, `WebSearch`), tool-with-pattern
       specifiers (`Bash(git *)`, `Edit(~/.openclaw/**)`), and MCP tool ids
       (`mcp__context7__query-docs`).
 

@@ -2,6 +2,7 @@
 name: lazy-observe.doctor
 description: "Run when metrics stopped reaching the observer, a dashboard went flat, an alert says the shipper is down, or the operator asks whether metrics shipping is healthy on this host. Read-only end-to-end check of the service unit, agent process, local `/metrics` endpoints, remote_write success, observer reachability, and WAL size — it reports fixes with PASS / WARN / FAIL, never applies them."
 allowed-tools: Read, Glob, Bash(launchctl *), Bash(systemctl *), Bash(curl *), Bash(test *), Bash(date *), Bash(ps *), Bash(du *), Bash(uname *), Bash(python3 *), Agent
+logging-waiver: "read-only check — nothing to record"
 ---
 # Doctor lazy-observe
 
@@ -11,7 +12,7 @@ Confirm the metrics shipping pipeline is healthy end-to-end. The skill is intent
 
 This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Read answer file`
    - `Step 2 — Service unit loaded`
    - `Step 3 — Agent process up`
@@ -20,8 +21,8 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 6 — Observer URL reachable`
    - `Step 7 — WAL directory bounds`
    - `Step 8 — Report`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** Each step ends with one of `PASS` / `WARN` / `FAIL`.
-3. **Do not reach the Report step until `TaskList` shows every prior task `completed`.**
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Each step ends with one of `PASS` / `WARN` / `FAIL`.
+3. **Do not reach the Report step until the ledger shows every prior task `completed`.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above with the severity word.
 
 ## Step 1 — Read answer file
@@ -97,10 +98,6 @@ Outcome: `PASS <size>` / `WARN oversized` / `INFO empty`.
 Render a markdown report. One line per Step 1–7 with `[SEVERITY] <step name> | <details>` and the suggested fix. The fix lines come from the per-step failure modes below — never invent new fixes.
 
 Outcome: `reported`.
-
-## Logging
-
-Per the project's `lazy-log.logging` rule, log this run to `./.logs/claude/lazy-observe.doctor/<UTC timestamp>.md`.
 
 ## Failure modes (with suggested fixes)
 

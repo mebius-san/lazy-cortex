@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "How registration and pickup flow"
   request: "Sequence diagram showing the user running /lazy-routine.register, the skill writing lazy.settings.json, the daemon picking up the new routine on its next cycle without restart, and the user later running /lazy-routine.unregister to remove it. Include the built-in protection check for lazy-expert.pump."
@@ -9,7 +9,7 @@ diagram_spec:
 source_skills:
   - lazy-routine.register
   - lazy-routine.unregister
-source_sha: c6319fd5862972d0cafec847f18eab54aea4d385
+source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
 ---
 # Register a periodic routine with the runtime daemon
 

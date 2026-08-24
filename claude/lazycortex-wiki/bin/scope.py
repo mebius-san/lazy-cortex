@@ -20,6 +20,34 @@ if TYPE_CHECKING:
   pass
 
 
+# `wiki.tags.dictionary` section keys and default — lives here (not in `tags.py`) so both
+# `tags.py` and `domains.py` can read it without importing each other.
+_TAGS_KEY = "tags"
+_DICTIONARY_KEY = "dictionary"
+_DEFAULT_TAG_DICTIONARY = "docs/tags.md"
+
+
+# ----------------------------------------------------------------------------------------
+def dictionary_rel(repo: Path) -> str:
+  """
+  Return the repo-relative path of the tag-values dictionary.
+
+  Args:
+    repo: Absolute repository root that owns `.claude/lazy.settings.json`.
+
+  Returns:
+    The `wiki.tags.dictionary` value from settings, or the default path
+    `docs/tags.md` when unset, malformed, or the settings file itself
+    is missing or unparsable. The dictionary is advisory — its absence on
+    disk is not an error for this reader.
+  """
+  tags = ScopeResolver(repo = repo).load_wiki().get(_TAGS_KEY, {})
+  # guard: `wiki.tags` is not a section — the dictionary path falls back to the default
+  if not isinstance(tags, dict):
+    return _DEFAULT_TAG_DICTIONARY
+  return str(tags.get(_DICTIONARY_KEY) or _DEFAULT_TAG_DICTIONARY)
+
+
 # ----------------------------------------------------------------------------------------
 class GlobMatcher:
   """

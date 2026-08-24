@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,7 +21,7 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 7e55c7700a727bafa0a894c538571d86f4359c7b
+source_sha: a9b2d776eca34dfacecb76acc730c0c22b8815d2
 ---
 # Frequently asked questions
 
@@ -167,7 +167,7 @@ If a new `__init__.py` in your project is not picking up the dedicated template,
 
 Always use `lazy-python.domain-writer` for a `Domain(…):` block and `lazy-python.contract-writer` for a `Contract:` block. Both agents read the documenting canon and the project's domain-groups dictionary (for domain-writer) on every dispatch, validate against them, and verify their own edits with `chk-py all <file>.py -q` before finishing — a hand-written block reliably drifts from the format canon or, for domain blocks, uses a group that is not in the project's dictionary. `lazy-python.contract-writer` also carries the one sanctioned exception to "docstrings go through `lazy-python.docstring-writer`": it syncs the owning docstring's `Guarantees` (or `Subclassing`) section in the same pass, since that section's content is authoritative from the contract block it was written for.
 
-Neither agent invents a domain group: when no listed group in the dictionary fits a mechanic, `lazy-python.domain-writer` parks the block under the reserved `Domain(unfiled):` group and reports a candidate name and gloss for you to file. That parked block shows up as a checker finding on every run until it is filed — see the next question for the sweep that clears a backlog of them.
+A `Domain(…):` block opens with just the group name in parentheses — `# Domain(mechanics.skills):` — nothing after the colon. Neither agent invents a domain group: when no listed group in the dictionary fits a mechanic, `lazy-python.domain-writer` parks the block under the reserved `Domain(unfiled):` group and reports a candidate name and gloss for you to file. That parked block shows up as a checker finding on every run until it is filed — see the next question for the sweep that clears a backlog of them.
 
 ---
 
@@ -175,7 +175,7 @@ Neither agent invents a domain group: when no listed group in the dictionary fit
 
 The canon expects `Domain(…):` and `Contract:` markers to be written at the same time as the code they describe — `lazy-python.domain-writer` and `lazy-python.contract-writer` are the per-edit route. `/lazy-python.knowledge-sweep` is the backfill route for code that predates that discipline, or for a repo whose domain-groups dictionary just grew: it walks a scope of Python sources, first growing the dictionary from whatever `Domain(unfiled):` blocks and subject-area vocabulary are already parked in the sources (proposing candidate groups to you one `AskUserQuestion` at a time — nothing is added without your tick), then dispatches the two writer agents file by file against the grown dictionary, and finally re-verifies and commits everything it touched.
 
-Run it when: a batch of `Domain(unfiled):` findings has piled up and nobody is clearing them by hand one file at a time; you just adopted domain/contract markers in an existing repo and want a first pass; or the dictionary grew (new groups accepted) and you want the sweep's `refile=true` dispatch to re-file blocks that are still parked under `Domain(unfiled):` against the new groups. It never invents a permanent group on its own — every accepted group in the dictionary traces back to your explicit choice.
+Run it when: a batch of `Domain(unfiled):` findings has piled up and nobody is clearing them by hand one file at a time; you just adopted domain/contract markers in an existing repo and want a first pass; or the dictionary grew (new groups accepted) and you want the sweep's `refile=true` dispatch to re-file blocks that are still parked under `Domain(unfiled):` against the new groups. A refile pass only ever rewrites a parked block's header line — the group name — never its title or body; it never invents a permanent group on its own, and every accepted group in the dictionary traces back to your explicit choice.
 
 ---
 

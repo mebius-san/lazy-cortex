@@ -12,12 +12,105 @@ from __future__ import annotations
 # waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # pylint: disable=import-error
 
+import os
+from pathlib import Path
+
+import domains as _domains
 import nodes as _nodes
 import scope as _scope
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-  from pathlib import Path
+  pass
+
+
+# File encoding used throughout this module.
+_ENCODING = "utf-8"
+
+# Surface id of the generated domain-spec doc tree — not a configured wiki scope.
+_SURFACE_DOMAINS = "domains"
+
+# Key under which `TagOps.collect` reports the per-axis value lists.
+COLLECT_AXES = "axes"
+
+# Dictionary markdown markers: the heading that opens an axis section, and a value bullet.
+_AXIS_HEADING = "## "
+_VALUE_BULLET = "- "
+
+
+# ────────────────────────────────────────────────────────────────────────────
+def dictionary_rel(repo: Path) -> str:
+  """
+  Return the repo-relative path of the tag-values dictionary.
+
+  Args:
+    repo: Absolute repository root that owns `.claude/lazy.settings.json`.
+
+  Returns:
+    The `wiki.tags.dictionary` value from settings, or the default path
+    `docs/tags.md` when unset, malformed, or the settings file itself
+    is missing or unparsable. The dictionary is advisory — its absence on
+    disk is not an error for this reader.
+  """
+  # the reader lives in scope.py so domains.py can reach it without importing this module
+  return _scope.dictionary_rel(repo)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+def dictionary_values(repo: Path) -> dict[str, list[str]]:
+  """
+  Read the per-axis value lists recorded in the tag-values dictionary.
+
+  Args:
+    repo: Absolute repository root that owns the dictionary file.
+
+  Returns:
+    A dict `{<axis>: [<value>, ...]}` built from the dictionary's `## <axis>`
+    sections and their `- <value> — <gloss>` bullets, values de-duplicated and
+    in file order. Empty when the file does not exist — the dictionary is
+    advisory, so its absence is not an error.
+  """
+
+  # Domain(wiki.taxonomy):
+  # # Why the dictionary outlives the values in use
+  # A census of an axis can only report the values nodes carry right now, so a value that was canonised and
+  # then fell out of use disappears from it entirely — and the next classification, seeing no trace of it,
+  # coins a synonym and the drift starts over. The dictionary is what keeps that decision alive: it records
+  # the settled vocabulary independently of who currently wears it, which is exactly what a fresh judgement
+  # needs to anchor to. It advises rather than binds — nothing is refused for being absent from it.
+
+  dictionary = Path(repo) / dictionary_rel(repo)
+  # guard: the dictionary is advisory — an absent file simply contributes nothing
+  if not dictionary.is_file():
+    return {}
+
+  # guard: the dictionary is advisory — an undecodable or unreadable file contributes nothing
+  # rather than halting every classify dispatch that reads it
+  try:
+    text = dictionary.read_text(encoding = _ENCODING)
+  except (OSError, UnicodeDecodeError):
+    return {}
+
+  # walk the file top-down: each heading opens the section its following bullets belong to
+  out: dict[str, list[str]] = {}
+  axis: str | None = None
+  for line in text.splitlines():
+    stripped = line.strip()
+    if stripped.startswith(_AXIS_HEADING):
+      axis = stripped[len(_AXIS_HEADING):].strip()
+      out.setdefault(axis, [])
+      continue
+    # guard: a bullet before the first heading names no axis, and prose names no value
+    if axis is None or not stripped.startswith(_VALUE_BULLET):
+      continue
+    parts = stripped[len(_VALUE_BULLET):].split()
+    # guard: an empty bullet carries no value
+    if not parts:
+      continue
+    # the value is the bullet's first token; the em-dash gloss after it is for human readers
+    if parts[0] not in out[axis]:
+      out[axis].append(parts[0])
+  return out
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -33,12 +126,15 @@ class TagOps:
   # Namespace prefix on every wiki topic tag.
   _WIKI_PREFIX = "wiki/"
 
+  # Markdown extension filter used when enumerating the domains surface.
+  _MD_EXT = ".md"
+
   # Max example summaries kept per tag value in a `collect` result.
   _MAX_EXAMPLES = 2
 
   # collect-result dict keys.
   _K_SCOPE    = "scope"
-  _K_AXES     = "axes"
+  _K_AXES     = COLLECT_AXES
   _K_VALUE    = "value"
   _K_COUNT    = "count"
   _K_EXAMPLES = "examples"
@@ -47,7 +143,14 @@ class TagOps:
   _K_NODES_CHANGED = "nodes_changed"
   _K_TAGS_REMAPPED = "tags_remapped"
 
-  def __init__(self, *, repo: Path, scope_id: str, cfg: dict) -> None:
+  def __init__(
+    self,
+    *,
+    repo: Path,
+    scope_id: str,
+    cfg: dict,
+    node_paths: list[Path] | None = None,
+  ) -> None:
     """
     Initialise the tag operations for one scope.
 
@@ -55,11 +158,35 @@ class TagOps:
       repo: Absolute path to the repository root.
       scope_id: Scope identifier as configured in lazy.settings.json.
       cfg: Scope-config dict (the value side of a `wiki.scopes` entry).
+      node_paths: Fixed node enumeration to operate over instead of resolving
+        `cfg` against a configured scope; used by `for_domains`. `None` for
+        an ordinary scope-bound instance.
     """
     self._repo = repo
     self._scope_id = scope_id
     self._cfg = cfg
+    self._node_paths = node_paths
     self._resolver = _scope.ScopeResolver(repo = repo)
+
+  @classmethod
+  def for_domains(cls, *, repo: Path) -> TagOps:
+    """
+    Construct tag operations over the generated domain-spec doc surface.
+
+    Enumerates every markdown doc under `wiki.domains.output`, excluding the
+    `domains.md` index, instead of resolving a configured wiki scope.
+
+    Args:
+      repo: Absolute repository root.
+
+    Returns:
+      A `TagOps` whose `collect`/`retag` calls report `scope: "domains"` and
+      operate over the domain-spec output tree; enumerates zero nodes when
+      `wiki.domains` is not configured or the output tree does not exist yet.
+    """
+    domain_cfg = _domains.DomainConfig.load(repo)
+    node_paths = cls._domain_doc_paths(domain_cfg) if domain_cfg is not None else []
+    return cls(repo = repo, scope_id = _SURFACE_DOMAINS, cfg = {}, node_paths = node_paths)
 
   # ── public ────────────────────────────────────────────────────────────────
 
@@ -96,7 +223,7 @@ class TagOps:
 
     # tally the distinct values every axis holds across the scope
     axes: dict = {}
-    for node_path in self._resolver.iter_nodes(self._cfg):
+    for node_path in self._iter_node_paths():
       node = _nodes.node_for(node_path)
       # guard: unrecognised file type — skip
       if node is None:
@@ -173,7 +300,7 @@ class TagOps:
     # count the nodes and tags the alias declaration actually rewrites
     nodes_changed = 0
     tags_remapped = 0
-    for node_path in self._resolver.iter_nodes(self._cfg):
+    for node_path in self._iter_node_paths():
       node = _nodes.node_for(node_path)
       # guard: unrecognised file type — skip
       if node is None:
@@ -195,6 +322,53 @@ class TagOps:
     }
 
   # ── helpers ───────────────────────────────────────────────────────────────
+
+  def _iter_node_paths(self) -> list[Path]:
+    """
+    Return the node paths this instance operates over.
+
+    Returns:
+      The fixed enumeration passed to the constructor when set (the
+      `for_domains` surface); otherwise the configured scope's nodes,
+      resolved fresh on every call.
+    """
+    # guard: a fixed enumeration overrides scope-config resolution
+    if self._node_paths is not None:
+      return self._node_paths
+    return self._resolver.iter_nodes(self._cfg)
+
+  @classmethod
+  def _domain_doc_paths(cls, cfg: _domains.DomainConfig) -> list[Path]:
+    """
+    Enumerate every generated domain doc under the output tree, minus the index.
+
+    Uses `os.walk` — stdlib `glob`/`rglob` are banned per the project tech
+    conventions.
+
+    Args:
+      cfg: The repo's loaded domain-spec configuration.
+
+    Returns:
+      Sorted absolute paths of the output tree's markdown docs, excluding
+      `domains.md`; empty when the output tree does not exist yet.
+    """
+    output_abs = cfg.repo / cfg.output
+    index_abs = output_abs / _domains.INDEX_NAME
+    # guard: output tree not generated yet — nothing to enumerate
+    if not output_abs.is_dir():
+      return []
+    paths: list[Path] = []
+    for base, _dirs, files in os.walk(str(output_abs)):
+      for fname in files:
+        # guard: only markdown docs carry tag-bearing frontmatter
+        if not fname.endswith(cls._MD_EXT):
+          continue
+        abs_path = Path(base) / fname
+        # guard: the index doc carries no per-group tags
+        if abs_path == index_abs:
+          continue
+        paths.append(abs_path)
+    return sorted(paths)
 
   @classmethod
   def _bare_topics(cls, node: _nodes.MarkdownNode | _nodes.CodeNode) -> list[str]:

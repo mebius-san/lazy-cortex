@@ -234,7 +234,7 @@ def resolve_project_package(config: dict) -> str:
     an empty string (project-import checks disabled).
   """
 
-  # Domain(pytool.import-discipline): [project-package]
+  # Domain(pytool.import-discipline):
   # # First-party package resolution
   # A consumer's own package name drives which imports classify as project imports rather
   # than third-party ones, and it is resolved by a strict precedence: an explicit
@@ -406,7 +406,7 @@ def _has_waiver(source_lines: list[str], lineno: int) -> bool:
     True if a waiver comment with explanation text is present, False otherwise.
   """
 
-  # Domain(pytool.marker-grammar): [waiver]
+  # Domain(pytool.marker-grammar):
   # # Waiver comment grammar
   # A waiver is granted by a `# waiver: <explanation>` comment carrying non-empty text
   # after the colon, and it is recognized in four positions relative to the line it
@@ -626,7 +626,7 @@ class ImportBlockType:
   Enum-like class for import block types.
   """
 
-  # Domain(pytool.import-discipline): [import-order]
+  # Domain(pytool.import-discipline):
   # # Import block ordering
   # A source file's imports fall into seven ordered categories, and every import at
   # module scope must appear no earlier than the highest category already seen: the
@@ -1090,7 +1090,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     Check blank line rules between import blocks.
     """
 
-    # Domain(pytool.import-discipline): [blank-lines] [type-checking]
+    # Domain(pytool.import-discipline):
     # # Import block spacing
     # A boundary between two different import categories carries exactly one blank line,
     # never zero and never more than one -- inside the ordinary import list and inside the
@@ -1430,7 +1430,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     always use multi-line with parentheses except for one item imports.
     """
 
-    # Domain(pytool.import-discipline): [multiline-format]
+    # Domain(pytool.import-discipline):
     # # Multi-item import layout
     # An import that names more than one symbol from the project's own package or from a
     # relative (local) module is always written across multiple lines inside parentheses,
@@ -1618,7 +1618,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     Skip __init__.py files as they are mainly for re-exporting.
     """
 
-    # Domain(pytool.import-discipline): [file-header]
+    # Domain(pytool.import-discipline):
     # # Mandatory header shape
     # Every source file, except a package's own `__init__.py`, opens with a
     # `from __future__ import annotations` import and carries an `if TYPE_CHECKING:` guarded
@@ -1726,7 +1726,7 @@ class ImportFormatAnalyzer(ast.NodeVisitor):
     Sibling imports like `from ..entity import X` are allowed.
     """
 
-    # Domain(pytool.import-discipline): [wildcard-position] [parent-import]
+    # Domain(pytool.import-discipline):
     # # Wildcard placement and parent-import ban
     # A wildcard import is legal only inside a package's own `__init__.py`, and only in one
     # position there: after the mandatory `__future__` import and before every other import,
@@ -2306,7 +2306,7 @@ class CodeFormatAnalyzer:
     Triple backticks (code fences) are allowed.
     """
 
-    # Domain(pytool.docstring-schema): [backticks]
+    # Domain(pytool.docstring-schema):
     # # Single-backtick inline code
     # Inline code references in this project's documentation prose -- docstrings, comments,
     # and Domain blocks alike -- are wrapped in a single backtick, never the double-backtick
@@ -2339,7 +2339,7 @@ class CodeFormatAnalyzer:
       to end with `return` or `continue`).
     """
 
-    # Domain(pytool.marker-grammar): [guard]
+    # Domain(pytool.marker-grammar):
     # # Guard clause marking
     # A conditional whose body only exits the current scope -- a lone `return`,
     # `return None`, `continue`, a bare `raise`, or a short run of error-setup statements
@@ -2495,7 +2495,7 @@ class CodeFormatAnalyzer:
     inside a docstring it is a D7 violation and is reported by that check instead.
     """
 
-    # Domain(pytool.marker-grammar): [marker-clause]
+    # Domain(pytool.marker-grammar):
     # # Marker clause requirement
     # Three annotation markers exist entirely for the text after their colon: `opt:` states
     # why a non-obvious implementation choice was made for performance, `limit:` names the
@@ -2640,7 +2640,7 @@ class CodeFormatAnalyzer:
     Only real comments are scanned; the same text inside a string literal is not a marker.
     """
 
-    # Domain(pytool.marker-grammar): [contract]
+    # Domain(pytool.marker-grammar):
     # # Contract marker body requirement
     # A `# Contract:` marker line carries no text of its own -- the colon ends the line by
     # design -- so the guarantee it records must live on the very next `#` comment line.
@@ -2688,7 +2688,7 @@ class CodeFormatAnalyzer:
     Only real comments are scanned; the same text inside a string literal is not a marker.
     """
 
-    # Domain(pytool.marker-grammar): [unfiled]
+    # Domain(pytool.marker-grammar):
     # # Reserved parking group
     # The group name `unfiled` inside a `Domain(...):` marker is reserved and never a real
     # topic: it is where a block goes when the domain knowledge it records has no matching
@@ -2731,7 +2731,7 @@ class CodeFormatAnalyzer:
     Only real comments are scanned; the same text inside a string literal is not a marker.
     """
 
-    # Domain(pytool.marker-grammar): [block-boundary]
+    # Domain(pytool.marker-grammar):
     # # Standalone block-marker boundary
     # The Capitalized marker family -- `Domain(...):`, a bare `Contract:`, and `Decision:`
     # -- opens a standalone comment block, never a comment attached to a line of code: every
@@ -3712,7 +3712,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
       node_name: name of the node for error messages.
     """
 
-    # Domain(pytool.docstring-schema): [section-order]
+    # Domain(pytool.docstring-schema):
     # # Canonical section order
     # A docstring's sections follow one fixed rank, and any two sections present must
     # appear in that rank's order regardless of which ones are actually used: for a class,
@@ -3845,7 +3845,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
       node_name: name of the node for error messages.
     """
 
-    # Domain(pytool.docstring-schema): [list-style]
+    # Domain(pytool.docstring-schema):
     # # Section list styles
     # A docstring section is written in exactly one of three list styles, and mixing them
     # inside one section is wrong regardless of which style the section happens to use.
@@ -3906,7 +3906,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
       start_line: line number where the docstring starts.
     """
 
-    # Domain(pytool.docstring-schema): [property]
+    # Domain(pytool.docstring-schema):
     # # Property documentation shape
     # A property is documented entirely through its Summary and, when meaningful, its
     # Notes -- it never carries an Args, Returns, or Yields section, even though the
@@ -3953,7 +3953,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
       node_name: name of the node for error messages.
     """
 
-    # Domain(pytool.docstring-schema): [what-not-how]
+    # Domain(pytool.docstring-schema):
     # # Describe what, not how
     # A docstring's Summary and Scope answer what a class or method guarantees to its
     # caller and why it exists, never a narration of the steps it takes to get there. A
@@ -4071,7 +4071,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
       node_name: enclosing class/function name for the message.
     """
 
-    # Domain(pytool.docstring-schema): [d1] [single-line]
+    # Domain(pytool.docstring-schema):
     # # No single-line docstring form
     # Even a docstring whose entire content is one short sentence is written across at
     # least two source lines: the opening triple-quote on its own line, then the text, then
@@ -4116,7 +4116,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
       node_name: enclosing class/function name for the message.
     """
 
-    # Domain(pytool.docstring-schema): [d2] [attributes]
+    # Domain(pytool.docstring-schema):
     # # Private names in Attributes
     # The Attributes section documents the public surface a caller reads or writes, so a
     # label starting with an underscore is rejected there by default -- documenting a
@@ -4171,7 +4171,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
       start_line: source line of the docstring opening `\"\"\"`.
     """
 
-    # Domain(pytool.docstring-schema): [d4] [returns]
+    # Domain(pytool.docstring-schema):
     # # Returns section requirement
     # A method whose signature declares a non-`None` return type must document that value
     # in a Returns section, or a Yields section for a generator -- either satisfies the
@@ -4282,7 +4282,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
       node_name: enclosing class/function name for the message.
     """
 
-    # Domain(pytool.docstring-schema): [d5] [banned-phrases]
+    # Domain(pytool.docstring-schema):
     # # Configurable banned phrases
     # A project may declare its own list of substrings that must never appear anywhere in a
     # docstring body, in any section including the Summary -- the match is a plain
@@ -4383,7 +4383,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
       node_name: enclosing class/function name for the message.
     """
 
-    # Domain(pytool.docstring-schema): [d7] [markers]
+    # Domain(pytool.docstring-schema):
     # # No development markers in prose
     # A docstring is caller-facing prose, never a place for the development-marker
     # vocabulary that belongs to code comments -- `TODO:`, `TMP:`, `DBG:`, `ref:`, `opt:`,
@@ -4470,7 +4470,7 @@ class DocstringAnalyzer(ast.NodeVisitor):
       node_name: enclosing class/function name for the message.
     """
 
-    # Domain(pytool.docstring-schema): [d9] [private-names]
+    # Domain(pytool.docstring-schema):
     # # No private names in narrative prose
     # A leading-underscore lowercase token appearing in a docstring's free narrative text is
     # read as the docstring narrating an internal component, which breaks the "describe what

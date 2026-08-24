@@ -1,13 +1,13 @@
 ---
 name: lazy-wiki.curator-protocol
-version: 4
-description: Curation protocol for the wiki.curator expert — payload/result contract for per-node classify and link jobs, and the scope-level normalize-tags job, dispatched via lazycortex-core's expert runtime queue.
+version: 5
+description: Curation protocol for the wiki.curator expert — payload/result contract for per-node classify and link jobs, dispatched via lazycortex-core's expert runtime queue. The scope-level normalize-tags job is owned by lazy-wiki.tag-curator-protocol.
 ---
-# lazy-wiki.curator-protocol v4
+# lazy-wiki.curator-protocol v5
 
 Canonical contract for jobs dispatched to `wiki.curator` by `lazycortex-wiki`'s dispatcher (or any consumer producing curator-shaped jobs). The dispatcher builds the bundle and queues it via `dispatch-job`; the curator (C-hybrid, has Bash) applies results by running a deterministic `lazycortex-wiki` primitive (`apply-node` for per-node kinds, `retag` for `normalize-tags`) and then commits. Consumer-side state machine, routine triggering, and `topics.md` aggregation are out of scope for this wire contract.
 
-**Version 2** replaced the single `curate` kind with two kinds: `classify` and `link`. **Version 3** is a backward-compatible additive extension: the `classify` result gains an optional `connectors` array, and the `link` request gains an optional `context/candidates.json` input. **Version 4** is also additive: it adds the scope-level `normalize-tags` kind (judge a canonical axis-value set, emit an alias map, self-apply via `retag`), and an optional `context/existing_tags.json` input to `classify` (the values already in use per axis, so the curator reuses an existing value instead of coining a synonym). All defaults are empty — a v2/v3 dispatcher's bundles still validate, and a v2/v3 curator's outputs still apply.
+**Version 2** replaced the single `curate` kind with two kinds: `classify` and `link`. **Version 3** is a backward-compatible additive extension: the `classify` result gains an optional `connectors` array, and the `link` request gains an optional `context/candidates.json` input. **Version 4** is also additive: it adds the scope-level `normalize-tags` kind (judge a canonical axis-value set, emit an alias map, self-apply via `retag`), and an optional `context/existing_tags.json` input to `classify` (the values already in use per axis, so the curator reuses an existing value instead of coining a synonym). All defaults are empty — a v2/v3 dispatcher's bundles still validate, and a v2/v3 curator's outputs still apply. **Version 5** hands the `normalize-tags` kind to its own expert: it is defined by `lazy-wiki.tag-curator-protocol.md`, which extends it from a scope to any tag surface and adds the advisory-dictionary duty. The v4 text below is left intact — a `normalize-tags` bundle already queued against this protocol still validates and still applies — but new dispatches of that kind go to `wiki.tag-curator`, and the per-node kinds are what `wiki.curator` is dispatched for.
 
 ## Request shape (`request.json`)
 

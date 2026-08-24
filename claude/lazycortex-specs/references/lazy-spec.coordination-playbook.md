@@ -153,7 +153,7 @@ This closes a gesture gap: re-opening review on an already-approved document fro
 
 ## 6. Opening review on a job's result
 
-On the DONE of any job that WROTE a document, and before evaluating any gate, the coordinator calls `Skill(lazycortex-review:lazy-review.submit, "<result doc>")` on the document that job just produced: `submit`, never `start`, since the writing round already happened and only the review round is missing.
+On the DONE of any job that WROTE a document, and before evaluating any gate, the coordinator calls `Skill(lazycortex-review:lazy-review.submit, "<result doc>")` on the document that job just produced: `submit` here, because the writing round already happened and only the review round is missing. The verb choice is that criterion, not a fixture — `submit` when the content is already written, `Skill(lazycortex-review:lazy-review.start, ...)` when the writer round itself is what is needed. Re-opening an already-finalized living doc so a writer folds carried-in material (Chapter 14's candidate legalization) is `start`'s case: a bare `dispatch-job` against a finalized, banner-carrying doc is no substitute — the runtime contract stops that writer at a file the system owns regions of, and the edit strands in the job's `result/` with nothing able to apply it.
 
 This is the ONLY path a freshly-written document takes into review — reports included. There is no md-scan sieve left that discovers a new document on its own, so skipping this call strands the document at `spec_stage: draft` with no `review_active` and no forward path, forever.
 

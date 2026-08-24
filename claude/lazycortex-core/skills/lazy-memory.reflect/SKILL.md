@@ -11,13 +11,13 @@ Dispatch a `kind=reflect` job to one expert. The expert receives recent run logs
 
 This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Validate inputs`
    - `Step 2 — Confirm expert is persona-marked`
    - `Step 3 — Dispatch reflect job`
    - `Step 4 — Report`
    - `Step 5 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.**
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.**
 3. **Do not reach the Report step until every prior task is `completed`.**
 4. **The Report step is a structural verifier.**
 

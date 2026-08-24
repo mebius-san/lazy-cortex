@@ -4,6 +4,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+
+### 7.1.1 — 2026-08-24 UTC
+
+- `lazy-core.git-guard`: a commit over a dirty shared index now waits then denies instead of proceeding, and staged content that reappears right after a commit raises a swap alarm; the deny message escalates to the operator without prescribing `git reset`.
+- The same guard now also catches a lagging index after `pull`/`merge`/`rebase` — staged content whose worktree already matches `HEAD` — and the runtime daemon self-repairs a provably lossless lag after its own fast-forward pull, without ever touching genuinely parked operator content.
+- `lazy-log.distill` snapshots `changelog.md` before its first edit and now edits in place instead of rebuilding through a keyed collection, fixing silent data loss when a theme header repeats.
+- `/lazy-core.install` no longer asks whether the project runs a background daemon — routines, runtime sections, and the expert-spawn sandbox now install on every checkout; `daemon.enabled` (seeded `false`) only gates the supervisor unit and the metrics endpoint.
+- Skills, commands, and agents now track execution steps via a self-written step ledger in their own output instead of the retired Task-checklist tool.
+- Default agent-model tiers ship for `lazy-wiki.tag-curator`, `lazy-experts.use-case-writer`, and `lazy-experts.ui-designer`, so a fresh install seeds them without asking.
 ### 7.0.1 — 2026-08-21 UTC
 
 - Fixed the default repo label to use the checkout folder's exact name, casing preserved, instead of prefixing it with `local-`; a directory with no origin remote and no other way to name it now falls back to `unnamed`.
@@ -543,6 +552,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+
+### 6.1.0 — 2026-08-24 UTC
+
+- New opt-in `use-cases` and `ui-design` document types can now join a spec's definition chain, with their own templates, dedicated review classes, and installer/config wiring — refined through several follow-up fixes to stale enumerations, note-check keys, and the architecture write precondition.
+- Fixed review-verb selection so a writer round now starts correctly, with candidates legalized into the finalized document via `carry` + `lazy-review.start`.
+- Installing no longer asks about the daemon — spec routines register unconditionally instead of being silently dropped when `daemon.enabled` was unset.
+- The document writer now resolves a document's language via the `resolve-language` verb before writing prose, fixing documents that mixed the vault's language with leftover English template boilerplate.
 ### 6.0.1 — 2026-08-21 UTC
 
 - Fixed the draft-stage document icon in Obsidian: newly created spec documents no longer trigger an Iconize error from a nonexistent icon.
@@ -686,6 +702,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+
+### 3.1.0 — 2026-08-24 UTC
+
+- New `lazy-obsidian.capture` / `lazy-obsidian.deploy` skills track a vault's whole Obsidian configuration as one file — `capture` snapshots `.obsidian/` into `.obsidian.manifest.json`, `deploy` rebuilds it on a clean checkout with every plugin at its latest release, and `lazy-obsidian.audit` now reports how far a live vault has drifted from its manifest. Credentials, per-device state, and Iconize's own database are left out.
 ### 3.0.0 — 2026-08-21 UTC
 
 - **Breaking:** icon repainting no longer runs from a pre-commit hook — `.githooks/pre-commit` and its `sync-staged`/`install-hooks` subcommands are gone; a `lazy-obsidian.repaint` daemon routine repaints on each commit instead, fixing halts caused by leftover unstaged icon writes under automation. Upgrading from 2.x: rerun `/lazy-obsidian.iconize-install`, which now detects and removes the old shim automatically.
@@ -832,6 +852,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+
+### 1.1.8 — 2026-08-24 UTC
+
+- _no user-visible changes_
 ### 1.1.7 — 2026-08-21 UTC
 
 - Fixed five diagram kinds — `block-beta` layouts, ERD, and journey diagrams — that rendered unreadable after Obsidian's Mermaid 11.13 upgrade; dark-mode colouring is restored via `themeCSS` instead of the classDef path that mermaid now drops.
@@ -882,6 +906,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+
+### 6.2.0 — 2026-08-24 UTC
+
+- Review commit verbs (coordinator wake, round/finalize landings, start/stop/submit) now commit under an explicit pathspec, so content another party staged into the shared git index is never swept into a review commit.
+- Fixed a bug where a coordinator wake could be lost when shadowed by a later bot commit — a review now also enters from the document's own state, and a buried operator commit is recovered via a `last_seen_sha` cursor.
+- `lazy-review.install` now registers the coordinator routine trio (`lazy-review.collect`, `lazy-review.coordinator-watch`, `lazy-review.sanitize`) unconditionally — a project with no runtime daemon no longer loses them, since `/lazy-runtime.tick` can fire them by hand.
+- Finalize now requires a `# History` line for the closing cycle — a document reaching an approved state without one is flagged as a coordinator violation instead of finalizing silently.
 ### 6.1.0 — 2026-08-21 UTC
 
 - **Breaking:** The review loop was rebuilt from the ground up — the old Python state-machine dispatcher and historian are gone, replaced by an LLM coordinator agent driving a documented playbook over a closed set of verbs. Existing repos need `/lazy-review.install` re-run to migrate.
@@ -977,6 +1008,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+
+### 0.8.5 — 2026-08-24 UTC
+
+- _no user-visible changes_
 ### 0.8.4 — 2026-08-21 UTC
 
 - When a foreign collector already scrapes this host, `install` now auto-switches into integrate mode instead of aborting — scrape targets regenerated, no questions asked. `doctor` reports this case distinctly as `WARN covered-unconfigured` instead of misreporting `FAIL not-installed`.
@@ -1064,6 +1099,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+
+### 1.2.0 — 2026-08-24 UTC
+
+- New `lazy-experts.use-case-writer` and `lazy-experts.ui-designer` agents join the expert roster — formal use cases ahead of design work, and UI/screen decisions with attached HTML mockups after it.
+- Every technical expert class now seeds a `data-writer` role by default alongside the two new roles (previously `data-writer` was seeded only for the `game-dev` class).
 ### 1.1.0 — 2026-08-21 UTC
 
 - New `software-product` generic expert class for software projects with no narrower domain — a matching aspect, class-map entry, and updated install/help enumeration make it selectable alongside the existing generic classes.
@@ -1154,6 +1194,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+
+### 4.0.1 — 2026-08-24 UTC
+
+- Domain block headers (`# Domain(group):`) drop the optional `[tag]` suffixes — the group name is now the whole header, and `lazy-python.domain-writer` writes and refiles blocks accordingly.
+- Fixed every plugin skill and agent's step-tracking discipline — it no longer depends on the removed Task-checklist tools, tracking steps via a self-written ledger in its own output instead.
 ### 4.0.0 — 2026-08-21 UTC
 
 - New `lazy-python.domain-writer` and `lazy-python.contract-writer` agents write and refile domain-groups knowledge blocks; `lazy-python.knowledge-sweep` now grows the dictionary from parked `Domain(unfiled)` blocks, scoping itself from `wiki.domains.code` when configured, with the dictionary defaulting to `docs/guidelines/domain-groups.md`; the audit gained a check flagging a missing dictionary once sources carry `Domain(...)` blocks.
@@ -1294,6 +1339,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-wiki
 
+
+### 2.1.0 — 2026-08-24 UTC
+
+- New `wiki.tag-curator` expert judges canonical axis values per surface and normalizes tags via a `lazy-wiki.tag-normalize` routine, wired into both `/lazy-wiki.install` and `/lazy-wiki.relink`; the advisory tag dictionary now defaults to `docs/tags.md` (was `docs/tag-values.md`), and reading it no longer crashes on a malformed or unreadable dictionary or settings file.
+- `collect-tags`/`retag` now also cover the generated `docs/domains/**/*.md` tree through a new `domains` tag surface (with the `domains` scope id reserved against collision), and `/lazy-wiki.doctor` now flags domain docs that use a tag axis outside the vault's declared vocabulary.
+- Generated domain-spec docs now carry a `tags:` frontmatter block chosen from the axis vocabulary and dictionary, replacing the old bracket-tag syntax in the domain-groups template.
+- `/lazy-wiki.install` and `/lazy-wiki.configure` no longer skip routine registration when the background daemon is disabled — routines register unconditionally, since `/lazy-runtime.tick` can fire the same scans by hand.
 ### 2.0.0 — 2026-08-21 UTC
 
 - **Breaking:** Mirror scopes replace the old cross-repo `@<repo-key>` link resolver — a scope's `mirror` block clones a foreign repo and syncs its markdown into the vault, preserving local wiki/pin frontmatter and the protected See-also section. Existing `@<repo-key>` links need migrating, and mirror-fetch failures now report as a clear message instead of a raw traceback.

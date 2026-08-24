@@ -43,6 +43,7 @@ An asset folder is `<spec_path>/<folder>/<slug>/`, where `<folder>` is the type'
 - the status folder-note `<slug>.md` (`spec_role: status`, flat gates, `spec_asset_type` — see Part 4 and [lifecycle](./lazy-spec.lifecycle-protocol.md));
 - the document named by the type's `start_doc` — `design.md` for the shipped `feature` / `change` / `content` / `research` types, `bug.md` for `bug`. There is no default layout: a type with no `start_doc` cannot be scaffolded at all;
 - optionally `architecture.md` — feature/change layout only, NEVER on a bug; opt-in on disk the same way as `code-plan.md` / `test-plan.md`, but its existence tracks a coordinator judgment (code-bearing asset) rather than free operator choice — see [coordination-playbook](./lazy-spec.coordination-playbook.md) Chapter 3 and Chapter 8;
+- optionally `use-cases.md` and/or `ui-design.md` — feature/change layout only, NEVER on a bug; opt-in the same way as `code-plan.md` / `test-plan.md`, each created only once its launch checkbox is ticked or the product or asset declares it mandatory — see the [feature](./lazy-spec.feature-playbook.md) and [change](./lazy-spec.change-playbook.md) playbooks;
 - optionally `code-plan.md` and/or `test-plan.md` — opt-in, scaffolded only when explicitly authored, never seeded by `lazy-spec.create-asset`;
 - optionally `code-report.md` and/or `test-report.md` — opt-in append-only execution journals, carrying no `spec_stage` and no role in any gate;
 - optionally `decisions.md` — opt-in append-only registry of accepted decisions for this asset, never scaffolded, created lazily by the `decide` primitive on its first record; carries no `spec_stage` and plays no role in any gate or review.
@@ -152,7 +153,10 @@ All products follow this shape. No concrete names appear in this rule — skills
     │           │   ├── features.md          ← category folder-note (operator-zone; managed iconize_icon)
     │           │   └── <slug>/              ← feature asset folder
     │           │       ├── <slug>.md        ← status folder-note (spec_role: status, flat gates)
+    │           │       ├── use-cases.md     ← opt-in — present only when authored
     │           │       ├── design.md
+    │           │       ├── architecture.md  ← opt-in — present once the asset is judged code-bearing
+    │           │       ├── ui-design.md     ← opt-in — present only when authored
     │           │       ├── code-plan.md      ← opt-in — present only when authored
     │           │       ├── code-report.md    ← opt-in — present only when authored
     │           │       ├── test-plan.md     ← opt-in — present only when authored
@@ -162,7 +166,10 @@ All products follow this shape. No concrete names appear in this rule — skills
     │           │   ├── changes.md           ← category folder-note (operator-zone)
     │           │   └── <slug>/              ← change asset folder
     │           │       ├── <slug>.md        ← status folder-note
+    │           │       ├── use-cases.md     ← opt-in
     │           │       ├── design.md
+    │           │       ├── architecture.md  ← opt-in — present once the asset is judged code-bearing
+    │           │       ├── ui-design.md     ← opt-in
     │           │       ├── code-plan.md      ← opt-in
     │           │       ├── code-report.md    ← opt-in
     │           │       ├── test-plan.md     ← opt-in
@@ -223,14 +230,16 @@ Three consequences worth stating outright:
 
 ### Roles
 
-The `spec_role` frontmatter key is a **closed set** of ten values: `design`, `architecture`, `code-plan`, `code-report`, `test-plan`, `test-report`, `bug`, `tech`, `status`, `decisions`. A plugin-owned spec doc carries exactly one of these. Role determines what content is allowed.
+The `spec_role` frontmatter key is a **closed set** of twelve values: `use-cases`, `design`, `architecture`, `ui-design`, `code-plan`, `test-plan`, `code-report`, `test-report`, `bug`, `tech`, `status`, `decisions`. A plugin-owned spec doc carries exactly one of these. Role determines what content is allowed.
 
 The last column records today's defaults only — the authority on whether a document carries `spec_stage` is the `stages` flag of its type's declaration, not this table.
 
 | `spec_role` | Purpose | May contain source URLs? | May carry `spec_source_branches`? | Per-file `spec_stage`? (see the type's `stages` flag) |
 |------|---------|--------------------------|------------------------------|-------------------|
+| `use-cases` | Opt-in requirements scenarios written before the behavior settles: actors, goals, preconditions, main and alternative flows, postconditions — WHO needs what of the system, in the actor's own language, with no system internals. Feature/change asset-level only, never on a bug | **No** | No | **Yes** |
 | `design` | Behavior, requirements, user flow — WHAT the system does (feature/change/operator-defined-asset doc) | **No** | No | **Yes** |
 | `architecture` | Opt-in code-structure design: module boundaries, dependency direction, public contract versus internals, data migration, cost to existing callers — the SHAPE of the code, not the behavior. Feature/change asset-level only, never on a bug. Mandatory once the coordinator judges the asset code-bearing (`lazy-spec.coordination-playbook.md` Chapter 3/8), same as `design` is mandatory once the category needs it | **No** | No | **Yes** |
+| `ui-design` | Opt-in interface design: the screens the asset introduces or changes, their per-screen states, the navigation between them, and the interaction decisions behind them — with the HTML mockups filed flat beside it as attachments. Feature/change asset-level only, never on a bug | **No** | No | **Yes** |
 | `tech` | Technical specification: architecture, source file map, components, data structures, reuse notes. System-level only (`tech.md` at a product root, or loose at the content-root as the project-wide spec; type `system-tech`) — no per-asset `tech.md` | **Yes** | **Yes** | **Yes** |
 | `code-plan` | Opt-in development plan: scope, sequence, implementation notes for the developer. Populated once `design.md` is approved | **Yes** | **Yes** | **Yes** |
 | `test-plan` | Opt-in functional test plan: verifies behavior against the design. Populated by the tester expert from the approved design; unit tests belong to the developer, not here | **Yes** | **Yes** | **Yes** |
@@ -242,9 +251,9 @@ The last column records today's defaults only — the authority on whether a doc
 
 A file that violates its role (e.g., source URL in a `design` file) is a hard violation caught by `lazy-spec.doctor`.
 
-**Per-file stage vs gates.** A document carries a per-file `spec_stage` when its type's declaration says `stages: true`; among the shipped types that flag is set on `design`, `system-design`, `bug`, `architecture`, `system-tech`, `code-plan`, and `test-plan`, which therefore carry `spec_stage` (`empty | draft | approved | rejected | cancelled`; see [lifecycle](./lazy-spec.lifecycle-protocol.md) and `lazy-spec.set-stage`). `code-report` and `test-report` are authored docs too, but carry **no** `spec_stage` — they are append-only journals, never opted into review, and play no role in any gate precondition. `decisions` carries no `spec_stage` either, for the same reason — it is an append-only registry, never opted into review, and plays no role in any gate. The `status` role carries the asset's **flat gate booleans** instead (it is a folder marker, not an authored doc) — see [lifecycle](./lazy-spec.lifecycle-protocol.md).
+**Per-file stage vs gates.** A document carries a per-file `spec_stage` when its type's declaration says `stages: true`; among the shipped types that flag is set on `use-cases`, `design`, `system-design`, `bug`, `architecture`, `ui-design`, `system-tech`, `code-plan`, and `test-plan`, which therefore carry `spec_stage` (`empty | draft | approved | rejected | cancelled`; see [lifecycle](./lazy-spec.lifecycle-protocol.md) and `lazy-spec.set-stage`). `code-report` and `test-report` are authored docs too, but carry **no** `spec_stage` — they are append-only journals, never opted into review, and play no role in any gate precondition. `decisions` carries no `spec_stage` either, for the same reason — it is an append-only registry, never opted into review, and plays no role in any gate. The `status` role carries the asset's **flat gate booleans** instead (it is a folder marker, not an authored doc) — see [lifecycle](./lazy-spec.lifecycle-protocol.md).
 
-**Path constraints.** `status` files are only permitted at an asset folder-note path (`<spec_path>/<category>/<slug>/<slug>.md`) — never at the product root. `bug` files are only permitted under `<spec_path>/bugs/<slug>/`. `architecture` files are only permitted under a `features/<slug>/` or `changes/<slug>/` asset folder — NEVER under `bugs/<slug>/`. `design.md`, and the opt-in `architecture.md` / `code-plan.md` / `code-report.md` / `test-plan.md` / `test-report.md` / `decisions.md`, live in an asset folder; the product-level `design.md` + `tech.md` + opt-in `decisions.md` are loose at the product root (`<spec_path>/design.md`, `<spec_path>/tech.md`, `<spec_path>/decisions.md`); the project-wide `design.md` + `tech.md` are loose at the content-root and are the ONLY spec docs legal there (`system-design` / `system-tech` typed — an asset-typed doc at the content-root is a defect).
+**Path constraints.** `status` files are only permitted at an asset folder-note path (`<spec_path>/<category>/<slug>/<slug>.md`) — never at the product root. `bug` files are only permitted under `<spec_path>/bugs/<slug>/`. `architecture`, `use-cases`, and `ui-design` files are only permitted under a `features/<slug>/` or `changes/<slug>/` asset folder — NEVER under `bugs/<slug>/`. `design.md`, and the opt-in `use-cases.md` / `architecture.md` / `ui-design.md` / `code-plan.md` / `code-report.md` / `test-plan.md` / `test-report.md` / `decisions.md`, live in an asset folder; the product-level `design.md` + `tech.md` + opt-in `decisions.md` are loose at the product root (`<spec_path>/design.md`, `<spec_path>/tech.md`, `<spec_path>/decisions.md`); the project-wide `design.md` + `tech.md` are loose at the content-root and are the ONLY spec docs legal there (`system-design` / `system-tech` typed — an asset-typed doc at the content-root is a defect).
 
 ### Removed roles
 
@@ -266,11 +275,11 @@ A request file (`<content-root>/requests/<slug>.md`) is free-form user intake ca
 
 ### Upstream unit notes
 
-A unit note (`<content-root>/upstream/<repo-key>/<mount>/<unit-path>/<unit-slug>.md`) carries `spec_role: upstream-unit` — declared the same way `request` is above: a recognised `spec_role` value living outside the closed ten in § 216, with its own frontmatter and lifecycle documented in [config-protocol](./lazy-spec.config-protocol.md) Part 5, not the quartet-role table above.
+A unit note (`<content-root>/upstream/<repo-key>/<mount>/<unit-path>/<unit-slug>.md`) carries `spec_role: upstream-unit` — declared the same way `request` is above: a recognised `spec_role` value living outside the closed twelve in § Roles, with its own frontmatter and lifecycle documented in [config-protocol](./lazy-spec.config-protocol.md) Part 5, not the quartet-role table above.
 
 ### Attachments
 
-An **attachment** is any file in an asset folder that is neither one of the canonical authored docs nor the status folder-note — a mockup, a diagram, a stylesheet, a data file, an additional prose chapter. It is created by the expert writing the document it belongs to, directly in the worktree, and it rides on that job's own commit. Like `request` and `upstream-unit` above, it lives outside the closed ten `spec_role` values and carries no `spec_role` of its own.
+An **attachment** is any file in an asset folder that is neither one of the canonical authored docs nor the status folder-note — a mockup, a diagram, a stylesheet, a data file, an additional prose chapter. It is created by the expert writing the document it belongs to, directly in the worktree, and it rides on that job's own commit. Like `request` and `upstream-unit` above, it lives outside the closed twelve `spec_role` values and carries no `spec_role` of its own.
 
 **Placement.** Flat in the asset folder (`<spec_path>/<category>/<slug>/`), beside the documents — see Part 1.
 
@@ -296,8 +305,10 @@ Filenames are **role-only** — a plugin-owned spec doc's basename is its role, 
 
 | Role | Filename | Allowed under |
 |------|----------|---------------|
+| `use-cases` | `use-cases.md` | `<spec_path>/features/<slug>/` or `<spec_path>/changes/<slug>/` ONLY — opt-in requirements-scenario doc, never on a bug |
 | `design` | `design.md` | content-root (project-wide, type `system-design`), product root `<spec_path>/` (product-level, type `system-design`), `<spec_path>/<category>/<slug>/` (any category except `bugs`; type `design`) |
 | `architecture` | `architecture.md` | `<spec_path>/features/<slug>/` or `<spec_path>/changes/<slug>/` ONLY — opt-in code-structure doc, never on a bug |
+| `ui-design` | `ui-design.md` | `<spec_path>/features/<slug>/` or `<spec_path>/changes/<slug>/` ONLY — opt-in interface doc, never on a bug |
 | `tech` | `tech.md` | content-root (project-wide) or product root `<spec_path>/` — always type `system-tech` |
 | `bug` | `bug.md` | `bugs/<slug>/` (bug-report doc; bugs omit design/tech/architecture) |
 | `code-plan` | `code-plan.md` | `<spec_path>/<category>/<slug>/` (opt-in asset-level implementation plan) |
@@ -327,15 +338,15 @@ Because filenames are role-only, every authored spec doc carries a structured bo
 | Field | Applies to | Value |
 |-------|-----------|-------|
 | `tags` | every file | list of tag paths (includes the product tag + the `spec/<stage>` mirror for stage-bearing docs) |
-| `spec_role` | every plugin-owned spec doc | one of the closed set: `design`, `architecture`, `code-plan`, `test-plan`, `code-report`, `test-report`, `bug`, `tech`, `status`, `decisions`. Operator-zone folder-notes carry NO `spec_role` — see Part 2 |
-| `spec_stage` | stage-bearing authored docs (`design`, `system-design`, `architecture`, `code-plan`, `test-plan`, `bug`, `system-tech`) | per-file lifecycle stage, one of `empty | draft | approved | rejected | cancelled`; mirrored to a `spec/<stage>` tag. See [lifecycle](./lazy-spec.lifecycle-protocol.md). `code-report` / `test-report` / `decisions` carry NO `spec_stage` |
+| `spec_role` | every plugin-owned spec doc | one of the closed set: `use-cases`, `design`, `architecture`, `ui-design`, `code-plan`, `test-plan`, `code-report`, `test-report`, `bug`, `tech`, `status`, `decisions`. Operator-zone folder-notes carry NO `spec_role` — see Part 2 |
+| `spec_stage` | stage-bearing authored docs (`use-cases`, `design`, `system-design`, `architecture`, `ui-design`, `code-plan`, `test-plan`, `bug`, `system-tech`) | per-file lifecycle stage, one of `empty | draft | approved | rejected | cancelled`; mirrored to a `spec/<stage>` tag. See [lifecycle](./lazy-spec.lifecycle-protocol.md). `code-report` / `test-report` / `decisions` carry NO `spec_stage` |
 | `spec_design_done` | `status` files only | bool gate — see [lifecycle](./lazy-spec.lifecycle-protocol.md) |
 | `spec_plan_done` | `status` files only | bool gate |
 | `spec_develop_done` | `status` files only | bool gate |
 | `spec_tests_passing` | `status` files only | bool gate |
 | `spec_released` | `status` files only | bool gate |
 | `spec_cancelled` | `status` files only | bool — terminal overlay freezing all gates |
-| `spec_source_requests` | every stage-bearing authored doc (`design`, `system-design`, `architecture`, `code-plan`, `test-plan`, `bug`, `system-tech`) AND `status` folder-notes | per-doc subset on authored docs / asset-wide union on the folder-note. List of path-qualified wikilinks to request files that contributed (`[]` when created directly). Forward-only; the reverse link lives in the request body. The body's `# Sources` section is a projection of this key — see [sources](./lazy-spec.sources-protocol.md) Part 1. `code-report` / `test-report` carry neither key — they are execution journals, not sourced deliverables |
+| `spec_source_requests` | every stage-bearing authored doc (`use-cases`, `design`, `system-design`, `architecture`, `ui-design`, `code-plan`, `test-plan`, `bug`, `system-tech`) AND `status` folder-notes | per-doc subset on authored docs / asset-wide union on the folder-note. List of path-qualified wikilinks to request files that contributed (`[]` when created directly). Forward-only; the reverse link lives in the request body. The body's `# Sources` section is a projection of this key — see [sources](./lazy-spec.sources-protocol.md) Part 1. `code-report` / `test-report` carry neither key — they are execution journals, not sourced deliverables |
 | `spec_source_docs` | every stage-bearing authored doc | per-doc list of path-qualified wikilinks to companion reference documents. See [sources](./lazy-spec.sources-protocol.md) Part 1 |
 | `spec_source_branches` | `system-tech`, `code-plan`, and `test-plan` only (when applicable) | per-repo branch pins — see [sources](./lazy-spec.sources-protocol.md) Part 2 |
 | `iconize_icon` | every folder-note (product / category / asset status) | managed iconize identifier the plugin writes from config — see Part 1 |

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Answers to common questions about setting up scopes, running relinks, querying the wiki, the terms dictionary, the structure map, and the domain-spec tree.
-last_regen: 2026-08-19
+summary: Answers to common questions about setting up scopes, running relinks, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, and the tag-values canon.
+last_regen: 2026-08-24
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,13 +13,13 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: e758792cb8f978c3f3e230b8233d46a2da076903
+source_sha: 104dfee697e450fa17612e7a70e05db572a5eceb
 ---
 # Frequently asked questions
 
 ## Do I need to run `/lazy-wiki.install` before anything else?
 
-Yes. `/lazy-wiki.install` seeds the `wiki` settings section in `lazy.settings.json`, seeds agent model tiers for the wiki curator, registers the `wiki.curator` expert, and copies the navigation rule into your rules directory. If your project uses the background daemon (or hasn't decided yet), it also registers the `lazy-wiki.scan`, `lazy-wiki.scan-deletes`, and `lazy-wiki.relink-weekly` routines; if the daemon is explicitly disabled for the project, the routines are skipped and only the curator expert and settings are installed. Nothing else in the plugin will work until the `wiki` section exists. The install is idempotent — running it again on an already-configured project is safe and will not overwrite values you have set.
+Yes. `/lazy-wiki.install` seeds the `wiki` settings section in `lazy.settings.json`, seeds agent model tiers for the wiki curator, registers the `wiki.curator`, `wiki.terms-curator`, `wiki.structure-curator`, and `wiki.tag-curator` experts, and copies the navigation rule into your rules directory. If your project uses the background daemon (or hasn't decided yet), it also registers the `lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`, `lazy-wiki.doctor-apply`, and `lazy-wiki.tag-normalize` routines; if the daemon is explicitly disabled for the project, the routines are skipped and only the curator experts and settings are installed. Nothing else in the plugin will work until the `wiki` section exists. The install is idempotent — running it again on an already-configured project is safe and will not overwrite values you have set.
 
 After install, run `/lazy-wiki.configure` to define at least one scope (the set of path globs the wiki covers, the tag axes it narrows to, and where to write the topics index). `/lazy-wiki.query` and `/lazy-wiki.relink` both require at least one configured scope to proceed.
 
@@ -129,7 +129,17 @@ The axis vocabulary itself — `wiki.tag_axes` — is repository-wide, not per s
 
 To narrow one scope's axes, run `/lazy-wiki.configure` for that scope and answer Phase 5 with the subset it should use. To grow or shrink the vocabulary itself for every scope at once, run `/lazy-wiki.configure vault` instead — `/lazy-wiki.configure` for a single scope offers only what `wiki.tag_axes` already contains and cannot add a new axis to it.
 
-Either way, expect a normalization pass on the next relink. On the next `/lazy-wiki.relink` run, Step 2 resolves each scope's effective axis list (vault vocabulary narrowed by the scope), and Step 3 (normalize tags + rebuild topics index) consolidates any values that no longer match a known axis into the new canonical set, with the curator's retag step updating affected nodes. Findings of `unknown-axis` from `/lazy-wiki.doctor` indicate nodes that carry axis keys not in the current effective set — a relink clears them.
+Either way, expect a normalization pass on the next relink or on the weekly `lazy-wiki.tag-normalize` routine. On the next `/lazy-wiki.relink` run, Step 2 resolves each scope's effective axis list (vault vocabulary narrowed by the scope), and the tag-canon step dispatches the `wiki.tag-curator` expert to judge a canonical axis-value set for the scope and apply it via the deterministic `retag` primitive, consolidating any values that drifted into near-synonyms. Findings of `unknown-axis` from `/lazy-wiki.doctor` indicate nodes that carry axis keys not in the current effective set — a relink clears them.
+
+---
+
+## What is the tag-values dictionary, and how does the wiki keep tag values from drifting into synonyms?
+
+Classification happens one node at a time, so near-synonyms accumulate on an axis over time — `food` beside `coffee`, `espresso` beside `coffee/espresso`. The `wiki.tag-curator` expert is the whole-axis pass that catches this: given a surface's tag census (each value's node count and a couple of example summaries), it decides which values mean the same thing, which nest as subtypes of another, and which are genuinely distinct, then applies the result via the deterministic `retag` primitive — it never hand-edits a node's tags.
+
+The consolidated vocabulary is recorded in an advisory dictionary file — `wiki.tags.dictionary` in `lazy.settings.json`, defaulting to `docs/tags.md` when the key is unset. It lists each settled value's gloss per axis, so a later classification pass reuses an existing value instead of coining a rival spelling. It constrains nothing: a classification may still coin a value the dictionary does not list, and the next canon pass records it there.
+
+Two things trigger a canon pass: `/lazy-wiki.relink` runs it for every configured scope (and the `domains` surface when `wiki.domains` is configured) as part of every relink, not only for the scope being relinked, because two surfaces may legitimately spell the same idea differently. The weekly `lazy-wiki.tag-normalize` routine runs the same pass on its own schedule when the runtime daemon is active, surveying every tag surface and dispatching a `wiki.tag-curator` job for each non-empty one.
 
 ---
 
@@ -171,6 +181,8 @@ It is one markdown file per configured "terms scope" — every `## <term>` headi
 
 Set one up with `/lazy-wiki.configure terms`. You are asked which documents the dictionary serves (a `paths` glob — a document under it may consult the dictionary), where the dictionary file itself lives (created empty if it does not exist yet), and `source_exclude` — the documents the dictionary still serves but never takes terms from (the dictionary file itself, and the tool-report/plan-document globs your project uses, so build journals don't pollute the dictionary with one-off wording). The wizard refuses an id whose `paths` overlap another terms scope's, since one document can only belong to one dictionary, and it registers a per-scope `lazy-wiki.terms-scan-<id>` routine (when the daemon is enabled) that dispatches the terms curator to fill the dictionary from finished documents automatically.
 
+The terms dictionary is a distinct file from the tag-values dictionary — a terms scope names concepts in prose, while `wiki.tags.dictionary` (`docs/tags.md` by default) canonises `wiki/<axis>/<value>` tags. They serve different curators and are never the same file.
+
 ---
 
 ## How do I look up a term, or check a name before I use it?
@@ -203,11 +215,21 @@ Any agent that needs to know where something lives (an architect deciding where 
 
 `wiki.domains` (configured via `/lazy-wiki.configure domains`) generates a tree of documentation — `docs/domains/` by default — synthesised from `Domain(…)` markers annotated on code, grouped by a dictionary of accepted group keys. Each generated doc carries fixed Terms, Principles, and Mechanics sections, with formulas verified against the annotated code, plus a trailing Contracts section for any attributed `Contract:` blocks. Query the generated tree with `/lazy-wiki.domains group <group-key> [<section>]` or `/lazy-wiki.domains term "<text>"` — it returns one doc's section or matching excerpts, never the whole tree, mirroring how `/lazy-wiki.structure query` works over the project-structure map instead.
 
+Each generated doc also carries `wiki/<axis>/<value>` tags in its own frontmatter, drawn from the same repository-wide `wiki.tag_axes` vocabulary the wiki scopes use, and reusing a value already settled in the tag-values dictionary where one fits. You never set these by hand — the domain-spec writer chooses them from the group's `Domain(…)` blocks, carrying forward any tags an existing doc already had rather than re-minting them on every regeneration.
+
 ---
 
 ## How do I regenerate the domain-spec tree, and do I need the background daemon?
 
 Run `/lazy-wiki.domain-sync` — it works entirely inside your current session, with no daemon required. It computes what changed since the last generation, dispatches the domain-spec writer per changed group, removes docs whose group no longer has any markers or was renamed out of the dictionary, rebuilds the `domains.md` index, and makes one commit. If your project does run the background daemon, the same regeneration happens automatically: a git-watch routine reacts per commit, and a weekly routine does a full sweep — `/lazy-wiki.domain-sync` is the manual equivalent for a checkout without it, or for right after a `/lazy-python.knowledge-sweep` backfill.
+
+---
+
+## Do the generated domain docs' tags get consolidated the same way scope tags do?
+
+Yes. The generated domain-doc tree is treated as its own reserved tag surface — `domains` — alongside every configured wiki scope. A relink's tag-canon step (and the weekly `lazy-wiki.tag-normalize` routine) passes over every surface including `domains` when `wiki.domains` is configured, so the `wiki.tag-curator` expert judges and consolidates the domain docs' axis values into the same `docs/tags.md` dictionary a wiki scope's values land in — a value settled on one surface is available for the other to reuse, though each surface is still judged on its own, since two surfaces may legitimately spell the same idea differently. The one difference from a wiki scope: the `domains` surface has no topics index, so its canon pass never rebuilds one.
+
+If a generated doc carries a `wiki/<axis>/…` tag whose axis is not declared in `wiki.tag_axes`, `/lazy-wiki.doctor`'s domains section reports it as a report-only `WARN` finding naming the axis and the first doc carrying it — the fix is the same as for a wiki scope's `unknown-axis` finding: either declare the axis via `/lazy-wiki.configure vault`, or regenerate the doc via `/lazy-wiki.domain-sync` so it drops the stale tag.
 
 ---
 

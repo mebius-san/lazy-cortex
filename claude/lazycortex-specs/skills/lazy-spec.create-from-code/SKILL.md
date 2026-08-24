@@ -1,7 +1,7 @@
 ---
 name: lazy-spec.create-from-code
 description: Use when generating a specification FROM an existing codebase for an already-registered, code-bound product — fans heavy source scanning out to parallel Explore agents, then writes a behavior-only product design doc and a code-grounded product tech doc with source URLs. Product mode documents the product itself; feature mode delegates one feature-candidate to lazy-spec.create-asset. Requires the product to be registered with a `source` binding via /lazy-spec.product-config first.
-allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Skill, Task, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent
+allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Skill, AskUserQuestion, Agent
 ---
 # Create Spec from Code
 
@@ -18,11 +18,11 @@ Heavy source reading runs through parallel Explore agents so the main session st
 
 This skill has two modes (`product` + `feature`) with mode-specific step lists. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with the entry-phase tasks (canonical titles verbatim):
+1. **Before calling any other tool**, write out the step ledger with the entry-phase entries (canonical titles verbatim):
    - `Step 0 — Resolve the product`
    - `Step M — Mode detection`
 
-   Immediately after Mode detection picks one of `product` / `feature`, `TaskCreate` the mode's full step list. Use these canonical titles verbatim — no merging, abbreviation, or renaming.
+   Immediately after Mode detection picks one of `product` / `feature`, extend the ledger with the mode's full step list. Use these canonical titles verbatim — no merging, abbreviation, or renaming.
 
    **Product mode**:
    - `Step P1 — Detect the branch`
@@ -40,8 +40,8 @@ This skill has two modes (`product` + `feature`) with mode-specific step lists. 
    - `Step F3 — Verify`
    - `Step F4 — Log the run`
 
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". A no-op counts only when it emits an explicit outcome word (`created`, `unchanged`, `no-candidates`, `delegated`, …).
-3. **Do not reach Verify until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task at Verify time is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". A no-op counts only when it emits an explicit outcome word (`created`, `unchanged`, `no-candidates`, `delegated`, …).
+3. **Do not reach Verify until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task at Verify time is a bug — stop and execute it first.
 4. **Verify is a structural verifier.** Run every check of the per-mode Verify subsection; do not render the report with gaps.
 
 ## Input

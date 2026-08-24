@@ -1,7 +1,7 @@
 ---
 name: lazy-diagram.audit
 description: "Run when the operator asks to audit the lazycortex-diagram plugin itself — after authoring or editing a template under `templates/diagram.*/` or a `styles-*.json` scheme, or when drawn diagrams come out with unbound roles, a missing init block, or an exemplar that no longer matches the authoring rule. Delegated from `lazy-core.doctor` Phase 3. Audits the plugin's own shipped templates and schemes, never a diagram in your docs — a stale fence in a document is `/lazy-diagram.fix`."
-allowed-tools: Read, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, Agent, AskUserQuestion, Edit, Write
+allowed-tools: Read, Glob, Grep, Bash, Agent, AskUserQuestion, Edit, Write
 ---
 # lazy-diagram.audit
 
@@ -15,7 +15,7 @@ This skill is a **parallel-scan coordinator** per `lazy-core.skill-writing § 5`
 
 This skill has 7 ordered steps. The executor MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Pre-flight`
    - `Step 2 — Dispatch A2–A3 + A5 in parallel`
    - `Step 3 — Merge structured reports`
@@ -23,8 +23,8 @@ This skill has 7 ordered steps. The executor MUST NOT skip, merge, reorder, or s
    - `Step 5 — Ask which to fix`
    - `Step 6 — Apply confirmed fixes`
    - `Step 7 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it".
-3. **Do not reach Step 4 (Present unified report) until `TaskList` shows steps 1–3 `completed`.** Reports without merge are a bug.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it".
+3. **Do not reach Step 4 (Present unified report) until the ledger shows steps 1–3 `completed`.** Reports without merge are a bug.
 4. **The Step 4 report is a structural verifier.** Its output MUST contain one section per A2 / A3 / A5 finding plus a summary line.
 
 ## Step 1: Pre-flight

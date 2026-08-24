@@ -12,7 +12,7 @@ Deep style + docstring review for modified Python files in the current change se
 
 This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Read guidelines`
    - `Step 2 — Identify modified files`
    - `Step 3 — Manual review`
@@ -20,8 +20,8 @@ This skill has 7 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 5 — Fix remaining issues`
    - `Step 6 — Re-verify`
    - `Step 7 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a one-word outcome for it". A no-op step counts only if it emits an explicit outcome (`manual-clean`, `chk-clean`, `no-fixes-needed`, …).
-3. **Do not reach the Report step until `TaskList` shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a one-word outcome for it". A no-op step counts only if it emits an explicit outcome (`manual-clean`, `chk-clean`, `no-fixes-needed`, …).
+3. **Do not reach the Report step until the ledger shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
 ## Step 1 — Read guidelines

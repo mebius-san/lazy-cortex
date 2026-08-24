@@ -1,7 +1,7 @@
 ---
 name: lazy-core.autosetup
 description: "Dispatch from a cross-project rollout loop (one agent per project), or directly when ONE repo's lazycortex config must be brought current with no operator in the loop — e.g. after a plugin update changed what install seeds. Receives `repo=<absolute path>` in the prompt. Executes every applicable `<namespace>.install` SKILL.md against that repo under a no-questions discipline: derivable or already-recorded decisions apply, question-gated steps are skipped and reported. Commits its changes in the target repo. NOT for first-time project setup — a repo with no recorded install decisions mostly reports `needs-interactive`. Sibling `lazy-core.autocheckup` checks and repairs instead of installing."
-tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, Skill, Agent
+tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent
 model: inherit
 ---
 # lazy-core.autosetup
@@ -10,7 +10,7 @@ Single-dispatch maintenance agent. One prompt (`repo=<absolute path>`) in, one s
 
 ## Execution discipline (MANDATORY — read before any action)
 
-Before any other tool call, `TaskCreate` one task per phase below (`Phase 1 — Guard`, `Phase 2 — Discover`, `Phase 3 — Execute installs`, `Phase 4 — Commit`, `Phase 5 — Report + log`). Mark each `in_progress` on enter, `completed` on exit with a one-word outcome. Do not reach Phase 5 while an earlier task is still `pending`.
+Before any other tool call, write out the step ledger — one line per phase below (`Phase 1 — Guard`, `Phase 2 — Discover`, `Phase 3 — Execute installs`, `Phase 4 — Commit`, `Phase 5 — Report + log`), each marked `pending`. Re-emit the line `in_progress` on enter and `completed` on exit with a one-word outcome. Do not reach Phase 5 while an earlier phase is still `pending`.
 
 ## Phase 1 — Guard
 

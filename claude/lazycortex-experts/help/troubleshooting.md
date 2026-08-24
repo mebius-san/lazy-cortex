@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
-last_regen: 2026-08-21
+last_regen: 2026-08-24
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -9,13 +9,15 @@ source_skills:
   - lazy-experts.designer
   - lazy-experts.architect
   - lazy-experts.planner
+  - lazy-experts.use-case-writer
+  - lazy-experts.ui-designer
   - lazy-experts.implementer
   - lazy-experts.data-implementer
   - lazy-experts.docs-writer
   - lazy-experts.debugger
   - lazy-experts.reviewer
   - lazy-experts.tester
-source_sha: 05f6f9a9fc372840e99c4cdcda9b7f182e336140
+source_sha: bd6abf68b291ce676681d87882caf99ee9e57b44
 ---
 # Troubleshooting
 
@@ -51,9 +53,9 @@ source_sha: 05f6f9a9fc372840e99c4cdcda9b7f182e336140
 
 ## Only `fiction-writer` got seeded for my sci-fi or fantasy class
 
-**Symptom**: You picked `sci-fi` (or `fantasy`) when `/lazy-experts.install` asked which classes to register, but only one expert entry appeared — `sci-fi.fiction-writer` (or `fantasy.fiction-writer`) — with no interpreter, designer, system-designer, architect, planner, developer, debugger, reviewer, or tester for that class.
+**Symptom**: You picked `sci-fi` (or `fantasy`) when `/lazy-experts.install` asked which classes to register, but only one expert entry appeared — `sci-fi.fiction-writer` (or `fantasy.fiction-writer`) — with no interpreter, designer, system-designer, architect, planner, use-case-writer, ui-designer, developer, data-writer, debugger, reviewer, or tester for that class.
 
-**Likely cause**: This is the intended behaviour, not a bug. The class map seeds roles differently by class kind: technical classes (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, and any future non-fiction class) get all nine engineering roles — `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `developer`, `debugger`, `reviewer`, `tester` — plus `data-writer` for `game-dev` specifically; fiction classes (`sci-fi`, `fantasy`) get only `fiction-writer`, because the other roles assume an engineering lifecycle (design specs, code architecture, implementation plans, code review) that doesn't apply to literary work. Fiction classes also never receive `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, or `lazy-experts.structure-aspect` — those three assume a technical repository, which a scene has nothing to do with.
+**Likely cause**: This is the intended behaviour, not a bug. The class map seeds roles differently by class kind: technical classes (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, and any future non-fiction class) get all twelve engineering roles — `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `debugger`, `reviewer`, `tester`; fiction classes (`sci-fi`, `fantasy`) get only `fiction-writer`, because the other roles assume an engineering lifecycle (design specs, code architecture, implementation plans, code review) that doesn't apply to literary work. `data-writer` is seeded with every technical class, not only `game-dev` — writing data files against an approved design is a general genre, not a game-dev particularity. Fiction classes also never receive `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, or `lazy-experts.structure-aspect` — those three assume a technical repository, which a scene has nothing to do with.
 
 **Fix**: Nothing to fix if you're working purely in a fiction domain — `fiction-writer` is the complete role set for `sci-fi`/`fantasy`. If your project also spans a technical domain (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`), register at least one expert of that class by hand in `lazy.settings.json[experts]`, or clear the `experts` section and re-run `/lazy-experts.install` so it asks again and seeds both class kinds together.
 
@@ -83,7 +85,7 @@ source_sha: 05f6f9a9fc372840e99c4cdcda9b7f182e336140
 
 **Symptom**: The report includes lines like `experts.claude-plugin.designer (completed: lazy-experts.terms-aspect, lazy-experts.structure-aspect)`, or `experts.claude-plugin.planner (completed: can_commit_in_repo)`, for expert entries that were already in `lazy.settings.json` before this run — nothing you asked to be added.
 
-**Likely cause**: `/lazy-experts.install` never touches a field an operator owns on an existing entry — `agent`, `git_author`, `workspace`, or the domain aspect stay exactly as they are. But two kinds of thing are treated as mandatory rather than as an operator choice: five cross-cutting aspects (`lazy-experts.discipline-aspect` and `lazy-experts.research-aspect` on every domain-class entry, plus `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, and `lazy-experts.structure-aspect` on technical-class entries specifically), and the `can_commit_in_repo` flag on every writing-role entry (`designer`, `system-designer`, `architect`, `planner`, `developer`, `data-writer`, `docs-writer`, `debugger`, `tester`). An entry seeded before one of these shipped (or hand-authored without it) isn't customized with respect to it — it's incomplete. Every re-run appends whatever's still missing from the mandatory aspect list, and seeds `can_commit_in_repo: true` on any writing-role entry that carries no such key at all, without touching anything else on the entry.
+**Likely cause**: `/lazy-experts.install` never touches a field an operator owns on an existing entry — `agent`, `git_author`, `workspace`, or the domain aspect stay exactly as they are. But two kinds of thing are treated as mandatory rather than as an operator choice: five cross-cutting aspects (`lazy-experts.discipline-aspect` and `lazy-experts.research-aspect` on every domain-class entry, plus `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, and `lazy-experts.structure-aspect` on technical-class entries specifically), and the `can_commit_in_repo` flag on every writing-role entry (`designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `debugger`, `tester`). An entry seeded before one of these shipped (or hand-authored without it) isn't customized with respect to it — it's incomplete. Every re-run appends whatever's still missing from the mandatory aspect list, and seeds `can_commit_in_repo: true` on any writing-role entry that carries no such key at all, without touching anything else on the entry.
 
 **Fix**: Nothing to fix — this is `/lazy-experts.install` keeping an older or hand-authored entry current with the mandatory list, not an error. If you deliberately want an expert without one of the five aspects (e.g. a technical expert that should never load `lazy-experts.terms-aspect`), there's no opt-out marker for it: the aspect gets re-appended on every future run — remove it by hand after each run if you need to keep it off. `can_commit_in_repo` is different: an explicit `false` you set yourself is an operator choice the skill leaves untouched, exactly like a customized `workspace` — only a *missing* key gets completed to `true`.
 
@@ -93,7 +95,7 @@ source_sha: 05f6f9a9fc372840e99c4cdcda9b7f182e336140
 
 **Symptom**: A seeded entry's role suffix doesn't match its `agent` field — e.g. `claude-plugin.system-designer` carries `"agent": "lazycortex-experts:lazy-experts.designer"`, `game.developer` carries `"agent": "lazycortex-experts:lazy-experts.implementer"`, or `game.data-writer` carries `"agent": "lazycortex-experts:lazy-experts.data-implementer"`.
 
-**Likely cause**: This is intended, not a mismatch to fix. Three roles in the class map name the job an expert does rather than reusing its agent's file name: `system-designer` and `developer` are two distinct jobs the `designer` and `implementer` agents perform depending on which stage of the class map dispatches them, and `data-writer` is the job name for the `data-implementer` agent's role in the `game-dev` class specifically. Every other role's `agent` field matches its own name verbatim (`interpreter` → `lazy-experts.interpreter`, `architect` → `lazy-experts.architect`, and so on).
+**Likely cause**: This is intended, not a mismatch to fix. Three roles in the class map name the job an expert does rather than reusing its agent's file name: `system-designer` and `developer` are two distinct jobs the `designer` and `implementer` agents perform depending on which stage of the class map dispatches them, and `data-writer` is the job name for the `data-implementer` agent's role across every technical class. Every other role's `agent` field matches its own name verbatim (`interpreter` → `lazy-experts.interpreter`, `architect` → `lazy-experts.architect`, `use-case-writer` → `lazy-experts.use-case-writer`, `ui-designer` → `lazy-experts.ui-designer`, and so on).
 
 **Fix**: Nothing to fix. Before assuming a seeded entry is broken, check whether its role is one of the three that intentionally maps to a differently-named agent (`system-designer` → designer, `developer` → implementer, `data-writer` → data-implementer).
 
@@ -101,7 +103,7 @@ source_sha: 05f6f9a9fc372840e99c4cdcda9b7f182e336140
 
 ## A launch-job expert's document never lands in the tracked tree
 
-**Symptom**: An expert with a writing role (`designer`, `system-designer`, `architect`, `planner`, `developer`, `data-writer`, `docs-writer`, `debugger`, or `tester`) runs a launch-checkbox job to completion, but its document never shows up in the working tree — the job strands in its own result, and whatever coordinates the job can only flag it as undelivered.
+**Symptom**: An expert with a writing role (`designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `debugger`, or `tester`) runs a launch-checkbox job to completion, but its document never shows up in the working tree — the job strands in its own result, and whatever coordinates the job can only flag it as undelivered.
 
 **Likely cause**: The expert's `lazy.settings.json[experts]` entry is missing `can_commit_in_repo: true`. Without that flag, the expert runtime treats the job as read-only and never lets the expert write its deliverable into the tracked tree. This normally happens to an entry that was seeded or hand-authored before `can_commit_in_repo` existed — it isn't a deliberate no-commit configuration, it's an incomplete entry.
 

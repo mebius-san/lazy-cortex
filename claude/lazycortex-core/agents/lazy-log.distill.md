@@ -1,7 +1,7 @@
 ---
 name: lazy-log.distill
 description: "Use after meaningful commits land (per the lazy-log.logging cadence), or when the operator asks to catch the changelog up. Rewrites ./.logs/changelog.md as themed prose from .logs/commits.jsonl, throttled to 4h unless forced — the running internal narration, not lazy-log.bullets' per-release public block and not the read-only history searches of lazy-log.recall/summary/timeline."
-tools: Read, Write, Edit, Glob, Bash, TaskCreate, TaskUpdate, TaskList, Skill, Agent
+tools: Read, Write, Edit, Glob, Bash, Skill, Agent
 model: inherit
 logging-waiver: "work output IS the changelog rewrite — per-run log duplicates the artifact"
 ---
@@ -13,7 +13,7 @@ Turn raw commit entries into human-readable functional prose in `./.logs/changel
 
 This agent has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Read state`
    - `Step 2 — Throttle check`
    - `Step 3 — Determine commits to process`
@@ -22,8 +22,8 @@ This agent has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 6 — Update changelog (theme-first, per-day)`
    - `Step 7 — Report`
    - `Step 8 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `skipped-throttle`, `up-to-date`).
-3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `skipped-throttle`, `up-to-date`).
+3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
 ## Input
@@ -125,9 +125,13 @@ The changelog is **theme-first**: top-level `##` is the theme, second-level `###
 
 Get today's date in UTC: `date -u +%Y-%m-%d`.
 
+**Before the first write, snapshot the file:** `Bash(cp ./.logs/changelog.md ./.logs/changelog.md.bak)` (skip when the file does not exist). `.logs/` is gitignored, so the `.bak` is the only rollback a botched rewrite has.
+
+**Edit in place — never rebuild the file through a keyed collection.** Theme headers repeat: the pre-format tail can carry a second `## <theme>` with the same name (see pre-format compatibility below), so any script that collects blocks into a map keyed by header text silently drops every occurrence but one. Apply the moves below as targeted `Edit` operations on the existing text. When a full-file `Write` is unavoidable, first verify the new text preserves every line of the old file outside the blocks this run touches — abort and report instead of writing when it does not.
+
 For each theme touched in this run, in order from oldest contributing SHA to newest (so the freshest theme ends up bumped highest):
 
-1. **If `## <theme>` block exists in the file:**
+1. **If `## <theme>` block exists in the file** (the topmost one, when the name repeats):
    - **If `### <today>` exists under it** → rewrite that day's paragraph in place, merging today's new commits into it (one paragraph for the whole day; SHAs accumulated).
    - **Else** → insert a new `### <today>` paragraph at the top of the theme block (above earlier dates).
    - **Then bump the entire `## <theme>` block** (header + all its date paragraphs) to the top of the file — directly under the `last-distilled-sha` marker, above all other theme blocks.

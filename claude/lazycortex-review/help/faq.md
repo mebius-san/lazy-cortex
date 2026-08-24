@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -12,7 +12,7 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: a2062bca54f427d017f9acfce7dee26e2b1db066
+source_sha: 183a0cb4d191ceb89a9670c24d9a6c0228bb8364
 ---
 # Frequently asked questions
 
@@ -22,15 +22,15 @@ source_sha: a2062bca54f427d017f9acfce7dee26e2b1db066
 
 ---
 
-## I ran `/lazy-review.install` but the review routines were not registered. Why?
+## What routines does `/lazy-review.install` register, and does the daemon have to be running?
 
-Three routines only work when `lazycortex-core`'s runtime daemon is enabled: `lazy-review.coordinator-watch`, which turns a commit into a coordinator wake; `lazy-review.collect`, which lands finished expert payloads; and `lazy-review.sanitize`, a daily deterministic sweep that repairs lost writer wakes, orphaned reviews, and markers on documents that have since vanished. If the `daemon.enabled` flag in `lazy.settings.json` is `false`, the install step removes all three to avoid leaving dead config. The rest of the plugin — settings sections, directories, the CLI allow-pattern — is still installed. Enable the daemon via `/lazy-core.install` (or the relevant core configure skill), then re-run `/lazy-review.install` to register them.
+Three routines carry the review loop: `lazy-review.coordinator-watch` (the git-watch that turns a commit into a coordinator wake), `lazy-review.collect` (the interval postman that lands finished expert payloads into the reviewed document), and `lazy-review.sanitize` (a daily deterministic sweep that repairs lost writer wakes, orphaned reviews, and markers on documents that have since vanished). All three are registered unconditionally, whatever the repo's daemon posture is — `/lazy-runtime.tick` fires the same interval, git-watch, and cron routines on a checkout with no daemon running, so withholding registration behind `daemon.enabled` would only leave the manual tick with less config to work from. If a routine is missing after install, re-run `/lazy-review.install` — Step 1 is idempotent and re-applies the seed.
 
 ---
 
-## During install I was asked to pick optional protocols for `lazy-review.coordinator-watch`. What are these?
+## Does `/lazy-review.install` ask me to pick protocols for the coordinator routine?
 
-`lazy-review.coordinator-watch` always carries two mandatory protocols — the coordination playbook the woken coordinator reasons from, and `lazy-core.markdown-style` — that ship attached and are never asked about. Other plugins can ship references that are useful while working on reviewed documents but aren't required (for example, a diagram-writing guide), and those self-flag as optional candidates. `/lazy-review.install` discovers them and lets you pick which ones to attach; declining just means the coordinator doesn't get that extra guidance. Nothing you pick changes how the loop behaves — that is the playbook's business. If you skip one and change your mind later, re-run `/lazy-review.install` — anything not yet attached is offered again. (`lazy-review.collect` and `lazy-review.sanitize` take no protocols; neither dispatches an agent.)
+No. `lazy-review.coordinator-watch` always carries two mandatory protocols, attached automatically with no prompt: the coordination playbook the woken coordinator reasons from, and `lazy-core.markdown-style` (every wake produces markdown in the vault). The coordinator is a system expert, so its protocol set is fixed by design — install never offers optional protocols for its routine. If you want to attach an extra protocol to the routine yourself, run `/lazy-routine.offer-protocols` directly; that skill is the operator-facing channel for it, not an install sub-step. (`lazy-review.collect` and `lazy-review.sanitize` take no protocols; neither dispatches an agent.)
 
 ---
 
@@ -99,4 +99,4 @@ The audit script could not find `.claude/lazy.settings.json`. Run `/lazy-review.
 
 ## Where do run logs land?
 
-Each skill writes a timestamped log under `.logs/claude/<skill-name>/` in the current repo. For example, a `start` run lands at `.logs/claude/lazy-review.start/<UTC-timestamp>.md`. The `status` skill is read-only and does not write a log.
+Each skill writes a timestamped log under `.logs/claude/<skill-name>/` in the current repo. For example, a `start` run lands at `.logs/claude/lazy-review.start/<UTC-timestamp>.md`. The `status` and `audit` skills are read-only and do not write a log.

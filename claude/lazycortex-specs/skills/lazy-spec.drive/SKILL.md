@@ -1,7 +1,7 @@
 ---
 name: lazy-spec.drive
 description: "Use when the operator wants to drive one spec asset through its ladder by hand, in a single continuous session, with no runtime daemon acting on this checkout — `/lazy-spec.drive <asset-note-path>`. Reads `lazy-spec.coordination-playbook.md`, the same law `spec.coordinator` follows under the daemon, and drives the identical ladder locally: the operator speaks a word, the skill translates it into the gesture (tick, question-answer, command) ON THE OPERATOR'S BEHALF — never its own decision — commits it, wakes the coordinator via the same CLI the daemon's git-watch routine uses, and pumps whatever expert jobs result to completion with the local manual pump. Refuses to start while a live daemon could act on the same checkout."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion, Agent
 ---
 # lazy-spec.drive
 
@@ -11,14 +11,14 @@ The no-daemon session orchestrator for the spec system (taskdoc `lazycortex-spec
 
 This skill has 4 ordered phases. The executing agent MUST NOT skip, merge, reorder, or silently omit any phase. To make dropped phases structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per phase below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per phase below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Resolve asset + preflight`
    - `Phase 2 — Resume: settle outstanding state`
    - `Phase 3 — Drive the dialog loop`
    - `Phase 4 — Close the session`
    - `Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the phase's logic AND produced an outcome word for it".
-3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.**
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the phase's logic AND produced an outcome word for it".
+3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above.
 
 ## The drive loop (used by Phases 2 and 3)

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about products, assets, gates, requests, decisions, coverage gaps, spec lookups, and the coordinator agent.
-last_regen: 2026-08-21
+last_regen: 2026-08-24
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -27,7 +27,7 @@ source_skills:
   - lazy-spec.source-url
   - lazy-spec.lookup
   - lazy-spec.coordinator
-source_sha: 302cf4ffd01e473afa10f9a3f323feae9ee06b31
+source_sha: b48fa0858c7398248bcdbc366bece0d7a1a02668
 ---
 # Frequently asked questions
 
@@ -41,7 +41,7 @@ Yes — run `/lazy-spec.install` once per project (or once globally, if you want
 
 Yes — a product must be registered first. A product is the top-level unit in the spec system: it has a folder path in the vault, an optional binding to a source-code repo, a language setting that controls what language the plugin uses for narrative prose, and optional per-product `asset_types` / `tool_types` declarations that extend the kinds of asset and the tools the plugin ships with.
 
-Run `/lazy-spec.product-config` to register a new product. The wizard asks for the product's folder name, its place in the vault, whether there is source code to bind, which review experts (designer / system-designer / architect / planner / developer / tester / data-writer) should handle each doc type, and any dependencies. Every product gets an icon — decline the question and the wizard falls back to a default (`LiPackage`) rather than leaving the folder-note unpainted. Once the product is saved, `/lazy-spec.create-feature`, `/lazy-spec.create-change`, `/lazy-spec.create-bug`, and the universal `/lazy-spec.create-asset` will accept it by name — attempting to create an asset under an unregistered product refuses with a message pointing you back to `/lazy-spec.product-config`.
+Run `/lazy-spec.product-config` to register a new product. The wizard asks for the product's folder name, its place in the vault, whether there is source code to bind, which review experts (use-case-writer / designer / system-designer / architect / ui-designer / planner / developer / tester / data-writer) should handle each doc type, and any dependencies. Every product gets an icon — decline the question and the wizard falls back to a default (`LiPackage`) rather than leaving the folder-note unpainted. Once the product is saved, `/lazy-spec.create-feature`, `/lazy-spec.create-change`, `/lazy-spec.create-bug`, and the universal `/lazy-spec.create-asset` will accept it by name — attempting to create an asset under an unregistered product refuses with a message pointing you back to `/lazy-spec.product-config`.
 
 ---
 
@@ -57,7 +57,7 @@ The skill requires the product to already carry a `source` binding — register 
 
 Yes. Every product's own `design.md` + `tech.md` pair — loose at the product root, not inside any asset folder — is typed `system-design` / `system-tech` rather than the asset-level `design` type feature/change/bug docs carry. The same pair can also exist loose at the vault's content-root (the `spec.vault_root` setting, default `specs/`), describing the whole project above every individual product. Nothing in config declares that project-wide pair — the files' existence at the content-root IS the declaration, so it's entirely optional and never auto-created; write it by hand (copying the plugin's own `system-design.md` / `system-tech.md` templates) whenever the project is big enough to want one.
 
-Review-wise, a `system-designer` expert writes the design half (the `system-design` class — covers both the product-root and the content-root copy) and the `architect` expert writes the tech half (the `system-tech` class), distinct from the asset-level `designer` (writes a feature/change/bug's own `design.md`) and from `architect`'s other job of writing opt-in `architecture.md` code-structure docs. These are two of the seven roles `/lazy-spec.product-config` Step 8 asks for. `/lazy-spec.create-from-code <product>` still scaffolds the product-level pair for a code-bound product (see above) — the content-root, project-wide pair has no dedicated creation skill.
+Review-wise, a `system-designer` expert writes the design half (the `system-design` class — covers both the product-root and the content-root copy) and the `architect` expert writes the tech half (the `system-tech` class), distinct from the asset-level `designer` (writes a feature/change/bug's own `design.md`) and from `architect`'s other job of writing opt-in `architecture.md` code-structure docs. These are two of the nine roles `/lazy-spec.product-config` Step 8 asks for. `/lazy-spec.create-from-code <product>` still scaffolds the product-level pair for a code-bound product (see above) — the content-root, project-wide pair has no dedicated creation skill.
 
 ---
 
@@ -66,6 +66,18 @@ Review-wise, a `system-designer` expert writes the design half (the `system-desi
 All three are assets — they share the same gate ladder and folder layout — but the problem they capture is different. A **feature** describes new behaviour that does not yet exist. A **change** is the atomic modification of something that already exists: a rename, a constraint relaxation, a behaviour adjustment. A **bug** describes a defect: what was supposed to happen, what happened instead, and how to reproduce it.
 
 The document layout differs too. Features and changes get `design.md` (no `bug.md`); bugs get `bug.md` (no `design.md`). Either way, the scaffold seeds only that one doc — `code-plan.md` and `test-plan.md` are opt-in, authored later, never part of the scaffold. `/lazy-spec.create-feature`, `/lazy-spec.create-change`, and `/lazy-spec.create-bug` are thin wrappers that pin the asset type and delegate to the universal `/lazy-spec.create-asset`, which asks type-scaled clarifying questions, authors the prose, and draws the primary behavioural diagram(s).
+
+---
+
+## Can I add use-cases or a UI-design pass to a feature or change before architecture is written?
+
+Yes, on both feature and change assets. `use-cases.md` (written by the use-case-writer) captures actor-level scenarios — main and alternative flows in the user's own language, no system internals — and `ui-design.md` (written by the ui-designer) settles screens, states, and interaction decisions, with self-contained HTML mockups attached beside it; neither ships production code. Both are opt-in: neither is part of `/lazy-spec.create-asset`'s scaffold, and each appears only once its own launch checkbox (`Write use-cases`, `Write ui-design`) is ticked — unless the product or the asset declares it mandatory.
+
+Both hold the step after them. `design.md` is not dispatched (or continued) while a `use-cases.md` sibling exists and hasn't yet reached `approved` or `cancelled` — the use cases are meant to settle before the behaviour they describe is written down for good. `Write architecture` doesn't queue until `ui-design.md` is absent, `approved`, or `cancelled` — the screens are meant to be cast before the module boundaries built to serve them. Once the gap closes, dispatch resumes as an ordinary launch-checkbox job, no special-casing.
+
+Each window closes on its own schedule: `Write use-cases` closes the moment `spec_design_done` closes, and `Write ui-design` closes once `architecture.md` is approved (or, for an asset that never becomes code, once `spec_plan_done` closes instead). Past either window a further revision belongs to a new change asset, not a reopening of this one. An edit landing on `use-cases.md` or `ui-design.md` after the document it feeds has already approved triggers no automatic rewrite — the coordinator drops an `[!attention]` callout into the downstream document and names the edit in `# Status brief`, leaving the decision to fold it in with you.
+
+`/lazy-spec.product-config` Step 8 assigns the use-case-writer and ui-designer roles alongside the other seven, and generates their `use-cases` / `ui-design` review classes the same way it generates every other doc-kind class.
 
 ---
 
@@ -89,7 +101,7 @@ The first two (`spec_design_done`, `spec_plan_done`) are **derived**: readiness 
 
 No. Gate frontmatter is managed entirely by `/lazy-spec.flip-gate` (interactive, or `spec.coordinator` calling it non-interactively once it decides a gate is ready — `lazy-spec.gate-tick` itself no longer touches a gate at all). Editing it by hand bypasses the side-effects — the callout, the `# History` line — that the primitive writes on every flip. Always use `/lazy-spec.flip-gate` for a manual flip; pass `--off` to regress a gate.
 
-Similarly, a doc's per-file stage (`spec_stage` on `design.md`, `code-plan.md`, `test-plan.md`, `bug.md`) is always changed through `/lazy-spec.set-stage`, never by hand-editing frontmatter. That skill rewrites `spec_stage`, mirrors the matching `spec/<stage>` tag in the same edit, and appends a transition line to the folder-note's `# History` section — the two writes never happen separately.
+Similarly, a doc's per-file stage (`spec_stage` on `use-cases.md`, `design.md`, `ui-design.md`, `code-plan.md`, `test-plan.md`, `bug.md`) is always changed through `/lazy-spec.set-stage`, never by hand-editing frontmatter. That skill rewrites `spec_stage`, mirrors the matching `spec/<stage>` tag in the same edit, and appends a transition line to the folder-note's `# History` section — the two writes never happen separately.
 
 ---
 

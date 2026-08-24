@@ -175,27 +175,40 @@ def _add_and_commit(
     *,
     author: Mapping[str, str],
     message_text: str,
-    allow_empty: bool = False,
+    extra_paths: tuple[str, ...] = (),
 ) -> str:
   """
-  Stage `path` and commit with the given message and author identity.
+  Stage `path` and commit it — plus `extra_paths` — under an explicit pathspec.
+
+  The checkout's index is shared with concurrent writers (routines, expert subprocesses,
+  the operator), so the commit always names its paths: a bare commit would snapshot
+  whatever the index happens to hold and publish a stranger's parked work.
+
+  Args:
+    repo: Absolute path to the repository root.
+    path: Absolute path to the file being committed.
+    author: Mapping with `name` and `email` keys for the commit author identity.
+    message_text: Full commit message, trailers included.
+    extra_paths: Repo-relative paths already staged by the caller, folded into the
+      commit's pathspec alongside `path`.
 
   Returns:
     Full SHA of the newly created commit.
   """
-  if path is not None and not allow_empty:
-    # waiver: git CLI vocabulary
-    _run_git(repo, "add", "--", str(path.relative_to(repo)))
-  elif path is not None:
-    # `allow_empty` paired with a path means "stage it if anything
-    # changed; allow empty if nothing did".
-    # waiver: git CLI vocabulary
-    _run_git(repo, "add", "--", str(path.relative_to(repo)))
-  commit_args = [*_author_flags(author), "commit", "-q", "-m", message_text]
-  if allow_empty:
-    # waiver: git CLI vocabulary
-    commit_args.append("--allow-empty")
-  _run_git(repo, *commit_args)
+
+  # Contract:
+  # The commit carries exactly `path` plus `extra_paths` — content staged by anyone else
+  # stays in the index, unpublished.
+
+  # stage the document, then commit under the explicit pathspec
+  # waiver: git CLI vocabulary
+  _run_git(repo, "add", "--", str(path.relative_to(repo)))
+  _run_git(
+      repo, *_author_flags(author),
+      # waiver: git CLI vocabulary
+      "commit", "-q", "-m", message_text,
+      "--", str(path.relative_to(repo)), *extra_paths,
+  )
   # waiver: git CLI vocabulary
   return _run_git(repo, "rev-parse", "HEAD")
 
@@ -362,7 +375,8 @@ def commit_mechanical(
     Full SHA of the new commit.
   """
   # fold the note's icon repaint into this same commit so no separate icons commit follows
-  for extra in repaint_inline(repo, [str(path.relative_to(repo))]):
+  extras = tuple(repaint_inline(repo, [str(path.relative_to(repo))]))
+  for extra in extras:
     # waiver: git CLI vocabulary
     _run_git(repo, "add", "--", extra)
 
@@ -372,6 +386,7 @@ def commit_mechanical(
       repo, path,
       author=author,
       message_text=_build_message(message, trailers),
+      extra_paths=extras,
   )
 
 
@@ -395,10 +410,11 @@ def commit_empty(
   trailers = [
       (Trailer.PHASE, _phase_trailer(phase, expert=expert, round_=round_)),
   ]
-  # No path → don't stage; --allow-empty drives the commit through.
+  # No path → don't stage; --allow-empty drives the commit through, and --only with no
+  # paths pins the tree to HEAD so a concurrently staged foreign file is never published
   commit_args = [
       *_author_flags(author),
-      "commit", "-q", "--allow-empty",
+      "commit", "-q", "--only", "--allow-empty",
       "-m", _build_message(message, trailers),
   ]
   _run_git(repo, *commit_args)

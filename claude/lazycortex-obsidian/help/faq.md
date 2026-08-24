@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Answers to common questions about vault setup, Iconize, diagram render glue, plugin updates, and tag pages for lazycortex-obsidian.
-last_regen: 2026-08-19
+summary: Answers to common questions about vault setup, Iconize, diagram render glue, the vault manifest, plugin updates, and tag pages for lazycortex-obsidian.
+last_regen: 2026-08-24
 no_diagram: true
 source_skills:
   - lazy-obsidian.install
@@ -12,7 +12,9 @@ source_skills:
   - lazy-obsidian.gen-tag-pages
   - lazy-obsidian.update-plugin
   - lazy-obsidian.audit
-source_sha: 1b79c714d76efca72ce97419eb66c032923b60bc
+  - lazy-obsidian.capture
+  - lazy-obsidian.deploy
+source_sha: 1424b48a2f90138fef84328e2fd33c138e6a0f23
 ---
 # Frequently asked questions
 
@@ -120,6 +122,30 @@ Yes. The plugin update refreshes the plugin cache but does not automatically re-
 
 ---
 
+## How do I share my vault's Obsidian configuration across machines or with teammates?
+
+Run `/lazy-obsidian.capture` after changing anything under `.obsidian/` — a plugin installed, a setting tweaked, a snippet added, the theme switched. It snapshots the whole `.obsidian/` surface into one tracked, reviewable file, `.obsidian.manifest.json`, and commits it. On any other checkout — a fresh clone, a machine that has never opened this vault — run `/lazy-obsidian.deploy`, which reads that manifest and rebuilds `.obsidian/`: every plugin fetched at its latest release, your captured settings layered on top, snippets, theme, and top-level config files. Deploy always ends with a reminder to open Obsidian once, since plugins run their own settings migrations on first launch. Both skills take an optional positional argument for the repo root; omit it and they use the current repo.
+
+---
+
+## Why does `/lazy-obsidian.capture` list some settings as "omitted" instead of recording them?
+
+That is deliberate, not an error. The manifest worker refuses to write anything that looks like a secret — an API key, a password — into `.obsidian.manifest.json`, because the manifest is a tracked, committed file. The `secrets_omitted` list names exactly what was left out; enter each of those values by hand in Obsidian on any machine you deploy the manifest to. `/lazy-obsidian.deploy` surfaces the same list in its own report as a reminder.
+
+---
+
+## I already track `.obsidian/**` directly in git. Do I need to switch to the manifest?
+
+Not required, but recommended — a hundred-odd files, several of them rewritten wholesale by the mobile app or by a plugin's own schema migrations, invite merge conflicts on files nobody meant to touch by hand. `/lazy-obsidian.capture` never untracks `.obsidian/` or edits `.gitignore` for you; it only tells you, once, in its summary, the two commands for the one-time migration: add `.obsidian/` to `.gitignore`, then `git rm -r --cached .obsidian`. Run those by hand when you're ready, then rely on capture/deploy going forward.
+
+---
+
+## `/lazy-obsidian.deploy` says a plugin was "served from cache" instead of the latest release. Is that a problem?
+
+Only temporarily. It means GitHub was unreachable, or the plugin's latest release lacked the expected binary assets, so deploy fell back to a vendored copy instead of failing outright. Re-run `/lazy-obsidian.deploy` later once the network is back to pull the real latest release. Nothing else about the deployed vault is affected in the meantime.
+
+---
+
 ## Tag pages are not being created. The agent reports a missing template.
 
 The tag-page template at `.claude/templates/lazy-obsidian.tag-page-template.md` is scaffolded by `/lazy-obsidian.install`. Run it at project scope, then re-run the `lazy-obsidian.gen-tag-pages` agent. If you have customized the template and want to keep your changes, the install skill merges silently unless there is a genuine same-region conflict.
@@ -129,6 +155,12 @@ The tag-page template at `.claude/templates/lazy-obsidian.tag-page-template.md` 
 ## The audit reports a FAIL about version coherence or the icon-map schema. What should I fix first?
 
 Run `/lazy-obsidian.audit` to see the grouped report. For schema failures (worker version constants mismatching hook templates, or `schema_version` outside the supported set), re-running `/lazy-obsidian.iconize-install` migrates the icon-map in place and brings hook templates up to date. For diagram render glue failures (missing or malformed `mermaid-fit.css` / `ascii-fit.css` / `callouts.css`, or a wrong `mermaid-popup` override block), re-running `/lazy-obsidian.install` (snippets) or `/lazy-obsidian.diagram-install` (`mermaid-popup`) resolves them. The audit presents findings one at a time and asks whether to fix, waive, or skip each.
+
+---
+
+## The audit reports "vault manifest drift". What does that mean?
+
+`/lazy-obsidian.audit` compares your live `.obsidian/` config against `.obsidian.manifest.json`, but only when that manifest exists — a vault that has never run `/lazy-obsidian.capture` is skipped with outcome `no-manifest`, which is not a failure. When drift is found, it means the live vault and the recorded manifest disagree, and the audit never guesses which side is right — it presents each entry and lets you choose: run `/lazy-obsidian.capture` if the live vault is correct and should be recorded, or `/lazy-obsidian.deploy` if the manifest is correct and the live vault should be restored from it. A separate `warnings` list (not drift) covers things like a plugin whose installed version moved past what its settings were captured under, or credentials the manifest can never carry.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: lazy-diagram.draw
 description: "Use when a NEW diagram should land under a named heading in a markdown file — an authoring skill reaching a declared draw seam, or a direct request to draw a flow / sequence / state / architecture / layout picture of something. Picks (kind, format) from the free-form request, dispatches the per-format drawer agent, and writes one fenced diagram. For re-conforming a fence that already exists, see `/lazy-diagram.fix`."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, TaskCreate, TaskUpdate, TaskList, Agent
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 ---
 # lazy-diagram.draw
 
@@ -11,7 +11,7 @@ Decide which drawer agent to call, dispatch it, and place the returned fence und
 
 This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Validate inputs`
    - `Step 2 — Discover available kinds`
    - `Step 3 — Resolve kind and format`
@@ -20,8 +20,8 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 6 — Dispatch drawer agent`
    - `Step 7 — Byte-compare and place block`
    - `Step 8 — Report and log`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome line for it". No-ops count only if they produced an explicit outcome word (e.g. `unchanged`, `skipped-below-threshold`, `failed:format-not-supported-for-kind`, `n/a (ascii)`).
-3. **Do not reach Step 8 (Report and log) until `TaskList` shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome line for it". No-ops count only if they produced an explicit outcome word (e.g. `unchanged`, `skipped-below-threshold`, `failed:format-not-supported-for-kind`, `n/a (ascii)`).
+3. **Do not reach Step 8 (Report and log) until the ledger shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one outcome line per step above. A missing line is a bug; do not render the report with gaps.
 
 ## Caller contract
@@ -32,9 +32,9 @@ A skill or agent that invokes `/lazy-diagram.draw` is the SEAM AUTHOR. Every cal
 
 Each invocation is its own numbered substep within the calling skill's Process — never a trailing one-liner. Wrong: "After the prose is written, invoke `/lazy-diagram.draw` ...". Right: a `### Step Xb. Draw <anchor>` substep.
 
-### 2. TaskCreate per seam
+### 2. Ledger entry per seam
 
-The calling skill's preamble MUST include one task per declared invocation, with title of the form `draw-diagram <file>:<anchor>:<kind|auto>`. The task's outcome word is this skill's return value: `created` / `replaced` / `unchanged` / `skipped-below-threshold` / `failed:<reason>` / `split-into-N`.
+The calling skill's preamble MUST include one step-ledger entry per declared invocation, with title of the form `draw-diagram <file>:<anchor>:<kind|auto>`. The entry's outcome word is this skill's return value: `created` / `replaced` / `unchanged` / `skipped-below-threshold` / `failed:<reason>` / `split-into-N`.
 
 ### 3. Verify section diffs declared seams against run logs
 
@@ -182,7 +182,7 @@ Render a markdown report. Format:
 target_file=<path> anchor=<anchor> kind=<kind> format=<format> outcome=<final-outcome-word>
 ```
 
-`<final-outcome-word>` is the value the caller's TaskCreate task records: `created` / `replaced` / `unchanged` / `skipped-below-threshold` / `failed:<reason>` / `split-into-N`.
+`<final-outcome-word>` is the value the caller's ledger entry records: `created` / `replaced` / `unchanged` / `skipped-below-threshold` / `failed:<reason>` / `split-into-N`.
 
 Then write the run log per `./.claude/rules/lazy-log.logging.md`:
 

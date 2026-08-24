@@ -6,9 +6,14 @@ Pre/PostToolUse + Stop/SubagentStop hook guarding the shared git index against a
 Two independent behaviours, selected per repo by `lazy.settings.json["git"]`:
 
 - `pathspec_enabled` (default) — the index belongs to the operator. Commits must name their
-  paths; `git add` may only register an intent-to-add; `git rm` / `git mv` are refused. The lock
-  machinery stays dormant, and the Stop branch never nags (a non-empty index is operator
-  parking, not the session's unfinished work).
+  paths; `git add` may only register an intent-to-add; `git rm` / `git mv` are refused. A commit
+  additionally requires an index free of staged content (intent-to-add entries aside): the hook
+  waits out a short window and then denies, and after a commit ran it alarms when staged content
+  is still present — the signature of the shared index swapped for a partial commit's temporary
+  index. After a pull / merge / rebase it likewise alarms when the staged content is exactly a
+  lagging index — the worktree matching `HEAD` on every staged path. The lock machinery stays
+  dormant, and the Stop branch never nags (a non-empty index is operator parking, not the
+  session's unfinished work).
 - `mutex_enabled` without `pathspec_enabled` — the staging-window mutex: serialize staging
   across sessions and refuse to end a turn with a non-empty index.
 
@@ -32,9 +37,11 @@ from __future__ import annotations
 # pylint: disable=import-error,wrong-import-position
 
 import json
+import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from typing import TYPE_CHECKING
@@ -123,6 +130,35 @@ _DENY_MCP = (
   "the MCP git tools cannot carry a pathspec, so they always snapshot the whole shared index. "
   f"Use Bash instead — {_REQUIRED_FORM}."
 )
+_DENY_DIRTY_INDEX = (
+  "the shared git index is not clean, and a session commit must not run over staged content — "
+  "everything staged belongs to the operator: parked work, an intentional untrack, or a swapped "
+  "index. Stop and escalate to the operator; do not touch the index yourself, and do not retry "
+  "until `git diff --cached` is empty."
+)
+_POST_SWAP_ALARM = (
+  "ALARM — the index is non-empty right after this commit, but the clean-index precondition held "
+  "before it ran. The shared `.git/index` was likely swapped by the partial commit's temporary "
+  "index. Surface this to the operator now; the cure is `git reset` (rebuilds the index from "
+  "HEAD, worktree untouched), run by the operator — never by the session. Run no further git "
+  "index operations until it is resolved."
+)
+_POST_LAG_ALARM = (
+  "ALARM — staged content right after this pull/merge/rebase, and every staged path's worktree "
+  "file matches HEAD: the shared `.git/index` lagged behind the fast-forward (an index write "
+  "lost a race), nobody staged anything. Surface this to the operator now; the cure is `git "
+  "reset` (rebuilds the index from HEAD, worktree untouched), run by the operator — never by "
+  "the session. Run no further git index operations until it is resolved."
+)
+
+# --- Clean-index precondition ------------------------------------------------
+
+# Total time the precondition polls a dirty index before denying, and the pause between probes.
+# The env variable is an operator-facing override of the wait window — shorten it to fail fast
+# or stretch it for a slow staging workflow; an unparseable value falls back to the default.
+_DIRTY_INDEX_WAIT_ENV = "LAZYCORTEX_GIT_GUARD_WAIT_SECONDS"
+_DIRTY_INDEX_WAIT_SECONDS = 15.0
+_DIRTY_INDEX_POLL_SECONDS = 1.0
 
 
 def _gate(tool_name: str, tool_input: dict) -> tuple[bool, str]:
@@ -135,7 +171,8 @@ def _gate(tool_name: str, tool_input: dict) -> tuple[bool, str]:
 
   Returns:
     A tuple `(relevant, verb)` where `relevant` is True when the call touches the git index and
-    `verb` is one of `add`, `rm`, `mv`, `reset`, `commit` (empty string when irrelevant).
+    `verb` is one of `add`, `rm`, `mv`, `reset`, `commit`, `checkout`, `restore` (empty string
+    when irrelevant).
   """
   # Bash branch: match the command against the index-verb regex.
   # waiver: external Claude Code tool name, not a domain key
@@ -267,9 +304,9 @@ def main() -> int:
 
   # Pathspec row: the index belongs to the operator, the lock machinery stays dormant.
   if cfg.pathspec_enabled:
-    # guard: nothing to release — the pathspec row never takes a lock
+    # after a commit ran, verify the index survived it; before, apply the discipline
     if is_post:
-      return 0
+      return _handle_post_pathspec(repo, tool_name, tool_input)
     return _handle_pre_pathspec(repo, tool_name, tool_input)
 
   # guard: mutex row disabled too — guard silent
@@ -329,8 +366,7 @@ def _handle_pre(repo: Path, session_id: str, verb: str, cfg: staging_lock.Stagin
   if verb in _DIAGNOSTIC_ONLY_VERBS:
     peer = staging_lock.inspect(repo)
     if peer and peer.session_id != session_id:
-      # waiver: stdlib module name for __import__, not a domain constant
-      age = int(__import__("time").time() - peer.started_at)
+      age = int(time.time() - peer.started_at)
       _emit_context(
         f"peer session {peer.session_id} holds the staging lock on {peer.branch} "
         f"(PID {peer.pid}, {age}s old) — proceeding with this commit anyway.",
@@ -391,6 +427,82 @@ def _handle_pre_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
     if reason:
       _emit_deny(reason)
       return 0
+  return 0
+
+
+def _handle_post_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
+  """
+  Apply the PostToolUse branch of the pathspec discipline — the index-health alarm.
+
+  The clean-index precondition guarantees a session commit started over an index free of staged
+  content, so staged content present right after one is the signature of the shared index being
+  swapped for the partial commit's temporary index. After a pull / merge / rebase the same probe
+  catches a lagging index — staged paths whose worktree files match HEAD mean the index write
+  lost a race to the fast-forward, not that anyone staged. This branch only diagnoses; it never
+  blocks and never touches the index itself.
+
+  Args:
+    repo: Absolute path to the repository root.
+    tool_name: The Claude Code tool identifier.
+    tool_input: The tool's input payload as delivered by Claude Code.
+
+  Returns:
+    Always 0; the alarm is signaled via the emitted JSON payload.
+  """
+
+  # Domain(guard.git-staging):
+  # # Partial commit runs against a temporary index
+  # A commit that names explicit paths builds a temporary index holding only those paths, computes
+  # the commit against it, then discards the temporary file, leaving the real index untouched. On a
+  # crash mid-commit, or a race where another party touches the shared index at the same moment,
+  # that temporary file can end up written into place as the real index instead of being discarded.
+  # The worktree is never touched by this failure — only the index is corrupted — so the visible
+  # symptom is that nearly every tracked file now reads as staged for deletion, even though the
+  # file itself is still present and unchanged on disk.
+
+  # guard: the index-writing MCP tools are denied at Pre on this row — no commit ever ran
+  # waiver: external Claude Code tool name, not a domain key
+  if tool_name != "Bash":
+    return 0
+  # waiver: external-format tool-input field name, not an internal key
+  segments = git_cmdline.parse_segments(tool_input.get("command", ""))
+  # guard: untokenisable command — nothing to attribute a commit to, stay silent at Post
+  if segments is None:
+    return 0
+  # waiver: git CLI vocabulary, not a domain constant
+  commit_ran = any(
+    seg.verb == "commit" and (seg.repo_dir is None or _targets_this_repo(repo, seg.repo_dir))
+    for seg in segments
+  )
+  # waiver: git CLI vocabulary, not a domain constant
+  sync_ran = any(
+    seg.verb in ("pull", "merge", "rebase")
+    and (seg.repo_dir is None or _targets_this_repo(repo, seg.repo_dir))
+    for seg in segments
+  )
+  # guard: only a commit or a history-sync verb against this repo can leave the index behind
+  if not commit_ran and not sync_ran:
+    return 0
+  git_dir = _git_dir(repo)
+  # guard: mid merge / rebase / cherry-pick a full index is legitimate (the verb may have failed)
+  if git_dir is not None and _mid_operation(git_dir):
+    return 0
+  staged = _content_staged_paths(repo)
+  # guard: index is clean — the verb left it exactly as it found it
+  if not staged:
+    return 0
+  # a commit runs over a precondition-checked index, so any leftover is the swap signature
+  if commit_ran:
+    _emit_context(_POST_SWAP_ALARM)
+    return 0
+
+  # a sync verb alarms only on the lag signature — worktree identical to HEAD for every staged
+  # path; anything else may be the operator's parked stage riding across the sync
+  if _worktree_matches_head(repo, staged):
+    _emit_context(_POST_LAG_ALARM)
+    return 0
+
+  # parked operator content rode across the sync verb — none of the session's business
   return 0
 
 
@@ -481,9 +593,9 @@ def _pathspec_violation(repo: Path, segment: git_cmdline.GitSegment) -> str | No
   # guard: a directory pathspec sweeps in whatever is parked beneath it
   if any((repo / p).is_dir() for p in segment.pathspecs):
     return _DENY_COMMIT_DIR
-  # guard: every committed path is named explicitly
+  # guard: every committed path is named explicitly — the clean-index precondition still applies
   if not git_cmdline.is_indexful_commit(segment):
-    return None
+    return _await_clean_index(repo)
   # guard: an amend against a clean index only rewrites the previous commit
   if git_cmdline.is_amend(segment) and not _staged_paths(repo):
     return None
@@ -596,6 +708,119 @@ def _mid_operation(git_dir: Path) -> bool:
   )
 
 
+def _content_staged_paths(cwd: Path) -> list[str]:
+  """
+  Return the staged paths that carry content — intent-to-add registrations excluded.
+
+  Args:
+    cwd: Directory to check; must be inside the repository of interest.
+
+  Returns:
+    List of repo-relative paths whose index entry differs from `HEAD` by actual content. An
+    intent-to-add entry (`git add -N`) stages nothing and is never listed; on a git too old for
+    the excluding flag the full staged list is returned instead, intent-to-add entries included.
+    Empty list when the index is clean.
+  """
+
+  # Domain(guard.git-staging):
+  # # Intent-to-add is invisible to the staged-content probe
+  # An intent-to-add registration stages no content — it only records that a path now exists — so
+  # it must never count as staged content when judging whether an index is clean. Modern git can be
+  # asked to leave such entries out of a diff against the index; git older than the version that
+  # introduced that exclusion has no way to leave them out, so on that older git an intent-to-add
+  # entry counts as staged content instead. The fallback is stricter, never looser, than the
+  # intended rule.
+
+  # Modern git omits intent-to-add entries from `diff --cached` by itself; the flag pins that
+  # behaviour on the 2.11..2.27 range where they would otherwise appear.
+  # waiver: git CLI vocabulary, not domain constants
+  r = _git_at(cwd, "diff", "--cached", "--name-only", "--ita-invisible-in-index")
+  # guard: the flag postdates the 2.10 git floor — on the one minor below it, retry without the
+  # flag (stricter: intent-to-add entries then count as content) rather than fail
+  if r.returncode != 0:
+    return _staged_paths(cwd)
+  return [ line for line in r.stdout.splitlines() if line.strip() ]
+
+
+def _worktree_matches_head(cwd: Path, paths: list[str]) -> bool:
+  """
+  Report whether every given path's worktree file is identical to its `HEAD` version.
+
+  Args:
+    cwd: Directory to check; must be inside the repository of interest.
+    paths: Repo-relative paths to compare; must be non-empty.
+
+  Returns:
+    True when `HEAD` and the worktree agree on every path — the staged entries for them are
+    then the only divergence, the lagging-index signature. False on any real worktree
+    difference, and on a git failure (a probe that cannot prove the signature must not alarm).
+  """
+
+  # Domain(guard.git-staging):
+  # # A fast-forward can leave the shared index behind
+  # A fast-forward rewrites the branch tip, the worktree, and the index together. When another
+  # party writes the shared index file at the same moment, the pulled entries can be lost from
+  # the index while the tip and the worktree already carry the new state. The visible symptom is
+  # staged content nobody staged, reverting exactly the pulled changes, while every affected
+  # file on disk is identical to the committed state.
+
+  # waiver: git CLI vocabulary, not domain constants
+  r = _git_at(cwd, "diff", "--quiet", "HEAD", "--", *paths)
+  return r.returncode == 0
+
+
+def _await_clean_index(repo: Path) -> str | None:
+  """
+  Enforce the clean-index precondition for one explicit-path commit, waiting out a busy operator.
+
+  Polls the index for a bounded window so a commit racing the tail of an operator's staging
+  burst can proceed once the index empties; a window of zero checks exactly once.
+
+  Notes:
+    - Blocks the calling hook for up to the wait window (15 s by default) while staged content
+      remains, sleeping between probes.
+    - Reads the `LAZYCORTEX_GIT_GUARD_WAIT_SECONDS` environment variable as an override of the
+      wait window.
+
+  Args:
+    repo: Absolute path to the repository root.
+
+  Returns:
+    The refusal reason when staged content remains after the wait window, or None when the
+    index is (or becomes) free of staged content.
+  """
+
+  # Domain(guard.git-staging):
+  # # Clean-index precondition around a session commit
+  # A session never stages content itself, so a session-issued commit must start from an index free
+  # of staged content — anything already staged there belongs to someone else and must not be swept
+  # into the commit. When a dirty index blocks a commit, the refusal escalates to the operator without
+  # prescribing a recovery command: staged content may be the operator's parked work, an intentional
+  # untrack, or a swapped index, and a session has no way to tell these apart. Finding staged content
+  # immediately after a session commit ran is the signature that the shared index was swapped for the
+  # partial commit's own temporary index, rather than genuinely dirtied by a peer in the meantime. The
+  # cure is to rebuild the index from the last commit, which leaves the worktree untouched — but that
+  # recovery is the operator's move alone; a session only raises the alarm and never runs it.
+
+  # Resolve the wait window, honouring the test-harness override.
+  try:
+    wait = float(os.environ.get(_DIRTY_INDEX_WAIT_ENV, _DIRTY_INDEX_WAIT_SECONDS))
+  except ValueError:
+    wait = _DIRTY_INDEX_WAIT_SECONDS
+
+  # Poll until the index frees up or the window closes.
+  deadline = time.monotonic() + wait
+  while True:
+    # guard: no staged content — the precondition holds
+    if not _content_staged_paths(repo):
+      return None
+    remaining = deadline - time.monotonic()
+    # guard: window closed with content still staged
+    if remaining <= 0:
+      return _DENY_DIRTY_INDEX
+    time.sleep(min(_DIRTY_INDEX_POLL_SECONDS, remaining))
+
+
 def _staged_paths(cwd: Path) -> list[str]:
   """
   Return the list of repo-relative paths currently in the git index.
@@ -620,10 +845,11 @@ def _handle_stop(payload: dict) -> int:
   """
   Apply the Stop / SubagentStop branch — refuse to end the turn while the git index is non-empty.
 
-  Belongs to the mutex row only. Skips silently when the operator cwd is outside a git repo,
-  when the repo is mid-transaction (merge / rebase / cherry-pick / revert), when the per-repo
-  kill-switch is off, when the pathspec row is active, or when the index is already clean.
-  Otherwise emits a `decision: block` payload with a preview of the
+  Belongs to the mutex row only. Skips silently when the operator cwd is outside a git repo or
+  inside a linked worktree (whose index is private), when the repo is mid-transaction (merge /
+  rebase / cherry-pick / revert), when the per-repo kill-switch is off, when the pathspec row is
+  active, when the index is already clean, or when the staged content belongs to another
+  session. Otherwise emits a `decision: block` payload with a preview of the
   staged paths and the three recovery commands the operator can run.
 
   Args:

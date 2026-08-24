@@ -1,7 +1,7 @@
 ---
 name: lazy-review.configure
 description: "Run when the operator wants a new kind of document to go through review, wants to change which paths a review class matches, or wants to reassign who writes / validates / closes out / narrates it. Wizard over `review.classes` in `.claude/lazy.settings.json`, one question per turn via AskUserQuestion; read-first, so an already-configured class is re-validated without a single prompt. Requires `/lazy-review.install` to have run."
-allowed-tools: Read, Edit, Write, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, TaskGet, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Agent
+allowed-tools: Read, Edit, Write, AskUserQuestion, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Agent
 ---
 # lazy-review.configure
 
@@ -13,14 +13,14 @@ Prerequisite: `/lazy-review.install` has run (the settings file exists).
 
 This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step.
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. Canonical titles:
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Canonical titles:
    - `Phase 1 — Verify install + load settings`
    - `Phase 2 — Collect class paths`
    - `Phase 3 — Collect writer groups`
    - `Phase 4 — Pick edit_marker_style`
    - `Phase 5 — Write back + run /lazy-review.audit`
    - `Report`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** Outcomes: `verified` / `collected` / `read-from-record` / `picked` / `written` / `audited` / `report-emitted`.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Outcomes: `verified` / `collected` / `read-from-record` / `picked` / `written` / `audited` / `report-emitted`.
 3. **Do not reach the Report step until every prior task is `completed`.**
 
 ## Read-first principle (applies to every question below)
@@ -84,7 +84,7 @@ Outcome: `picked` (asked) or `read-from-record` (reused the persisted style).
 
 ## Phase 5 — Write back + run /lazy-review.audit
 
-Serialize the updated settings via `Write` to `.claude/lazy.settings.json`. Then widen the coordinator's watch scope so this class's documents actually reach it — but only when `routines["lazy-review.coordinator-watch"]` is present. The daemon-gated routine may be absent (a daemon-disabled project, per `/lazy-review.install` Step 2 outcome `skipped-daemon-disabled`); if it is missing, skip this normalization silently — there is no watch to feed.
+Serialize the updated settings via `Write` to `.claude/lazy.settings.json`. Then widen the coordinator's watch scope so this class's documents actually reach it — but only when `routines["lazy-review.coordinator-watch"]` is present. The routine may be absent on a repo where `/lazy-review.install` has not run yet; if it is missing, skip this normalization silently — there is no watch to feed.
 
 The watch carries **one** pathspec, not a list — core's git-watch takes a single `path_filter` — so the scope is one directory root that must contain every class:
 

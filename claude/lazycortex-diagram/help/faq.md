@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about kind/format selection, scheme palettes, draw vs fix, ASCII vs mermaid, density bounds, split behaviour, direct agent invocation, and install.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 no_diagram: true
 source_skills:
   - lazy-diagram.draw
@@ -9,7 +9,7 @@ source_skills:
   - lazy-diagram.draw-mermaid
   - lazy-diagram.draw-ascii
   - lazy-diagram.install
-source_sha: dd568a4ee2fbb367826851a45f41e55c5c10ad9f
+source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
 ---
 # Frequently asked questions
 
@@ -83,7 +83,7 @@ These three kinds render as mermaid's `block-beta` syntax, which expresses relat
 
 ## Can I embed a diagram inside another skill I am writing?
 
-Yes. Follow the Caller contract in the `lazy-diagram.draw` SKILL.md. The contract has four clauses: (1) each invocation must be its own numbered substep in the calling skill's Process — never a trailing one-liner; (2) the calling skill's preamble must declare one `TaskCreate` task per invocation with a title of the form `draw-diagram <file>:<anchor>:<kind|auto>`; (3) the calling skill must include a `## Verify` section that diffs its declared seam set against the run logs written by the dispatcher under `./.logs/claude/lazy-diagram.draw/` — any non-empty difference is a verify failure; (4) a section that has a declared draw seam must carry no other visual-authoring placeholder (no ASCII sketch, no boxed-text diagram) — the seam invocation is the artifact.
+Yes. Follow the Caller contract in the `lazy-diagram.draw` SKILL.md. The contract has four clauses: (1) each invocation must be its own numbered substep in the calling skill's Process — never a trailing one-liner; (2) the calling skill's preamble must declare one step-ledger entry per invocation with a title of the form `draw-diagram <file>:<anchor>:<kind|auto>`; (3) the calling skill must include a `## Verify` section that diffs its declared seam set against the run logs written by the dispatcher under `./.logs/claude/lazy-diagram.draw/` — any non-empty difference is a verify failure; (4) a section that has a declared draw seam must carry no other visual-authoring placeholder (no ASCII sketch, no boxed-text diagram) — the seam invocation is the artifact.
 
 ---
 

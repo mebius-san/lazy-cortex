@@ -13,9 +13,9 @@ Prerequisite: `/lazy-wiki.install` has run (the `wiki` settings section exists).
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has six mutually exclusive branches; exactly one runs per invocation. The **scope branch** (default) has 9 ordered steps plus Report; the **domains branch** (argument `domains`, or the operator asks to configure domain specs) has 5 ordered steps plus Report; the **mirror branch** (argument `mirror`, or the operator asks to mirror a foreign repo into the wiki) has 5 ordered steps plus Report; the **terms branch** (argument `terms`, or the operator asks to set up a terms dictionary) has 7 ordered steps plus Report; the **structure branch** (argument `structure`, or the operator asks to configure the structure map) has 5 ordered steps plus Report; the **vault branch** (argument `vault`, or the operator asks to edit the axis vocabulary or the repository-wide exclusions) has 4 ordered steps plus Report. The executing agent MUST NOT skip, merge, reorder, or silently omit any step of the chosen branch. To make dropped steps structurally impossible:
+This skill has six mutually exclusive branches; exactly one runs per invocation. The **scope branch** (default) has 9 ordered steps plus Report; the **domains branch** (argument `domains`, or the operator asks to configure domain specs) has 5 ordered steps plus Report; the **mirror branch** (argument `mirror`, or the operator asks to mirror a foreign repo into the wiki) has 5 ordered steps plus Report; the **terms branch** (argument `terms`, or the operator asks to set up a terms dictionary) has 7 ordered steps plus Report; the **structure branch** (argument `structure`, or the operator asks to configure the structure map) has 6 ordered steps plus Report; the **vault branch** (argument `vault`, or the operator asks to edit the axis vocabulary or the repository-wide exclusions) has 4 ordered steps plus Report. The executing agent MUST NOT skip, merge, reorder, or silently omit any step of the chosen branch. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, decide the branch from the invocation, then call `TaskCreate` with exactly one task per step of that branch — no merging, no abbreviation, no renaming, and no tasks from another branch. The scope branch's canonical list (use these titles verbatim; each other branch's list is in its own section below):
+1. **Before calling any other tool**, decide the branch from the invocation, then write out the step ledger — one line per step of that branch, each marked `pending` — no merging, no abbreviation, no renaming, and no entries from another branch. The scope branch's canonical list (use these titles verbatim; each other branch's list is in its own section below):
    - `Phase 1 — Verify install + load settings`
    - `Phase 2 — Collect scope id`
    - `Phase 3 — Collect paths globs`
@@ -26,7 +26,7 @@ This skill has six mutually exclusive branches; exactly one runs per invocation.
    - `Phase 8 — Write back + log`
    - `Phase 9 — Refresh navigation-rule Coverage`
    - `Report`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** Outcomes: `verified` / `collected` / `skipped-per-user-choice` / `written` / `logged` / `refreshed` / `unchanged` / `absent` / `report-emitted`.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Outcomes: `verified` / `collected` / `skipped-per-user-choice` / `written` / `logged` / `refreshed` / `unchanged` / `absent` / `report-emitted`.
 3. **Do not reach the Report step until every prior task is `completed`.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 5. **Orient before the branch's first `AskUserQuestion`.** Print two to four lines naming what the section governs, which artifact it produces and where that artifact lives, and what the values being collected mean — the vocabulary of the questions ahead (`depth_profiles` classes and their three depths, `source_exclude` versus `exclude_paths`, `tag_axes`, a `mirror` block). An operator who has not read this SKILL.md cannot answer a question phrased in its internal vocabulary, and a guessed answer is written to settings as a decision. Say it once per invocation, before the first question; do not repeat it per question.
@@ -375,9 +375,7 @@ Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.term
 
 **Edit mode rewrites rather than patches.** The registrar refuses to overwrite an existing record, so when `paths` changed, first `Skill(skill: "lazycortex-core:lazy-routine.unregister", args: "name=lazy-wiki.terms-scan-<id>")`, then register again with the new `path_filter`. **Remove mode** unregisters and stops.
 
-When `daemon.enabled` is `false` in the tracked settings, skip the registration silently and state `skipped-daemon-disabled` — a routine that cannot fire is dead config, and the dictionary is still readable and still curatable by hand.
-
-Outcome: `registered` / `re-registered` / `unregistered` / `skipped-daemon-disabled`.
+Outcome: `registered` / `re-registered` / `unregistered`.
 
 ### Terms 7 — Log + pointers
 
@@ -446,11 +444,9 @@ Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.stru
 
 The rename routine carries a **different** `request` because `renamed_files` exposes different placeholders — `{old_path}` / `{new_path}`, not `{path}` / `{status}`; a shared template would `KeyError` on substitution and fail the tick on every rename. `path_filter` is omitted deliberately — the routines watch the whole tracked tree; the fine-grained cut is `exclude`, applied by the curator. The `review_active` filter keeps documents under an open review out of the map until the review closes and the file changes one last time; files without frontmatter pass it (`not_in [true]` holds for an absent key).
 
-When `daemon.enabled` is `false` in the tracked settings, skip all three silently and state `skipped-daemon-disabled` — the map still works through `/lazy-wiki.structure rebuild`.
-
 Edit mode: a routine already registered is left as is (`already-present`); when the section was reconfigured in a way the routines do not carry (they have no `path_filter`), nothing needs re-registering.
 
-Outcome: `registered` / `already-present` / `skipped-daemon-disabled`.
+Outcome: `registered` / `already-present`.
 
 ### Structure 6 — Log + pointers
 
@@ -506,7 +502,7 @@ Outcome: `written` and `logged`.
 
 ## Report
 
-One line per task in the canonical list of the branch that ran, with its outcome word. Scope-branch summary line: `scope <id> <created|updated>: paths=<count>, tag_axes=[<axes>], topics_index=<path>, review-skip=<on|off>, folder_note=<value held in the filter>`. Domains-branch summary line: `wiki.domains <created|updated>: code=<count>, dictionary=<path>, output=<path>, language=<language>`. Mirror-branch summary line: `scope <id> mirror <created|updated>: url=<url>, source_paths=<count>, exclude=<count>, mirror_path=<path>`. Terms-branch summary line: `terms scope <id> <created|updated|removed>: paths=<count>, file=<path>, source_exclude=<count>, routine=<registered|re-registered|unregistered|skipped-daemon-disabled>`. Structure-branch summary line: `structure <created|updated>: classes=<count>, exclude=<count>, routines=<registered|already-present|skipped-daemon-disabled>`. Vault-branch summary line: `wiki vault updated: tag_axes=[<axes>], exclude=<count>`.
+One line per task in the canonical list of the branch that ran, with its outcome word. Scope-branch summary line: `scope <id> <created|updated>: paths=<count>, tag_axes=[<axes>], topics_index=<path>, review-skip=<on|off>, folder_note=<value held in the filter>`. Domains-branch summary line: `wiki.domains <created|updated>: code=<count>, dictionary=<path>, output=<path>, language=<language>`. Mirror-branch summary line: `scope <id> mirror <created|updated>: url=<url>, source_paths=<count>, exclude=<count>, mirror_path=<path>`. Terms-branch summary line: `terms scope <id> <created|updated|removed>: paths=<count>, file=<path>, source_exclude=<count>, routine=<registered|re-registered|unregistered>`. Structure-branch summary line: `structure <created|updated>: classes=<count>, exclude=<count>, routines=<registered|already-present>`. Vault-branch summary line: `wiki vault updated: tag_axes=[<axes>], exclude=<count>`.
 
 ## Failure modes
 
@@ -519,4 +515,3 @@ One line per task in the canonical list of the branch that ran, with its outcome
 - **Mirror 1 aborts: "no scopes configured"** — the mirror block nests inside an existing scope → create the scope with `/lazy-wiki.configure` first, then re-run `/lazy-wiki.configure mirror`.
 - **Terms 1 aborts: "the `terms` section is missing"** — `lazy.settings.json` predates the terms mechanism → run `/lazy-wiki.install`, then re-run `/lazy-wiki.configure terms`.
 - **Terms 2 re-asks on an overlapping glob** — another terms scope already serves a document the new globs would match, and one document belongs to one dictionary → narrow the globs, or edit the colliding scope instead.
-- **Terms 6 reports `skipped-daemon-disabled`** — the project does not run the background daemon, so nothing dispatches the curator → the dictionary still works for reading; run the terms section of `/lazy-wiki.doctor` to fill and check it by hand.

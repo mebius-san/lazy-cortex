@@ -63,6 +63,7 @@ class JobMarker:
     COORDINATOR_JOB: The id of the coordinator job currently in flight on the document.
     ACTIVE_JOB: The id of the expert job currently in flight on the document.
     PENDING_WAKE: The wake the postman raised and the watch worker has yet to consume.
+    LAST_SEEN_SHA: The last git-watch item sha the wake worker judged for this document.
     JOB_DONE: The `PENDING_WAKE` value a landed expert payload raises.
     KIND_COORDINATOR: The `mark-job` CLI token selecting `COORDINATOR_JOB`.
     KIND_WRITER: The `mark-job` CLI token selecting `ACTIVE_JOB`.
@@ -71,6 +72,7 @@ class JobMarker:
   COORDINATOR_JOB = "coordinator_job"
   ACTIVE_JOB = "active_job"
   PENDING_WAKE = "pending_wake"
+  LAST_SEEN_SHA = "last_seen_sha"
   JOB_DONE = "job-done"
   KIND_COORDINATOR = "coordinator"
   KIND_WRITER = "writer"

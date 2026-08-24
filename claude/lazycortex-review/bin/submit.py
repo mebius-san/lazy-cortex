@@ -257,11 +257,13 @@ def _atomic_commit(file_path: Path) -> None:
       ["git", "add", "--", str(file_path.name)],
       cwd=cwd, check=True, capture_output=True,
   )
+  # the pathspec keeps a concurrently staged foreign file out of the submit commit
   subprocess.run(
       [
           "git", "commit", "-q",
           "-m", f"review: submit {file_path.name}",
           "-m", f"{Trailer.PHASE}: {Phase.INITIAL}",
+          "--", str(file_path.name),
       ],
       cwd=cwd, check=True, capture_output=True,
   )

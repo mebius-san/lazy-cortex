@@ -1,7 +1,7 @@
 ---
 name: lazy-spec.add-asset-type
 description: "Use when a product must grow a new kind of asset beyond the shipped feature / change / bug / content / research set — characters, scenes, chapters, endpoints, whatever the operator names — or when `lazy-spec.request-classify` has no type to route a request into. Writes the type declaration into `products[<key>].asset_types.<name>` and settles the playbook the coordinator will work assets of that type under; review coverage is automatic, so it never touches `review.classes`."
-allowed-tools: Read, Glob, Grep, Bash, Edit, Write, AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent
+allowed-tools: Read, Glob, Grep, Bash, Edit, Write, AskUserQuestion, Agent
 ---
 # Add Asset Type
 
@@ -15,7 +15,7 @@ The type's per-block config is `{ "icon": <icon>, "color"?: <hex>, "playbook": <
 
 This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. Use these canonical titles verbatim:
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Use these canonical titles verbatim:
    - `Step 1 — Resolve the product`
    - `Step 2 — Ask the type name`
    - `Step 3 — Ask the icon + color`
@@ -25,8 +25,8 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 7 — Write the type block`
    - `Step 8 — Choose the type playbook`
    - `Step 9 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". A no-op counts only when it emits an explicit outcome (`unchanged`, `skipped-per-user-choice`, …).
-3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it". A no-op counts only when it emits an explicit outcome (`unchanged`, `skipped-per-user-choice`, …).
+3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
 ## Input

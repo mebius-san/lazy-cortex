@@ -92,6 +92,22 @@
       "append_only": true,
       "icon": "LiGavel",
       "color": "#94a3b8"
+    },
+    "use-cases": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiListChecks",
+      "color": "#94a3b8",
+      "template": "use-cases.md"
+    },
+    "ui-design": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiLayoutDashboard",
+      "color": "#94a3b8",
+      "template": "ui-design.md"
     }
   }
 }

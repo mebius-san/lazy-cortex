@@ -23,4 +23,4 @@ Mermaid and ASCII diagrams in long-running docs drift from house style as palett
 2. Run `/lazy-diagram.install` to wire local config.
 3. Insert a new diagram: `/lazy-diagram.draw target_file=<abs path> anchor_section="## <H2>" request="<one-line description>"`. The skill picks `(kind, format)`, dispatches the per-format writer agent, and writes a fence under the heading.
 4. Re-conform an existing diagram: `/lazy-diagram.fix target_file=<abs path> anchor_section="## <H2>"`. The skill infers `(kind, format)` from the fence and rewrites it against the current scheme.
-5. To embed diagram seams inside another skill, follow the `Caller contract` in `skills/lazy-diagram.draw/SKILL.md` (numbered substep, per-seam TaskCreate, Verify section).
+5. To embed diagram seams inside another skill, follow the `Caller contract` in `skills/lazy-diagram.draw/SKILL.md` (numbered substep, per-seam ledger entry, Verify section).

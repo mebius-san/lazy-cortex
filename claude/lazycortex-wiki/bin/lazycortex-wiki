@@ -69,6 +69,7 @@ _SUBCOMMANDS = {
   "build-index":    "Rebuild the topics.md index from current node tags.",
   "collect-tags":   "Survey distinct tag values per axis across a scope, as JSON.",
   "retag":          "Apply an axis-value alias map to a scope's node tags.",
+  "tag-tick":       "Survey every tag surface and dispatch a tag-curator job for each non-empty one.",
   "doctor":         "Audit scope integrity: broken links, missing summaries, stale glosses.",
   "domain-plan":    "Compute the domain-spec plan (changed/orphaned/unknown groups, index state) as JSON.",
   "domain-apply-index": "Rebuild the domains.md index from the dictionary and the docs on disk.",
@@ -115,6 +116,7 @@ class Cli:
   _CMD_DOCTOR         = "doctor"
   _CMD_COLLECT_TAGS   = "collect-tags"
   _CMD_RETAG          = "retag"
+  _CMD_TAG_TICK       = "tag-tick"
   _CMD_DOMAIN_PLAN    = "domain-plan"
   _CMD_DOMAIN_APPLY_INDEX = "domain-apply-index"
   _CMD_DOMAIN_TICK    = "domain-tick"
@@ -136,6 +138,10 @@ class Cli:
   _ARG_PROCESS_PATH_HELP   = "Git-item JSON string or bare file path to process."
   _ARG_SCOPE_ID            = "scope_id"
   _ARG_SCOPE_ID_HELP       = "Scope identifier as defined in lazy.settings.json[wiki.scopes]."
+  _ARG_TAG_SURFACE_HELP    = (
+    "Scope identifier as defined in lazy.settings.json[wiki.scopes]. "
+    "'domains' is reserved for the generated domain-docs surface."
+  )
   _ARG_DOCTOR_SCOPE_ID_HELP = "Scope id to audit; omit to audit every configured scope."
   _ARG_RELINK_SCOPE_ID_HELP = "Scope id to plan a relink pass for."
   _ARG_RELINK_ALL_SCOPE_ID_HELP = (
@@ -189,6 +195,16 @@ class Cli:
   _PAYLOAD_EXISTING_TAGS     = "existing_tags"
   _PAYLOAD_TOPICS_INDEX_CONT = "topics_index_content"
 
+  # Payload field names for the tag-curator dispatch bundle.
+  _PAYLOAD_SURFACE        = "surface"
+  _PAYLOAD_TAG_DICTIONARY = "tag_dictionary"
+
+  # Field names of the per-surface JSON line `tag-tick` prints.
+  _TICK_SURFACE    = "surface"
+  _TICK_DISPATCHED = "dispatched"
+  _TICK_REASON     = "reason"
+  _TICK_EMPTY      = "empty"
+
   # argparse help string for dispatch-link path argument.
   _ARG_DISPATCH_LINK_PATH_HELP = "Absolute path to the node file to dispatch a link job for."
 
@@ -197,15 +213,6 @@ class Cli:
   _ARG_FULL                  = "--full"
   _ARG_FULL_DEST             = "full"
   _ARG_FULL_HELP             = "Full pass: skip the trigger-path filter (the schedule-routine mode)."
-
-  # Domain payload field names for the writer-job request.
-  _PAYLOAD_GROUP     = "group"
-  _PAYLOAD_GLOSS     = "gloss"
-  _PAYLOAD_LANGUAGE  = "language"
-  _PAYLOAD_DOC_PATH  = "doc_path"
-  _PAYLOAD_HASH      = "hash"
-  _PAYLOAD_BLOCKS    = "blocks"
-  _PAYLOAD_CONTRACTS = "contracts"
 
   # File encoding used throughout this module.
   _ENCODING = "utf-8"
@@ -238,6 +245,12 @@ class Cli:
   _MSG_DOMAINS_UNCONFIGURED_PLAN  = "domain-plan: wiki.domains not configured (run /wiki.configure domains)"
   _MSG_DOMAINS_UNCONFIGURED_INDEX = "domain-apply-index: wiki.domains not configured (run /wiki.configure domains)"
   _MSG_DOMAIN_TICK_SKIP           = "domain-tick: skip (wiki.domains not configured)"
+
+  # Scope id naming the generated domain-spec doc surface for `collect-tags` / `retag`.
+  _SURFACE_DOMAINS = "domains"
+  _MSG_DOMAINS_COLLISION = (
+    "{cmd}: scope id 'domains' collides with the reserved domains surface — rename the scope"
+  )
 
   # Frontmatter anchor key written into topics.md by set-synced-sha.
   _KEY_WIKI_SYNCED_SHA = "wiki_synced_sha"
@@ -302,6 +315,8 @@ class Cli:
       return self._cmd_collect_tags(args)
     if cmd == self._CMD_RETAG:
       return self._cmd_retag(args)
+    if cmd == self._CMD_TAG_TICK:
+      return self._cmd_tag_tick(args)
     if cmd == self._CMD_DOMAIN_PLAN:
       return self._cmd_domain_plan(args)
     if cmd == self._CMD_DOMAIN_APPLY_INDEX:
@@ -444,10 +459,10 @@ class Cli:
         )
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_COLLECT_TAGS:
-        p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_SCOPE_ID_HELP)
+        p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_TAG_SURFACE_HELP)
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_RETAG:
-        p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_SCOPE_ID_HELP)
+        p.add_argument(self._ARG_SCOPE_ID, help = self._ARG_TAG_SURFACE_HELP)
         p.add_argument(
           self._ARG_FROM,
           dest = self._ARG_FROM_DEST,
@@ -455,7 +470,7 @@ class Cli:
           help = self._ARG_ALIAS_HELP,
         )
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
-      elif name in (self._CMD_DOMAIN_PLAN, self._CMD_DOMAIN_APPLY_INDEX):
+      elif name in (self._CMD_TAG_TICK, self._CMD_DOMAIN_PLAN, self._CMD_DOMAIN_APPLY_INDEX):
         p.add_argument(self._ARG_REPO, default = None, help = self._ARG_REPO_HELP)
       elif name == self._CMD_DOMAIN_TICK:
         p.add_argument(
@@ -937,6 +952,16 @@ class Cli:
     resolver = _scope.ScopeResolver(repo = repo)
     scopes = resolver.load_scopes()
 
+    # guard: a configured scope literally named 'domains' would collide with the reserved surface
+    if args.scope_id == self._SURFACE_DOMAINS and self._SURFACE_DOMAINS in scopes:
+      print(self._MSG_DOMAINS_COLLISION.format(cmd = "collect-tags"), file = sys.stderr)
+      return 1
+
+    # guard: the domains surface is not a configured wiki scope — its own factory enumerates it
+    if args.scope_id == self._SURFACE_DOMAINS:
+      print(json.dumps(_tags.TagOps.for_domains(repo = repo).collect()))
+      return 0
+
     # guard: requested scope id not present in settings
     if args.scope_id not in scopes:
       print(
@@ -969,17 +994,6 @@ class Cli:
     """
     repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
     repo = Path(repo_raw).resolve()
-    resolver = _scope.ScopeResolver(repo = repo)
-    scopes = resolver.load_scopes()
-
-    # guard: requested scope id not present in settings
-    if args.scope_id not in scopes:
-      print(
-        f"retag: unknown scope '{args.scope_id}' "
-        f"(known: {', '.join(sorted(scopes)) or 'none'})",
-        file = sys.stderr,
-      )
-      return 1
 
     alias_path = Path(args.from_file)
     # guard: alias-map file does not exist
@@ -994,8 +1008,102 @@ class Cli:
       print(f"retag: alias-map must be a JSON object: {alias_path}", file = sys.stderr)
       return 1
 
+    # scopes are loaded once and shared by both the collision guard and the ordinary lookup below
+    resolver = _scope.ScopeResolver(repo = repo)
+    scopes = resolver.load_scopes()
+
+    # guard: a configured scope literally named 'domains' would collide with the reserved surface
+    if args.scope_id == self._SURFACE_DOMAINS and self._SURFACE_DOMAINS in scopes:
+      print(self._MSG_DOMAINS_COLLISION.format(cmd = "retag"), file = sys.stderr)
+      return 1
+
+    # guard: the domains surface is not a configured wiki scope — its own factory enumerates it
+    if args.scope_id == self._SURFACE_DOMAINS:
+      print(json.dumps(_tags.TagOps.for_domains(repo = repo).retag(alias_map)))
+      return 0
+
+    # guard: requested scope id not present in settings
+    if args.scope_id not in scopes:
+      print(
+        f"retag: unknown scope '{args.scope_id}' "
+        f"(known: {', '.join(sorted(scopes)) or 'none'})",
+        file = sys.stderr,
+      )
+      return 1
+
     ops = _tags.TagOps(repo = repo, scope_id = args.scope_id, cfg = scopes[args.scope_id])
     print(json.dumps(ops.retag(alias_map)))
+    return 0
+
+  def _cmd_tag_tick(self, args: argparse.Namespace) -> int:
+    """
+    Survey every tag surface and dispatch a tag-curator job per non-empty one.
+
+    Walks each configured wiki scope plus the generated domain-doc tree when
+    `wiki.domains` is configured, surveys the tag values in use, and queues one
+    `wiki.tag-curator` job for every surface that carries any.  Prints one JSON
+    line per surface reporting whether a job was queued.
+
+    Args:
+      args: Parsed argument namespace; must carry `.repo`.
+
+    Returns:
+      Integer exit code (0 on success, 1 when a configured scope collides with
+      the reserved `domains` surface).
+    """
+
+    # Domain(wiki.taxonomy):
+    # # One canon judgement per surface
+    # Tag values drift within the body of documents that share a vocabulary, so a canon is judged per such
+    # body and never across them: two surfaces may legitimately spell the same idea differently, and one
+    # judgement spanning both would erase a distinction nobody asked to lose. A surface carrying no tags at
+    # all is passed over rather than sent for judgement — there is nothing to consolidate, and a request for
+    # work with no material only occupies the queue.
+
+    repo_raw = args.repo or os.environ.get(_ENV_REPO_ROOT) or os.getcwd()
+    repo = Path(repo_raw).resolve()
+    resolver = _scope.ScopeResolver(repo = repo)
+    scopes = resolver.load_scopes()
+
+    # guard: a configured scope literally named 'domains' would collide with the reserved surface
+    if self._SURFACE_DOMAINS in scopes:
+      print(self._MSG_DOMAINS_COLLISION.format(cmd = self._CMD_TAG_TICK), file = sys.stderr)
+      return 1
+
+    surfaces: list[tuple[str, _tags.TagOps]] = [
+      (scope_id, _tags.TagOps(repo = repo, scope_id = scope_id, cfg = scopes[scope_id]))
+      for scope_id in sorted(scopes)
+    ]
+    # the generated domain-doc tree is a tag surface of its own, not a configured scope
+    if _domains.DomainConfig.load(repo) is not None:
+      surfaces.append((self._SURFACE_DOMAINS, _tags.TagOps.for_domains(repo = repo)))
+
+    dictionary = _tags.dictionary_rel(repo)
+    dispatcher: _dispatch.CoreDispatch | None = None
+    for surface, ops in surfaces:
+      collected = ops.collect()
+      # guard: nothing tagged on this surface — no canon to judge, so no job to queue
+      if not collected[_tags.COLLECT_AXES]:
+        print(json.dumps({
+          self._TICK_SURFACE:    surface,
+          self._TICK_DISPATCHED: False,
+          self._TICK_REASON:     self._TICK_EMPTY,
+        }))
+        continue
+      # resolve the core CLI only once a job is actually going out
+      if dispatcher is None:
+        dispatcher = _dispatch.CoreDispatch()
+      dispatcher.dispatch_tag_curator(
+        repo = repo,
+        surface = surface,
+        payload = {
+          self._PAYLOAD_KIND:           _dispatch.CoreDispatch.KIND_NORMALIZE_TAGS,
+          self._PAYLOAD_SURFACE:        surface,
+          self._PAYLOAD_TAG_DICTIONARY: dictionary,
+        },
+        collected_tags = collected,
+      )
+      print(json.dumps({ self._TICK_SURFACE: surface, self._TICK_DISPATCHED: True }))
     return 0
 
   def _cmd_set_synced_sha(self, args: argparse.Namespace) -> int:
@@ -1687,16 +1795,8 @@ class Cli:
     if changed:
       dispatcher = _dispatch.CoreDispatch()
       for entry in changed:
-        payload = {
-          self._PAYLOAD_KIND:      _dispatch.CoreDispatch.KIND_DOMAIN_SPEC,
-          self._PAYLOAD_GROUP:     entry[_domains.GROUP_KEY],
-          self._PAYLOAD_GLOSS:     entry[_domains.GROUP_GLOSS],
-          self._PAYLOAD_LANGUAGE:  plan[_domains.PLAN_LANGUAGE],
-          self._PAYLOAD_DOC_PATH:  entry[_domains.GROUP_DOC],
-          self._PAYLOAD_HASH:      entry[_domains.GROUP_HASH],
-          self._PAYLOAD_BLOCKS:    entry[_domains.GROUP_BLOCKS],
-          self._PAYLOAD_CONTRACTS: entry[_domains.GROUP_CONTRACTS],
-        }
+        payload = planner.payload_for(entry)
+        payload[self._PAYLOAD_KIND] = _dispatch.CoreDispatch.KIND_DOMAIN_SPEC
         dispatcher.dispatch_domain_writer(
           repo = repo,
           group = entry[_domains.GROUP_KEY],

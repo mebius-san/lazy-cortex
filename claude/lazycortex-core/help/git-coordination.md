@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Protect your repo's git index from Claude Code — pathspec-only commits by default, an optional staging lock for concurrent sessions, and the two skills to inspect and break it.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "Lock lifecycle"
   request: "State diagram of the lazy-core.git staging-window lock, scoped to the mutex row only (git.pathspec_enabled=false, git.mutex_enabled=true — the lock never exists on the default pathspec row). NO_LOCK → HELD (a hook or skill acquires .git/lazy-git.lock before touching the git index) → auto-released when the staging window closes (commit/reset empties the index) OR auto-broken by heuristics (dead PID / stale-and-idle / different host) → NO_LOCK. Show the manual break path via /lazy-core.git-unlock as an alternative exit from HELD, guarded by /lazy-core.git-status inspection first."
@@ -9,7 +9,7 @@ diagram_spec:
 source_skills:
   - lazy-core.git-status
   - lazy-core.git-unlock
-source_sha: c57b0440478f9bd39c12b3719727f44deb182600
+source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
 ---
 # git staging coordination
 
@@ -18,6 +18,7 @@ Your git index is not Claude Code's to sweep up. When you have files staged for 
 ## When you'd use this
 
 - You notice Claude Code always commits with explicit file paths and never runs `git commit -am` or `git add .`, and you want to understand why — this is the default pathspec discipline protecting whatever you already have staged.
+- A commit is refused with a message about the shared index not being clean, and you want to know why — pathspec discipline also requires a clean index before it lets a commit through, so anything staged there for another reason (your own parked work, a peer session, a stray leftover) blocks it until it clears.
 - You want to go back to the older lock-based behavior (or turn coordination off entirely) for a repo where you know only one Claude Code session ever touches it.
 - In a repo running the mutex row: a commit or hook appears to hang and you want to confirm whether the staging lock is the cause before reaching for a heavier tool.
 - `/lazy-core.doctor` surfaces a stale-lock warning and you want to inspect the holder before deciding whether to act.
@@ -27,6 +28,8 @@ Your git index is not Claude Code's to sweep up. When you have files staged for 
 ## What's in this block
 
 **Pathspec discipline** is not a skill you invoke — it's the default behavior of every Claude Code git action in your repo. A new file gets registered with `git add -N <path>` (no content staged) rather than a plain `git add`; a rename or delete happens as a plain filesystem `mv`/`rm` rather than `git mv`/`git rm`, both of which auto-stage; and every commit names its paths explicitly (`git commit -m "..." -- <path> <path>`) rather than going bare, `-a`, or against a directory. Reverting a file follows the same logic: `git restore --worktree -- <path>` is allowed, since it only touches the working tree, but `git checkout <tree-ish> -- <path>` and `git restore --staged --source=<tree-ish>` are refused — both rewrite the index entry, silently re-staging a revision's content nobody asked Claude Code to stage. `git restore --staged` without `--source` stays allowed, since it only unstages. The two exceptions to the discipline overall are a commit mid-merge/rebase/cherry-pick (git itself refuses a partial commit there) and `--amend` against a clean index or with its own pathspec. Anything that would snapshot content you didn't ask Claude Code to touch is refused outright, with a message telling the agent to rephrase — never to bypass with `--no-verify` or a raw wrapper. The guard also only judges commands against the repo they actually target — a command that points at a different checkout (its own `-C <dir>` resolving elsewhere) is left alone, so it stays out of the way of tooling that manages other repos alongside yours.
+
+A commit on this row also requires a clean index before it runs — intent-to-add registrations don't count, but any other staged content is presumed to belong to you, not the session: parked work, an intentional untrack, or a stray leftover, and Claude Code can't tell those apart. The hook waits up to 15 seconds for that content to clear (`LAZYCORTEX_GIT_GUARD_WAIT_SECONDS` overrides the window if you need it shorter or longer), then denies the commit and tells the agent to stop and escalate to you rather than touch the index itself. After a commit does go through clean, the hook also checks that the index came out the way it should: staged content reappearing immediately afterward, when the index was clean going in, is the signature of a rare failure — a crashed or raced partial commit leaving its own temporary index in place instead of discarding it, which shows up as nearly every tracked file reading as staged for deletion even though nothing changed on disk. The hook raises an alarm for you rather than fixing it; the cure is `git reset` (rebuilds the index from HEAD, worktree untouched), and it's a move only you make, never the session.
 
 **The staging-window mutex** is the older, opt-in behavior: a per-repo lock at `.git/lazy-git.lock` that serializes the interval from the first staging action to the commit that empties the index, so two concurrent Claude Code sessions never corrupt each other's staged changes. It only takes effect once you've turned pathspec discipline off for that repo (see Common adjustments) — the two rows don't run at the same time.
 
@@ -53,6 +56,7 @@ Run `/lazy-core.git-unlock`, confirm at the prompt, and the lock is gone; any qu
 - **Go back to the older lock-based behavior** — set `"pathspec_enabled": false` in the `git` section. `mutex_enabled` is already `true` by default, so the mutex row activates immediately.
 - **Turn coordination off entirely for a single-session repo** — set `"enabled": false`. The hook short-circuits on every call; both rows become a no-op.
 - **Tune how quickly a stuck mutex lock is treated as stale** — `max_hold_seconds` and `max_idle_seconds` in the same section, relevant only once you're on the mutex row.
+- **Tune how long a commit waits on a dirty index before it's refused** — the `LAZYCORTEX_GIT_GUARD_WAIT_SECONDS` environment variable, relevant only on the pathspec row (default 15 seconds).
 
 ## Where this fits
 

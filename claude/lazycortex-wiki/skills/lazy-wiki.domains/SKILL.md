@@ -2,7 +2,7 @@
 name: lazy-wiki.domains
 description: "Use when a question needs domain knowledge synthesised from code's `Domain(…)` markers — defining a term, looking up a mechanic or formula, or surveying a group of related domain concepts — and `wiki.domains` is configured in this repo. A research skill: given a group key or a search term, hands back a bounded slice of the domain-spec tree (`docs/domains/` by default, materialized by `/lazy-wiki.domain-sync`) — one doc's section, or matching excerpts — never the whole group doc or the whole tree. Mirrors `lazy-wiki.structure`'s query mode, over the domain tree instead of the project structure map."
 research: true
-allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash(test -f *), Bash(git rev-parse *), Bash(mkdir -p *), Bash(date -u *), Write, TaskCreate, TaskUpdate, TaskList
+allowed-tools: Read, Grep, Glob, Agent, AskUserQuestion, Bash(test -f *), Bash(git rev-parse *), Bash(mkdir -p *), Bash(date -u *), Write
 dirty-tree-waiver: "writes only its run log under .logs/ (untracked) — never a tracked file"
 ---
 # lazy-wiki.domains
@@ -17,14 +17,14 @@ Prerequisites: `wiki.domains` is configured (`.claude/lazy.settings.json[wiki][d
 
 This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Load domains config`
    - `Phase 2 — Resolve query target`
    - `Phase 3 — Answer a group query`
    - `Phase 4 — Answer a term query`
    - `Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced. The phase that does not match the resolved mode is marked `skipped` with outcome `skipped-per-mode` — not left `pending`.
-3. **Do not reach the Log step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.**
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means the step's logic ran AND an outcome word was produced. The phase that does not match the resolved mode is marked `skipped` with outcome `skipped-per-mode` — not left `pending`.
+3. **Do not reach the Log step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 4. **The Log step is a structural verifier.** Its output MUST contain one line per task above.
 
 ## Phase 1 — Load domains config

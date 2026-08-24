@@ -49,7 +49,7 @@ A skill invoked from another skill's `Skill: ...` call OR from an agent's body i
 
 ### Rule
 
-A nested skill MUST declare `execution-discipline-waiver:` in frontmatter (per § 1 Waiver) with a reason naming the nested-call context, AND MUST NOT carry the canonical `## Execution discipline (MANDATORY)` H2 with a numbered "X ordered steps" list and TaskCreate requirement. Replace it with plain procedural prose under `## Process` (or equivalent).
+A nested skill MUST declare `execution-discipline-waiver:` in frontmatter (per § 1 Waiver) with a reason naming the nested-call context, AND MUST NOT carry the canonical `## Execution discipline (MANDATORY)` H2 with a numbered "X ordered steps" list and step-ledger requirement. Replace it with plain procedural prose under `## Process` (or equivalent).
 
 ### Top-level vs nested
 

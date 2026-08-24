@@ -61,7 +61,7 @@ The `errors` key (nested under the flat `daemon` section) is optional and tunes 
 | `post_push_timeout_sec` | int | Optional. Wall-clock cap on the post-push hook process. Default `30`. On expiry the hook is killed and the timeout journaled. |
 | `allowed_hooks` | list | Optional. Operator git-hook filenames (`pre-commit`, `commit-msg`, …) allowed to run under the daemon. At startup the daemon rebuilds `<git-common-dir>/lazy-hooks/` with a symlink per vetted name and points `core.hooksPath` at it through the environment, so a hook absent from the list never fires on a routine's commit. Absent or empty = no operator git hook runs under the daemon; the operator's own sessions are untouched. |
 
-`base_branch` and `remote_sync` are seeded by `lazy-core.install` from the checkout itself — the current branch, and `"pull_push"` when an `origin` remote exists. The block is written only when absent or `null`, so a hand-tuned one survives re-installs; `post_push_hook` is never seeded. A daemon-enabled repo whose `git` block stays `null` is a `lazy-core.audit` D3 finding.
+`base_branch` and `remote_sync` are seeded by `lazy-core.install` from the checkout itself — the current branch, and `"pull_push"` when an `origin` remote exists. The block is written only when absent or `null`, so a hand-tuned one survives re-installs; `post_push_hook` is never seeded. A repo whose `git` block stays `null` is a `lazy-core.audit` D3 finding — the block is what routine commits ride, under a daemon or under a manual tick alike.
 
 **Pre-iteration ops** (when `daemon.git.remote_sync` is `"pull"` or `"pull_push"`):
 

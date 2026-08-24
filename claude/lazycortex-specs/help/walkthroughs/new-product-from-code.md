@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to an existing codebase, generate its design and tech docs from source, then scaffold the first feature.
-last_regen: 2026-08-21
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce design + tech docs, then runs lazy-spec.create-feature to scaffold the first feature asset; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-spec.product-config
   - lazy-spec.create-from-code
   - lazy-spec.create-feature
-source_sha: 159ac1288fe27b2672a13bdafc577c34c46cb8d5
+source_sha: 4b5dd469eeace0bb9705806972b0766ed95c8863
 ---
 # How do I get specs for a codebase that already exists?
 
@@ -32,7 +32,7 @@ Neither `design.md` nor `tech.md` gets a diagram automatically — the product-s
 - `lazycortex-specs` installed and running (`/lazy-spec.install` completed at least once in this repo).
 - `lazycortex-core` available — it provides the `settings-get` / `settings-set` CLI and the runtime daemon.
 - A local checkout of the source repo you want to document — either the same repo that holds your spec vault (`/lazy-spec.product-config` can register it with `local_path: "."`, so every checkout resolves its own root with no absolute path needed), or a separate checkout that exists on disk at a path Claude Code can read.
-- At least one expert registered in `lazy.settings.json[experts]` for each review role you plan to assign — designer, system-designer, architect, planner, developer, and tester (plus data-writer if your product needs one) — unless this is not your first product in the vault, in which case you can ride the shared expert set an earlier product already set up. If you have not set up experts yet, run `/lazy-spec.install` — it offers to configure them — or run `lazycortex-experts` to compose the personas first.
+- At least one expert registered in `lazy.settings.json[experts]` for each review role you plan to assign — use-case-writer, designer, system-designer, architect, ui-designer, planner, developer, and tester (plus data-writer if your product needs one) — unless this is not your first product in the vault, in which case you can ride the shared expert set an earlier product already set up. If you have not set up experts yet, run `/lazy-spec.install` — it offers to configure them — or run `lazycortex-experts` to compose the personas first.
 - `lazycortex-diagram` available — Step 3's feature scaffold draws a flow diagram automatically; Steps 1 and 2 draw nothing on their own, so it is only needed there if you choose to draw a diagram yourself afterward.
 
 ## The journey
@@ -51,7 +51,7 @@ The key decisions you will make:
 - **Dependencies** — the skill dispatches a read-only scan of your source paths and presents each detected dependency (internal products, cross-repo, or external packages) for you to accept or skip, one at a time.
 - **Icon** — every product gets one: pick a concrete suggestion or type your own, or decline and the product still gets the default `LiPackage` — a product never ends up icon-less in the file explorer. The product root is also the only ordinary container the wizard paints a colour on (a neutral, state-independent shade); the group folders that appear under it as you add assets carry no colour of their own.
 - **Guidelines** (optional) — per-role file paths whose contents are folded into an expert's job context whenever an operator later ticks a launch checkbox on this product's assets.
-- **Review experts** — seven roles review this product's docs: **designer** (asset-level `design.md`), **system-designer** (the product's own `design.md`, and the project-wide `design.md`), **architect** (the product's `tech.md` plus any `architecture.md`, and a standing validator on design-shaped docs), **planner** (`code-plan.md`), **developer** (`code-report.md`), **tester** (`bug.md`, `test-plan.md`, `test-report.md`), and **data-writer** (`data-report.md`, only relevant if your product produces data-report docs). If the vault already carries a shared expert set from an earlier product, you can ride it as-is or define a product-specific override; otherwise your answers here seed the vault's shared set.
+- **Review experts** — nine roles review this product's docs: **use-case-writer** (`use-cases.md`), **designer** (asset-level `design.md`, plus a validation pass on `use-cases.md`), **system-designer** (the product's own `design.md`, and the project-wide `design.md`), **architect** (the product's `tech.md` plus any `architecture.md`, and a standing validator on every design-shaped doc including `ui-design.md`), **ui-designer** (`ui-design.md`), **planner** (`code-plan.md`), **developer** (`code-report.md`), **tester** (`bug.md`, `test-plan.md`, `test-report.md`), and **data-writer** (`data-report.md`, only relevant if your product produces data-report docs). If the vault already carries a shared expert set from an earlier product, you can ride it as-is or define a product-specific override; otherwise your answers here seed the vault's shared set. A vault whose shared set predates the use-case-writer and ui-designer roles is asked for those two separately, even when it rides the shared set for everything else.
 - **Asset types** — optional; declare any beyond the shipped feature/change/bug set now, or later via `/lazy-spec.add-asset-type`.
 - **Workflow mode** — `full` (design through implementation and testing, the default) or `spec-only` (stops after `design.md` approves, released only by an explicit operator word). Most code-bound products want `full`.
 

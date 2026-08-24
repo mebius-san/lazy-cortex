@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.audit
-description: "Run when the operator asks to audit the lazycortex-obsidian plugin, or when its machinery misbehaves after an update — icons stop being painted, the icon-map is rejected as the wrong schema, or mermaid/ascii fences render unstyled in the vault. Checks the plugin's own shipped artifacts (worker version constants, icon-map template, the Iconize settings block, the render-glue CSS), not any one vault's installed state. Read-first; presents findings, then asks which to fix."
-allowed-tools: Read, Glob, Grep, Bash(python3 *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), AskUserQuestion, Write, Agent
+description: "Run when the operator asks to audit the lazycortex-obsidian plugin, or when its machinery misbehaves after an update — icons stop being painted, the icon-map is rejected as the wrong schema, or mermaid/ascii fences render unstyled in the vault. Checks the plugin's own shipped artifacts (worker version constants, icon-map template, the Iconize settings block, the render-glue CSS), plus — when the repo carries a vault manifest — how far this vault's live config has drifted from it. Read-first; presents findings, then asks which to fix."
+allowed-tools: Read, Glob, Grep, Bash(python3 *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), AskUserQuestion, Write, Agent
 argument-hint: "(no arguments — runs the full plugin audit)"
 ---
 # lazycortex-obsidian audit
@@ -10,9 +10,9 @@ Semantic integrity check for the plugin. Orthogonal to `lazy-core.doctor`'s gene
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Version coherence`
    - `Phase 2 — Icon-map template sanity`
    - `Phase 2.5 — Cross-artifact coherence for the two-writer model`
@@ -20,10 +20,11 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Phase 4 — Skill cross-refs`
    - `Phase 6 — Protocol doc content checks`
    - `Phase 8 — Plugin snippets`
+   - `Phase 9 — Vault manifest drift`
    - `Phase 5 — Report + fix loop`
    - `Phase 7 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
-3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
 ## Phase 1 — Version coherence
@@ -103,6 +104,22 @@ The plugin ships every CSS snippet consumers install under `templates/obsidian/s
 - **WARN** if the file is not findable — the diagram-install skill expects the engine to ship the theme directive on every fence; a vault that installs render glue without the engine has no producer of well-formed fences. Heuristic only; not a hard fail (consumers may emit fences manually).
 
 - The render-fix `lazy-obsidian.diagram-tune` agent and the `lazy-obsidian.diagram-render` rule were scoped out of v1 (the engine's authoring rule already enforces theme directive + edge labels; per-vault render concerns are install-time, not per-diagram). Do NOT flag their absence as findings.
+
+## Phase 9 — Vault manifest drift
+
+Only when the repo carries a vault manifest — `test -f <repo_root>/.obsidian.manifest.json`. Absent → outcome `no-manifest`, skip the phase (the vault predates `/lazy-obsidian.capture`, or this checkout is not a vault).
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/vault_manifest.py" drift <repo_root>
+```
+
+The worker writes nothing; it compares the live config directory against the manifest and returns two lists.
+
+- **WARN** per entry in `drift` — the live vault and its manifest disagree. Never auto-resolve: only the operator knows which side is right. Offer the two moves in the fix loop and let them choose — `/lazy-obsidian.capture` (the vault is right, record it) or `/lazy-obsidian.deploy` (the manifest is right, restore it).
+- **WARN** per entry in `warnings` — not drift. A plugin whose installed version moved past the one its settings were captured under, and credentials the manifest can never carry.
+- **PASS** when both lists are empty.
+
+Outcome: `clean`, `drift: <N>`, or `no-manifest`.
 
 ## Phase 5 — Report + fix loop
 

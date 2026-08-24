@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one document through a full review cycle from opt-in to finalize.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "How the review loop flows"
   request: "Sequence diagram showing: operator runs /lazy-review.start → banner inserted + commit → daemon dispatches expert jobs per section → operator reads suggestions and ticks approve → operator checks status via /lazy-review.status → all sections approved → operator runs /lazy-review.finalize → finalized commit with Doc-Review-Phase: finalize trailer"
@@ -79,7 +79,7 @@ If `/lazy-review.finalize` reports `already finalized: <file>`, the document is 
 
 ## After you're done
 
-The finalized document lives at the same path with no review scaffolding. The `# History` section records what the review cycle produced. The commit log has a `Doc-Review-Phase: finalize` entry as the terminal marker.
+The finalized document lives at the same path with no review scaffolding. The `# History` section records what the review cycle produced, opening with a short explanatory line — in your vault's configured language, falling back to English — that marks it as automatically maintained; it isn't meant to be hand-edited.
 
 To resume a document later (e.g. a follow-up review pass), run `/lazy-review.start <file>` again — it re-opens the loop from `review_round: 1`. The old `# History` section is preserved; the coordinator appends a new line to it each time the document reaches an approved state.
 

@@ -94,6 +94,9 @@ _ROUTINES_KEY         = "routines"
 _DAEMON_KEY           = "daemon"
 _DAEMON_ENABLED_KEY   = "enabled"
 
+# `wiki` section key carrying the repository-wide tag-axis vocabulary.
+_KEY_TAG_AXES         = "tag_axes"
+
 # The domain routine names the install skill registers.
 _DOMAIN_ROUTINES      = ( "lazy-wiki.domain-scan", "lazy-wiki.domain-full" )
 
@@ -1486,6 +1489,8 @@ class DomainDoctor:
     CHECK_HASH_STALE: Check identifier for a group doc whose `domain_hash` diverged from the code.
     CHECK_OUTPUT_IN_SCOPE: Check identifier for a wiki scope whose globs reach the domain output tree.
     CHECK_ROUTINE_MISMATCH: Check identifier for `wiki.domains` and the domain routines disagreeing.
+    CHECK_TAG_AXIS_UNKNOWN: Check identifier for a generated doc's tag whose axis is not
+      declared in `wiki.tag_axes`.
   """
 
   # Check identifiers (canonical names).
@@ -1496,6 +1501,7 @@ class DomainDoctor:
   CHECK_HASH_STALE         = "domain-hash-stale"
   CHECK_OUTPUT_IN_SCOPE    = "domain-output-in-scope"
   CHECK_ROUTINE_MISMATCH   = "domain-routine-mismatch"
+  CHECK_TAG_AXIS_UNKNOWN   = "domain-tag-axis-unknown"
 
   def __init__(self, *, repo: Path) -> None:
     """
@@ -1577,6 +1583,7 @@ class DomainDoctor:
     findings += self._check_gloss_missing(dictionary)
     findings += self._check_doc_unknown(dictionary, layout)
     findings += self._check_hash_stale(dictionary, scanned, layout)
+    findings += self._check_tag_axis_unknown(dictionary, layout)
     findings += self._check_output_in_scope()
     findings += self._check_routines(routines)
     return findings
@@ -1816,6 +1823,72 @@ class DomainDoctor:
         node     = doc_rel,
       ))
     return findings
+
+  # ── check: domain-tag-axis-unknown ────────────────────────────────────────
+
+  def _check_tag_axis_unknown(
+    self,
+    dictionary: dict[str, str],
+    layout: _domains.DomainLayout,
+  ) -> list[dict]:
+    """
+    Report `wiki/<axis>/...` tags on generated domain docs whose axis is not
+    declared in `wiki.tag_axes`.
+
+    Args:
+      dictionary: Group→gloss mapping from the dictionary file.
+      layout: Path mapper for the output directory.
+
+    Returns:
+      One `WARN` finding per unknown axis, naming its first carrier doc;
+      empty when `wiki.tag_axes` is unconfigured — the wiki-scope
+      `_check_unknown_axis` skips for the same reason, or every tag would
+      be flagged.
+    """
+    tag_axes = self._tag_axes()
+    # guard: no axes configured — every tag would be flagged; skip
+    if not tag_axes:
+      return []
+    axes_set = set(tag_axes)
+
+    # one finding per unknown axis, naming the first doc that carries it
+    carriers: dict[str, str] = {}
+    for group in sorted(dictionary):
+      doc_rel = layout.doc_rel(group)
+      # waiver: planner's protected tags reader reused — one frontmatter notation across the engine
+      for tag in _domains.DomainPlanner._stored_tags(self._repo / doc_rel):
+        # guard: not a wiki tag — irrelevant to axis vocabulary
+        if not tag.startswith(_WIKI_TAG_PREFIX):
+          continue
+        rest = tag[len(_WIKI_TAG_PREFIX):]
+        axis = rest.split("/")[0] if "/" in rest else rest
+        # guard: axis is known
+        if axis in axes_set:
+          continue
+        carriers.setdefault(axis, doc_rel)
+
+    # one finding per unknown axis collected above
+    return [
+      _finding(
+        check    = self.CHECK_TAG_AXIS_UNKNOWN,
+        severity = SEV_WARN,
+        message  = f"tag axis '{axis}' not in wiki.tag_axes {tag_axes} (carrier: {doc_rel})",
+        node     = doc_rel,
+        fixable  = False,
+      )
+      for axis, doc_rel in sorted(carriers.items())
+    ]
+
+  def _tag_axes(self) -> list[str]:
+    """
+    Return the repository-wide tag-axis vocabulary declared in `wiki.tag_axes`.
+
+    Returns:
+      The declared axis names, or `[]` when unconfigured or malformed.
+    """
+    wiki = _scope.ScopeResolver(repo = self._repo).load_wiki()
+    axes = wiki.get(_KEY_TAG_AXES)
+    return list(axes) if isinstance(axes, list) else []
 
   # ── check: domain-routine-mismatch ────────────────────────────────────────
 

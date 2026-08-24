@@ -193,7 +193,7 @@ def routine_git_author_env(cfg: dict) -> dict[str, str]:
     block, else an empty dict.
   """
 
-  # Domain(runtime.bot-identity): [routine.git-author]
+  # Domain(runtime.bot-identity):
   # # Routine commit identity
   # A routine that commits on its own behalf can carry its own recorded author identity, separate
   # from the identity of the process running it. Only the author side of a commit's identity is ever
@@ -351,7 +351,7 @@ def _validate_command_or_expert(name: str, cfg: dict, rtype: str) -> None:
     RoutineConfigError: When both shapes are present or neither shape is present.
   """
 
-  # Domain(runtime.routines): [routine.dispatch]
+  # Domain(runtime.routines):
   # # Command-or-expert dispatch shape
   # A routine's actual unit of work is dispatched in exactly one of two shapes, regardless of the
   # routine's own kind: a shell command it spawns as a subprocess, or a named expert together with
@@ -396,7 +396,7 @@ def validate_routine_entry(name: str, cfg: dict) -> None:
       invalid, or a per-type constraint fails.
   """
 
-  # Domain(runtime.routines): [routine.type] [routine.schema]
+  # Domain(runtime.routines):
   # # Routine type taxonomy
   # A routine's type decides what shape of work it produces and which configuration fields it
   # accepts. A plain routine runs on a fixed polling interval alone; an inbox routine additionally
@@ -682,7 +682,7 @@ def _match_filter(flt: dict, frontmatter: dict, path: object = None) -> bool:
     block accepts everything.
   """
 
-  # Domain(runtime.routines): [routine.filter]
+  # Domain(runtime.routines):
   # # Composite routine filter semantics
   # A routine's filter narrows which items its tick acts on. At the flat level, every declared
   # sub-condition — a frontmatter field predicate, folder-note membership, basename — must all hold at
@@ -1101,7 +1101,7 @@ def dispatch_inbox(repo: Path, name: str, cfg: dict) -> dict:
   # waiver: routine-config schema field name, single-source set in SCHEMAS, not a reusable cross-module key
   deferred_window = float(cfg.get("deferred_retry_sec", DEFERRED_RETRY_AGE_SEC))
 
-  # Domain(runtime.routines): [routine.inbox] [routine.dedup]
+  # Domain(runtime.routines):
   # # Inbox dead-letter aging
   # An inbox item that failed keeps its dispatch slot occupied so the same input is never resubmitted
   # while an operator has not yet looked at it — the parked result is a dead letter waiting on triage.
@@ -1391,7 +1391,7 @@ def dispatch_git(repo: Path, name: str, cfg: dict) -> dict:
   git_state = state.setdefault(StateKey.GIT_WATCH, {}).setdefault(name, {})
   last_seen = git_state.get(StateKey.LAST_SEEN_SHA)
 
-  # Domain(runtime.routines): [routine.git-watch]
+  # Domain(runtime.routines):
   # # Git-watch baseline and force-push detection
   # A git watch remembers, per watch, the commit it last scanned up to — its baseline. The very first
   # tick after a watch is configured has no baseline yet: it records the current commit as the
@@ -1797,7 +1797,7 @@ def _group_dir_for(path: str, group_globs: list) -> str | None:
     The matched directory prefix as a repo-relative path, or None when no glob matches.
   """
 
-  # Domain(runtime.routines): [routine.git-watch] [routine.grouping]
+  # Domain(runtime.routines):
   # # Directory-level grouping of file-level watch items
   # A git watch normally treats one changed file as one unit of work, but some consumers really care
   # about a whole directory changing together — an asset folder, a bundle of related files.
@@ -2054,7 +2054,7 @@ def _dir_signature(d: Path, walk_files: list[Path], memo: dict[str, str]) -> str
     Hex digest stable while no walked file under `d` changes.
   """
 
-  # Domain(runtime.routines): [routine.md-scan]
+  # Domain(runtime.routines):
   # # Change detection by directory signature
   # A scan that spawns an external command for every matching file would repeat the same no-op work
   # every tick once nothing has changed, so a change is detected instead by fingerprinting the whole

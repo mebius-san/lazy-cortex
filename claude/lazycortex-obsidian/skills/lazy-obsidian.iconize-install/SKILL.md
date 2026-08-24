@@ -1,7 +1,7 @@
 ---
 name: lazy-obsidian.iconize-install
 description: "Run when the operator asks to set up folder and file icons in this Obsidian vault, or when `/lazy-obsidian.iconize-sync` refuses because the icon-map is missing, or the Iconize / folder-notes / iconize-reloader vault plugins aren't there. Scaffolds the vault-side pieces (icon-map, gitignore entry, schema migration, repaint routine) and installs those three plugins. Chained from `/lazy-obsidian.install`; idempotent, and must be run from the vault's git root."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(git -C *), Bash(chmod *), Bash(python3 *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), Bash(jq *), AskUserQuestion, TaskCreate, TaskUpdate, TaskList, Agent
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(git rev-parse*), Bash(git ls-files*), Bash(git -C *), Bash(chmod *), Bash(python3 *), Bash(cp *), Bash(test *), Bash(date *), Bash(rm *), Bash(jq *), AskUserQuestion, Agent
 argument-hint: "[repo=<abs>] [--dry-run] — scaffolds into <repo-root>/.claude/ (repo= sets the target under headless dispatch)"
 ---
 # Install iconize-sync (Obsidian)
@@ -16,7 +16,7 @@ Project-local only. There is no global scope — iconize-sync is inherently per-
 
 This skill has 15 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Locate repo root and vault`
    - `Step 1.5a — Install/update folder-notes`
    - `Step 1.5b — Install/update obsidian-icon-folder`
@@ -33,8 +33,8 @@ This skill has 15 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 5 — Verify`
    - `Step 6 — Report`
    - `Step 7 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `kept-orphan`).
-3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `kept-orphan`).
+3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
 ## Architecture note (why this skill is smaller than before)
@@ -73,7 +73,7 @@ Three MANDATORY hard deps. No prompt, no skip. The user opted into iconize-insta
 | `obsidian-icon-folder` | — |
 | `iconize-reloader` | `--bundled` |
 
-For each row, in order (each is its own TaskCreate task — 1.5a / 1.5b / 1.5c):
+For each row, in order (each is its own ledger entry — 1.5a / 1.5b / 1.5c):
 
 1. Invoke `/lazy-obsidian.update-plugin <id> [<flag>]`.
 2. Record the state tuple (`binary=... overrides=... community=...`) for the Step 6 report.

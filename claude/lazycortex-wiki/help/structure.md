@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Keep one repo-wide map, docs/structure.md, current — rebuild it wholesale, query a slice of it, or let git-watch routines patch it per commit.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram of the structure block: (1) /lazy-wiki.configure structure sets depth_profiles + exclude and registers three git-watch routines (structure-scan for changed files, structure-scan-deletes for deleted files, structure-scan-renames for renamed files); (2) each routine dispatches lazy-wiki.structure-curator per changed path with kind=curate or kind=rename; (3) the curator edits docs/structure.md incrementally and commits; (4) separately, an operator or agent runs /lazy-wiki.structure rebuild for a wholesale resync (walks git ls-files, classifies by depth_profiles, fans out to Explore subagents on a large tree, writes and commits the whole map), or /lazy-wiki.structure query [<path>] to read back just one slice without loading the whole file. Show rebuild and the curator's incremental path as two ways of reaching the same file, and query as the read-only path that never touches routines."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-wiki.structure
   - lazy-wiki.structure-curator
   - lazy-wiki.configure
-source_sha: e758792cb8f978c3f3e230b8233d46a2da076903
+source_sha: 22e572d702fbaeb90f38bcc5465f242ddcb9ce28
 ---
 # Structure
 
@@ -40,3 +40,48 @@ Both paths write the same file in the same shape, so `/lazy-wiki.structure query
 The structure map is repo-wide and file-and-directory shaped — it answers "where", not "what does this concept mean" or "how do these pieces connect". That makes it a companion to, not a replacement for, the wiki's other blocks: `curation` builds a graph of per-node summaries and See-also links for research questions about a specific document or code file, and `terms` maintains a vocabulary dictionary so a concept doesn't grow a second name across documents. Reach for structure when the question is about placement or discovery; reach for curation or terms when the question is about meaning or naming.
 
 ## How the pieces fit together
+
+
+```mermaid
+%%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
+flowchart LR
+  configureStructure["/lazy-wiki.configure structure"]
+  structureScan["structure-scan (changed files)"]
+  structureScanDeletes["structure-scan-deletes (deleted files)"]
+  structureScanRenames["structure-scan-renames (renamed files)"]
+  dispatchCuratorCurate["Dispatch structure-curator (kind=curate)"]
+  dispatchCuratorRename["Dispatch structure-curator (kind=rename)"]
+  curatorEditsCommits["Curator edits docs/structure.md incrementally and commits"]
+  structureMdUpdated["docs/structure.md updated"]
+  rebuildStructure["/lazy-wiki.structure rebuild"]
+  queryStructure["/lazy-wiki.structure query"]
+  queryResult["Read-only slice returned"]
+
+  configureStructure -->|registers| structureScan
+  configureStructure -->|registers| structureScanDeletes
+  configureStructure -->|registers| structureScanRenames
+  structureScan -->|changed path| dispatchCuratorCurate
+  structureScanDeletes -->|deleted path| dispatchCuratorCurate
+  structureScanRenames -->|renamed path| dispatchCuratorRename
+  dispatchCuratorCurate -->|kind=curate| curatorEditsCommits
+  dispatchCuratorRename -->|kind=rename| curatorEditsCommits
+  curatorEditsCommits -->|incremental write| structureMdUpdated
+  rebuildStructure -->|wholesale resync| structureMdUpdated
+  queryStructure -->|read-only slice| queryResult
+
+  classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
+  classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
+
+  class configureStructure entry
+  class rebuildStructure entry
+  class queryStructure entry
+  class structureScan action
+  class structureScanDeletes action
+  class structureScanRenames action
+  class dispatchCuratorCurate action
+  class dispatchCuratorRename action
+  class curatorEditsCommits action
+  class structureMdUpdated success
+  class queryResult success
+```

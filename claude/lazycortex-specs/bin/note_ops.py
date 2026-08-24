@@ -175,6 +175,13 @@ _TOKEN_LIST_KEYS = frozenset({ SpecTargetsKey.TARGETS, SpecDependsOnKey.DEPENDS_
 _TAGS_KEY = "tags"
 _SPEC_SOURCE_REQUESTS_KEY = "spec_source_requests"
 
+# Managed-paint and wiki-pin keys every scaffolded status note legitimately carries: the
+# iconize pair is seeded by `scaffold_asset._K.ICONIZE_*` and rewritten by the iconize worker,
+# `wiki_pinned_topics` ships in the asset-note template (`spec_pins._Key.WIKI_PINNED_TOPICS`).
+_ICONIZE_ICON_KEY = "iconize_icon"
+_ICONIZE_COLOR_KEY = "iconize_color"
+_WIKI_PINNED_TOPICS_KEY = "wiki_pinned_topics"
+
 # `note-check`'s recognized-key superset: every `_WRITABLE_SCHEMA` entry plus the other
 # legitimate frontmatter keys a status folder-note carries that this verb never writes itself —
 # the scaffold-time `spec_role` / `tags`, the `spec_source_requests` slot `apply_request.py`
@@ -193,6 +200,9 @@ _NOTE_SCHEMA = {
     SpecCoordinatorDocStateKey.STATE: _Kind.DICT,
     SpecCoordinatorReadyStateKey.STATE: _Kind.DICT,
     AssetTypeKey.TYPE: _Kind.STR,
+    _ICONIZE_ICON_KEY: _Kind.STR,
+    _ICONIZE_COLOR_KEY: _Kind.STR,
+    _WIKI_PINNED_TOPICS_KEY: _Kind.LIST,
 }
 
 # Canonical required-section roster and order, per `lazy-spec.coordinator.md`'s asset-note templates

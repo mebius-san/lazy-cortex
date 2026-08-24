@@ -74,3 +74,4 @@ __pycache__/
 
 # vault-nickname — per-device vault display name, must not sync across machines
 .obsidian/plugins/vault-nickname/data*.json
+.obsidian/

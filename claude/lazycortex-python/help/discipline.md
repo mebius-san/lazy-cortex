@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Three always-loaded rules shape every Python edit; five reference guidelines back the writer agents and chk-py/tst-py with the full canon.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "How rules and guidelines connect"
   request: "Architecture diagram showing three path-scoped rules (lazy-python.style on **/*.py, lazy-python.docstrings on **/*.py, lazy-python.tests on tests/**/*.py) feeding into Claude's edit loop, and five reference guidelines (coding, documenting, testing, checking, guidelines-index) being read by the docstring-writer agent, test-writer agent, and the chk-py/tst-py checker scripts"
@@ -15,7 +15,7 @@ source_skills:
   - lazy-python.testing-guidelines
   - lazy-python.checking-guidelines
   - lazy-python.guidelines-index
-source_sha: 612e0dc5f599c02a8079c2fda95dce662c02757a
+source_sha: 9a0c1bb74f30f823eada9640c74226d03eaf587b
 ---
 # Python coding discipline — rules and guidelines
 

@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-review skills — symptoms, likely causes, and fixes.
-last_regen: 2026-08-19
+last_regen: 2026-08-24
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Decision tree routing on observed symptom. Top-level branches: install/bootstrap failures (settings missing, permission error, core bin not found), configure failures (audit FAIL after wizard, section-id loop), start/submit problems (file not opted in, no-op on re-run when unexpected), status reporting nothing useful, stop/resume confusion, finalize blocked or partial, audit FAIL findings. Each leaf names the troubleshooting entry that resolves it."
+  request: "Decision tree routing on observed symptom. Top-level branches: install/bootstrap failures (settings missing, permission error, malformed JSON), configure failures (audit FAIL after wizard, section-id loop), start/submit problems (file not opted in, no-op on re-run when unexpected), status reporting nothing useful, stop/resume confusion, finalize blocked or partial, audit FAIL findings. Each leaf names the troubleshooting entry that resolves it."
   kind_hint: decision-tree
 source_skills:
   - lazy-review.install
@@ -15,7 +15,7 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: a2062bca54f427d017f9acfce7dee26e2b1db066
+source_sha: 183a0cb4d191ceb89a9670c24d9a6c0228bb8364
 ---
 # Troubleshooting
 
@@ -36,16 +36,6 @@ source_sha: a2062bca54f427d017f9acfce7dee26e2b1db066
 **Likely cause**: The settings file was hand-edited and is now syntactically invalid JSON.
 
 **Fix**: Open `.claude/lazy.settings.json` and repair the syntax error (a missing comma, an unclosed brace, or a trailing comma after the last key are the usual culprits). Then re-run `/lazy-review.install`.
-
----
-
-## `/lazy-review.install` Step 2 cannot find the `lazycortex-core` bin
-
-**Symptom**: Step 2 fails to read the `daemon.enabled` flag and prints something like "cannot resolve core bin — $LAZYCORTEX_PLUGIN_DIRS unset and no lazycortex-core cache found".
-
-**Likely cause**: `lazycortex-core` was never installed in this environment, or its cache was cleared.
-
-**Fix**: Run `/lazy-core.install` first. Once the core plugin is installed and its cache is populated, re-run `/lazy-review.install`.
 
 ---
 
@@ -183,9 +173,9 @@ source_sha: a2062bca54f427d017f9acfce7dee26e2b1db066
 
 **Symptom**: `/lazy-review.status <file>` shows the document is active and waiting, but no expert round fires — the banner stays "Waiting" indefinitely.
 
-**Likely cause**: The `lazycortex-core` expert runtime daemon is not running, or the `lazy-review.coordinator-watch` / `lazy-review.collect` routine pair was unregistered during install because `daemon.enabled` was `false` at install time.
+**Likely cause**: `/lazy-review.install` registers the `lazy-review.collect` / `lazy-review.coordinator-watch` / `lazy-review.sanitize` routine trio unconditionally now, regardless of the project's daemon posture — so a missing registration is no longer the explanation. What actually drains the queue is either the `lazycortex-core` runtime daemon ticking on its own, or `/lazy-runtime.tick` being run by hand on a checkout with no daemon.
 
-**Fix**: Check whether the daemon is enabled: run `/lazy-core.audit` and look for the `daemon.enabled` value. If the daemon is disabled, re-run `/lazy-core.install` and answer yes to its daemon gate, then re-run `/lazy-review.install` so both routines get registered. If the daemon is enabled but not running, `/lazy-runtime.preflight` reports what is stopping it.
+**Fix**: Run `/lazy-review.status <file>` to confirm the document is genuinely stuck rather than mid-round. If this project runs the daemon, `/lazy-runtime.preflight` reports what is stopping it. If this project has no daemon, expert jobs and routine wakes only advance when something calls `/lazy-runtime.tick` — run it by hand, or set up a recurring trigger for it.
 
 ---
 

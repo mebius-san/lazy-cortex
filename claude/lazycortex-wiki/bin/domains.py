@@ -65,6 +65,12 @@ _ENCODING = "utf-8"
 # Frontmatter key carrying the generation-time content hash of a group doc.
 FM_DOMAIN_HASH = "domain_hash"
 
+# Frontmatter key carrying a generated doc's tag list.
+FM_TAGS = "tags"
+
+# Settings key carrying the repository-wide tag-axis vocabulary (`wiki.tag_axes`).
+_KEY_TAG_AXES = "tag_axes"
+
 # Opening line of a `Domain(…)` block: `# Domain(<group>):` with optional tags after the colon.
 _DOMAIN_HEADER_RE = re.compile(r"^\s*#\s*Domain\s*\(\s*([A-Za-z0-9_.-]+)\s*\)\s*:")
 
@@ -104,6 +110,11 @@ GROUP_CONTRACTS = "contracts"
 # Why a generated doc is on the removal list.
 DOC_REASON_NO_BLOCKS = "no-blocks"
 DOC_REASON_UNLISTED  = "group-unlisted"
+
+# Domain-spec writer payload field names for the tag-canon inputs the writer consumes.
+PAYLOAD_TAG_AXES       = "tag_axes"
+PAYLOAD_EXISTING_TAGS  = "existing_tags"
+PAYLOAD_TAG_DICTIONARY = "tag_dictionary"
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -874,10 +885,12 @@ class DomainPlanner:
 
     Returns:
       Plan dict with `changed_groups` (group, hash, files, doc_path, gloss,
-      blocks, contracts), `orphaned_docs`, `unlisted_docs` (the `orphaned_docs`
-      subset dropped because their group left the dictionary), `unknown_groups`,
-      `index_path`, `index_needs_update`, `language`, `dictionary`, and
-      `output`.
+      blocks, contracts, tag_axes, existing_tags, tag_dictionary — the last
+      three are the tag-canon inputs the domain-spec writer needs and are
+      also what `payload_for` forwards unchanged), `orphaned_docs`,
+      `unlisted_docs` (the `orphaned_docs` subset dropped because their
+      group left the dictionary), `unknown_groups`, `index_path`,
+      `index_needs_update`, `language`, `dictionary`, and `output`.
     """
 
     # Contract:
@@ -890,6 +903,13 @@ class DomainPlanner:
     scanned = scanner.scan()
     scanned_contracts = scanner.scan_contracts()
     layout = DomainLayout(output = self.cfg.output)
+
+    # tag-canon inputs shared by every changed entry: the vault's axis vocabulary and the
+    # advisory dictionary path, resolved once rather than per group
+    wiki = _scope.ScopeResolver(repo = self.cfg.repo).load_wiki()
+    tag_axes = wiki.get(_KEY_TAG_AXES)
+    tag_axes = list(tag_axes) if isinstance(tag_axes, list) else []
+    tag_dictionary = _scope.dictionary_rel(self.cfg.repo)
 
     # changed groups: dictionary groups with blocks whose doc hash diverged
     changed: list[dict] = []
@@ -905,13 +925,16 @@ class DomainPlanner:
       if self._stored_hash(self.cfg.repo / doc_rel) == digest:
         continue
       changed.append({
-        GROUP_KEY:       group,
-        GROUP_HASH:      digest,
-        GROUP_FILES:     sorted({ blk[BLOCK_PATH] for blk in blocks }),
-        GROUP_DOC:       doc_rel,
-        GROUP_GLOSS:     dictionary[group],
-        GROUP_BLOCKS:    blocks,
-        GROUP_CONTRACTS: contracts,
+        GROUP_KEY:              group,
+        GROUP_HASH:             digest,
+        GROUP_FILES:            sorted({ blk[BLOCK_PATH] for blk in blocks }),
+        GROUP_DOC:              doc_rel,
+        GROUP_GLOSS:            dictionary[group],
+        GROUP_BLOCKS:           blocks,
+        GROUP_CONTRACTS:        contracts,
+        PAYLOAD_TAG_AXES:       tag_axes,
+        PAYLOAD_EXISTING_TAGS:  self._stored_tags(self.cfg.repo / doc_rel),
+        PAYLOAD_TAG_DICTIONARY: tag_dictionary,
       })
 
     # groups present in code but absent from the dictionary — the doctor's business
@@ -936,6 +959,42 @@ class DomainPlanner:
       PLAN_LANGUAGE:    self.cfg.language,
       PLAN_DICTIONARY:  self.cfg.dictionary,
       PLAN_OUTPUT:      self.cfg.output,
+    }
+
+  def payload_for(self, entry: dict) -> dict:
+    """
+    Build the domain-spec writer payload for one changed-group plan entry.
+
+    Guarantees:
+      - The returned dict is JSON-serialisable as it stands; the CLI caller
+        merges in only the dispatch-mechanism `kind` field before dispatch.
+
+    Args:
+      entry: One `changed_groups` entry from `plan()`.
+
+    Returns:
+      Payload dict carrying the group's own fields (`group`, `gloss`,
+      `doc_path`, `hash`, `blocks`, `contracts`), the configured `language`,
+      and the tag-canon inputs the writer needs (`tag_axes`, `existing_tags`,
+      `tag_dictionary`) — the last three copied verbatim from `entry`, which
+      `plan()` already populated.
+    """
+
+    # Contract:
+    # The returned dict is JSON-serialisable as it stands; the CLI caller
+    # merges in only the dispatch-mechanism `kind` field before dispatch.
+
+    return {
+      GROUP_KEY:              entry[GROUP_KEY],
+      GROUP_GLOSS:            entry[GROUP_GLOSS],
+      PLAN_LANGUAGE:          self.cfg.language,
+      GROUP_DOC:              entry[GROUP_DOC],
+      GROUP_HASH:             entry[GROUP_HASH],
+      GROUP_BLOCKS:           entry[GROUP_BLOCKS],
+      GROUP_CONTRACTS:        entry[GROUP_CONTRACTS],
+      PAYLOAD_TAG_AXES:       entry[PAYLOAD_TAG_AXES],
+      PAYLOAD_EXISTING_TAGS:  entry[PAYLOAD_EXISTING_TAGS],
+      PAYLOAD_TAG_DICTIONARY: entry[PAYLOAD_TAG_DICTIONARY],
     }
 
   def _removable_docs(
@@ -1007,3 +1066,23 @@ class DomainPlanner:
     frontmatter = _scope._parse_frontmatter(doc_abs.read_text(encoding = _ENCODING))
     value = frontmatter.get(FM_DOMAIN_HASH)
     return str(value) if value else None
+
+  @staticmethod
+  def _stored_tags(doc_abs: Path) -> list[str]:
+    """
+    Read the `tags` frontmatter list of a generated doc.
+
+    Args:
+      doc_abs: Absolute path of the group doc.
+
+    Returns:
+      The stored tag strings, or `[]` when the doc, the key, or a well-formed
+      list value is absent.
+    """
+    # guard: doc not generated yet
+    if not doc_abs.is_file():
+      return []
+    # waiver: sibling-module private frontmatter parser reused to keep one YAML notation (doctor precedent)
+    frontmatter = _scope._parse_frontmatter(doc_abs.read_text(encoding = _ENCODING))
+    value = frontmatter.get(FM_TAGS)
+    return list(value) if isinstance(value, list) else []

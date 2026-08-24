@@ -1,7 +1,7 @@
 ---
 name: lazy-log.bullets
 description: "Use when one plugin is being released and its CHANGELOG.public.md needs a release block drafted from a commit range — dispatched by any release-drafting flow, or directly with plugin + range + version. Renders the `### <version> — <date> UTC` block of user-visible bullets: the per-release public counterpart to lazy-log.distill's running internal changelog."
-tools: Bash, Write, TaskCreate, TaskUpdate, TaskList, Skill, Agent
+tools: Bash, Write, Skill, Agent
 model: inherit
 logging-waiver: "single-response synthesizer — output IS the prose response, no mutations to record"
 ---
@@ -13,15 +13,15 @@ Read commits in a given range scoped to one plugin tree, drop internal-only comm
 
 This agent has 6 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 1 — Parse input`
    - `Step 2 — Read commits`
    - `Step 3 — Filter to user-visible`
    - `Step 4 — Rewrite as bullets`
    - `Step 5 — Render release block`
    - `Step 6 — Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `no-commits`, `all-internal`, `kept-N-of-M`).
-3. **Do not reach the Render step until `TaskList` shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `no-commits`, `all-internal`, `kept-N-of-M`).
+3. **Do not reach the Render step until the ledger shows every prior task `completed`.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Render step's output IS the agent's return value.** Output the release block as-is at the very end of the response, after the per-step report lines. Do NOT wrap it in commentary, do NOT prepend "Here is the bullet list".
 
 ## Input

@@ -4,6 +4,7 @@ description: "Use when a brief is settled and the work needs a scoped design spe
 tools: Read, Write, Edit, Glob, Grep, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"
+logging-waiver: "expert-runtime job — the job dir is the record"
 ---
 # lazy-experts.designer
 

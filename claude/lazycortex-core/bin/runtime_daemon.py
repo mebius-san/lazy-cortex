@@ -1862,6 +1862,55 @@ def _run_git_capture(repo_root: Path, args: list[str]) -> str:
   return proc.stdout.strip()
 
 
+def _repair_lagging_index(repo_root: Path) -> None:
+  """
+  Repair a git index that lagged behind a fast-forward pull, when the repair is provably lossless.
+
+  A fast-forward that races another writer of the shared `.git/index` can leave the index holding
+  pre-pull entries while `HEAD` and the worktree already carry the pulled state — `git status` then
+  shows phantom staged content nobody staged. The repair runs only under the proven lag signature:
+  every staged path's worktree file is identical to its `HEAD` version, so rebuilding the index from
+  `HEAD` discards nothing. Any real worktree divergence leaves the index untouched for the operator.
+
+  Guarantees:
+    - The index is reset only when every staged path's worktree file is byte-identical to its `HEAD`
+      version.
+    - Genuinely staged content is never discarded.
+    - The worktree is never modified.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is driving.
+  """
+
+  # Contract:
+  # The index is reset only when every staged path's worktree file is byte-identical to its
+  # `HEAD` version. Genuinely staged content — any staged path whose worktree file diverges from
+  # `HEAD` — is NEVER discarded. The worktree is NEVER modified.
+
+  # staged entries as git reports them — an empty index means the fast-forward landed intact
+  staged = _run_git_capture(repo_root, [ "diff", "--cached", "--name-only" ])
+  # guard: index clean — nothing lagged
+  if not staged:
+    return
+
+  # probe the lag signature: the worktree must match HEAD on every staged path
+  paths = staged.splitlines()
+  probe = subprocess.run(
+    [ "git", "diff", "--quiet", "HEAD", "--", *paths ],
+    cwd = repo_root, check = False, capture_output = True, text = True,
+  )
+  # guard: real worktree divergence — parked operator content, never reset it
+  if probe.returncode != 0:
+    return
+
+  # signature proven: rebuild the index from HEAD (worktree untouched) and journal the repair
+  _run_git(repo_root, [ "reset", "-q" ])
+  _log_routine_result(repo_root, {
+    TickResultKey.NAME: "_git_pre", TickResultKey.EXIT: 0, TickResultKey.DURATION_SEC: 0.0,
+    TickResultKey.NOTE: f"lagging index after ff-pull repaired via git reset ({len(paths)} paths)",
+  })
+
+
 def _git_pre(repo_root: Path, git_cfg: dict | None) -> None:
   """
   Perform the daemon's pre-iteration git synchronization.
@@ -1901,6 +1950,7 @@ def _git_pre(repo_root: Path, git_cfg: dict | None) -> None:
   # local is an ancestor of remote → fast-forward pull is safe (operator pushed ahead)
   if base == local:
     _run_git_remote(repo_root, [ "pull", "--ff-only", "origin", base_branch ])
+    _repair_lagging_index(repo_root)
     return
   # remote is an ancestor of local → unpushed routine commits from a prior tick; _git_post pushes them
   if base == remote:

@@ -21,6 +21,20 @@ The starting document is declared by the type record as `start_doc: "design.md:d
 - **Plans and reports are the tools' property.** This playbook declares and demands neither `code-plan`, nor `test-plan`, nor `code-report`, nor `test-report`. Which plan document and which report document a tool has is declared by that tool's record (`tool_types.<name>.plan_doc`, optional; `report_doc`, mandatory) and described by that tool's own playbook. A tool without `plan_doc` has no plan document at all — that is a declared absence, not a gap.
 - **`decisions`** — the asset's decision registry, kept by `lazy-spec.decide`. Created lazily by the first recorded decision; its absence means nothing and blocks nobody.
 
+## Use-cases and ui-design
+
+`use-cases.md` (written by the use-case-writer) and `ui-design.md` (written by the ui-designer) are opt-in, not mandatory: neither is declared above among the definition documents this playbook demands, and neither exists until its launch checkbox is ticked — or the product or the asset declares it mandatory (below). Their absence is a determination like any other opt-in artifact, never a gap: it blocks nothing.
+
+**The queue.** `Write architecture`'s own precondition (below) already carries the architect's side of this hold: the row doesn't appear until `ui-design.md` is absent, `approved`, or `cancelled`, so a tick recorded while `ui-design.md` is still in review simply has no row to dispatch yet — the row appears, and the architect reads `ui-design.md`, on the wake where it reaches `approved` (a cancelled `ui-design.md` releases the hold with nothing for the architect to read). Dispatching that tick is then the same ordinary launch-checkbox `dispatch-job` call as any other (`lazy-spec.coordination-playbook.md` Chapter 5), never a special-cased hold.
+
+`design.md` carries no such checkbox — it is the asset's start document, dispatched directly rather than through a launch-checkbox precondition — so its hold is a rule on the dispatch itself: when `use-cases.md` exists, the designer is not dispatched (or continued) on `design.md` until `use-cases.md` reaches `approved` or `cancelled`, and reads it once it is approved. Either way the point is the same: the use cases are meant to settle before the behaviour they describe is written down for good, and the screens before the module boundaries built to serve them are cast.
+
+**The windows.** `Write use-cases` closes the moment `spec_design_done` closes — past that point a fresh use case is a change asset's business, not this asset's own definition half. `Write ui-design` closes on `architecture.md` reaching `approved` (or, for an asset that never becomes code-bearing, on `spec_plan_done` closing instead) — past that point a screen redesign likewise belongs to a change asset.
+
+**Late edits.** An edit landing on `use-cases.md` or `ui-design.md` after the downstream document it feeds (`design.md`, `architecture.md` respectively) has already reached `approved` triggers no auto-cascade — the coordinator does not reopen the downstream document on its own. It drops a `[!attention]` callout into that downstream document instead and names the edit in `# Status brief`, so the operator sees the drift and decides whether it is worth folding in.
+
+**Declaring it mandatory.** A product or this asset may declare either document mandatory in its `# Coordinator rules` section. Once declared, the coordinator dispatches the corresponding writer directly, without waiting for a tick — the same rule-driven dispatch every other "automatic" behaviour in this system already uses (`lazy-spec.coordination-playbook.md` Chapter 1, "Automation 'by rule' is still verb calls").
+
 ## Code-bearing
 
 Whether a feature carries code is the coordinator's judgment, not a flag in script.
@@ -58,7 +72,9 @@ Checkboxes live in the status folder-note's `[!gate]` block. The coordinator rec
 
 | Checkbox | Appears when | Dispatches (role · source · context · result) |
 |---|---|---|
-| `Write architecture` | `spec_design_done` closed AND the asset is code-bearing AND `architecture.md` doesn't exist | architect · `design.md` · guidelines · `architecture.md` |
+| `Write use-cases` | asset exists AND `design.md` is not `approved` AND `use-cases.md` doesn't exist | use-case-writer · request/brief · guidelines · `use-cases.md` |
+| `Write architecture` | `spec_design_done` closed AND the asset is code-bearing AND `architecture.md` doesn't exist AND (`ui-design.md` is absent, `approved`, or `cancelled`) | architect · `design.md` · `ui-design.md` if present · guidelines · `architecture.md` |
+| `Write ui-design` | `spec_design_done` closed AND `ui-design.md` doesn't exist AND (`architecture.md` is absent OR not `approved`) | ui-designer · `design.md` · `use-cases.md` if present · guidelines · `ui-design.md` |
 | `Write <tool>-plan` | `spec_design_done` closed AND (the asset is NOT code-bearing OR `architecture.md` is `approved`) AND that tool's plan document doesn't exist | role from the plan document's own review class · `design.md` · guidelines · the plan document |
 | `Publish` | `spec_released` closed AND `spec_draft` still `true` | no job — the tick clears `spec_draft` and the coordinator removes the checkbox |
 

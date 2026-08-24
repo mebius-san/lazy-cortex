@@ -27,7 +27,7 @@ Optional flags on invocation:
 
 This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. Canonical list (titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Canonical list (titles verbatim):
    - `Step 1 — Parse arguments`
    - `Step 2 — Load or initialize configs`
    - `Step 3 — Discover agents`
@@ -37,8 +37,8 @@ This skill has 9 ordered steps. The executing agent MUST NOT skip, merge, reorde
    - `Step 7 — Per-agent wizard loop (review-bound only)`
    - `Step 8 — Write back`
    - `Step 9 — Report and log`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** A no-op counts only if it produced an explicit outcome line in the Report (e.g. `nothing to do`, `dry-run — N entries would write`).
-3. **Do not reach Report until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.**
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** A no-op counts only if it produced an explicit outcome line in the Report (e.g. `nothing to do`, `dry-run — N entries would write`).
+3. **Do not reach Report until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per step above. A missing line is a bug.
 
 ## Step 1: Parse arguments

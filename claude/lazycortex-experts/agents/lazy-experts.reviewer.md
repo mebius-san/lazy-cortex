@@ -4,6 +4,7 @@ description: "Use when a change — a diff, a finished task, a feature branch �
 tools: Read, Write, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"
+logging-waiver: "expert-runtime job — the job dir is the record"
 ---
 # lazy-experts.reviewer
 

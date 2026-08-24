@@ -81,6 +81,12 @@ _ITEM_PATH = "path"
 _ITEM_SHA = "sha"
 _ITEM_AUTHOR_EMAIL = "author_email"
 
+# Bound on the buried-operator window scan — how many of the document's own commits between the
+# item's sha and the sidecar's `last_seen_sha` cursor are examined before giving up.
+# limit: a window wider than this many commits on ONE document within one watch tick loses the
+# rescue; widen the cap if a real repo ever produces such a burst
+_WINDOW_SCAN_CAP = 50
+
 # Terminal markers `lazycortex-core` writes into a job bundle. A bundle carrying any of them has
 # stopped running, whatever the sidecar's `coordinator_job` still claims.
 _TERMINAL_MARKERS = (JobFile.DONE, JobFile.DEAD, JobFile.CANCELLED)
@@ -235,6 +241,71 @@ def _is_system_commit(repo: Path, asset_note: Path, item: dict, bot_emails: set[
   return _email_is_bot(item.get(_ITEM_AUTHOR_EMAIL, ""), bot_emails)
 
 
+def _has_buried_operator_commit(repo: Path, asset_note: Path, item: dict, bot_emails: set[str],
+                               last_seen: str | None) -> bool:
+  """
+  Check whether an operator commit is buried between the sidecar cursor and the item's commit.
+
+  Rescues an operator edit that a later bot commit on the same document shadowed within one
+  watch window, since the git watch surfaces only the file's last-changing commit per tick.
+
+  Args:
+    repo: Repository root to walk file history in.
+    asset_note: The reviewed document's path.
+    item: The git-watch `changed_files` item for this note.
+    bot_emails: Registered `git_author.email` values, from `_bot_emails`.
+    last_seen: The sidecar's `last_seen_sha` cursor, or None when no invocation stamped one.
+
+  Returns:
+    True when a commit strictly inside the `(last_seen, item sha)` window is operator-authored;
+    False otherwise — including when there is no cursor yet (conservative: the single-commit
+    author semantics apply unchanged) or the cursor is unreachable in the file's history.
+  """
+
+  # Domain(review.coordinator):
+  # # Shadowed-wake rescue for a one-commit-per-tick watch
+  # A file-level change watch hands the coordinator exactly one item per document per wake —
+  # that document's most recent commit. A state transition or an operator edit is therefore
+  # invisible to the item alone whenever a later, system-authored commit lands on the same
+  # document inside the same watch window; the earlier change is shadowed by the newer one.
+  # Two rescues close this blind spot. A document that is already active, still in its opening
+  # round, and has received neither a main-writer contribution nor a tracked job fires its
+  # entry wake from its current state alone, since the entry transition itself may have been
+  # shadowed. Separately, a buried operator edit is recovered by scanning the document's own
+  # history between the previous wake's cursor and the current commit: any commit strictly
+  # inside that window authored by someone other than a recognized system identity proves an
+  # operator touched the document during the window, even though the watch item itself points
+  # at a later, system-authored commit.
+
+  sha = item.get(_ITEM_SHA, "")
+  # guard: no window to scan — no cursor, no sha, or the item IS the cursor
+  if not sha or not last_seen or sha == last_seen:
+    return False
+
+  # walk the document's history from the item's commit down to the cursor, newest first
+  in_window = False
+  scanned = 0
+  for record in _git_ops.history_for_file(repo, asset_note):
+    # guard: skip everything newer than the item; its own commit is _is_system_commit's call
+    if not in_window:
+      in_window = record.sha == sha
+      continue
+    # guard: reached the cursor — everything older was judged by an earlier invocation
+    if record.sha == last_seen:
+      return False
+    scanned += 1
+    # guard: window implausibly deep — stop rather than walk unbounded history
+    if scanned > _WINDOW_SCAN_CAP:
+      return False
+    # guard: a coordinator commit proves everything older in the window was already handled
+    if Trailer.PHASE in record.trailers:
+      return False
+    # a trailerless non-bot author inside the window is the buried operator edit
+    if not _email_is_bot(record.author_email, bot_emails):
+      return True
+  return False
+
+
 # A ticked option line inside any callout — the shape every operator gesture takes (the approve
 # checkbox, a question option, a decision-candidate verdict). Bots never tick, by system invariant.
 _TICKED_LINE_RE = re.compile(r"^>\s*-\s*\[x\]", re.IGNORECASE)
@@ -368,6 +439,21 @@ def _resolve_trigger(current_report: dict, blob_report: dict, is_operator_edit: 
   if current_fm.get(ReviewKey.ACTIVE) is True and blob_fm.get(ReviewKey.ACTIVE) is not True:
     return _Trigger.REVIEW_ENTRY
 
+  # 1b. review-entry, state fallback — the entry transition can be shadowed when a later bot
+  # commit touches the same file inside one watch window (the item then diffs against a blob
+  # that is already active). A document that is active, entry-shaped (round 1, no main writer
+  # has spoken), and tracked by nothing in the sidecar has never had its entry wake — fire it
+  # from state alone. The entry wake's own writer dispatch stamps `active_job`, so a handled
+  # entry never re-fires here.
+  if (current_fm.get(ReviewKey.ACTIVE) is True
+      and current_fm.get(ReviewKey.ROUND) == 1
+      # the frontmatter reader keeps the bracketed list raw, so empty is "", "[]", or absent
+      and str(current_fm.get(ReviewKey.MAIN_DONE) or "").strip() in ("", "[]")
+      and not markers.get(JobMarker.COORDINATOR_JOB)
+      and not markers.get(JobMarker.ACTIVE_JOB)
+      and not markers.get(JobMarker.PENDING_WAKE)):
+    return _Trigger.REVIEW_ENTRY
+
   # 2. job-done — the postman raised the pending wake when it landed the payload. The commit
   # carrying that payload is this very git item, and its author is a registered bot, so the
   # sidecar flag rather than the commit's identity is what makes the wake visible here.
@@ -475,13 +561,47 @@ def _core_dispatch_job(repo: Path, bundle: dict) -> dict:
 
 def coordinator_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
   """
-  Detect a coordinator wake trigger on one document and dispatch a job when one fires.
+  Dispatch a coordinator job for one document when its wake trigger fires.
 
-  At most one coordinator job runs per document, and only a live one counts: a `coordinator_job`
-  marker naming a bundle that is still running is a silent skip, checked before any of the four
-  triggers, while a marker naming a finished, dead, cancelled, or vanished bundle is cleared in
-  the sidecar and this same call goes on to resolve the trigger. Neither the clear nor the
-  dispatch stamp touches the document, so neither costs a commit.
+  Notes:
+    - Stamps the item's commit sha as the document's `last_seen_sha` cursor on every call,
+      dispatched or not, so the next invocation's buried-operator rescue has an accurate cursor.
+
+  Args:
+    repo: Repository root.
+    asset_note: The reviewed document's path.
+    item: The git-watch `changed_files` item that woke this tick (`path`, `status`, `sha`,
+      `author_name`, `author_email`).
+
+  Returns:
+    `{"action": "noop"}` when nothing wakes the coordinator or a live job is already tracked; or
+    `{"action": "dispatched", "trigger", "job_id"}` on a fresh dispatch.
+
+  Raises:
+    RuntimeError: When the settings file exists but is not valid JSON, or when the
+      `lazycortex-core` CLI cannot be resolved or its dispatch call exits non-zero.
+  """
+  result = _resolve_and_dispatch(repo, asset_note, item)
+
+  # stamp the cursor last, so this invocation's own window scan used the previous value
+  sha = item.get(_ITEM_SHA, "")
+  if sha:
+    _job_markers.update(repo, asset_note, { JobMarker.LAST_SEEN_SHA: sha })
+  return result
+
+
+def _resolve_and_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
+  """
+  Dispatch a coordinator job for one document's git-watch item when its wake trigger fires.
+
+  Guarantees:
+    - At most one coordinator job runs per document: a `coordinator_job` marker naming a bundle
+      that is still running blocks a new dispatch, while one naming a finished, dead, cancelled,
+      or vanished bundle is cleared before the trigger is resolved.
+
+  Notes:
+    - Clearing a stale job marker and stamping a fresh dispatch never touch the document itself,
+      so neither action costs a commit.
 
   Args:
     repo: Repository root.
@@ -493,6 +613,12 @@ def coordinator_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
     `{"action": "noop"}` when nothing wakes the coordinator or a live job is already tracked; or
     `{"action": "dispatched", "trigger", "job_id"}` on a fresh dispatch.
   """
+
+  # Contract:
+  # At most one coordinator job runs per document. A `coordinator_job` marker naming a bundle
+  # that is still running blocks a new dispatch; a marker naming a finished, dead, cancelled,
+  # or vanished bundle is cleared before the trigger is resolved.
+
   markers = _job_markers.read(repo, asset_note)
 
   # one active coordinator job per document — but only while that job is genuinely live. A marker
@@ -512,10 +638,15 @@ def coordinator_dispatch(repo: Path, asset_note: Path, item: dict) -> dict:
   settings = _load_settings(repo)
   blob_text = _read_blob(repo, item.get(_ITEM_SHA, ""), item.get(_ITEM_PATH, ""))
   # a fresh tick is an operator gesture whoever committed it — bots never tick, so a tick
-  # transition overrides the author-based suppression exactly like a review_result transition
+  # transition overrides the author-based suppression exactly like a review_result transition;
+  # an operator commit buried under a later bot commit in the same watch window is rescued by
+  # the cursor-bounded window scan
+  bot_emails = _bot_emails(settings)
   is_operator_edit = (
-      not _is_system_commit(repo, asset_note, item, _bot_emails(settings))
+      not _is_system_commit(repo, asset_note, item, bot_emails)
       or _has_fresh_tick(blob_text or "", current_text)
+      or _has_buried_operator_commit(repo, asset_note, item, bot_emails,
+                                    markers.get(JobMarker.LAST_SEEN_SHA))
   )
   # waiver: type: ignore — note_ops is a deferred/late-bound sibling import; mypy cannot resolve it
   blob_report = _note_ops.build_report(blob_text or "")  # type: ignore[attr-defined]

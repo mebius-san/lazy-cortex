@@ -4,6 +4,7 @@ description: "Use when the answer has to come from actually running things — a
 tools: Read, Write, Glob, Grep, Bash, Skill, Agent
 model: inherit
 execution-discipline-waiver: "single-response expert; no multi-phase orchestration"
+logging-waiver: "expert-runtime job — the job dir is the record"
 ---
 # lazy-experts.tester
 

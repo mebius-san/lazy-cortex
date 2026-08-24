@@ -19,13 +19,13 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.parallel-scan.md` before dispat
 
 This skill has 4 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
-1. **Before calling any other tool**, call `TaskCreate` with exactly one task per step below — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
+1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Phase 1 — Inline logging compliance checks`
    - `Phase 2 — Dispatch parallel scans`
    - `Phase 3 — Render (Report)`
    - `Log the run`
-2. **Mark each task `in_progress` on enter and `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
-3. **Do not reach the Report step until `TaskList` shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
 ## Phase 1 — Inline logging compliance checks
@@ -355,7 +355,7 @@ Validate the returned sections (`daemon_version` / `routines_version` are the cu
 - **`daemon` section.** When the section carries only `_version` (no daemon keys), it is not configured — `[INFO] daemon section absent — daemon not configured (git-sync off or routines-only repo) | .claude/lazy.settings.json` and skip the remaining daemon checks. Otherwise:
   - `daemon._version` must equal `daemon_version` (current `CURRENT_VERSIONS['daemon']`, presently 2). Wrong value or absent → `[FAIL] daemon section _version mismatch (expected <daemon_version>) | .claude/lazy.settings.json`.
   - The `daemon` section must contain: `git` (object or null), `polling_interval_sec` (positive int), `cleanup_completed_after` (string or int), `cleanup_failed_after` (string or int), `cleanup_dead_after` (string or int). Any missing key → `[FAIL] daemon section missing key(s): <list> | .claude/lazy.settings.json`.
-  - When `daemon.enabled` is true, the `git` block must be a non-empty object carrying `base_branch` (the sole required field per `lazy-core.runtime-schema`). A `null` / absent block → `[FAIL] daemon.enabled is true but daemon.git is null — the daemon rides no branch and never syncs with origin, so routine output stays unpublished in this checkout | .claude/lazy.settings.json`; `fix: re-run /lazy-core.install (Step 9c derives it), or accept Fix L6 in /lazy-core.doctor`. A block present but missing `base_branch` → `[FAIL] daemon.git missing required field base_branch | .claude/lazy.settings.json` with the same fix. A block carrying `base_branch` but no `remote_sync` is **not** a finding — a checkout without an `origin` remote gets exactly that shape, and an operator may drop `remote_sync` deliberately.
+  - The `git` block must be a non-empty object carrying `base_branch` (the sole required field per `lazy-core.runtime-schema`), whatever `daemon.enabled` says — a manual `/lazy-runtime.tick` commits through the same block. A `null` / absent block → `[FAIL] daemon.git is null — routine commits ride no branch and never sync with origin, so their output stays unpublished in this checkout | .claude/lazy.settings.json`; `fix: re-run /lazy-core.install (Step 9c derives it), or accept Fix L6 in /lazy-core.doctor`. A block present but missing `base_branch` → `[FAIL] daemon.git missing required field base_branch | .claude/lazy.settings.json` with the same fix. A block carrying `base_branch` but no `remote_sync` is **not** a finding — a checkout without an `origin` remote gets exactly that shape, and an operator may drop `remote_sync` deliberately.
   - Each `cleanup_*_after` value must parse as `<N>d` (days), `<N>h` (hours), or a raw non-negative integer (seconds). Anything else → `[FAIL] daemon.<key> has malformed value '<value>' (expected <N>d / <N>h / int) | .claude/lazy.settings.json` — D6 below would otherwise silently fail to parse and apply a default.
 - **`routines` section.** The section IS the routines map (each key is a routine name; `_version` is the lone reserved key). `routines._version` must equal `routines_version` (current `CURRENT_VERSIONS['routines']`, presently 2). Wrong value or absent → `[FAIL] routines section _version mismatch (expected <routines_version>) | .claude/lazy.settings.json`. The section must be a dict — a non-dict value → `[FAIL] routines section is not a dict | .claude/lazy.settings.json`.
 - When D1 found at least one expert AND `routines` does not contain a `lazy-expert.pump` entry → `[WARN] experts configured but lazy-expert.pump routine absent from routines | .claude/lazy.settings.json`.
@@ -482,11 +482,11 @@ The audit scans `.claude/references/*-protocol.md` (plus the same directory unde
 
 No entries → emit nothing.
 
-**D15 — Operator git hooks undecided under the daemon**
+**D15 — Operator git hooks undecided under the runtime**
 
-A hook the operator keeps in this repo is written for a person at a keyboard. Under the daemon the same hook fires on autonomous commits, and one that rewrites files after the commit is assembled leaves a dirty tree the runtime halts on. The daemon therefore runs only the hooks named in `daemon.git.allowed_hooks`; every other one is silently absent from its filtered directory. Silently is the problem — an operator who adds a guard hook expecting it to gate the daemon's commits gets no signal that it never ran.
+A hook the operator keeps in this repo is written for a person at a keyboard. Under the runtime the same hook fires on autonomous commits, and one that rewrites files after the commit is assembled leaves a dirty tree the runtime halts on. The daemon therefore runs only the hooks named in `daemon.git.allowed_hooks`; every other one is silently absent from its filtered directory. Silently is the problem — an operator who adds a guard hook expecting it to gate the daemon's commits gets no signal that it never ran.
 
-Skip the check when `daemon.enabled` is false. Otherwise resolve the operator's hook directory — `core.hooksPath` when set (relative values resolve against the repo root), else `<git-common-dir>/hooks` — and list the executable files in it, ignoring `*.sample`.
+The filtered hook directory is the routine subprocess's, so this applies to a manually ticked checkout exactly as to a supervised one; `daemon.enabled` does not gate it. Resolve the operator's hook directory — `core.hooksPath` when set (relative values resolve against the repo root), else `<git-common-dir>/hooks` — and list the executable files in it, ignoring `*.sample`.
 
 - `[WARN]` per executable hook whose filename is absent from `daemon.git.allowed_hooks` — `operator hook <name> does not run under the daemon | <hooks-dir>/<name>`; `fix: add "<name>" to daemon.git.allowed_hooks, or leave it out deliberately — the daemon runs no unlisted hook`.
 
