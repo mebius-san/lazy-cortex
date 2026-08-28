@@ -26,7 +26,7 @@ You decide what a thing in this project is called. A writing expert picks a word
 
 Read the mode first — it decides both what you read and whether you write anything.
 
-- **`curate`** — dispatched by the routine through the runtime. You have a **job dir**: `request.json` (`kind`, `file`), `source/document` (a read-only snapshot of the changed document). You edit the dictionary, commit it, and write `result/terms.json` plus `result/response.json`.
+- **`curate`** — dispatched by the routine through the runtime. You have a **job dir**: `request.json` (`kind`, `file`). There is no snapshot copy — read the real `file` path in the working tree. You edit the dictionary, commit it, and write `result/terms.json` plus `result/response.json`.
 - **`report`** — dispatched by the terms section of the doctor with the `Agent` tool. There is **no job dir** — no `request.json`, no `source/`, no `result/`. The prompt names the real things directly: the scope id, the dictionary path, the scope's covered-document globs, and its term-source exclusions. You read, you judge, you return findings as your reply. You write nothing, you commit nothing.
 
 ## Resolving the scope (both modes)
@@ -41,7 +41,7 @@ In `report` the prompt hands you the scope. In `curate` you resolve it yourself:
 
 ## kind = `curate`
 
-1. **Read the document** — `source/document`.
+1. **Read the document** — the `file` path from the request, in the working tree. Missing or empty → `outcome: error`, category `logical`.
 2. **Read the dictionary's headings**, not its whole body: `Grep` for `^## ` with `output_mode: content`.
 3. **Decide what the document introduced.** For each concept it names that looks like a project entity, find the candidates among the headings — a heading spelled similarly, or one that by its wording names the same thing. Pull the definitions of just those candidates with a second `Grep` using `-A` to capture the lines after the heading. **Escape the heading before you put it in a pattern**: `Grep` has no fixed-string mode, and terms here are dotted and namespaced, so a bare `.` matches anything and a bare bracket either over-matches or fails to compile. Put a backslash before each of `[ ] ( ) { } * + ? | ^ $ \ .`
 4. **Choose the operation** per concept:
@@ -77,7 +77,6 @@ Format and configuration findings belong to the dispatching skill. Do not comput
 
 - The dictionary is the only tracked file you may write, and only in `curate`.
 - MUST NOT edit the triggering document, any other document of the scope, or the scope's configuration.
-- MUST NOT write back to `source/document` — it is a read-only staged copy.
 - MUST NOT create the dictionary when it is missing.
 - MUST NOT call `AskUserQuestion` — there is no user channel in this execution model.
 - `.memory/<self>/` is yours, granted by the persona aspect; nothing else outside the job dir is.

@@ -50,7 +50,7 @@ CURRENT_VERSIONS = {
   "agent_models": 2,
   "daemon": 4,
   "external_dirs": 1,
-  "routines": 6,
+  "routines": 7,
   "experts": 4,
   "git": 1,
   "products": 2,

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-locate-plugin-post-bump); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
@@ -16,7 +16,10 @@ source_skills:
   - lazy-python.docstring-writer
   - lazy-python.test-writer
   - lazy-python.code-reviewer
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+  - lazy-python.knowledge-sweep
+  - lazy-python.domain-writer
+  - lazy-python.contract-writer
+source_sha: 417672bdd01f4f9a903295fa390308952515f9bc
 ---
 # Troubleshooting
 
@@ -303,6 +306,56 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 **Likely cause**: A test correctly reflects documented behaviour (what the class's docstring promises) but fails against the current implementation. The agent follows the Golden Rule: it does not alter the test to match a possibly buggy implementation, and it does not delete the test. The `# FAILS:` flag is intentional — it signals a divergence between the spec (docstring) and the code.
 
 **Fix**: The flagged test is a bug report, not a broken test. Investigate the production class: either the implementation has a defect (fix the code), or the docstring overstates what the class actually does (update the docstring via `lazy-python.docstring-writer` to reflect the real contract, then revisit the test). Do not remove the `# FAILS:` comment or alter the assertion to make it pass without first resolving the underlying divergence.
+
+---
+
+## `lazy-python.knowledge-sweep` Step 2 finds nothing to add to the dictionary
+
+**Symptom**: `/lazy-python.knowledge-sweep` completes Step 2 with outcome `nothing-parked`, proposing no candidate groups, and the dictionary is left untouched.
+
+**Likely cause**: No source file carries a `Domain(unfiled):` block yet, and the sources don't yet carry enough recognizable subject-area vocabulary (module/package names, recurring domain nouns in docstrings) for the step to propose a candidate cluster on its own.
+
+**Fix**: This is expected on a codebase that hasn't adopted domain markers yet, or one that's already fully filed. Add groups by hand to the dictionary if you already know the subject areas you want to document, or just let the sweep continue against the dictionary as it stands — Step 4 still dispatches the writer agents, and any new `Domain(…)` blocks they write can seed the next sweep's candidates.
+
+---
+
+## `lazy-python.knowledge-sweep` Step 7 reports `gate-absent`
+
+**Symptom**: The sweep runs to completion, but Step 7 (Verify) reports outcome `gate-absent` instead of `verified-clean`, and the run leaves you with no confirmation the swept files are still clean.
+
+**Likely cause**: The repo has no `cli/chk-py` wrapper for the sweep to run — `/lazy-python.install` was never run, or was run in a different repo than the one being swept.
+
+**Fix**: Run `/lazy-python.install` to deploy the wrapper, then re-run `chk-py all -q` by hand to verify the sweep's edits. The sweep's changes are already committed (Step 8 runs regardless of Step 7's outcome), so this only closes the verification gap, not a lost edit.
+
+---
+
+## `Domain(unfiled):` blocks keep appearing after a sweep or a direct `lazy-python.domain-writer` dispatch
+
+**Symptom**: After running `/lazy-python.knowledge-sweep` or dispatching `lazy-python.domain-writer` directly, one or more blocks land under (or stay under) the reserved `Domain(unfiled):` group instead of a real one.
+
+**Likely cause**: `Domain(unfiled):` is the parking group the agent uses whenever no listed group in the domain-groups dictionary fits the concept it just documented — it never invents a permanent group on its own. This is the expected outcome when the dictionary doesn't yet cover that subject area, not a defect in the write itself.
+
+**Fix**: The agent's report names the candidate group and a one-line gloss for each parked block. Accept or rename the candidate into the dictionary — by hand, or by re-running `/lazy-python.knowledge-sweep`, whose Step 2 walks parked blocks and proposes clusters for exactly this case — then re-dispatch `lazy-python.domain-writer` with `refile=true` against the affected file so it re-picks the group for the now-fileable blocks. A block that still matches nothing after the dictionary grows stays parked; `check12` (see above) keeps flagging it until it's filed.
+
+---
+
+## `lazy-python.domain-writer` or `lazy-python.contract-writer` won't touch a block I asked it to change
+
+**Symptom**: Dispatching either agent to update an existing `Domain(…)` or `Contract:` block leaves the block's text unchanged, even though the dispatch described a change.
+
+**Likely cause**: Both agents enforce a hard rule: neither ever removes or alters an existing block without the dispatch prompt explicitly approving that exact block. A vague dispatch ("update the domain comments in this file") does not name a specific block, so the agent has nothing it is authorized to rewrite.
+
+**Fix**: Name the exact block — the symbol it sits on, or the concept/guarantee it states — and describe what changed. For `lazy-python.domain-writer`, the one standing exception is refile mode (`refile=true`), which authorizes rewriting the header (group) line — never the body — of already-parked or `rename=`-named blocks; it does not license rewording an existing block's text.
+
+---
+
+## `lazy-python.contract-writer` refuses to formalize the guarantee I asked for
+
+**Symptom**: Dispatching `lazy-python.contract-writer` against a method or class produces no new `Contract:` block, and the agent's report names the requested guarantee as out of scope.
+
+**Likely cause**: The agent's hard rules exclude three categories from ever becoming a contract: pure implementation details invisible to callers, anything already obvious from the signature and type hints, and presentation details (exact message text, log lines, formatting) — the last is only ever contractable when a caller demonstrably parses the string programmatically, and even then the contract names the parsed structure, not the prose.
+
+**Fix**: This is expected behaviour, not a bug — writing a contract for one of these would violate the plugin's own documenting canon. If the guarantee is genuinely caller-visible (a return value's shape, a side effect, an invariant that must survive refactoring), re-describe it in those terms in the dispatch. If it's presentation-only, it belongs in a code comment or the docstring's ordinary prose instead of a `Contract:` block.
 
 ---
 

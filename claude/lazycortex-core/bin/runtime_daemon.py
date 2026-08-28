@@ -47,6 +47,13 @@ POST_TICK_MAX_PUSH_ATTEMPTS = 3
 # Sleeps between retries of a remote-touching git command whose failure looks like a transport
 # blip. One entry per retry, so the command runs len()+1 times at worst and costs sum() seconds.
 REMOTE_RETRY_BACKOFF_SEC = ( 2.0, 5.0, 10.0 )
+# Backoff before re-attempting a local git command that lost a race for `.git/index.lock` — held
+# for the fraction of a second another writer of the same checkout (an expert job commit) needs.
+LOCAL_LOCK_RETRY_BACKOFF_SEC = ( 0.5, 1.5 )
+# Substrings that mark a failed local git invocation as index-lock contention rather than an
+# answer git computed. Both must appear in stderr: the lock path and the create failure.
+_GIT_LOCK_PATH_MARKER = "index.lock"
+_GIT_LOCK_CREATE_MARKERS = ( "File exists", "Unable to create" )
 # Substrings that mark a git failure as unreachable-remote rather than a refusal git computed.
 # Matched case-insensitively against stderr. A non-fast-forward rejection deliberately matches
 # none of these — it is an answer from a reachable remote and must surface on the first attempt.
@@ -1146,7 +1153,7 @@ def _run_iteration(repo_root: Path, *, push: bool = True, only: str | None = Non
         TickResultKey.ERROR: f"git_pre failed: {e}",
       })
       # waiver: daemon error/trigger token, not an internal key
-      _halt_daemon(repo_root, state, HaltReason.GIT_REMOTE_UNAVAILABLE, "_git_pre", str(e))
+      _halt_daemon(repo_root, state, _git_halt_reason(e), "_git_pre", str(e))
       return
 
   # pre-iteration tree check — daemon does NOT run routines while the working tree has uncommitted
@@ -1251,7 +1258,7 @@ def _run_iteration(repo_root: Path, *, push: bool = True, only: str | None = Non
         TickResultKey.ERROR: f"git_post failed: {e}",
       })
       # waiver: daemon error/trigger token, not an internal key
-      _halt_daemon(repo_root, state, HaltReason.GIT_REMOTE_UNAVAILABLE, "_git_post", str(e))
+      _halt_daemon(repo_root, state, _git_halt_reason(e), "_git_post", str(e))
 
   # loop-detect — bound the cost of a buggy state machine that commits forever as the same bot;
   # cheap post-iteration scan: if the N most recent commits in the repo all share the same author
@@ -1429,6 +1436,85 @@ def _record_metrics_port_conflict(repo_root: Path, port: int, e: OSError) -> Non
   })
 
 
+def resolve_daemon_token(settings_path: Path, *, env_file: Path | None = None) -> str:
+  """
+  Resolve the daemon's explicit OAuth token and export it for every spawn.
+
+  A daemon without an explicit token runs on whatever account the machine happens to be
+  logged into — unpredictable, and it burns a usage window nobody chose. `daemon.token_env`
+  names the environment variable holding this daemon's token.
+
+  Notes:
+    - The environment variable's value takes precedence over the same variable's entry in the env file.
+    - Sets `CLAUDE_CODE_OAUTH_TOKEN` in the process environment to the resolved token, so the pump's
+      spawns and every routine started afterward inherit it.
+
+  Args:
+    settings_path: The repository's `lazy.settings.json` path.
+    env_file: The env file consulted after the environment; defaults to `~/.claude/.env`.
+
+  Returns:
+    The variable name that was resolved.
+
+  Raises:
+    SystemExit: When `daemon.token_env` is absent or blank, or the named variable resolves
+      to no value in either source — the daemon must not run on the ambient login.
+  """
+  var = load_section(settings_path, SettingsKey.DAEMON).get(DaemonKey.TOKEN_ENV)
+  # guard: no named variable means the ambient login would be used — refuse loudly
+  if not isinstance(var, str) or not var.strip():
+    raise SystemExit(
+      "lazycortex daemon: daemon.token_env is required — name the environment variable "
+      "(seeded in ~/.claude/.env) holding this daemon's OAuth token; running on the "
+      "machine's ambient login is refused"
+    )
+  var = var.strip()
+  value = os.environ.get(var) or _env_file_value(
+    # waiver: the operator's canonical env file location, a fixed convention
+    env_file if env_file is not None else Path.home() / ".claude" / ".env", var,
+  )
+  # guard: the variable is named but resolves nowhere — a silent ambient fallback here
+  # would defeat the gate
+  if not value:
+    raise SystemExit(
+      f"lazycortex daemon: daemon.token_env names {var!r} but it is set neither in the "
+      "environment nor in ~/.claude/.env"
+    )
+  os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = value
+  return var
+
+
+def _env_file_value(env_file: Path, var: str) -> str:
+  """
+  Read one variable's value from a dotenv-style file.
+
+  Args:
+    env_file: The file to read; absent or unreadable reads as empty.
+    var: The variable name to look up.
+
+  Returns:
+    The value with surrounding quotes stripped, or an empty string when not found.
+  """
+  try:
+    lines = env_file.read_text().splitlines()
+  except OSError:
+    return ""
+  for line in lines:
+    stripped = line.strip()
+    # guard: skip comments and blanks
+    if not stripped or stripped.startswith("#"):
+      continue
+    # waiver: dotenv `export ` prefix, a fixed file-format token
+    if stripped.startswith("export "):
+      stripped = stripped[len("export "):]
+    key, sep, value = stripped.partition("=")
+    # guard: not an assignment, or a different variable
+    if not sep or key.strip() != var:
+      continue
+    return value.strip().strip("'\"")
+  return ""
+
+
 def _gate_run_here(repo_root: Path) -> None:
   """
   Refuse to start the daemon on a machine or checkout that lacks authorization to run it.
@@ -1532,6 +1618,11 @@ def run(repo_root: Path) -> None:
   schedule indefinitely, sleeping between iterations based on the next-due time and the configured
   polling interval.
 
+  Guarantees:
+    - The daemon's own token resolves and exports before any spawn-capable machinery comes up, so
+      no routine, hook, or subprocess this process starts ever runs under the machine's ambient
+      login instead of the daemon's own token.
+
   Notes:
     - When the daemon is halted, the loop sleeps for the polling interval directly to avoid a tight
       CPU loop driven by stale `last_run` timestamps — except a `rate_limit` halt, which instead
@@ -1549,7 +1640,8 @@ def run(repo_root: Path) -> None:
 
   Raises:
     SystemExit: If the `daemon.run_here` setting does not designate this host and checkout as the
-      pair that drives this repository.
+      pair that drives this repository, or if `daemon.token_env` is absent or blank, or the
+      variable it names resolves to no value in either the environment or the env file.
   """
   # every loop-tail settings read resolves against this one path
   settings_path = repo_root / SettingsFile.REL
@@ -1570,6 +1662,16 @@ def run(repo_root: Path) -> None:
     # it reads the settings file: an unparseable one must land in the ledger like any other startup
     # failure, rather than killing the process with a bare traceback
     _gate_run_here(repo_root)
+
+    # Contract:
+    # `resolve_daemon_token` MUST resolve and export the daemon's token before any spawn-capable
+    # machinery comes up; no routine, hook, or subprocess this process starts may ever run under
+    # the machine's ambient login instead of the daemon's own token.
+
+    # the explicit-token gate stands right after the host gate: a daemon must never spend
+    # under the machine's ambient login, so the token resolves (and exports) before any
+    # spawn-capable machinery comes up
+    resolve_daemon_token(settings_path)
 
     # Decision: pin best-effort rather than abort — a checkout git cannot answer for (no repository,
     # git absent) is a broken environment the operator must see, not a reason to refuse to drive the
@@ -1761,23 +1863,65 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
   return [ str(bin_path), *cmd[1:] ]
 
 
+def _git_halt_reason(error: Exception) -> str:
+  """
+  Name the halt reason a failed git sync step records.
+
+  Args:
+    error: The exception that escaped `_git_pre` or `_git_post`.
+
+  Returns:
+    `HaltReason.GIT_REMOTE_UNAVAILABLE` only when the failure is a git invocation whose stderr
+    names an unreachable remote; `HaltReason.GIT_LOCAL_FAILED` for everything else — a halt over
+    a local failure must not send recovery after a remote that was never involved.
+  """
+  if isinstance(error, subprocess.CalledProcessError) and _is_transport_failure(error):
+    return HaltReason.GIT_REMOTE_UNAVAILABLE
+  return HaltReason.GIT_LOCAL_FAILED
+
+
+def _is_lock_contention(error: subprocess.CalledProcessError) -> bool:
+  """
+  Decide whether a failed local git invocation lost a race for the shared index lock.
+
+  Args:
+    error: The failure raised by the git subprocess.
+
+  Returns:
+    `True` when stderr names a held `index.lock` — a transient another writer of the same
+    checkout (an expert job committing) releases momentarily; `False` for every failure git
+    computed as an answer, which a retry could only repeat.
+  """
+  # waiver: codec error mode literal — subprocess stderr decode, same idiom as _is_transport_failure
+  stderr = (error.stderr or b"").decode(errors = "replace")
+  return _GIT_LOCK_PATH_MARKER in stderr and any(m in stderr for m in _GIT_LOCK_CREATE_MARKERS)
+
+
 def _run_git(repo_root: Path, args: list[str]) -> None:
   """
   Run a git command in the daemon repository and surface its stderr on failure.
+
+  A failure that lost a race for the shared `.git/index.lock` is retried after a short backoff;
+  every other failure surfaces on the first attempt.
 
   Args:
     repo_root: Absolute path to the repository the git command targets.
     args: Argument vector passed to the `git` executable (without the leading `git` token).
 
   Raises:
-    subprocess.CalledProcessError: When the git invocation exits non-zero. Stderr is written to the
-      daemon's standard error stream before the exception propagates.
+    subprocess.CalledProcessError: When the git invocation exits non-zero past the lock retries.
+      Stderr is written to the daemon's standard error stream before the exception propagates.
   """
-  try:
-    subprocess.run([ "git", *args ], cwd = repo_root, check = True, capture_output = True)
-  except subprocess.CalledProcessError as e:
-    sys.stderr.write(f"git {' '.join(args)} failed:\n{e.stderr.decode()}\n")
-    raise
+  for backoff in ( *LOCAL_LOCK_RETRY_BACKOFF_SEC, None ):
+    try:
+      subprocess.run([ "git", *args ], cwd = repo_root, check = True, capture_output = True)
+      return
+    except subprocess.CalledProcessError as e:
+      # guard: only a held index lock earns another attempt — computed answers surface at once
+      if backoff is None or not _is_lock_contention(e):
+        sys.stderr.write(f"git {' '.join(args)} failed:\n{e.stderr.decode()}\n")
+        raise
+      time.sleep(backoff)
 
 
 def _is_transport_failure(error: subprocess.CalledProcessError) -> bool:
@@ -1844,7 +1988,8 @@ def _run_git_capture(repo_root: Path, args: list[str]) -> str:
   """
   Run a git command in the daemon repository and return its stripped standard output.
 
-  Used for `rev-parse` and `merge-base` calls where the daemon needs the resulting sha as a string.
+  Used for git plumbing queries whose stripped stdout the daemon needs, returning either a sha (`rev-parse`,
+  `merge-base`) or a branch name (`rev-parse --abbrev-ref`).
 
   Args:
     repo_root: Absolute path to the repository the git command targets.
@@ -1934,9 +2079,15 @@ def _git_pre(repo_root: Path, git_cfg: dict | None) -> None:
   if not git_cfg:
     return
   base_branch = git_cfg[GitConfigKey.BASE_BRANCH]
-  # NOTE: plain checkout — NOT `-B`. The daemon now rides the operator's base branch and must never
-  # reset it to HEAD; operator commits arrive via the ff-pull below.
-  _run_git(repo_root, [ "checkout", base_branch ])
+
+  # move to the operator's base branch — plain checkout, never `-B`: the daemon rides the branch and
+  # must not reset it to HEAD; operator commits arrive via the ff-pull below.
+  # opt: skipped when already on the branch — a no-op checkout still appends a reflog line to
+  # .git/logs/HEAD on every tick, and under a file-sync service that unbounded growth costs
+  # gigabytes per day.
+  if _run_git_capture(repo_root, [ "rev-parse", "--abbrev-ref", "HEAD" ]) != base_branch:
+    _run_git(repo_root, [ "checkout", base_branch ])
+
   # guard: remote sync not requested
   if git_cfg.get(GitConfigKey.REMOTE_SYNC) not in ( "pull", "pull_push" ):
     return

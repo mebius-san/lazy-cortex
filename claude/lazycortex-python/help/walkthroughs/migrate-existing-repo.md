@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation (including pcf's language and project-package checks), then backfill Domain/Contract markers with knowledge-sweep.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 diagram_spec:
   anchor: "Migration flow"
   request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install runs its ordered steps fully automatically (mirror rules, deploy chk-py/tst-py wrappers, detect PyCharm, bootstrap pyproject.toml, scaffold overlay, sync scaffold template, record python.env_source with a one-time disambiguation prompt only when multiple bootstrap-script candidates exist, seed agent-model tiers, register the code-reviewer expert, log) → user runs chk-py all -q → the six-step gate (pcf, toi, cmp, mypy, ruff, pylint) surfaces existing violations, including pcf's language and project-package findings → user fixes violations in chunks and commits iteratively until chk-py all exits clean → user dispatches lazy-python.knowledge-sweep to grow the domain-groups dictionary from any parked Domain(unfiled) blocks the fixes surfaced and file them under real groups"
@@ -11,7 +11,7 @@ source_skills:
   - chk
   - pcf.py
   - lazy-python.knowledge-sweep
-source_sha: caa41597babc75b695667127c243f81511fefde4
+source_sha: 417672bdd01f4f9a903295fa390308952515f9bc
 ---
 # Adopt the plugin in a repo with pre-existing Python that drifted from the canon
 
@@ -123,9 +123,9 @@ A drifted repo's remediation pass in Step 3 routinely surfaces (or writes) `Doma
 /lazy-python.knowledge-sweep
 ```
 
-The sweep resolves the dictionary path (`.claude/lazy.settings.json[wiki.domains.dictionary]` when set, else `docs/guidelines/domain-groups.md`), then always runs its dictionary-growth step: it collects every parked `Domain(unfiled):` block plus the sources' recurring subject-area vocabulary, clusters them into candidate groups, and puts each candidate to you with `AskUserQuestion` — you tick, edit, or reject each one. Accepted candidates are appended to the dictionary; a rejected cluster stays parked for the next sweep. It also catches groups that are misspelled or simply invented at the keyboard (present in a `Domain(<group>):` block but not in the dictionary), offering **add** or **rename** for each.
+The sweep resolves the dictionary path (`.claude/lazy.settings.json[wiki.domains.dictionary]` when set, else `docs/guidelines/domain-groups.md`), then always runs its dictionary-growth step: it collects every parked `Domain(unfiled):` block plus the sources' recurring subject-area vocabulary, clusters them into candidate groups. The sweep is non-interactive — it does not stop to ask. It settles the finest cut the clusters justify itself (one group per subject a reader would open separately, nothing merged just to keep the count down) and writes the accepted groups straight into the dictionary, reporting the full cut back so you can overrule a name or a boundary afterward, against a finished result rather than a hypothetical. It also catches groups that are misspelled or simply invented at the keyboard (present in a `Domain(<group>):` block but not listed in the dictionary) — these too it resolves itself, adding a sound name to the dictionary or renaming into the listed group it duplicates, and reports every add and rename it made.
 
-Once the dictionary reflects this repo's real subject areas, the sweep enumerates its scope (explicit paths, `wiki.domains.code` globs when configured, or every tracked `.py` file), and dispatches the `lazy-python.domain-writer` and `lazy-python.contract-writer` agents across it — `refile=true` is set automatically so blocks already parked under `unfiled` get re-picked against the grown dictionary, not just newly-written ones. It then re-runs `chk-py all -q` over the touched files to catch cross-file fallout, and commits everything it touched (marker edits plus the dictionary) under an explicit pathspec.
+Once the dictionary reflects this repo's real subject areas, the sweep enumerates its scope (explicit paths, `wiki.domains.code` globs when configured, or every tracked `.py` file), and dispatches the `lazy-python.domain-writer` and `lazy-python.contract-writer` agents across it — `refile=true` is set automatically so blocks already parked under `unfiled` get re-picked against the grown dictionary, not just newly-written ones. Two corpus-level consolidation passes follow, each settled by the sweep itself and reported for you to overrule rather than asked up front: one over the dictionary (collapsing synonym group names, splitting a group that turned out to cover two unrelated subjects, folding thin single-block groups into a neighbour, re-checking every surviving name against the naming law), and one over the `Contract:` blocks the writers just wrote — dropping guarantees the canon excludes (presentation details such as exact message text, signature-obvious facts), converging one guarantee stated across sibling classes onto a single phrasing, and folding a redundant block only when its audience already reads the block it duplicates. A block on a hook any subclass overrides, or on a surface with its own distinct readers, keeps its own copy even on a word-for-word text match — only a private helper with no overrides and a single caller gets folded. It then re-runs `chk-py all -q` over the touched files to catch cross-file fallout, and commits everything it touched (marker edits plus the dictionary) under an explicit pathspec.
 
 **A repo with nothing parked and no recognisable domain vocabulary yet** is a legitimate outcome — the sweep proposes no candidates and leaves the dictionary untouched. That's not a failure; it means this repo's Python doesn't (yet) carry domain-marker discipline, and the sweep has nothing to cluster from until some markers exist.
 

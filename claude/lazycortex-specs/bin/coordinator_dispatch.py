@@ -15,8 +15,12 @@ coordinator's own `[!question]` callouts — and, when any of the three fires, d
 boundary contract `gate_dispatch.py` uses for launch-checkbox jobs). The `coordinator_job`
 marker in `spec_job_markers.py`'s gitignored runtime sidecar enforces one active coordinator job per
 asset; the git-watch routine's own cursor (not a marker) is what keeps a repeat tick with
-no new commit from re-dispatching. Because that marker lives outside the note, neither stamping
-nor clearing it costs a commit, and no hand-edit of the note can break the mutex.
+no new commit from re-dispatching, and this worker's own dispatch-cursor store beside the
+sidecar records the last item sha dispatched on per note, bounding the bot-buried-operator
+lookback so an already-handled operator commit never re-dispatches. Because all of that lives
+outside the note, neither stamping nor clearing it costs a commit, and no hand-edit of the
+note can break the mutex; a wake itself writes and commits the note only when a frontmatter
+stamp or a warning line actually changed it.
 
 The routine's `filter.any_of` also matches sibling authored docs by basename (`design.md`,
 `code-plan.md`, ...) — an item naming one of those is resolved to its OWNING asset's status
@@ -41,6 +45,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -78,7 +83,6 @@ from spec_keys import (  # noqa: E402
     AnsweredQuestionKey,
     CoordinatorTrigger,
     Gate,
-    HistoryEvent,
     JobMarker,
     Section,
     SiblingDoc,
@@ -100,11 +104,25 @@ _COORDINATOR_EXPERT = "spec.coordinator"
 # `lazy-spec.coordination-playbook.md` § 2 layer 3 (`products[<key>].guidelines.coordinator` + `"*"`).
 _COORDINATOR_ROLE = "coordinator"
 
-# Bot identity for this worker's own commit (job-metadata write + History line) — the `@bot.`
+# Bot identity for this worker's own commit (frontmatter stamps, warning lines) — the `@bot.`
 # substring is what the coordinator's own self-suppression check (playbook § 1) relies on to
 # never re-wake itself on this worker's writes.
 _DISPATCH_AUTHOR_NAME = "lazy-spec.coordinator-watch"
 _DISPATCH_AUTHOR_EMAIL = "lazy-spec.coordinator-watch@bot.invalid"
+
+# This worker's own dispatch-cursor store beside the job-marker sidecar: one sha per note — the
+# last git-watch item dispatched on — bounding `_has_operator_authored_recently`'s scan so an
+# already-handled operator commit never re-dispatches. Runtime scratch like the sidecar: losing
+# it costs at most one duplicate dispatch, so it is rebuilt rather than guarded.
+
+# Decision: the lookback bound lives in a gitignored runtime store, not in a `# History` wake
+# line whose commit doubled as the bound — the wake lines were daemon mechanics polluting an
+# operator-facing section, and on a single-daemon deployment the sidecar loses nothing the
+# commit protected; the cost accepted is one possible duplicate dispatch on a checkout whose
+# store is fresh, which the dedup key and the active-job guard absorb.
+
+_CURSOR_SIDECAR = "lazy-specs.dispatch-cursors.json"
+_CURSOR_TMP_SUFFIX = ".tmp"
 
 # Mirrored `spec_source_requests` frontmatter key from `apply_request.py`'s own `_K` class,
 # duplicated here rather than imported per this bin/ tree's own per-file small-constant
@@ -331,19 +349,20 @@ def _compute_answer_fingerprint(block: str) -> str:
   return hashlib.sha256(block.encode()).hexdigest()
 
 
-def _has_operator_authored_recently(repo_root: Path, item: dict) -> bool:
+def _has_operator_authored_recently(repo_root: Path, item: dict, cursor: str | None) -> bool:
   """
   Check whether the item's author, or a recent commit touching the same path, is non-`@bot.`.
 
   Args:
     repo_root: The repository root to run `git` in.
     item: The git-watch `changed_files` item for this note.
+    cursor: The last item sha this worker dispatched on for the note, from the dispatch-cursor
+      store; None when nothing is recorded yet.
 
   Returns:
-    True when the item's own author is non-bot, or when a bounded lookback of the path's most
-    recent commits (ending at the item's own `sha`, stopping at this worker's own last wake
-    commit) finds a non-bot author among them; False otherwise, including when the item carries
-    no usable `path` / `sha`.
+    True when the item's own author is non-bot, or when the path's commits after `cursor`
+    (falling back to a bounded window of the most recent ones when no cursor is usable) include
+    a non-bot author; False otherwise, including when the item carries no usable `path` / `sha`.
   """
   # guard: the item's own author is already non-bot — nothing further to check
   if _BOT_MARK not in item.get(_ITEM_AUTHOR_EMAIL, ""):
@@ -351,11 +370,7 @@ def _has_operator_authored_recently(repo_root: Path, item: dict) -> bool:
 
   # a bot-authored tip can bury an operator commit on the same path within one pull batch (N3;
   # the same failure mode fixed for the note's own commit history in cfed7046, before this
-  # worker's git-watch resew).
-  # limit: fails to find the operator commit when more than `_AUTHOR_LOOKBACK_COMMITS` bot
-  # commits land on the same path between pulls; upgrade path is exposing the git-watch
-  # routine's own tick cursor on the item (today it lives only in core's own state.json), giving
-  # this worker a true lower bound to scan from instead of a fixed window
+  # worker's git-watch resew)
   sha = item.get(_ITEM_SHA)
   path = item.get(_ITEM_PATH)
 
@@ -363,7 +378,24 @@ def _has_operator_authored_recently(repo_root: Path, item: dict) -> bool:
   if not sha or not path:
     return False
 
-  # a fixed-size window of the path's own recent authors, ending at the item's reported tip
+  # the cursor bounds the scan to commits this worker has not dispatched on yet (N6 — without a
+  # lower bound, the same operator commit re-fires on every later bot tick until it ages out of
+  # the window); a cursor git no longer knows (rewritten history, a sha recorded on another
+  # checkout) falls through to the fixed window below
+  if cursor:
+    ranged = subprocess.run(
+        ["git", "log", "--format=%ae", "-n", str(_AUTHOR_LOOKBACK_COMMITS),
+         f"{cursor}..{sha}", "--", path],
+        cwd = str(repo_root), capture_output = True, text = True, check = False,
+    )
+    if ranged.returncode == 0:
+      return any(_BOT_MARK not in email for email in ranged.stdout.splitlines())
+
+  # no usable cursor: a fixed-size window of the path's own recent authors, ending at the
+  # item's reported tip.
+  # limit: this fallback misses the operator commit when more than `_AUTHOR_LOOKBACK_COMMITS`
+  # bot commits land on the same path between pulls; the cursor path above is the upgrade and
+  # takes over the moment the first dispatch stamps it
   out = subprocess.run(
       ["git", "log", "--format=%ae", "-n", str(_AUTHOR_LOOKBACK_COMMITS), sha, "--", path],
       cwd = str(repo_root), capture_output = True, text = True, check = False,
@@ -371,12 +403,87 @@ def _has_operator_authored_recently(repo_root: Path, item: dict) -> bool:
   for email in out.splitlines():
     if _BOT_MARK not in email:
       return True
-    # guard: this worker's own wake commit proves everything older was already dispatched on
-    # (N6 — without this stop, the lookback re-finds the same operator commit on every tick
-    # until it ages out of the window, re-dispatching several times per genuine operator gesture)
+    # guard: this worker's own historic wake commit proves everything older was already
+    # dispatched on — the worker no longer writes such commits, but pre-cursor installs still
+    # carry them, and they keep bounding the window until a cursor is stamped
     if email == _DISPATCH_AUTHOR_EMAIL:
       return False
   return False
+
+
+def _cursor_store_path(repo_root: Path) -> Path:
+  """
+  Return the path of this worker's dispatch-cursor store.
+
+  Args:
+    repo_root: Repository root holding the gitignored `.runtime/` directory.
+
+  Returns:
+    Absolute path of `<repo>/.runtime/lazy-specs.dispatch-cursors.json`, whether or not it
+    exists.
+  """
+  return spec_job_markers.sidecar_path(repo_root).parent / _CURSOR_SIDECAR
+
+
+def _read_dispatch_cursor(repo_root: Path, asset_note: Path) -> str | None:
+  """
+  Read the note's dispatch cursor — the last item sha this worker dispatched on.
+
+  Args:
+    repo_root: Repository root holding the cursor store.
+    asset_note: The asset status folder-note the cursor belongs to.
+
+  Returns:
+    The recorded sha, or None when the store is absent, unreadable, or holds nothing usable for
+    this note — a corrupt store is runtime scratch and re-derives itself, so it never fails a
+    tick.
+  """
+  # an absent or unreadable store is the "nothing recorded yet" answer, never a failure
+  try:
+    data = json.loads(_cursor_store_path(repo_root).read_text())
+  except (OSError, json.JSONDecodeError):
+    return None
+
+  # guard: a non-object store (hand-mangled scratch) reads as "nothing recorded"
+  if not isinstance(data, dict):
+    return None
+
+  # only a non-empty string is a usable sha bound
+  value = data.get(spec_job_markers.note_key(repo_root, asset_note))
+  return value if isinstance(value, str) and value else None
+
+
+def _stamp_dispatch_cursor(repo_root: Path, asset_note: Path, sha: object) -> None:
+  """
+  Record the item sha this tick dispatched on, so later lookbacks scan only past it.
+
+  Args:
+    repo_root: Repository root holding the cursor store.
+    asset_note: The asset status folder-note the cursor belongs to.
+    sha: The handled item's commit sha; a falsy or non-string value (a synthetic
+      dependency-ready wake carries no commit) records nothing.
+  """
+  # guard: a synthetic wake has no commit to bound a later lookback with
+  if not isinstance(sha, str) or not sha:
+    return
+
+  # an absent or unreadable store starts empty — it is runtime scratch and re-derives itself
+  path = _cursor_store_path(repo_root)
+  try:
+    data = json.loads(path.read_text())
+  except (OSError, json.JSONDecodeError):
+    data = {}
+
+  # guard: a non-object store is scratch — rebuild it rather than crash the tick
+  if not isinstance(data, dict):
+    data = {}
+
+  # write beside the target and rename over it, so a reader never observes a half-written store
+  data[spec_job_markers.note_key(repo_root, asset_note)] = sha
+  path.parent.mkdir(parents = True, exist_ok = True)
+  tmp = path.with_suffix(path.suffix + _CURSOR_TMP_SUFFIX)
+  tmp.write_text(json.dumps(data, indent = 2, sort_keys = True) + "\n")
+  os.replace(tmp, path)
 
 
 def _read_marker_dict(fm: dict, key: str) -> dict:
@@ -507,7 +614,9 @@ def _group_note_changed(item: dict, asset_note: Path, repo_root: Path) -> bool:
   return False
 
 
-def _resolve_wake_trigger(repo_root: Path, fm: dict, body: str, item: dict, markers: dict) -> str | None:
+def _resolve_wake_trigger(
+    repo_root: Path, fm: dict, body: str, item: dict, markers: dict, cursor: str | None,
+) -> str | None:
   """
   Resolve the wake trigger for this tick, honoring the halt override.
 
@@ -518,6 +627,8 @@ def _resolve_wake_trigger(repo_root: Path, fm: dict, body: str, item: dict, mark
     item: The git-watch `changed_files` item for this note (`path`, `status`, `sha`,
       `author_name`, `author_email`).
     markers: The note's runtime marker entry, from `spec_job_markers.read`.
+    cursor: The note's dispatch cursor, from `_read_dispatch_cursor` — bounds the
+      operator-author lookback.
 
   Returns:
     A `CoordinatorTrigger` token, or None when nothing wakes the coordinator this tick.
@@ -550,14 +661,14 @@ def _resolve_wake_trigger(repo_root: Path, fm: dict, body: str, item: dict, mark
   # has been committed, pushed, and pulled into this checkout, so there is no dirty-tree signal
   # for this worker to read (unlike a single-checkout deployment)
   # guard: neither the item's own author nor a recent bot-buried one was the operator
-  if not _has_operator_authored_recently(repo_root, item):
+  if not _has_operator_authored_recently(repo_root, item, cursor):
     return None
   return CoordinatorTrigger.OPERATOR_EDIT
 
 
 def _resolve_group_trigger(
     repo_root: Path, fm: dict, body: str, item: dict, markers: dict, members: list[Path],
-    asset_note: Path,
+    asset_note: Path, cursor: str | None,
 ) -> tuple[str | None, dict[str, str]]:
   """
   Resolve the wake trigger for a grouped git-watch item, honoring the halt override.
@@ -579,6 +690,8 @@ def _resolve_group_trigger(
     asset_note: The asset's own status folder-note path — used only to tell whether the note
       itself is one of `item["paths"]`'s changed members (`_group_note_changed`), for the
       OPERATOR_EDIT arm's review-active carve-out below.
+    cursor: The note's dispatch cursor, from `_read_dispatch_cursor` — bounds the
+      operator-author lookback.
 
   Returns:
     A `(trigger, transitions)` pair. `trigger` is a `CoordinatorTrigger` token, or None when
@@ -641,7 +754,7 @@ def _resolve_group_trigger(
   }
   # guard: neither the item's own author nor a recent bot-buried one on the group's dir was the
   # operator
-  if not _has_operator_authored_recently(repo_root, dir_item):
+  if not _has_operator_authored_recently(repo_root, dir_item, cursor):
     return None, {}
   return CoordinatorTrigger.OPERATOR_EDIT, {}
 
@@ -764,13 +877,15 @@ def _build_bundle(
   """
   Assemble the `lazycortex-core dispatch-job` wire bundle pieces for a coordinator wakeup.
 
-  Source names the note itself; context names the owning product's folder-note, the folders of
-  every `spec_targets` asset, the folders of every `spec_depends_on` dependency asset, every
-  `spec_source_requests` file (resolved via wikilink), and the vault-wide
-  `spec.coordination_rules` doc — all as repo-relative paths the pump copies when it claims the
-  job. The product's `coordinator` + `"*"` guidelines and the asset's + owning product's
-  `decisions.md` registries (`spec-decisions-design.md` § "Coordinator") are never copied at
-  all: they ride in the payload as paths the expert reads in place.
+  Source names the note itself; context names the owning product's folder-note, every container
+  folder-note lying strictly between the product's spec-path root and the asset folder — top-down,
+  so the layer closest to the asset lands last — the folders of every `spec_targets` asset, the
+  folders of every `spec_depends_on` dependency asset, every `spec_source_requests` file (resolved
+  via wikilink), and the vault-wide `spec.coordination_rules` doc — all as repo-relative paths the
+  pump copies when it claims the job. A container folder with no folder-note of its own contributes
+  nothing to context and is never a warning. The product's `coordinator` + `"*"` guidelines and the
+  asset's + owning product's `decisions.md` registries (`spec-decisions-design.md` § "Coordinator")
+  are never copied at all: they ride in the payload as paths the expert reads in place.
   A declared path that does not resolve to a file is never a silent drop — it becomes a
   warning string for the caller's `# History` line; a missing `decisions.md` is the one
   exception — it is created lazily by the first decision recorded into it, so its absence is
@@ -818,6 +933,22 @@ def _build_bundle(
   # (product_record still `{}`) is not — there is nothing declared to have gone missing
   elif product_record:
     warnings.append(f"product folder-note not found: {product_record.get(_SPEC_PATH_KEY)}")
+
+  # Contract:
+  # Container folder-notes between the product root and the asset folder MUST reach `context`
+  # top-down (shallowest first), so the group-scoped `# Coordinator rules` layer closest to the
+  # asset lands last; a container without a folder-note MUST contribute no entry and no warning.
+
+  # the container chain itself, anchored on the product's own spec-path root
+  if isinstance(spec_path := product_record.get(_SPEC_PATH_KEY), str) and spec_path:
+    product_dir = spec_paths.spec_content_root(repo_root) / spec_path
+    # an asset dispatched from outside its own product's tree has no container chain to walk
+    if product_dir in asset_dir.parents:
+      containers = [ ancestor for ancestor in asset_dir.parents if product_dir in ancestor.parents ]
+      for container in reversed(containers):
+        container_note = container / f"{container.name}.md"
+        if container_note.is_file():
+          context.append(_to_rel_path(repo_root, container_note))
 
   # every declared spec_targets asset's own folder, named by its repo-relative path — the folder
   # rather than the note alone, so the pump lands it under `<category>-<slug>` and two categories
@@ -1056,6 +1187,11 @@ def coordinator_dispatch(
   sibling's current `review_result` against the value this worker last recorded for it, honoring
   the same halt override every other trigger respects (`lazy-spec.coordination-playbook.md` § 1).
 
+  Guarantees:
+    - Writes and commits the status folder-note only when the produced text differs from the
+      note's bytes as read at the start of the call; a wake that changes nothing leaves the note
+      byte-identical and creates no commit.
+
   Notes:
     - A raise here leaves the tick's in-memory state unwritten, but the wake it carried is not
       lost: a non-zero exit from this CLI invocation is caught by `dispatch_git`'s command
@@ -1111,9 +1247,11 @@ def coordinator_dispatch(
   repo_root = flip_gate._repo_root(asset_dir)
   today_str = flip_gate._today(today)
   text = asset_note.read_text()
+  original_text = text
   fm, fm_end = flip_gate._parse_frontmatter(text)
   body = text[fm_end:]
   markers = spec_job_markers.read(repo_root, asset_note)
+  cursor = _read_dispatch_cursor(repo_root, asset_note)
 
   # one active coordinator job per asset — unconditional, no halt/command exception
   note_dirty = False
@@ -1178,7 +1316,7 @@ def coordinator_dispatch(
   group_transitions: dict[str, str] = {}
   if group_members is not None:
     trigger, group_transitions = _resolve_group_trigger(
-        repo_root, fm, body, item, markers, group_members, asset_note,
+        repo_root, fm, body, item, markers, group_members, asset_note, cursor,
     )
     # the FULL set stamps into spec_coordinator_doc_state below; `doc_transition` only carries
     # the first-sorted pair so every other consumer built around a single (basename, value) —
@@ -1201,7 +1339,7 @@ def coordinator_dispatch(
       trigger = CoordinatorTrigger.DOC_TRANSITION
       doc_transition = resolved
   else:
-    trigger = _resolve_wake_trigger(repo_root, fm, body, item, markers)
+    trigger = _resolve_wake_trigger(repo_root, fm, body, item, markers, cursor)
 
   # nothing else claimed this tick — a wake the busy-guard declined (or a legacy install's
   # pending-note key) redeems by re-resolving triggers against the asset's CURRENT on-disk
@@ -1216,7 +1354,7 @@ def coordinator_dispatch(
   if trigger is None and (redeemed_wake in (JobMarker.JOB_DONE, JobMarker.DECLINED) or legacy_pending):
     redeem_members = sorted(p for p in asset_dir.iterdir() if p.is_file() and p.name in _SIBLING_BASENAMES)
     trigger, group_transitions = _resolve_group_trigger(
-        repo_root, fm, body, item, markers, redeem_members, asset_note,
+        repo_root, fm, body, item, markers, redeem_members, asset_note, cursor,
     )
     if trigger is None:
       # nothing specific replayed — the generic fallback token per the flag that forced this
@@ -1355,17 +1493,16 @@ def coordinator_dispatch(
       and gate_tick._find_active_job_marker(repo_root, _COORDINATOR_EXPERT, job_id) is not None
   ):
     gate_dispatch.consume_stale_job(repo_root, _COORDINATOR_EXPERT, job_id)
-    # the localized narrative tail of the History line, in the note's authoring language
-    stale_tail = note_explainers.history_line(asset_note, HistoryEvent.DISPATCH_STALE,
-                                              trigger = trigger, job_id = job_id)
-    new_body = flip_gate._append_under_heading(
-        body, Section.HISTORY, f"- {today_str} — {_DISPATCH_AUTHOR_NAME} · {stale_tail}",
-    )
-    asset_note.write_text(note_explainers.heal_note_text(asset_note, fm_text + new_body))
-    _commit(
-        asset_dir, asset_note,
-        f"{_DISPATCH_AUTHOR_NAME}: stale dispatch for {trigger} on {asset_dir.name}",
-    )
+    # the retired trigger still counts as handled — the cursor moves so the same commit never
+    # re-fires, and the I6 stamps persist below only when they actually changed the note
+    _stamp_dispatch_cursor(repo_root, asset_note, item.get(_ITEM_SHA))
+    new_text = fm_text + body
+    if new_text != original_text:
+      asset_note.write_text(note_explainers.heal_note_text(asset_note, new_text))
+      _commit(
+          asset_dir, asset_note,
+          f"{_DISPATCH_AUTHOR_NAME}: stale dispatch for {trigger} on {asset_dir.name}",
+      )
 
     # this asset's own dispatch already landed above — the reverse wake runs after, never
     # before, so a broken dependent can't strand it (N2)
@@ -1377,29 +1514,40 @@ def coordinator_dispatch(
 
   # record the dispatched job in runtime state so the active-job guard blocks a second
   # concurrent dispatch — no note write, so this stamp costs no commit of its own and nothing
-  # an operator editing the note can break
+  # an operator editing the note can break; the cursor moves in the same breath, so the handled
+  # item's commit never re-fires a later lookback
   spec_job_markers.update(repo_root, asset_note, { JobMarker.COORDINATOR_JOB: {
       JobMarker.TRIGGER: trigger,
       JobMarker.EXPERT: _COORDINATOR_EXPERT,
       JobMarker.JOB_ID: job_id,
   } })
+  _stamp_dispatch_cursor(repo_root, asset_note, item.get(_ITEM_SHA))
 
-  # record the wakeup in History, then one line per unresolved context path — never a silent skip
-  # the localized narrative tail of the History line, in the note's authoring language
-  woke_tail = note_explainers.history_line(asset_note, HistoryEvent.WOKE, trigger = trigger,
-                                           expert = _COORDINATOR_EXPERT, job_id = job_id)
-  new_body = flip_gate._append_under_heading(
-      body, Section.HISTORY, f"- {today_str} — {_DISPATCH_AUTHOR_NAME} · {woke_tail}",
-  )
+  # the wake itself leaves no `# History` line — `# History` records the asset's own
+  # transitions, not this worker's mechanics; a dispatch warning (an unresolved context path)
+  # is still landed, one line each, never a silent skip
+  new_body = body
   for warning in warnings:
     new_body = flip_gate._append_under_heading(
         new_body, Section.HISTORY, f"- {today_str} — {_DISPATCH_AUTHOR_NAME} · {warning}",
     )
-  asset_note.write_text(note_explainers.heal_note_text(asset_note, fm_text + new_body))
-  _commit(
-      asset_dir, asset_note,
-      f"{_DISPATCH_AUTHOR_NAME}: wake {trigger} on {asset_dir.name} → {_COORDINATOR_EXPERT} ({job_id})",
-  )
+
+  # Contract:
+  # The status folder-note MUST be written and committed only when the produced text differs
+  # from the note's bytes as read at the start of the call — a frontmatter stamp, a legacy-key
+  # strip, a warning line, or the dead-job WARNING line. A wake that changes nothing MUST leave
+  # the note byte-identical and MUST NOT create a commit.
+
+  # write and commit only when something above actually changed the note — an I6 stamp, a
+  # legacy-key strip, a warning line, the dead-job WARNING; a plain wake leaves the note
+  # byte-identical and costs no commit at all, so explainer healing rides real writes only
+  new_text = fm_text + new_body
+  if new_text != original_text:
+    asset_note.write_text(note_explainers.heal_note_text(asset_note, new_text))
+    _commit(
+        asset_dir, asset_note,
+        f"{_DISPATCH_AUTHOR_NAME}: wake {trigger} on {asset_dir.name} → {_COORDINATOR_EXPERT} ({job_id})",
+    )
 
   # this asset's own dispatch already landed above — the reverse wake runs after, never
   # before, so a broken dependent can't strand it (N2)

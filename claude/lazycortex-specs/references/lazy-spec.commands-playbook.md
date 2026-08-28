@@ -19,6 +19,6 @@ An operator instruction dropped into an asset's `# Coordinator commands` section
 
 **Mid-command failure.** A step failing partway stops the whole chain — no partial continuation past a failed step. The command block locks with an outcome line naming where it stopped: `reached step N, failed at <what failed>`.
 
-**Completion.** Once every step reads `✓` (or the chain locked on a failure), the whole block — plan, marks, outcome — moves as one unit into `# History`, and `# Coordinator commands` goes empty again. "Empty" keeps the section's own asterisk-italic explainer line (`*...*`, right under the `#protected/spec/coordinator-commands` tag) — that line is the section's self-description, not a command, and unfolding a mini-plan or clearing a finished block never removes it.
+**Completion.** Once every step reads `✓` (or the chain locked on a failure), the whole block — plan, marks, outcome — moves as one unit into `# History`, and `# Coordinator commands` goes empty again. "Empty" keeps the section's own HTML-comment explainer line (`<!-- ... -->`, right under the `#protected/spec/coordinator-commands` tag) — that line is the section's self-description, not a command, and unfolding a mini-plan or clearing a finished block never removes it.
 
 **Commands run on halted assets too.** `spec_halted: true` silences automatic dispatch (checkboxes, cascades, rule-driven "run tests automatically" calls), but a command is an operator gesture aimed straight at a halted asset on purpose — it is how the operator directs recovery. Commands are never blocked by halt.

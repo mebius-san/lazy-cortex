@@ -124,6 +124,14 @@ class _K:
     SOURCE_NOTE_H1: Heading of a source note's fetch-status section.
     SOURCE_UNITS_H1: Heading of a source note's Dataview unit-summary section.
     SOURCE_INVALID_H1: Heading of a source note's vault-unsafe-directory-name list (§ 3/§ 5).
+    REFERENCES_DIR: The plugin subdirectory holding the shipped icon registry.
+    ICON_REGISTRY_FILE: Filename of the shipped iconize matcher registry.
+    ICON_MATCHERS: Registry key holding the matcher list.
+    ICON_WHEN: Matcher key holding the frontmatter predicate.
+    ICON_RESOLVE: Matcher key holding the resolved paint.
+    ICON_PRIORITY: Matcher key holding the tie-break priority.
+    ICON_NAME: Resolve key holding the icon name.
+    ICON_COLOR: Resolve key holding the icon colour.
     ICONIZE_ICON: Frontmatter key carrying a folder-note's icon.
     ICONIZE_COLOR: Frontmatter key carrying a folder-note's icon colour.
     SOURCE_NOTE_ICON: Default icon seeded on every source's repo-level folder-note.
@@ -159,6 +167,14 @@ class _K:
   SOURCE_DIR = "source"
   PROCESSED_DIR = "processed"
   MD_SUFFIX = ".md"
+  REFERENCES_DIR = "references"
+  ICON_REGISTRY_FILE = "lazy-spec.iconize-registry.json"
+  ICON_MATCHERS = "matchers"
+  ICON_WHEN = "when"
+  ICON_RESOLVE = "resolve"
+  ICON_PRIORITY = "priority"
+  ICON_NAME = "iconName"
+  ICON_COLOR = "iconColor"
   GIT = "git"
   GIT_DIR = ".git"
   BOT_NAME = "lazy-spec.upstream-tick"
@@ -1175,6 +1191,39 @@ def _extract_section(body: str, heading: str) -> list[dict]:
   return out
 
 
+def _resolve_upstream_icon(status: str) -> tuple[str, str]:
+  """
+  Resolve the icon and colour a unit note of one upstream status carries.
+
+  Reads the plugin's shipped iconize registry and picks the highest-priority matcher keyed
+  solely on the unit's own status frontmatter, so the rendered note is born fully painted and
+  no later repaint has to rewrite it inside the write-to-commit window.
+
+  Args:
+    status: The unit's current `UpstreamStatus` value.
+
+  Returns:
+    Two-tuple of icon name and colour; both empty when no matcher covers the status (the note
+    then simply carries no icon keys, exactly as an unregistered status always did).
+  """
+  registry = Path(__file__).resolve().parent.parent / _K.REFERENCES_DIR / _K.ICON_REGISTRY_FILE
+  # guard: a checkout without the shipped registry renders unpainted rather than failing the tick
+  if not registry.is_file():
+    return "", ""
+  status_key = f"frontmatter.{UpstreamKey.STATUS}"
+  best: tuple[int, str, str] = ( -1, "", "" )
+  # highest-priority matcher keyed solely on the unit status wins, same tie-break as the engine
+  for entry in json.loads(registry.read_text()).get(_K.ICON_MATCHERS, []):
+    # guard: only matchers keyed solely on the unit status are this note's own paint
+    if entry.get(_K.ICON_WHEN) != { status_key: status }:
+      continue
+    resolve = entry.get(_K.ICON_RESOLVE, {})
+    priority = int(entry.get(_K.ICON_PRIORITY, 0))
+    if priority > best[0]:
+      best = ( priority, resolve.get(_K.ICON_NAME, ""), resolve.get(_K.ICON_COLOR, "") )
+  return best[1], best[2]
+
+
 def _render_note(
     *, unit_path: str, status: str, revision: str, url: str,
     skipped_current: list[dict], skipped_processed: list[dict], history_body: str,
@@ -1222,6 +1271,11 @@ def _render_note(
       if status == UpstreamStatus.IN_REVIEW and request_wikilink else ""
   )
 
+  # the status paint is rendered in, not repainted after — the note leaves this function fully
+  # final, so the commit step never has to rewrite it between write and stage
+  icon, color = _resolve_upstream_icon(status)
+  icon_lines = f"{_K.ICONIZE_ICON}: {icon}\n{_K.ICONIZE_COLOR}: \"{color}\"\n" if icon else ""
+
   # assemble the fixed-order frontmatter block, with the two status-scoped lines spliced in
   frontmatter = (
       "---\n"
@@ -1232,6 +1286,7 @@ def _render_note(
       "tags:\n"
       f"  - upstream/{status}\n"
       f"spec_role: {UpstreamRole.UNIT}\n"
+      f"{icon_lines}"
       "---\n"
   )
 
@@ -1784,9 +1839,10 @@ def _accept_unit(
       url = source_url, skipped_current = skipped_current, skipped_processed = skipped_current,
       history_body = history_body, lang = repo_language,
   )
-  note_path.write_text(new_text)
-  had_work = _commit_unit(repo, unit_dir, unit_path, UpstreamStatus.PROCESSED)
-  return had_work, UpstreamStatus.PROCESSED
+  return (
+      _commit_unit(repo, unit_dir, unit_path, UpstreamStatus.PROCESSED, note_text = new_text),
+      UpstreamStatus.PROCESSED,
+  )
 
 
 def _release_unit(
@@ -1826,9 +1882,10 @@ def _release_unit(
       skipped_current = skipped_current, skipped_processed = skipped_processed,
       history_body = history_body, lang = resolve_language.resolve_repo_language(repo),
   )
-  note_path.write_text(new_text)
-  had_work = _commit_unit(repo, unit_dir, unit_path, fallback_status)
-  return had_work, fallback_status
+  return (
+      _commit_unit(repo, unit_dir, unit_path, fallback_status, note_text = new_text),
+      fallback_status,
+  )
 
 
 def _advance_frozen_unit(
@@ -1889,7 +1946,8 @@ def _advance_frozen_unit(
   return False, UpstreamStatus.IN_REVIEW
 
 
-def _commit_paths(repo: Path, paths: list[Path], subject: str) -> bool:
+def _commit_paths(repo: Path, paths: list[Path], subject: str, *,
+                  deferred_write: tuple[Path, str] | None = None) -> bool:
   """
   Stage a fixed path set and commit it under this module's bot identity, when the staged
   contents actually changed this tick.
@@ -1901,11 +1959,16 @@ def _commit_paths(repo: Path, paths: list[Path], subject: str) -> bool:
   Guarantees:
     - Any `.md` path among `paths` has its icon-frontmatter repaint folded into this same
       commit; no separate icons commit ever follows a note-owning bot commit.
+    - A `deferred_write` reaches its final path only after the repaint subprocess has returned:
+      a process death anywhere up to that point leaves the previously committed file untouched.
 
   Args:
     repo: Repository root.
     paths: Paths to stage, absolute or repo-relative.
     subject: The commit subject line.
+    deferred_write: Optional `(path, text)` pair written immediately before staging — the
+      caller's rendered note, held back so the seconds-wide repaint step cannot sit between
+      the write and its commit.
 
   Returns:
     `True` when a commit was made; `False` when nothing was staged (no change this tick).
@@ -1915,6 +1978,10 @@ def _commit_paths(repo: Path, paths: list[Path], subject: str) -> bool:
   # Any `.md` path among `paths` has its icon-frontmatter repaint folded into this same commit;
   # no separate icons commit ever follows a note-owning bot commit.
 
+  # Contract:
+  # A `deferred_write` reaches its final path only after the repaint subprocess has returned;
+  # a process death anywhere up to that point leaves the previously committed file untouched.
+
   # resolve every target to a repo-relative path git can stage
   rel_paths = [str(path.resolve().relative_to(repo.resolve())) for path in paths]
 
@@ -1922,6 +1989,11 @@ def _commit_paths(repo: Path, paths: list[Path], subject: str) -> bool:
   rel_paths.extend(iconize_inline.repaint_paths(
       repo, [p for p in rel_paths if p.endswith(_K.MD_SUFFIX)],
   ))
+
+  # the held-back write lands here — one syscall away from staging, past the slow repaint step
+  if deferred_write is not None:
+    deferred_path, deferred_text = deferred_write
+    deferred_path.write_text(deferred_text)
 
   # stage the fixed target set
   subprocess.run([_K.GIT, "add", "--", *rel_paths], cwd = str(repo), check = True, capture_output = True)
@@ -1941,6 +2013,7 @@ def _commit_paths(repo: Path, paths: list[Path], subject: str) -> bool:
 
 def _commit_unit(
     repo: Path, unit_dir: Path, unit_path: str, status: str, *, extra_paths: tuple[Path, ...] = (),
+    note_text: str | None = None,
 ) -> bool:
   """
   Commit one unit's whole directory (plus any extra paths) under this module's bot identity,
@@ -1953,6 +2026,8 @@ def _commit_unit(
     status: The unit's freshly computed status, for the commit subject.
     extra_paths: Additional paths to stage alongside `unit_dir` — Phase C's own freshly written
       request file, staged in the same atomic commit as the note that links to it.
+    note_text: The unit note's freshly rendered text, written by `_commit_paths` only after the
+      repaint step; `None` when the caller already wrote the note itself.
 
   Returns:
     `True` when a commit was made; `False` when nothing was staged (unit unchanged this tick).
@@ -1962,6 +2037,7 @@ def _commit_unit(
   note_path = unit_dir / f"{unit_dir.name}{_K.MD_SUFFIX}"
   return _commit_paths(
       repo, [unit_dir, note_path, *extra_paths], f"lazy-spec.upstream-tick: {unit_path} -> {status}",
+      deferred_write = ( note_path, note_text ) if note_text is not None else None,
   )
 
 
@@ -2129,7 +2205,7 @@ def _advance_unit(
         resume_status, revision, skipped_current, existing_body,
     )
 
-  # render and persist the note, then commit whatever this pass actually changed on disk
+  # render the note; the commit step itself persists it, past the repaint window
   skipped_processed_for_note = _extract_section(existing_body, _K.SKIPPED_PROCESSED_H1)
   new_text = _render_note(
       unit_path = unit_path, status = status, revision = revision, url = source_cfg.get(_K.URL, ""),
@@ -2138,9 +2214,7 @@ def _advance_unit(
       resume_label = resume_label, lang = resolve_language.resolve_repo_language(repo),
   )
   unit_dir.mkdir(parents = True, exist_ok = True)
-  note_path.write_text(new_text)
-  had_work = _commit_unit(repo, unit_dir, unit_path, status)
-  return had_work, status
+  return _commit_unit(repo, unit_dir, unit_path, status, note_text = new_text), status
 
 
 def _load_cursor(repo: Path) -> int:

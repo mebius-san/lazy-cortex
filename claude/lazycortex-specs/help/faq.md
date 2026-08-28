@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about products, assets, gates, requests, decisions, coverage gaps, spec lookups, and the coordinator agent.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -27,7 +27,7 @@ source_skills:
   - lazy-spec.source-url
   - lazy-spec.lookup
   - lazy-spec.coordinator
-source_sha: b48fa0858c7398248bcdbc366bece0d7a1a02668
+source_sha: ac6c3e4c5c56301e62e3afab0d0de63b564eb60e
 ---
 # Frequently asked questions
 
@@ -129,6 +129,8 @@ Yes, two ways, both on the asset's own folder-note. Write anything into its `# C
 
 The second way is answering one of the coordinator's own `[!question]` callouts — tick the option you want and it acts on that answer, then removes the callout and records the choice in `# History`. Both surfaces are the coordinator's own pen; you never need to hand-edit the rest of the note to get its attention. When a decision doesn't follow unambiguously from its playbook and the rule layers in scope, the coordinator does not guess or act "just in case" — it raises exactly this kind of `[!question]` with concrete options and stops on that asset until your tick.
 
+A product folder-note and every container folder-note under it (`features/`, `changes/`, `bugs/`, and any folder you add) may also each carry their own `# Coordinator rules` section — the coordinator reads the whole chain top-down (playbook, then the product note, then every container note down to the asset, then the asset's own `# Coordinator rules`) before it decides anything on that asset. Writing a constraint at the product or container level applies it to every asset underneath without repeating it on each one; leaving the section empty (or absent) is normal until you actually need a group-wide rule.
+
 ---
 
 ## How do I record a design decision, and does the plugin write `decisions.md` for me?
@@ -173,7 +175,9 @@ Yes, via the `spec` settings section's `upstream` sub-key — a configured forei
 
 The vault-root `requests/` folder is the intake inbox. Run `/lazy-spec.create-request` with a raw idea; the skill asks three to five wizard questions to clarify scope, outcome, and constraints, then writes a body-only Markdown file at `requests/<slug>.md` — it never sets frontmatter itself, that lands automatically once the request enters the review loop.
 
-Once the request body is approved during review, `spec.coordinator` wakes at the terminal group of that review cycle and takes over the routing: it classifies the idea, checks the vault for existing assets it could attach to instead of spawning something new, and always surfaces its proposed routing — spawn a new asset, attach to an existing one, or both — as an explicit `[!question]` confirmation you tick before anything is materialized. You can also edit the proposed routing block directly instead of just accepting or rejecting it. The whole pipeline runs without you hand-editing any frontmatter.
+Once the request body is approved during review, `spec.coordinator` wakes at the terminal group of that review cycle and takes over the routing: it classifies the idea, checks the vault for existing assets it could attach to or an asset that already implements it, and always surfaces its proposed routing — spawn a new asset, attach to an existing one, mark an asset that already covers it as the reference (with its reasoning stated in the same block), or a mix — as an explicit `[!question]` confirmation you tick before anything is materialized. You can also edit the proposed routing block directly instead of just accepting or rejecting it.
+
+Applying the decision never seeds document prose anywhere. A **spawn** creates only the asset's folder and its status folder-note, carrying the request's attribution — no `design.md`, no review opened yet. Every document the asset gets, `design.md` included, is created later, one launch-checkbox tick at a time: ticking a `Write <doc>` checkbox seeds an empty skeleton at stage `empty`, copies the folder-note's request attribution onto it, and opens review on it. An **attach** works the other way — it stamps the request's attribution onto the existing target's own primary doc (`design.md` for a feature/change, `bug.md` for a bug) and re-opens review on that doc, without touching its existing content. Either way, the request body itself is never copied into any doc, whole or in sections — the doc's own review writer reads the linked request directly from its job context when it drafts the real prose. A **reference** decision writes nothing onto the target at all — it just links the request to the asset that already covers it. The whole pipeline runs without you hand-editing any frontmatter.
 
 ---
 

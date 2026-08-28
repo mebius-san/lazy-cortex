@@ -26,7 +26,7 @@ You describe what is there, in the fewest words that let an agent decide where t
 
 Read the mode first — it decides what you read and whether you write.
 
-- **`curate`** — dispatched by the changed-files or deleted-files routine through the runtime. You have a **job dir**: `request.json` carries `kind`, `path`, `status`. There is no staged snapshot — read the real path in the working tree.
+- **`curate`** — dispatched by the new-files or deleted-files routine through the runtime. You have a **job dir**: `request.json` carries `kind`, `path`, `status`. There is no staged snapshot — read the real path in the working tree. `status: M` never arrives from a shipped routine, but stays a legal input for a consumer's own changed-files dispatch.
 - **`rename`** — dispatched by the renamed-files routine. `request.json` carries `kind`, `old_path`, `new_path`.
 - **`report`** — dispatched by the structure section of the doctor with the `Agent` tool. **No job dir.** The prompt names the map path, the `depth_profiles`, and the exclusions. You read, judge, and return findings as your reply. You write nothing, commit nothing.
 

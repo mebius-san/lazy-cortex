@@ -9,10 +9,10 @@ this script directly). The operator-facing wizard at
 flow for operator-invoked use; this primitive owns the deterministic
 scaffold + stage-stamp step it used to perform via Step 5.
 
-CLI: `scaffold-asset <product> <asset_type> <slug> --doc <name>:<spec_doc_type>
+CLI: `scaffold-asset <product> <asset_type> <slug> [--doc <name>:<spec_doc_type>]
 [--doc ...] [--path <dir>]`. There is no built-in category map and no default
 document layout — the `--doc` list is the produced document set in full, and
-a call naming none is a logical refusal.
+a call naming none scaffolds the folder and its folder-note alone.
 
 Inputs read:
 
@@ -113,7 +113,6 @@ class _K:
     HELP_PATH: CLI help text for the `--path` flag.
     HELP_SLUG: CLI help text for the slug argument.
     HELP_CWD: CLI help text for the `--cwd` flag.
-    ERR_NO_DOC: Refusal message for a scaffold naming no document at all.
     OUT_FILE: Output JSON key naming a produced doc's repo-relative path.
     OUT_STAGE: Output JSON key naming a produced doc's initial stage.
     GIT_DIR: The `.git` entry checked to detect a repo checkout.
@@ -167,11 +166,10 @@ class _K:
   ARG_CWD = "--cwd"
   HELP_PRODUCT = "Product compound-key"
   HELP_TYPE = "Asset type, as declared in asset_types"
-  HELP_DOC = "Produced document as <name>:<spec_doc_type>; repeatable, at least one"
+  HELP_DOC = "Produced document as <name>:<spec_doc_type>; repeatable, may be absent"
   HELP_PATH = "Folder under spec_path the asset lands in; defaults to the type's default_path"
   HELP_SLUG = "Asset slug (lowercase-with-hyphens)"
   HELP_CWD = "Override repo root"
-  ERR_NO_DOC = "at least one --doc <name>:<type> is required"
   # Output JSON keys
   OUT_FILE = "file"
   OUT_STAGE = "stage"
@@ -636,7 +634,7 @@ def main(argv: list[str]) -> int:
   Run the `scaffold-asset` subcommand: scaffold a new asset folder under a product.
 
   Args:
-    argv: Subcommand argv tail (`<product> <type> <slug> --doc <name>:<type> [--path <dir>]`).
+    argv: Subcommand argv tail (`<product> <type> <slug> [--doc <name>:<type> ...] [--path <dir>]`).
 
   Returns:
     Process exit code: `0` on success, `1` on logical error, `2` on argparse failure.
@@ -652,9 +650,8 @@ def main(argv: list[str]) -> int:
   parser.add_argument(_K.ARG_CWD, default=None, help=_K.HELP_CWD)
   args = parser.parse_args(argv)
 
-  # guard: the document set is the caller's decision in full — there is no default layout left
-  if not args.doc:
-    _fail(_K.CAT_LOGICAL, _K.ERR_NO_DOC)
+  # an empty --doc list scaffolds the folder and its folder-note alone — documents are seeded
+  # later, by the coordinator's launch checkboxes, never by the scaffold itself
   layout = [ _parse_doc_token(token) for token in args.doc ]
 
   # the product record supplies every type-scaled decision the scaffold needs

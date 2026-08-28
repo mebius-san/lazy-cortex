@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,7 +21,7 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: a9b2d776eca34dfacecb76acc730c0c22b8815d2
+source_sha: 417672bdd01f4f9a903295fa390308952515f9bc
 ---
 # Frequently asked questions
 
@@ -173,9 +173,23 @@ A `Domain(…):` block opens with just the group name in parentheses — `# Doma
 
 ## What is `/lazy-python.knowledge-sweep`, and when do I need it?
 
-The canon expects `Domain(…):` and `Contract:` markers to be written at the same time as the code they describe — `lazy-python.domain-writer` and `lazy-python.contract-writer` are the per-edit route. `/lazy-python.knowledge-sweep` is the backfill route for code that predates that discipline, or for a repo whose domain-groups dictionary just grew: it walks a scope of Python sources, first growing the dictionary from whatever `Domain(unfiled):` blocks and subject-area vocabulary are already parked in the sources (proposing candidate groups to you one `AskUserQuestion` at a time — nothing is added without your tick), then dispatches the two writer agents file by file against the grown dictionary, and finally re-verifies and commits everything it touched.
+The canon expects `Domain(…):` and `Contract:` markers to be written at the same time as the code they describe — `lazy-python.domain-writer` and `lazy-python.contract-writer` are the per-edit route. `/lazy-python.knowledge-sweep` is the backfill route for code that predates that discipline, or for a repo whose domain-groups dictionary just grew: it walks a scope of Python sources, first growing the dictionary from whatever `Domain(unfiled):` blocks and subject-area vocabulary are already parked in the sources, then dispatches the two writer agents file by file against the grown dictionary, runs two corpus-wide consolidation passes over what the writers produced, and finally re-verifies and commits everything it touched.
 
-Run it when: a batch of `Domain(unfiled):` findings has piled up and nobody is clearing them by hand one file at a time; you just adopted domain/contract markers in an existing repo and want a first pass; or the dictionary grew (new groups accepted) and you want the sweep's `refile=true` dispatch to re-file blocks that are still parked under `Domain(unfiled):` against the new groups. A refile pass only ever rewrites a parked block's header line — the group name — never its title or body; it never invents a permanent group on its own, and every accepted group in the dictionary traces back to your explicit choice.
+The sweep is non-interactive throughout: growing the dictionary, consolidating it, and consolidating the contracts are each settled by the sweep itself rather than asked about cluster by cluster or block by block. Every settled cut — every group added, renamed, merged, or split; every contract removed or reworded — is reported back in full so you can overrule a specific name or boundary against the finished result, but nothing waits on an `AskUserQuestion` mid-run.
+
+Run it when: a batch of `Domain(unfiled):` findings has piled up and nobody is clearing them by hand one file at a time; you just adopted domain/contract markers in an existing repo and want a first pass; or the dictionary grew (new groups accepted) and you want the sweep's `refile=true` dispatch to re-file blocks that are still parked under `Domain(unfiled):` against the new groups. A refile pass only ever rewrites a parked block's header line — the group name — never its title or body; it never invents a permanent group without reporting it, and every group that lands in the dictionary is visible in that report for you to overrule.
+
+---
+
+## What do the dictionary-consolidation and contract-consolidation steps in the sweep actually do?
+
+After the writer agents run file by file, two passes catch drift that no single dispatch could see — each dispatch only ever looked at one file, never the corpus. Dictionary consolidation collapses synonym group names into one, splits a group whose blocks turned out to cover two unrelated subjects, folds a group holding a single block into its nearest neighbour unless the subject is genuinely separate, re-checks every surviving name against the dictionary's own naming law, and rewrites glosses to match what each group actually ended up holding — then refiles every block whose group changed. Contract consolidation removes any block the documenting canon's exclusions reject (presentation details, signature-obvious facts, pure implementation details), converges one guarantee stated across sibling classes into a single phrasing — moving it to the base class when the base is what enforces it — and folds redundant copies of one guarantee, but only when the copies address the same audience: a block on a hook that a subclass overrides, or on a surface with its own readers, survives even when its wording matches another block word for word. Both passes settle their cut and report it in full rather than asking about each merge.
+
+---
+
+## Why did `lazy-python.contract-writer` refuse to write a contract for an error message or log line?
+
+Contracts pin caller-visible guarantees that must survive refactoring, and exact human-readable text — a message string, a log line, `repr`/pretty-print formatting — is presentation, not a guarantee: rewording it should never count as breaking a contract. The agent writes one for such a string only when a caller demonstrably parses it programmatically, and even then the contract names the parsed structure the caller depends on, not the prose itself. This exclusion is enforced both in the agent's hard rules on every dispatch and in the sweep's contract-consolidation pass, which strips any block that slipped through before the exclusion existed.
 
 ---
 

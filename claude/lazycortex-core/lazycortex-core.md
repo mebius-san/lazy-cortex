@@ -1,24 +1,24 @@
 ---
 role: plugin-status
-stage: changed
+stage: major
 plugin: lazycortex-core
-current_version: 7.1.1
-published_version: 7.0.1
-generated_at: 2026-08-23 22:08:36 UTC
+current_version: 8.0.1
+published_version: 7.1.1
+generated_at: 2026-08-28 00:35:00 UTC
 iconize_icon: LiFileClock
-iconize_color: "#fde68a"
+iconize_color: "#fca5a5"
 ---
-# lazycortex-core — changed since publish
+# lazycortex-core — pending changes
 
-**Status**: changed — version `7.1.1` is ahead of the published `7.0.1`; the pending cycle below ships with the next publish.
+**Status**: changed — `plugin.json` version `8.0.1` has not been published yet (last recorded release: `7.1.1`).
 
-## Highlights since 7.0.1
+## Highlights since `7.1.1`
 
-- Installing no longer requires a background daemon. `/lazy-core.install` never asks whether the project is daemon-driven — `daemon.enabled` is seeded `false` and gates exactly two steps, the supervisor unit and the metrics endpoint. Routines, the runtime sections, `.experts/`, and the expert-spawn sandbox install on every checkout, because `/lazy-runtime.tick` drives them without a daemon; the audit's `daemon.git` finding and the doctor's sanitizer-routine check apply to a hand-ticked repo too.
-- The Execution-discipline preamble no longer depends on the Task checklist tool. A skill, command, or agent now writes out a step ledger in its own output — the same canonical step list, the same `in_progress` / `completed` marking, the same one-outcome-per-step Report contract — and `lazy-core.skill-writing` documents the ledger as the mechanism. The tool entries are gone from every `allowed-tools:` / `tools:` list and from the permissions `/lazy-core.install` seeds.
-- The two new lazycortex-experts agents, `lazy-experts.use-case-writer` and `lazy-experts.ui-designer`, ship a default agent-model tier so a fresh install seeds them without asking.
-- The git-guard's pathspec row now requires a clean index before a session commit: staged content is always the operator's, so the hook waits out a short staging burst (15 s, tunable via `LAZYCORTEX_GIT_GUARD_WAIT_SECONDS`) and then denies with an escalate-to-operator message that prescribes no recovery command — staged content may equally be the operator's parked work, an intentional `git rm --cached` untrack, or a swapped index, and the session cannot tell them apart. Right after a commit it alarms when staged content is still present — the signature of the shared index swapped for a failed partial commit's temporary index — naming `git reset` as the operator-run cure, never the session's.
-- The index-health probe now also covers history-sync verbs: after a `pull` / `merge` / `rebase` the guard alarms when the staged content is exactly a lagging index — every staged path's worktree file identical to HEAD — so an index write that lost a race to a fast-forward is named for what it is instead of reading as someone's stage. The runtime daemon additionally self-checks after its own ff-pull and repairs that signature with a provably lossless `git reset`, journalling the repair; genuinely parked content is never touched.
+- The rate-limit guard is now scoped per account: a raised window defers only the daemons spending under the same account identity (digest of the daemon's own token), so one account's warning no longer freezes every daemon on the host; legacy account-less records stay host-global until they expire. BREAKING: the daemon now requires `daemon.token_env` — the name of the environment variable (seeded in `~/.claude/.env`) holding its OAuth token — and refuses to start on the machine's ambient login.
+- The daemon's pre-tick git sync no longer checks out the base branch when the repo already stands on it, so `.git/logs/HEAD` stops gaining a no-op reflog line every tick — under a file-sync service like Dropbox that growth used to cost gigabytes of version history per day.
+- New `lazycortex-core safe-pull` CLI: the guarded fast-forward pull the daemon's `post_push_hook` should fan commits out with — it waits out a held `index.lock` in the target checkout, refuses to touch an index with staged content, and merges only a strict fast-forward, so a hook pull can no longer race a session's partial commit into index residue.
+- A local git sync failure no longer masquerades as a remote outage: a command losing the race for `.git/index.lock` (an expert job committing at the same moment) is retried after a short backoff instead of halting the daemon, and a failure that does halt is recorded as `git_local_failed` when no remote was involved — `git_remote_unavailable` is reserved for stderr that actually names an unreachable remote.
+- The routines settings ladder gained a v7 step: `lazy-wiki.structure-scan` is retargeted from `changed_files` to `new_files`, so a consumer's existing config stops queuing one structure-curator job per modified file — content edits never change the tree shape the map describes. Configs already off `changed_files`, and configs without the routine, pass through untouched.
 
 ---
 *Frontmatter + status header generated by the publish-status agent. The `## Highlights since …` body is curated by the pre-commit pipeline on each meaningful commit; treat it as LLM-maintained narrative.*

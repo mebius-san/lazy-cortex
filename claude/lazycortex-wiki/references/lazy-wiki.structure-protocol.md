@@ -36,7 +36,7 @@ Canonical contract for jobs dispatched to `wiki.structure-curator` (or any consu
 Field notes:
 
 - `kind` — see `## Kind enum` below.
-- `path` / `status` — (`curate` only) the changed path and its git status letter. `A` and `M` arrive from a changed-files watch, `D` from a deleted-files watch; the two watches feed one kind because the curator's response differs only in direction (enter or update versus remove).
+- `path` / `status` — (`curate` only) the changed path and its git status letter. `A` arrives from a new-files watch, `D` from a deleted-files watch; the watches feed one kind because the curator's response differs only in direction (enter or update versus remove). `M` stays a legal value for a consumer that dispatches curator-shaped jobs from its own changed-files watch, but no shipped routine sends it — the map describes the tree's shape, and a content edit never changes that.
 - `old_path` / `new_path` — (`rename` only) both sides of the rename. Both are required: removing the old entry needs the old name, and the two names travel in one request because a rename split into a delete and an add would touch the map twice for one event.
 - There is no `source/` — the curator reads the real file (or notices its absence) in the working tree, because the description is derived from live content and a snapshot of one file cannot show the directory around it.
 - No extra fields.

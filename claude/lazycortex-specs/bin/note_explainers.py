@@ -1,18 +1,21 @@
-"""Shared italic explainer lines for generated spec-note sections.
+"""Shared HTML-comment explainer lines for generated spec-note sections.
 
-Every bot-written section of a spec note carries one italic one-liner under its
-heading, in the vault's authoring language, so the operator never has to guess
-what a section means. This module owns the mechanics (idempotent insert/replace)
-plus the text table for asset/container folder-note sections; `upstream_tick.py`
-keeps its own upstream-note table and reuses the mechanics. It also owns the
+Every bot-written section of a spec note carries one `<!-- ... -->` one-liner
+under its heading, in the vault's authoring language, so the operator never has
+to guess what a section means — visible in the editor, invisible in reading
+view. This module owns the mechanics (idempotent insert/replace) plus the text
+table for asset/container folder-note sections; `upstream_tick.py` keeps its
+own upstream-note table and reuses the mechanics. It also owns the
 language-resolved templates for the narrative `# History` lines the bin
 primitives land on notes.
 
-Only asterisk-italic lines (`*...*`) are recognized as explainers — underscore
-placeholders like `_Not yet assessed by the coordinator._` are content and stay
-untouched. On notes whose sections carry a `#protected/...` owner tag the
-explainer sits right after the tag line, keeping the tag the first content line
-as the protected-sections convention requires.
+Asterisk-italic lines (`*...*`) — the explainers' pre-comment form — are still
+recognized at the explainer slot and migrate to the comment form on the next
+heal. Underscore placeholders like `_Not yet assessed by the coordinator._` are
+content and stay untouched, and so is any `<!-- spec:... -->` marker comment
+(`summary_render.py`'s precis/stats fences). On notes whose sections carry a
+`#protected/...` owner tag the explainer sits right after the tag line, keeping
+the tag the first content line as the protected-sections convention requires.
 """
 from __future__ import annotations
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -45,12 +48,13 @@ LANG_RU = "ru"
 # a section's owner tag line sits directly under the heading and stays the first content line
 _PROTECTED_PREFIX = "#protected/"
 
-# an explainer is exactly one asterisk-italic line; underscore-italic placeholders are content.
+# an explainer is exactly one line in the comment form or the legacy asterisk-italic form;
+# underscore-italic placeholders are content, and so is any `<!-- spec:... -->` marker comment.
 # Public: section readers (e.g. the commands-wake detector) use it to skip the explainer line.
-EXPLAINER_LINE_RE = re.compile(r"^\*[^*].*\*\s*$")
+EXPLAINER_LINE_RE = re.compile(r"^(?:\*[^*].*\*|<!--(?!\s*spec:).*-->)\s*$")
 
-# italic one-liners rendered under the generated sections of asset/container folder-notes —
-# the note documents itself so the operator never has to guess what a section means
+# one-liners rendered as `<!-- ... -->` under the generated sections of asset/container
+# folder-notes — the note documents itself so the operator never has to guess what a section means
 # waiver: the RU lines carry `# noqa: RUF001` — Cyrillic in Russian UI strings is the content,
 # not a lookalike-character typo; the checker cannot distinguish deliberate Russian text
 ASSET_EXPLAINERS: dict[tuple[str, str], str] = {
@@ -132,15 +136,6 @@ HISTORY_LINES: dict[tuple[str, str], str] = {
     (HistoryEvent.REVIEW_OPENED_SCAN, LANG_RU):
         # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
         "открыто ревью на {doc}",  # noqa: RUF001
-    (HistoryEvent.WOKE, LANG_EN): "woke on {trigger} → {expert} ({job_id})",
-    (HistoryEvent.WOKE, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "пробуждение на {trigger} → {expert} ({job_id})",  # noqa: RUF001
-    (HistoryEvent.DISPATCH_STALE, LANG_EN):
-        "wake on {trigger} returned an already-terminal job ({job_id}) — retired, not retried",
-    (HistoryEvent.DISPATCH_STALE, LANG_RU):
-        # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
-        "пробуждение на {trigger} вернуло уже завершённый job ({job_id}) — списан, не перезапущен",  # noqa: RUF001
     (HistoryEvent.REQUEST_PROCESSED, LANG_EN): "request [[{wikilink}]] accepted → processed",
     (HistoryEvent.REQUEST_PROCESSED, LANG_RU):
         # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
@@ -165,10 +160,10 @@ def explainer_text(heading: str, lang: str, table: dict[tuple[str, str], str]) -
 
 def with_explainer(section: str, lang: str, table: dict[tuple[str, str], str]) -> str:
   """
-  Insert a rendered section's italic explainer line right under its heading.
+  Insert a rendered section's comment explainer line right under its heading.
 
-  Idempotent: an explainer already present under the heading (any language, from
-  a prior render) is replaced rather than stacked.
+  Idempotent: an explainer already present under the heading (any language or
+  form, from a prior render) is replaced rather than stacked.
 
   Args:
     section: A rendered section — heading line plus body.
@@ -184,10 +179,11 @@ def with_explainer(section: str, lang: str, table: dict[tuple[str, str], str]) -
   # guard: a heading without a defined explainer renders exactly as before
   if not note:
     return section
-  # replace a previous render's explainer instead of stacking a second one
-  if rest.startswith("*") and "*\n" in rest:
-    rest = rest.split("*\n", 1)[1]
-  return f"{heading}\n*{note}*\n{rest}"
+  # replace a previous render's explainer — comment or legacy italic — instead of stacking one
+  first, _, remainder = rest.partition("\n")
+  if EXPLAINER_LINE_RE.match(first):
+    rest = remainder
+  return f"{heading}\n<!-- {note} -->\n{rest}"
 
 
 def ensure_explainers(
@@ -197,11 +193,13 @@ def ensure_explainers(
   Insert or refresh the explainer line under every known section of a note body.
 
   Idempotent whole-body healer: for each heading present in `body` and known to
-  `table`, exactly one `*...*` line ends up under the heading — after the
+  `table`, exactly one `<!-- ... -->` line ends up under the heading — after the
   section's `#protected/...` owner tag when one is present, so the tag stays the
-  first content line. An existing asterisk-italic line at that spot is replaced;
-  any other line (including underscore-italic placeholders) is left in place and
-  the explainer is inserted above it.
+  first content line. A line at that spot matching the explainer shape — any
+  non-`spec:` HTML comment, or the legacy asterisk-italic form — is replaced;
+  any other line (underscore-italic placeholders, `<!-- spec:... -->` marker
+  comments, plain prose) is left in place and the explainer is inserted above
+  it.
 
   Args:
     body: The note body text (post-frontmatter).
@@ -231,12 +229,13 @@ def ensure_explainers(
     insert_at = idx + 1
     if insert_at < len(lines) and lines[insert_at].startswith(_PROTECTED_PREFIX):
       insert_at += 1
-    # replace only a prior render's own asterisk-italic line; anything else (an underscore
-    # placeholder, operator prose) is content — the explainer is inserted above it instead
+    # replace a line wearing the explainer shape — any non-`spec:` HTML comment, or a legacy
+    # italic render; anything else (an underscore placeholder, a `spec:` marker comment,
+    # operator prose) is content and the explainer is inserted above it instead
     if insert_at < len(lines) and EXPLAINER_LINE_RE.match(lines[insert_at]):
-      lines[insert_at] = f"*{note}*"
+      lines[insert_at] = f"<!-- {note} -->"
     else:
-      lines.insert(insert_at, f"*{note}*")
+      lines.insert(insert_at, f"<!-- {note} -->")
     # resume past the line just written so the scan never re-reads its own output
     idx = insert_at + 1
   return "\n".join(lines) + ("\n" if body.endswith("\n") else "")

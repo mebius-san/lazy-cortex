@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols, detect-scope, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit")
+         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols, detect-scope, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit")
 
 
 def _cmd_consume_job(argv: list[str]) -> int:
@@ -694,6 +694,9 @@ def main() -> int:
     elif sub == "remote-mirror":
         from remote_mirror import main as _remote_mirror_main
         return _remote_mirror_main(sys.argv[2:])
+    elif sub == "safe-pull":
+        from safe_pull import main as _safe_pull_main
+        return _safe_pull_main(sys.argv[2:])
     elif sub == "error-record":
         return _cmd_error_record(sys.argv[2:])
     elif sub == "error-list":

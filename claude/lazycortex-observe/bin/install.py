@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
+import configparser
 import os
 import re
 import shutil
@@ -790,6 +791,280 @@ def write_scrape_file_via_core(out: Path | None = None) -> dict:
     return json.loads(proc.stdout)
   except json.JSONDecodeError as e:
     raise RuntimeError(f"lazycortex-core metrics-scrape-file printed unparseable JSON: {e}") from e
+
+
+# --- Grafana dashboard provisioning -----------------------------------------
+
+DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboards"
+
+# waiver: external Grafana process-table markers, not internal keys
+_GRAFANA_SERVER_MARKERS = ("grafana server", "grafana-server")
+# waiver: external Grafana CLI flags, not internal keys
+_GRAFANA_CONFIG_FLAG = "--config="
+# waiver: external Grafana CLI flags, not internal keys
+_GRAFANA_HOMEPATH_FLAG = "--homepath="
+# waiver: external grafana.ini section / key names, not internal keys
+_GRAFANA_PATHS_SECTION = "paths"
+# waiver: external grafana.ini section / key names, not internal keys
+_GRAFANA_PROVISIONING_KEY = "provisioning"
+# waiver: Grafana's own documented default, relative to its homepath
+_GRAFANA_DEFAULT_PROVISIONING = "conf/provisioning"
+# waiver: external Grafana provisioning-tree layout name, not an internal key
+_GRAFANA_DASHBOARDS_SUBDIR = "dashboards"
+_GRAFANA_CONFIG_CANDIDATES = (
+  XDG_CONFIG_HOME / "grafana" / "grafana.ini",
+  # waiver: package-manager install prefixes probed for a Grafana config, not internal keys
+  Path("/opt/homebrew/etc/grafana/grafana.ini"),
+  # waiver: package-manager install prefixes probed for a Grafana config, not internal keys
+  Path("/usr/local/etc/grafana/grafana.ini"),
+  # waiver: package-manager install prefixes probed for a Grafana config, not internal keys
+  Path("/etc/grafana/grafana.ini"),
+)
+# waiver: answer-file key of the operator's dashboards-directory override
+_ANSWER_KEY_DASHBOARD_DIR = "grafana_dashboards_dir"
+# waiver: subprocess wall-clock cap in seconds for the process-table read
+_PS_TIMEOUT_SEC = 5
+# waiver: file suffix of a shipped dashboard, not an internal key
+_JSON_SUFFIX = ".json"
+# waiver: suffix of the sibling temp file the atomic dashboard write goes through
+_TMP_SUFFIX = ".tmp"
+
+
+def _read_grafana_process_config() -> tuple[Path | None, Path | None]:
+  """
+  Read the config and homepath flags off a currently running Grafana server process.
+
+  Returns:
+    A pair `(config, homepath)` taken from a running Grafana server process's command line;
+    either or both are `None` when no such process is found or it carries neither flag.
+  """
+  # limit: args split on whitespace miss a path with a space, switch to a delimited `ps -Ao pid=,args=` read
+
+  # read the whole process table; an unavailable `ps` leaves the caller on the packaged candidates
+  try:
+    # waiver: external ps flags, not internal keys
+    proc = subprocess.run(
+      ["ps", "-Ao", "args="], capture_output = True, text = True, check = False, timeout = _PS_TIMEOUT_SEC,
+    )
+  except (OSError, subprocess.SubprocessError):
+    return None, None
+
+  # scan the table for a grafana server line and lift its path flags
+  for line in proc.stdout.splitlines():
+    # guard: reject every process line that is not a grafana server
+    if not any(marker in line for marker in _GRAFANA_SERVER_MARKERS):
+      continue
+    # lift the two path flags off the matched command line
+    config: Path | None = None
+    homepath: Path | None = None
+    for arg in line.split():
+      if arg.startswith(_GRAFANA_CONFIG_FLAG):
+        config = Path(arg[len(_GRAFANA_CONFIG_FLAG):])
+      elif arg.startswith(_GRAFANA_HOMEPATH_FLAG):
+        homepath = Path(arg[len(_GRAFANA_HOMEPATH_FLAG):])
+    # guard: reject a grafana line that carries neither path flag
+    if not (config or homepath):
+      continue
+    return config, homepath
+
+  # no grafana server is running on this host
+  return None, None
+
+
+def _resolve_provisioning_dir(config: Path, homepath: Path | None) -> Path | None:
+  """
+  Resolve the provisioning directory a Grafana config file points at.
+
+  Guarantees:
+    - A relative provisioning path always resolves against Grafana's homepath, matching
+      Grafana's own resolution rule.
+
+  Args:
+    config: Path to the `grafana.ini` file to read.
+    homepath: Grafana's homepath, used to resolve a relative provisioning path, or `None`
+      when unknown.
+
+  Returns:
+    The resolved provisioning directory, or `None` when the config cannot be read or the
+    provisioning path is relative and no `homepath` is available to resolve it against.
+  """
+  # parse the ini permissively — a consumer's grafana.ini carries duplicate sample keys
+  parser = configparser.RawConfigParser(strict = False)
+  try:
+    parser.read(config)
+  except (OSError, configparser.Error):
+    return None
+
+  # read the declared provisioning path, falling back to Grafana's own default
+  raw = parser.get(_GRAFANA_PATHS_SECTION, _GRAFANA_PROVISIONING_KEY, fallback = "").strip()
+  path = Path(os.path.expanduser(raw or _GRAFANA_DEFAULT_PROVISIONING))
+
+  # Contract:
+  # A relative provisioning path always resolves against Grafana's homepath, matching
+  # Grafana's own resolution rule.
+
+  # Grafana resolves a relative provisioning path against its homepath
+  if not path.is_absolute():
+    # guard: a relative path with no known homepath cannot be resolved
+    if homepath is None:
+      return None
+    path = homepath / path
+
+  # the provisioning root every dashboard target hangs off
+  return path
+
+
+def detect_grafana_dashboards_dir() -> Path | None:
+  """
+  Locate the host's Grafana dashboard-provisioning directory.
+
+  Resolves to the directory Grafana already watches for provisioning, so callers can deploy
+  dashboards without hardcoding a host-specific path.
+
+  Guarantees:
+    - A recorded operator override is authoritative and terminal: its directory, or `None` when
+      it does not exist, is returned without running any further probe.
+    - Absent a recorded override, the fixed detection order decides the result: a running
+      Grafana server's own config, then the packaged `grafana.ini` locations, and the first
+      candidate that resolves to an existing dashboards directory wins.
+
+  Notes:
+    - Reads the host's running process list to look for a live Grafana server; if that read
+      fails, detection falls back to the packaged config candidates instead of raising.
+
+  Returns:
+    The resolved dashboards directory, or `None` when a recorded override does not resolve to
+    an existing directory (skipping every further probe), or when no override is recorded and
+    no probed Grafana config resolves to an existing dashboards directory.
+  """
+
+  # Domain(observe.install-state):
+  # # Dashboard provisioning directory is found by a fixed discovery order
+  # A host's dashboard-rendering tool keeps a directory it automatically loads dashboards from, and this
+  # installer discovers that directory rather than assuming a fixed location for it. An operator's own
+  # recorded answer for this host is authoritative and stops the search immediately. Absent that, a
+  # currently running instance of the tool is asked for its own configuration, since a live instance
+  # reflects what the operator actually deployed rather than a guessed default; only when nothing is
+  # running does the search fall back to the handful of locations the tool's own packaging conventionally
+  # installs its configuration to. A relative provisioning path declared in that configuration is never
+  # resolved against the working directory of whatever process reads it — it resolves against the tool's
+  # own home directory, matching the tool's own resolution rule, so the same relative path always names the
+  # same directory regardless of where it happens to be read from.
+
+  # Contract:
+  # A recorded operator override is authoritative and terminal: its resolved directory,
+  # or `None` when it is not an existing directory, is returned without running any probe.
+
+  # an operator's recorded directory is the authoritative answer for this host
+  recorded = read_answer_file().get(_ANSWER_KEY_DASHBOARD_DIR)
+  # guard: reject every probe once an override is on record
+  if recorded:
+    override = Path(os.path.expanduser(str(recorded)))
+    return override if override.is_dir() else None
+
+  # Contract:
+  # Absent a recorded override, the probes run in a fixed order — the running Grafana
+  # server's own config, then the packaged `grafana.ini` locations — and the first
+  # candidate that resolves to an existing dashboards directory wins.
+
+  # build the config candidates, the running instance's own outranking the packaged locations
+  running_config, homepath = _read_grafana_process_config()
+  candidates = ([ running_config ] if running_config else []) + [
+    candidate for candidate in _GRAFANA_CONFIG_CANDIDATES if candidate != running_config
+  ]
+
+  # take the first candidate that resolves to a dashboards directory this host carries
+  for candidate in candidates:
+    # guard: reject candidates absent from this host
+    if not candidate.is_file():
+      continue
+    provisioning = _resolve_provisioning_dir(candidate, homepath)
+    # guard: reject a config that is unreadable or leaves a relative path unresolvable
+    if provisioning is None:
+      continue
+    dashboards = provisioning / _GRAFANA_DASHBOARDS_SUBDIR
+    if dashboards.is_dir():
+      return dashboards
+
+  # no candidate carried a dashboards directory
+  return None
+
+
+def deploy_dashboards(target_dir: Path | None = None) -> dict:
+  """
+  Copy the plugin's shipped Grafana dashboards into the host's provisioning directory.
+
+  Reaches only the dashboard JSON files themselves; Grafana's own configuration is never
+  written by this call.
+
+  Guarantees:
+    - Each written dashboard file is always either the previous complete content or the new
+      complete content, never a partial write.
+    - A dashboard payload already byte-identical to the file on disk is left untouched and
+      counted as unchanged rather than rewritten.
+
+  Notes:
+    - Writes dashboard files into a host directory outside the repository.
+    - When no destination is supplied, resolution reads the host's process table and
+      Grafana's own configuration files.
+
+  Args:
+    target_dir: Destination provisioning directory to write into. Detected automatically when
+      omitted.
+
+  Returns:
+    A mapping with `outcome` (`installed`, `unchanged`, or `skipped-no-grafana`), `dir` (the
+    resolved destination or `None`), and the `written` / `unchanged` dashboard file name lists.
+
+  Raises:
+    OSError: If the target directory tree cannot be written to.
+    PermissionError: If the process lacks permission to write into the target directory, such
+      as a root-owned provisioning tree.
+  """
+  # settle where the dashboards go before touching anything on disk
+  target = target_dir or detect_grafana_dashboards_dir()
+  # guard: reject the copy when this host has no Grafana provisioning tree
+  if target is None:
+    # waiver: outcome tokens of the dashboard-provisioning step contract
+    return { "outcome": "skipped-no-grafana", "dir": None, "written": [], "unchanged": [] }
+
+  # per-file verdicts the install step reports back
+  written: list[str] = []
+  unchanged: list[str] = []
+
+  # copy every shipped dashboard, skipping the ones already byte-identical on disk
+  for name in sorted(os.listdir(DASHBOARD_DIR)):
+    # guard: reject directory entries that are not JSON payloads
+    if not name.endswith(_JSON_SUFFIX):
+      continue
+    payload = (DASHBOARD_DIR / name).read_bytes()
+    installed = target / name
+
+    # Contract:
+    # A dashboard payload already byte-identical to the file on disk is left untouched and
+    # counted as unchanged rather than rewritten.
+
+    # guard: reject a rewrite of a payload already identical on disk
+    if installed.is_file() and installed.read_bytes() == payload:
+      unchanged.append(name)
+      continue
+
+    # Contract:
+    # Each written dashboard file is always either the previous complete content or the new
+    # complete content, never a partial write.
+
+    # write through a sibling temp file so an interrupted copy never leaves a half-written dashboard
+    tmp = installed.with_name(installed.name + _TMP_SUFFIX)
+    tmp.write_bytes(payload)
+    os.replace(tmp, installed)
+    written.append(name)
+
+  # the step's outcome, destination and per-file verdicts
+  # waiver: outcome tokens of the dashboard-provisioning step contract
+  return {
+    "outcome": "installed" if written else "unchanged",
+    "dir": str(target), "written": written, "unchanged": unchanged,
+  }
 
 
 # --- Tiny template engine --------------------------------------------------

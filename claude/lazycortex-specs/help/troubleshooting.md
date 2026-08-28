@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,7 +25,7 @@ source_skills:
   - lazy-spec.set-stage
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
-source_sha: b48fa0858c7398248bcdbc366bece0d7a1a02668
+source_sha: ac6c3e4c5c56301e62e3afab0d0de63b564eb60e
 ---
 # Troubleshooting
 
@@ -146,6 +146,16 @@ source_sha: b48fa0858c7398248bcdbc366bece0d7a1a02668
 **Likely cause**: Layout and body-shape findings are report-only by design — the skill never auto-migrates or moves existing content, even under `--apply`. Only frontmatter-level and reference fixes (wikilinks, stage/tag sync, icon drift, gate booleans) are ever written automatically.
 
 **Fix**: Resolve the finding by hand — move the files, rewrite the section — following the instruction the report gives for that specific finding, then re-run `/lazy-spec.doctor` to confirm it clears.
+
+---
+
+## `/lazy-spec.doctor` keeps warning that a container folder-note has no `# Coordinator rules` section
+
+**Symptom**: Every doctor run reports a WARN naming a container folder-note (e.g. `features/features.md`) as missing its `# Coordinator rules` section, alongside the same warning for the product folder-note.
+
+**Likely cause**: The rule-chain the coordinator reads before deciding anything on any asset (playbook → vault doc → product note → container notes top-down → asset note) now spans container-level notes too, not just the product root — a container folder-note that has never needed group-wide constraints simply has nothing written yet, which is expected rather than broken.
+
+**Fix**: Nothing is required — this is a WARN, not a FAIL, and an empty section is not owed. If you do want group-scoped constraints for that container, re-run `/lazy-spec.doctor <product> --apply` and confirm the fix that adds the empty `# Coordinator rules` section (carrying the `#protected/spec/coordinator-rules` tag); the operator authors the actual constraints afterward.
 
 ---
 

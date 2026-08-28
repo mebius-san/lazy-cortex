@@ -37,6 +37,7 @@ _SUB_GATE_TICK = "gate-tick"
 # waiver: subcommand name string -- dispatch key for the CLI router
 _SUB_COLLECT_TICK = "collect-tick"
 _SUB_SCAFFOLD_ASSET = "scaffold-asset"
+_SUB_SEED_DOC = "seed-doc"
 _SUB_RENDER_CONTAINER_STATS = "render-container-stats"
 _SUB_COORDINATOR_DISPATCH = "coordinator-dispatch"
 _SUB_NOTE_SET_KEY = "note-set-key"
@@ -58,8 +59,10 @@ _USAGE = (
     "  flip-gate <asset_dir> <gate> [--off] [--auto] [--reason TEXT]   move one gate\n"
     "  gate-tick <asset_note> [--today YYYY-MM-DD]   clear finished job markers, run structural note-check\n"
     "  collect-tick [--repo DIR]      sweep the job-marker sidecar, gate-tick every recorded note\n"
-    "  scaffold-asset <product> <type> <slug> --doc <name>:<type> [--doc ...] [--path <dir>]\n"
+    "  scaffold-asset <product> <type> <slug> [--doc <name>:<type> ...] [--path <dir>]\n"
     "                                  deterministic scaffold of a new asset folder\n"
+    "  seed-doc <product> <folder-note-path> --doc <name>:<type>\n"
+    "                                  seed one authored doc beside an existing folder-note\n"
     "  apply-request <file>           deterministic post-finalize apply transition for a request file\n"
     "  render-container-stats <note>  recompute a container note's stats region\n"
     "  coordinator-dispatch <asset_note> [--today YYYY-MM-DD]   wake spec.coordinator on activity\n"
@@ -134,6 +137,10 @@ def main(argv: list[str]) -> int:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import scaffold_asset  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
     return scaffold_asset.main(rest)
+  if sub == _SUB_SEED_DOC:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import seed_doc  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return seed_doc.main(rest)
   if sub == _SUB_RENDER_CONTAINER_STATS:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import summary_render  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy

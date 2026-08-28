@@ -396,7 +396,7 @@ Configures `lazy.settings.json[structure]` — the section that drives the proje
 - `Structure 3 — Collect exclude`
 - `Structure 4 — Write back`
 - `Structure 5 — Register the scan routines`
-- `Structure 6 — Log + pointers`
+- `Structure 6 — Initial map + log`
 - `Report`
 
 ### Structure 1 — Verify install + load section
@@ -432,12 +432,14 @@ Outcome: `written`.
 
 ### Structure 5 — Register the scan routines
 
-Three git routines, one per event class, because one `watch` covers one status set: `changed_files` passes only `A`/`M`, `deleted_files` only `D`, and a rename under git's default `diff.renames=true` arrives as `R`, which both of those drop — without the third routine a directory rename silently stales the map. (With `diff.renames=false` a rename decomposes into `D`+`A` and lands in the first two — the mechanism degrades to a correct result, not to a breakage.)
+Three git routines, one per event class, because one `watch` covers one status set: `new_files` passes only `A`, `deleted_files` only `D`, and a rename under git's default `diff.renames=true` arrives as `R`, which both of those drop — without the third routine a directory rename silently stales the map. (With `diff.renames=false` a rename decomposes into `D`+`A` and lands in the first two — the mechanism degrades to a correct result, not to a breakage.)
+
+The scan routine deliberately does NOT watch modifications (`changed_files` = `A`+`M`): the map describes the tree's shape — what exists where — and a content edit never changes that, so every `M` dispatch cost one expert job with nothing to apply, and a busy commit wave queued them by the dozen. The price is that a per-file description at `file` depth goes stale when its file is rewritten in place; that drift is `report`'s to find (`/lazy-wiki.doctor`, the `divergence` finding) and `/lazy-wiki.structure rebuild`'s to repair.
 
 Resolve the watched branch with `Bash(git rev-parse --abbrev-ref HEAD)`. Register each through the registrar:
 
 ```
-Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.structure-scan type=git watch=changed_files branch=<branch> interval_sec=60 filter.frontmatter.review_active.not_in=[true] expert=wiki.structure-curator protocols=lazycortex-wiki:lazy-wiki.structure-protocol request.kind=curate request.path={path} request.status={status} timeout_sec=900")
+Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.structure-scan type=git watch=new_files branch=<branch> interval_sec=60 filter.frontmatter.review_active.not_in=[true] expert=wiki.structure-curator protocols=lazycortex-wiki:lazy-wiki.structure-protocol request.kind=curate request.path={path} request.status={status} timeout_sec=900")
 Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.structure-scan-deletes type=git watch=deleted_files branch=<branch> interval_sec=60 filter.frontmatter.review_active.not_in=[true] expert=wiki.structure-curator protocols=lazycortex-wiki:lazy-wiki.structure-protocol request.kind=curate request.path={path} request.status={status} timeout_sec=900")
 Skill(skill: "lazycortex-core:lazy-routine.register", args: "name=lazy-wiki.structure-scan-renames type=git watch=renamed_files branch=<branch> interval_sec=60 filter.frontmatter.review_active.not_in=[true] expert=wiki.structure-curator protocols=lazycortex-wiki:lazy-wiki.structure-protocol request.kind=rename request.old_path={old_path} request.new_path={new_path} timeout_sec=900")
 ```
@@ -448,12 +450,13 @@ Edit mode: a routine already registered is left as is (`already-present`); when 
 
 Outcome: `registered` / `already-present`.
 
-### Structure 6 — Log + pointers
+### Structure 6 — Initial map + log
+
+**Build the initial map when it is missing.** The routines registered in Structure 5 only keep an existing map current — the curator refuses to create one, so a repo that leaves this section without `docs/structure.md` has every incremental dispatch fail with a `logical` error until someone remembers the rebuild. `Bash(test -f docs/structure.md && echo present || echo absent)`; on `absent`, invoke `Skill(skill: "lazycortex-wiki:lazy-wiki.structure", args: "rebuild")` now — never defer it to a printed pointer. Outcome: `map-present` / `map-built`.
 
 Log to `./.logs/claude/lazy-wiki.configure/<UTC-timestamp>.md` per the Phase 8 recipe (`input: "structure"`).
 
-Print two pointers (no questions):
-- *"Build the initial map with `/lazy-wiki.structure rebuild` — the routines only keep an existing map current, they never create it."*
+Print one pointer (no questions):
 - *"Re-run `/lazy-wiki.install` to register the `wiki.structure-curator` expert if it is not on record yet."*
 
 Outcome: `logged`.

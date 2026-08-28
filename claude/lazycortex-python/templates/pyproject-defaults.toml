@@ -249,6 +249,10 @@ check_magic_literal = true
 check_line_length = true
 max_line_length = 117
 
+# Comment/docstring language admission by unicode script; greek admits π and
+# friends in domain formulas.
+allowed_languages = [ "english", "greek" ]
+
 # Substrings rejected anywhere in a docstring body (D5 check).
 # Each entry must be a short, unambiguous phrase that signals
 # implementation-detail leakage or tautology.

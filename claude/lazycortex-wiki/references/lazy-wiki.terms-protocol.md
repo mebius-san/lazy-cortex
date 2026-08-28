@@ -16,7 +16,6 @@ Canonical contract for jobs dispatched to `wiki.terms-curator` (or any consumer 
   "kind":    "curate",
   "role":    "terms-curator",
   "file":    "<repo-relative path of the document that changed>",
-  "source":  [{"path": "source/document", "description": "current content of the changed document"}],
   "result":  [{"path": "result/terms.json", "description": "curator output: the dictionary operations it applied"}]
 }
 ```
@@ -24,8 +23,7 @@ Canonical contract for jobs dispatched to `wiki.terms-curator` (or any consumer 
 Field notes:
 
 - `kind` — see `## Kind enum` below.
-- `file` — the repo-relative path of the document whose change triggered this job. The curator needs the real path, not only the staged copy, because the scope a document belongs to is decided by matching that path against the scope's globs.
-- `source/document` — the full raw text of the changed document (frontmatter + body).
+- `file` — the repo-relative path of the document whose change triggered this job. The curator reads the document at this path in the working tree; the same path decides which scope the document belongs to, matched against the scope's globs.
 - No extra fields.
 
 ### `report` dispatch
@@ -65,8 +63,8 @@ Outcome semantics:
 
 ### `curate`
 
-- **source/** — `source/document`: the full raw text of the changed document.
-- **context/** — none. The dictionary itself is a tracked file the curator reads and writes in place; staging a copy would only invite editing the copy.
+- **source/** — none. The changed document is a tracked file the curator reads at the request's `file` path in the working tree.
+- **context/** — none. The dictionary itself is a tracked file the curator reads and writes in place; a bundled copy would only invite editing the copy.
 - **result/** — `result/terms.json`: the operations the curator applied; see `## Result format` below.
 
 ### `report`
@@ -110,7 +108,6 @@ Format and configuration findings are the dispatching skill's own; the curator n
 
 - The expert MAY edit the scope's dictionary file in place, and commit it under the git identity its environment carries.
 - The expert MUST NOT edit the document that triggered the job, or any other document of the scope. A document naming a concept differently from the dictionary is a `report` finding, never a silent rewrite of someone else's text.
-- The expert MUST NOT write back to `source/document` — it is a read-only staged copy.
 - The expert MUST NOT touch any tracked file except the dictionary, and `.memory/<self>/` where the persona aspect grants it.
 - On `report` the expert writes nothing at all.
 
@@ -118,6 +115,6 @@ Format and configuration findings are the dispatching skill's own; the curator n
 
 | Category | Used when |
 |---|---|
-| `logical` | Input is malformed or unusable: `source/document` is empty, `file` is absent from the request, the document's path matches no scope, or the dictionary path in the scope's configuration names a file that does not exist. |
+| `logical` | Input is malformed or unusable: the document at `file` is missing or empty, `file` is absent from the request, the document's path matches no scope, or the dictionary path in the scope's configuration names a file that does not exist. |
 | `transient` | Claude subprocess crashed or timed out — the runner should retry. |
 | `technical` | The dictionary is in a state the curator may not repair: the heading it would anchor an insertion to appears more than once. Log and skip; repairing duplicate headings belongs to the report side. |

@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -39,20 +39,25 @@ Run `/lazy-core.install` in the repo you want the async team to work in. Alongsi
 - Creates `.experts/` and registers every expert candidate it finds — any installed plugin's agent carrying `expert_protocol:` frontmatter is registered automatically in `lazy.settings.json[experts]`, no per-candidate prompt. Registration happens whether or not a background daemon runs anywhere — experts are dispatch-routing config used by interactive flows too.
 - Registers the built-in routines, including the queue-draining `lazy-expert.pump`, in `lazy.settings.json[routines]` — again unconditionally. The daemon is never required for the queue itself to exist.
 - Seeds `lazy.settings.json[daemon]` with `enabled: false` as the default. A project only gets a background daemon **supervisor** once you explicitly set that flag to `true` in the tracked settings and re-run `/lazy-core.install` — at which point the skill asks the one remaining question, `daemon.run_here` (a per-machine "does this checkout drive the daemon" map), and installs the supervisor (launchd on macOS, systemd on Linux) once you confirm.
+- Does **not** seed `daemon.token_env`. Whenever the daemon process actually runs — the supervisor or the manual shim, never `/lazy-runtime.tick` — it refuses to start under the machine's ambient login and instead requires an explicit token, named by this key. Setting it is on you; see the queue-draining bullet below.
 - Seeds the `git` section of the project's `lazy.settings.json` with the git-guard's `enabled`, `pathspec_enabled`, and `mutex_enabled` flags — defaults that match the guard's current behavior, written down so you (or the expert's dispatched work) can tune them later without reading the hook source.
 
 Confirm two things are in place before dispatching:
 
 - **At least one expert is registered.** Check `lazy.settings.json[experts]` for a key besides `_version`. If it's empty, no plugin you have installed ships an expert candidate yet — install one, or re-run `/lazy-core.install` after adding your own agent with `expert_protocol:` frontmatter.
-- **Decide how the queue gets drained.** With `daemon.enabled` left at its default `false`, nothing drains the queue automatically — run `/lazy-runtime.tick` by hand whenever you want queued jobs picked up; it runs the same routines, in the same priority order, as the daemon would. If you'd rather have it run continuously, set `daemon.enabled: true` in the tracked `lazy.settings.json` and re-run `/lazy-core.install` to get the `run_here` prompt and a supervisor unit — or, outside Claude Code, start the shim directly:
+- **Decide how the queue gets drained.** With `daemon.enabled` left at its default `false`, nothing drains the queue automatically — run `/lazy-runtime.tick` by hand whenever you want queued jobs picked up; it runs the same routines, in the same priority order, as the daemon would, and needs no token of its own. If you'd rather have it run continuously, two things need to be true before the daemon process will actually start:
+  - **`daemon.token_env` is set.** The daemon refuses to run under the machine's ambient login — it requires an explicit OAuth token, named by `daemon.token_env` (a string naming an environment variable, e.g. `"CLAUDE_TOKEN_MYPROJECT"`) in the tracked `lazy.settings.json[daemon]` section, resolved from either the real environment or a matching line in `~/.claude/.env`. `/lazy-core.install` does not seed this key — set it yourself before the daemon's first start. Left absent, blank, or naming a variable that resolves nowhere, the daemon process exits immediately with an explicit error naming what's missing.
+  - **`daemon.enabled: true` and `daemon.run_here` name this checkout.** Set `daemon.enabled: true` in the tracked `lazy.settings.json` and re-run `/lazy-core.install` to get the `run_here` prompt and a supervisor unit.
+
+  Or, outside Claude Code, start the shim directly once both are set:
 
 ```
 .claude/bin/lazy.runtime.sh
 ```
 
-The shim resolves the runner from the plugin cache and starts it. The daemon logs to stdout; it wakes on each polling cycle, drains any queued jobs, and runs registered routines. Leave it running in a `tmux` or `screen` pane — you do not need to restart it for each job.
+The shim resolves the runner from the plugin cache and starts it — the same token gate applies here too. The daemon logs to stdout; it wakes on each polling cycle, drains any queued jobs, and runs registered routines. Leave it running in a `tmux` or `screen` pane — you do not need to restart it for each job.
 
-**Verification gate**: `lazy.settings.json[experts]` contains at least one expert key besides `_version`, and either the daemon prints its startup message and enters its polling loop without errors, or you know to run `/lazy-runtime.tick` by hand.
+**Verification gate**: `lazy.settings.json[experts]` contains at least one expert key besides `_version`, and either you know to run `/lazy-runtime.tick` by hand, or — for a background daemon — `daemon.token_env` is set and resolves, and the daemon prints its startup message and enters its polling loop instead of exiting on a missing-token error.
 
 ### (Optional) Aspects and arguments
 
@@ -161,7 +166,7 @@ If `/lazy-expert.list-jobs` shows the job as `dead` but `/lazy-expert.collect-jo
 - **Cancel a job you no longer need** — run `/lazy-expert.cancel-job expert_name=designer job_id=<job_id>` for any job that is still queued or in progress. Cancellation stops the running executor immediately and marks the bundle `CANCELLED`; nothing is deleted, so the job stays visible in `/lazy-expert.list-jobs` for forensics.
 - **Add memory to an expert** — run `/lazy-memory.mark-persona <expert>` to opt an expert into the long-term memory subsystem. After a few dispatches accumulate run logs, run `/lazy-memory.reflect <expert>` to have the expert write its first memory notes under `.memory/<expert>/`. See the *add-memory-to-expert* walkthrough for the full flow.
 - **Register plugin routines** — if a plugin also needs periodic background work, run `/lazy-routine.register` to add it to the daemon's rotation alongside `lazy-expert.pump`.
-- **No daemon running?** — that's the default; nothing is wrong. Run `/lazy-runtime.tick` by hand whenever you want the queue drained — same routines, same order as the daemon. To get continuous draining instead, set `lazy.settings.json[daemon].enabled: true` and re-run `/lazy-core.install`, or start the shim directly with `.claude/bin/lazy.runtime.sh`. If a daemon you did start halted on a dirty working tree, run `/lazy-runtime.recover` first.
+- **No daemon running?** — that's the default; nothing is wrong. Run `/lazy-runtime.tick` by hand whenever you want the queue drained — same routines, same order as the daemon, no token required. To get continuous draining instead, set `lazy.settings.json[daemon].enabled: true`, set `daemon.token_env` to name an environment variable holding an OAuth token (seeded in `~/.claude/.env` or the real environment — the daemon refuses to start without it), and re-run `/lazy-core.install`, or start the shim directly with `.claude/bin/lazy.runtime.sh`. If a daemon you did start halted on a dirty working tree, run `/lazy-runtime.recover` first.
 
 ## How the pieces fit
 

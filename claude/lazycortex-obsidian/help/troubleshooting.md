@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
-summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, and vault manifest capture/deploy.
-last_regen: 2026-08-24
+summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, tag pages, and vault manifest capture/deploy.
+last_regen: 2026-08-27
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin / gen-tag-pages); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
@@ -16,7 +16,7 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 1424b48a2f90138fef84328e2fd33c138e6a0f23
+source_sha: 07686c8fa9ef083334f66cfa6c696cf913a33740
 ---
 # Troubleshooting
 
@@ -220,11 +220,11 @@ source_sha: 1424b48a2f90138fef84328e2fd33c138e6a0f23
 
 ---
 
-## `/lazy-obsidian.deploy` reports a theme `not installed and not bundled`
+## `/lazy-obsidian.deploy` reports a theme `not installed`
 
-**Symptom**: The deploy report shows the vault's theme as `not installed and not bundled`.
+**Symptom**: The deploy report shows the vault's theme as `not installed`.
 
-**Likely cause**: The manifest records only the theme's name, not its CSS — deploy cannot fabricate a theme it does not ship.
+**Likely cause**: The manifest records only the theme's name, not its CSS — deploy never carries a theme's stylesheet.
 
 **Fix**: Install the theme once from Obsidian's own Appearance settings; the manifest picks it up correctly on the next `/lazy-obsidian.capture`.
 
@@ -237,6 +237,16 @@ source_sha: 1424b48a2f90138fef84328e2fd33c138e6a0f23
 **Likely cause**: Expected — icons are painted live by Iconize and the bundled `iconize-reloader` from note frontmatter, not written by the deploy skill itself.
 
 **Fix**: Open Obsidian (it repaints on load), or run `/lazy-obsidian.iconize-sync reconcile` to force the frontmatter reconciliation immediately.
+
+---
+
+## Tag-page generation stops: "Missing tag-page template"
+
+**Symptom**: Regenerating tag pages (`lazy-obsidian.gen-tag-pages`) stops immediately with a message about a missing tag-page template at `.claude/templates/lazy-obsidian.tag-page-template.md`.
+
+**Likely cause**: `/lazy-obsidian.install` has not been run yet at project scope, so the template was never seeded into this repo. The generator refuses to fall back to a bundled default once a local template is expected — the local copy is the single source of truth once it exists.
+
+**Fix**: Run `/lazy-obsidian.install` to scaffold the default template, then re-run tag-page generation.
 
 ---
 

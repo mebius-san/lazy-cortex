@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-observe install, uninstall, and doctor — symptoms, likely causes, and fixes.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree rooted at the operator's situation: top-level branch on whether the shipper is installed at all (answer file present?); if not-installed, branch further on whether the Step 0 pre-flight found an already-covered host (routes to --integrate-only or --force-standalone guidance) versus a genuinely clear host (routes to plain install); if installed, branch on whether the host runs in integrate mode (scrape-targets file present and current vs missing/stale) or standalone mode — standalone then branches on whether the service is active, whether local /metrics is reachable, whether agent self-metrics show successful remote_write (token vs observer-reachability vs WAL-recovery sub-branches), and whether WAL is oversized. Separate top-level branch for uninstall failures (launchctl error 5 vs systemctl unit-not-found). Each leaf cites the troubleshooting entry that resolves it."
@@ -11,7 +11,7 @@ source_skills:
   - lazy-observe.uninstall
   - lazy-observe.doctor
   - lazy-observe.audit
-source_sha: 183a0cb4d191ceb89a9670c24d9a6c0228bb8364
+source_sha: 890473ef0218899352d3af6d39a3910845b28731
 ---
 # Troubleshooting
 
@@ -182,6 +182,16 @@ source_sha: 183a0cb4d191ceb89a9670c24d9a6c0228bb8364
 **Likely cause**: The bearer token or basic-auth password is wrong, expired, or missing the required scope for the observer's `remote_write` endpoint.
 
 **Fix**: Rotate the credential at the observer side, then re-run `/lazy-observe.install`. At Step 5 you can update the token-source kind or write a new token file without changing any other setting.
+
+---
+
+## Install reports "skipped-no-grafana" and dashboards never land in Grafana
+
+**Symptom**: `/lazy-observe.install` completes, but its Step 10.5 line reports outcome `skipped-no-grafana`, and the dashboards under `claude/lazycortex-observe/dashboards/` never appear in your Grafana instance's dashboard list without a manual import.
+
+**Likely cause**: Step 10.5 tries to auto-provision the shipped dashboards by copying their JSON straight into Grafana's own provisioning directory, resolved in this order: a `grafana_dashboards_dir` value already on record, the config of a running local `grafana server` process, then the packaged `grafana.ini` default locations. None of those probes found a provisioning directory — Grafana isn't installed on this host, isn't running, or keeps its provisioning tree somewhere the probe doesn't check (a remote/hosted Grafana, a container-mounted path, a non-default `grafana.ini`).
+
+**Fix**: A skip here isn't necessarily wrong — a remote or hosted Grafana can't be auto-provisioned from this host at all, and importing `claude/lazycortex-observe/dashboards/lazycortex-runtime.json` there by hand is the expected path. If Grafana IS local and the probe just missed it, record the absolute dashboards directory as `grafana_dashboards_dir` in `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml`, then re-run `/lazy-observe.install` — Step 10.5 picks it up on the next pass and writes the dashboard JSON directly. Grafana's own file provider reloads the directory on its configured interval, so no restart or manual import is needed after that.
 
 ---
 

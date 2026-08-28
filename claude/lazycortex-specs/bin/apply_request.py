@@ -4,10 +4,10 @@ Deterministic apply-transition worker — the Python primitive backing the
 
 Replaces the LLM-driven `lazy-spec.request-apply` agent. Reads the resolved
 routing prose from a post-finalize request file, enacts the named
-attach / spawn / reference targets, seeds each spawn/attach target's
-primary doc with the router-authored per-target description — a fresh
-spawn gets it as draft content, an existing attach target gets it as an
-attention-block delta, a reference target gets neither (link only) —
+attach / spawn / reference targets — a spawn scaffolds the asset folder
+and its folder-note alone (documents come later, from the coordinator's
+launch checkboxes), an attach records the request's attribution on the
+existing target's primary doc, a reference registers a link only —
 opens a review cycle on every populated doc, then stamps terminal markers
 (`request_class`, `request_status`, `request/<status>` mirror tag,
 status callout) and strips the `# Routing` section. Atomic commit
@@ -39,9 +39,6 @@ Structured `<!-- routing-decision -->` block lines carry an optional
 writes; empty/legacy when the suffix is absent) plus a set of named
 fields the router decides and this worker never guesses at:
 
-- `docs=<name>:<type>[,...]` on a spawn line — the documents the asset
-  is scaffolded with, in order. Mandatory: the scaffolder has no
-  default layout, so a spawn naming none is refused outright.
 - `path=<dir>` on a spawn line — the folder under the product's
   `spec_path` the asset lands in; absent falls back to the asset
   type's own `default_path`.
@@ -72,12 +69,10 @@ Inputs read:
 
 Outputs written:
 
-- Spawn targets: full asset scaffolds via the `scaffold-asset`
-  subprocess.
-- Each populated doc: router-description seed (draft content on a
-  spawn target, an attention-block delta on an attach target) +
-  `spec_source_requests` frontmatter + `## Requests` projection inside
-  `# Sources`.
+- Spawn targets: folder + folder-note scaffolds via the
+  `scaffold-asset` subprocess (no documents).
+- Each attach target's primary doc: `spec_source_requests` frontmatter
+  + `## Requests` projection inside `# Sources`.
 - Each change spawn naming design-cascade targets: `spec_targets`
   frontmatter on its status folder-note.
 - Reference targets: `spec_targets` frontmatter on the request file
@@ -204,17 +199,13 @@ class _K:
     DECISION_DESC_SEP: Token separating a routing-decision line's target spec from its free-text description.
     DECISION_TARGETS_PREFIX: Prefix marking the optional design-cascade `targets=` field on a change-spawn line.
     DECISION_PRODUCT_PREFIX: Prefix marking the optional spawning-product `product=` field on a spawn line.
-    DECISION_DOCS_PREFIX: Prefix marking the mandatory `docs=` field naming a spawn's documents.
     DECISION_PATH_PREFIX: Prefix marking the optional `path=` field naming a spawn's folder.
     DECISION_TOOLS_PREFIX: Prefix marking the optional `tools=` field naming a spawn's tools.
     DECISION_DROP_PREFIX: Prefix marking the optional `drop=` field naming an attach's dropped docs.
-    DOC_TOKEN_SEP: Separator between a document's filename and its type inside `docs=`.
-    SCAFFOLD_DOC_FLAG: The `scaffold-asset` flag naming one produced document.
     SCAFFOLD_PATH_FLAG: The `scaffold-asset` flag naming the folder the asset lands in.
     SCAFFOLD_GROUP_NOTE_KEY: The scaffold result key naming the group folder-note it seeded.
     SPEC_TOOLS_KEY: Frontmatter key listing the tools the asset is realised and checked with.
     ASSET_TYPES: Settings key holding a product's own asset-type declarations.
-    OVERVIEW_H2: Heading of the template skeleton's opening section, where a spawn seed lands.
     SOURCES_H1: Heading marking a doc's sources section.
     SOURCES_TAG: Protected-section tag guarding a doc's sources section.
     REQUESTS_H2: Sub-heading marking a doc's requests projection.
@@ -227,8 +218,6 @@ class _K:
     STATUS_TAG_PATTERN: Regex pattern matching an existing status tag to replace.
     REJECT_HINT: Recovery-hint text appended to a rejection callout.
     REJECT_REASON_DEFAULT: Default rejection reason when routing names no target.
-    FALLBACK_DESCRIPTION: One-line seed used when the router left a target's description empty.
-    ATTENTION_CALLOUT_PREFIX: Leading text of an attach target's seeded attention-block delta.
     GIT: The git executable name.
     PROG: CLI program name shown in `--help` output.
     CLI_LAZYCORTEX_SPECS: Plugin name used to resolve the `lazycortex-specs` CLI.
@@ -301,17 +290,13 @@ class _K:
   DECISION_DESC_SEP = "::"
   DECISION_TARGETS_PREFIX = "targets="
   DECISION_PRODUCT_PREFIX = "product="
-  DECISION_DOCS_PREFIX = "docs="
   DECISION_PATH_PREFIX = "path="
   DECISION_TOOLS_PREFIX = "tools="
   DECISION_DROP_PREFIX = "drop="
-  SCAFFOLD_DOC_FLAG = "--doc"
   SCAFFOLD_PATH_FLAG = "--path"
   SCAFFOLD_GROUP_NOTE_KEY = "group_note"
   SPEC_TOOLS_KEY = "spec_tools"
   ASSET_TYPES = "asset_types"
-  DOC_TOKEN_SEP = ":"
-  OVERVIEW_H2 = "## Overview"
   SOURCES_H1 = "# Sources"
   SOURCES_TAG = "#protected/spec/sources"
   REQUESTS_H2 = "## Requests"
@@ -325,8 +310,6 @@ class _K:
   STATUS_TAG_PATTERN = r"#status/\S+"
   REJECT_HINT = "To re-open: clear request_status, clear review_result, restore review_active: true."
   REJECT_REASON_DEFAULT = "Routing prose named no resolvable target."
-  FALLBACK_DESCRIPTION = "Request routed here — see linked request"
-  ATTENTION_CALLOUT_PREFIX = "> [!attention] change requested: "
   # Subprocess + git
   GIT = "git"
   # CLI identity
@@ -652,31 +635,6 @@ def _spawn_field(block: str, prefix: str) -> dict[tuple[str, str], str]:
           found[( tokens[1].lower(), tokens[2] )] = value
         break
   return found
-
-
-def _parse_spawn_docs(block: str) -> dict[tuple[str, str], list[tuple[str, str]]]:
-  """
-  Scan a routing-decision block for each spawn line's own `docs=` field.
-
-  `docs=` is the document set the spawned asset is scaffolded with — the router's decision in
-  full, since `scaffold-asset` has no default layout of its own. An entry that does not carry
-  the `<name>:<type>` shape is dropped rather than guessed at.
-
-  Args:
-    block: Inner text of the comment block (between the opening and closing markers).
-
-  Returns:
-    Dict `{(kind, slug): [(filename, doc_type), ...]}` in the order the line declares them;
-    a spawn line whose `docs=` resolved to no well-formed entry is absent.
-  """
-  parsed: dict[tuple[str, str], list[tuple[str, str]]] = {}
-  for key, raw in _spawn_field(block, _K.DECISION_DOCS_PREFIX).items():
-    pairs = [ entry.partition(_K.DOC_TOKEN_SEP) for entry in raw.split(",") if entry.strip() ]
-    docs = [ ( name.strip(), doc_type.strip() ) for name, sep, doc_type in pairs
-             if sep and name.strip() and doc_type.strip() ]
-    if docs:
-      parsed[key] = docs
-  return parsed
 
 
 def _parse_spawn_paths(block: str) -> dict[tuple[str, str], str]:
@@ -1232,15 +1190,13 @@ class _Attach:
   """
   Inline attach primitive for the apply transition.
 
-  Replaces the LLM-driven `spec.request-attach` skill, seeding a target's primary doc with the
-  router's per-target description on behalf of one apply run.
+  Replaces the LLM-driven `spec.request-attach` skill, recording an attach target's request
+  attribution on its primary doc on behalf of one apply run.
 
   Responsibilities:
-    - Seed a spawn target's primary doc with draft content, or an attach target's primary doc
-      with an attention-block delta.
+    - Resolve an attach target's primary doc from its declared asset type.
     - Track a doc's `spec_source_requests` frontmatter and its `## Requests` body projection,
       without duplicating an already-listed request.
-    - Append the originating request to the entity's folder-note `## Source requests` list.
   """
 
   @staticmethod
@@ -1275,105 +1231,6 @@ class _Attach:
     """
     declared = asset_types.type_of(folder_note) if folder_note.is_file() else ""
     return declared or _K.CHANGE_KIND
-
-  @staticmethod
-  def _splice_before_sources(text: str, block: str) -> str:
-    """
-    Splice a content block into a doc's body, before `# Sources` when present.
-
-    Args:
-      text: Full doc text (frontmatter + body).
-      block: Content to insert — landed at end-of-doc when no `# Sources`
-        heading exists, otherwise immediately before it.
-
-    Returns:
-      The doc text with `block` spliced in.
-    """
-    sources_idx = text.find(f"\n{_K.SOURCES_H1}\n")
-    if sources_idx < 0:
-      return text.rstrip() + "\n\n" + block + "\n"
-    head = text[:sources_idx].rstrip()
-    tail = text[sources_idx:]
-    return head + "\n\n" + block + "\n" + tail
-
-  @staticmethod
-  def _replace_overview_stub(text: str, block: str) -> str | None:
-    """
-    Replace the `## Overview` section's italic template stub with a content block.
-
-    Args:
-      text: Full doc text (frontmatter + body).
-      block: Content that becomes the section's body.
-
-    Returns:
-      The doc text with the stub replaced, or `None` when the doc carries no `## Overview`
-      section or its content is not a lone `_…_` template stub — the caller falls back to
-      the end-of-body splice then.
-    """
-    # the lookahead is the guard that matters: the section body must be NOTHING but the lone
-    # italic stub before the next heading — an Overview a human already wrote never matches,
-    # so the seed can only ever replace scaffolding, not authored prose
-    match = re.search(
-        rf"(?ms)^{re.escape(_K.OVERVIEW_H2)}\s*\n(_[^\n]*_\s*\n)(?=\s*^#|\s*\Z)",
-        text,
-    )
-    # guard: no Overview skeleton to seed into — the doc is not template-shaped
-    if not match:
-      return None
-    return text[:match.start(1)] + block + "\n" + text[match.end(1):]
-
-  @staticmethod
-  def seed_body_content(doc_path: Path, content_block: str) -> bool:
-    """
-    Seed a content block into a doc — into the `## Overview` stub, else before `# Sources`.
-
-    Guarantees:
-      An `## Overview` section carrying anything other than the lone template stub is never
-      overwritten — the seed then falls back to the pre-`# Sources` splice.
-
-    Args:
-      doc_path: Path to the target authored doc.
-      content_block: Content to splice into the doc.
-
-    Returns:
-      `True` when the doc text changed, `False` otherwise.
-    """
-    text = doc_path.read_text()
-    # guard: skip empty content blocks
-    if not content_block.strip():
-      return False
-
-    # Decision: the seed replaces the Overview stub rather than trailing the skeleton — the
-    # protocol calls it the doc's INITIAL content, and a pointer buried under Boundaries is
-    # one the writer and the operator both miss (found live on the first spawned asset).
-    new_text = _Attach._replace_overview_stub(text, content_block)
-    if new_text is None:
-      new_text = _Attach._splice_before_sources(text, content_block)
-    if new_text == text:
-      return False
-    doc_path.write_text(new_text)
-    return True
-
-  @staticmethod
-  def append_attention_block(doc_path: Path, seed: str) -> bool:
-    """
-    Append a `[!attention] change requested` callout to a doc, before `# Sources` when present.
-
-    Args:
-      doc_path: Path to the target authored doc.
-      seed: Description text to display (already resolved to the fallback
-        sentence when the router left none).
-
-    Returns:
-      `True` when the doc text changed, `False` otherwise.
-    """
-    text = doc_path.read_text()
-    block = f"{_K.ATTENTION_CALLOUT_PREFIX}{seed}"
-    new_text = _Attach._splice_before_sources(text, block)
-    if new_text == text:
-      return False
-    doc_path.write_text(new_text)
-    return True
 
   @staticmethod
   def ensure_source_request(doc_path: Path, request_wikilink: str,
@@ -1504,15 +1361,32 @@ class _FolderNote:
     """
     Append `- [[<wikilink>|<display>]] — <today>` to the folder-note's `## Source requests` section.
 
+    Unions the same bullet into the `spec_source_requests` frontmatter list, the set `seed-doc`
+    copies onto checkbox-seeded docs; a re-run against an already-listed request changes neither
+    projection.
+
+    Guarantees:
+      - The `spec_source_requests` frontmatter list and the `## Source requests` body section
+        stay in step; after a successful append, both carry the same wikilink.
+      - Never appends a wikilink already present under either projection.
+
     Args:
       folder_note: Path to `<slug>/<slug>.md`.
       request_wikilink: Request file's wikilink target.
       request_display: Display gloss for the bullet.
 
     Returns:
-      `True` when the folder-note text changed, `False` when the bullet was already
-      present (idempotent re-run).
+      `True` when the folder-note changed, `False` when the bullet was already present
+      (idempotent re-run).
     """
+
+    # Contract:
+    # Every append MUST keep the `spec_source_requests` frontmatter list and the
+    # `## Source requests` body section in step: both carry the same wikilink, the
+    # frontmatter entry quoted, so a caller reading only the frontmatter sees the full
+    # union of requests ever appended through this method. A wikilink already present
+    # under either projection MUST NOT be appended again.
+
     text = folder_note.read_text()
     today = _today_iso()
     bullet = f"- [[{request_wikilink}|{request_display}]] — {today}"
@@ -1541,7 +1415,14 @@ class _FolderNote:
         new_text = text[:hist_idx + 1] + block_text + text[hist_idx + 1:]
       else:
         new_text = text.rstrip() + "\n\n" + block_text
-    folder_note.write_text(new_text)
+
+    # the frontmatter union is what seed-doc copies onto checkbox-seeded docs — the body bullet
+    # alone is invisible to it, so both projections are maintained together
+    _fm_values, fm_end = _parse_frontmatter(new_text)
+    existing = re.findall(r'(?m)^  - "\[\[([^\]|]+)\]\]"$', new_text[:fm_end])
+    fm_text = _set_fm_list(new_text[:fm_end], _K.SPEC_SOURCE_REQUESTS,
+                           [ f"\"[[{link}]]\"" for link in [ *existing, request_wikilink ] ])
+    folder_note.write_text(fm_text + new_text[fm_end:])
     return True
 
 
@@ -1565,7 +1446,7 @@ class _Apply:
     author_email: Git author email used for the atomic commit.
     specs_cli: Resolved path to the sibling `lazycortex-specs` CLI.
     review_cli: Resolved path to the sibling `lazycortex-review` CLI.
-    populated_docs: Docs that received a router-description seed during this run.
+    populated_docs: Docs whose attribution changed via an attach target during this run.
     spawn_folder_notes: Folder-notes created by enacting a spawn target during this run.
     spawn_group_notes: Group folder-notes the scaffolder seeded while enacting spawns this run.
     attach_folder_notes: Folder-notes populated by enacting an attach target during this run.
@@ -1707,8 +1588,7 @@ class _Apply:
     return frozenset(kinds)
 
   def _spawn(self, kind: str, slug: str, *, product: str | None = None,
-             docs: list[tuple[str, str]] | None = None, path: str = "",
-             tools: list[str] | None = None) -> tuple[Path, str]:
+             path: str = "", tools: list[str] | None = None) -> tuple[Path, str]:
     """
     Run the scaffold-asset subprocess to create the new entity folder.
 
@@ -1719,8 +1599,6 @@ class _Apply:
         one routing decision fans a request out across several products in the same apply run
         (playbook Chapter 7). Falls back to `_default_product()` (first registered product key)
         when omitted, matching every pre-multi-product routing decision on a single-product repo.
-      docs: The `(filename, doc_type)` pairs the decision's own `docs=` field named; the
-        scaffold has no default layout, so a spawn naming none is refused.
       path: The decision's own `path=` field, empty to fall back to the type's `default_path`.
       tools: The decision's own `tools=` field, empty to leave the asset's tools undetermined.
 
@@ -1729,9 +1607,6 @@ class _Apply:
       (`<content_root>/<spec_path>/<folder>/<slug>/<slug>.md`, where the content root is
       `spec.vault_root`, default `specs`) and the spawning product's `spec_path`.
     """
-    # guard: the document set is the router's decision in full — a spawn without one cannot land
-    if not docs:
-      _fail(_K.CAT_LOGICAL, f"spawn {kind} '{slug}' names no {_K.DECISION_DOCS_PREFIX} documents")
     product = product or self._default_product()
     record = self._load_product_record(product)
     spec_path = record[_K.SPEC_PATH]
@@ -1744,8 +1619,6 @@ class _Apply:
       # Idempotent — earlier apply attempt already scaffolded; no-op.
       return folder_note, spec_path
     argv = [ str(self.specs_cli), "scaffold-asset", product, kind, slug ]
-    for name, doc_type in docs:
-      argv += [ _K.SCAFFOLD_DOC_FLAG, f"{name}{_K.DOC_TOKEN_SEP}{doc_type}" ]
     if path:
       argv += [ _K.SCAFFOLD_PATH_FLAG, path ]
     res = subprocess.run(
@@ -1953,7 +1826,7 @@ class _Apply:
     an already-halted asset). On success the feature ends in the same gate state as one that
     never started its ladder. Every failure halts the asset (a half-dropped ladder — job
     cancelled, pre-launch siblings gone, but the gates never actually flipped — is worse than an
-    intact one) and aborts the whole apply run without proceeding to the attach seed, whether
+    intact one) and aborts the whole apply run without proceeding to the attribution step, whether
     the failure is a job that never confirmed cancelled, a pre-launch sibling surviving its own
     deletion, or a gate flip refused outright by a cancelled asset after the earlier steps
     already ran.
@@ -2032,41 +1905,30 @@ class _Apply:
               f"pre-launch rollback refused on {asset_dir.name}: {gate} flip was refused "
               f"({refused_reason})")
 
-  def _attach_to_folder_note(self, folder_note: Path, description: str,
-                             request_display: str, *, is_spawn: bool) -> list[Path]:
+  def _attach_to_folder_note(self, folder_note: Path,
+                             request_display: str) -> list[Path]:
     """
-    Seed the entity's primary doc with the router's per-target description.
+    Record the request's attribution on an attach target's primary doc and folder-note.
 
-    Also keeps the doc's source-request attribution current, so the doc and its folder-note
-    both reflect that this request populated them.
+    The target's body is never seeded — the writer reads the request first-hand from its job
+    context, so attribution is the whole delta an attach lands.
 
     Args:
       folder_note: Absolute path to `<slug>/<slug>.md`.
-      description: Router-authored description for this target; empty when the router left
-        none, or when no structured routing-decision block was present at all.
       request_display: Display gloss used in the `## Requests` and folder-note bullets.
-      is_spawn: True for a just-scaffolded target, seeding the primary doc's own draft content;
-        False for an existing attach target, seeding an attention-block delta instead.
 
     Returns:
-      List of authored docs that were populated (used to open review on each).
+      List of authored docs whose attribution changed (used to open review on each).
     """
     kind = _Attach.kind_from_folder_note(folder_note)
-    # the product's own declarations decide the start doc — a type declared only by this product
+    # the product's own declarations decide the primary doc — a type declared only by this product
     # would otherwise silently fall back to the shipped default
     primary = _Attach.primary_doc_for_kind(kind, self._record_for_note(folder_note))
     primary_path = folder_note.parent / primary
-    seed = description.strip() or _K.FALLBACK_DESCRIPTION
     populated: list[Path] = []
     if primary_path.is_file():
-      if is_spawn:
-        changed_body = _Attach.seed_body_content(primary_path, seed)
-      else:
-        changed_body = _Attach.append_attention_block(primary_path, seed)
-      changed_sources = _Attach.ensure_source_request(
-          primary_path, self.request_wikilink, request_display,
-      )
-      if changed_body or changed_sources:
+      # attribution is the review trigger: a changed source list re-enters the doc into review
+      if _Attach.ensure_source_request(primary_path, self.request_wikilink, request_display):
         populated.append(primary_path)
     _FolderNote.append_source_request(folder_note, self.request_wikilink, request_display)
     return populated
@@ -2078,9 +1940,9 @@ class _Apply:
     Args:
       doc_path: Absolute path to the populated authored doc.
       verb: The review CLI subcommand to invoke — `start` for a fresh opening writer round
-        (the default, used by a spawn's draft seed and a plain attach's attention delta), or
-        `submit` to skip that round when the doc already carries prior content (used after a
-        pre-launch ladder rollback re-opens an already-drafted `design.md`).
+        (the default, used by a plain attach's attribution re-entry), or `submit` to skip that
+        round when the doc already carries prior content (used after a pre-launch ladder
+        rollback re-opens an already-drafted `design.md`).
     """
     res = subprocess.run(
         [ str(self.review_cli), verb, str(doc_path) ],
@@ -2243,28 +2105,21 @@ class _Apply:
     # `_parse_reference_targets` and `_parse_spawn_products` (see the `# Decision:` note on
     # `_parse_routing_decision_rich`)
     decision_block = _extract_decision_block(routing_text)
-    spawn_desc: dict[tuple[str, str], str] = {}
     spawn_cascades: dict[tuple[str, str], list[str]] = {}
-    attach_desc: dict[str, str] = {}
-    # a reference target's own description is never seeded anywhere — unlike spawn/attach, no
-    # doc is ever written for it, so only the resolved path itself is kept
+    # a `:: description` tail is tolerated on every line but seeded nowhere — writers read the
+    # request itself from job context, so only structural fields are consumed here
     reference_targets: list[str] = []
     spawn_product: dict[tuple[str, str], str] = {}
-    spawn_docs: dict[tuple[str, str], list[tuple[str, str]]] = {}
     spawn_paths: dict[tuple[str, str], str] = {}
     spawn_tools: dict[tuple[str, str], list[str]] = {}
     attach_drops: dict[str, list[str]] = {}
     if decision_block is not None:
-      spawn_rich, attach_rich = _parse_routing_decision_rich(
+      spawn_rich, _attach_rich = _parse_routing_decision_rich(
           decision_block, known_kinds = self._known_kinds())
-      for kind, slug, description, targets in spawn_rich:
-        spawn_desc[( kind, slug )] = description
+      for kind, slug, _description, targets in spawn_rich:
         spawn_cascades[( kind, slug )] = targets
-      for path, description in attach_rich:
-        attach_desc[path] = description
       reference_targets = [ path for path, _description in _parse_reference_targets(decision_block) ]
       spawn_product = _parse_spawn_products(decision_block)
-      spawn_docs = _parse_spawn_docs(decision_block)
       spawn_paths = _parse_spawn_paths(decision_block)
       spawn_tools = _parse_spawn_tools(decision_block)
       attach_drops = _parse_attach_drops(decision_block)
@@ -2292,19 +2147,16 @@ class _Apply:
                          "request_class": request_class }))
       return 0
 
-    # a spawn target scaffolds its asset first, then gets seeded with its own draft content
+    # a spawn target scaffolds its folder and folder-note alone — documents are seeded later,
+    # by the coordinator's launch checkboxes, so only the note's attribution is written here
     for kind, slug in spawn_targets:
       folder_note, spec_path = self._spawn(
           kind, slug, product = spawn_product.get(( kind, slug )),
-          docs = spawn_docs.get(( kind, slug )), path = spawn_paths.get(( kind, slug ), ""),
+          path = spawn_paths.get(( kind, slug ), ""),
           tools = spawn_tools.get(( kind, slug )))
       rel = folder_note.relative_to(self.repo).with_suffix("")
       resolved_wikilinks.append(str(rel))
-      description = spawn_desc.get(( kind, slug ), "")
-      populated = self._attach_to_folder_note(
-          folder_note, description, request_display, is_spawn = True,
-      )
-      self.populated_docs.extend(populated)
+      _FolderNote.append_source_request(folder_note, self.request_wikilink, request_display)
       self.spawn_folder_notes.append(folder_note)
       # a change spawn may cascade its design onto existing assets via routing's targets= field
       if kind == _K.CHANGE_KIND:
@@ -2319,7 +2171,7 @@ class _Apply:
           if valid:
             self._write_spec_targets(folder_note, valid)
 
-    # an attach target already exists, so only the attention-block delta applies — but a feature
+    # an attach target already exists, so only the attribution delta applies — but a feature
     # whose ladder already started rolls back to the pre-launch state first (the rule that, before
     # code is launched, a request edits the spec directly via gate rollback plus a new review);
     # a launched feature must never reach this path at all (the router should have
@@ -2334,14 +2186,14 @@ class _Apply:
         _fail(_K.CAT_LOGICAL,
               f"attach target '{target}' is cancelled — automation is refused")
       # guard: all automation stays off a halted asset until an operator resolves it by hand,
-      # regardless of ladder state — a plain attach must not seed + reopen review either
+      # regardless of ladder state — a plain attach must not attribute + reopen review either
       if fm_values.get(SpecHaltKey.HALTED, "").strip().lower() == BOOL_TRUE:
         _fail(_K.CAT_LOGICAL,
               f"attach target '{target}' is halted — automation is refused until an "
               "operator resolves it")
 
       # a feature whose ladder already started rolls back to the pre-launch state before the
-      # attach seed runs; every other kind (and a not-yet-started feature) attaches plainly
+      # attribution lands; every other kind (and a not-yet-started feature) attaches plainly
       rolled_back = False
       if _Attach.kind_from_folder_note(folder_note) == _K.FEATURE_KIND:
         # guard: a launched feature must never be silently attached — the router should have
@@ -2351,17 +2203,14 @@ class _Apply:
                 f"attach target '{target}' is a launched feature — routing must spawn a "
                 "change instead of attaching")
         if _has_ladder_started(fm_values, folder_note):
-          # not halted (checked above) — safe to roll the ladder back before the attach seed runs
+          # not halted (checked above) — safe to roll the ladder back before the attribution lands
           self._rollback_pre_launch_ladder(folder_note, attach_drops.get(target, []))
           rolled_back = True
 
-      # the attach-seed flow itself is unconditional — a rollback only changes what state it
-      # seeds onto, never whether it runs
+      # the attribution step itself is unconditional — a rollback only changes what state it
+      # lands on, never whether it runs
       resolved_wikilinks.append(target)
-      description = attach_desc.get(target, "")
-      populated = self._attach_to_folder_note(
-          folder_note, description, request_display, is_spawn = False,
-      )
+      populated = self._attach_to_folder_note(folder_note, request_display)
       self.populated_docs.extend(populated)
       # a rolled-back feature's primary doc already carries prior content, so it re-enters
       # review via `submit` (skip the opening writer round) instead of `start`
@@ -2379,7 +2228,7 @@ class _Apply:
     if reference_targets:
       self._write_reference_targets(reference_targets)
 
-    # every doc that received content enters the review loop
+    # every doc whose attribution changed enters the review loop
     for doc in self.populated_docs:
       self._open_review(doc, verb = "submit" if doc in self.submit_docs else "start")
 

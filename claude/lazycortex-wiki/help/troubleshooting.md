@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,7 +13,7 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 104dfee697e450fa17612e7a70e05db572a5eceb
+source_sha: 55e842efac087a3cd7919acecb3209e7e854abf3
 ---
 # Troubleshooting
 
@@ -51,9 +51,9 @@ source_sha: 104dfee697e450fa17612e7a70e05db572a5eceb
 
 **Symptom**: `/lazy-wiki.install` completes, but nodes never get curated on their own after a commit — the wiki only updates when you run `/lazy-wiki.relink` by hand.
 
-**Likely cause**: The project's background daemon is disabled. Install always registers the curator itself, but the routines that trigger it automatically — one that reacts to changed files, one that prunes links to deleted files, and one that does a weekly full rescan — only fire when the daemon is running, so their registration is skipped while it's off.
+**Likely cause**: The three wiki routines — one that reacts to changed files, one that prunes links to deleted files, and one that does a weekly full rescan — are registered unconditionally by install, exactly like the curator experts themselves. What's actually missing is a daemon to fire them: a registered routine only ticks on its own once the project's background daemon is running and supervising this checkout.
 
-**Fix**: Enable the daemon via `/lazy-core.install` (Gate 1), then re-run `/lazy-wiki.install` to register the routines. Until then, use `/lazy-wiki.relink <scope-id>` whenever you want the scope brought up to date.
+**Fix**: Tick the routines by hand right away with `/lazy-runtime.tick`, or make it durable by setting `daemon.enabled` and `daemon.run_here` in the tracked `lazy.settings.json` and re-running `/lazy-core.install` to install a supervisor. Until then, `/lazy-wiki.relink <scope-id>` still brings one scope fully up to date on demand.
 
 ---
 
@@ -147,13 +147,13 @@ source_sha: 104dfee697e450fa17612e7a70e05db572a5eceb
 
 ---
 
-## A terms scope reports `skipped-daemon-disabled` after `/lazy-wiki.configure terms`
+## A terms scope's dictionary doesn't stay current on its own
 
-**Symptom**: `/lazy-wiki.configure terms` finishes creating or updating a scope, but the routine-registration outcome reads `skipped-daemon-disabled` instead of `registered`.
+**Symptom**: `/lazy-wiki.configure terms` finishes creating or updating a scope and reports the scan routine as `registered`, but new terms never make it into the dictionary without you running something by hand.
 
-**Likely cause**: The project does not run the background daemon, so the routine that dispatches the terms curator on a document change is never registered — the same daemon dependency as the wiki curator's own routines.
+**Likely cause**: Terms 6 registers the scan routine unconditionally, the same as any other wiki routine — `registered`/`re-registered`/`unregistered` describes only whether the registration step itself changed anything. What's actually missing is a daemon: like every wiki routine, the scan routine only fires on its own once the project's background daemon is supervising this checkout.
 
-**Fix**: `/lazy-wiki.terms` still answers lookups against whatever the dictionary already holds — reading is unaffected. To keep the dictionary itself current without the daemon, run the terms section of `/lazy-wiki.doctor` by hand after documents change, or enable the daemon via `/lazy-core.install` (Gate 1) and re-run `/lazy-wiki.configure terms` to register the routine.
+**Fix**: `/lazy-wiki.terms` still answers lookups against whatever the dictionary already holds — reading is unaffected. To keep the dictionary itself current without a daemon, run the terms section of `/lazy-wiki.doctor` by hand after documents change, or set `daemon.enabled` and `daemon.run_here` in `lazy.settings.json` and re-run `/lazy-core.install` so the already-registered routine actually ticks.
 
 ---
 
@@ -364,3 +364,13 @@ source_sha: 104dfee697e450fa17612e7a70e05db572a5eceb
 **Likely cause**: The domain-spec writer hit an unreadable source file or malformed dispatch data for that group.
 
 **Fix**: The remaining groups in the run are unaffected. The skipped group is re-detected and retried on the next `/lazy-wiki.domain-sync` run — no manual intervention is needed unless the same group keeps failing, in which case check that the source files its `Domain(…)` blocks live in are readable.
+
+---
+
+## `/lazy-wiki.domain-sync` Step 5 reports "unchanged" and creates no commit
+
+**Symptom**: The domain-sync run completes all steps but reports `unchanged` at Step 5 — no commit is created.
+
+**Likely cause**: An idempotent re-run produced no byte changes to any group doc or `domains.md`. This happens when the tree is already fully in sync with the code's `Domain(…)` blocks and the dictionary.
+
+**Fix**: No action needed. If you expected changes, confirm the code actually carries the `Domain(…)` blocks you expect, and that `/lazy-wiki.configure domains`'s code globs still reach the files you edited.

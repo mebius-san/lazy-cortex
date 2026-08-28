@@ -13,6 +13,7 @@ from __future__ import annotations
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # pylint: disable=import-error
 
+import hashlib
 import json
 import os
 import sys
@@ -44,6 +45,52 @@ UNKNOWN_KEY = "unknown"
 _SAFE_KEY_CHARS = set("abcdefghijklmnopqrstuvwxyz0123456789_-")
 
 
+def account_identity() -> str:
+  """
+  Resolve the identity of the account the current process spends tokens under.
+
+  Scopes rate-limit flag records to the account currently spending tokens, so a record raised
+  under one account cannot gate a different account sharing the same host.
+
+  Notes:
+    - An exported OAuth token's digest takes precedence over the machine login's account id; a
+      process with neither is filed under a shared unknown bucket.
+
+  Returns:
+    A short stable identity string; never empty, never the raw token.
+  """
+
+  # Domain(runtime.job-execution):
+  # # Per-account rate-limit scoping
+  # Daemons on one host can spend tokens under different accounts, and each account has its own
+  # usage windows, so a window raised by one account must not gate a process spending under a
+  # different account. The account identity used to scope a window is the effective credential
+  # the spending process carries: the digest of an exported token when one is set, else the id of
+  # the machine login's account, else a shared bucket for a process with neither. A record written
+  # before this scoping existed carries no account identity and stays host-global, gating every
+  # process on the host regardless of the account it spends under.
+
+  # an explicit token is the effective account, whatever the machine login says
+  token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+  if token:
+    # waiver: digest-length literal — 12 hex chars are ample for a per-host account set
+    return "tok-" + hashlib.sha256(token.encode()).hexdigest()[:12]
+
+  # ambient login: the account id recorded by the Claude CLI's own config
+  try:
+    # waiver: external Claude Code config path and field names, not internal keys
+    cfg = json.loads((Path.home() / ".claude.json").read_text())
+    uuid = str((cfg.get("oauthAccount") or {}).get("accountUuid") or "")
+  except (OSError, json.JSONDecodeError):
+    uuid = ""
+  if uuid:
+    # waiver: digest-length literal — see above
+    return "acc-" + uuid[:12]
+
+  # no token, no login record — every such process shares one bucket
+  return UNKNOWN_KEY
+
+
 def flag_dir() -> Path:
   """
   Return the host-local directory holding one record file per rate-limit window.
@@ -58,7 +105,9 @@ def flag_dir() -> Path:
   # or per-process one. A daemon running out of one checkout, a daemon running out of a different
   # checkout, and a wrapper script in a third-party repository that knows nothing about this
   # project all read and write the same directory, so a window closed by any one of them is seen
-  # as closed by every other token-burning process sharing the host and the same subscription.
+  # as closed by every other token-burning process sharing the host and spending under the same
+  # account, while a record written before per-account scoping existed stays visible to every
+  # process on the host regardless of account.
 
   # waiver: environment-variable name, not a domain key
   base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
@@ -186,8 +235,10 @@ def record(info: dict, trigger: str, *, writer: str) -> Path:
   permanent stop.
 
   Guarantees:
-    - A written record stays visible to every reader on this host until the window's reset time
-      passes, regardless of which process or checkout wrote it.
+    - A written record stays visible to every reader running under the same account identity as
+      the writer, until the window's reset time passes, regardless of which process or checkout
+      wrote it.
+    - A legacy record carrying no account field stays visible to every reader on this host.
 
   Args:
     info: The rate-limit payload that raised the flag.
@@ -199,9 +250,10 @@ def record(info: dict, trigger: str, *, writer: str) -> Path:
   """
 
   # Contract:
-  # A record written here MUST become visible to every reader sharing this host's flag directory
-  # — any checkout's daemon, or a third-party process reading the same directory — and remains
-  # visible until the window's reset time passes, regardless of which process wrote it.
+  # A record written here MUST become visible to every reader running under the same account
+  # identity as the writer, and remains visible until the window's reset time passes, regardless
+  # of which process or checkout wrote it. A legacy record carrying no account field stays
+  # visible to every reader on this host, whatever account it runs under.
 
   # Domain(runtime.job-execution):
   # # Fallback expiry for a window with no reported reset
@@ -212,6 +264,8 @@ def record(info: dict, trigger: str, *, writer: str) -> Path:
   # forever.
 
   now = time.time()
+  # the identity is used twice below (record field + filename) and may cost a config read
+  account = account_identity()
   # a frame carrying no reset timestamp still bounds the record — by the shortest window
   resets = _resets_at(info, trigger)
   effective = resets if resets is not None else now + FALLBACK_TTL_SEC
@@ -224,6 +278,7 @@ def record(info: dict, trigger: str, *, writer: str) -> Path:
     RateLimitRecordKey.TRIGGER:          trigger,
     RateLimitRecordKey.WRITER:           writer,
     RateLimitRecordKey.WRITTEN_AT:       now,
+    RateLimitRecordKey.ACCOUNT:          account,
   }
   # a record born expired protects nothing — say so where the operator will see it
   if effective <= now:
@@ -232,9 +287,10 @@ def record(info: dict, trigger: str, *, writer: str) -> Path:
       f"(resets_at={effective}, now={now}) — clock skew?\n"
     )
 
-  # one file per window, in the directory every reader on this host watches
+  # one file per (window, account), in the directory every reader on this host watches —
+  # two accounts raising the same window must never overwrite each other's records
   # waiver: filesystem suffix idiom, not a domain key
-  target = flag_dir() / f"{_window_key(info)}.json"
+  target = flag_dir() / f"{_window_key(info)}--{account}.json"
   target.parent.mkdir(parents = True, exist_ok = True)
 
   # atomic replace so a concurrent reader never sees a half-written record
@@ -293,6 +349,8 @@ def live() -> list[dict]:
   if not base.is_dir():
     return []
   now = time.time()
+  # loop-invariant: the reader's own identity, checked against every record below
+  own = account_identity()
   raised: list[dict] = []
   try:
     names = sorted(os.listdir(base))
@@ -316,6 +374,11 @@ def live() -> list[dict]:
     resets = entry.get(RateLimitRecordKey.RESETS_AT)
     # guard: no usable reset timestamp, or the window has already reopened
     if not isinstance(resets, (int, float)) or now >= float(resets):
+      continue
+    owner = entry.get(RateLimitRecordKey.ACCOUNT)
+    # guard: another account's window says nothing about this reader's budget; a record
+    # without the field predates the scoping and stays visible to everyone
+    if isinstance(owner, str) and owner and owner != own:
       continue
     raised.append(entry)
   return raised

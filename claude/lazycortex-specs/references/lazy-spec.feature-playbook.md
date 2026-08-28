@@ -4,13 +4,13 @@ description: Type playbook for feature assets — the design-first definition fl
 ---
 # Feature type playbook — the definition half of the flow
 
-This document is the coordinator's law for any asset whose status folder-note carries `spec_asset_type: feature`. It covers the first half of that asset's life — definition, from the starting document up to the moment the tool set is written down and the first two gates have closed. Everything after that point — implementation, reports, verification — belongs to the playbooks of the tools declared in this asset's `spec_tools` and is not described here.
+This document is the coordinator's law for any asset whose status folder-note carries `spec_asset_type: feature`. It covers the first half of that asset's life — definition, from the first definition document up to the moment the tool set is written down and the first two gates have closed. Everything after that point — implementation, reports, verification — belongs to the playbooks of the tools declared in this asset's `spec_tools` and is not described here.
 
 ## What this type is
 
 `spec_asset_type: feature` is a full-mode asset: it walks all five gates from `spec_design_done` through `spec_released`, and its result is a working part of the product, not a document about one.
 
-The starting document is declared by the type record as `start_doc: "design.md:design"` — a feature begins with `design.md`, of doc type `design`, which the scaffold primitive creates alongside the asset folder and its status folder-note.
+The primary document is declared by the type record as `start_doc: "design.md:design"` — a feature begins with `design.md`, of doc type `design`. Nothing seeds it at spawn: the scaffold primitive creates only the asset folder and its status folder-note (with its `## Source requests` section), and `design.md`, like every other definition document, is launched later through its own checkbox on that note.
 
 **Place is not a fact about type.** The type record carries `default_path` (`features` as shipped), and that is where a new feature lands at creation when the routing line named no explicit `path=`. But a feature is legal anywhere in the catalog, including nested under another asset's folder: an asset's boundary is a folder-note carrying `spec_role: status`, never the name of a parent directory. The type is read from the status folder-note's frontmatter and from nowhere else; where the folder sits plays no part in resolving it.
 
@@ -25,21 +25,21 @@ The starting document is declared by the type record as `start_doc: "design.md:d
 
 `use-cases.md` (written by the use-case-writer) and `ui-design.md` (written by the ui-designer) are opt-in, not mandatory: neither is declared above among the definition documents this playbook demands, and neither exists until its launch checkbox is ticked — or the product or the asset declares it mandatory (below). Their absence is a determination like any other opt-in artifact, never a gap: it blocks nothing.
 
-**The queue.** `Write architecture`'s own precondition (below) already carries the architect's side of this hold: the row doesn't appear until `ui-design.md` is absent, `approved`, or `cancelled`, so a tick recorded while `ui-design.md` is still in review simply has no row to dispatch yet — the row appears, and the architect reads `ui-design.md`, on the wake where it reaches `approved` (a cancelled `ui-design.md` releases the hold with nothing for the architect to read). Dispatching that tick is then the same ordinary launch-checkbox `dispatch-job` call as any other (`lazy-spec.coordination-playbook.md` Chapter 5), never a special-cased hold.
+**The queue.** `Write architecture`'s own precondition (below) already carries the architect's side of this hold: the row doesn't appear until `ui-design.md` is absent, `approved`, or `cancelled`, so a tick recorded while `ui-design.md` is still in review simply has no row to enact yet — the row appears, and the architect reads `ui-design.md`, on the wake where it reaches `approved` (a cancelled `ui-design.md` releases the hold with nothing for the architect to read). Enacting that tick is then the same ordinary seed-then-start flow as any other `Write` row (below), never a special-cased hold.
 
-`design.md` carries no such checkbox — it is the asset's start document, dispatched directly rather than through a launch-checkbox precondition — so its hold is a rule on the dispatch itself: when `use-cases.md` exists, the designer is not dispatched (or continued) on `design.md` until `use-cases.md` reaches `approved` or `cancelled`, and reads it once it is approved. Either way the point is the same: the use cases are meant to settle before the behaviour they describe is written down for good, and the screens before the module boundaries built to serve them are cast.
+`design.md` launches through its own `Write design` checkbox like the rest, so its hold is a precondition on continuing its review: when `use-cases.md` exists, the designer is not continued on `design.md`'s review until `use-cases.md` reaches `approved` or `cancelled`, and reads it once it is approved. Either way the point is the same: the use cases are meant to settle before the behaviour they describe is written down for good, and the screens before the module boundaries built to serve them are cast.
 
 **The windows.** `Write use-cases` closes the moment `spec_design_done` closes — past that point a fresh use case is a change asset's business, not this asset's own definition half. `Write ui-design` closes on `architecture.md` reaching `approved` (or, for an asset that never becomes code-bearing, on `spec_plan_done` closing instead) — past that point a screen redesign likewise belongs to a change asset.
 
 **Late edits.** An edit landing on `use-cases.md` or `ui-design.md` after the downstream document it feeds (`design.md`, `architecture.md` respectively) has already reached `approved` triggers no auto-cascade — the coordinator does not reopen the downstream document on its own. It drops a `[!attention]` callout into that downstream document instead and names the edit in `# Status brief`, so the operator sees the drift and decides whether it is worth folding in.
 
-**Declaring it mandatory.** A product or this asset may declare either document mandatory in its `# Coordinator rules` section. Once declared, the coordinator dispatches the corresponding writer directly, without waiting for a tick — the same rule-driven dispatch every other "automatic" behaviour in this system already uses (`lazy-spec.coordination-playbook.md` Chapter 1, "Automation 'by rule' is still verb calls").
+**Declaring it mandatory.** A product, the asset's group folder, or this asset may declare either document mandatory in its `# Coordinator rules` section. Once declared, the coordinator runs the same seed-then-start enactment directly, without waiting for a tick — the same rule-driven verb calls every other "automatic" behaviour in this system already uses (`lazy-spec.coordination-playbook.md` Chapter 1, "Automation 'by rule' is still verb calls").
 
 ## Code-bearing
 
 Whether a feature carries code is the coordinator's judgment, not a flag in script.
 
-**An explicit declaration settles it.** When the product or the type itself declares the asset code-bearing (or, conversely, docs-only) — in the product's guidelines, in the `# Coordinator rules` section of the product folder-note, or in that same section on the asset itself — the judgment is closed and there is no reason to read the design.
+**An explicit declaration settles it.** When the product or the type itself declares the asset code-bearing (or, conversely, docs-only) — in the product's guidelines, in the `# Coordinator rules` section of the product or group folder-note, or in that same section on the asset itself — the judgment is closed and there is no reason to read the design.
 
 **Otherwise, read the design.** Absent an explicit declaration the coordinator reads `design.md`'s own content and decides for itself: does the document describe a change to code. If it does, the asset is code-bearing and the architecture step is imposed. A docs-only feature is never imposed an architecture step: the `Write architecture` checkbox never hangs, `architecture.md` never comes into existence, and `spec_plan_done` waits on no architecture.
 
@@ -70,19 +70,22 @@ The architecture step gets no boolean gate of its own — it lives inside `spec_
 
 Checkboxes live in the status folder-note's `[!gate]` block. The coordinator reconciles the set on every relevant invocation — hangs a block the moment its precondition starts holding, removes an un-ticked one the moment it stops holding — and never ticks one itself: ticking is the operator's gesture. `spec_halted: true` takes every one of them down.
 
-| Checkbox | Appears when | Dispatches (role · source · context · result) |
+| Checkbox | Appears when | On tick |
 |---|---|---|
-| `Write use-cases` | asset exists AND `design.md` is not `approved` AND `use-cases.md` doesn't exist | use-case-writer · request/brief · guidelines · `use-cases.md` |
-| `Write architecture` | `spec_design_done` closed AND the asset is code-bearing AND `architecture.md` doesn't exist AND (`ui-design.md` is absent, `approved`, or `cancelled`) | architect · `design.md` · `ui-design.md` if present · guidelines · `architecture.md` |
-| `Write ui-design` | `spec_design_done` closed AND `ui-design.md` doesn't exist AND (`architecture.md` is absent OR not `approved`) | ui-designer · `design.md` · `use-cases.md` if present · guidelines · `ui-design.md` |
-| `Write <tool>-plan` | `spec_design_done` closed AND (the asset is NOT code-bearing OR `architecture.md` is `approved`) AND that tool's plan document doesn't exist | role from the plan document's own review class · `design.md` · guidelines · the plan document |
+| `Write design` | asset exists AND `design.md` doesn't exist | seed `design.md:design`, then the seed-then-start flow below |
+| `Write use-cases` | asset exists AND `design.md` is not `approved` AND `use-cases.md` doesn't exist | seed `use-cases.md:use-cases`, then the seed-then-start flow below |
+| `Write architecture` | `spec_design_done` closed AND the asset is code-bearing AND `architecture.md` doesn't exist AND (`ui-design.md` is absent, `approved`, or `cancelled`) | seed `architecture.md:architecture`, then the seed-then-start flow below |
+| `Write ui-design` | `spec_design_done` closed AND `ui-design.md` doesn't exist AND (`architecture.md` is absent OR not `approved`) | seed `ui-design.md:ui-design`, then the seed-then-start flow below |
+| `Write <tool>-plan` | `spec_design_done` closed AND (the asset is NOT code-bearing OR `architecture.md` is `approved`) AND that tool's plan document doesn't exist | seed that tool's `plan_doc` (doc name and type from the tool's own declaration), then the seed-then-start flow below |
 | `Publish` | `spec_released` closed AND `spec_draft` still `true` | no job — the tick clears `spec_draft` and the coordinator removes the checkbox |
 
 `Write <tool>-plan` hangs once per tool of the asset whose record carries `plan_doc`, and the label is parametrised by the tool's name: `Write code-plan`, `Write test-plan`. A tool without `plan_doc` gets no plan checkbox.
 
+**Seed-then-start.** The single mechanic for every `Write` row of this table: a tick is never a writer job. The coordinator seeds the one document with `lazycortex-specs seed-doc <product> <folder-note-path> --doc <name>:<type>` — the type's template chain, stage `empty`, the folder-note's `spec_source_requests` copied onto the doc — and then branches on the folder-note's `## Source requests`. With at least one entry there, review opens immediately with `Skill(lazycortex-review:lazy-review.start, "<doc>")`, and the class's main writer works round 1 reading the request(s) `context_from_frontmatter` resolves from the doc's own attribution. With none (an asset created without a request), the seed is the whole enactment: the operator writes into the skeleton and commits, that commit is the coordinator's ordinary operator-edit wake, and on it — seeing a non-empty body on a doc with no active review — the coordinator opens review with `lazy-review.start`, the writer refining the operator's text as round 1.
+
 The implementation checkboxes — `Start implementation (<tool>)` and everything downstream of them — are declared by the tool playbooks; this playbook neither hangs them nor knows their conditions.
 
-On the `DONE` of a job that wrote a document, the coordinator opens review on it by calling `Skill(lazycortex-review:lazy-review.submit, "<result doc>")` — the only route a fresh document takes into review. A `DONE` carrying a `blocked` field wrote no document: there is nothing to submit.
+On the `DONE` of an implementation-ladder job that wrote a document (`code-report.md`, `test-report.md`, and the other tool journals), the coordinator opens review on it by calling `Skill(lazycortex-review:lazy-review.submit, "<result doc>")` — the route a job-produced document takes into review; no `Write` row's document arrives this way. A `DONE` carrying a `blocked` field wrote no document: there is nothing to submit.
 
 ## The architect must read the project-structure map
 

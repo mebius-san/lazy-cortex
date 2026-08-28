@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime (incl. manual ticks and new daemon authoring), memory, routines, git staging (incl. the clean-index precondition), MCP permissions, and change-history search.
-last_regen: 2026-08-24
+summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime (incl. the daemon's own OAuth token, manual ticks, and new daemon authoring), memory, routines, git staging (incl. the clean-index precondition and local-vs-remote sync halts), MCP permissions, and change-history search.
+last_regen: 2026-08-27
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -25,7 +25,7 @@ source_skills:
   - lazy-log.recall
   - lazy-log.summary
   - lazy-log.timeline
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: 8351c07ae62867736a3ef96dbdf0104c3d1b787c
 ---
 # FAQ
 
@@ -87,7 +87,7 @@ The file exists separately because model-routing preferences are architectural d
 
 The tracked `settings.json` files (global `~/.claude/settings.json` and project `.claude/settings.json`) are for enablement-only entries: `enabledPlugins`, `enabledMcpjsonServers`, `hooks` registrations, non-secret `env` vars, model selection, and status-line config. Per-tool permission entries (`permissions.allow`, `permissions.ask`), `additionalDirectories`, and machine-specific `env` values belong in the gitignored `settings.local.json` files. Committing permission lists leaks your personal risk preferences to teammates who may have different policies. The `lazy-guard.settings` PreToolUse hook enforces this split by intercepting writes to settings files that violate it.
 
-The same split applies to `lazy.settings.json[daemon].metrics`: the `enabled` flag and `repo_label` are tracked (they're a shared design decision), while the allocated port lives only in the gitignored local overlay, because a port that is free on one machine can be taken on another. `daemon.run_here` is the deliberate exception to "per-machine stays local" — it is a hostname-to-checkout-path map and lives in the **tracked** file on purpose, so the pairing travels to every clone (see the Dropbox/iCloud question below).
+The same split applies to `lazy.settings.json[daemon].metrics`: the `enabled` flag and `repo_label` are tracked (they're a shared design decision), while the allocated port lives only in the gitignored local overlay, because a port that is free on one machine can be taken on another. `daemon.run_here` is the deliberate exception to "per-machine stays local" — it is a hostname-to-checkout-path map and lives in the **tracked** file on purpose, so the pairing travels to every clone (see the Dropbox/iCloud question below). `daemon.token_env` is tracked too — it only names an environment variable, never the token itself (see the next question but one).
 
 ---
 
@@ -127,13 +127,23 @@ No install-time question gates it anymore. `/lazy-core.install` always writes th
 
 What is still opt-in is `daemon.enabled` — whether a background daemon actually supervises the project, versus you ticking it by hand. It is seeded `false` on first install, silently, with no wizard question: a project declares itself daemon-supervised by having the flag flipped, not by answering a prompt at install time. With it `false`, every routine, expert, and runtime artifact is already in place and runnable — `/lazy-expert.dispatch-job` and the rest of the `/lazy-expert.*` skills work immediately, and you drive routines and queued jobs by hand with `/lazy-runtime.tick`.
 
-To make a project daemon-supervised, set `daemon.enabled: true` in the tracked `lazy.settings.json` and re-run `/lazy-core.install` — that is what unlocks the `run_here` question and the supervisor/metrics install described in the next two questions.
+To make a project daemon-supervised, set `daemon.enabled: true` in the tracked `lazy.settings.json` and re-run `/lazy-core.install` — that is what unlocks the `run_here` question and the supervisor/metrics install described in the next two questions. A background daemon also needs its own `daemon.token_env` set before it will actually start — see the next question.
+
+---
+
+## Why does the runtime daemon refuse to start without `daemon.token_env` set?
+
+A daemon is a standing background process, and every LLM call it makes has to spend under some account — with no name for that account, it would silently run on whatever account the machine happens to be logged into at that moment. `daemon.token_env` closes that gap: set it, in the tracked `<repo-root>/.claude/lazy.settings.json[daemon]`, to the name of an environment variable holding this daemon's own OAuth token (a plain string, e.g. `"CLAUDE_TOKEN_MYPROJECT"`). At startup the daemon resolves that variable — the real environment first, then a matching line in `~/.claude/.env` — and exports the result as `CLAUDE_CODE_OAUTH_TOKEN` to every job and routine it spawns afterward. Left absent, blank, or naming a variable that resolves nowhere in either source, the daemon exits immediately with an error naming what's missing, rather than starting anyway on the ambient login.
+
+`/lazy-core.install` never seeds this key for you — add the token to `~/.claude/.env` (or the real environment) and point `daemon.token_env` at its variable name yourself before the daemon's first start. `/lazy-runtime.tick`, by contrast, needs no token: it is never a standing process, so it always runs under whichever account you are already using when you invoke it by hand.
+
+Naming an explicit token also changes how the rate-limit guard scopes a closed subscription window: a raised window now only defers daemons spending under the *same* account (told apart by a digest of the exported token, or the machine login's account id when no token is set), so one project's daemon hitting its usage limit no longer freezes every other daemon sharing the host.
 
 ---
 
 ## Does `/lazy-core.install` set up monitoring for the runtime daemon?
 
-Yes, but only on a project that is daemon-supervised (`daemon.enabled: true` — see the previous question) and a checkout that actually runs the daemon locally. With the seeded default of `false`, install never reaches this step at all. Once `daemon.enabled` is true and the earlier `run_here` question confirms this machine and checkout are the pair on record, a later step asks once whether to enable the daemon's Prometheus `/metrics` endpoint — exposing routine ticks, errors, tokens, and queue depth on a loopback HTTP port for a Prometheus-compatible scraper. Answering "No" is recorded permanently and you are never asked again on that checkout; re-running `/lazy-core.install` reuses the recorded answer instead of re-asking.
+Yes, but only on a project that is daemon-supervised (`daemon.enabled: true` — see the previous questions) and a checkout that actually runs the daemon locally. With the seeded default of `false`, install never reaches this step at all. Once `daemon.enabled` is true and the earlier `run_here` question confirms this machine and checkout are the pair on record, a later step asks once whether to enable the daemon's Prometheus `/metrics` endpoint — exposing routine ticks, errors, tokens, and queue depth on a loopback HTTP port for a Prometheus-compatible scraper. Answering "No" is recorded permanently and you are never asked again on that checkout; re-running `/lazy-core.install` reuses the recorded answer instead of re-asking.
 
 Answering "Yes" allocates a free port sequentially starting from `9464` — reusing this checkout's already-recorded port on re-runs instead of picking a new one — and splits where the decision is written: the `enabled` flag and a human-readable `repo_label` (default: the folder name) go into the tracked `lazy.settings.json[daemon].metrics`, shared across machines, while the allocated port goes into the gitignored per-machine overlay, because a port that's free on one machine may be taken on another. The step then regenerates a host-wide Prometheus scrape-targets file so an external Prometheus with a `file_sd_configs` pointer picks up every locally running daemon with zero manual edits.
 
@@ -143,7 +153,7 @@ If the daemon later starts and finds its recorded port already taken by somethin
 
 ## My checkout is on Dropbox/iCloud/Syncthing and shows up on more than one machine — won't `run_here` start a daemon on all of them?
 
-It would, if `run_here` only accepted `true`/`false` — but that shape is retired. `daemon.run_here` is now a hostname-to-checkout-path map, for example `{"nexus": "~/lazy-runtime/Money"}`, stored in the **tracked** `lazy.settings.json` so the pairing travels with the project to every clone (a gitignored overlay would never reach a machine that cloned the repo independently — exactly where a second daemon would appear). Neither half of the pair decides alone: the hostname says which machine, the path says which of that machine's checkouts drives the daemon — a single machine commonly holds more than one checkout of the same project (a working copy plus the one the daemon runs from), and naming only the host would collide between them the same way a bare `true` used to collide across synced machines. This question is only reached once `daemon.enabled` is `true` — see the two questions above.
+It would, if `run_here` only accepted `true`/`false` — but that shape is retired. `daemon.run_here` is now a hostname-to-checkout-path map, for example `{"nexus": "~/lazy-runtime/Money"}`, stored in the **tracked** `lazy.settings.json` so the pairing travels with the project to every clone (a gitignored overlay would never reach a machine that cloned the repo independently — exactly where a second daemon would appear). Neither half of the pair decides alone: the hostname says which machine, the path says which of that machine's checkouts drives the daemon — a single machine commonly holds more than one checkout of the same project (a working copy plus the one the daemon runs from), and naming only the host would collide between them the same way a bare `true` used to collide across synced machines. This question is only reached once `daemon.enabled` is `true` — see the questions above.
 
 `/lazy-core.install` compares the map against the machine's own hostname (lowercased) and the checkout's own resolved path (symlinks included, so a symlinked path still matches). The named pair installs the supervisor as normal. Every other machine — and every other checkout on the named machine — both skips the supervisor install AND tears down any supervisor unit it already has for that checkout, so re-running `/lazy-core.install` anywhere that shouldn't be running the daemon self-heals a leaked one instead of leaving it running. The daemon itself also refuses to start on a checkout the map doesn't name, even while `daemon.enabled` stays `true`, so a leaked supervisor can't outlive the map even if you never get around to re-running install there. An empty map (`{}`) names nothing at all — the project stays daemon-enabled but nothing drives it until you point the map at a checkout.
 
@@ -198,9 +208,9 @@ Only the named hooks run for that expert's spawns; every other lazycortex hook s
 
 ## When does the runtime daemon halt, and how do I recover it?
 
-The daemon halts in two distinct situations. A **working-tree halt** (`uncommitted_changes`) happens when a routine or expert job leaves the repo in a dirty state — the daemon stops rather than proceeding with uncommitted changes in the tree. A **remote-sync halt** (`git_pull_diverged`, `git_push_failed`, `git_remote_unavailable`) happens when the daemon's pre- or post-tick git sync fails unrecoverably.
+The daemon halts in three distinct situations. A **working-tree halt** (`uncommitted_changes`) happens when a routine or expert job leaves the repo in a dirty state — the daemon stops rather than proceeding with uncommitted changes in the tree. A **remote-sync halt** (`git_pull_diverged`, `git_push_failed`, `git_remote_unavailable`) happens when the daemon's pre- or post-tick git sync fails against the actual remote — a genuine divergence between local and origin, exhausted push retries, or stderr that names an unreachable network or host. A **local-sync halt** (`git_local_failed`) happens when that same git sync fails for a purely local reason instead — a held `index.lock` past its retry backoff, a bad ref, or a checkout-permission problem; a transient `index.lock` race (an expert job committing at the same moment, say) is retried in place with backoff before it is ever allowed to halt, so this reason only fires once that retry is exhausted.
 
-Run `/lazy-runtime.recover` to unblock it. For working-tree halts the skill walks you through four options: commit the dirty files (you supply the message), stash them, discard them, or abort and leave the halt in place. For remote-sync halts the skill surfaces reason-specific guidance (the exact git commands to inspect and fix the divergence or push failure) and waits for you to confirm you have resolved the situation before clearing the halt block. Once the halt block is cleared from `.runtime/state.json`, the daemon resumes on its next iteration.
+Run `/lazy-runtime.recover` to unblock it. For working-tree halts the skill walks you through four options: commit the dirty files (you supply the message), stash them, discard them, or abort and leave the halt in place. For remote- and local-sync halts the skill surfaces reason-specific guidance (the exact git commands to inspect and fix the divergence, push failure, or local git problem) and waits for you to confirm you have resolved the situation before clearing the halt block. Once the halt block is cleared from `.runtime/state.json`, the daemon resumes on its next iteration.
 
 If the cleanup does not produce a clean tree, the skill reports "working tree still dirty; refusing to resume" and leaves the halt intact — inspect with `git status` and re-run the skill.
 
@@ -211,6 +221,8 @@ If the cleanup does not produce a clean tree, the skill reports "working tree st
 Yes. Set `daemon.git.post_push_hook` to a shell command in the `daemon.git` block of `lazy.settings.json`. It fires immediately after the daemon's post-iteration push actually advances `origin/<base_branch>` — whether that push was a plain fast-forward or the result of a post-rebase retry — with `LAZY_PUSH_REPO` (absolute repo path), `LAZY_PUSH_BRANCH`, `LAZY_PUSH_REMOTE`, `LAZY_PUSH_OLD_SHA`, and `LAZY_PUSH_NEW_SHA` set in the hook's environment. That is enough to trigger a deploy, post a notification, or kick off any other automation keyed to what the daemon just pushed.
 
 The hook is fully isolated from the daemon's own tick: a non-zero exit, a timeout past `post_push_timeout_sec` (30 seconds by default), or a spawn failure is journaled and never halts the daemon, retries the push, or fails the tick. It also never fires when nothing was actually pushed — an in-sync tick, the already-published fallthrough, and a discarded rebase-conflict retry all skip it. This only applies when `daemon.git.remote_sync` is `"pull_push"`; a `"pull"`-only daemon never pushes, so the hook never fires.
+
+If the hook's own job is fanning those commits out into other local checkouts of the same repo — a second clone, a Dropbox-synced sibling — pull with the daemon's own `safe-pull <repo-dir> <remote> <ref> [--timeout-sec N]` primitive rather than a bare `git pull`; it is exactly what the daemon's own post-push fan-out is built to pair with. It waits out a held `index.lock` in the target checkout, refuses to touch an index that already carries staged content, and merges only a strict fast-forward — every guarded outcome (a timed-out wait, staged content in the way, a non-fast-forward) exits `0` with a JSON `{"outcome": ...}` result instead of failing your hook script, so it can never leave the kind of index residue a racing bare `git pull` would.
 
 ---
 
@@ -332,6 +344,8 @@ Naming paths is necessary but not sufficient under pathspec discipline — a ses
 The denial deliberately does not prescribe a fix, because a session has no way to tell the three causes apart: stop and escalate to the operator, and do not retry until `git diff --cached` comes back empty. Never run `git reset` on the operator's behalf to clear the way. Intent-to-add registrations (`git add -N <path>`, the only kind a session may create) never count as staged content and never trigger this denial.
 
 Separately, if a commit succeeds but the index is non-empty again immediately afterward — even though it started clean — that is the signature of a partial commit's temporary index getting written into place as the real one, typically from a crash or a race mid-commit. The hook raises an ALARM for this case instead of blocking, since the commit already landed; surface it to the operator, who runs `git reset` to rebuild the index from `HEAD` (worktree untouched) — never something a session does on its own.
+
+The same index-health check also watches `pull`, `merge`, and `rebase`, not just `commit`. When the staged content it finds afterward is a **lagging index** — every staged path's worktree file already matches `HEAD`, meaning an index write simply lost a race to a fast-forward — it alarms with that specific diagnosis rather than the generic swap message, because that signature is provably lossless rather than ambiguous. The runtime daemon applies the same check to its own pre-tick pull and repairs a proven-lossless lagging index automatically with `git reset`, journaling the repair; anything that isn't provably lossless is left alone for the operator, exactly as a session would.
 
 ---
 

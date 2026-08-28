@@ -1,10 +1,10 @@
 ---
 chapter_type: block
 summary: Keep one repo-wide map, docs/structure.md, current — rebuild it wholesale, query a slice of it, or let git-watch routines patch it per commit.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 diagram_spec:
   anchor: "How the pieces fit together"
-  request: "Flow diagram of the structure block: (1) /lazy-wiki.configure structure sets depth_profiles + exclude and registers three git-watch routines (structure-scan for changed files, structure-scan-deletes for deleted files, structure-scan-renames for renamed files); (2) each routine dispatches lazy-wiki.structure-curator per changed path with kind=curate or kind=rename; (3) the curator edits docs/structure.md incrementally and commits; (4) separately, an operator or agent runs /lazy-wiki.structure rebuild for a wholesale resync (walks git ls-files, classifies by depth_profiles, fans out to Explore subagents on a large tree, writes and commits the whole map), or /lazy-wiki.structure query [<path>] to read back just one slice without loading the whole file. Show rebuild and the curator's incremental path as two ways of reaching the same file, and query as the read-only path that never touches routines."
+  request: "Flow diagram of the structure block: (1) /lazy-wiki.configure structure sets depth_profiles + exclude and registers three git-watch routines (structure-scan for new files, structure-scan-deletes for deleted files, structure-scan-renames for renamed files); (2) each routine dispatches lazy-wiki.structure-curator per matching path with kind=curate or kind=rename; (3) the curator edits docs/structure.md incrementally and commits; (4) separately, an operator or agent runs /lazy-wiki.structure rebuild for a wholesale resync (walks git ls-files, classifies by depth_profiles, fans out to Explore subagents on a large tree, writes and commits the whole map), or /lazy-wiki.structure query [<path>] to read back just one slice without loading the whole file. Show rebuild and the curator's incremental path as two ways of reaching the same file, and query as the read-only path that never touches routines."
 source_skills:
   - lazy-wiki.structure
   - lazy-wiki.structure-curator
@@ -19,7 +19,7 @@ source_sha: 22e572d702fbaeb90f38bcc5465f242ddcb9ce28
 
 **`lazy-wiki.structure`** is the entry point for both directions of the map. `/lazy-wiki.structure rebuild` walks the tracked tree (`git ls-files`), classifies each directory against your configured `depth_profiles`, and rewrites `docs/structure.md` from scratch — the tool for an initial build, a map that drifted before the routines existed, or a hand edit that bypassed them. On a tree with more than roughly 12 top-level tracked directories, rebuild fans the work out to one `Explore` subagent per directory (batches of at most 4 concurrent), so no single context has to hold the whole tree. `/lazy-wiki.structure query [<path>]` is the read side — it returns only the matched slice of the map (top-level bullets when `<path>` is omitted, or the bullet plus its nested children for a given path), never the whole file. Any agent doing research — deciding where a new file belongs, or asking "where does X live" — should query through this skill rather than reading `docs/structure.md` directly.
 
-**`lazy-wiki.structure-curator`** is the expert that keeps the map current one change at a time, so a full rebuild is rarely needed once the map exists. It runs in three modes: `curate` (a path was added or modified — decide whether it earns its own entry, and whether the change shifts what its parent directory is for), `rename` (a path moved — remove the old entry, re-enter the new one at the class its new path resolves to, since a rename can cross depth-profile boundaries), and `report` (a read-only pass, dispatched by the structure section of `/lazy-wiki.doctor`, that compares the map against the tracked tree and returns findings without writing anything). The curator never edits the files and directories it describes, and it never creates `docs/structure.md` — only `rebuild` does that, so one incremental entry never gets mistaken for the whole repository's map.
+**`lazy-wiki.structure-curator`** is the expert that keeps the map current one change at a time, so a full rebuild is rarely needed once the map exists. It runs in three modes: `curate` (a path appeared or vanished — decide whether it earns its own entry, and whether the change shifts what its parent directory is for), `rename` (a path moved — remove the old entry, re-enter the new one at the class its new path resolves to, since a rename can cross depth-profile boundaries), and `report` (a read-only pass, dispatched by the structure section of `/lazy-wiki.doctor`, that compares the map against the tracked tree and returns findings without writing anything). The curator never edits the files and directories it describes, and it never creates `docs/structure.md` — only `rebuild` does that, so one incremental entry never gets mistaken for the whole repository's map.
 
 **`/lazy-wiki.configure structure`** is the wizard that wires the other two together: it collects your `depth_profiles` (which path globs get per-file entries, which get a directory-only line, which get a half-line note) and `exclude` globs, writes them into `lazy.settings.json[structure]`, and registers the three git-watch routines that dispatch the curator automatically. `docs/structure.md` itself is always force-included in `exclude`, silently — without it, the curator's own commit describing the map would wake the very routine that just fired, and the map would try to describe itself.
 
@@ -27,7 +27,7 @@ source_sha: 22e572d702fbaeb90f38bcc5465f242ddcb9ce28
 
 Two independent paths keep `docs/structure.md` accurate, and you rarely have to think about which one is running.
 
-The **incremental path** is the default once the block is configured. Three routines — `lazy-wiki.structure-scan` (changed files), `lazy-wiki.structure-scan-deletes` (deleted files), `lazy-wiki.structure-scan-renames` (renamed files) — watch every commit on your configured branch and dispatch `lazy-wiki.structure-curator` per matching path, one commit at a time. The curator reads only the real path that changed (never the whole tree), decides whether the map's description of it — or its parent directory's — needs to change, applies the edit by anchoring on the existing entry line, and commits under your operator identity. A change that doesn't alter what the map says about a path is a no-op: nothing written, nothing committed. This is why the map stays current without you ever running a command for it.
+The **incremental path** is the default once the block is configured. Three routines — `lazy-wiki.structure-scan` (new files), `lazy-wiki.structure-scan-deletes` (deleted files), `lazy-wiki.structure-scan-renames` (renamed files) — watch every commit on your configured branch and dispatch `lazy-wiki.structure-curator` per matching path, one commit at a time. Plain content edits dispatch nothing: the map describes the tree's shape, and rewriting a file in place does not change it — drift in a per-file description is caught by `/lazy-wiki.doctor`'s structure report and repaired by `/lazy-wiki.structure rebuild`. The curator reads only the real path that changed (never the whole tree), decides whether the map's description of it — or its parent directory's — needs to change, applies the edit by anchoring on the existing entry line, and commits under your operator identity. A change that doesn't alter what the map says about a path is a no-op: nothing written, nothing committed. This is why the map stays current without you ever running a command for it.
 
 The **wholesale path** is `/lazy-wiki.structure rebuild`, which you reach for directly: the first time you set the block up (there is no map yet to patch incrementally), after a rebase or history rewrite the routines never saw, or when you suspect drift the incremental path can't self-heal (a duplicated anchor line, for instance — the curator refuses to guess which one is authoritative and reports an error instead of picking one). Rebuild reads the whole tracked tree once and replaces the whole file; the routines then resume patching it per commit from that clean baseline.
 
@@ -46,42 +46,42 @@ The structure map is repo-wide and file-and-directory shaped — it answers "whe
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
   configureStructure["/lazy-wiki.configure structure"]
-  structureScan["structure-scan (changed files)"]
-  structureScanDeletes["structure-scan-deletes (deleted files)"]
-  structureScanRenames["structure-scan-renames (renamed files)"]
-  dispatchCuratorCurate["Dispatch structure-curator (kind=curate)"]
-  dispatchCuratorRename["Dispatch structure-curator (kind=rename)"]
-  curatorEditsCommits["Curator edits docs/structure.md incrementally and commits"]
-  structureMdUpdated["docs/structure.md updated"]
-  rebuildStructure["/lazy-wiki.structure rebuild"]
-  queryStructure["/lazy-wiki.structure query"]
+  watchNewFiles["structure-scan - new files"]
+  watchDeletedFiles["structure-scan-deletes - deleted files"]
+  watchRenamedFiles["structure-scan-renames - renamed files"]
+  dispatchCurate["Dispatch lazy-wiki.structure-curator kind=curate"]
+  dispatchRename["Dispatch lazy-wiki.structure-curator kind=rename"]
+  curatorEditsCommit["Curator edits docs/structure.md incrementally and commits"]
+  structureDoc["docs/structure.md updated"]
+  rebuildCommand["/lazy-wiki.structure rebuild"]
+  queryCommand["/lazy-wiki.structure query"]
   queryResult["Read-only slice returned"]
 
-  configureStructure -->|registers| structureScan
-  configureStructure -->|registers| structureScanDeletes
-  configureStructure -->|registers| structureScanRenames
-  structureScan -->|changed path| dispatchCuratorCurate
-  structureScanDeletes -->|deleted path| dispatchCuratorCurate
-  structureScanRenames -->|renamed path| dispatchCuratorRename
-  dispatchCuratorCurate -->|kind=curate| curatorEditsCommits
-  dispatchCuratorRename -->|kind=rename| curatorEditsCommits
-  curatorEditsCommits -->|incremental write| structureMdUpdated
-  rebuildStructure -->|wholesale resync| structureMdUpdated
-  queryStructure -->|read-only slice| queryResult
+  configureStructure -->|registers| watchNewFiles
+  configureStructure -->|registers| watchDeletedFiles
+  configureStructure -->|registers| watchRenamedFiles
+  watchNewFiles -->|new path| dispatchCurate
+  watchDeletedFiles -->|deleted path| dispatchCurate
+  watchRenamedFiles -->|renamed path| dispatchRename
+  dispatchCurate -->|curate| curatorEditsCommit
+  dispatchRename -->|rename| curatorEditsCommit
+  curatorEditsCommit -->|commit| structureDoc
+  rebuildCommand -->|wholesale resync| structureDoc
+  queryCommand -->|read-only slice| queryResult
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
   class configureStructure entry
-  class rebuildStructure entry
-  class queryStructure entry
-  class structureScan action
-  class structureScanDeletes action
-  class structureScanRenames action
-  class dispatchCuratorCurate action
-  class dispatchCuratorRename action
-  class curatorEditsCommits action
-  class structureMdUpdated success
+  class rebuildCommand entry
+  class queryCommand entry
+  class watchNewFiles action
+  class watchDeletedFiles action
+  class watchRenamedFiles action
+  class dispatchCurate action
+  class dispatchRename action
+  class curatorEditsCommit action
+  class structureDoc success
   class queryResult success
 ```

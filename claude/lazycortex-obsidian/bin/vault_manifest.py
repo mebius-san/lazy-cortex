@@ -1046,12 +1046,13 @@ def _install_resolved(resolved: dict, destination: Path) -> None:  # waiver: ass
 
 def _deploy_theme(vault: Path, theme: str | None, errors: list[str]) -> str | None:
   """
-  Restore the recorded theme from the plugin's bundled themes when the vault lacks it.
+  Validate the recorded theme name and flag one the vault does not carry.
 
   Args:
     vault: The vault's config directory.
     theme: Theme name recorded in the manifest, or None when the vault uses the default.
-    errors: Accumulator for a theme neither installed nor bundled.
+    errors: Accumulator that gains an entry naming a theme that fails validation or is not
+      installed, for the operator to install from Obsidian.
 
   Returns:
     The theme name, or None when the manifest recorded none or named one this refuses to
@@ -1063,17 +1064,9 @@ def _deploy_theme(vault: Path, theme: str | None, errors: list[str]) -> str | No
   if not is_safe_name(theme):
     errors.append(f"theme {theme!r}: not a plain theme name, skipped")
     return None
-  target = vault / VaultPath.THEMES / theme
-  # guard: an already-installed theme is left exactly as it is
-  if target.is_dir():
-    return theme
-  shipped = template_root() / VaultPath.THEMES / theme
-  if not shipped.is_dir():
-    errors.append(f"theme {theme!r}: not installed and not bundled — install it from Obsidian")
-    return theme
-  for source in shipped.iterdir():
-    if source.is_file():
-      write_bytes(target / source.name, source.read_bytes())
+  # guard: the manifest records a theme's name, never its CSS — only Obsidian installs one
+  if not (vault / VaultPath.THEMES / theme).is_dir():
+    errors.append(f"theme {theme!r}: not installed — install it from Obsidian")
   return theme
 
 

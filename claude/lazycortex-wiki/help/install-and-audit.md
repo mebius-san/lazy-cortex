@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap and maintain lazycortex-wiki — install, configure scopes plus vault-wide axes/domains/mirror/terms/structure, and audit everything for integrity.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 diagram_spec:
   anchor: "How the setup flow connects"
   request: "Flow diagram showing the install-and-audit lifecycle: lazy-wiki.install seeds the wiki/structure/terms settings sections (wiki carries a repository-wide tag_axes vocabulary seeded empty and an exclude list seeded with docs/structure.md), unions the doc-kind axis into that repository-wide vocabulary, composes the wiki.curator, wiki.terms-curator, and wiki.structure-curator experts unconditionally, and (daemon-gated) registers lazy-wiki.scan, lazy-wiki.scan-deletes, lazy-wiki.relink-weekly, and lazy-wiki.doctor-apply — plus the wiki.domain-writer expert and its two domain routines when wiki.domains is configured, and one lazy-wiki.mirror-sync.<scope-id> routine per scope carrying a mirror block → lazy-wiki.configure's six branches (default scope branch, domains, mirror, terms, structure, vault) each collect their own config one question at a time and write it into lazy.settings.json — the scope branch only narrows the vault's tag_axes vocabulary and adds exclusions on top of the vault's own exclude list, both edited directly via the vault branch — refreshing the navigation rule's Coverage section wherever scope paths changed → lazy-wiki.doctor audits the wiki scopes via the CLI, then (report-only) the terms scopes and the structure map by reading plus a curator dispatch in report mode, and applies only the fixable repairs after the operator confirms."

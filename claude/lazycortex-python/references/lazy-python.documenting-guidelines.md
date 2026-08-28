@@ -544,6 +544,7 @@ A block marker is **not a comment to the code** — it is a standalone block, se
 - When **not** to use:
   - Pure implementation details that are invisible to callers.
   - Information that is already obvious from the method signature and type hints.
+  - Presentation details: the exact wording or format of human-readable output — exception message text, log lines, pretty-print or repr formatting. These are presentation, not API; pinning them freezes wording that must stay free to change. A contract on such a string is justified only when a caller demonstrably parses it programmatically, and then it names the parsed structure, not the prose.
 - Format:
   - Place the comment **inside the method or class body**, on its own line, above the code it governs — separated from it (and from everything above) by a blank line, per the standalone-block rule in Marker Comments.
   - Start with `# Contract:` on its own line (no text after the colon).

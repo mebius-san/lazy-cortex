@@ -47,7 +47,7 @@
   "editable": true,
   "graphTooltip": 1,
   "id": null,
-  "title": "LazyCortex Runtime",
+  "title": "Runtime",
   "uid": "lazycortex-runtime",
   "tags": [
     "lazycortex",
@@ -148,7 +148,7 @@
     {
       "type": "table",
       "title": "Daemons Health ($period)",
-      "description": "One row per runtime daemon: liveness, halt state, problem jobs now, errors and tokens over the selected period.",
+      "description": "One row per runtime daemon: liveness, halt state, problem jobs now, errors and tokens over the selected period. Cost is an estimate: tokens priced at Anthropic list rates per model family (fable/mythos $10, opus $5, sonnet-5 $2, sonnet-4 $3, haiku $1 per 1M input; output 5x, cache read 0.1x, cache write 1.25x). Models outside those families count as $0.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -201,6 +201,13 @@
           "refId": "H",
           "instant": true,
           "format": "table"
+        },
+        {
+          "expr": "sum by (repo) (\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"input\"}[$period]) * 1e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"output\"}[$period]) * 5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"cache_read\"}[$period]) * 1e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"cache_write\"}[$period]) * 1.25e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"input\"}[$period]) * 5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"output\"}[$period]) * 2.5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"cache_read\"}[$period]) * 5e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"cache_write\"}[$period]) * 6.25e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"input\"}[$period]) * 2e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"output\"}[$period]) * 1e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"cache_read\"}[$period]) * 2e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"cache_write\"}[$period]) * 2.5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"input\"}[$period]) * 3e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"output\"}[$period]) * 1.5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"cache_read\"}[$period]) * 3e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"cache_write\"}[$period]) * 3.75e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"input\"}[$period]) * 1e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"output\"}[$period]) * 5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"cache_read\"}[$period]) * 1e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"cache_write\"}[$period]) * 1.25e-06\n) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "legendFormat": "",
+          "refId": "I",
+          "instant": true,
+          "format": "table"
         }
       ],
       "transformations": [
@@ -222,7 +229,8 @@
               "Value #D": 5,
               "Value #E": 6,
               "Value #G": 3,
-              "Value #H": 7
+              "Value #H": 7,
+              "Value #I": 8
             },
             "renameByName": {
               "repo": "Daemon",
@@ -231,7 +239,8 @@
               "Value #D": "Dead",
               "Value #E": "Errors",
               "Value #G": "Work",
-              "Value #H": "Busy time"
+              "Value #H": "Busy time",
+              "Value #I": "Cost"
             }
           }
         }
@@ -378,6 +387,30 @@
               {
                 "id": "min",
                 "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cost"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 90
               }
             ]
           }
@@ -615,7 +648,7 @@
     {
       "type": "table",
       "title": "Expert health ($period)",
-      "description": "One row per expert \u00d7 repo: job attempts over the selected period by outcome (done / failed / dead), attempt-level errors that left the job queued for retry, and busy time.",
+      "description": "One row per expert \u00d7 repo: job attempts over the selected period by outcome (done / failed / dead), attempt-level errors that left the job queued for retry, and busy time. Cost is an estimate: tokens priced at Anthropic list rates per model family (fable/mythos $10, opus $5, sonnet-5 $2, sonnet-4 $3, haiku $1 per 1M input; output 5x, cache read 0.1x, cache write 1.25x). Models outside those families count as $0.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -675,6 +708,13 @@
           "refId": "G",
           "instant": true,
           "format": "table"
+        },
+        {
+          "expr": "sum by (expert, repo) (\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"input\"}[$period]) * 1e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"output\"}[$period]) * 5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"cache_read\"}[$period]) * 1e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-fable.*|claude-mythos.*\",kind=\"cache_write\"}[$period]) * 1.25e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"input\"}[$period]) * 5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"output\"}[$period]) * 2.5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"cache_read\"}[$period]) * 5e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-opus.*\",kind=\"cache_write\"}[$period]) * 6.25e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"input\"}[$period]) * 2e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"output\"}[$period]) * 1e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"cache_read\"}[$period]) * 2e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-5.*\",kind=\"cache_write\"}[$period]) * 2.5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"input\"}[$period]) * 3e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"output\"}[$period]) * 1.5e-05\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"cache_read\"}[$period]) * 3e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-sonnet-4.*\",kind=\"cache_write\"}[$period]) * 3.75e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"input\"}[$period]) * 1e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"output\"}[$period]) * 5e-06\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"cache_read\"}[$period]) * 1e-07\n  or\n  increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",model=~\"claude-haiku.*\",kind=\"cache_write\"}[$period]) * 1.25e-06\n) or 0 * sum by (expert, repo) (increase(lazycortex_runtime_expert_jobs_total{repo=~\"$repo\"}[$period]))",
+          "legendFormat": "",
+          "refId": "H",
+          "instant": true,
+          "format": "table"
         }
       ],
       "transformations": [
@@ -701,7 +741,8 @@
               "Value #D": 5,
               "Value #E": 7,
               "Value #F": 8,
-              "Value #G": 6
+              "Value #G": 6,
+              "Value #H": 9
             },
             "renameByName": {
               "expert": "Expert",
@@ -712,7 +753,8 @@
               "Value #D": "Dead",
               "Value #E": "Errors",
               "Value #F": "Busy time",
-              "Value #G": "Deferred"
+              "Value #G": "Deferred",
+              "Value #H": "Cost"
             }
           }
         }
@@ -815,6 +857,30 @@
               {
                 "id": "custom.width",
                 "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Cost"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 90
               }
             ]
           }

@@ -7,7 +7,7 @@ dirty-tree-waiver: "writes only into `.obsidian/`, which the manifest workflow k
 ---
 # Deploy the vault config from its manifest
 
-Rebuilds the current repo's Obsidian config directory from `.obsidian.manifest.json`: every plugin at its latest release, the captured settings on top, snippets, theme, and the top-level config files.
+Rebuilds the current repo's Obsidian config directory from `.obsidian.manifest.json`: every plugin at its latest release, the captured settings on top, snippets, and the top-level config files. A theme is named, never installed — the manifest carries its name, and Obsidian is the only thing that puts a theme's CSS in a vault.
 
 Never pins a version. The manifest records what a plugin was captured under, not what to install — a plugin migrates its own settings forward when Obsidian first opens it.
 
@@ -65,7 +65,7 @@ Outcome: `deployed` or `deployed-with-errors: <N>`.
 Surface in the final summary:
 
 - `plugins` — one line per plugin with the source it came from: `upstream` (GitHub latest), `cache` (vendored fallback, upstream unreachable), `bundled` (shipped inside this plugin).
-- `theme` — restored, already present, or the error naming a theme the operator installs from Obsidian once.
+- `theme` — already present, or the error naming a theme the operator installs from Obsidian once.
 - `secrets_omitted` — **always surface this list in full when non-empty.** Each entry is a settings value the manifest deliberately does not carry: an API token, a password. Name them so the operator enters them in Obsidian by hand; nothing else will.
 - `errors` — verbatim.
 
@@ -93,5 +93,5 @@ One line per task in the canonical list, with its outcome word, followed by the 
 - **"No `.obsidian.manifest.json`"** — this vault was never captured. Run `/lazy-obsidian.capture` where it is configured, commit, pull here, re-run.
 - **A plugin reports `served from cache`** — GitHub was unreachable or the release lacked assets; the vendored copy under the user's cache was used instead. Re-run when the network is back to pull latest.
 - **A plugin reports `not in the community catalog`** — it has no public catalog entry. Add a `repo` key (`owner/name`) to that plugin's entry in the manifest, or ship it bundled under the plugin's own templates.
-- **A theme reports `not installed and not bundled`** — install it once from Obsidian's appearance settings; the manifest records the name, not the theme's CSS.
+- **A theme reports `not installed`** — install it once from Obsidian's appearance settings; the manifest records the name, not the theme's CSS.
 - **Icons and folder colours are missing after deploy** — expected: they are rebuilt by `iconize-reloader` from note frontmatter, not by this skill. Open Obsidian, or run `/lazy-obsidian.iconize-sync reconcile`.

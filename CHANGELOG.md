@@ -5,6 +5,17 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-core
 
 
+### 8.0.1 — 2026-08-27 UTC
+
+- New `safe-pull` command backs the daemon's post-push sync — a guarded fast-forward pull that waits out a locked index and never touches staged content, replacing a bare `git pull` that could race the shared git index.
+- The daemon no longer misreports local git contention (e.g. a locked index during a concurrent commit) as "remote unavailable" — it retries locally with backoff and, if it genuinely fails, halts with an honest local-failure reason instead.
+- The daemon's per-tick branch checkout is now skipped when already on the target branch, stopping runaway `.git/logs/HEAD` growth under Dropbox-synced repos.
+- **Breaking:** every daemon must now set `daemon.token_env`, naming its own OAuth token in `~/.claude/.env` — the rate-limit guard is scoped per account, and a daemon without a dedicated token refuses to start.
+- The daemon detects and self-repairs a "lagging index" alarm after its own pull/merge/rebase, instead of mistaking its own caught-up worktree for someone else's stray stage.
+- The git-guard's dirty-index refusal no longer prescribes `git reset` as the fix — it escalates to the operator instead, since staged content could be parked work, an intentional untrack, or a swapped index, and a session can't tell which.
+- Structure-scan no longer queues a job for every file whose content merely changed — only genuinely new files trigger a rescan, cutting a queue that was mostly noise.
+- `lazy-log.distill` now backs up the changelog before its first write and edits sections in place, instead of a rebuild-via-map approach that could silently drop a repeated theme header.
+
 ### 7.1.1 — 2026-08-24 UTC
 
 - `lazy-core.git-guard`: a commit over a dirty shared index now waits then denies instead of proceeding, and staged content that reappears right after a commit raises a swap alarm; the deny message escalates to the operator without prescribing `git reset`.
@@ -553,6 +564,18 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-specs
 
 
+### 6.2.0 — 2026-08-27 UTC
+
+- `lazy-spec.upstream-run` no longer leaves an uncommitted, icon-less unit note behind if the daemon is killed mid-write — the note write is now folded into the same commit step during advance, accept, and release.
+- Documents seeded from a request via a launch checkbox now inherit the request's attribution correctly: the folder-note's `spec_source_requests` frontmatter list and its `## Source requests` body section stay in sync, and the inherited attribution is quoted like every other writer produces it.
+- Container folder-notes (product/category groups) can now carry their own group-level coordinator-rules layer.
+- **Breaking:** Spawning from a request now creates only the folder-note — every document, including `design.md`, is seeded empty and opened for review individually by ticking its own launch checkbox, instead of every document being created and opened at once.
+- The coordinator's wake dispatch now tracks a per-note dispatch cursor, cutting duplicate wakes and keeping daemon bookkeeping out of the note's operator-facing `# History` section.
+- Generated section explainers on spec notes now render as HTML comments instead of italic text — visible while editing, invisible in reading view.
+- `lazy-spec.doctor` no longer false-flags valid iconize/wiki-pin frontmatter keys, and its design-section check now matches the current design template (`Overview`/`Behavior`) instead of the retired `Requirements`/`Changes` roster.
+- New opt-in `use-cases.md` and `ui-design.md` document types, each with its own template and review class, wired into the feature/change definition chain — architecture writing now waits on ui-design when the step is opted in.
+- Fixed review-verb selection so the coordinator opens `lazy-review.start` for a fresh writer round and uses `carry` only to legalize an already-reviewed candidate into a finalized document.
+
 ### 6.1.0 — 2026-08-24 UTC
 
 - New opt-in `use-cases` and `ui-design` document types can now join a spec's definition chain, with their own templates, dedicated review classes, and installer/config wiring — refined through several follow-up fixes to stale enumerations, note-check keys, and the architecture write precondition.
@@ -702,6 +725,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+
+### 4.0.0 — 2026-08-27 UTC
+
+- **Breaking:** `/lazy-obsidian.deploy` no longer bundles or restores a vendored theme — it only records the theme's name in the manifest; a vault missing that theme now shows `theme <name>: not installed`, and the operator installs it once by hand from Obsidian's Appearance settings.
+- Fixed vault discovery for headless checkouts (CI, runtime clones) — it now resolves via the git repo's toplevel instead of requiring an untracked `.obsidian/` marker, so icon repaint works again; a missing `git` binary or a non-repo working directory now surfaces a clear error instead of failing silently.
 
 ### 3.1.0 — 2026-08-24 UTC
 
@@ -907,6 +935,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-review
 
 
+### 6.2.1 — 2026-08-27 UTC
+
+- Review's commit verbs (start, stop, submit, and coordinator commits) now scope every commit to an explicit pathspec, so they can no longer sweep in and publish someone else's staged, unrelated changes.
+- Fixed missed review wakes: an entry into review, or an operator edit, could get silently buried when a later bot commit landed on the same document within one watch cycle — both are now recovered.
+
 ### 6.2.0 — 2026-08-24 UTC
 
 - Review commit verbs (coordinator wake, round/finalize landings, start/stop/submit) now commit under an explicit pathspec, so content another party staged into the shared git index is never swept into a review commit.
@@ -1008,6 +1041,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+
+### 0.9.0 — 2026-08-27 UTC
+
+- Install now provisions this plugin's Grafana dashboards automatically — a new step copies the shipped dashboard JSON into the host Grafana's provisioning directory (detected from the answer file, a running Grafana server, or the packaged config), with no manual import or restart needed; the bundled runtime dashboard also gained new panels.
 
 ### 0.8.5 — 2026-08-24 UTC
 
@@ -1195,6 +1232,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-python
 
 
+### 4.1.0 — 2026-08-27 UTC
+
+- The `lazy-python.knowledge-sweep` skill now runs non-interactively — it settles the group cut itself instead of asking — and closes with a corpus-wide consolidation pass that trims canon-excluded formalism, converges sibling phrasing, and merges duplicate `Contract:` blocks.
+- Fixed contract redundancy folding during the sweep to be audience-aware — two blocks are merged only when they serve the same consumer, so a block still needed by a subclass override is kept even on a word-for-word match.
+- The seeded checker policy now admits Greek letters in comments and docstrings by default (`allowed_languages = ["english", "greek"]` in the `pyproject.toml` template), so domain formulas can use Greek letters like π without a per-project override.
+- `Domain(group):` block headers drop the optional `[tag]` bracket syntax — group name only now; the `lazy-python.domain-writer` agent and the documenting-guidelines canon no longer mention per-block tags.
+
 ### 4.0.1 — 2026-08-24 UTC
 
 - Domain block headers (`# Domain(group):`) drop the optional `[tag]` suffixes — the group name is now the whole header, and `lazy-python.domain-writer` writes and refiles blocks accordingly.
@@ -1339,6 +1383,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-wiki
 
+
+### 2.2.0 — 2026-08-27 UTC
+
+- New `lazy-wiki.tag-curator` expert normalizes tag values into one canonical, axis-based dictionary across wiki scopes and generated domain-spec docs — wired into install with a scheduled `tag-tick` dispatch, and guards against a scope literally named `domains` colliding with the built-in domain-doc surface.
+- `lazy-wiki.doctor` now flags domain docs using a tag axis missing from the dictionary.
+- Domain-spec docs gained a `tags:` frontmatter block driven by the tag dictionary; the `domain-groups` template dropped the old inline bracket syntax on `Domain(group):` headers — tag a group in frontmatter instead.
+- **Breaking:** the default tag dictionary path moved from `docs/tag-values.md` to `docs/tags.md` — set `wiki.tags.dictionary` explicitly if you rely on the old location.
+- Fixed `structure-scan` spawning a curator job on every content-only edit instead of only real structural changes.
+- Fixed `terms-scan` reading a bundle copy instead of the actual changed file — every run was failing.
 
 ### 2.1.0 — 2026-08-24 UTC
 

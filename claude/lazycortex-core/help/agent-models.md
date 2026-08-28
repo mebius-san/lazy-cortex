@@ -1,12 +1,12 @@
 ---
 chapter_type: block
 summary: Assign model tiers to every agent in your vault, prune dead entries for deleted agents, and route dispatches automatically.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
   - lazy-core.agent-models-seed
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: 95d5aefa32937ab7c4f1a3a4f4d7f50f3f73c58a
 ---
 # Per-agent model routing
 

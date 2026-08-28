@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to an existing codebase, generate its design and tech docs from source, then scaffold the first feature.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 diagram_spec:
   anchor: "How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce design + tech docs, then runs lazy-spec.create-feature to scaffold the first feature asset; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-spec.product-config
   - lazy-spec.create-from-code
   - lazy-spec.create-feature
-source_sha: 4b5dd469eeace0bb9705806972b0766ed95c8863
+source_sha: 5c6df9c9cd371786a67e07f580e9c5ed4ea8493f
 ---
 # How do I get specs for a codebase that already exists?
 
@@ -55,11 +55,11 @@ The key decisions you will make:
 - **Asset types** — optional; declare any beyond the shipped feature/change/bug set now, or later via `/lazy-spec.add-asset-type`.
 - **Workflow mode** — `full` (design through implementation and testing, the default) or `spec-only` (stops after `design.md` approves, released only by an explicit operator word). Most code-bound products want `full`.
 
-When the wizard finishes, the skill writes the product record into settings, creates the on-disk folder tree with its operator-zone folder-notes (each carrying a `# Summary` skeleton with a précis and stats markers), and generates the built-in review classes — one per document type marked for review (design, system-design, tech, code-plan, test-plan, bug, plus the implementation and testing report docs) — reusing the vault's shared set when your expert choices match it. It then runs `/lazy-spec.doctor` automatically and reports any issues.
+When the wizard finishes, the skill writes the product record into settings, creates the product folder with its operator-zone folder-note (carrying a `# Summary` skeleton with a précis and stats markers) plus the shared vault-root request inbox, and generates the built-in review classes — one per document type marked for review (design, system-design, tech, code-plan, test-plan, bug, plus the implementation and testing report docs) — reusing the vault's shared set when your expert choices match it. It then runs `/lazy-spec.doctor` automatically and reports any issues.
 
 If `/lazy-spec.product-config` points you at `lazycortex-experts` before finishing, it means a chosen expert name is not registered. Compose the persona via `lazycortex-experts`, then re-run `/lazy-spec.product-config`.
 
-**Verification gate.** Before continuing, confirm that `lazy-spec.doctor` in the report shows no failures. The product folder and its `features/`, `changes/`, and `bugs/` subdirectories should exist on disk.
+**Verification gate.** Before continuing, confirm that `lazy-spec.doctor` in the report shows no failures. The product folder and its folder-note should exist on disk — `features/`, `changes/`, and `bugs/` do not appear yet: group folders are created lazily, the first time an asset lands in one (Step 3 is what creates `features/`).
 
 ### Step 2 — Generate the spec from code with `/lazy-spec.create-from-code`
 

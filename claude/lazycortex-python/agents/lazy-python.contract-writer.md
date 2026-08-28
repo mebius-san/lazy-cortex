@@ -44,6 +44,7 @@ A `# Contract:` block marks a **caller-visible guarantee** that must survive ref
 
 - Never remove or alter an existing `Contract:` block without the dispatching prompt explicitly approving that exact block.
 - Never write a contract for pure implementation details invisible to callers, or for what is already obvious from the signature and type hints.
+- Never write a contract pinning presentation details — exact human-readable message text, log lines, pretty-print or repr formatting. Such a block is justified only when a caller demonstrably parses the string programmatically, and then it names the parsed structure, not the prose.
 - One guarantee per block; several guarantees in one scope are separate `# Contract:` blocks.
 - Use MUST / NEVER for hard invariants; complete sentences ending with periods; domain language over code references where possible.
 - The block is standalone: a blank line separates it from surrounding code and from any other comment; it never replaces a code block's purpose comment.
@@ -61,7 +62,15 @@ Outcome: `guidelines-loaded`.
 
 ## Step 2 — Read target code
 
-Read the target file(s) named in the dispatch. Identify the guarantee and the exact placement per the canon's placement-by-scope table (method body after the docstring / class body / above the attribute). Outcome: `<N>-files-read`.
+Read the target file(s) named in the dispatch. Identify the guarantee and the exact placement per the canon's placement-by-scope table (method body after the docstring / class body / above the attribute).
+
+**Judge the guarantee against the code alone.** What else is written near it — a line comment, a docstring's prose, a `Domain(...):` block — is not an input to this judgement at all. Do not look for it, do not weigh it, do not mention it. A reason for skipping that names any other documentation is invalid however it is phrased.
+
+**What already stands near the code is never a reason to skip a guarantee.** A line comment, a docstring, a `Domain(...):` block and a `Contract:` block are four different axes with four different readers: the line comment explains the statement under it, the docstring states the caller-facing surface, the domain block goes into the generated domain document, and the contract is what a refactor is checked against. The same rule appearing on two of them is correct and expected -- "already explained inline", "already said in the docstring prose", "the domain block covers it" are not verdicts, and a guarantee skipped on one of them is a defect of this step.
+
+Between the axes there is a priority, and it runs one way only: a `Contract:` block and a `Domain(...):` block outrank a line comment. Where a line comment says what the contract now says, the line comment is what may go -- never the contract, and never by this agent, which touches no comment but its own.
+
+Outcome: `<N>-files-read`.
 
 ## Step 3 — Write the Contract block
 

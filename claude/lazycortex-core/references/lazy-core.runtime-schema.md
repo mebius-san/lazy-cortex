@@ -36,6 +36,7 @@ The `daemon` key is optional. When absent, no git ops are performed and `polling
 | `cleanup_dead_after` | duration string | `"7d"` | Age after which a DEAD-marked stuck job dir is deleted. DEAD jobs are marked by `expert_pump._detect_dead_jobs` when their PID file references a dead process; the forensic window before cleanup matches `cleanup_completed_after` by default. |
 | `stream_idle_timeout_sec` | int | `900` | Seconds of stdout silence from a `claude -p` expert spawn before it is treated as a frozen stream, its process group killed, and the spawn re-tried. Sized for opus-tier experts, which legitimately stay silent for minutes while thinking. |
 | `stream_max_retries` | int | `3` | Maximum number of in-memory re-spawns on stream-idle-stall before the job is left with a transient error for the next tick. Separate from the on-disk `attempts` counter. |
+| `token_env` | string | — (required) | Name of the environment variable holding this daemon's OAuth token, resolved at startup from the environment first, then from `~/.claude/.env`, and exported as `CLAUDE_CODE_OAUTH_TOKEN` to every spawn. The daemon refuses to start without it — running on the machine's ambient login is unpredictable and burns a usage window nobody chose. The secret itself never lands in settings; only the variable's name does. |
 | `cleanup_runtime_log_after` | duration string | `"30d"` | Age after which a dated `<YYYY-MM-DD>.jsonl` journal is deleted. The hourly sweep walks all of `.logs/`, so a journal written by any plugin (`.logs/lazy-review/runs/…`, and whatever a future plugin adds) is retained on the same window without registering itself. Journals with no date in the name — `tokens.jsonl`, `jobs.jsonl`, `commits.jsonl` — are append-only ledgers whose age says nothing about which lines are still wanted; operators rotate those. |
 | `loop_detect_window` | int | `threshold * 4` | Number of recent commits to inspect for the per-(author, patch-id) loop-detection heuristic. Must be ≥ `loop_detect_threshold`. Larger values give better accuracy at the cost of a slightly slower `git log` query. |
 
@@ -87,7 +88,7 @@ A retry loop (max 3 attempts):
 
 After the third failed push attempt, halt with `reason: git_push_failed`.
 
-Any other git failure during pre-iteration or post-iteration ops (network unreachable, missing remote tracking, permission denied, force-protection rejection) halts with `reason: git_remote_unavailable`.
+Any other git failure during pre-iteration or post-iteration ops halts with `reason: git_remote_unavailable` when stderr names an unreachable remote (network unreachable, could-not-resolve-host, remote read failure), and with `reason: git_local_failed` otherwise — a purely local failure (a held `index.lock` past the retry backoff, a bad ref, permission on the checkout) never blames the remote. A transient `index.lock` race is retried in place before it can halt at all.
 
 The daemon rides the operator's base branch directly rather than a perpetual daemon-exclusive branch: operator commits flow in every tick via the pre-tick fast-forward pull, and routine output lands on the base branch and is pushed by the post-tick ops. Operator pushes from a second machine coexist safely — they are absorbed by the pre-tick pull or the post-tick rebase. Because the pre-tick checkout is plain (never `-B`), it does not reset the branch and does not clobber operator history.
 
@@ -441,7 +442,7 @@ Schema:
   "daemon_halted": {
     "halted_since": <unix_ts>,
     "triggered_by": "<routine_name|_git_pre|_git_post|lazy-expert.pump>",
-    "reason": "uncommitted_changes|git_pull_diverged|git_push_failed|git_remote_unavailable|suspected_loop|routine_config_invalid|rate_limit",
+    "reason": "uncommitted_changes|git_pull_diverged|git_push_failed|git_remote_unavailable|git_local_failed|suspected_loop|routine_config_invalid|rate_limit",
     "dirty_paths": ["<git status --porcelain line>", ...],
     "resets_at": <unix_ts, rate_limit only>,
     "expert": "<expert_name|null>",
@@ -457,7 +458,8 @@ Schema:
 - `uncommitted_changes` — routine left the working tree dirty (see § 10). Recovery: dirt-cleanup wizard via `/lazy-runtime.recover`.
 - `git_pull_diverged` — pre-tick fetch found that local and origin both have commits the other doesn't. Recovery: operator repairs branch state manually, then `/lazy-runtime.recover` clears the halt.
 - `git_push_failed` — post-tick push retried `POST_TICK_MAX_PUSH_ATTEMPTS` (3) times and kept failing. Recovery: operator investigates push refusal (auth, branch protection, persistent race), then `/lazy-runtime.recover`.
-- `git_remote_unavailable` — any other unexpected git failure during pre- or post-tick remote sync (network, permission, missing remote). Recovery: operator restores network/auth, then `/lazy-runtime.recover`.
+- `git_remote_unavailable` — a pre- or post-tick git failure whose stderr names an unreachable remote (network, DNS, remote read). Recovery: operator restores network/auth, then `/lazy-runtime.recover`.
+- `git_local_failed` — a pre- or post-tick git failure with no remote involved (a held `index.lock` past the retry backoff, a bad ref, checkout permissions). Recovery: operator inspects the checkout, then `/lazy-runtime.recover`.
 - `suspected_loop` — loop-detection heuristic fired: one identical diff (`git patch-id --stable`) was committed ≥ `loop_detect_threshold` times by the same registered-bot author within the `loop_detect_window` commit window. Commit volume alone never trips it — only a diff that keeps re-landing unchanged, directly or as one leg of an oscillation. The halt block names the offending patch-id, author, and the repeated commits' subjects. Recovery: operator investigates the routine's commit pattern and runs `/lazy-runtime.recover` once resolved.
 - `routine_config_invalid` — a `routines[*]` entry failed `validate_routine_entry` when the daemon read the registry (see § 10). `triggered_by` names the offending routine; the schema error text is in the routine's own `routine:<name>` incident. Recovery: operator fixes the settings entry, then `/lazy-runtime.recover` (mode `manual-fix`).
 - `rate_limit` — an expert run's `rate_limit_event` frame tripped the rate-limit guard (`daemon.rate_limit_guard`): the subscription window is closed. The block carries `resets_at` — the latest reopening time across the host-local flag records at `${XDG_CACHE_HOME:-$HOME/.cache}/lazycortex/rate-limit/`. Self-lifting: `_run_iteration` clears the halt (and resolves the `halt:<repo>` incident) once `now >= resets_at`; a block with no `resets_at` is treated as already expired. While halted the loop sleeps `min(resets_at − now, 3600)` instead of the polling interval, git sync stays alive, and the self-update restart is NOT skipped for this reason (state survives the restart, a restart burns no tokens). Recovery: none needed; `/lazy-runtime.recover` (mode `manual-fix`) resumes early — safe, the pump's pre-spawn flag check still defers spawns while the flag lives.
@@ -477,7 +479,7 @@ The daemon halts (writes a top-level `daemon_halted` block to state.json and sto
 - **Dirty working tree after a routine** — `git status --porcelain` non-empty → `reason: uncommitted_changes`. Why daemon-wide rather than per-routine: the daemon rides the operator's base branch directly, so leftover dirt is operator/routine WIP that the next iteration's routines would read as inconsistent tree state (and commit over). If a single routine left dirt, even routines that operate purely in gitignored paths would see that inconsistent state in the next iteration. Halting everything is the safe default.
 - **Pre-tick divergence** — local and origin branches both have commits the other doesn't → `reason: git_pull_diverged`. Automatic resolution would risk dropping the operator's commits, so the daemon halts and waits.
 - **Post-tick push exhausted retries** — the rebase+push retry loop failed `POST_TICK_MAX_PUSH_ATTEMPTS` times → `reason: git_push_failed`. Indicates either persistent operator-side races (rare) or branch-protection / auth refusal.
-- **Other pre- or post-tick git failure** — network, missing remote, permission, etc. → `reason: git_remote_unavailable`.
+- **Other pre- or post-tick git failure** — an unreachable remote → `reason: git_remote_unavailable`; a purely local failure → `reason: git_local_failed`.
 - **Malformed registry entry** — an entry under `routines` fails `validate_routine_entry` when the daemon loads the registry, before any scheduling decision reads it → `reason: routine_config_invalid`. The entry is dropped from that iteration's registry and opens a `routine:<name>` incident carrying the schema error verbatim; every further broken entry increments `routine_errors_total{reason="routine_config_invalid"}` under its own routine label, while the halt block keeps the first one's attribution. Why daemon-wide: a schema violation never self-heals — it stands until the operator edits the settings — so skipping it quietly every tick would hide a routine that silently stopped working.
 
 Per-job attribution: when an expert (inside `expert-pump`) is the cause of a dirty-tree halt, the halt block also records `expert` + `job_id`. The job's `response.json` is overridden with `outcome: "error", error.category: "uncommitted_changes"` and `DONE` is touched. Git-related halts carry no expert attribution (the daemon, not a routine, owns remote sync).
@@ -670,7 +672,7 @@ lazycortex_runtime_build_info{version,daemon_name,repo}
 The `reason` label is metric-specific:
 
 - On `routine_errors_total` (routine tick failures): `{timeout, resolve, subprocess_error, unexpected, git_pre_failed, git_post_failed, external_dir_broken, routine_config_invalid}`. `routine_config_invalid` is the one value that marks a permanently broken entry rather than a failed run — it never clears on its own and needs a settings edit.
-- On `daemon_halts_total` / `daemon_halted` (gauge): `{uncommitted_changes, git_pull_diverged, git_push_failed, git_remote_unavailable, suspected_loop, routine_config_invalid}` — matches the closed set in § 9.
+- On `daemon_halts_total` / `daemon_halted` (gauge): `{uncommitted_changes, git_pull_diverged, git_push_failed, git_remote_unavailable, git_local_failed, suspected_loop, routine_config_invalid}` — matches the closed set in § 9.
 
 ### Shipping to a Prometheus + Grafana stack
 

@@ -119,56 +119,63 @@ class IconizeError(Exception):
     self.code = code
 
 
-def find_vault_walk_up(start: Path) -> Path | None:
+def find_vault_git_root(start: Path) -> Path | None:
   """
-  Return the closest ancestor directory of `start` that contains an Obsidian vault marker.
+  Return the git toplevel of the repository containing `start`.
 
   Args:
-    start: Filesystem path to begin the upward walk from.
+    start: Filesystem path to resolve the enclosing repository for.
 
   Returns:
-    The first ancestor directory that has a `.obsidian/` subdirectory, or None when no
-    ancestor qualifies up to the filesystem root.
+    The repository toplevel as an absolute path, or None when `start` is not inside a
+    git repository (or git itself is unavailable).
   """
-  cur = Path(os.path.abspath(start))
-  while True:
-    # guard: vault marker found at the current level
-    # waiver: filesystem path idiom (.obsidian)
-    if (cur / ".obsidian").is_dir():
-      return cur
-    parent = cur.parent
-    # guard: reached filesystem root without finding a vault
-    if parent == cur:
-      return None
-    cur = parent
+
+  # Decision: the vault root is the git toplevel, not an `.obsidian/`-marked ancestor — the
+  # icon-map lives under `.claude/` and every note path is repo-relative, while `.obsidian/`
+  # is untracked since the vault-manifest migration and absent from headless checkouts.
+
+  # resolve the enclosing repository through git itself
+  # waiver: git CLI vocabulary, not domain constants
+  try:
+    proc = subprocess.run(
+      ["git", "-C", os.path.abspath(start), "rev-parse", "--show-toplevel"],
+      check = False, capture_output = True, text = True,
+    )
+  except OSError:
+    # guard: git binary unavailable — no repository can be resolved
+    return None
+  # guard: not a git repository — there is no vault to resolve
+  if proc.returncode != 0 or not (top := proc.stdout.strip()):
+    return None
+  return Path(top)
 
 
 def find_vault(override: str | None) -> Path:
   """
-  Return the vault root, either from an explicit override or by walking up from the cwd.
+  Return the vault root, either from an explicit override or as the git toplevel of the cwd.
 
   Args:
-    override: Caller-supplied vault path; when set it must contain a `.obsidian/` directory.
+    override: Caller-supplied vault path; when set it must name an existing directory.
 
   Returns:
     Absolute path to the resolved vault root.
 
   Raises:
-    IconizeError: When `override` is provided but does not point at a valid vault, or when
-      no vault is found by walking up from the current working directory.
+    IconizeError: When `override` is provided but does not name an existing directory, or
+      when the current working directory is not inside a git repository.
   """
   # guard: explicit override path takes precedence over discovery
   if override:
     v = Path(os.path.abspath(Path(override).expanduser()))
-    # guard: override must itself be a vault
-    # waiver: filesystem path idiom (.obsidian)
-    if not (v / ".obsidian").is_dir():
-      raise IconizeError(f"vault override has no .obsidian/: {v}")
+    # guard: override must name an existing directory
+    if not v.is_dir():
+      raise IconizeError(f"vault override is not a directory: {v}")
     return v
-  found = find_vault_walk_up(Path.cwd())
+  found = find_vault_git_root(Path.cwd())
   # guard: discovery failed
   if found is None:
-    raise IconizeError("vault not found: no .obsidian/ in cwd or parents")
+    raise IconizeError("vault not found: not inside a git repository")
   return found
 
 
@@ -343,7 +350,7 @@ def build_parser() -> argparse.ArgumentParser:
   p.add_argument("--validate-entry", action = "store_true",
                  help = "read {iconName, iconColor?} JSON from stdin; exit 0 if valid")
   # waiver: argparse CLI signature
-  p.add_argument("--vault", help = "vault root (default: walk up from cwd)")
+  p.add_argument("--vault", help = "vault root (default: git toplevel of cwd)")
   # waiver: argparse CLI signature
   p.add_argument("--icon-map", help = "path to icon-map (default: <repo>/.claude/iconize/obsidian-icon-map.json)")
   # waiver: argparse CLI signature

@@ -31,7 +31,7 @@ Genuine config (`agent_kind`, `remote_write_url`, `auth_kind`, `basic_auth_usern
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 13 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 14 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 0 — Detect existing coverage (pre-flight)`
@@ -46,6 +46,7 @@ This skill has 13 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 8 — Render + install service unit`
    - `Step 9 — Detect or guide install of agent binary`
    - `Step 10 — Load service + smoke test`
+   - `Step 10.5 — Provision Grafana dashboards`
    - `Step 11 — Report`
 2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced an outcome word for it" (e.g. `installed`, `unchanged`, `skipped-per-user-choice`, `aborted`). No-ops count only with an explicit outcome.
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
@@ -226,9 +227,28 @@ Then poll for up to 30s: `install.smoke_test_local_metrics(<target>)` for each t
 
 Outcome: `up` / `loaded-but-not-up`.
 
+## Step 10.5 — Provision Grafana dashboards
+
+Copy the dashboards this plugin ships into the host Grafana's provisioning tree, so a dashboard edit reaches Grafana without a manual import:
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+import json, install
+print(json.dumps(install.deploy_dashboards()))
+"
+```
+
+`install.detect_grafana_dashboards_dir()` resolves the target in this order: a `grafana_dashboards_dir` entry in the answer file, the config of a running `grafana server` process, then the packaged `grafana.ini` locations. A relative `provisioning` path resolves against Grafana's homepath, and the target is `<provisioning>/dashboards`.
+
+The step writes dashboard JSON and nothing else — it never creates or edits a provisioning provider, `grafana.ini`, or any other Grafana-owned file. A host with no Grafana provisioning directory is not an error: report the skip and move on. When the operator's Grafana keeps its dashboards somewhere the probe cannot reach, record the absolute path as `grafana_dashboards_dir` in `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` and re-run.
+
+Grafana's own file provider reloads the directory on its configured interval, so no restart and no import is needed.
+
+Outcome: `installed` / `unchanged` / `skipped-no-grafana`.
+
 ## Step 11 — Report
 
-Render a markdown report. Severity: `PASS` / `WARN` / `FAIL`. One line per Step 0–10 with its outcome word. Include the answer-file path, rendered-config path, service-unit path (or the file_sd snippet in integrate mode), and the smoke-test summary.
+Render a markdown report. Severity: `PASS` / `WARN` / `FAIL`. One line per Step 0–10.5 with its outcome word. Include the answer-file path, rendered-config path, service-unit path (or the file_sd snippet in integrate mode), the smoke-test summary, and the Grafana dashboards directory (or the skip reason).
 
 Outcome: `reported`.
 
@@ -238,6 +258,7 @@ Per the project's `lazy-log.logging` rule, log this run to `./.logs/claude/lazy-
 
 ## Failure modes
 
+- **`/lazy-observe.install` reports `skipped-no-grafana`** — the probe found no Grafana provisioning directory on this host → cause: Grafana is not installed here, is not running, or keeps its provisioning tree outside the probed locations → fix: record the absolute dashboards directory as `grafana_dashboards_dir` in `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` and re-run. A host that renders dashboards in a remote Grafana needs no fix — the skip is correct there.
 - **`/lazy-observe.install` stops immediately saying "collection is already covered on this host"** — the Step 0 pre-flight found our own shipper unit already installed (its signals are listed in the output) → this is the intended default on a working standalone install; re-run with `--force-standalone` to re-render it anyway. A foreign collector never produces this abort — it auto-switches the run into integrate mode instead.
 - **Step 2 aborts: "no metrics-enabled daemons registered"** — no local daemon has `daemon.metrics.enabled: true` → enable metrics via `/lazy-core.install` (its metrics step allocates the port and label), then re-run.
 - **Operator already has a different shipper running on the same launchctl label / unit name** — symptom: `bootstrap` / `enable` errors with "already loaded" → cause: previous install or operator-managed copy → fix: run `/lazy-observe.uninstall` first, then re-run install.

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Answers to common questions about setting up scopes, running relinks, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, and the tag-values canon.
-last_regen: 2026-08-24
+summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, and the tag-values canon.
+last_regen: 2026-08-27
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,7 +13,7 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 104dfee697e450fa17612e7a70e05db572a5eceb
+source_sha: 55e842efac087a3cd7919acecb3209e7e854abf3
 ---
 # Frequently asked questions
 
@@ -111,7 +111,7 @@ There are two common causes. First, the topics index for the relevant scope may 
 
 `see-also-path-base` catches a See-also link written against the wrong path form for the target node (for example, a relative link that no longer matches how the node's canonical path is tracked in the index) — the fix rewrites the link's target to the canonical path without touching its gloss.
 
-Report-only findings (`broken-repo-key`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`, `domain-output-in-scope`) identify structural issues that require a curator relink or a scope reconfiguration to resolve — the doctor surfaces them but does not modify nodes for those checks.
+Report-only findings (`dangling-at-prefix`, `missing-summary`, `unknown-axis`, `dup-branch`, `broken-wiki-block`, `scope-overlap`, `domain-output-in-scope`, and — for any scope carrying a `mirror` block — `mirror-clone-orphaned`, `mirror-dir-missing`, `mirror-paths-uncovered`, `mirror-stale-fetch`, `mirror-local-edit`) identify structural issues that require a curator relink, a scope reconfiguration, or a mirror sync to resolve — the doctor surfaces them but does not modify nodes for those checks. `dangling-at-prefix` catches a See-also link still written in the old `@<repo-key>/<path>` cross-repo notation whose target now belongs to a mirrored scope and should point at the mirrored node's local path instead.
 
 The same run also audits the terms dictionary (when any terms scope is configured) and the project-structure map (when it is configured or already built) — see the dedicated questions below for what each of those sections reports.
 
@@ -160,6 +160,16 @@ No. It means a scope's `paths` glob reaches the generated domain-spec tree, but 
 ## How do I add a second repository to a scope's See-also links?
 
 See-also links can reference nodes in other repositories using a `@<repo-key>/<path>` notation. Both `/lazy-wiki.query` and `/lazy-wiki.relink` resolve `<repo-key>` against the `repos` map at the top level of `lazy.settings.json` — a project-wide registry that lazycortex-wiki reads but does not itself manage. If the key you need is not already present in that map, it needs to be added at the project level before cross-repo links will resolve; consult your project's setup for how that registry is maintained. Once the key exists, the curator can resolve cross-repo paths when building links, and `/lazy-wiki.query` can validate and traverse them.
+
+---
+
+## How do I mirror a foreign repo's documentation into the wiki, instead of just linking out to it?
+
+Run `/lazy-wiki.configure mirror` against an existing scope — the `mirror` block nests inside a scope's own entry, so the scope must already exist; create one first with `/lazy-wiki.configure` if none does. You provide the source repository's git URL, an optional branch (blank follows the source's default), one or more `source_paths` globs of markdown to pull in (only `.md` files under them are mirrored), an optional `exclude` for source service files you don't want curated — put a generated index like the source's own `domains.md` here, so it doesn't become a pointless curation target — and `mirror_path`, the directory in your vault where the mirrored files land (required, no default). The wizard then adds `<mirror_path>/**` to the scope's own `paths` automatically, so the mirrored files become ordinary wiki nodes without a second edit.
+
+The sync itself — `Bash(lazycortex-wiki mirror-sync <scope-id>)` run by hand, or the `lazy-wiki.mirror-sync.<scope-id>` schedule routine registered by re-running `/lazy-wiki.install` afterwards — clones the source into a gitignored runtime directory, copies the matched files under `mirror_path`, and commits. The git-watch `lazy-wiki.scan` routine then picks up the changed files for curation exactly like any other node; there is no second curation channel.
+
+Mirror bodies are overwritten on every sync, so a hand-edit to a mirrored node's content does not survive the next run — only the pin keys (operator-authored node state) carry over. `/lazy-wiki.doctor` reports drift on a mirrored scope separately — see the doctor question above for the `mirror-*` findings — and a See-also link still written in the old `@<repo-key>/<path>` cross-repo notation for content that is now mirrored locally shows up there as `dangling-at-prefix`.
 
 ---
 

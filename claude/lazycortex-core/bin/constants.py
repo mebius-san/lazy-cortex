@@ -178,6 +178,7 @@ class DaemonKey:
     PORT: The metrics endpoint TCP port.
     REPO_LABEL: The override for the `repo` metric label.
     LOOP_DETECT_THRESHOLD: The repeated-identical-tick halt threshold.
+    TOKEN_ENV: The name of the environment variable holding this daemon's OAuth token.
     ERRORS: The error-ledger sub-configuration block.
     RETENTION_DAYS: The journal-retention window in days.
     GIT: The git-integration sub-configuration block.
@@ -205,6 +206,7 @@ class DaemonKey:
   RATE_LIMIT_GUARD = "rate_limit_guard"
   STREAM_IDLE_TIMEOUT_SEC = "stream_idle_timeout_sec"
   TRANSIENT_MAX_RETRIES = "transient_max_retries"
+  TOKEN_ENV = "token_env"
 
 
 # ----------------------------------------------------------------------------------------
@@ -260,6 +262,7 @@ class RateLimitRecordKey:
     TRIGGER: The closed-set trigger token that raised the record.
     WRITER: The label of the process that wrote the record.
     WRITTEN_AT: The epoch-second timestamp at which the record was written.
+    ACCOUNT: The identity of the account whose window the record describes.
   """
 
   RESETS_AT = "resets_at"
@@ -268,6 +271,7 @@ class RateLimitRecordKey:
   TRIGGER = "trigger"
   WRITER = "writer"
   WRITTEN_AT = "written_at"
+  ACCOUNT = "account"
 
 
 # ----------------------------------------------------------------------------------------
@@ -698,6 +702,7 @@ class HaltReason:
     GIT_PULL_DIVERGED: A pre-tick pull found diverged history.
     GIT_PUSH_FAILED: A post-tick push could not complete.
     GIT_REMOTE_UNAVAILABLE: The git remote could not be reached.
+    GIT_LOCAL_FAILED: A local git sync command failed with no remote involved.
     INBOX_COLLISION: Another checkout on this host drives the same physical inbox.
     ROUTINE_CONFIG_INVALID: A registry entry does not conform to its type schema.
     RATE_LIMIT: The subscription rate-limit window is closed; spawns pause until it reopens.
@@ -708,6 +713,7 @@ class HaltReason:
   GIT_PULL_DIVERGED = "git_pull_diverged"
   GIT_PUSH_FAILED = "git_push_failed"
   GIT_REMOTE_UNAVAILABLE = "git_remote_unavailable"
+  GIT_LOCAL_FAILED = "git_local_failed"
   INBOX_COLLISION = "inbox_collision"
   ROUTINE_CONFIG_INVALID = "routine_config_invalid"
   RATE_LIMIT = "rate_limit"

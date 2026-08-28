@@ -1,14 +1,14 @@
 ---
 chapter_type: faq
 summary: Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 no_diagram: true
 source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
   - lazy-observe.doctor
   - lazy-observe.audit
-source_sha: 183a0cb4d191ceb89a9670c24d9a6c0228bb8364
+source_sha: 890473ef0218899352d3af6d39a3910845b28731
 ---
 # Frequently asked questions
 
@@ -36,6 +36,14 @@ Yes. `/lazy-observe.install` renders the agent config with scrape targets for ev
 ## Which agent should I pick — Alloy or otelcol?
 
 Pick **Grafana Alloy** if you're already on the Grafana / Mimir stack. Pick **OpenTelemetry Collector** (`otelcol`) for everything else. Both agents scrape the same loopback endpoints and emit identical metric series shapes, so dashboards and alert rules work unchanged with either. Your choice is genuine config — it's collected once, persisted, and reused silently on every later `/lazy-observe.install` run (you won't be asked again). This question is only asked when a shipper is actually being installed — a host that auto-integrates with a foreign collector never sees it. To switch agents later, see "How do I change my agent kind, remote_write URL, or auth after the first install?" below.
+
+---
+
+## Does the installer set up my Grafana dashboards automatically?
+
+Yes, if this host runs Grafana. After the shipper is up, `/lazy-observe.install` copies the dashboards this plugin ships into Grafana's provisioning directory, so they show up without a manual import. It resolves that directory in this order: a `grafana_dashboards_dir` value already on record, the config of a running `grafana server` process, then Grafana's packaged default locations. Grafana's own file provider reloads the directory on its normal interval — no restart, no import step, no question asked.
+
+If this host has no local Grafana (or the probe can't find its provisioning tree), the step reports `skipped-no-grafana` and moves on — that's expected, not a failure, when your Grafana runs elsewhere. Import `claude/lazycortex-observe/dashboards/lazycortex-runtime.json` by hand in that case, or record the absolute provisioning path as `grafana_dashboards_dir` in `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` and re-run the installer to have it deploy automatically next time.
 
 ---
 

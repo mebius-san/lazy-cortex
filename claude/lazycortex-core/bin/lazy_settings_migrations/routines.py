@@ -32,8 +32,15 @@ other plugins, and a section already on the new keys, pass through unchanged.
 v5 → v6 (`MIGRATIONS[5]`) follows the `experts` v3 → v4 step: an expert-shaped
 routine whose `expert:` field names one of the three recanonicalised keys is
 pointed at the new key instead, so the dispatch still resolves. The routine's own
-key is untouched — it belongs to a plugin and keeps that namespace. Add
-`6: lambda data: <transformed>` here when a v6 → v7 migration is needed.
+key is untouched — it belongs to a plugin and keeps that namespace.
+
+v6 → v7 (`MIGRATIONS[6]`) retargets the `lazy-wiki.structure-scan` git watch
+from `changed_files` to `new_files`: the structure map describes the tree's
+shape, which a content edit never changes, so the `M` status only produced one
+curator job per modified file with nothing to apply. Deletions and renames keep
+their own routines. An entry already off `changed_files` (operator override) and
+a section without the routine pass through unchanged. Add
+`7: lambda data: <transformed>` here when a v7 → v8 migration is needed.
 """
 from __future__ import annotations
 
@@ -90,6 +97,13 @@ _PRE_CANON_EXPERT_KEYS = {
   "lazy-runtime.doctor": "runtime.doctor",
   "lazy-core.autocheckup": "core.autocheckup",
 }
+
+
+# waiver: routine key and watch values local to this single retarget step, not reusable domain values
+_STRUCTURE_SCAN_KEY = "lazy-wiki.structure-scan"
+_WATCH_KEY = "watch"
+_STRUCTURE_SCAN_OLD_WATCH = "changed_files"
+_STRUCTURE_SCAN_NEW_WATCH = "new_files"
 
 
 def _recanon_expert_ref(entry: object) -> object:
@@ -207,4 +221,14 @@ MIGRATIONS = {
   },
   # v5 → v6: `expert:` refs onto the recanonicalised expert keys; routine keys untouched.
   5: lambda data: { rk: _recanon_expert_ref(rv) for rk, rv in data.items() },
+  # v6 → v7: structure-scan watches new files only — a content edit never changes the tree shape.
+  6: lambda data: {
+    rk: (
+      { **rv, _WATCH_KEY: _STRUCTURE_SCAN_NEW_WATCH }
+      if rk == _STRUCTURE_SCAN_KEY and isinstance(rv, dict)
+      and rv.get(_WATCH_KEY) == _STRUCTURE_SCAN_OLD_WATCH
+      else rv
+    )
+    for rk, rv in data.items()
+  },
 }

@@ -170,10 +170,12 @@ class Stage:
 
 
 # ----------------------------------------------------------------------------------------
+
 # Decision: the asset's paint state is a written key, not a matcher-computed one — `IN_REVIEW`
 # lives as `review_active` on a sibling document and `IMPLEMENTATION` / `TESTING` track a job in
 # the gitignored runtime sidecar, neither of which an iconize matcher can read from the status
 # note it paints.
+
 class AssetState:
   """
   `spec_state` value tokens carried by an asset's status folder-note.
@@ -319,8 +321,6 @@ class HistoryEvent:
     JOB_DEAD: A coordinator job died and its marker was cleared.
     REVIEW_OPENED: The stuck-draft backstop submitted a doc into review.
     REVIEW_OPENED_SCAN: Dedup fragment of `REVIEW_OPENED` the stuck-draft sweep greps for.
-    WOKE: The coordinator was dispatched on a wake trigger.
-    DISPATCH_STALE: A wake hit an already-terminal job and was retired.
     REQUEST_PROCESSED: An upstream request reached its processed state.
   """
 
@@ -333,8 +333,6 @@ class HistoryEvent:
   JOB_DEAD = "job-dead"
   REVIEW_OPENED = "review-opened"
   REVIEW_OPENED_SCAN = "review-opened-scan"
-  WOKE = "woke"
-  DISPATCH_STALE = "dispatch-stale"
   REQUEST_PROCESSED = "request-processed"
 
 

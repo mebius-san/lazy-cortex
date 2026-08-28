@@ -10,4 +10,4 @@ _TBD — one-line description; regenerated on refresh._
 # Coordinator rules
 #protected/spec/coordinator-rules
 
-<!-- Body below is operator-zone. The plugin owns only the # Summary section above. -->
+<!-- Body below is operator-zone. The plugin owns only the sections above. -->

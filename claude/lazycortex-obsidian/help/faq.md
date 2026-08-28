@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about vault setup, Iconize, diagram render glue, the vault manifest, plugin updates, and tag pages for lazycortex-obsidian.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 no_diagram: true
 source_skills:
   - lazy-obsidian.install
@@ -14,7 +14,7 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 1424b48a2f90138fef84328e2fd33c138e6a0f23
+source_sha: 07686c8fa9ef083334f66cfa6c696cf913a33740
 ---
 # Frequently asked questions
 
@@ -124,7 +124,7 @@ Yes. The plugin update refreshes the plugin cache but does not automatically re-
 
 ## How do I share my vault's Obsidian configuration across machines or with teammates?
 
-Run `/lazy-obsidian.capture` after changing anything under `.obsidian/` — a plugin installed, a setting tweaked, a snippet added, the theme switched. It snapshots the whole `.obsidian/` surface into one tracked, reviewable file, `.obsidian.manifest.json`, and commits it. On any other checkout — a fresh clone, a machine that has never opened this vault — run `/lazy-obsidian.deploy`, which reads that manifest and rebuilds `.obsidian/`: every plugin fetched at its latest release, your captured settings layered on top, snippets, theme, and top-level config files. Deploy always ends with a reminder to open Obsidian once, since plugins run their own settings migrations on first launch. Both skills take an optional positional argument for the repo root; omit it and they use the current repo.
+Run `/lazy-obsidian.capture` after changing anything under `.obsidian/` — a plugin installed, a setting tweaked, a snippet added, the theme switched. It snapshots the whole `.obsidian/` surface into one tracked, reviewable file, `.obsidian.manifest.json`, and commits it. On any other checkout — a fresh clone, a machine that has never opened this vault — run `/lazy-obsidian.deploy`, which reads that manifest and rebuilds `.obsidian/`: every plugin fetched at its latest release, your captured settings layered on top, snippets, and top-level config files. A theme it only names — install that once from Obsidian's Appearance settings. Deploy always ends with a reminder to open Obsidian once, since plugins run their own settings migrations on first launch. Both skills take an optional positional argument for the repo root; omit it and they use the current repo.
 
 ---
 

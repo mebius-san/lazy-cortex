@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-08-24
+last_regen: 2026-08-27
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -33,7 +33,7 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: 8351c07ae62867736a3ef96dbdf0104c3d1b787c
 ---
 # Troubleshooting
 
@@ -148,6 +148,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: `daemon.run_here` is recorded on disk as a plain boolean or a bare host list — the shape an older `lazy-core.install` wrote before the gate became a hostname-to-checkout-path map. Neither a boolean nor a bare hostname can say which checkout on a machine should drive the project (a machine commonly holds more than one clone of the same project), so the current install refuses to run the daemon against the old shape and asks again rather than guess.
 
 **Fix**: Answer the question `/lazy-core.install` asks — it writes the correct `{"<hostname>": "<checkout path>"}` map entry, preserving any other machine's entry already on record. Once the map carries this machine and checkout, re-runs proceed silently again.
+
+---
+
+## The daemon refuses to start: `daemon.token_env is required`
+
+**Symptom**: The runtime daemon does not come up after `/lazy-core.install` or a supervisor restart -- the process exits immediately with a message like "daemon.token_env is required -- name the environment variable (seeded in `~/.claude/.env`) holding this daemon's OAuth token" or "`daemon.token_env` names `<var>` but it is set neither in the environment nor in `~/.claude/.env`". A checkout whose daemon worked fine before an upgrade now refuses to start at all.
+
+**Likely cause**: The daemon now requires its own explicit OAuth token rather than running under whichever account the host happens to be logged into. `daemon.token_env`, in the tracked `.claude/lazy.settings.json[daemon]` block, names the environment variable that holds this daemon's token; without it, or with it pointing nowhere, the daemon refuses to start rather than silently spend under the machine's ambient login. This is a required field on every daemon-enabled checkout -- an existing daemon-enabled repo needs the field added once before its daemon can run again after upgrading.
+
+**Fix**: Add the token to `~/.claude/.env` (create the file if it doesn't exist yet) as `<YOUR_VAR_NAME>=<oauth-token>`, then set `daemon.token_env` to that variable's name in the tracked `.claude/lazy.settings.json[daemon]` block. Restart the supervisor to pick it up -- `launchctl kickstart -k gui/$UID/com.lazycortex.runtime.<repo-name>` on macOS, or `systemctl --user restart lazy-core-runtime-<repo-name>` on Linux. Each daemon-enabled checkout on a host can name a different variable, so multiple checkouts can spend under different accounts without contending over one shared login.
 
 ---
 
@@ -525,6 +535,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## A correctly-formed commit is still refused: the index isn't clean
+
+**Symptom**: A commit refused by `lazy-core.git-guard` even though the pathspec is explicit and correct, nothing this session staged is involved, and the refusal names the git index as belonging to the operator with an instruction not to touch or reset it.
+
+**Likely cause**: The pathspec-discipline row now checks that the index is actually clean before letting any commit through, not just that the commit call itself uses the right form. A session never stages content of its own, so anything already staged when a commit is attempted belongs to the operator -- parked work-in-progress, or a poisoned index left by something else: a swapped index from a failed partial commit, or a lagging index where a pull, merge, or rebase raced a stage write and left staged paths that already match `HEAD`. The hook polls briefly for the index to clear on its own before denying.
+
+**Fix**: Do not run a git reset on the index yourself. Escalate to the operator -- only they can tell deliberate work-in-progress apart from stray leftover from a failed run or a genuine untrack. Once the operator has resolved it their own way and the index reports clean, retry the commit.
+
+---
+
 ## A routine's expert spawns keep timing out or the job dies doing nothing
 
 **Symptom**: A routine (inbox, schedule, git, or md-scan) that dispatches to an expert never produces a result — the job sits until it eats the routine's wall timeout and dies, with no useful output in `response.json`. `/lazy-expert.collect-job` eventually reports `status: failed` or the job never leaves `active`.
@@ -806,6 +826,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Fix**: Re-inspect the actual git state from your terminal: run `git fetch origin <branch>` to test reachability, `git log --oneline HEAD origin/<branch>` to check for divergence, or `git push origin <branch>` to observe the push rejection message. Resolve the root cause first, then re-run `/lazy-runtime.recover` and confirm once the situation is genuinely clear.
 
 **Update — `git_remote_unavailable` can clear itself**: Once a `git_remote_unavailable` halt has stood for about an hour, the daemon's hourly health-check tick re-probes the remote directly (`git ls-remote --heads origin`) before doing anything else, and clears the halt on its own the moment the remote answers — no `/lazy-runtime.recover` run required. This self-heal is scoped to `git_remote_unavailable` only; `git_pull_diverged` and `git_push_failed` still need the manual fetch/log/push inspection above followed by an explicit `/lazy-runtime.recover` confirmation, since only a person can judge whether a divergence or rejection is genuinely resolved.
+
+---
+
+## `/lazy-runtime.recover` reports a `git_local_failed` halt
+
+**Symptom**: `/lazy-runtime.recover` (or the daemon's own state file) reports a halt with reason `git_local_failed`, but network, VPN, and `git remote -v` all look fine -- there is clearly nothing wrong with reaching the remote.
+
+**Likely cause**: The daemon now tells apart a purely local git failure during its pre- or post-tick sync from a genuine remote-reachability problem, instead of folding every non-network git failure into `git_remote_unavailable` and sending the operator to chase a network issue that was never the cause. A held `.git/index.lock` that outlasted the daemon's own short retry backoff, a bad ref, or a checkout-permission error now surfaces honestly as `git_local_failed`. A transient lock contention -- racing an expert job's own commit, for instance -- is retried in place first and never reaches a halt at all; only a lock still held past that backoff halts.
+
+**Fix**: Inspect the checkout directly with `git status`. If `.git/index.lock` is present and you've confirmed no other process actually holds it, remove it by hand. Resolve whatever the local failure was -- a bad ref, a checkout permission problem -- then run `/lazy-runtime.recover` to clear the halt. Unlike `git_remote_unavailable`, this halt does not clear itself on a later health-check tick; it always needs the manual fix followed by an explicit `/lazy-runtime.recover` confirmation.
 
 ---
 
