@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-08-27
+last_regen: 2026-08-30
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -33,7 +33,7 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 8351c07ae62867736a3ef96dbdf0104c3d1b787c
+source_sha: 4b059db3faee4129ac2de3faa7376ba7212ee3b6
 ---
 # Troubleshooting
 
@@ -542,6 +542,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: The pathspec-discipline row now checks that the index is actually clean before letting any commit through, not just that the commit call itself uses the right form. A session never stages content of its own, so anything already staged when a commit is attempted belongs to the operator -- parked work-in-progress, or a poisoned index left by something else: a swapped index from a failed partial commit, or a lagging index where a pull, merge, or rebase raced a stage write and left staged paths that already match `HEAD`. The hook polls briefly for the index to clear on its own before denying.
 
 **Fix**: Do not run a git reset on the index yourself. Escalate to the operator -- only they can tell deliberate work-in-progress apart from stray leftover from a failed run or a genuine untrack. Once the operator has resolved it their own way and the index reports clean, retry the commit.
+
+---
+
+## Phantom staged content appears after a cloud-sync client touches the repo
+
+**Symptom**: `git status` suddenly reports staged content nobody staged, or a commit is refused by `lazy-core.git-guard` citing an unclean index — right after the working tree passed through a machine running Dropbox, iCloud Drive, or a similar sync client, with no session actually mid-commit. A file named `index (<name>'s conflicted copy <date>)` sits beside `.git/index` inside `.git/`.
+
+**Likely cause**: A cloud-sync client raced git's own rename-replace write of `.git/index` and resolved the conflict by keeping an older index under the live name while stashing the newer one — the version git actually wrote last, parked staging included — under a `... conflicted copy ...` filename. `git status` then reads the resurrected older index and reports content nobody staged. Both `lazy-core.git-guard`'s pre-flight and the runtime daemon's own pre-tick git sync heal this automatically before judging anything: they restore the newest conflicted copy over the live index and remove the litter, so the symptom is usually gone by the time you look. The heal only fires when no git operation is mid-flight (`index.lock` absent) and the newest copy is both strictly newer than the live index and carries a valid index signature — anything short of that is left untouched rather than guessed at.
+
+**Fix**: Retry the git command once — the guard heals on the next pre-flight and the phantom content disappears on its own. If it persists (an `index.lock` is stuck, or the newest copy fails the newer-than/signature check), run `lazycortex-core index-guard` from the repo root to heal by hand; it prints a report of what it restored and removed. Never hand-copy or delete the `... conflicted copy ...` file yourself — the guard's newest-wins comparison protects any legitimately parked staging that an out-of-order manual copy would silently drop.
 
 ---
 

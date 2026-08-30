@@ -530,6 +530,30 @@ def _call_remote_mirror(repo: Path, payload: dict) -> dict:
     ) from exc
 
 
+def _source_content_changed(repo: Path, source_dir: Path) -> bool:
+  """
+  Report whether the freshly rewritten `source/` differs from its last committed state.
+
+  The unit's revision moves only on this signal: the mirror clone is depth-1, so the last
+  upstream commit that touched the unit's path cannot be walked from history — the observable
+  equivalent is comparing the just-synced bytes against what the previous tick committed.
+
+  Args:
+    repo: Repository root.
+    source_dir: The unit's `source/` directory, just rewritten by the sync.
+
+  Returns:
+    `True` when any file under `source/` is modified, added, or deleted relative to `HEAD`;
+    `False` when the rewrite reproduced the committed bytes exactly.
+  """
+  status = subprocess.run(
+      # waiver: git CLI vocabulary, not a domain constant
+      [_K.GIT, "-C", str(repo), "status", "--porcelain", "--", str(source_dir)],
+      check = False, capture_output = True, text = True,
+  )
+  return bool(status.stdout.strip())
+
+
 def _clone_dir(repo: Path, repo_key: str) -> Path:
   """
   Resolve one source's gitignored working-clone directory.
@@ -1795,7 +1819,7 @@ def _dispatch_request(
 
 
 def _accept_unit(
-    repo: Path, unit_dir: Path, note_path: Path, unit_path: str, source_url: str,
+    repo: Path, unit_dir: Path, unit_path: str, source_url: str,
     revision: str, existing_body: str, wikilink: str,
 ) -> tuple[bool, str]:
   """
@@ -1846,7 +1870,7 @@ def _accept_unit(
 
 
 def _release_unit(
-    repo: Path, unit_dir: Path, note_path: Path, unit_path: str, source_url: str,
+    repo: Path, unit_dir: Path, unit_path: str, source_url: str,
     revision: str, existing_body: str, fallback_status: str, history_note: str,
 ) -> tuple[bool, str]:
   """
@@ -1889,7 +1913,7 @@ def _release_unit(
 
 
 def _advance_frozen_unit(
-    repo: Path, unit_dir: Path, note_path: Path, unit_path: str,
+    repo: Path, unit_dir: Path, unit_path: str,
     existing_fm: dict, existing_body: str, source_url: str,
 ) -> tuple[bool, str]:
   """
@@ -1928,18 +1952,18 @@ def _advance_frozen_unit(
   # the closed outcome ladder (§ 8): accepted, technically-failed routing, operator-stopped
   if request_status == _K.REQUEST_STATUS_ACCEPTED:
     return _accept_unit(
-        repo, unit_dir, note_path, unit_path, source_url, revision, existing_body, wikilink,
+        repo, unit_dir, unit_path, source_url, revision, existing_body, wikilink,
     )
   if request_status == _K.REQUEST_STATUS_REJECTED:
     return _release_unit(
-        repo, unit_dir, note_path, unit_path, source_url, revision, existing_body, fallback_status,
+        repo, unit_dir, unit_path, source_url, revision, existing_body, fallback_status,
         f"routing on [[{wikilink}]] named no applicable target — released to {fallback_status}",
     )
   review_active = flip_gate._is_true(request_fm, _K.REQUEST_REVIEW_ACTIVE_KEY)
   review_result = request_fm.get(_K.REQUEST_REVIEW_RESULT_KEY, "")
   if request_status == _K.REQUEST_STATUS_DRAFT and not review_active and not review_result:
     return _release_unit(
-        repo, unit_dir, note_path, unit_path, source_url, revision, existing_body, fallback_status,
+        repo, unit_dir, unit_path, source_url, revision, existing_body, fallback_status,
         f"review stopped on [[{wikilink}]] without a verdict — released to {fallback_status}",
     )
   # still under active review, or awaiting the apply pass — stay frozen
@@ -2091,7 +2115,7 @@ def _advance_unit(
   # never touching the fetch/detect ladder below
   if prior_status in UPSTREAM_FROZEN_STATUSES:
     return _advance_frozen_unit(
-        repo, unit_dir, note_path, unit_path, existing_fm, existing_body, source_cfg.get(_K.URL, ""),
+        repo, unit_dir, unit_path, existing_fm, existing_body, source_cfg.get(_K.URL, ""),
     )
   # guard: already-materialized unit whose mirrored canon note already carries `spec_draft: true`
   # — frozen wholesale, checked against the PRIOR tick's own mirror so a steady-state gated unit
@@ -2133,7 +2157,10 @@ def _advance_unit(
     )
     if sync_error is not None:
       return False, prior_status or UpstreamStatus.NEW
-    revision = fetched_sha or revision
+    # the revision names the commit that delivered the current bytes — an upstream commit that
+    # left this unit's subtree untouched must not move it, or every tick lands a noise commit
+    if not revision or _source_content_changed(repo, source_dir):
+      revision = fetched_sha or revision
     skipped_current = skip_entries
     has_md = any(
         fname.endswith(_K.MD_SUFFIX) for _d, _dirs, files in os.walk(str(source_dir)) for fname in files

@@ -59,6 +59,8 @@ if str(_BIN) not in sys.path:
   sys.path.insert(0, str(_BIN))
 
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import body as _body  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import frontmatter as _fm  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import git_ops as _git_ops  # noqa: E402
@@ -252,7 +254,16 @@ def _apply_one_job(text: str, jdir: Path, request: dict, response: dict) -> str 
       owned_owner=owner,
       section_layout=section_layout,
   )
-  return reapply_result.text
+
+  # an answered question is a settled decision the round just folded — the callout must not
+  # survive it, or the next wake reads the same tick as fresh operator input and reopens forever
+  landed = reapply_result.text
+  _landed_meta, landed_body = _fm.parse(landed)
+  stripped_body = _body.strip_answered_questions(landed_body)
+  # guard: nothing answered in this round — the landed text is already final
+  if stripped_body == landed_body:
+    return landed
+  return landed[:len(landed) - len(landed_body)] + stripped_body
 
 
 # ------------------------------------------------------------- consume (§1c)

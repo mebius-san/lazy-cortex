@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime (incl. the daemon's own OAuth token, manual ticks, and new daemon authoring), memory, routines, git staging (incl. the clean-index precondition and local-vs-remote sync halts), MCP permissions, and change-history search.
-last_regen: 2026-08-27
+summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime (incl. the daemon's own OAuth token, manual ticks, and new daemon authoring), memory, routines, git staging (incl. the clean-index precondition, the sync-displaced-index self-heal, and local-vs-remote sync halts), MCP permissions, and change-history search.
+last_regen: 2026-08-30
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -25,7 +25,7 @@ source_skills:
   - lazy-log.recall
   - lazy-log.summary
   - lazy-log.timeline
-source_sha: 8351c07ae62867736a3ef96dbdf0104c3d1b787c
+source_sha: 4b059db3faee4129ac2de3faa7376ba7212ee3b6
 ---
 # FAQ
 
@@ -346,6 +346,16 @@ The denial deliberately does not prescribe a fix, because a session has no way t
 Separately, if a commit succeeds but the index is non-empty again immediately afterward — even though it started clean — that is the signature of a partial commit's temporary index getting written into place as the real one, typically from a crash or a race mid-commit. The hook raises an ALARM for this case instead of blocking, since the commit already landed; surface it to the operator, who runs `git reset` to rebuild the index from `HEAD` (worktree untouched) — never something a session does on its own.
 
 The same index-health check also watches `pull`, `merge`, and `rebase`, not just `commit`. When the staged content it finds afterward is a **lagging index** — every staged path's worktree file already matches `HEAD`, meaning an index write simply lost a race to a fast-forward — it alarms with that specific diagnosis rather than the generic swap message, because that signature is provably lossless rather than ambiguous. The runtime daemon applies the same check to its own pre-tick pull and repairs a proven-lossless lagging index automatically with `git reset`, journaling the repair; anything that isn't provably lossless is left alone for the operator, exactly as a session would.
+
+---
+
+## `git status` briefly showed staged content nobody staged, right after a Dropbox/iCloud sync, and then it cleared on its own — what happened?
+
+That is a sync-displaced index healing itself, not a swap the git-guard hook needed to alarm on. A cloud-sync client (Dropbox, iCloud, Syncthing) can race git's own atomic rename of `.git/index`, lose, and resolve the "conflict" by leaving an older index under the real name while parking the version git actually wrote last beside it as `index (<owner>'s conflicted copy <date>)`. The resurrected old index is what makes `git status` show phantom staged content.
+
+`/lazy-core.install` registers a `lazy-core.index-guard` routine alongside the built-in expert pump and doctor tick — it runs every 5 minutes, independent of `daemon.enabled`, and `/lazy-runtime.tick` drives it on a checkout with no daemon exactly as it would any other routine. The git-guard hook also runs the same heal as a pre-flight check on every commit-related tool call. Either way, the heal restores the newest conflicted copy over the live index and deletes the litter, but only when that copy is strictly newer than the live file, carries a valid index signature, and no `index.lock` is present — a git operation mid-flight is left alone and retried on the next pass. The worktree, `HEAD`, and refs are never touched, and a repository with no conflicted copies is a silent no-op.
+
+Because the heal runs automatically on this cadence, you should rarely see the phantom state persist past a minute or two. If you want to trigger it immediately rather than wait for the next tick, run `/lazy-runtime.tick lazy-core.index-guard`. Separately, both the daemon and `/lazy-runtime.tick` now run their own git calls with `GIT_OPTIONAL_LOCKS=0`, so a background `git status` they perform no longer rewrites the shared index on every pass — fewer index rewrites means fewer chances for a sync client to race one in the first place.
 
 ---
 

@@ -1643,6 +1643,13 @@ def run(repo_root: Path) -> None:
       pair that drives this repository, or if `daemon.token_env` is absent or blank, or the
       variable it names resolves to no value in either the environment or the env file.
   """
+  # The daemon's own git calls and everything it spawns run with optional locks off: a
+  # background `git status` otherwise rewrites the shared `.git/index` on nearly every run,
+  # and each rewrite is one more chance for a cloud-sync client to race the rename and
+  # resurrect a stale index. `setdefault`, so a unit-level override stays authoritative.
+  # waiver: environment-variable name, not a domain key
+  os.environ.setdefault("GIT_OPTIONAL_LOCKS", "0")
+
   # every loop-tail settings read resolves against this one path
   settings_path = repo_root / SettingsFile.REL
 
@@ -2075,6 +2082,19 @@ def _git_pre(repo_root: Path, git_cfg: dict | None) -> None:
       commits the other does not.
     subprocess.CalledProcessError: When an underlying git invocation fails for any other reason.
   """
+  # heal a sync-displaced index first — a resurrected pre-commit index would otherwise read
+  # as staged content through the whole flow below; the guard is a no-op when nothing happened
+  # waiver: deferred import — index_guard is only needed on the git-flow path
+  import index_guard
+  report = index_guard.guard_index(repo_root)
+  # waiver: report keys are index_guard's own JSON contract, not this module's constants
+  if report.get("restored") or report.get("removed"):
+    _log_routine_result(repo_root, {
+      TickResultKey.NAME: "_git_pre", TickResultKey.EXIT: 0, TickResultKey.DURATION_SEC: 0.0,
+      # waiver: report keys are index_guard's own JSON contract, not this module's constants
+      TickResultKey.NOTE: f"index-guard: restored={report['restored']} removed={report['removed']}",
+    })
+
   # guard: git sync disabled
   if not git_cfg:
     return

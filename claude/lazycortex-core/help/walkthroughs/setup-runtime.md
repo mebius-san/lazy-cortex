@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover from any of its halt reasons — dirty tree, remote sync, bad routine config, or a closed rate-limit window.
-last_regen: 2026-08-27
+last_regen: 2026-08-30
 diagram_spec:
   anchor: "How setup and recovery connect"
   request: "Sequence diagram showing three phases: (1) User runs /lazy-core.install, answers yes to the runtime-daemon wizard, wizard writes .claude/bin/lazy.runtime.sh + lazy.settings.json[experts] + flat daemon and routines sections; (2) User runs .claude/bin/lazy.runtime.sh, daemon starts and polls .experts/.jobs/ on interval, user checks .runtime/state.json for a recent last_run; (3) Working tree goes dirty, daemon writes daemon_halted to .runtime/state.json, user runs /lazy-runtime.recover, skill shows halt context, user picks a cleanup mode (commit/stash/discard), skill clears daemon_halted, daemon resumes on next iteration."
@@ -9,7 +9,7 @@ diagram_spec:
 source_skills:
   - lazy-core.install
   - lazy-runtime.recover
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: 4b059db3faee4129ac2de3faa7376ba7212ee3b6
 ---
 # How do I bootstrap the runtime daemon and recover it if it halts?
 
@@ -94,6 +94,8 @@ If the tree is still dirty after cleanup (e.g., a submodule left additional chan
 ## After you're done
 
 The daemon runs continuously, draining jobs and firing registered routines. The built-in `lazy-expert.pump` routine processes them serially per expert so there is never contention. An autonomous `lazy-runtime.doctor` routine runs hourly and handles DEAD expert jobs automatically — retrying recoverable failures and permanently failing jobs the daemon can no longer make progress on — without requiring operator action.
+
+If this repo's working tree syncs through a cloud-storage client (Dropbox, iCloud, OneDrive, and similar), install also bootstraps a built-in `lazy-core.index-guard` routine alongside `lazy-expert.pump` and `lazy-runtime.doctor` — no separate opt-in. Cloud-sync clients occasionally race git and resurrect a stale `.git/index`, leaving `index (…conflicted copy…)` files sitting beside the real one; the routine (plus a pre-flight baked into the git-guard hook and the daemon's own git flow) restores the newest copy — the one git actually wrote last — and clears the litter automatically. The daemon and manual `/lazy-runtime.tick` also run git with `GIT_OPTIONAL_LOCKS=0` so a background `status` scan can no longer rewrite the shared index in the first place. Nothing to configure here — never hand-copy those conflicted-copy files yourself, and never diagnose staged content before the routine has had a chance to heal it.
 
 Whenever you wire a new expert into a routine, or a routine's expert spawns start timing out, re-run `/lazy-runtime.preflight` before trusting the daemon with it again — catching a broken spawn config at preflight time is far cheaper than debugging a stuck queue entry after the fact.
 

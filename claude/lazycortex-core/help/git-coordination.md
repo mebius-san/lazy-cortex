@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Protect your repo's git index from Claude Code — pathspec-only commits by default, an optional staging lock for concurrent sessions, and the two skills to inspect and break it.
-last_regen: 2026-08-27
+last_regen: 2026-08-30
 diagram_spec:
   anchor: "Lock lifecycle"
   request: "State diagram of the lazy-core.git staging-window lock, scoped to the mutex row only (git.pathspec_enabled=false, git.mutex_enabled=true — the lock never exists on the default pathspec row). NO_LOCK → HELD (a hook or skill acquires .git/lazy-git.lock before touching the git index) → auto-released when the staging window closes (commit/reset empties the index) OR auto-broken by heuristics (dead PID / stale-and-idle / different host) → NO_LOCK. Show the manual break path via /lazy-core.git-unlock as an alternative exit from HELD, guarded by /lazy-core.git-status inspection first."
@@ -9,7 +9,7 @@ diagram_spec:
 source_skills:
   - lazy-core.git-status
   - lazy-core.git-unlock
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: 4b059db3faee4129ac2de3faa7376ba7212ee3b6
 ---
 # git staging coordination
 
@@ -20,6 +20,7 @@ Your git index is not Claude Code's to sweep up. When you have files staged for 
 - You notice Claude Code always commits with explicit file paths and never runs `git commit -am` or `git add .`, and you want to understand why — this is the default pathspec discipline protecting whatever you already have staged.
 - A commit is refused with a message about the shared index not being clean, and you want to know why — pathspec discipline also requires a clean index before it lets a commit through, so anything staged there for another reason (your own parked work, a peer session, a stray leftover) blocks it until it clears.
 - You want to go back to the older lock-based behavior (or turn coordination off entirely) for a repo where you know only one Claude Code session ever touches it.
+- You notice `index (…conflicted copy…)` files sitting next to `.git/index` after a cloud-sync client (Dropbox and similar) has touched the repo, and want to know whether you need to intervene — you don't; this now heals itself automatically before any staged-content diagnosis runs.
 - In a repo running the mutex row: a commit or hook appears to hang and you want to confirm whether the staging lock is the cause before reaching for a heavier tool.
 - `/lazy-core.doctor` surfaces a stale-lock warning and you want to inspect the holder before deciding whether to act.
 - A Claude Code session was interrupted mid-staging-window — crash, forced kill, IDE restart — and you want to verify the PID is dead before breaking the lock yourself.
@@ -30,6 +31,8 @@ Your git index is not Claude Code's to sweep up. When you have files staged for 
 **Pathspec discipline** is not a skill you invoke — it's the default behavior of every Claude Code git action in your repo. A new file gets registered with `git add -N <path>` (no content staged) rather than a plain `git add`; a rename or delete happens as a plain filesystem `mv`/`rm` rather than `git mv`/`git rm`, both of which auto-stage; and every commit names its paths explicitly (`git commit -m "..." -- <path> <path>`) rather than going bare, `-a`, or against a directory. Reverting a file follows the same logic: `git restore --worktree -- <path>` is allowed, since it only touches the working tree, but `git checkout <tree-ish> -- <path>` and `git restore --staged --source=<tree-ish>` are refused — both rewrite the index entry, silently re-staging a revision's content nobody asked Claude Code to stage. `git restore --staged` without `--source` stays allowed, since it only unstages. The two exceptions to the discipline overall are a commit mid-merge/rebase/cherry-pick (git itself refuses a partial commit there) and `--amend` against a clean index or with its own pathspec. Anything that would snapshot content you didn't ask Claude Code to touch is refused outright, with a message telling the agent to rephrase — never to bypass with `--no-verify` or a raw wrapper. The guard also only judges commands against the repo they actually target — a command that points at a different checkout (its own `-C <dir>` resolving elsewhere) is left alone, so it stays out of the way of tooling that manages other repos alongside yours.
 
 A commit on this row also requires a clean index before it runs — intent-to-add registrations don't count, but any other staged content is presumed to belong to you, not the session: parked work, an intentional untrack, or a stray leftover, and Claude Code can't tell those apart. The hook waits up to 15 seconds for that content to clear (`LAZYCORTEX_GIT_GUARD_WAIT_SECONDS` overrides the window if you need it shorter or longer), then denies the commit and tells the agent to stop and escalate to you rather than touch the index itself — the denial doesn't prescribe a recovery command, since staged content could equally be your parked work, an intentional untrack, or a swapped index, and Claude Code has no way to tell those apart. After a commit does go through clean, the hook also checks that the index came out the way it should: staged content reappearing immediately afterward, when the index was clean going in, is the signature of a rare failure — a crashed or raced partial commit leaving its own temporary index in place instead of discarding it, which shows up as nearly every tracked file reading as staged for deletion even though nothing changed on disk. The hook raises an alarm for you rather than fixing it; the cure is `git reset` (rebuilds the index from HEAD, worktree untouched), and it's a move only you make, never the session.
+
+Before any of that diagnosis runs, the hook also self-heals a different kind of index corruption: a **sync-displaced index**. If a cloud-sync client (Dropbox and the like) races git while it's mid-write to `.git/index`, it can resurrect a stale copy and leave `index (…conflicted copy…)` litter beside the real file. The `lazy-core.index-guard` routine, and the git-guard hook's own pre-flight check on every invocation, restore the newest copy automatically and clean up the conflicted-copy files — you never need to hand-copy one back into place, and the hook never treats this litter as staged content worth escalating to you. This heal always runs first, so the "commit requires a clean index" diagnosis above only ever fires once a real staging conflict is left.
 
 **The staging-window mutex** is the older, opt-in behavior: a per-repo lock at `.git/lazy-git.lock` that serializes the interval from the first staging action to the commit that empties the index, so two concurrent Claude Code sessions never corrupt each other's staged changes. It only takes effect once you've turned pathspec discipline off for that repo (see Common adjustments) — the two rows don't run at the same time.
 
@@ -60,7 +63,7 @@ Run `/lazy-core.git-unlock`, confirm at the prompt, and the lock is gone; any qu
 
 ## Where this fits
 
-Pathspec discipline is silent infrastructure — it applies to every git action Claude Code takes in your repo, whether you notice it or not, and its only visible effect is that agent commits always name their files. The staging mutex, when a repo opts into it, is what the rest of the lazycortex-core surface leans on for concurrent-session safety — the pre-commit pipeline, the install-and-audit lifecycle, the runtime daemon, and the expert job queue all pass through it. It becomes relevant when a commit or hook appears to hang, when `/lazy-core.doctor` surfaces a stale-lock warning, or when `/lazy-runtime.recover` notes a staging-lock conflict as part of a daemon halt.
+Pathspec discipline is silent infrastructure — it applies to every git action Claude Code takes in your repo, whether you notice it or not, and its only visible effect is that agent commits always name their files. The sync-displaced-index heal is the same kind of silent infrastructure, running ahead of every guard decision so a cloud-sync race never masquerades as a dirty-index refusal. The staging mutex, when a repo opts into it, is what the rest of the lazycortex-core surface leans on for concurrent-session safety — the pre-commit pipeline, the install-and-audit lifecycle, the runtime daemon, and the expert job queue all pass through it. It becomes relevant when a commit or hook appears to hang, when `/lazy-core.doctor` surfaces a stale-lock warning, or when `/lazy-runtime.recover` notes a staging-lock conflict as part of a daemon halt.
 
 ## Lock lifecycle
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-08-27
+last_regen: 2026-08-30
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,7 +25,7 @@ source_skills:
   - lazy-spec.set-stage
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
-source_sha: ac6c3e4c5c56301e62e3afab0d0de63b564eb60e
+source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
 ---
 # Troubleshooting
 
@@ -46,6 +46,16 @@ source_sha: ac6c3e4c5c56301e62e3afab0d0de63b564eb60e
 **Likely cause**: A prior install already wired that routine. Re-running `/lazy-spec.install` never overwrites an existing routine registration — this is the expected `routine-already-present` outcome, not a failure. `lazy-spec.collect` is the postman routine that delivers a finished expert job's terminal marker back into the asset's status folder-note — install registers it alongside the gate-tick and coordinator-watch routines.
 
 **Fix**: Nothing to do if the routine's shape is still correct. To change its shape (schedule, paths, filters), run `/lazy-routine.unregister lazy-spec.gate-tick` (or `lazy-spec.coordinator-watch`, or `lazy-spec.collect`) first, then re-run `/lazy-spec.install` so it re-registers fresh.
+
+---
+
+## `/lazy-spec.product-config` aborts with `aborted:no-vault-spec`
+
+**Symptom**: Running the wizard in create mode (registering a brand-new product) aborts immediately, saying there is no `design.md` at the spec content-root.
+
+**Likely cause**: The project-wide vault spec — the content-root `design.md` that states what the project is and why it exists, the document every product split is a consequence of — hasn't been seeded yet. Registering the first product is gated on that file existing.
+
+**Fix**: Run `/lazy-spec.install` — its Step 6.9 seeds a draft vault spec at the content-root if one is missing — fill it in, then re-run `/lazy-spec.product-config`.
 
 ---
 
@@ -156,6 +166,16 @@ source_sha: ac6c3e4c5c56301e62e3afab0d0de63b564eb60e
 **Likely cause**: The rule-chain the coordinator reads before deciding anything on any asset (playbook → vault doc → product note → container notes top-down → asset note) now spans container-level notes too, not just the product root — a container folder-note that has never needed group-wide constraints simply has nothing written yet, which is expected rather than broken.
 
 **Fix**: Nothing is required — this is a WARN, not a FAIL, and an empty section is not owed. If you do want group-scoped constraints for that container, re-run `/lazy-spec.doctor <product> --apply` and confirm the fix that adds the empty `# Coordinator rules` section (carrying the `#protected/spec/coordinator-rules` tag); the operator authors the actual constraints afterward.
+
+---
+
+## `/lazy-spec.doctor` reports `vault-spec-missing`
+
+**Symptom**: A doctor run's Check 11 reports `[WARN] vault-spec-missing` — the content-root `design.md` (the vault spec) does not exist.
+
+**Likely cause**: The catalog was registered before the mandatory-vault-spec contract landed, or `/lazy-spec.install` was never re-run afterward — the content-root `design.md` that every product split is a consequence of was never seeded.
+
+**Fix**: Re-run `/lazy-spec.install` — its Step 6.9 seeds a draft vault spec at the content-root when one is missing — then fill it in. This is a WARN, not a FAIL: the rest of the catalog keeps working while it's absent.
 
 ---
 

@@ -27,7 +27,7 @@ This skill has 21 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 10.5 — Bootstrap .memory/ directory`
    - `Step 10.7 — Install lazy-claude wrapper`
    - `Step 11 — Register expert candidates`
-   - `Step 12 — Bootstrap built-in routines (expert pump, doctor tick, weekly autocheckup)`
+   - `Step 12 — Bootstrap built-in routines (expert pump, doctor tick, index guard, weekly autocheckup)`
    - `Step 12.5 — Restore externally-sourced working directories`
    - `Step 13 — Daemon gate (enabled + run_here) + supervisor install`
    - `Step 13.5 — Configure expert-spawn sandbox in .runtime/sandbox.settings.json`
@@ -531,7 +531,7 @@ The two names differ on purpose: the key is the § 3 `<domain>.<role>` form, the
 
 State one line per candidate: `<expert_key>: registered`.
 
-## Step 12: Bootstrap built-in routines (expert pump, doctor tick, weekly autocheckup)
+## Step 12: Bootstrap built-in routines (expert pump, doctor tick, index guard, weekly autocheckup)
 
 If Step 9 was skipped (outcome `skipped-not-in-git-repo`), inherit the same outcome and skip this step. A registered routine is not daemon-only config: `/lazy-runtime.tick` runs the same set, in the same priority order, on a checkout that never starts a daemon.
 

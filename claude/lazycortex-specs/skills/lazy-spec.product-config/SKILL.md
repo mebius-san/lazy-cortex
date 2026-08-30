@@ -63,9 +63,11 @@ Resolve the user's input to a mode:
 
 When intent is ambiguous (e.g. the user just says "configure product"), `AskUserQuestion` whether they want to create a new product or edit an existing one, then proceed.
 
+**Vault-spec gate (create mode only).** Products are a consequence of the repo-wide spec: resolve the content-root (`<settings-dir>/<spec.vault_root>`, default `specs`) and check that `<content-root>/design.md` — the vault spec — exists. Absent → abort with outcome `aborted:no-vault-spec`, pointing the operator at `/lazy-spec.install` (its Step 6.9 seeds the draft). Presence is the whole gate; how far the document must have progressed (written / approved) is deliberately outside this contract yet. Edit mode skips the check — the registered catalog predates the gate.
+
 The products object + `repos` section drive: uniqueness of the new product key, flat-product validation (`spec_path` not nested under another product's `spec_path` per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`), and registered-repo options.
 
-Outcome: `create` or `edit`.
+Outcome: `create`, `edit`, or `aborted:no-vault-spec`.
 
 ## Step 2 — Product key + spec_path
 
@@ -389,6 +391,8 @@ Outcome: `verified` + `logged`.
 One line per task in the canonical list, with its outcome word. A missing line is a bug. End with the `lazy-spec.doctor` summary line from Step 13 and the `audit:` line from Step 12. If Step 9 was `delegated`, include the `/lazy-spec.add-asset-type <compound-key>` instruction.
 
 ## Failure modes
+
+- **`/lazy-spec.product-config` aborts with `aborted:no-vault-spec`** — create mode with no `design.md` at the spec content-root → run `/lazy-spec.install` (its Step 6.9 seeds the vault-spec draft), fill it in, then re-run this skill.
 
 - **`/lazy-spec.product-config` aborts pointing at `lazycortex-experts`** — a chosen role expert (use-case-writer / designer / system-designer / architect / ui-designer / planner / developer / tester / data-writer) is not registered in `experts` → compose the persona via `lazycortex-experts`, then re-run this skill.
 - **`/lazy-spec.product-config` refuses because the spec_path is nested** — the chosen `spec_path` sits under another product's `spec_path` (products are flat) → choose a path outside every registered product's subtree, then re-run.

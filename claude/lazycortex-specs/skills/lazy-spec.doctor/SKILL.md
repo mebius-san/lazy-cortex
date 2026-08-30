@@ -15,7 +15,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
    - `Step 0 — Resolve product`
    - `Step 1 — Dispatch parallel scan agents A/B/C/D`
-   - `Step 2 — Cross-reference + upstream + wiki-companion checks (inline)`
+   - `Step 2 — Cross-reference + upstream + wiki-companion + vault-spec checks (inline)`
    - `Step 3 — Merge findings by severity`
    - `Step 4 — Report`
    - `Step 5 — Fix loop (per-finding AskUserQuestion, apply on --apply)`
@@ -254,9 +254,16 @@ Runs once, vault-wide, like Checks 8–9 — the pairing between the spec plugin
 - Installed, but `lazy.settings.json` has `wiki.scopes` empty AND `structure.depth_profiles` empty AND no `wiki.domains` → `[INFO] wiki-companion-unconfigured — lazycortex-wiki is installed but nothing is configured; run /lazy-wiki.configure.`
 - Otherwise → `scan: Check 10 wiki-companion — clean`.
 
+## Vault-spec check (Check 11, inline in coordinator)
+
+Runs once, vault-wide, like Checks 8–10. The content-root `design.md` (the vault spec) is mandatory per `lazy-spec.layout-protocol.md` Part 1 — seeded by `/lazy-spec.install` Step 6.9, required by `lazy-spec.product-config` before the first product registration.
+
+- `<content-root>/design.md` absent → `[WARN] vault-spec-missing — the content-root design.md does not exist; re-run /lazy-spec.install to seed the draft (a registered catalog without one predates the mandatory-vault-spec contract).`
+- Otherwise → `scan: Check 11 vault-spec — clean`.
+
 ## Output (Report)
 
-Merge the four agents' findings plus Check 0, Check 8, Check 9, and Check 10, then print a report grouped by severity. The report MUST contain one line per Agent (A/B/C/D) plus Check 0, Check 8, Check 9, and Check 10 — a missing line is a bug. Checks 9 and 10 run exactly once per invocation (not once per product, even under "all products") — render each scan line once, at the end.
+Merge the four agents' findings plus Check 0, Check 8, Check 9, Check 10, and Check 11, then print a report grouped by severity. The report MUST contain one line per Agent (A/B/C/D) plus Check 0, Check 8, Check 9, Check 10, and Check 11 — a missing line is a bug. Checks 9–11 run exactly once per invocation (not once per product, even under "all products") — render each scan line once, at the end.
 
 ```
 ## <Product Name> — Spec Doctor Report

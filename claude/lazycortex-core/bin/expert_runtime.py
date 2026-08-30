@@ -966,6 +966,20 @@ DEFAULT_DOCTOR_TICK: _RoutineDefaults = {
   "ignore_halt":  True,
 }
 
+# Five-minute index healer: restores a `.git/index` displaced by a cloud-sync conflict
+# resolution (the newest `index (…conflicted copy…)` wins) and removes the copy litter.
+# Cheap — one glob of the git dir on the quiet path — and it MUST run during halt, since a
+# displaced index is exactly the kind of stuck state a halt tends to accompany.
+DEFAULT_INDEX_GUARD: _RoutineDefaults = {
+  "name":         "lazy-core.index-guard",
+  "command":      [ "lazycortex-core", "index-guard" ],
+  "interval_sec": 300,
+  "timeout_sec":  30,
+  # fast, runs before doctor and pump
+  "priority":     20,
+  "ignore_halt":  True,
+}
+
 # Weekly LLM-tier sanitizer (state-sanitizers-design's second tier): dispatches one
 # `core.autocheckup` expert job that runs the domain doctors and applies only its
 # mechanically-derivable whitelist. Typed (`schedule` + `expert`) shape, which the legacy
@@ -1021,7 +1035,7 @@ def _backfill_defaults(repo: Path, entry: _RoutineDefaults, existing: dict) -> N
 
 def bootstrap_default_routines(repo: Path) -> None:
   """
-  Register the built-in expert-pump, doctor-tick, and autocheckup routines when absent.
+  Register the built-in expert-pump, doctor-tick, index-guard, and autocheckup routines when absent.
 
   Idempotent — never overwrites a value an existing routine already carries. A key the
   defaults gained after the routine was first registered is filled in, since a repository
@@ -1041,7 +1055,7 @@ def bootstrap_default_routines(repo: Path) -> None:
   # saving would copy the operator's private values into the shared file
   merged = load_section(settings, SettingsKey.ROUTINES)
   tracked = load_tracked_section(settings, SettingsKey.ROUTINES)
-  for entry in (DEFAULT_EXPERT_PUMP, DEFAULT_DOCTOR_TICK):
+  for entry in (DEFAULT_EXPERT_PUMP, DEFAULT_DOCTOR_TICK, DEFAULT_INDEX_GUARD):
     # waiver: TypedDict access requires string-literal keys; constants break mypy literal-required
     name = entry["name"]
     # guard: configured only in the local overlay — writing the tracked layer would leave the

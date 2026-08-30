@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols, detect-scope, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit")
+         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols, detect-scope, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard")
 
 
 def _cmd_consume_job(argv: list[str]) -> int:
@@ -667,6 +667,9 @@ def main() -> int:
         print(json.dumps(result))
         return 0
     elif sub == "runtime-tick":
+        # optional git locks off for the tick and everything it spawns — a background
+        # `git status` must not rewrite the shared index (see runtime_daemon.run)
+        os.environ.setdefault("GIT_OPTIONAL_LOCKS", "0")
         return _cmd_runtime_tick(repo, sys.argv[2:])
     elif sub == "runtime":
         from runtime_daemon import run
@@ -725,6 +728,9 @@ def main() -> int:
         return _cmd_sandbox_sync(sys.argv[2:])
     elif sub == "sandbox-audit":
         return _cmd_sandbox_audit(sys.argv[2:])
+    elif sub == "index-guard":
+        from index_guard import main as _index_guard_main
+        return _index_guard_main(sys.argv[2:])
     else:
         print(f"unknown subcommand: {sub}\n{USAGE}", file=sys.stderr); return 2
 

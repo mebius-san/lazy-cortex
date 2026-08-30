@@ -11,7 +11,7 @@ Physical disk layout, the closed set of file roles, naming conventions, and the 
 
 ### Folder kinds
 
-**Spec content-root.** All spec content lives under `<settings-dir>/<spec.vault_root>` (default `specs`), where `<settings-dir>` is the directory that holds `.claude/lazy.settings.json` (the repo root). The operator's top-level folders, the content-root `requests/` inbox, and the optional **project-wide spec pair** — a loose `design.md` + `tech.md` describing the whole project above every product, typed `system-design` / `system-tech` — are direct children of the content-root. No config key declares the project-wide pair: the files' existence is the declaration, and their absence means the project level simply does not exist yet. Vault-relative paths (`spec_path`, wikilinks, tags) are relative to this content-root, not to `<settings-dir>`. See [config](./lazy-spec.config-protocol.md) for the `spec.vault_root` setting.
+**Spec content-root.** All spec content lives under `<settings-dir>/<spec.vault_root>` (default `specs`), where `<settings-dir>` is the directory that holds `.claude/lazy.settings.json` (the repo root). The operator's top-level folders, the content-root `requests/` inbox, and the **project-wide spec pair** — a loose `design.md` + `tech.md` describing the whole project above every product, typed `system-design` / `system-tech` — are direct children of the content-root. No config key declares the pair. `design.md` is the **vault spec** and is mandatory: `/lazy-spec.install` seeds its draft, and `lazy-spec.product-config` refuses to register the first product while the file is absent — the split into products is a consequence of the repo-wide spec. `tech.md` stays optional: its existence is its declaration, and its absence means the project tech level simply does not exist yet. Vault-relative paths (`spec_path`, wikilinks, tags) are relative to this content-root, not to `<settings-dir>`. See [config](./lazy-spec.config-protocol.md) for the `spec.vault_root` setting.
 
 Two kinds of folders exist under the content-root:
 
@@ -140,7 +140,7 @@ All products follow this shape. No concrete names appear in this rule — skills
 ```
 <settings-dir>/                              ← repo root (holds .claude/lazy.settings.json)
 └── specs/                                   ← content-root (<spec.vault_root>, default "specs")
-    ├── design.md                            ← optional — project-wide design (system-design), loose at the content-root
+    ├── design.md                            ← mandatory vault spec — project-wide design (system-design), seeded by /lazy-spec.install
     ├── tech.md                              ← optional — project-wide tech (system-tech), loose at the content-root
     ├── <operator folders…>/                 ← free-form organizational nesting, operator's own (any depth, or none)
     │   └── …/

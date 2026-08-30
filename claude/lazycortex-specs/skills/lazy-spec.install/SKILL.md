@@ -1,6 +1,6 @@
 ---
 name: lazy-spec.install
-description: "Run when the operator asks to set up the spec system in a repo, after enabling or updating lazycortex-specs, or when spec skills misbehave because the `spec` settings section, the per-category template-override dirs, the `lazy-spec.gate-tick` routine, or the request-handler runtime are missing. Also the place the first product gets registered. Idempotent — safe to re-run."
+description: "Run when the operator asks to set up the spec system in a repo, after enabling or updating lazycortex-specs, or when spec skills misbehave because the `spec` settings section, the per-category template-override dirs, the `lazy-spec.gate-tick` routine, the request-handler runtime, or the content-root vault spec (`design.md`) are missing. Also the place the vault spec gets seeded and the first product gets registered. Idempotent — safe to re-run."
 allowed-tools: Read, Write, Edit, Glob, Skill, Bash(mkdir -p *), Bash(git rev-parse*), Bash(test *), Bash(date *), Bash(PYTHONPATH=* python3 *), Bash(lazycortex-core *), Bash(lazycortex-wiki *), Bash(ls *), AskUserQuestion, Agent
 ---
 # Install lazycortex-specs
@@ -29,7 +29,7 @@ Steps 5, 5b, and 6 register routines (`lazy-spec.gate-tick`, `lazy-spec.coordina
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 15 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 18 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. Canonical list (titles verbatim):
    - `Step 1 — Detect install scope`
@@ -43,6 +43,7 @@ This skill has 15 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 6 — Wire the request-handler runtime`
    - `Step 6.5 — Seed agent-model tiers`
    - `Step 6.7 — Register the upstream-tick routine`
+   - `Step 6.9 — Seed the vault spec`
    - `Step 7 — Offer first product registration`
    - `Step 7b — Ensure product/category wiki axes (wiki-conditional)`
    - `Step 7c — Backfill spec_doc_type across the catalog`
@@ -106,7 +107,7 @@ Report `created` or `already-exists`.
 
 This skill does NOT create a `templates/spec.workflows/` dir — workflow machinery has been removed from the plugin. Products live in the `products` settings section and repos live in the `repos` settings section, not in rule files — `.claude/rules/` carries only the plugin's own authoring rules, mirrored in Step 3b below.
 
-Project scope only: if a spec output directory is needed (e.g. a `Specs/` vault root), defer that decision to `lazy-spec.product-config` — this skill does not create vault content.
+Project scope only: if a spec output directory is needed (e.g. a `Specs/` vault root), defer that decision to `lazy-spec.product-config` — the only vault content this skill creates is the vault-spec draft (Step 6.9); everything else is `lazy-spec.product-config`'s.
 
 ## Step 3b: Mirror plugin rules into `.claude/rules/`
 
@@ -633,7 +634,21 @@ The daemon resolves `command[0]` (`lazycortex-specs`) to the plugin's bin script
 
 If `/lazy-routine.register` reports the routine is already registered, accept its outcome (`unchanged` / `present`) — do not force-overwrite. Outcome: `routine-registered`, `routine-already-present`, or `skipped-no-upstream-configured`.
 
+## Step 6.9: Seed the vault spec
+
+The project-wide `design.md` at the spec content-root — the **vault spec** — is the starting point of the whole catalog: it states what the project is and why it exists, and the split into products is a consequence of it (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` Part 1). `lazy-spec.product-config` refuses to register the first product while the file is absent, so this step seeds a draft before Step 7 offers that registration.
+
+**Project scope only.** Vault content lives per-repo; at user scope skip silently with outcome `skipped-user-scope`.
+
+1. Resolve the content-root: `<settings-dir>/<spec.vault_root>` (`spec.vault_root` from `Bash(lazycortex-core settings-get spec)`, default `specs`).
+2. If `<content-root>/design.md` already exists — in any state, draft or approved — leave it untouched. Outcome: `already-present`.
+3. Otherwise `Bash(mkdir -p <content-root>)`, then instantiate `${CLAUDE_PLUGIN_ROOT}/templates/spec.docs/vault-design.md`, substituting `{{project}}` with the repo-root directory name, and `Write` the result to `<content-root>/design.md`. Outcome: `seeded`.
+
+No question — the seed is fully derivable. No review dispatch either: the shared `system-design` review class already covers the content-root `design.md` glob, so the review loop picks the document up through the normal channels once the operator starts filling it in. The gate `lazy-spec.product-config` enforces is the file's presence; any stricter condition (written / approved) is deliberately not part of this contract yet.
+
 ## Step 7: Offer first product registration
+
+The vault spec from Step 6.9 now exists, so registration can follow it — products are a consequence of the repo-wide spec.
 
 Ask via `AskUserQuestion`:
 
@@ -747,6 +762,7 @@ Outcome: `cli-allow-added` or `cli-allow-already-present`.
 - Confirm the `lazy-spec.gate-tick` routine is present in `lazy.settings.json` (`routines.lazy-spec.gate-tick`) — pure script, no `protocols` entry.
 - Confirm the `lazy-spec.coordinator-watch` routine is present in `lazy.settings.json` (`routines.lazy-spec.coordinator-watch`) and that its `protocols` list carries both `lazycortex-specs:lazy-spec.coordination-playbook` AND `lazycortex-core:lazy-core.markdown-style`.
 - If Step 4 set a language: confirm `lazycortex-core settings-get spec` reports the chosen `language`.
+- Project scope only: confirm `<content-root>/design.md` exists (Step 6.9).
 - Unless Step 6 was `skipped-user-scope`: confirm the blocks are present in `lazy.settings.json` (`experts.spec.coordinator`, at least one `review.classes[]` entry covering `requests/*.md` with `terminal.routing` naming `spec.coordinator`; and `routines.lazy-spec.request-open` / `routines.lazy-spec.request-apply` unless the daemon gate skipped them). Note: no `experts.lazy-spec.request-apply` entry — the apply routine is `command:`-shape, not expert-based.
 - Confirm every 6d/6e `review.classes` entry carries `lazycortex-specs:lazy-spec.expert-signals-protocol` in its `protocols` list (Step 6f).
 - **Wiki companion check (report-only).** The spec experts (architect above all) work best with the research surfaces `lazycortex-wiki` provides — the structure map, the domain tree, the terms dictionary, wiki query. Check the pairing and append one INFO line to the report; never ask a question, never install anything:
@@ -766,6 +782,7 @@ Outcome: `cli-allow-added` or `cli-allow-already-present`.
   - Step 6 outcome (`wiring-applied:<N>` or `skipped-user-scope`)
   - Step 6.5 outcome (`seeded` or `unchanged`), with the primitive's report block folded in verbatim; surface `sot-missing` / `no-entries` if returned
   - Step 6.7 outcome (`routine-registered`, `routine-already-present`, or `skipped-no-upstream-configured`)
+  - Step 6.9 outcome (`seeded`, `already-present`, or `skipped-user-scope`)
   - Step 7 outcome (`registered: <compound-key>` or `skipped-per-user-choice`)
   - Step 7b outcome (`skipped-no-wiki` or `ensured: <N-scopes> (no-scope: <M-products>, cli-failed: <K>)`)
   - Step 7c outcome (`backfilled: <touched>/<skipped>`)

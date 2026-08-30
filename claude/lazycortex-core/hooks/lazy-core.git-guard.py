@@ -59,6 +59,8 @@ import staging_lock  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import git_cmdline  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import index_guard  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import hook_gate  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from constants import HookKey, HookName  # noqa: E402
@@ -399,6 +401,15 @@ def _handle_pre_pathspec(repo: Path, tool_name: str, tool_input: dict) -> int:
   Returns:
     Always 0; refusals are signaled via the emitted JSON payload.
   """
+  # heal a sync-displaced index before judging anything — a resurrected pre-commit index
+  # otherwise reads as operator-staged content and denies an innocent commit; the guard is a
+  # no-op when no conflicted copy exists, and never touches a mid-operation repository
+  try:
+    index_guard.guard_index(repo)
+  except OSError:
+    # guard: a heal failure must never block the tool call the hook is judging
+    pass
+
   # MCP branch: these tools cannot carry a pathspec, so only the harmless verb survives
   if tool_name in _MCP_INDEX_TOOLS:
     verb = tool_name.rsplit("_", 1)[-1]

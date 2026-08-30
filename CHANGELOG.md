@@ -5,6 +5,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-core
 
 
+### 8.1.0 — 2026-08-30 UTC
+
+- New `lazy-core.index-guard` routine heals a `.git/index` displaced by a cloud-sync conflict (the phantom "staged content nobody staged" symptom) — registered by `/lazy-core.install` alongside the expert pump and doctor tick, runs every 5 minutes during halt, with the same heal also available via a pre-flight check in the git-guard hook and as a standalone CLI subcommand.
+- Daemon and `runtime-tick` git calls now set `GIT_OPTIONAL_LOCKS=0`, so background `git status` runs stop rewriting the shared `.git/index` — the displacement this guards against gets rare instead of merely repaired, for every daemon-supervised checkout.
+
 ### 8.0.1 — 2026-08-27 UTC
 
 - New `safe-pull` command backs the daemon's post-push sync — a guarded fast-forward pull that waits out a locked index and never touches staged content, replacing a bare `git pull` that could race the shared git index.
@@ -564,6 +569,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-specs
 
 
+### 6.3.0 — 2026-08-30 UTC
+
+- New mandatory vault spec (`design.md`) at the catalog root — `lazy-spec.install` now seeds a draft, and `lazy-spec.product-config` refuses to register the first product until it exists.
+- Fixed a bug in the upstream-sync tick that fired a spurious commit for every unrelated upstream-repo commit, even ones outside a unit's mounted path — the revision now advances only when the synced content actually changed.
+
 ### 6.2.0 — 2026-08-27 UTC
 
 - `lazy-spec.upstream-run` no longer leaves an uncommitted, icon-less unit note behind if the daemon is killed mid-write — the note write is now folded into the same commit step during advance, accept, and release.
@@ -934,6 +944,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+
+### 6.2.2 — 2026-08-30 UTC
+
+- Fixed an infinite review-round loop where an already-answered question kept getting re-read as fresh input and reopened the round on every wake (observed 7 rounds on a use-cases document). Landing a round now strips each answered question in the same pass; unanswered questions and other callout kinds are left untouched.
 
 ### 6.2.1 — 2026-08-27 UTC
 

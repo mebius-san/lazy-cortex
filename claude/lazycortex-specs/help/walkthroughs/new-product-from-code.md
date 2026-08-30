@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Register a product bound to an existing codebase, generate its design and tech docs from source, then scaffold the first feature.
-last_regen: 2026-08-27
+last_regen: 2026-08-30
 diagram_spec:
   anchor: "How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce design + tech docs, then runs lazy-spec.create-feature to scaffold the first feature asset; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -9,16 +9,17 @@ source_skills:
   - lazy-spec.product-config
   - lazy-spec.create-from-code
   - lazy-spec.create-feature
-source_sha: 5c6df9c9cd371786a67e07f580e9c5ed4ea8493f
+source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
 ---
 # How do I get specs for a codebase that already exists?
 
-You have a working codebase — a service, a library, an application — and no spec to go with it. This walkthrough takes you through all three steps: registering the product in the spec system, generating a behavior-and-source-grounded specification directly from the code, and scaffolding the first feature so the asset lifecycle can begin. Three skills carry the work; your job is to answer their wizard questions and review what lands.
+You have a working codebase — a service, a library, an application — and no spec to go with it. This walkthrough starts from the vault spec that has to exist before any product can be registered, then takes you through registering the product in the spec system, generating a behavior-and-source-grounded specification directly from the code, and scaffolding the first feature so the asset lifecycle can begin. Three skills carry the bulk of the work; your job is to answer their wizard questions and review what lands.
 
 ## Outcome
 
 After completing this walkthrough you will have:
 
+- A project-wide vault spec (`design.md` at the spec content root) confirmed present — either an existing one or a freshly seeded draft.
 - A product record in `lazy.settings.json[products]` that names your codebase's source repo and the paths within it your product covers.
 - A `design.md` — behavior-only, no source URLs — describing what the product does for its users.
 - A `tech.md` — code-grounded, with forge-correct source URLs — covering the source map, architecture, and components.
@@ -33,11 +34,21 @@ Neither `design.md` nor `tech.md` gets a diagram automatically — the product-s
 - `lazycortex-core` available — it provides the `settings-get` / `settings-set` CLI and the runtime daemon.
 - A local checkout of the source repo you want to document — either the same repo that holds your spec vault (`/lazy-spec.product-config` can register it with `local_path: "."`, so every checkout resolves its own root with no absolute path needed), or a separate checkout that exists on disk at a path Claude Code can read.
 - At least one expert registered in `lazy.settings.json[experts]` for each review role you plan to assign — use-case-writer, designer, system-designer, architect, ui-designer, planner, developer, and tester (plus data-writer if your product needs one) — unless this is not your first product in the vault, in which case you can ride the shared expert set an earlier product already set up. If you have not set up experts yet, run `/lazy-spec.install` — it offers to configure them — or run `lazycortex-experts` to compose the personas first.
-- `lazycortex-diagram` available — Step 3's feature scaffold draws a flow diagram automatically; Steps 1 and 2 draw nothing on their own, so it is only needed there if you choose to draw a diagram yourself afterward.
+- `lazycortex-diagram` available — Step 4's feature scaffold draws a flow diagram automatically; Steps 2 and 3 draw nothing on their own, so it is only needed there if you choose to draw a diagram yourself afterward.
 
 ## The journey
 
-### Step 1 — Register the product with `/lazy-spec.product-config`
+### Step 1 — Confirm the vault spec exists
+
+Before any product can be registered, the spec catalog needs a starting point: a project-wide `design.md` at the vault's content root (`specs/design.md` by default), stating what the whole project is and why it exists — every product is a consequence of that document, not the other way around. `/lazy-spec.product-config` enforces this: in create mode it checks for the file and aborts with `aborted:no-vault-spec` when it is missing, before asking you a single wizard question.
+
+If `/lazy-spec.install` has already run in this repo, its own seeding step already created a draft here — either it was `already-present` (your vault already had a `design.md`) or it wrote one (`seeded`), instantiated from a template with your repo's directory name filled in, no questions asked. If you have not run `/lazy-spec.install` yet, run it now; the vault-spec seed is part of its normal setup, not a separate step you invoke by hand.
+
+The seeded draft is deliberately minimal — presence is the whole gate `/lazy-spec.product-config` checks, not any particular level of completeness. You can flesh it out before or after registering your first product; the review loop picks it up through the standard `system-design` class either way.
+
+**Verification gate.** `<content-root>/design.md` exists on disk (content root defaults to `specs/`), in any state — draft or approved.
+
+### Step 2 — Register the product with `/lazy-spec.product-config`
 
 Run `/lazy-spec.product-config`. The skill opens a wizard and asks one question at a time.
 
@@ -59,9 +70,9 @@ When the wizard finishes, the skill writes the product record into settings, cre
 
 If `/lazy-spec.product-config` points you at `lazycortex-experts` before finishing, it means a chosen expert name is not registered. Compose the persona via `lazycortex-experts`, then re-run `/lazy-spec.product-config`.
 
-**Verification gate.** Before continuing, confirm that `lazy-spec.doctor` in the report shows no failures. The product folder and its folder-note should exist on disk — `features/`, `changes/`, and `bugs/` do not appear yet: group folders are created lazily, the first time an asset lands in one (Step 3 is what creates `features/`).
+**Verification gate.** Before continuing, confirm that `lazy-spec.doctor` in the report shows no failures. The product folder and its folder-note should exist on disk — `features/`, `changes/`, and `bugs/` do not appear yet: group folders are created lazily, the first time an asset lands in one (Step 4 is what creates `features/`).
 
-### Step 2 — Generate the spec from code with `/lazy-spec.create-from-code`
+### Step 3 — Generate the spec from code with `/lazy-spec.create-from-code`
 
 Run `/lazy-spec.create-from-code <compound-key>` where `<compound-key>` is the product key the previous step just wrote (e.g. `backend-api-gateway`).
 
@@ -80,7 +91,7 @@ After scanning, the skill authors two docs:
 
 Once both docs are written, the skill presents Agent D's candidate feature list and asks you what to do with each one:
 
-- **scaffold feature** — delegates immediately to `lazy-spec.create-asset`, which opens its own wizard for that feature (see Step 3). Pick this for features you want to document now. Scaffolded features leave no trace in `design.md` — the folder-notes aggregate the decomposition catalog.
+- **scaffold feature** — delegates immediately to `lazy-spec.create-asset`, which opens its own wizard for that feature (see Step 4). Pick this for features you want to document now. Scaffolded features leave no trace in `design.md` — the folder-notes aggregate the decomposition catalog.
 - **treat as architectural area** — adds a subsection to the tech doc's `## Architectural Areas`; no feature folder is created.
 - **skip** — leaves no trace.
 
@@ -88,9 +99,9 @@ Work through each candidate. You do not need to scaffold all of them now — you
 
 **Verification gate.** Both `design.md` and `tech.md` should exist and carry `spec_stage: draft`. The design doc must contain no source URLs and no `spec_source_branches` frontmatter. Both docs should carry the default `spec_source_docs` frontmatter and a body `# Sources` section pointing at each other.
 
-### Step 3 — Scaffold the first feature with `/lazy-spec.create-feature`
+### Step 4 — Scaffold the first feature with `/lazy-spec.create-feature`
 
-If you chose "scaffold feature" for at least one candidate in Step 2, `lazy-spec.create-asset` already ran inside that step and your first feature folder is ready. You can skip directly to the verification gate below.
+If you chose "scaffold feature" for at least one candidate in Step 3, `lazy-spec.create-asset` already ran inside that step and your first feature folder is ready. You can skip directly to the verification gate below.
 
 If you deferred all candidates or want to add a feature that was not in the candidate list, run:
 

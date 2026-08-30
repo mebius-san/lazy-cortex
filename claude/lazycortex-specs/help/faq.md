@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about products, assets, gates, requests, decisions, coverage gaps, spec lookups, and the coordinator agent.
-last_regen: 2026-08-27
+last_regen: 2026-08-30
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -27,13 +27,13 @@ source_skills:
   - lazy-spec.source-url
   - lazy-spec.lookup
   - lazy-spec.coordinator
-source_sha: ac6c3e4c5c56301e62e3afab0d0de63b564eb60e
+source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
 ---
 # Frequently asked questions
 
 ## Do I need to run anything before registering my first product?
 
-Yes — run `/lazy-spec.install` once per project (or once globally, if you want the plugin available everywhere). It ensures the per-type template-override directories exist, seeds the repo's authoring language (asks only if none is on record), registers the `lazy-spec.gate-tick` and `lazy-spec.coordinator-watch` daemon routines — the pair that clears finished job markers / structurally checks each note and hands operator activity to `spec.coordinator`, which is what actually decides and flips gates — and wires the requests-inbox runtime (open / apply routines, the request-routing expert, and its review class) at project scope. It's idempotent — re-running it is always safe and never overwrites config you've customized since. At the end it offers to chain straight into `/lazy-spec.product-config` so you can register your first product in the same pass, or you can skip and run that separately whenever you're ready.
+Yes — run `/lazy-spec.install` once per project (or once globally, if you want the plugin available everywhere). It ensures the per-type template-override directories exist, seeds the repo's authoring language (asks only if none is on record), registers the `lazy-spec.gate-tick` and `lazy-spec.coordinator-watch` daemon routines — the pair that clears finished job markers / structurally checks each note and hands operator activity to `spec.coordinator`, which is what actually decides and flips gates — and wires the requests-inbox runtime (open / apply routines, the request-routing expert, and its review class) at project scope. At project scope it also seeds a draft of the **vault spec** — the project-wide `design.md` at the spec content-root — whenever one isn't already there; this file is now mandatory groundwork, not an optional nicety, because `/lazy-spec.product-config` refuses to register your first product while it's absent — the split into products is a consequence of the repo-wide spec. It's idempotent — re-running it is always safe and never overwrites config you've customized since. At the end it offers to chain straight into `/lazy-spec.product-config` so you can register your first product in the same pass, or you can skip and run that separately whenever you're ready.
 
 ---
 
@@ -55,9 +55,9 @@ The skill requires the product to already carry a `source` binding — register 
 
 ## What is `system-design` / `system-tech`, and is there a spec for the whole project, not just one product?
 
-Yes. Every product's own `design.md` + `tech.md` pair — loose at the product root, not inside any asset folder — is typed `system-design` / `system-tech` rather than the asset-level `design` type feature/change/bug docs carry. The same pair can also exist loose at the vault's content-root (the `spec.vault_root` setting, default `specs/`), describing the whole project above every individual product. Nothing in config declares that project-wide pair — the files' existence at the content-root IS the declaration, so it's entirely optional and never auto-created; write it by hand (copying the plugin's own `system-design.md` / `system-tech.md` templates) whenever the project is big enough to want one.
+Yes. Every product's own `design.md` + `tech.md` pair — loose at the product root, not inside any asset folder — is typed `system-design` / `system-tech` rather than the asset-level `design` type feature/change/bug docs carry. The same pair can also exist loose at the vault's content-root (the `spec.vault_root` setting, default `specs/`), describing the whole project above every individual product — this is the **vault spec**, and its `design.md` half is no longer optional: `/lazy-spec.install` seeds a draft there automatically (project scope only, from the plugin's own template) whenever one is absent, and `/lazy-spec.product-config` refuses to register a product while it's missing — the split into products is a consequence of the repo-wide spec. `/lazy-spec.doctor` also flags a missing vault spec as `[WARN] vault-spec-missing` on a catalog that predates this contract; re-run `/lazy-spec.install` to seed the draft. The content-root `tech.md` half of the pair stays entirely optional and is never auto-created — write it by hand (copying the plugin's own `system-tech.md` template) whenever the project wants one.
 
-Review-wise, a `system-designer` expert writes the design half (the `system-design` class — covers both the product-root and the content-root copy) and the `architect` expert writes the tech half (the `system-tech` class), distinct from the asset-level `designer` (writes a feature/change/bug's own `design.md`) and from `architect`'s other job of writing opt-in `architecture.md` code-structure docs. These are two of the nine roles `/lazy-spec.product-config` Step 8 asks for. `/lazy-spec.create-from-code <product>` still scaffolds the product-level pair for a code-bound product (see above) — the content-root, project-wide pair has no dedicated creation skill.
+Review-wise, a `system-designer` expert writes the design half (the `system-design` class — covers both the product-root and the content-root copy) and the `architect` expert writes the tech half (the `system-tech` class), distinct from the asset-level `designer` (writes a feature/change/bug's own `design.md`) and from `architect`'s other job of writing opt-in `architecture.md` code-structure docs. These are two of the nine roles `/lazy-spec.product-config` Step 8 asks for. `/lazy-spec.create-from-code <product>` still scaffolds the product-level pair for a code-bound product (see above) — the content-root, project-wide `design.md` gets its draft from `/lazy-spec.install` instead, and `tech.md` at that level still has no dedicated creation skill.
 
 ---
 
@@ -191,7 +191,7 @@ If the underlying repo record is missing or the remote's hostname isn't recogniz
 
 ## What's the difference between `/lazy-spec.doctor` and `/lazy-spec.audit`?
 
-`/lazy-spec.doctor <product>` audits your own spec content in this repo — a product's folder tree, its status folder-notes, per-file stages, source links, wikilinks — for staleness, broken links, or inconsistency with the actual source code, and can apply targeted fixes. `/lazy-spec.audit` checks the plugin's own installed surface instead — whether the decisions-registry rule still matches what the code relies on, every CLI verb is documented in `/lazy-spec.help`, and every skill and reference the plugin ships still resolves. It's read-only: findings name the fix (re-run `/lazy-spec.install`, hand-edit the drifted file, run `/lazy-spec.doctor`) rather than applying one itself. Reach for `doctor` when a specific product's specs look wrong; reach for `audit` when the plugin itself seems to be missing a piece.
+`/lazy-spec.doctor <product>` audits your own spec content in this repo — a product's folder tree, its status folder-notes, per-file stages, source links, wikilinks — for staleness, broken links, or inconsistency with the actual source code, and can apply targeted fixes. It also runs one vault-wide check outside any single product: whether the mandatory vault spec (`design.md` at the spec content-root) still exists. `/lazy-spec.audit` checks the plugin's own installed surface instead — whether the decisions-registry rule still matches what the code relies on, every CLI verb is documented in `/lazy-spec.help`, and every skill and reference the plugin ships still resolves. It's read-only: findings name the fix (re-run `/lazy-spec.install`, hand-edit the drifted file, run `/lazy-spec.doctor`) rather than applying one itself. Reach for `doctor` when a specific product's specs look wrong; reach for `audit` when the plugin itself seems to be missing a piece.
 
 ---
 

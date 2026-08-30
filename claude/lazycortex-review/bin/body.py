@@ -691,6 +691,40 @@ def strip_banner_callouts(body: str) -> str:
   return _BANNER_CALLOUT_BLOCK_RE.sub("", body)
 
 
+_ANSWERED_QUESTION_BLOCK_RE = re.compile(
+    r"(?ms)^>\s*\[!question\][^\n]*#review/question[^\n]*\n"
+    r"(?:>[^\n]*\n)*?"
+    r">\s*-\s*\[[xX]\][^\n]*\n"
+    r"(?:>[^\n]*\n)*"
+    r"\n?"
+)
+
+
+def strip_answered_questions(body: str) -> str:
+  """
+  Remove every `#review/question` callout whose operator answer is already ticked.
+
+  Guarantees:
+    - A question callout carrying no ticked option survives untouched — it is still awaiting
+      the operator.
+    - Only `[!question]` callouts are considered; a ticked option inside any other callout
+      (`[!warning] #review/concerns-decision` above all) is left exactly as found.
+
+  Args:
+    body: Document body (no frontmatter).
+
+  Returns:
+    `body` with each answered question block removed, together with the blank line that
+    separated it from the next block.
+  """
+
+  # Contract:
+  # A `[!question]` callout carrying a ticked option MUST NOT survive this call, and a callout
+  # of any other kind — or a question with no ticked option — MUST survive byte-for-byte.
+
+  return _ANSWERED_QUESTION_BLOCK_RE.sub("", body)
+
+
 def strip_review_callouts(body: str) -> str:
   """
   Remove every `#review/<x>`-tagged callout block from `body`.
