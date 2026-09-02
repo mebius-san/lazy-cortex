@@ -11,9 +11,11 @@ from __future__ import annotations
 # waiver: bare-name sibling imports (flat bin/), resolved at runtime via sys.path; not statically resolvable
 # pylint: disable=import-error
 
+import socket
 from pathlib import Path
 
 from constants import (
+  DaemonKey,
   InboxGuardKey,
   InboxGuardKind,
   RoutineKey,
@@ -110,3 +112,45 @@ def check_inbox_collision(repo: Path | str, platform: str | None = None) -> list
           ),
         })
   return findings
+
+
+def check_inbox_collision_for_install(repo: Path | str, platform: str | None = None) -> list[dict]:
+  """
+  Run the collision check only where this checkout is authorized to run a daemon.
+
+  Notes:
+    - The authorization read mirrors the runtime daemon's own start gate: the host is the
+      machine's short hostname lowercased, `daemon.run_here` keys are stripped and lowercased,
+      and the mapped value must resolve to this very checkout.
+
+  Args:
+    repo: Repository root whose inbox routines are being defended.
+    platform: Optional `sys.platform` override, forwarded to the collision check.
+
+  Returns:
+    `check_inbox_collision`'s findings when this checkout is the authorized daemon pairing for
+    this host; empty when the daemon is disabled, the settings cannot be read, or
+    `daemon.run_here` maps this host elsewhere or not at all — a daemon can never start there,
+    so a shared inbox is uncontested by construction.
+  """
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  from lazy_settings import load_section
+  repo = Path(repo).resolve()
+  try:
+    daemon = load_section(repo / SettingsFile.REL, SettingsKey.DAEMON)
+  except (OSError, ValueError):
+    return []
+
+  # guard: a disabled daemon never contests an inbox
+  if not daemon.get(DaemonKey.ENABLED):
+    return []
+
+  # the same two facts the daemon's own start gate matches against, normalised the same way
+  host = socket.gethostname().split(".")[0].lower()
+  gate = daemon.get(DaemonKey.RUN_HERE)
+  mapped = { str(k).strip().lower(): v for k, v in gate.items() }.get(host) if isinstance(gate, dict) else None
+
+  # guard: an unmapped or elsewhere-mapped host cannot start a daemon here — nothing to contest
+  if mapped is None or Path(str(mapped)).expanduser().resolve() != repo:
+    return []
+  return check_inbox_collision(repo, platform)

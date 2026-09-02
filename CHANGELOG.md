@@ -5,6 +5,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-core
 
 
+### 9.0.1 — 2026-09-02 UTC
+
+- Fixed a false `inbox-conflict` FAIL from the shared-inbox guard in checkouts that would never run a daemon — install and audit now skip the check when `daemon.enabled` is off or `daemon.run_here` maps the host elsewhere.
+
 ### 9.0.0 — 2026-09-02 UTC
 
 - New `daemon-pause` / `daemon-resume` CLI commands and a local `.runtime/daemon.pause` semaphore let you pause the daemon; the Daemons dashboard now shows a PAUSED state and reports it via the paused gauge.
@@ -583,6 +587,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+
+### 7.1.0 — 2026-09-02 UTC
+
+- Vision templates gain a `Requirements` section: hard constraints the solution must not violate, owned by the vision alongside its goals — the sibling design works within them and never restates them.
+- Vision documents drop their `Risks` section — risks now live only in design documents, worked rather than raw; a raw risk that constrains the solution is a vision requirement instead.
 
 ### 7.0.0 — 2026-09-02 UTC
 

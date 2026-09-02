@@ -21,7 +21,7 @@ After completing this walkthrough you will have:
 
 - A project-wide vault spec (`vision.md` at the spec content root — or, for a vault seeded before the vision-document kind existed, a pre-vision `design.md`) confirmed present — either an existing one or a freshly seeded draft.
 - A product record in `lazy.settings.json[products]` that names your codebase's source repo and the paths within it your product covers.
-- A product `vision.md` — goals and value proposition, authored first from the code survey.
+- A product `vision.md` — goals, requirements, and value proposition, authored first from the code survey.
 - A `design.md` — behavior-only, no source URLs, opening with a reference to the sibling vision doc — describing what the product does for its users.
 - A `tech.md` — code-grounded, with forge-correct source URLs — covering the source map, architecture, and components.
 - Optionally a product-level `use-cases.md` — actors and cross-feature scenarios — if you opted in when `lazy-spec.create-from-code` asked.
@@ -87,7 +87,7 @@ The skill resolves your product's source binding, then fans out four parallel Ex
 
 After scanning, the skill authors the product's docs in order.
 
-**`vision.md`** comes first, when your product does not already have one: goals, value proposition, a short design-concept paragraph pointing at the sibling design, and the risks the intent itself carries — all filled from the code survey, then marked `draft`. A `vision.md` that already exists is left untouched.
+**`vision.md`** comes first, when your product does not already have one: an overview of what the product is and who it is for, its goals, the hard requirements the solution must not violate, the value proposition, and a short design-concept paragraph pointing at the sibling design — all filled from the code survey, then marked `draft`. Risk is not a vision-level section — the vision states intent and constraints, and the design works out what to do about risk (see `design.md` below). A `vision.md` that already exists is left untouched.
 
 **`design.md`** is behavior-only: what the product does, who uses it, and what the user-visible limitations are. It never contains source URLs or file paths — just observable behavior — and it opens with a reference to the sibling vision doc rather than restating goals and value, which live only in `vision.md`. Where the code shows a genuine fork was taken — a real alternative existed, reversal would be expensive, and the "why" is not recoverable from the code itself — the skill records it inline as a decision callout in the design body; approving the design later promotes these into the product's `decisions.md` automatically. This skill draws no diagrams — if you want a picture under `## Behavior` (or a UI subsection you add later), ask for one via `/lazy-diagram.draw` against that heading once the doc exists.
 

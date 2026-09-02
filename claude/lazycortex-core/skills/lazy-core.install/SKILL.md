@@ -669,16 +669,18 @@ Two daemons over one physical inbox import every document twice, and the duplica
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
-from inbox_guard import check_inbox_collision
+from inbox_guard import check_inbox_collision_for_install
 from pathlib import Path
-for f in check_inbox_collision(Path('<repo-root>')):
+for f in check_inbox_collision_for_install(Path('<repo-root>')):
   print('collision: ' + f['detail'])
 "
 ```
 
+The wrapper stays silent in a checkout that would never run a daemon — `daemon.enabled` false, or `daemon.run_here` not mapping this host to this checkout: a second daemon cannot start where the runtime's own gate already refuses one, so there is nothing to contest. In that case state **not-this-checkout** and continue to Step 13, whose own gate declines on its own terms.
+
 **Any `collision` line is a refusal, not a warning.** State **inbox-conflict**, print the lines verbatim, and tell the operator that the two projects' `daemon.run_here` maps must not both name a checkout on this host (the other checkout is named in the finding). Then skip Steps 13, 13.5, and 13.6 entirely — no supervisor is installed for a contested inbox — and mark this step failed in Step 14. Which checkout drives a shared inbox is the operator's decision, so never resolve it here.
 
-Outcome: `no-declaration` / `linked` / `unchanged` / `declined-on-record` / `ignores-ok` / `ignores-updated` / `ignores-declined` / `inbox-conflict`. The repair outcome and the ignore-coverage outcome are both stated — `linked, ignores-updated` is a normal pair.
+Outcome: `no-declaration` / `linked` / `unchanged` / `declined-on-record` / `ignores-ok` / `ignores-updated` / `ignores-declined` / `inbox-conflict` / `not-this-checkout`. The repair outcome and the ignore-coverage outcome are both stated — `linked, ignores-updated` is a normal pair.
 
 ## Step 13: Daemon gate (enabled + run_here) + supervisor install
 

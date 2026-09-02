@@ -4,19 +4,18 @@ summary: Ingest free-form requests and route them into the spec tree: classify, 
 last_regen: 2026-09-02
 diagram_spec:
   anchor: "How the block flows"
-  request: "Flow diagram showing the requests block pipeline: spec.coordinator, in its routing mode, orchestrates — it calls lazy-spec.request-classify (returns a class token), then lazy-spec.request-find-candidates (returns a ranked candidate list), then writes a short per-target description into the routing decision. Show an operator confirmation step, then a single lazy-spec.request-apply node that branches internally into attach (seeds the description onto an existing entity's primary doc) or spawn (scaffolds a new entity first, then seeds the same way) — both paths converge into 'doc's own writer builds from source in its review job'."
+  request: "Flow diagram showing the requests block pipeline: spec.coordinator, in its routing mode, orchestrates — it calls lazy-spec.request-classify (returns a class token), then lazy-spec.request-find-candidates (returns a ranked candidate list), then writes only structural routing fields (verb, target, product/path/tools/targets/drop) into the routing decision — no per-target prose. Show an operator confirmation step, then a single lazy-spec.request-apply node that branches internally into attach (folds the request onto an existing entity's primary doc) or spawn (scaffolds a new entity's folder and status note only, documents seeded later per launch checkbox) — both paths converge into 'doc's own writer builds from source in its review job'."
 source_skills:
-  - lazy-spec.coordinator
-  - lazy-spec.create-request
+  - spec.coordinator
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
-source_sha: ac6c3e4c5c56301e62e3afab0d0de63b564eb60e
+source_sha: 16bd72c56e7e50107f9be0af4e908569ddf14c1f
 ---
 # Requests
 
 When you or a collaborator have an idea, bug report, or design brief that doesn't yet have a home in the spec tree, the requests block handles the journey from raw text to a properly-attributed entry in the right asset. You drop a request into the content root's `requests/` inbox, the block works out what it is and where it belongs, and the result is either a new entity scaffolded from the request — its documents created later, one at a time, as you tick its own launch checkboxes — an existing entity whose relevant document is attributed to the request and sent straight into review, or — when the code already does what the request asks — a link pointing at the entity that already covers it. Every document a request ever populates, whether immediately or later, opens a review cycle in which its own writer reads the full request from that cycle's job context and builds the real prose from it.
 
-The block covers three invocable members: `lazy-spec.create-request` (the intake skill that captures a raw idea into the vault-wide `requests/` inbox), `lazy-spec.request-classify` (the classifier primitive), and `lazy-spec.request-find-candidates` (the vault search primitive). Once a request enters the review cycle, `spec.coordinator` — running in its routing mode, one of the five modes the same coordinator persona runs across the whole spec system — orchestrates classification and candidate search automatically and surfaces the routing decision for your confirmation. Enacting that decision — attaching to an existing entity, spawning a new one, or simply linking to one that already covers it — is not a skill you invoke: it is `lazy-spec.request-apply`, a deterministic Python worker that fires on its own once you confirm.
+The block owns three members, and none of them is something you invoke directly. `spec.coordinator` — running in its routing mode, one of the five modes the same coordinator persona runs across the whole spec system — wakes once a request reaches the terminal group of its own review cycle and orchestrates the two primitives beneath it: `lazy-spec.request-classify` (the classifier primitive) and `lazy-spec.request-find-candidates` (the vault search primitive), then surfaces the routing decision for your confirmation. A request only reaches this block after `/lazy-spec.create-request` — the authoring block's own intake skill — has captured it into the vault-wide `requests/` inbox; this block never captures a request itself, it only routes one that already exists. Enacting the routing decision — attaching to an existing entity, spawning a new one, or simply linking to one that already covers it — is not a skill you invoke either: it is `lazy-spec.request-apply`, a deterministic Python worker that fires on its own once you confirm.
 
 ## When you'd use this
 
@@ -70,40 +69,43 @@ No document's prose is ever assembled from the routing decision itself. What act
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  requestReceived[Request received]
-  classifyRequest[lazy-spec.request-classify]
-  findCandidates[lazy-spec.request-find-candidates]
-  writeDescription[Coordinator writes per-target description]
-  operatorConfirm{Operator confirms?}
-  applyWorker[lazy-spec.request-apply]
-  seedDoc[Seed description onto primary doc]
-  writerBuilds[Doc's writer builds from request in context]
-  requestCancelled[Request cancelled]
+  specCoordinatorRoutingMode["spec.coordinator - routing mode"]
+  requestClassify["lazy-spec.request-classify"]
+  requestFindCandidates["lazy-spec.request-find-candidates"]
+  writeRoutingFields["Write structural routing fields - verb, target, product/path/tools/targets/drop"]
+  operatorConfirms{"Operator confirms routing decision?"}
+  requestDropped["Routing decision dropped"]
+  requestApply{"lazy-spec.request-apply - attach or spawn?"}
+  attachToPrimaryDoc["Attach - fold request onto existing entity's primary doc"]
+  spawnNewEntity["Spawn - scaffold new entity's folder and status note only"]
+  writerBuildsFromSource["Doc's own writer builds from source in its review job"]
 
-  requestReceived -->|orchestrate| classifyRequest
-  classifyRequest -->|class token| findCandidates
-  findCandidates -->|ranked candidates| writeDescription
-  writeDescription -->|routing decision| operatorConfirm
-  operatorConfirm -->|confirm| applyWorker
-  operatorConfirm -->|reject| requestCancelled
-  applyWorker -->|attach or spawn| seedDoc
-  seedDoc -->|spec_source_requests → context| writerBuilds
+  specCoordinatorRoutingMode -->|invokes| requestClassify
+  requestClassify -->|class token| requestFindCandidates
+  requestFindCandidates -->|ranked candidate list| writeRoutingFields
+  writeRoutingFields -->|routing decision drafted| operatorConfirms
+  operatorConfirms -->|rejected| requestDropped
+  operatorConfirms -->|confirmed| requestApply
+  requestApply -->|attach| attachToPrimaryDoc
+  requestApply -->|spawn| spawnNewEntity
+  attachToPrimaryDoc -->|folded| writerBuildsFromSource
+  spawnNewEntity -->|documents seeded later per launch checkbox| writerBuildsFromSource
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
-
-  class requestReceived entry
-  class classifyRequest action
-  class findCandidates action
-  class writeDescription action
-  class operatorConfirm guard
-  class applyWorker action
-  class seedDoc action
-  class writerBuilds success
-  class requestCancelled error
+  class specCoordinatorRoutingMode entry
+  class requestClassify action
+  class requestFindCandidates action
+  class writeRoutingFields action
+  class operatorConfirms guard
+  class requestApply guard
+  class attachToPrimaryDoc action
+  class spawnNewEntity action
+  class writerBuildsFromSource success
+  class requestDropped error
 ```
 
 ## See also

@@ -9,7 +9,7 @@ diagram_spec:
 source_skills:
   - lazy-core.install
   - lazy-runtime.recover
-source_sha: 4b059db3faee4129ac2de3faa7376ba7212ee3b6
+source_sha: dcf8d33f2b4551fe855abfab3c4b83a79f9d63a3
 ---
 # How do I bootstrap the runtime daemon and recover it if it halts?
 
@@ -31,7 +31,7 @@ After completing this walkthrough you have a running runtime daemon that polls f
 
 Run `/lazy-core.install` inside the repo. Install seeds the whole runtime layer unconditionally, on every run — routines, `.experts/`, the expert registry, and the flat `daemon` and `routines` settings sections all land regardless of whether a background daemon ever runs; `daemon.enabled` is seeded `false` and nothing prompts you about it at this stage. The install's full sequence — what it writes to `lazy.settings.json`, the expert-discovery scan, the expert-spawn sandbox, the git-guard flags it seeds (`git.enabled`, `git.pathspec_enabled`, `git.mutex_enabled`), and the optional Prometheus metrics endpoint — is covered in the **Install, audit, and maintain lazycortex-core** block chapter; work through Steps there before continuing here. Come back once install has finished.
 
-If this repo declares externally-sourced working directories (e.g. a shared inbox it does not carry in git) via `external_dirs.paths`, install resolves them before it touches anything daemon-related. On a fresh checkout it asks once where they live on this machine and remembers the answer for every future run. It also refuses to install a supervisor when two checkouts would end up driving the same physical inbox directory — it names the other checkout and asks you to set `daemon.run_here: false` on one of them before continuing.
+If this repo declares externally-sourced working directories (e.g. a shared inbox it does not carry in git) via `external_dirs.paths`, install resolves them before it touches anything daemon-related. On a fresh checkout it asks once where they live on this machine and remembers the answer for every future run. It also refuses to install a supervisor when two checkouts would end up driving the same physical inbox directory — but only for a checkout that would actually drive the daemon here; a checkout the `daemon.run_here` map does not name for this host skips the check silently, since the daemon already refuses to start there on its own. When the check does fire, it names the other checkout and tells you the two projects' `daemon.run_here` maps must not both name a checkout on this host.
 
 With the runtime layer in place, decide how you want it driven:
 

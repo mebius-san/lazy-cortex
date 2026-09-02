@@ -24,7 +24,7 @@ spec_source_docs: []
 <!-- How it will be. The diagram anchors here, when there is something to draw. -->
 
 ## Risks
-<!-- The vision-level risks, worked: what this design does about each. -->
+<!-- The risks of this design, worked: what could sink it and what the design does about each. -->
 
 ## Known Limitations
 <!-- Things the change does, but with a known ceiling — accepted constraints. -->

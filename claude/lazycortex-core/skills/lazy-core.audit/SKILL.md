@@ -433,12 +433,14 @@ Run:
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
-from inbox_guard import check_inbox_collision
+from inbox_guard import check_inbox_collision_for_install
 from pathlib import Path
 import json
-print(json.dumps(check_inbox_collision(Path('.')), ensure_ascii=False))
+print(json.dumps(check_inbox_collision_for_install(Path('.')), ensure_ascii=False))
 "
 ```
+
+The wrapper reports nothing in a checkout that would never run a daemon (`daemon.enabled` false, or `daemon.run_here` not mapping this host to this checkout) — the runtime's own start-gate already refuses a daemon there, so a shared inbox is uncontested by construction.
 
 - `[FAIL]` kind `inbox_collision` — `<detail>`; `fix: daemon.run_here is a {hostname: checkout-path} map, not a boolean — in the checkout that should NOT run the daemon, point this host's entry at the OTHER checkout's path (or drop this host's key entirely) so the runtime's own start-gate refuses it here` (never auto-applied — which checkout drives it is the operator's decision).
 

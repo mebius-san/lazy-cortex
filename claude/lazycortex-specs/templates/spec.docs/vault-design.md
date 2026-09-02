@@ -24,7 +24,7 @@ spec_source_docs: []
 <!-- Observable behavior of the project, as its user experiences it. -->
 
 ## Risks
-<!-- The vision-level risks, worked: what this design does about each. -->
+<!-- The risks of this design, worked: what could sink it and what the design does about each. -->
 
 ## Known Limitations
 <!-- Things the project does, but with a known ceiling — accepted constraints. -->
