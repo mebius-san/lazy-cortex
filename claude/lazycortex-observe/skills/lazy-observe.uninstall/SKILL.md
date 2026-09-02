@@ -30,7 +30,7 @@ Outcome: `darwin` / `linux` / `unsupported-platform`.
 
 ## Step 2 — Unload service
 
-- **darwin**: call `claude/lazycortex-observe/bin/install.unload_service_macos(<plist_path>)`. Plist path is `~/Library/LaunchAgents/com.lazycortex.observe.plist`.
+- **darwin**: call `${CLAUDE_PLUGIN_ROOT}/bin/install.unload_service_macos(<plist_path>)`. Plist path is `~/Library/LaunchAgents/com.lazycortex.observe.plist`.
 - **linux**: call `install.unload_service_linux()`.
 
 Both helpers tolerate "not loaded" exit codes and return a (`ok`, `stderr`) tuple. Treat "not loaded" as `absent`, not as an error.

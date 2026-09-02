@@ -15,22 +15,22 @@ spec_source_docs: []
 # {{slug}} — design
 
 ## Overview
-_What the feature is and why it exists._
-
-## Goals
-_What the feature aims to achieve — the outcomes that count as success._
+<!-- Opens with a reference to the sibling vision (goals and value live there, never here). What the feature is and why it exists. -->
 
 ## Design
-_The feature's key decisions with WHY it is this way and not otherwise._
+<!-- The feature's key decisions with WHY it is this way and not otherwise. -->
 
 ## Behavior
-_Observable behavior of the feature, as its user experiences it. The flow diagram anchors here._
+<!-- Observable behavior of the feature, as its user experiences it. The flow diagram anchors here. -->
+
+## Risks
+<!-- The vision-level risks, worked: what this design does about each. -->
 
 ## Known Limitations
-_Things the feature does, but with a known ceiling — accepted constraints._
+<!-- Things the feature does, but with a known ceiling — accepted constraints. -->
 
 ## Boundaries
-_What the feature deliberately does NOT do; seams with neighboring features, who owns what._
+<!-- What the feature deliberately does NOT do; seams with neighboring features, who owns what. -->
 
 # Sources
 #protected/spec/sources

@@ -10,22 +10,22 @@ wiki_pinned_topics:
 ---
 # {{slug}} — test-report
 
-_Append-only working journal, written during execution — never after the fact._
+<!-- Append-only working journal, written during execution — never after the fact. -->
 
 ## Verdict
-_What is proven to work, what is not, and what was left unexercised._
+<!-- What is proven to work, what is not, and what was left unexercised. -->
 
 ## Defects
-_What broke, with the verbatim decisive output and the shortest steps to reproduce it._
+<!-- What broke, with the verbatim decisive output and the shortest steps to reproduce it. -->
 
 ## Open questions
-_Questions against the plan or the spec that only the operator can answer, still unanswered._
+<!-- Questions against the plan or the spec that only the operator can answer, still unanswered. -->
 
 ## Unresolved problems
-_What obstructed the run and was not solved — an environment that could not be reached, a step nothing could execute, a case that stayed flaky without explanation. Problems of the run, not defects of the product._
+<!-- What obstructed the run and was not solved — an environment that could not be reached, a step nothing could execute, a case that stayed flaky without explanation. Problems of the run, not defects of the product. -->
 
 ## Decisions taken alone
-_Departures from the plan made without the operator — substituted data, a skipped step, a chosen environment — and the grounds for each._
+<!-- Departures from the plan made without the operator — substituted data, a skipped step, a chosen environment — and the grounds for each. -->
 
 ## Log
-_One entry per test of the plan, in its order and under its name: actual result against expected. A block carrying a `Cases` list gets one entry naming the cases that failed, not one entry per case. A test that could not run is recorded as blocked, with the reason._
+<!-- One entry per test of the plan, in its order and under its name: actual result against expected. A block carrying a `Cases` list gets one entry naming the cases that failed, not one entry per case. A test that could not run is recorded as blocked, with the reason. -->

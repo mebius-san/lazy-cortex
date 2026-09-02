@@ -1,27 +1,27 @@
 ---
 chapter_type: walkthrough
 summary: Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
-last_regen: 2026-08-30
+last_regen: 2026-09-02
 diagram_spec:
   anchor: "How the journey flows"
-  request: "Sequence diagram showing the five-skill lifecycle of one asset: lazy-spec.create-asset scaffolds and authors the asset, lazy-spec.set-stage marks the design approved and then the plan approved, lazy-spec.flip-gate advances each gate (spec_design_done through spec_tests_passing), lazy-spec.sync-with-code reconciles code reality and proposes spec_develop_done, lazy-spec.finalize-branch rebases branch pins and proposes spec_released."
+  request: "Sequence diagram showing the five-skill lifecycle of one asset: lazy-spec.create-asset scaffolds and authors the asset, lazy-spec.set-stage marks the design approved and then the plan approved, lazy-spec.flip-gate advances each gate (spec_design_done through spec_tests_passing), lazy-spec.sync-with-code reconciles code reality and proposes spec_develop_done, lazy-spec.rebase-pins rebases branch pins and proposes spec_released."
 source_skills:
   - lazy-spec.create-asset
   - lazy-spec.set-stage
   - lazy-spec.flip-gate
   - lazy-spec.sync-with-code
-  - lazy-spec.finalize-branch
-source_sha: 78a4ee6c847c8f6b2e405190d7d36113bf705cf0
+  - lazy-spec.rebase-pins
+source_sha: 73781d3513221e28253bd78d907cc43ef85a029c
 ---
 # How do I take an asset from creation all the way to release?
 
-This walkthrough is for anyone who has a product registered in the spec system and wants to carry a single asset — a feature, change, or bug — through its complete lifecycle: from a blank scaffold to a confirmed release gate. Five skills divide the work: `lazy-spec.create-asset` builds the scaffold and authors the docs; `lazy-spec.set-stage` records when a doc moves from draft to approved; `lazy-spec.flip-gate` advances the flat readiness gates; `lazy-spec.sync-with-code` keeps the spec current with code commits and proposes gates grounded in what actually landed; and `lazy-spec.finalize-branch` cleans up source-branch pins and proposes the final `spec_released` gate once the branch merges.
+This walkthrough is for anyone who has a product registered in the spec system and wants to carry a single asset — a feature, change, or bug — through its complete lifecycle: from a blank scaffold to a confirmed release gate. Five skills divide the work: `lazy-spec.create-asset` builds the scaffold and authors the docs; `lazy-spec.set-stage` records when a doc moves from draft to approved; `lazy-spec.flip-gate` advances the flat readiness gates; `lazy-spec.sync-with-code` keeps the spec current with code commits and proposes gates grounded in what actually landed; and `lazy-spec.rebase-pins` cleans up source-branch pins and proposes the final `spec_released` gate once the branch merges.
 
 ## Outcome
 
 After completing this journey you have:
 
-- A fully authored spec folder for the asset (`design.md` approved and, if you chose to author one, `code-plan.md` approved; source links pointing at the default branch).
+- A fully authored spec folder for the asset (`vision.md` approved when the type seeds one — the shipped `feature` type always does — plus `design.md` approved and, if you chose to author one, `code-plan.md` approved; source links pointing at the default branch).
 - All five gates (`spec_design_done` through `spec_released`) set to `true` in the asset's status folder-note.
 - A complete `# History` trail in the folder-note recording every stage transition and gate flip.
 
@@ -38,7 +38,7 @@ After completing this journey you have:
 
 Run `/lazy-spec.create-asset <product> <category> <slug>`, where `<product>` is the compound key for your registered product, `<category>` is `feature`, `change`, `bug`, or an operator-defined category, and `<slug>` is a lowercase-with-hyphens name for this asset.
 
-`lazy-spec.create-asset` opens a wizard (2–5 questions, one at a time) to gather scope, behavior, and edge-case detail for the category. After you answer, it scaffolds the asset folder at `<spec_path>/<category>/<slug>/`, authors the one doc it seeds — `design.md` (starting at `draft` stage) — and fills in the folder-note's `# Summary` précis. The scaffold draws no diagrams of its own — once `design.md`'s prose is settled, ask for one explicitly via `/lazy-diagram.draw` if the doc needs a picture. The folder-note (`<slug>.md`) is created with all five gates at `false` and a `# History` H1 section carrying a scaffold entry. `code-plan.md` and `test-plan.md` are opt-in — the scaffold never creates them; Step 4 below covers authoring a code plan when your asset needs one.
+`lazy-spec.create-asset` opens a wizard (2–5 questions, one at a time) to gather scope, behavior, and edge-case detail for the category. Before scaffolding, it also settles the document set for the type: a mandatory definition document rides in automatically when the type declares one — the shipped `feature` type always seeds `vision.md` ahead of `design.md`, so goals and value proposition are captured before behavior — and a multiSelect question offers whichever opt-in documents the type playbook allows (`vision.md` where it isn't mandatory, e.g. a `change`; `use-cases.md`; `ui-design.md`), each with a one-line description of what it's for. Declining one leaves it available as a later launch checkbox, never a gap. After you answer, it scaffolds the asset folder at `<spec_path>/<category>/<slug>/`, authors every doc the resolved set named — the type's own start doc (`design.md` for a feature, starting at `draft` stage) plus any mandatory or selected definition documents — and fills in the folder-note's `# Summary` précis. Any real decision fork the clarification settled lands in the authored prose as a `[!decision]` callout, ready to transfer into the product's `decisions.md` once you approve the doc it lives in (Step 2 below). The scaffold draws no diagrams of its own — once a doc's prose is settled, ask for one explicitly via `/lazy-diagram.draw` if it needs a picture. The folder-note (`<slug>.md`) is created with all five gates at `false` and a `# History` H1 section carrying one scaffold entry per seeded doc. `code-plan.md` and `test-plan.md` stay opt-in in a stronger sense — the scaffold never creates either at all; Step 4 below covers authoring a code plan when your asset needs one.
 
 `design.md` describes the intended behavior only — it never writes in "not yet supported" or half-built code paths as if they were spec limitations. If a section feels narrower than you expected, that's an explicit scope decision from the wizard answers, not a reflection of what the code currently does.
 
@@ -48,7 +48,7 @@ If the skill refuses naming an unknown product, run `/lazy-spec.product-config` 
 
 ### Step 2 — Review and approve the design doc
 
-Read `design.md` and iterate on its prose as needed (the skill authored a first draft; refinement is yours). When the design is ready for implementation, run:
+Read `design.md` and iterate on its prose as needed (the skill authored a first draft; refinement is yours). If your asset also seeded a `vision.md`, review and approve it the same way, on its own schedule — `vision.md` and `design.md` advance independently, each through its own `set-stage` call, so approving one never forces the other. When the design is ready for implementation, run:
 
 ```
 /lazy-spec.set-stage <design.md path> approved
@@ -127,17 +127,17 @@ For a lighter check on just this one asset — without waiting for a full produc
 After you merge (or delete) the source-repo branch, run:
 
 ```
-/lazy-spec.finalize-branch <branch>
+/lazy-spec.rebase-pins <branch>
 ```
 
-`lazy-spec.finalize-branch` fetches the remote, walks every spec file that carries `spec_source_branches:` pins for the merged branch, rebases the source URLs to the default branch, and removes the pin entries — this rebase always applies, regardless of any asset's gate state. For any asset whose pinned docs covered the now-merged branch, it then checks that asset's own `spec_released`, `spec_cancelled`, and `spec_tests_passing`: only when `spec_released` is `false`, `spec_cancelled` is `false`, and `spec_tests_passing` is `true` does it propose flipping `spec_released` via one confirmation question. On yes, it invokes `lazy-spec.flip-gate <asset> spec_released`.
+`lazy-spec.rebase-pins` fetches the remote, walks every spec file that carries `spec_source_branches:` pins for the merged branch, rebases the source URLs to the default branch, and removes the pin entries — this rebase always applies, regardless of any asset's gate state. For any asset whose pinned docs covered the now-merged branch, it then checks that asset's own `spec_released`, `spec_cancelled`, and `spec_tests_passing`: only when `spec_released` is `false`, `spec_cancelled` is `false`, and `spec_tests_passing` is `true` does it propose flipping `spec_released` via one confirmation question. On yes, it invokes `lazy-spec.flip-gate <asset> spec_released`.
 
-That readiness check is `finalize-branch`'s own, not the underlying `flip-gate` primitive's — `flip-gate` flips unconditionally once confirmed, refusing only when the asset is cancelled. `finalize-branch` only checks `spec_tests_passing`, not the whole ladder behind it, so glance at the folder-note yourself to confirm `spec_design_done`, `spec_plan_done`, and `spec_develop_done` already read `true` before confirming. If `spec_tests_passing` isn't `true` yet, no proposal appears at all — settle it (flip `spec_tests_passing` once a green test report exists), then re-run `/lazy-spec.finalize-branch <branch>`; the rebase itself doesn't need repeating, only the release flip was held back.
+That readiness check is `rebase-pins`'s own, not the underlying `flip-gate` primitive's — `flip-gate` flips unconditionally once confirmed, refusing only when the asset is cancelled. `rebase-pins` only checks `spec_tests_passing`, not the whole ladder behind it, so glance at the folder-note yourself to confirm `spec_design_done`, `spec_plan_done`, and `spec_develop_done` already read `true` before confirming. If `spec_tests_passing` isn't `true` yet, no proposal appears at all — settle it (flip `spec_tests_passing` once a green test report exists), then re-run `/lazy-spec.rebase-pins <branch>`; the rebase itself doesn't need repeating, only the release flip was held back.
 
 For squash-merges where the branch still exists on the remote, pass `--force-merged`:
 
 ```
-/lazy-spec.finalize-branch <branch> --force-merged
+/lazy-spec.rebase-pins <branch> --force-merged
 ```
 
 **Verification gate:** all five gates are `true` on the folder-note; `spec_source_branches` is absent from `design.md` and, if you authored one, `code-plan.md` (or empty on either); source URLs in the tech doc and any code-plan doc point at the default branch.
@@ -159,7 +159,7 @@ sequenceDiagram
   participant stager as lazy-spec.set-stage
   participant gater as lazy-spec.flip-gate
   participant syncer as lazy-spec.sync-with-code
-  participant finalizer as lazy-spec.finalize-branch
+  participant finalizer as lazy-spec.rebase-pins
   participant asset as Asset
 
   creator->>asset: scaffold asset

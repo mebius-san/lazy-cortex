@@ -20,19 +20,19 @@ spec_source_docs: []
 # {{product}} — tech
 
 ## Overview
-_What the product is, in terms of the code that implements it._
+<!-- What the product is, in terms of the code that implements it. -->
 
 ## Architecture
-_The modules the product is built from, what each owns, and which way the dependencies run._
+<!-- The modules the product is built from, what each owns, and which way the dependencies run. -->
 
 ## Components
-_Per component: its responsibility, its public surface, and where it lives._
+<!-- Per component: its responsibility, its public surface, and where it lives. -->
 
 ## Data structures
-_The shapes the product persists or passes between components, and where each is defined._
+<!-- The shapes the product persists or passes between components, and where each is defined. -->
 
 ## Source map
-_Path-by-path map from the structures above to the files that implement them, with source URLs._
+<!-- Path-by-path map from the structures above to the files that implement them, with source URLs. -->
 
 # Sources
 #protected/spec/sources

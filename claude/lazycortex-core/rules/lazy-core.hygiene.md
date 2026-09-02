@@ -1,5 +1,5 @@
 ---
-description: Project hygiene constraints checked by lazy-core.audit, lazy-core.doctor, and lazy-core.optimize — scope, naming, settings split, MCP scope, and path hygiene.
+description: Project hygiene constraints checked by lazy-core.audit, lazy-core.doctor, and lazy-core.slim-context — scope, naming, settings split, MCP scope, and path hygiene.
 always_loaded: constrains main agent on every artifact create/edit
 ---
 # Project Hygiene

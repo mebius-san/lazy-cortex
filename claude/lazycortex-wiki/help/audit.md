@@ -1,11 +1,11 @@
 ---
 chapter_type: block
 summary: Run integrity checks across a wiki scope, its terms dictionary, structure map, mirrors, and domain tree — with optional auto-repair.
-last_regen: 2026-08-27
+last_regen: 2026-09-02
 no_diagram: true
 source_skills:
   - lazy-wiki.doctor
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: 330b97960670773e9761442bb7daab587dc239e0
 ---
 # Wiki integrity audit
 
@@ -32,6 +32,8 @@ You invoke `/lazy-wiki.doctor` with an optional scope id. Omit the id and the sk
 **Phase 1 — the core audit.** Read-only: `lazycortex-wiki doctor` prints per-scope findings grouped by severity, tagging each fixable one, and ends with a grand-total count. This is also where the mirror checks and, when `wiki.domains` is configured, the domain-tree checks are printed — both report-only. If the scope id you name is unknown, or no scopes are configured at all, the command exits non-zero and the skill stops there rather than proceeding to later phases.
 
 **Phase 2 — terms scopes and the structure map.** Neither has a CLI of its own, so this phase reads `lazy.settings.json` directly. For each configured terms scope it checks two things: configuration you can judge by reading (a missing dictionary file, overlapping scope globs, a dictionary that isn't excluded from the wiki scope that would otherwise try to curate it) and meaning, dispatched to the terms curator in report mode, which returns divergence / missing / duplicate / dead findings without writing anything. The project-structure map gets the same treatment — configuration read directly, then a structure-curator dispatch in report mode comparing the map against the tree. Either sub-check is skipped with a stated reason when nothing is configured (`no-terms-scopes`, `no-structure`).
+
+Structure configuration checks also cover the three scan routines' `watch` setting — `new_files` / `deleted_files` / `renamed_files` on the change / deletion / rename routine respectively — and flag any of the three registered before `docs/structure.md` exists, since every incremental dispatch fails its precondition until `/lazy-wiki.structure rebuild` creates the map.
 
 **Phase 3 — presentation.** Every finding from both phases is summarised: per-scope counts by severity, plus check name, affected node or entry, and message — with fixable findings called out separately from report-only ones, and a named repair route for each report-only class.
 
@@ -61,6 +63,7 @@ Applying a fix only touches the lines that need it — the rest of a node's See-
 - **A `broken-see-also` finding keeps appearing after deleting a node** — if the background daemon isn't running, the automatic pruning happens on your next `/lazy-wiki.relink` rather than instantly. Run `/lazy-wiki.relink` on the affected scope, then re-run `/lazy-wiki.doctor` to confirm the finding is gone.
 - **A `divergence` or `dead` terms finding** — the audit will not auto-apply either side; when it asks, name which word wins (the document's or the dictionary's) and it edits accordingly. A document with `review_active: true`, or anything under an upstream mirror tree, is never touched this way — resolve those by hand.
 - **Structure or domain drift after a rename sweep** — `missing-dir` / `missing-file` / `dead-entry` / `divergence` findings usually clear with a wholesale `/lazy-wiki.structure rebuild` rather than fixing entries one at a time; `domain-hash-stale` clears with `/lazy-wiki.domain-sync`.
+- **A structure-scan routine reports `config` right after registration** — if `docs/structure.md` doesn't exist yet, every one of the three scan routines fails its precondition until you run `/lazy-wiki.structure rebuild` once to create the map.
 - **`docs/structure.md` shows up as a finding in its own scope** — the map has no frontmatter to defend itself against being curated as an ordinary node. The exclusion belongs to the whole vault, not one scope: add `docs/structure.md` to `wiki.exclude` via `/lazy-wiki.configure vault` rather than excluding it scope by scope.
 - **If the scope id you pass is not in `lazy.settings.json`** — the command exits non-zero and the skill surfaces the error without proceeding to the presentation or apply phases.
 

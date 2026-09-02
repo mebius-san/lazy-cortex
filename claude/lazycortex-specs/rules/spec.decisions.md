@@ -9,7 +9,7 @@ This rule concerns documents in a spec catalog (`lazycortex-specs`) — it has n
 
 ## 1. Read before you edit
 
-Working on an asset or product whose folder carries a `decisions.md` — read it, and the product's own `decisions.md`, before your first edit to any of that asset's documents. A record explains why a choice was made; skipping it risks re-proposing a rejected option or quietly reversing something already settled.
+Working on an asset or product whose folder carries a `decisions.md` — read it, and the product's own `decisions.md`, before your first edit to any of that asset's documents. Editing the project-wide system pair at the content-root — read the project-level `<content-root>/decisions.md` the same way, when it exists. A record explains why a choice was made; skipping it risks re-proposing a rejected option or quietly reversing something already settled.
 
 ## 2. A decision statement deserves only a real fork
 
@@ -29,4 +29,4 @@ The same bar applies to a decision-candidate marked in a report — a candidate 
 
 ## Enforcement
 
-`lazy-spec.audit` verifies this rule's invariants — the closed transfer-source set and the registry's wiring in `lazy-core.markdown-style` — still hold against the plugin's actual state. `lazy-spec.doctor` enforces the registry's structural shape (record format, header, numbering, links) file by file.
+The plugin maintainer's own audit tooling verifies this rule's invariants — the closed transfer-source set and the registry's wiring in `lazy-core.markdown-style` — still hold against the plugin's actual state. `lazy-spec.doctor` enforces the registry's structural shape (record format, header, numbering, links) file by file.

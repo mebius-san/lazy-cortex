@@ -1,6 +1,6 @@
 ---
 name: lazy-memory.index
-description: "Run when memory tag files have drifted — an audit reports a note carrying `memory/<topic>` that its tag file does not list, a global tag file points at a missing local one, or notes were hand-edited or moved. Also offered by `/lazy-core.optimize`. Recovery only: `/lazy-memory.write` keeps `.tags/` in sync on every normal write."
+description: "Run when memory tag files have drifted — an audit reports a note carrying `memory/<topic>` that its tag file does not list, a global tag file points at a missing local one, or notes were hand-edited or moved. Also offered by `/lazy-core.slim-context`. Recovery only: `/lazy-memory.write` keeps `.tags/` in sync on every normal write."
 allowed-tools: Read, Bash(python3 *), Bash(mkdir -p *), Bash(date -u *), Bash(test *), Write, Agent
 ---
 # Memory reindex

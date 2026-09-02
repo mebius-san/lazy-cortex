@@ -23,7 +23,7 @@ Authors product / feature / change / bug (and operator-defined) specs as Markdow
 - `lazy-spec.create-asset` — Universal: scaffold an asset of any category (built-in or operator-defined) — folder-note + authored docs + behavioral diagram(s); `--empty` for a bare scaffold.
 - `lazy-spec.create-feature` / `lazy-spec.create-change` / `lazy-spec.create-bug` — Thin wrappers that pin the category and delegate to `lazy-spec.create-asset`.
 - `lazy-spec.create-request` — Capture a raw idea into the product's `requests/` inbox as a body-only file; the request subsystem adds frontmatter and routes it during review.
-- `lazy-spec.decide` — Interactive wrapper over the `decide` CLI primitive (`add` / `supersede <id>` / `obsolete <id>` / `promote <living-doc>`) for an asset's or product's `decisions.md` registry.
+- `lazy-spec.record-decision` — Interactive wrapper over the `decide` CLI primitive (`add` / `supersede <id>` / `obsolete <id>` / `promote <living-doc>`) for an asset's or product's `decisions.md` registry.
 
 ## Gates & lifecycle
 
@@ -31,7 +31,7 @@ Authors product / feature / change / bug (and operator-defined) specs as Markdow
 - `lazy-spec.gate-tick` (worker) — Script-only md-scan worker: polls an asset's active expert job for a terminal marker and structurally checks the folder-note. Dispatched by the `lazy-spec.gate-tick` routine.
 - `spec.coordinator` (agent, `lazy-spec.coordinator-watch` git-watch routine) — Decides gate readiness, promotes doc stages, and dispatches launch-checkbox / cascade jobs, woken on a commit that reaches the daemon's own checkout; see `lazy-spec.coordination-playbook.md`.
 - `lazy-spec.set-stage` — Change one authored doc's `spec_stage` (`empty | draft | approved | rejected | cancelled`), mirror the `spec/<stage>` tag, and log to the folder-note `# History` section.
-- `lazy-spec.finalize-branch` — Rebase pinned specs back to the repo's default branch after a source branch is merged or deleted; propose `spec_released` flips.
+- `lazy-spec.rebase-pins` — Rebase pinned specs back to the repo's default branch after a source branch is merged or deleted; propose `spec_released` flips.
 
 ## Request processing
 
@@ -46,7 +46,6 @@ Authors product / feature / change / bug (and operator-defined) specs as Markdow
 - `lazy-spec.upstream-run` — Manual, no-daemon counterpart of the `lazy-spec.upstream-tick` routine: mirrors every configured external design source, derives each unit's status, opens a request for a ticked unit, and unfreezes an `in-review` unit whose linked request concluded.
 - `lazy-spec.doctor` — Audit a product spec for staleness, broken links, role/gate/stage inconsistencies; offer targeted fixes.
 - `lazy-spec.coverage` — Gap-scan a product's structure map and domain groups against its spec-asset tree; report uncovered capabilities with a proposed category + slug for a retro-spec.
-- `lazy-spec.audit` — Read-only health check of the plugin's own artifacts (rule invariants, CLI-to-help coverage, reference/template wiring); the plugin's `<namespace>.audit`, distinct from `lazy-spec.doctor`'s consumer-content checks.
 - `lazycortex-specs pins` (CLI, no skill wrapper) — One-shot backfill: add `wiki_pinned_topics` to every role-bearing spec doc missing it (pre-dates the pin landing in its template, or was scaffolded from an unrefreshed per-product/per-category override). Idempotent, repeatable — `lazy-spec.doctor` reports missing pins but never writes them.
 
 ## Primitives (called by other skills)

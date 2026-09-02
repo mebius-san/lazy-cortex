@@ -68,8 +68,28 @@ by the specs plugin's own `doc-type rename` still carries stale globs), and
 an `experts.history` block naming the retired `review.historian` expert is
 dropped; a history block naming any other expert — an operator
 customization — is preserved. Idempotent: a second run finds nothing under
-the retired names. Add `9: lambda data: <transformed>` here when a v9 → v10
-migration is needed.
+the retired names.
+
+v9 → v10 (`MIGRATIONS[9]`) adds the document-height protocol
+(`lazycortex-specs:lazy-spec.doc-height-protocol`) to the `protocols` list of
+every `design` and `system-design` class (product-qualified `@<key>` variants
+included), so the class's main writer and validators receive the abstraction
+height their document holds. Guarded add-if-absent union: an entry already
+carrying the reference — an operator customization or a previous run — is
+left untouched, and nothing is ever removed.
+
+v10 → v11 (`MIGRATIONS[10]`) brings the vision document kind to existing
+vaults: every `use-cases` class (product-qualified variants included) gains
+the content-root path `use-cases.md` when absent, and two classes are seeded
+when absent — `vision` (`*/*/vision.md`, main writers deep-copied from the
+`design` class) and `system-vision` (`*/vision.md` + `vision.md`, main
+writers deep-copied from the `system-design` class), each carrying the
+expert-signals and doc-height protocols and no validation block (a vision is
+closed by its writer and the operator). A vision class whose source class is
+absent is not seeded — there is nobody to derive the writer from, and a
+re-run of `/lazy-spec.install` covers such vaults. Guarded add-if-absent
+throughout; nothing is ever removed or rewritten. Add `11: lambda data:
+<transformed>` here when a v11 → v12 migration is needed.
 """
 from __future__ import annotations
 
@@ -89,6 +109,27 @@ _PROTOCOLS_KEY = "protocols"
 # the reference prefix a specs protocol carried before the plugin took its own namespace
 _SPEC_PROTOCOL_OLD_PREFIX = "lazycortex-specs:spec."
 _SPEC_PROTOCOL_NEW_PREFIX = "lazycortex-specs:lazy-spec."
+
+# the v9 -> v10 document-height protocol reference and the design-family class tokens it attaches
+# to; "system-design" carries no ReviewClassName constant — the migration ladder never keyed off
+# it before this step (waiver: one-off literal for this single union step)
+_DOC_HEIGHT_PROTOCOL = "lazycortex-specs:lazy-spec.doc-height-protocol"
+_HEIGHT_CLASS_NAMES = { ReviewClassName.DESIGN, "system-design" }
+
+# the v10 -> v11 vision seeding: class tokens, path globs, and the content-root use-cases path
+# (waiver: one-off literals for this single seeding step; "vision" / "system-vision" carry no
+# ReviewClassName constant — the ladder keys off the literal tokens, same as "system-design")
+_EXPERT_SIGNALS_PROTOCOL = "lazycortex-specs:lazy-spec.expert-signals-protocol"
+_USE_CASES_CLASS_NAME = "use-cases"
+_USE_CASES_ROOT_PATH = "use-cases.md"
+# waiver: private keys of the local _VISION_SEEDS table below, not settings-schema fields
+_SEED_SOURCE_KEY = "source"
+_SEED_PATHS_KEY = "paths"
+_VISION_SEEDS = {
+    "vision": { _SEED_SOURCE_KEY: ReviewClassName.DESIGN, _SEED_PATHS_KEY: [ "*/*/vision.md" ] },
+    "system-vision": { _SEED_SOURCE_KEY: "system-design",
+                       _SEED_PATHS_KEY: [ "*/vision.md", "vision.md" ] },
+}
 
 # waiver: one-off expert-name literals for these single main-rewrite/class-creation steps, not
 # reusable domain values
@@ -679,6 +720,76 @@ def _migrate_code_classes(data: dict) -> dict:
   return { **data, ReviewClassKey.CLASSES: classes }
 
 
+def _migrate_doc_height_protocol(data: dict) -> dict:
+  """
+  Apply the v9 → v10 addition of the document-height protocol to design-family classes.
+
+  Args:
+    data: The `review` section content.
+
+  Returns:
+    The section content with `lazycortex-specs:lazy-spec.doc-height-protocol` appended to the
+    `protocols` list of every `design` / `system-design` class (product-qualified variants
+    included) that does not already carry it; every other key and class is preserved.
+  """
+  # an entry already carrying the reference (operator customization or a previous run) is
+  # left untouched; nothing is ever removed
+  classes = [
+    { **c, _PROTOCOLS_KEY: [*c.get(_PROTOCOLS_KEY, []), _DOC_HEIGHT_PROTOCOL] }
+    if isinstance(c, dict)
+    and str(c.get(ReviewClassKey.CLASS, "")).split(_CLASS_PRODUCT_SEP, maxsplit = 1)[0] in _HEIGHT_CLASS_NAMES
+    and _DOC_HEIGHT_PROTOCOL not in c.get(_PROTOCOLS_KEY, [])
+    else c
+    for c in data.get(ReviewClassKey.CLASSES, [])
+  ]
+  return { **data, ReviewClassKey.CLASSES: classes }
+
+
+def _migrate_vision_and_use_cases(data: dict) -> dict:
+  """
+  Apply the v10 → v11 vision-class seeding and the use-cases content-root path.
+
+  Args:
+    data: The `review` section content.
+
+  Returns:
+    The section content with `use-cases.md` appended to every `use-cases` class's paths (when
+    absent), and a `vision` / `system-vision` class appended when absent and derivable — main
+    writers deep-copied from the `design` / `system-design` class respectively, both protocols
+    attached, no validation block; every other key and class is preserved.
+  """
+  classes = list(data.get(ReviewClassKey.CLASSES, []))
+
+  # content-root path on every use-cases class not already carrying it; nothing is removed
+  classes = [
+    { **c, ReviewClassKey.PATHS: [*c.get(ReviewClassKey.PATHS, []), _USE_CASES_ROOT_PATH] }
+    if isinstance(c, dict)
+    and str(c.get(ReviewClassKey.CLASS, "")).split(_CLASS_PRODUCT_SEP, maxsplit = 1)[0] == _USE_CASES_CLASS_NAME
+    and _USE_CASES_ROOT_PATH not in c.get(ReviewClassKey.PATHS, [])
+    else c
+    for c in classes
+  ]
+
+  # seed each vision class once: skipped when it already exists (operator state is never
+  # rewritten) or when its source class is absent (nobody to derive the writer from)
+  present = { str(c.get(ReviewClassKey.CLASS, "")).split(_CLASS_PRODUCT_SEP, maxsplit = 1)[0]
+              for c in classes if isinstance(c, dict) }
+  for token, seed in _VISION_SEEDS.items():
+    # guard: the class already exists, or the source class to copy the main writers from is gone
+    if token in present or seed[_SEED_SOURCE_KEY] not in present:
+      continue
+    source = next(c for c in classes
+                  if isinstance(c, dict) and c.get(ReviewClassKey.CLASS) == seed[_SEED_SOURCE_KEY])
+    classes.append({
+      ReviewClassKey.CLASS: token,
+      _PROTOCOLS_KEY: [ _EXPERT_SIGNALS_PROTOCOL, _DOC_HEIGHT_PROTOCOL ],
+      ReviewClassKey.PATHS: list(seed[_SEED_PATHS_KEY]),
+      _CONTEXT_FROM_FRONTMATTER_KEY: [ _SPEC_SOURCE_REQUESTS_KEY ],
+      ReviewClassKey.EXPERTS: { _MAIN_KEY: copy.deepcopy(source[ReviewClassKey.EXPERTS][_MAIN_KEY]) },
+    })
+  return { **data, ReviewClassKey.CLASSES: classes }
+
+
 MIGRATIONS = {
   1: _migrate_plan_classes,
   2: _migrate_test_plan_main_to_tester,
@@ -688,4 +799,6 @@ MIGRATIONS = {
   6: _migrate_architecture_and_planner,
   7: _migrate_spec_protocol_refs,
   8: _migrate_code_classes,
+  9: _migrate_doc_height_protocol,
+  10: _migrate_vision_and_use_cases,
 }

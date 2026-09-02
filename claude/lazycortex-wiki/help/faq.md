@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, and the tag-values canon.
-last_regen: 2026-08-27
+last_regen: 2026-09-02
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,7 +13,7 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 55e842efac087a3cd7919acecb3209e7e854abf3
+source_sha: 330b97960670773e9761442bb7daab587dc239e0
 ---
 # Frequently asked questions
 
@@ -209,7 +209,7 @@ These come from the terms section of `/lazy-wiki.doctor`, which dispatches the t
 
 ## What is `docs/structure.md`, and how do I build it?
 
-It is one file per repository — a compact, model-written map of what lives where and where new work belongs, distinct from the per-scope wiki topic indexes. Configure it with `/lazy-wiki.configure structure`: you define `depth_profiles` (named classes of path globs, each at depth `file`, `dir`, or `brief` — controlling how much detail that part of the tree gets) and `exclude` globs the map must never describe (`docs/structure.md` itself is always included automatically, since a map describing itself would loop). Build the initial map with `/lazy-wiki.structure rebuild` — the wizard only configures the section, it does not create the file.
+It is one file per repository — a compact, model-written map of what lives where and where new work belongs, distinct from the per-scope wiki topic indexes. Configure it with `/lazy-wiki.configure structure`: you define `depth_profiles` (named classes of path globs, each at depth `file`, `dir`, or `brief` — controlling how much detail that part of the tree gets) and `exclude` globs the map must never describe (`docs/structure.md` itself is always included automatically, since a map describing itself would loop). The wizard's last step checks whether `docs/structure.md` already exists and, if not, builds it for you by running `/lazy-wiki.structure rebuild` on your behalf — you never leave the wizard with the scan routines registered against a map that doesn't exist yet. Run `/lazy-wiki.structure rebuild` yourself any time afterwards to force a full resync.
 
 Any agent that needs to know where something lives (an architect deciding where a new file belongs, an expert asking "where does X live in this repo") should query it with `/lazy-wiki.structure query [<path>]` rather than reading the file directly — the query returns just the slice under `<path>`, never the whole map.
 
@@ -217,7 +217,9 @@ Any agent that needs to know where something lives (an architect deciding where 
 
 ## Does the structure map stay current on its own, or do I need to rebuild it by hand?
 
-`/lazy-wiki.configure structure` registers three git-watch routines — one for changed files, one for deletions, and one for renames — that dispatch the structure curator to update just the affected entries as commits land, when your project runs the background daemon. Without the daemon, the map only updates when you run `/lazy-wiki.structure rebuild` yourself; the terms section of `/lazy-wiki.doctor` — more precisely its structure counterpart — also flags drift (`missing-dir`, `missing-file`, `dead-entry`, `divergence`, `depth`) you can act on by hand or by rebuilding. A `config` finding there that says the map is reachable by the wiki is fixed once for the whole vault via `/lazy-wiki.configure vault` (putting `docs/structure.md` back into `wiki.exclude`), not by editing any one scope.
+`/lazy-wiki.configure structure` registers three git-watch routines — one for new files, one for deletions, and one for renames — that dispatch the structure curator to update just the affected entries as commits land, when your project runs the background daemon. The scan routine deliberately does not watch content edits to existing files: the map describes the shape of the tree, not what's inside each file, so rewriting a file in place never removes it from the map — the file's own line just goes stale, which is what the `divergence` finding below exists to catch (dispatching an expert job on every content edit used to queue dozens of no-op jobs per commit wave).
+
+Without the daemon, the map only updates when you run `/lazy-wiki.structure rebuild` yourself; the structure section of `/lazy-wiki.doctor` also flags drift (`missing-dir`, `missing-file`, `dead-entry`, `divergence`, `depth`) you can act on by hand or by rebuilding. A `config` finding there that says the map is reachable by the wiki is fixed once for the whole vault via `/lazy-wiki.configure vault` (putting `docs/structure.md` back into `wiki.exclude`), not by editing any one scope; the same section also flags a `config` finding when the three routines are registered but `docs/structure.md` itself is missing — every incremental dispatch would fail until you run `/lazy-wiki.structure rebuild` once, though `/lazy-wiki.configure structure`'s own last step already prevents this from happening on a fresh setup.
 
 ---
 

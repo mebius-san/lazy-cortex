@@ -5,7 +5,8 @@ Four operations, dispatched from the `decide` CLI subcommand: `add` (a fresh rec
 `supersede` (a fresh record that also marks an older one `superseded-by`), `obsolete` (marks a
 record `obsolete — <reason>`), and `promote` (transfers `[!decision]` blocks out of a living
 doc's body — `design.md` / `bug.md` / `tech.md` / `architecture.md` — into its sibling registry,
-replacing each block with a reference link). `decisions.md` is never scaffolded: the file is
+replacing each block with a self-describing reference line: the record link followed by the
+thesis). `decisions.md` is never scaffolded: the file is
 created lazily, with its own header + frontmatter, on the first record written into it.
 
 Numbering (`max + 1` within one file) is guarded by an exclusive file lock under the enclosing
@@ -193,15 +194,16 @@ class _Context:
   Attributes:
     content_root: The spec content-root (`spec_content_root`), used to build path-qualified
       wikilinks relative to it.
-    product: The product's settings-dict key (e.g. `core`) — the literal header value.
+    product: The product's settings-dict key (e.g. `core`) — the literal header value — or None
+      at project level (the content-root itself owns no product).
     category: The singular category axis value (`feature` / `change` / `bug` / operator-defined),
-      or None at product level (no category exists there).
-    slug: The asset's folder slug, or None at product level.
-    asset_dir: The asset's own folder, or None at product level.
+      or None at product and project level (no category exists there).
+    slug: The asset's folder slug, or None at product and project level.
+    asset_dir: The asset's own folder, or None at product and project level.
   """
 
   content_root: Path
-  product: str
+  product: str | None
   category: str | None
   slug: str | None
   asset_dir: Path | None
@@ -213,8 +215,9 @@ def _resolve_context(target_path: Path) -> _Context:
 
   Reads `.claude/lazy.settings.json[products]` and matches the target's parent directory
   (relative to the spec content-root) against each product's `spec_path`, picking the longest
-  (most specific) match. A parent equal to a product's `spec_path` is product-level; a parent one
-  or more segments deeper is asset-level.
+  (most specific) match. A parent equal to the content-root itself is project-level; a parent
+  equal to a product's `spec_path` is product-level; a parent one or more segments deeper is
+  asset-level.
 
   Args:
     target_path: The `decisions.md` path (may not yet exist) or a living doc's own path; only
@@ -224,11 +227,19 @@ def _resolve_context(target_path: Path) -> _Context:
     The resolved `_Context`.
 
   Raises:
-    ValueError: When no registered product's `spec_path` covers the target's parent directory.
+    ValueError: When the target's parent directory is neither the content-root nor covered by
+      any registered product's `spec_path`.
   """
   target_dir = target_path.resolve().parent
   settings_root = spec_paths.find_settings_root(target_dir)
   content_root = spec_paths.spec_content_root(settings_root).resolve()
+
+  # guard: the target sits loose at the content-root itself — project-level, no product at all
+  if target_dir == content_root:
+    return _Context(content_root = content_root, product = None,
+                    category = None, slug = None, asset_dir = None)
+
+  # below the root a product must claim the target — load the registered product records
   settings_path = settings_root / _K.CLAUDE_DIR / _K.SETTINGS_FILE
   data = json.loads(settings_path.read_text()) if settings_path.is_file() else {}
   products = data.get(_K.PRODUCTS) or {}
@@ -623,7 +634,10 @@ def _new_file_shell(decisions_path: Path) -> tuple[str, str]:
   """
   ctx = _resolve_context(decisions_path)
   fm_lines = ["---", "spec_role: decisions", "wiki_pinned_topics:",
-              "  - wiki/doc-kind/decisions", f"  - wiki/product/{ctx.product}"]
+              "  - wiki/doc-kind/decisions"]
+  # project-level registries carry no product pin — there is no product above the content-root
+  if ctx.product is not None:
+    fm_lines.append(f"  - wiki/product/{ctx.product}")
   if ctx.category is not None:
     fm_lines.append(f"  - wiki/category/{ctx.category}")
   # the registry never carries a stage, so no matcher ever claims it — the type's own seed is
@@ -636,11 +650,12 @@ def _new_file_shell(decisions_path: Path) -> tuple[str, str]:
   fm_lines.append("---")
   fm_text = "\n".join(fm_lines) + "\n"
 
-  # asset-level carries the slug segment in the title; product-level carries the product key
+  # asset-level carries the slug segment in the title; product-level the product key; the
+  # project-level registry has neither and takes the fixed word "project"
   if ctx.slug is not None:
     header = f"# {ctx.slug} — decisions\n"
   else:
-    header = f"# {ctx.product} — decisions\n"
+    header = f"# {ctx.product or 'project'} — decisions\n"
   return fm_text, header
 
 
@@ -982,10 +997,11 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
   Refuses (no mutation) when `doc_path` doesn't exist, when the doc's `spec_role` is not one of
   `design` / `bug` / `tech` / `architecture`, or — for an asset-level doc — when the owning
   asset's status folder-note currently carries `spec_cancelled` / `spec_halted` / `spec_released`
-  as true. Each transferred block is replaced in the doc with a reference wikilink to its new (or
-  dedup-matched existing) record; a block whose normalized thesis + full body already matches an
-  existing record contributes no new record — only its own reference-link replacement, making a
-  repeat approve idempotent.
+  as true. Each transferred block is replaced in the doc with a self-describing reference line —
+  the wikilink to its new (or dedup-matched existing) record followed by the thesis, with a
+  terminal period added when the thesis carries no terminal punctuation of its own; a block whose
+  normalized thesis + full body already matches an existing record contributes no new record —
+  only its own reference-line replacement, making a repeat approve idempotent.
 
   Guarantees:
     - Every outcome dict — refused, noop, or promoted — carries both `records` and
@@ -1030,7 +1046,7 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
 
   # a product-level doc has no owning asset and so no terminal/halt flags to check at all; an
   # asset-level doc's owning asset gates every promote call regardless of who invoked it (auto on
-  # approve, or a manual /lazy-spec.decide promote)
+  # approve, or a manual /lazy-spec.record-decision promote)
   ctx = _resolve_context(doc_path)
   if ctx.asset_dir is not None:
     status_note = ctx.asset_dir / f"{ctx.slug}.md"
@@ -1086,9 +1102,12 @@ def promote(doc_path: Path, *, today: str | None = None) -> dict:
           if _write_status(target_path, old_number, f"superseded-by {new_link}"):
             touched.add(str(target_path))
 
-    # the block's own lines are replaced in-place with a single reference-link line
-    reference_line = _self_link(decisions_path, record_id, thesis, ctx.content_root)
-    lines = [*lines[:blk[_K.START]], reference_line, *lines[blk[_K.END]:]]
+    # the block's own lines are replaced in-place with a self-describing reference line — the
+    # record link plus the visible thesis: this code cannot judge which prose owns the decision,
+    # so the line must read on its own until the writer weaves it in (markdown-style canon)
+    link = _self_link(decisions_path, record_id, thesis, ctx.content_root)
+    tail = "" if thesis.endswith(( ".", "!", "?", "…" )) else "."
+    lines = [*lines[:blk[_K.START]], f"{link} — {thesis}{tail}", *lines[blk[_K.END]:]]
 
   # write the doc back once, after every block has been replaced
   new_body = "\n".join(lines)

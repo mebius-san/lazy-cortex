@@ -41,6 +41,7 @@ class StateKey:
   """
 
   DAEMON_HALTED = "daemon_halted"
+  DAEMON_PAUSED = "daemon_paused"
   GIT_WATCH = "git_watch"
   LAST_RUN = "last_run"
   LAST_SEEN_SHA = "last_seen_sha"
@@ -738,9 +739,11 @@ class RuntimeFile:
 
   Attributes:
     SANDBOX_SETTINGS: The Claude Code settings file that confines expert spawns to the sandbox scope.
+    PAUSE: The operator's local pause semaphore — while present, the daemon skips all work.
   """
 
   SANDBOX_SETTINGS = ".runtime/sandbox.settings.json"
+  PAUSE = ".runtime/daemon.pause"
 
 
 # ----------------------------------------------------------------------------------------
@@ -1015,6 +1018,7 @@ class MetricStateKey:
     QUEUE_DEPTH: The expert-queue-depth gauge instrument.
     UP: The endpoint-up gauge instrument.
     DAEMON_HALTED: The daemon-halted gauge instrument.
+    DAEMON_PAUSED: The operator-pause gauge instrument.
     BUILD_INFO: The build-info gauge instrument.
     HALT_COUNT: The cumulative-halt counter instrument.
     DIRTY_TREE: The dirty-working-tree silent-skip gauge instrument.
@@ -1042,6 +1046,7 @@ class MetricStateKey:
   QUEUE_DEPTH = "queue_depth"
   UP = "up"
   DAEMON_HALTED = "daemon_halted"
+  DAEMON_PAUSED = "daemon_paused"
   BUILD_INFO = "build_info"
   HALT_COUNT = "halt_count"
   DIRTY_TREE = "dirty_tree"

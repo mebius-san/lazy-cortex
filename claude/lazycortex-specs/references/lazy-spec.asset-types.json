@@ -5,21 +5,24 @@
       "color": "#64748b",
       "default_path": "features",
       "start_doc": "design.md:design",
-      "playbook": "lazycortex-specs:lazy-spec.feature-playbook"
+      "playbook": "lazycortex-specs:lazy-spec.feature-playbook",
+      "vision": "mandatory"
     },
     "change": {
       "icon": "LiRefreshCcw",
       "color": "#64748b",
       "default_path": "changes",
       "start_doc": "design.md:design",
-      "playbook": "lazycortex-specs:lazy-spec.change-playbook"
+      "playbook": "lazycortex-specs:lazy-spec.change-playbook",
+      "vision": "opt-in"
     },
     "bug": {
       "icon": "LiBug",
       "color": "#64748b",
       "default_path": "bugs",
       "start_doc": "bug.md:bug",
-      "playbook": "lazycortex-specs:lazy-spec.bug-playbook"
+      "playbook": "lazycortex-specs:lazy-spec.bug-playbook",
+      "vision": "none"
     },
     "content": {
       "icon": "LiShapes",
@@ -29,7 +32,8 @@
       "default_tools": [
         "data"
       ],
-      "playbook": "lazycortex-specs:lazy-spec.content-playbook"
+      "playbook": "lazycortex-specs:lazy-spec.content-playbook",
+      "vision": "opt-in"
     },
     "research": {
       "icon": "LiFlaskConical",
@@ -37,7 +41,8 @@
       "default_path": "research",
       "start_doc": "design.md:design",
       "default_tools": [],
-      "playbook": "lazycortex-specs:lazy-spec.research-playbook"
+      "playbook": "lazycortex-specs:lazy-spec.research-playbook",
+      "vision": "opt-in"
     }
   }
 }

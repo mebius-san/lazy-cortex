@@ -21,21 +21,21 @@ The definition half of a change's flow is the same as a feature's, PLUS the casc
 - `design` (`design.md`) — mandatory. Never `cancelled`: the stage primitive refuses it exactly as it refuses a cancelled `bug.md`.
 - `architecture` (`architecture.md`) — mandatory the moment the asset is judged code-bearing. Never `cancelled` either.
 - Plans and reports are the tools' property. Which ones exist and what they are called is declared by the tool playbooks through their own `plan_doc` / `report_doc` declarations; this playbook does not enumerate them.
-- `decisions.md` — the registry of recorded decisions, written only by the `lazy-spec.decide` primitive. It carries no stage and takes no part in any gate.
+- `decisions.md` — the registry of recorded decisions, written only by the `lazy-spec.record-decision` primitive. It carries no stage and takes no part in any gate.
 
 ## Use-cases and ui-design
 
-The change's own `use-cases.md` (use-case-writer) and `ui-design.md` (ui-designer) are opt-in, exactly as on a feature: neither is on the mandatory list above, and neither exists until its launch checkbox is ticked — or the product or the change declares it mandatory (below). These describe the CHANGE's own delta, not a cascade target's; folding that delta into a target's own use cases or screens, where the target carries them, is the target's own definition-half business once the cascade reaches it, not something this chapter tracks.
+The change's own `vision.md` (designer, per the type record's `vision: opt-in` contract), `use-cases.md` (use-case-writer), and `ui-design.md` (ui-designer) are opt-in: neither is on the mandatory list above, and neither exists until its launch checkbox is ticked — or the product or the change declares it mandatory (below). These describe the CHANGE's own delta, not a cascade target's; folding that delta into a target's own use cases or screens, where the target carries them, is the target's own definition-half business once the cascade reaches it, not something this chapter tracks.
 
 **The queue.** `Write architecture`'s own precondition (below) already carries the architect's side of this hold: the row doesn't appear until `ui-design.md` is absent, `approved`, or `cancelled`, so a tick recorded while `ui-design.md` is still in review simply has no row to enact yet — the row appears, and the architect reads `ui-design.md`, on the wake where it reaches `approved` (a cancelled `ui-design.md` releases the hold with nothing for the architect to read). Enacting that tick is then the same ordinary seed-then-start flow as any other `Write` row (below), never a special-cased hold.
 
-The change's `design.md` launches through its own `Write design` checkbox like the rest, so its hold is a precondition on continuing its review: when `use-cases.md` exists, the designer is not continued on the change's `design.md` until `use-cases.md` reaches `approved` or `cancelled`, and reads it once it is approved.
+The change's `design.md` launches through its own `Write design` checkbox like the rest, so its hold is a precondition on continuing its review: when `vision.md` or `use-cases.md` exists, the designer is not continued on the change's `design.md` until each existing one reaches `approved` or `cancelled`, and reads them once approved. The general rule: a document's review proceeds only after every EXISTING upstream sibling in the reading chain (vision → use-cases → design → tech) is `approved`; an absent opt-in document never blocks.
 
-**The windows.** `Write use-cases` closes the moment `spec_design_done` closes. `Write ui-design` closes on the change's `architecture.md` reaching `approved` — or, for a change that never becomes code-bearing, on `spec_plan_done` closing instead. Past either window, a further use-case or screen revision on this delta is a new change, not a reopening of this one.
+**The windows.** `Write vision` and `Write use-cases` close the moment `spec_design_done` closes. `Write ui-design` closes on the change's `architecture.md` reaching `approved` — or, for a change that never becomes code-bearing, on `spec_plan_done` closing instead. Past either window, a further use-case or screen revision on this delta is a new change, not a reopening of this one.
 
-**Late edits.** An edit to `use-cases.md` or `ui-design.md` after the document it feeds (`design.md`, `architecture.md`) has already reached `approved` gets no auto-cascade — the coordinator drops a `[!attention]` callout into that downstream document and names the edit in `# Status brief`, rather than reopening anything on its own.
+**Late edits.** An edit to `vision.md`, `use-cases.md`, or `ui-design.md` after the document it feeds (`design.md`, `architecture.md`) has already reached `approved` gets no auto-cascade — the coordinator drops a `[!attention]` callout into that downstream document and names the edit in `# Status brief`, rather than reopening anything on its own.
 
-**Declaring it mandatory.** A product, the change's group folder, or this change may declare either document mandatory in its `# Coordinator rules` section, in which case the coordinator runs the same seed-then-start enactment directly, without a tick — the same rule-driven verb calls behind every other "runs automatically" clause (`lazy-spec.coordination-playbook.md` Chapter 1, "Automation 'by rule' is still verb calls").
+**Declaring it mandatory.** The `vision` contract comes from the type declaration (`asset_types.<name>.vision`); for `use-cases.md` / `ui-design.md`, a product, the change's group folder, or this change may declare either document mandatory in its `# Coordinator rules` section, in which case the coordinator runs the same seed-then-start enactment directly, without a tick — the same rule-driven verb calls behind every other "runs automatically" clause (`lazy-spec.coordination-playbook.md` Chapter 1, "Automation 'by rule' is still verb calls").
 
 ## Code-bearing
 
@@ -69,6 +69,7 @@ The architecture clause adds no sixth boolean — it rides inside the same `spec
 | Checkbox | Appears when | On tick |
 |---|---|---|
 | `Write design` | asset exists AND `design.md` doesn't exist | seed `design.md:design`, then the seed-then-start flow below |
+| `Write vision` | asset exists AND `design.md` is not `approved` AND `vision.md` doesn't exist | seed `vision.md:vision`, then the seed-then-start flow below |
 | `Write use-cases` | asset exists AND `design.md` is not `approved` AND `use-cases.md` doesn't exist | seed `use-cases.md:use-cases`, then the seed-then-start flow below |
 | `Write architecture` | `spec_design_done` true AND the asset is code-bearing AND `architecture.md` doesn't exist AND (`ui-design.md` is absent, `approved`, or `cancelled`) | seed `architecture.md:architecture`, then the seed-then-start flow below |
 | `Write ui-design` | `spec_design_done` true AND `ui-design.md` doesn't exist AND (`architecture.md` is absent OR not `approved`) | seed `ui-design.md:ui-design`, then the seed-then-start flow below |

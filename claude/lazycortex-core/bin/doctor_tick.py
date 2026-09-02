@@ -6,10 +6,11 @@ daemon needs medical attention and, if so, dispatches a single
 `runtime.doctor` expert job to the queue. The agent itself
 performs every diagnosis + fix-or-give-up decision.
 
-Before evaluating the triggers, a halt raised because the git remote
-could not be reached is re-probed once it is an hour old and cleared
-when the remote answers again — that class of halt describes a
-transient outage, not a state a human has to resolve.
+Before evaluating the triggers, a halt raised because the git remote could
+not be reached — or a `git_local_failed` halt whose trigger was a git sync
+step — is re-probed once it is an hour old and cleared when the remote
+answers again — that class of halt describes a transient outage, not a
+state a human has to resolve.
 
 Trigger conditions (OR-joined):
 1. `state.daemon_halted.reason == "uncommitted_changes"` and
@@ -46,6 +47,8 @@ JOBS_BASE = ".experts/.jobs"
 DEAD_HALT_AGE_SEC = 3600  # halt must be ≥1h old before doctor takes over
 REMOTE_NAME = "origin"
 REMOTE_PROBE_TIMEOUT_SEC = 15
+# waiver: daemon trigger tokens as recorded in daemon_halted.triggered_by, not internal keys
+GIT_SYNC_ACTORS = ( "_git_pre", "_git_post" )
 
 
 def _dead_jobs_needing_doctor(repo: Path) -> list[dict]:
@@ -87,13 +90,14 @@ def _dead_jobs_needing_doctor(repo: Path) -> list[dict]:
   return out
 
 
-def _clear_reachable_remote_halt(repo: Path) -> bool:
+def _clear_probe_recoverable_halt(repo: Path) -> bool:
   """
-  Clear a stale unreachable-remote halt once the remote answers again.
+  Clear a stale unreachable-remote or sync-step-local halt once the remote answers again.
 
-  A momentary network or SSH failure halts the daemon permanently: nothing re-probes the remote, so
-  the loop stays down long after connectivity returns. Only the reachability class is self-checkable
-  this way — divergence and rejected pushes describe real history the operator must resolve.
+  A momentary network or SSH failure can halt the daemon permanently: nothing re-probes the remote
+  on its own, so the loop stays down long after connectivity returns. Both an unreachable-remote
+  halt and a sync-step failure classified as local are cleared this way; divergence and rejected
+  pushes are not.
 
   Args:
     repo: Absolute path to the repository root.
@@ -107,9 +111,39 @@ def _clear_reachable_remote_halt(repo: Path) -> bool:
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from runtime_state import get_halted
   halt = get_halted(repo)
-  # guard: only an unreachable-remote halt is self-checkable
-  if halt is None or halt.get(HaltKey.REASON) != HaltReason.GIT_REMOTE_UNAVAILABLE:
+  # guard: nothing to clear
+  if halt is None:
     return False
+
+  # classify the halt: is this one of the probe-clearable classes?
+  reason = halt.get(HaltKey.REASON)
+
+  # Decision: probe-clear sync-step git_local_failed halts too, not only git_remote_unavailable —
+  # a transient network failure often lands in git_local_failed when its stderr misses the
+  # transport markers, and a probe that answers proves the same sync op would succeed now;
+  # divergence and rejected pushes describe real history and stay for a human.
+
+  # a locally-classified failure counts as probe-clearable only when a sync step raised it
+  sync_local = (
+    reason == HaltReason.GIT_LOCAL_FAILED and halt.get(HaltKey.TRIGGERED_BY) in GIT_SYNC_ACTORS
+  )
+
+  # Domain(runtime.incidents):
+  # # Self-recovering versus operator-requiring halt classes
+  # A halted daemon divides into two classes by what the halt reason says about the world. An
+  # unreachable-remote halt and a sync-step failure classified local both describe a transient
+  # outage — the repository itself is fine, only the connection to it failed at that moment —
+  # so both self-recover once a probe of the remote answers again, and only after the halt has
+  # aged past a one-hour gate that gives the operator and the daemon's own retry a fair chance
+  # first. Diverged history, rejected pushes, and invalid routine configuration describe real,
+  # persistent repository or configuration state instead of a passing outage; no probe of the
+  # remote changes what is true about them, so they always wait for the operator to resolve.
+
+  # guard: only an unreachable-remote or sync-step-local halt is self-checkable
+  if reason != HaltReason.GIT_REMOTE_UNAVAILABLE and not sync_local:
+    return False
+
+  # the halt must have aged past the doctor threshold before self-recovery applies
   age = time.time() - float(halt.get(HaltKey.HALTED_SINCE, 0))
   # guard: halt is younger than the threshold — give the operator and the daemon's own retry time
   if age < DEAD_HALT_AGE_SEC:
@@ -287,7 +321,7 @@ def doctor_tick(repo: Path) -> dict:
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from expert_runtime import dispatch_job, retire_completed_jobs
   repo = Path(repo)
-  remote_halt_cleared = _clear_reachable_remote_halt(repo)
+  remote_halt_cleared = _clear_probe_recoverable_halt(repo)
   halt = _stuck_halt(repo)
   dead_jobs = _dead_jobs_needing_doctor(repo)
   # guard: no trigger condition met — leave the queue untouched

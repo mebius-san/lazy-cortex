@@ -80,26 +80,30 @@ _PIN_ROLES = frozenset({
 _SPEC_ROLE_LINE_RE = re.compile(r"(?m)^spec_role:\s*(\S+)\s*$")
 
 
-def _pin_block(role: str, product: str, category: str | None) -> str:
+def _pin_block(role: str, product: str | None, category: str | None) -> str:
   """
   Render the `wiki_pinned_topics` YAML block for one document.
 
   Args:
     role: The document's `spec_role` value; becomes the `doc-kind` pin verbatim.
-    product: The owning product's settings-dict key.
-    category: The owning asset's singular category axis value, or `None` at product level
-      (no category pin — a product document has no category).
+    product: The owning product's settings-dict key, or `None` at project level (no product
+      pin — a content-root document belongs to no product).
+    category: The owning asset's singular category axis value, or `None` at product and
+      project level (no category pin — such a document has no category).
 
   Returns:
     The block's lines, joined, with no leading/trailing newline.
   """
-  lines = [f"{_K.WIKI_PINNED_TOPICS}:", f"  - wiki/doc-kind/{role}", f"  - wiki/product/{product}"]
+  lines = [f"{_K.WIKI_PINNED_TOPICS}:", f"  - wiki/doc-kind/{role}"]
+  # a project-level document sits above every product — only lower levels carry the axis pins
+  if product is not None:
+    lines.append(f"  - wiki/product/{product}")
   if category is not None:
     lines.append(f"  - wiki/category/{category}")
   return "\n".join(lines)
 
 
-def _insert_pin(fm_text: str, role: str, product: str, category: str | None) -> str:
+def _insert_pin(fm_text: str, role: str, product: str | None, category: str | None) -> str:
   """
   Insert the pin block into a frontmatter slice, right after its `spec_role:` line.
 
@@ -109,8 +113,9 @@ def _insert_pin(fm_text: str, role: str, product: str, category: str | None) -> 
   Args:
     fm_text: The document's frontmatter text (opening/closing `---` fences included).
     role: The document's `spec_role` value.
-    product: The owning product's settings-dict key.
-    category: The owning asset's singular category axis value, or `None` at product level.
+    product: The owning product's settings-dict key, or `None` at project level.
+    category: The owning asset's singular category axis value, or `None` at product and
+      project level.
 
   Returns:
     The updated frontmatter text, or `fm_text` unchanged when no `spec_role: <role>` line could

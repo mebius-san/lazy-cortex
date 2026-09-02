@@ -10,19 +10,19 @@ wiki_pinned_topics:
 ---
 # {{slug}} — code-report
 
-_Append-only working journal, written during execution — never after the fact._
+<!-- Append-only working journal, written during execution — never after the fact. -->
 
 ## Result
-_What landed, and the evidence it works._
+<!-- What landed, and the evidence it works. -->
 
 ## Open questions
-_Questions raised against the plan that only the operator can answer, still unanswered._
+<!-- Questions raised against the plan that only the operator can answer, still unanswered. -->
 
 ## Unresolved problems
-_Problems that surfaced during execution and were not solved — what breaks, and what was tried._
+<!-- Problems that surfaced during execution and were not solved — what breaks, and what was tried. -->
 
 ## Decisions taken alone
-_Decisions made without the operator because the work could not proceed otherwise — what was chosen, and on what grounds._
+<!-- Decisions made without the operator because the work could not proceed otherwise — what was chosen, and on what grounds. -->
 
 ## Log
-_Entries appended during execution, in order. Each records what was done and what the verification returned._
+<!-- Entries appended during execution, in order. Each records what was done and what the verification returned. -->

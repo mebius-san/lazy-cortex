@@ -15,22 +15,22 @@ spec_source_docs: []
 # {{product}} — design
 
 ## Overview
-_What the system is and why it exists._
-
-## Goals
-_What the system aims to achieve — the outcomes that count as success._
+<!-- Opens with a reference to the sibling vision (goals and value live there, never here). What the system is and why it exists. -->
 
 ## Design
-_The system's key decisions with WHY it is this way and not otherwise._
+<!-- The system's key decisions with WHY it is this way and not otherwise. -->
 
 ## Behavior
-_Observable behavior of the system, as its user experiences it._
+<!-- Observable behavior of the system, as its user experiences it. -->
+
+## Risks
+<!-- The vision-level risks, worked: what this design does about each. -->
 
 ## Known Limitations
-_Things the system does, but with a known ceiling — accepted constraints._
+<!-- Things the system does, but with a known ceiling — accepted constraints. -->
 
 ## Boundaries
-_What the system deliberately does NOT do; seams with neighboring systems, who owns what._
+<!-- What the system deliberately does NOT do; seams with neighboring systems, who owns what. -->
 
 # Sources
 #protected/spec/sources

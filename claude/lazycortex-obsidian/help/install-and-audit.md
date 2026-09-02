@@ -1,7 +1,7 @@
 ---
 chapter_type: block
-summary: Install, keep current, and audit the lazycortex-obsidian plugin — vault bootstrap, Obsidian plugin management, and semantic integrity checks in one pass.
-last_regen: 2026-08-27
+summary: Install, keep current, and audit the lazycortex-obsidian plugin — vault bootstrap, Obsidian plugin management, and vault-manifest drift checks in one pass.
+last_regen: 2026-09-02
 diagram_spec:
   anchor: "How the three skills compose"
   request: "Flow diagram showing how lazy-obsidian.install orchestrates lazy-obsidian.update-plugin (for Dataview, and indirectly for Obsidian community plugins via iconize-install), syncs and enables its own CSS snippets (diagram-fit + callouts), and how lazy-obsidian.audit feeds findings back to the user for fix or waive; show the idempotent re-run loop"
@@ -10,11 +10,11 @@ source_skills:
   - lazy-obsidian.install
   - lazy-obsidian.audit
   - lazy-obsidian.update-plugin
-source_sha: 1424b48a2f90138fef84328e2fd33c138e6a0f23
+source_sha: c5789cd250ada25aa79c0fc976a881d7c0be44a4
 ---
 # Install and audit
 
-Getting `lazycortex-obsidian` working in a project comes down to three skills that each own a distinct part of the lifecycle. `/lazy-obsidian.install` is the one-stop entry point: it syncs plugin rules and the tag-page template, installs Dataview into your vault, and chains into the iconize-sync and diagram render-glue setups so the full vault reaches a usable baseline in a single pass. `/lazy-obsidian.update-plugin` is the primitive beneath it — the workhorse that resolves, fetches, deep-merges opinionated settings, and registers any single Obsidian community plugin; you can also call it directly when you need to refresh one plugin out of band. `/lazy-obsidian.audit` is the semantic health check you run after updates or when something looks off — it verifies that the shipped artifacts stay internally coherent, and — when the vault has one — how far its live config has drifted from its tracked manifest, and presents a grouped PASS / WARN / FAIL report you can act on in-place.
+Getting `lazycortex-obsidian` working in a project comes down to three skills that each own a distinct part of the lifecycle. `/lazy-obsidian.install` is the one-stop entry point: it syncs plugin rules and the tag-page template, installs Dataview into your vault, and chains into the iconize-sync and diagram render-glue setups so the full vault reaches a usable baseline in a single pass. `/lazy-obsidian.update-plugin` is the primitive beneath it — the workhorse that resolves, fetches, deep-merges opinionated settings, and registers any single Obsidian community plugin; you can also call it directly when you need to refresh one plugin out of band. `/lazy-obsidian.audit` is the drift check you run when the vault's config may have moved — it compares the live config against the tracked manifest, when the vault has one, and presents a grouped PASS / WARN report you can act on in-place.
 
 All three are idempotent. Running `/lazy-obsidian.install` a second time produces no mutations if nothing changed, and `/lazy-obsidian.update-plugin` skips the binary copy when the vault is already at the latest version.
 
@@ -22,7 +22,6 @@ All three are idempotent. Running `/lazy-obsidian.install` a second time produce
 
 - Bootstrapping a freshly cloned repo: run `/lazy-obsidian.install` once to bring the vault to a working baseline (Dataview, Iconize, CSS snippets, diagram render glue) without any manual setup.
 - Refreshing a single vault plugin after a new upstream release: run `/lazy-obsidian.update-plugin <id>` directly — no need to re-run the full install.
-- Checking that your plugin artifacts are still coherent after a plugin update or a cache refresh: run `/lazy-obsidian.audit` to surface any version drift, schema mismatches, or stale settings.
 - Checking whether a vault whose config you snapshotted has since drifted — someone toggled a setting, added a snippet, or a plugin was quietly upgraded: `/lazy-obsidian.audit` reports it automatically whenever the repo carries a tracked `.obsidian.manifest.json`.
 - Re-running install safely after a plugin update: `/plugin update lazycortex-obsidian@lazycortex` refreshes the plugin cache but does not re-sync rule or template files — follow it with `/lazy-obsidian.install` to pick up changes.
 
@@ -32,7 +31,7 @@ You start with `/lazy-obsidian.install`. It detects whether you are installing a
 
 `/lazy-obsidian.update-plugin` is intentionally narrow: one plugin id per call, no side effects on sibling dirs, backup-safe (`manifest.json.bak` / `main.js.bak` are created before any download, restored on failure). When you pass `--bundled`, the skill copies binaries from the plugin's own templates instead of hitting GitHub — useful for `iconize-reloader`, which ships inside this plugin, and safe in offline environments. The state tuple it prints (`binary=... overrides=... community=...`) is machine-readable so the calling skill can log it verbatim.
 
-`/lazy-obsidian.audit` runs independently of install — invoke it any time you want a coherence check. It works through a fixed set of phases: version constants in `iconize_sync.py` vs. template `HOOK_VERSION` markers; icon-map template schema validity; cross-artifact coherence for the two-writer model (worker writes frontmatter, the bundled `iconize-reloader` bridges folder-note frontmatter into `data.json`); protocol template sanity; skill cross-references; the plugin's shipped CSS snippets — the diagram-fit snippets, the `mermaid-popup` override block, and `callouts.css`'s two decision-callout selectors; and, when the repo carries a tracked `.obsidian.manifest.json`, a comparison of the live vault config against that manifest. Drift findings are never auto-resolved — the audit only reports which side disagrees and lets you pick `/lazy-obsidian.capture` (the vault is right, record it) or `/lazy-obsidian.deploy` (the manifest is right, restore it) yourself. For every FAIL or WARN it offers fix / waive / skip — one question at a time. It is also the target of `lazy-core.doctor` Phase 3, so running the core doctor in any project that has this plugin enabled will delegate to this skill automatically.
+`/lazy-obsidian.audit` runs independently of install — invoke it any time you want a drift check. When the repo carries a tracked `.obsidian.manifest.json`, it compares the live vault config against that manifest; without one it skips silently with outcome `no-manifest`. Drift findings are never auto-resolved — the audit only reports which side disagrees and lets you pick `/lazy-obsidian.capture` (the vault is right, record it) or `/lazy-obsidian.deploy` (the manifest is right, restore it) yourself. For every WARN it offers fix / waive / skip — one question at a time. It is also the target of `lazy-core.doctor` Phase 3, so running the core doctor in any project that has this plugin enabled will delegate to this skill automatically.
 
 ## Common adjustments
 

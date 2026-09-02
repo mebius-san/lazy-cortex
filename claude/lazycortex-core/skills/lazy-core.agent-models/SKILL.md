@@ -1,17 +1,17 @@
 ---
 name: lazy-core.agent-models
-description: "Run when the operator asks which model each subagent runs on or wants to set them — after adding agents, after a fresh `/lazy-core.install`, or when an audit reports missing `agent_models` entries. Also runs as Phase 7 of `/lazy-core.optimize`. Interactive wizard over the entries install did not already seed; also prunes entries whose agent file is gone. Cheap, standalone, safe to re-run."
+description: "Run when the operator asks which model each subagent runs on or wants to set them — after adding agents, after a fresh `/lazy-core.install`, or when an audit reports missing `agent_models` entries. Also runs as Phase 7 of `/lazy-core.slim-context`. Interactive wizard over the entries install did not already seed; also prunes entries whose agent file is gone. Cheap, standalone, safe to re-run."
 allowed-tools: Read, Write, Edit, Glob, AskUserQuestion, Bash(mkdir -p *), Bash(git rev-parse*), Bash(date *), Bash(test *), Bash(python3 *), Agent
 lazy_setup_phase: post-install
 ---
 # Fill agent_models
 
-Standalone wizard for the `agent_models` section of `lazy.settings.json`. Extracted from `lazy-core.optimize` so you can fill model routes without paying for the full optimize pipeline (Phases 1–6: audit-repair, metadata, hygiene checks, parallel-scan refactor candidates, etc.).
+Standalone wizard for the `agent_models` section of `lazy.settings.json`. Extracted from `lazy-core.slim-context` so you can fill model routes without paying for the full optimize pipeline (Phases 1–6: audit-repair, metadata, hygiene checks, parallel-scan refactor candidates, etc.).
 
 ## When to invoke
 
 - **Directly**: `/lazy-core.agent-models` — after adding new agents, after a fresh `lazy-core.install`, or when `lazy-core.audit` reports missing `agent_models` entries.
-- **From `lazy-core.optimize`**: Phase 7 of that skill delegates to this one. Running optimize end-to-end triggers this skill as its final interactive phase.
+- **From `lazy-core.slim-context`**: Phase 7 of that skill delegates to this one. Running optimize end-to-end triggers this skill as its final interactive phase.
 
 ## Arguments
 
@@ -78,7 +78,7 @@ Shared enumeration (same as `lazy-core.audit` / `lazy-core.doctor` Phase), dedup
 1. **Built-ins** — hardcoded: `Explore`, `Plan`, `general-purpose`, `statusline-setup`. Group: `_builtin`. Dispatch: bare name.
 2. **User-authored, global** — `~/.claude/agents/*.md`. Group: `_user`. Dispatch: filename stem.
 3. **User-authored, project** — `./.claude/agents/*.md`. Group: `_project`. Dispatch: filename stem.
-4. **Plugin-shipped** — `~/.claude/plugins/cache/**/agents/*.md`. Extract plugin name from path. Group: domain (plugin name up to first `-`, else whole name). Dispatch: `<plugin-name>:<stem>`.
+4. **Plugin-shipped** — `~/.claude/plugins/cache/**/agents/*.md`. Extract plugin name from path. Group: domain (plugin name up to first `-`, else whole name). Dispatch: `<plugin-name>:<stem>`. **Install-scope filter:** the cache is machine-global, so filter each discovered plugin against `~/.claude/plugins/installed_plugins.json` — keep its agents only when the plugin is installed at `user` scope, or at `project` scope with a `projectPath` equal to the current repo root. A plugin installed only into some other project's scope is invisible to this repo's run — skipping it here is what keeps a foreign project-scoped plugin from being re-flagged `needs-interactive` forever in every unrelated repo.
 
 For each, record: dispatch string, target group, plugin name (if applicable), source path, and whether a merged-config entry exists.
 

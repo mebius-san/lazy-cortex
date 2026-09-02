@@ -27,7 +27,7 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Step 1 — Read answer file
 
-Call `claude/lazycortex-observe/bin/install.read_answer_file()`. If the file is absent, the verdict comes from the fact of collection, not from the file: run `install.detect_existing_coverage()` first.
+Call `${CLAUDE_PLUGIN_ROOT}/bin/install.read_answer_file()`. If the file is absent, the verdict comes from the fact of collection, not from the file: run `install.detect_existing_coverage()` first.
 
 - Coverage verdict `already-covered` → collection works on this host but observe has no record of it — report `WARN covered-unconfigured` (echo the detected signals) and skip the rest of the steps with outcome `n/a`. The fix is `/lazy-observe.install`, which records integrate mode automatically.
 - Coverage verdict `clear` → report `FAIL not-installed` and skip the rest of the steps with outcome `n/a`.

@@ -53,7 +53,7 @@ See [`claude/lazycortex-experts/`](claude/lazycortex-experts/) for details.
 
 Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
-4 skills.
+3 skills.
 
 Requires: lazycortex-core
 
@@ -93,7 +93,7 @@ See [`claude/lazycortex-review/`](claude/lazycortex-review/) for details.
 
 Specification and design skills for Claude Code
 
-27 skills, 1 agent.
+26 skills, 1 agent.
 
 Requires: lazycortex-core, lazycortex-diagram, lazycortex-review
 

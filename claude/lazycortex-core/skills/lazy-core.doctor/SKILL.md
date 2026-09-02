@@ -105,7 +105,7 @@ Checks the agent performs:
 
      For the **global scope**, do NOT call `load_section` via Bash (CRITICAL PATH RULE forbids Bash under `$HOME/.claude/`). Instead, pluck the `agent_models` value directly from the raw JSON parsed in step 1: `raw.get("agent_models", {})`. If `agent_models` is missing from the raw JSON treat it as an empty dict (no gap findings for the global scope).
 
-  4. **Absent-at-both-scopes check** — after processing both scopes, if BOTH files were absent (both step-1 Reads returned no file): emit `[WARN] no lazy.settings.json found at either scope — agent routing disabled. Run /lazy-core.optimize to create and fill.` and skip the remaining schema checks.
+  4. **Absent-at-both-scopes check** — after processing both scopes, if BOTH files were absent (both step-1 Reads returned no file): emit `[WARN] no lazy.settings.json found at either scope — agent routing disabled. Run /lazy-core.slim-context to create and fill.` and skip the remaining schema checks.
 
   5. **Schema checks** — for each present file, inspect the `agent_models` section dict obtained in step 3:
      - `[FAIL]` `agent_models` is not a dict (load returned a non-dict value).
@@ -113,8 +113,8 @@ Checks the agent performs:
      - `[WARN]` unexpected reserved group — any group whose name starts with `_` and is NOT one of `_builtin`, `_user`, `_project`. Finding: `unknown reserved group <name> in <path> — reserved prefix`.
      - `[WARN]` cross-group duplicate keys — same dispatch string appearing in more than one group. Finding: `duplicate key <dispatch> in groups <a>, <b> (<path>) — router last-wins is non-deterministic`.
      - `[WARN]` invalid value — any value not in `{"haiku", "sonnet", "opus", "default"}`. Finding: `invalid value <x> for <group>.<key> in <path>`.
-     - `[WARN]` orphan — dispatch string in any group that does NOT resolve to any discovered agent (see Agent discovery under `lazy-core.audit` / `lazy-core.optimize`). Finding: `orphan agent_models entry: <group>.<key> (<path>)`.
-     - `[INFO]` gap — discovered agent with no entry in any group (except those explicitly set to `"default"`, which are NOT gaps). Finding: `no agent_models entry for <dispatch-string> — run /lazy-core.optimize to fill`.
+     - `[WARN]` orphan — dispatch string in any group that does NOT resolve to any discovered agent (see Agent discovery under `lazy-core.audit` / `lazy-core.slim-context`). Finding: `orphan agent_models entry: <group>.<key> (<path>)`.
+     - `[INFO]` gap — discovered agent with no entry in any group (except those explicitly set to `"default"`, which are NOT gaps). Finding: `no agent_models entry for <dispatch-string> — run /lazy-core.slim-context to fill`.
      - `[INFO]` env-var status — current `LAZY_AGENT_MODEL_FLOOR` value if set, plus tier-order note `haiku < sonnet < opus`.
   All non-blocking.
 
@@ -464,11 +464,6 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 - *Run condition*: same as availability — plugin installation / enablement is the opt-in.
 - *On invoke*: fold audit findings into a **Diagram** subsection.
 
-**11d. Observe coverage** → `lazy-observe.audit`
-- *Availability*: `lazycortex-observe` meets the canonical signal set above.
-- *Run condition*: same as availability — plugin installation / enablement is the opt-in.
-- *On invoke*: fold audit findings into an **Observe** subsection.
-
 **11e. Review coverage** → `lazy-review.audit`
 - *Availability*: `lazycortex-review` meets the canonical signal set above.
 - *Run condition*: same as availability — plugin installation / enablement is the opt-in.
@@ -477,37 +472,27 @@ Any one signal is sufficient — doctor should not skip a delegated audit just b
 **11f. Expert runtime** — inline, via `lazy-core.audit` Agent D findings
 - *Availability*: always (expert-runtime checks are part of `lazycortex-core` itself — no separate plugin probe needed).
 - *Run condition*: `.claude/lazy.settings.json` contains a non-empty `experts` section, a `lazy-core.runtime` section, **or a non-empty `external_dirs.paths` list**. Skip if none is present (no expert runtime configured — silent skip, no report entry). Test the `paths` list, never the section: a settings migration stamps a `{"_version": 1}` stub for every known section into every repo, so "non-empty section" would match everywhere and defeat the skip.
-- *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D15 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).
+- *On invoke*: run the Agent D sub-checks from `lazy-core.audit` inline (do NOT dispatch a separate skill — just execute the same D1–D16 logic described in `lazy-core.audit`'s Agent D section). Fold findings into a **Loop runtime** subsection. Retain all D-findings for Phase 4 fix-offer matching (see "Loop runtime fix offers" in Phase 4).
 
 **11g. Obsidian coverage** → `lazy-obsidian.audit`
 - *Availability*: `lazycortex-obsidian` meets the canonical signal set above.
 - *Run condition*: same as availability — plugin installation / enablement is the opt-in.
-- *On invoke*: fold audit findings into an **Obsidian** subsection.
+- *On invoke*: fold audit findings into an **Obsidian** subsection. Drift-only scope: the skill compares the live vault config against `.obsidian.manifest.json` (silent `no-manifest` skip when the repo carries none); it no longer audits the plugin's own shipped artifacts.
 
 **11h. Python coverage** → `lazy-python.audit`
 - *Availability*: `lazycortex-python` meets the canonical signal set above.
 - *Run condition*: same as availability — plugin installation / enablement is the opt-in.
 - *On invoke*: fold audit findings into a **Python** subsection.
 
-**11i. Description triggers** — inline, via `lazy-core.audit` skill-writing check 5 + agent-writing check 2
-- *Availability*: always — the contract lives in `lazycortex-core` itself.
-- *Run condition*: at least one file in `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md`, `.claude/agents/*.md`, `claude/*/agents/*.md`, `.claude/commands/*.md`, or `claude/*/commands/*.md`. No local skills, agents, or commands → silent skip.
-- *On invoke*: `Read` `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`, then judge every one of those files' `description:` against it inline (do NOT dispatch a separate skill). One `[WARN]` per mechanism-only description, `[FAIL]` per missing one; fold into a **Description triggers** subsection. A description that will not fire is invisible to the router, so the count matters as much as the individual lines — lead the subsection with `<n> of <total> descriptions carry no trigger`.
-
-**11j. `Agent`-tool presence** — inline, via `lazy-core.audit` skill-writing check 6 + agent-writing check 5
+**11i. `Agent`-tool presence** — inline, via `lazy-core.audit` skill-writing check 6 + agent-writing check 4
 - *Availability*: always — the contract lives in `lazycortex-core` itself.
 - *Run condition*: at least one file in `.claude/skills/*/SKILL.md`, `claude/*/skills/*/SKILL.md`, `.claude/agents/*.md`, or `claude/*/agents/*.md`. No local skills or agents → silent skip.
 - *On invoke*: for each agent file, grep `^tools:` and flag `[WARN]` when present but missing `Agent`; for each skill file, grep `^allowed-tools:` and flag `[WARN]` the same way (a skill with no `allowed-tools:` field is out of scope — it inherits the caller's tools). Never flag `Agent`'s presence. Fold into an **Agent-tool coverage** subsection.
 
-**11k. Research-marker semantics** — inline, via `lazy-core.audit` skill-writing check 7
+**11j. Research-marker semantics** — inline, via `lazy-core.audit` skill-writing check 7
 - *Availability*: always — the contract lives in `lazycortex-core` itself.
 - *Run condition*: at least one file in `.claude/skills/*/SKILL.md` or `claude/*/skills/*/SKILL.md`. No local skills → silent skip.
 - *On invoke*: judge each skill's description/body against the research-marker convention per `lazy-core.skill-writing § 10` (do NOT dispatch a separate skill); flag `[WARN]` per missing-marker or marker-without-query-contract finding. Fold into a **Research markers** subsection.
-
-**11l. Specs plugin coverage** → `lazy-spec.audit`
-- *Availability*: `lazycortex-specs` meets the canonical signal set above.
-- *Run condition*: same as availability — plugin installation / enablement is the opt-in; no further gate.
-- *On invoke*: fold audit findings into a **Specs** subsection.
 
 ## Phase 4 — Present + fix + waive
 
@@ -524,7 +509,7 @@ Render in the existing format, with a new "Waived" tail section covering finding
 
 #### [FAIL] Rules: openclaw.md is 25 KB (limit: 3 KB)
 Reference material should be in .claude/agents/openclaw-config.md.
-**Fix**: Run `/lazy-core.optimize` to slim rules files.
+**Fix**: Run `/lazy-core.slim-context` to slim rules files.
 
 #### [WARN] Memory: feedback_old_thing.md not in MEMORY.md index
 File exists but has no index entry.
@@ -554,14 +539,13 @@ Fixes split into two classes, marked per bullet below:
 
 After the report, ask the user which of the **(ask)** fixes to apply, and apply only those. Then enter the **per-WARN waive loop** described in 4a below. Fixes available in-coordinator:
 
-- Rules oversized (ask) → suggest running `/lazy-core.optimize`; don't auto-slim here.
+- Rules oversized (ask) → suggest running `/lazy-core.slim-context`; don't auto-slim here.
 - Rule drift on an install-managed rule (auto) → restore the file from the owning plugin's shipped source. A plugin rule is not an editing surface: a project that needs different behaviour writes its own rule alongside it, so a divergence from the plugin source is stale content rather than a deliberate override, and preserving it means the consumer silently runs on a rule the plugin no longer ships. Identify install-managed status from the owning install skill's registry (`lazy-log.*` rules are owned by `/lazy-core.install`), never from the filename. Report which rules were restored so an operator who did mean to edit one sees it immediately.
 - Orphan rule — a `.claude/rules/*.md` no installed plugin claims (ask) → report; deleting a file whose owner is simply not installed right now is not doctor's call.
 - Missing rules frontmatter (mixed) → `description:` is derived from the rule body and written (auto). The scope key (`paths:` vs `always_loaded:`) is a separate decision — see the next bullet.
 - Rule lacks scope AND waiver (ask) → ask the user, per rule, whether the rule is legitimately always-loaded. If yes, add `always_loaded: <reason>` (reason must be substantive — one line explaining *why* every turn needs it, not `true`). If no, add a `paths:` block-list narrowing it to the folders where it applies. Show the proposed frontmatter diff before writing. Never auto-pick a scope — only the user knows the rule's true audience.
 - Inline-array `paths:` shape (FAIL from `lazy-core.audit` rule-writing check 3) (auto) → in-place migration to canonical YAML block-list. Parse the existing `paths: ["a", "b", ...]` line, preserve all globs verbatim (including quote style), rewrite as a key on its own line followed by one `  - "<glob>"` per array element. No glob is added, dropped, or reworded, so the rule's scope is byte-equivalent before and after.
 - Authoring rule without template reference (WARN from `lazy-core.audit` rule-writing check 9) (auto) → two-step scaffold. (1) Derive `<artifact-type>` from the rule filename (`*.writing.md` → strip `-writing`/`.writing` and pluralize as needed; e.g. `lazy-core.skill-writing.md` → `skill`), copy the matching base template (`<plugin>/templates/core/{rule,skill,agent}-template.md`) to `<plugin>/templates/<group>/<derived-name>-template.md`, with `<group>` = the plugin's primary namespace (`core` for `lazycortex-core`). (2) Prepend `**Template:** ${CLAUDE_PLUGIN_ROOT}/templates/<group>/<derived-name>-template.md — start here when creating a new <artifact-type>.` immediately after the rule's H1 + orientation paragraph, before the first `## ` section. Per `lazy-core.scaffold`. Both the derived name and the group follow from names already on disk; a maintainer who wants a different group renames the file afterwards.
-- `description:` without a trigger — WARN (mechanism-only) or FAIL (absent) from Phase 3 § 11i (auto) → rewrite the line. `Read` `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md` and the artifact's own body, then grep the artifact's name across `.claude/` and `claude/` before claiming a caller trigger — the trigger states what the file does and who invokes it, and both are already written in the body and the call sites. `Edit` that one frontmatter line and nothing else — not the body, not another key — and record old and new under `### Applied` so a wrong trigger is one line to spot and revert. The single exception is an artifact with no substantive body to read from (an empty or stub file): nothing to derive, so it stays a report.
 - Missing mandatory routine protocol (auto): `Bash(lazycortex-core add-protocols --routine <name> --ids <id>)` per finding. The routine and the protocol both come from the check's own table, and the union only appends — nothing the operator attached is touched.
 - Memory index (auto): add missing entries, remove broken links; flag stale for review.
 - Settings leakage (auto): move each misplaced key to the file the split in `rules/lazy-core.hygiene.md` assigns it.

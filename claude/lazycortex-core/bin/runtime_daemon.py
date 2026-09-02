@@ -32,7 +32,7 @@ from worktree_tasks import WorktreeTaskManager
 from code_fingerprint import CodeFingerprint
 from constants import (
   DaemonKey, EnvVar, GitConfigKey, HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase,
-  IncidentState, InboxGuardKey, JobConfigKey, PluginFile, RoutineKey, SettingsFile,
+  IncidentState, InboxGuardKey, JobConfigKey, PluginFile, RoutineKey, RuntimeFile, SettingsFile,
   SettingsKey, StateKey, TickResultKey,
 )
 
@@ -1046,14 +1046,26 @@ def _run_iteration(repo_root: Path, *, push: bool = True, only: str | None = Non
     force_due: Treat the `only` routine as due regardless of its interval — the operator named it
       explicitly, so its schedule does not apply to this run.
   """
+  # guard: the operator's local pause semaphore is present — the whole iteration is skipped:
+  # no git sync, no routine dispatch, no state mutation. The gauge tracks the semaphore so
+  # dashboards read "paused" rather than a silent gap; the loop announces the transition.
+  # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
+  import metrics
+  if (repo_root / RuntimeFile.PAUSE).exists():
+    metrics.set_paused_gauge(True)
+    return
+  metrics.set_paused_gauge(False)
+
+  # not paused — load the persisted state and settle any self-lifting halt before dispatching
   state = runtime_state.load(repo_root)
   halt = state.get(StateKey.DAEMON_HALTED)
   if halt:
-    # Auto-clear the two self-lifting halt reasons; the rest (git_pull_diverged / git_push_failed /
-    # git_remote_unavailable / routine_config_invalid) require human investigation and stay until
-    # /lazy-runtime.recover. A dirty-tree halt lifts once the tree is clean; a rate-limit halt
-    # lifts once its window reopens — and a block missing `resets_at` is treated as already
-    # expired, since nothing could ever lift it otherwise.
+    # Auto-clear the two self-lifting halt reasons. A dirty-tree halt lifts once the tree is
+    # clean; a rate-limit halt lifts once its window reopens — and a block missing `resets_at`
+    # is treated as already expired, since nothing could ever lift it otherwise. Network-shaped
+    # git halts (git_remote_unavailable, and git_local_failed raised by a sync step) are cleared
+    # by the hourly doctor tick's remote probe instead; git_pull_diverged / git_push_failed /
+    # routine_config_invalid require human investigation and stay until /lazy-runtime.recover.
     reason = halt.get(HaltKey.REASON)
     dirty_cleared = reason == HaltReason.UNCOMMITTED_CHANGES and _check_working_tree(repo_root) is None
     resets = halt.get(HaltKey.RESETS_AT)
@@ -1167,8 +1179,6 @@ def _run_iteration(repo_root: Path, *, push: bool = True, only: str | None = Non
   system_stuck = pre_dirty or (halt is not None)
   # surface the silent skip: without this gauge a dirty-tree pause is invisible on the dashboard
   try:
-    # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-    import metrics
     if metrics.is_enabled():
       metrics.set_dirty_tree_gauge(pre_dirty)
   except ImportError:
@@ -1721,6 +1731,8 @@ def run(repo_root: Path) -> None:
   # polling sleep, and loops.
   # halt-announce cursor: the halted_since value already reported, None while running
   announced_halt_since = None
+  # pause-announce cursor: whether the pause already reported, so each transition logs once
+  announced_paused = False
 
   while not _STOP_EVENT.is_set():
     _run_iteration_guarded(repo_root)
@@ -1752,6 +1764,22 @@ def run(repo_root: Path) -> None:
       state = runtime_state.load(repo_root)
       tail_halt = state.get(StateKey.DAEMON_HALTED)
 
+      # announce a pause transition exactly once each way — the paused iterations are
+      # otherwise indistinguishable from a hang; the semaphore is the operator's local file,
+      # so no settings or commits are involved
+      paused = (repo_root / RuntimeFile.PAUSE).exists()
+      if paused != announced_paused:
+        message = (
+            f"daemon paused — semaphore {RuntimeFile.PAUSE} present" if paused
+            else "daemon resumed — pause semaphore removed"
+        )
+        sys.stderr.write(message + "\n")
+        _log_routine_result(repo_root, {
+          TickResultKey.NAME: "_daemon_pause", TickResultKey.EXIT: 0, TickResultKey.DURATION_SEC: 0.0,
+          "message": message,
+        })
+        announced_paused = paused
+
       # announce a halt exactly once per halt (and its lifting once), on the daemon's own
       # terminal and in the journal — the sleep below is otherwise indistinguishable from a hang
       halt_since = (tail_halt or {}).get(HaltKey.HALTED_SINCE)
@@ -1775,7 +1803,11 @@ def run(repo_root: Path) -> None:
             "message": "halt lifted",
           })
         announced_halt_since = halt_since
-      if tail_halt:
+      if paused:
+        # a paused iteration returns immediately without touching `last_run`, so `compute_sleep`
+        # would spin; idle at the polling floor until the operator removes the semaphore
+        sleep_s = polling
+      elif tail_halt:
         # when halted, `_run_iteration` returns immediately without touching `last_run`;
         # `compute_sleep` would otherwise see stale last_run timestamps + short intervals → return 0
         # → tight CPU loop. Sleep the polling floor directly so a halted daemon idles cleanly until
@@ -2583,12 +2615,22 @@ def _emit_tick_metrics_if_available(repo_root: Path, result: dict) -> None:
   if not metrics.is_enabled():
     return
   raw_dispatched = result.get(TickResultKey.DISPATCHED_COUNT)
+
+  # a command routine with no dispatch count still signals idleness through its stdout — the same
+  # no-op classifier the journal elision trusts marks those ticks as zero work, so the runs counter
+  # stays a real-work count instead of mirroring ticks for stdout-only routines like the pump
+  if raw_dispatched is not None:
+    dispatched: int | None = int(raw_dispatched)
+  else:
+    dispatched = 0 if _is_no_op_log(result) else None
+
+  # one call records the tick, run, error, and duration series together under the metrics lock
   metrics.record_tick(
     routine = result.get(TickResultKey.NAME) or "unknown",
     exit_code = int(result.get(TickResultKey.EXIT, 0)),
     duration_sec = float(result.get(TickResultKey.DURATION_SEC, 0.0)),
     error = result.get(TickResultKey.ERROR),
-    dispatched = int(raw_dispatched) if raw_dispatched is not None else None,
+    dispatched = dispatched,
   )
   metrics.set_queue_depth_from_filesystem(repo_root)
   metrics.aggregate_tokens_from_log(repo_root)

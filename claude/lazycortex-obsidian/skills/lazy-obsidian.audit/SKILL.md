@@ -1,111 +1,26 @@
 ---
 name: lazy-obsidian.audit
-description: "Run when the operator asks to audit the lazycortex-obsidian plugin, or when its machinery misbehaves after an update — icons stop being painted, the icon-map is rejected as the wrong schema, or mermaid/ascii fences render unstyled in the vault. Checks the plugin's own shipped artifacts (worker version constants, icon-map template, the Iconize settings block, the render-glue CSS), plus — when the repo carries a vault manifest — how far this vault's live config has drifted from it. Read-first; presents findings, then asks which to fix."
+description: "Run when the operator asks whether this vault's live Obsidian config still matches its captured manifest — icons or plugin settings changed by hand, a plugin updated past its captured version, or after pulling a checkout onto a new machine. Compares `.obsidian.manifest.json` against the live config directory and reports drift; the fix is the operator's pick between `/lazy-obsidian.capture` and `/lazy-obsidian.deploy`. Read-first; presents findings, then asks which to fix."
 allowed-tools: Read, Glob, Grep, Bash(python3 *), Bash(test *), Bash(mkdir -p *), Bash(date *), Bash(git rev-parse*), AskUserQuestion, Write, Agent
-argument-hint: "(no arguments — runs the full plugin audit)"
+argument-hint: "(no arguments — runs the vault-manifest drift check)"
 ---
 # lazycortex-obsidian audit
 
-Semantic integrity check for the plugin. Orthogonal to `lazy-core.doctor`'s generic structural checks (filename format, frontmatter presence, etc.) — this skill owns the domain-specific invariants.
+Vault-manifest drift check: does the live `.obsidian/` config still match the manifest `/lazy-obsidian.capture` recorded. Consumer-facing only — the plugin's own shipped artifacts are audited by the maintainer's tooling, not here.
 
 ## Execution discipline (MANDATORY — read before any action)
 
-This skill has 10 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
+This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorder, or silently omit any step. To make dropped steps structurally impossible:
 
 1. **Before calling any other tool**, write out the step ledger — one line per step below, each marked `pending` — no merging, no abbreviation, no renaming. The canonical list (use these titles verbatim):
-   - `Phase 1 — Version coherence`
-   - `Phase 2 — Icon-map template sanity`
-   - `Phase 2.5 — Cross-artifact coherence for the two-writer model`
-   - `Phase 3 — Protocol template sanity`
-   - `Phase 4 — Skill cross-refs`
-   - `Phase 6 — Protocol doc content checks`
-   - `Phase 8 — Plugin snippets`
-   - `Phase 9 — Vault manifest drift`
-   - `Phase 5 — Report + fix loop`
-   - `Phase 7 — Log the run`
-2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `already-ignored`, `absent`, `skipped-per-user-choice`).
+   - `Phase 1 — Vault manifest drift`
+   - `Phase 2 — Report + fix loop`
+   - `Phase 3 — Log the run`
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** "Completed" means "I executed the step's logic AND produced a report line for it". No-ops count only if they produced an explicit outcome line (e.g. `asserted`, `no-manifest`, `skipped-per-user-choice`).
 3. **Do not reach the Report step until the ledger shows every prior task `completed` or explicitly `skipped` with an outcome.** A still-`pending` task is a bug — stop and execute it first.
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 
-## Phase 1 — Version coherence
-
-- Read `${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py`; extract `PROTOCOL_VERSION`, `HOOK_VERSION`, `SCHEMA_VERSION`, and `SUPPORTED_SCHEMA` constants.
-- Grep `HOOK_VERSION:` markers out of:
-  - `hooks/hooks.json` (plugin-shipped PostToolUse entry)
-- **FAIL** if MAJOR differs between worker and any template/hook.
-- **WARN** if MINOR/PATCH differs.
-- **FAIL** if `SCHEMA_VERSION` is not a member of `SUPPORTED_SCHEMA` (the worker would refuse its own written config).
-- **FAIL** if `templates/iconize/obsidian-icon-map.json`'s `schema_version` does not equal the worker's `SCHEMA_VERSION`.
-
-## Phase 2 — Icon-map template sanity
-
-- Load `templates/iconize/obsidian-icon-map.json`.
-- **FAIL** if JSON doesn't parse.
-- **FAIL** if required top-level keys missing (`schema_version`, `matchers`).
-- **FAIL** if `schema_version != 2` (the current worker schema). v1 icon-maps in the template are a release-blocking regression — consumers copy this file as their starter.
-- **FAIL** if any matcher contains an `emit` key (retired at schema 2; folder emission is now driven by Folder Notes template, not matcher output).
-- **WARN** per matcher whose `path_glob` does not end in a file extension (`specs/**` rather than `specs/**/*.md`). Icons live in frontmatter, so the worker only ever reaches `.md`; an extensionless glob claims a reach it does not have and hides the author's intent for non-markdown paths.
-
-The template ships with `matchers: []` by design (consumers author their own rules); matcher-coverage checks belong in a consumer-side audit, not here.
-
-## Phase 2.5 — Cross-artifact coherence for the two-writer model
-
-- Read `templates/obsidian/plugin-settings.json`.
-- **FAIL** if `obsidian-icon-folder.settings.iconInFrontmatterEnabled` is not `true`.
-- **FAIL** if `obsidian-icon-folder.settings.iconInFrontmatterFieldName` is not `"iconize_icon"`.
-- **FAIL** if `obsidian-icon-folder.settings.iconColorInFrontmatterFieldName` is not `"iconize_color"`.
-- **FAIL** if `folder-notes` is absent from the top-level override blocks (the reloader depends on the `folderNoteName` template being set).
-- **WARN** if `folder-notes.folderNoteName` is not `"{{folder_name}}"` — the plugin supports other templates but the protocol doc documents the default.
-
-- Read `templates/obsidian/plugins/iconize-reloader/manifest.json`.
-- Extract `version`.
-- Grep `RELOADER_VERSION` from `templates/obsidian/plugins/iconize-reloader/main.js`.
-- **FAIL** if the manifest version does not match the `RELOADER_VERSION` constant — the reloader's runtime version marker is the handshake the audit surfaces to `lazy-core.doctor`.
-- **FAIL** if the manifest version's MAJOR is `< 2` — the v1 reloader predates the folder-note writer.
-
-## Phase 3 — Protocol template sanity
-
-- Read `references/lazy-obsidian.iconize-protocol.md`.
-- **FAIL** if frontmatter missing or `owner_skill` is not a skill that exists under `skills/`.
-- **WARN** if no `## Resolver` section.
-
-## Phase 4 — Skill cross-refs
-
-- Enumerate `skills/*/SKILL.md`.
-- **FAIL** if any shipped skill's `allowed-tools` includes a Bash glob that hardcodes an absolute path (violates `lazy-core.hygiene`).
-- **WARN** if the `iconize-sync` SKILL.md does not document all core subcommands (`sync`, `sync-paths`, `reconcile`, `reconcile-plugin`, `reconcile-dirty`, `check-versions`).
-
-## Phase 8 — Plugin snippets
-
-The plugin ships every CSS snippet consumers install under `templates/obsidian/snippets/` — diagram render glue (`mermaid-fit.css`, `ascii-fit.css`) plus the `mermaid-popup` override block in `templates/obsidian/plugin-settings.json`, and the custom-callout styles (`callouts.css`). `mermaid-fit.css`, `ascii-fit.css`, and `callouts.css` are synced and enabled by `/lazy-obsidian.install`'s shared snippet step; `mermaid-popup` is installed by `/lazy-obsidian.diagram-install`. This phase verifies the shipped artifacts are well-formed; consumer-side state (CSS enabled in a specific vault, plugin actually installed) is the install skill's job, not the plugin audit.
-
-- Read `templates/obsidian/snippets/mermaid-fit.css`.
-- **FAIL** if the file is absent — install skill cannot scaffold without it.
-- **FAIL** if the file contains no rule binding `text:not([fill])` to `var(--text-normal)`. The selector is the contract for "diagram text picks up Obsidian theme color"; without it the engine's transparent-background theme directive renders unreadable in dark themes.
-- **WARN** if the file contains hardcoded color literals (`fill: #...`, `color: rgb(...)`, etc.) on selectors that touch `.mermaid` — the contract is to defer to theme variables, not bake a palette.
-
-- Read `templates/obsidian/snippets/ascii-fit.css`.
-- **FAIL** if the file is absent — install skill cannot scaffold without it.
-- **FAIL** if the file contains no `code.language-text` selector — that is the contract anchor for "shrink ASCII-diagram blocks", without it the snippet is a no-op.
-- **WARN** if the file targets `.markdown-source-view.mod-cm6` (Live Preview) — current contract is Reading-Mode-only; CM6 rules are reserved for a future explicit decision.
-
-- Read `templates/obsidian/plugin-settings.json` (already loaded in Phase 2.5).
-- **FAIL** if the top-level `mermaid-popup` block is missing — `/lazy-obsidian.update-plugin mermaid-popup` would land the plugin with default settings (no zoom-step calibration).
-- **FAIL** if `mermaid-popup.ZoomRatioValue` is not a string equal to `"0.1"`. (The plugin schema uses string types for this field; numeric `0.1` would be coerced and break the override deep-merge.)
-
-- Read `templates/obsidian/snippets/callouts.css`.
-- **FAIL** if the file is absent — install skill cannot scaffold without it.
-- **FAIL** if the file does not contain both `.callout[data-callout="decision"]` and `.callout[data-callout="decision-candidate"]` selectors — those are the contract for the decisions-registry's custom callout vocabulary; missing either leaves that type unstyled.
-
-- Grep `templates/obsidian/snippets/` for any file other than `mermaid-fit.css`, `ascii-fit.css`, or `callouts.css`.
-- **WARN** for each unexpected file — this snippets folder is only for plugin-shipped snippets today; stragglers from a previous plugin version are stale config.
-
-- Grep the engine's authoring rule (`${CLAUDE_PLUGIN_ROOT}/../lazycortex-diagram/rules/lazy-diagram.authoring.md`, if `lazycortex-diagram` is also installed under `~/.claude/plugins/cache/`).
-- **WARN** if the file is not findable — the diagram-install skill expects the engine to ship the theme directive on every fence; a vault that installs render glue without the engine has no producer of well-formed fences. Heuristic only; not a hard fail (consumers may emit fences manually).
-
-- The render-fix `lazy-obsidian.diagram-tune` agent and the `lazy-obsidian.diagram-render` rule were scoped out of v1 (the engine's authoring rule already enforces theme directive + edge labels; per-vault render concerns are install-time, not per-diagram). Do NOT flag their absence as findings.
-
-## Phase 9 — Vault manifest drift
+## Phase 1 — Vault manifest drift
 
 Only when the repo carries a vault manifest — `test -f <repo_root>/.obsidian.manifest.json`. Absent → outcome `no-manifest`, skip the phase (the vault predates `/lazy-obsidian.capture`, or this checkout is not a vault).
 
@@ -121,23 +36,10 @@ The worker writes nothing; it compares the live config directory against the man
 
 Outcome: `clean`, `drift: <N>`, or `no-manifest`.
 
-## Phase 5 — Report + fix loop
+## Phase 2 — Report + fix loop
 
-Collect all findings. Present a grouped report with `PASS` / `WARN` / `FAIL` prefixes. For each `FAIL` / `WARN`, ask (one `AskUserQuestion`): **fix** / **waive** / **skip**. Apply fixes where trivial; otherwise explain what needs manual attention.
+Collect all findings. Present a grouped report with `PASS` / `WARN` / `FAIL` prefixes. For each `WARN`, ask (one `AskUserQuestion`): **fix** / **waive** / **skip**. Drift fixes route through `/lazy-obsidian.capture` or `/lazy-obsidian.deploy` per the operator's pick; this skill never resolves drift by hand.
 
-Follow the coordinator pattern documented in `lazycortex-core`'s `references/lazy-core.parallel-scan.md` if the audit scans enough artifacts to warrant parallel Explore subagents. Today's audit is small enough to run inline.
-
-## Phase 6 — Protocol doc content checks
-
-- Read `references/lazy-obsidian.iconize-protocol.md`.
-- **FAIL** if the protocol still describes `emit: ["self", "parent_dir"]` as a matcher output (retired at schema 2).
-- **FAIL** if the protocol does not describe the two-writer model (worker writes frontmatter; reloader writes folder-keyed `data.json` entries).
-- **WARN** if the protocol does not name `iconize_icon` / `iconize_color` as the canonical frontmatter keys.
-
-## Phase 7 — Log the run
+## Phase 3 — Log the run
 
 `./.logs/claude/lazy-obsidian.audit/YYYY-MM-DD_HH-MM-SS.md` per the logging rule.
-
-## Integration with `lazy-core.doctor`
-
-`lazy-core.doctor` Phase 3 delegates to this skill. Add a Phase-3 step in `lazycortex-core`'s doctor that probes for `lazycortex-obsidian` in the installed plugins list and, when present, invokes this skill. Tracked as a follow-up.

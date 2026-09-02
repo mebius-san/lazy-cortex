@@ -33,7 +33,7 @@ Required inputs from the caller:
 
 Pre-flight checks:
 1. `expert_name` must be a non-empty string. If absent → abort: "`expert_name` is required."
-2. `payload` must be a dict containing all three standard fields: `kind`, `role`, `request`. If any field is missing → abort with: "payload missing required field(s): <list>. See `claude/lazycortex-core/references/lazy-core.expert-protocols-contract.md` for the protocol contract."
+2. `payload` must be a dict containing all three standard fields: `kind`, `role`, `request`. If any field is missing → abort with: "payload missing required field(s): <list>. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.expert-protocols-contract.md` for the protocol contract."
 3. Every entry of `source` / `context` must be a repo-relative path string. A caller holding text that no file carries passes it as `source_inline` / `context_inline` instead — those are written at dispatch, not copied at claim.
 
 Optional payload fields: the `source` / `context` / `result` file-list arrays of `{path, description}` entries, which tell the expert what it will find under the job dir, plus protocol-specific extras. These are `request.json` prose — not the path manifests above.
@@ -125,7 +125,7 @@ input: "expert_name=<expert_name>"
 
 ## Failure modes
 
-- **"payload missing required field(s): kind"** (or `role`, `request`) — payload does not conform to the protocol contract → add the missing fields; see `claude/lazycortex-core/references/lazy-core.expert-protocols-contract.md`.
+- **"payload missing required field(s): kind"** (or `role`, `request`) — payload does not conform to the protocol contract → add the missing fields; see `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.expert-protocols-contract.md`.
 - **"`.experts/` not initialised"** — the experts directory has not been bootstrapped in this repo → run `/lazy-core.install` to create the required directory layout.
 - **Python `FileNotFoundError` or `ModuleNotFoundError`** — `${CLAUDE_PLUGIN_ROOT}/bin` is not on the path or `expert_runtime.py` is absent → verify the plugin is installed (`/lazy-core.install`) and `${CLAUDE_PLUGIN_ROOT}` resolves correctly.
 - **"`<expert_name>` is not registered in `lazy.settings.json[experts]`"** — the expert was never added or the name is a typo → register via `/lazy-core.install` expert wizard, or correct the name and re-run.

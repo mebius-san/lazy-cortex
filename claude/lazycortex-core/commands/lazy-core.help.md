@@ -17,7 +17,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-core.doctor` — health check across rules, agents, skills, commands, settings, memory, hooks, CLAUDE.md. Delegates to sibling audits.
 - `lazy-core.install` — bootstrap the plugin into a project (or globally); copies hygiene + security rule templates. Idempotent.
 - `lazy-core.iterate` — drive a do → verify → fix loop against one target until a verification pass comes back clean, with hard caps on cycles, repeated findings, and regression spirals. Also the loop every expert runs over its own output before finishing.
-- `lazy-core.optimize` — slim oversized rule files, move reference material to agents, fix global-vs-local settings leakage.
+- `lazy-core.slim-context` — slim oversized rule files, move reference material to agents, fix global-vs-local settings leakage.
 - `lazy-core.setup` — meta-installer that runs every enabled lazycortex plugin's install skill in dependency order. Idempotent.
 - `lazy-expert.cancel-job` — cancel an expert job: stops its executor (SIGTERM, grace, then SIGKILL) and marks the bundle `CANCELLED`, keeping the directory on disk for forensics; releases the dedup key. Confirms via AskUserQuestion for non-done jobs.
 - `lazy-expert.collect-job` — collect the result of a dispatched expert job; returns `{status, response}`.

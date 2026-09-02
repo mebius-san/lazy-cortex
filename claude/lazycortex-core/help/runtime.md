@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Register, unregister, tick, preflight, and recover routines in the per-repo serial daemon — six skills keep the async team running in order, decide when a new periodic job needs the daemon at all, and validate broken expert configs before they run live.
-last_regen: 2026-08-30
+last_regen: 2026-09-02
 diagram_spec:
   anchor: "Runtime lifecycle"
   request: "State diagram showing the daemon lifecycle: routines registered in lazy.settings.json feed the serial daemon loop; the daemon runs each routine in order per interval_sec or cron schedule; a dirty working tree triggers an uncommitted_changes halt; a failed remote sync retries with backoff and only escalates to a git_pull_diverged / git_push_failed / git_remote_unavailable halt once retries are exhausted; /lazy-runtime.recover (commit/stash/discard/abort for tree halts; manual-fix + resume for remote-sync halts) cleans the precondition and resumes; unregister removes a routine from the loop."
@@ -12,7 +12,7 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.tick
   - lazy-core.daemon-authoring
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: bf704574aa25dc7697e00bebb805686ae6ca145e
 ---
 # Runtime daemon — routine management and recovery
 
@@ -29,10 +29,12 @@ Three routines exist before you register any of your own — the daemon's instal
 - `subprocess` — run any shell command on a fixed interval. Use it for scripts, CLI tools, or any periodic task that does not need expert routing.
 - `inbox` — watch a directory and dispatch one job per file. With an `expert + request` dispatch, the daemon references each file by its path — the file is never copied into the job bundle — and deletes it only once the job's response proves a finished outcome; with a `command` dispatch the file stays in the inbox until the consumer removes it.
 - `schedule` — fire once per cron boundary using a standard five-field cron expression. Use it for calendar-driven tasks like nightly backups or weekly audits.
-- `git` — poll local HEAD for `new_commits`, `new_files`, `changed_files`, `deleted_files`, or `renamed_files` and fire once per match. Use it for CI-like reactions to changes in the working repo.
+- `git` — poll local HEAD for `new_commits`, `new_files`, `changed_files`, `deleted_files`, or `renamed_files` and fire once per match. Use it for CI-like reactions to changes in the working repo. An optional `group_globs` list collapses file-level matches sitting below a matched directory glob into one item per directory (carrying `dir` plus the sorted member paths) instead of one item per file — useful when a routine cares about "something changed under this folder" rather than every individual file; it does not apply to `new_commits` watches.
 - `md-scan` — scan vault-relative glob patterns, filter matching markdown files by frontmatter key-value pairs, and fire in-place once per match. Use it for processing request-queue notes tracked in git, such as design-request or review-request documents.
 
 Every type accepts the same two dispatch shapes: either a `command` list (spawn a subprocess) or an `expert + request` pair (queue a job to a named expert). For cross-repo dispatch, the `expert` field accepts an `<expert>@<repo>` suffix — the daemon resolves the target repo from `lazy.settings.json` and routes the job there. The skill refuses to overwrite an existing routine unless you pass `--force`.
+
+Three fields are available on every routine type, on top of the type-specific ones: `hooks_enabled` names which lazycortex hooks may run inside that routine's own `command` subprocesses (default empty, so a tree-writing hook never dirties the worktree behind an autonomous commit); `ignore_halt` lets the routine keep ticking while the daemon is otherwise halted, for routines whose whole job is clearing a stuck state; and `git_author` stamps a bot identity (`{name, email}`, exported as `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`) on commits the routine's own `command` consumer makes — offer it whenever that consumer commits, and never point it at the operator's own identity, since loop-detection and the operator-vs-bot checks key off it.
 
 For `inbox` routines dispatching to an expert, every job's response is judged strictly, not inferred. `response.json` must carry an explicit `outcome` field — a value from the expert's protocol, or the reserved `deferred` token — or the response is rejected outright: nothing an expert writes to a status field of its own choosing counts. The first rejection keeps the bundle queued and hands the expert the reason for a corrective re-spawn; a second violation in a row fails the job for good and opens an incident. The reserved `deferred` outcome means the expert deliberately postponed the work and left the input untouched — the routine parks that bundle rather than treating it as done or failed, and offers the file back to the queue only after the routine's optional `deferred_retry_sec` field elapses (default one day, tunable per routine since it waits on the world changing by hand rather than a transient fault). Across every shape, the input file itself is deleted only against a proven success — a failed, still-parked, or still-deferred bundle keeps the file exactly where it was, so nothing in the inbox is ever dispatched twice.
 
@@ -102,6 +104,7 @@ Before any of the above matters, `/lazy-core.daemon-authoring` is the fork in th
 - **Check daemon halt status before recovering** — inspect `.runtime/state.json` directly to confirm halt state, read the halt reason and `dirty_paths`, and identify which routine or expert triggered the halt (`triggered_by`, `expert`, `job_id`).
 - **Narrow an `md-scan` to specific frontmatter states** — the `filter` field accepts a composite filter block; `null` in the `in` list matches files where the key is absent entirely, so `{"frontmatter": {"request_status": {"in": [null, "draft"], "not_in": []}}}` catches both new files and in-progress ones.
 - **Route a routine's jobs to a remote repo's expert** — use `<expert>@<repo>` in the `expert` field when registering. The target repo must be registered in `lazy.settings.json` and reachable from the daemon's working directory.
+- **Stamp a bot identity on a routine's own commits** — set `git_author` (`{name, email}`) when registering (`/lazy-routine.register <name> --force`). The daemon exports it as `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` for that routine's `command` subprocess; leave it unset and the routine commits under the daemon process's own identity.
 - **A daemon push or pull hits a brief network blip** — no action needed. The daemon retries the underlying fetch/pull/push automatically with increasing backoff (2s, 5s, 10s) before it would ever halt; a `git_remote_unavailable` halt only fires once that whole retry window is exhausted, so seeing the halt at all means the remote stayed unreachable throughout.
 - **Halt re-fires immediately after resume** — if a remote-sync halt returns on the very next daemon tick, the underlying condition was not fully resolved. Run `git fetch origin <branch>; git log --oneline HEAD origin/<branch>` and address the actual cause before re-running `/lazy-runtime.recover`.
 - **Run something after every daemon push** — set `daemon.git.post_push_hook` (and optionally `post_push_timeout_sec`) in the `daemon.git` block of `lazy.settings.json`. It only fires on a push that actually advances `origin/<base_branch>`; a failing or hanging hook is journaled and never affects the daemon's own tick, so it is safe to point at flaky external automation.

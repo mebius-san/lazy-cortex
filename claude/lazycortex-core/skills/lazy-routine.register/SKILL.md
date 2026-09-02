@@ -45,7 +45,7 @@ In wizard mode (no `cfg`), ask via `AskUserQuestion`:
 
 ### 1b. Collect type-specific fields
 
-Per type, ask only the required + commonly-needed optional fields. Schemas live in `claude/lazycortex-core/bin/routine_types.py::SCHEMAS`. Wizard prompts:
+Per type, ask only the required + commonly-needed optional fields. Schemas live in `${CLAUDE_PLUGIN_ROOT}/bin/routine_types.py::SCHEMAS`. Wizard prompts:
 
 Every type ends with the same EITHER/OR question — `command` (list) OR `expert` (name) + `request` (JSON-shaped block). The validator enforces exactly-one; the wizard asks the question once at the end of the type-specific fields.
 

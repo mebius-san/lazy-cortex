@@ -1,21 +1,25 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-08-30
+last_regen: 2026-09-02
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
+  request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
   kind_hint: decision-tree
 source_skills:
   - lazy-core.agent-models
+  - lazy-core.agent-models-seed
   - lazy-core.audit
   - lazy-core.daemon-authoring
   - lazy-core.doctor
   - lazy-core.git-status
   - lazy-core.git-unlock
   - lazy-core.install
-  - lazy-core.optimize
+  - lazy-core.iterate
+  - lazy-core.scaffold-local
+  - lazy-core.scaffold-sync
   - lazy-core.setup
+  - lazy-core.slim-context
   - lazy-expert.cancel-job
   - lazy-expert.collect-job
   - lazy-expert.dispatch-job
@@ -28,12 +32,13 @@ source_skills:
   - lazy-memory.reflect
   - lazy-memory.write
   - lazy-repo.mark-public
+  - lazy-routine.offer-protocols
   - lazy-routine.register
   - lazy-routine.unregister
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 4b059db3faee4129ac2de3faa7376ba7212ee3b6
+source_sha: 08eabbb6b10b346b58200e8fafd7061b9f10c24c
 ---
 # Troubleshooting
 
@@ -78,6 +83,20 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: `lazy-core.agent-models/default-tiers.json` inside the plugin cache cannot be read or parsed. This file is the single source of truth for built-in subagent model tiers; the skill refuses to fall back to hardcoded values.
 
 **Fix**: Reinstall `lazycortex-core` by running `/plugin update lazycortex-core@lazycortex`, then re-run `/lazy-core.install`.
+
+---
+
+## Any plugin's install fails seeding agent-model tiers (`sot-missing` or `no-entries`)
+
+**Symptom**: Installing any lazycortex plugin — not only `lazycortex-core` — stops during its agent-model tier seeding step with an error like "`sot-missing`" or "`no-entries`", instead of finishing silently the way tier seeding normally does.
+
+**Likely cause (`sot-missing`)**: Every plugin's install skill hands its dispatchable agents to `lazy-core.agent-models-seed`, which reads `lazycortex-core`'s `default-tiers.json` as the single source of truth for built-in tiers. If that file can't be found on `$LAZYCORTEX_PLUGIN_DIRS` or in the plugin cache — because `lazycortex-core` itself is missing, only partially cached, or was never installed on this host — the seed step has nothing to read and fails outright rather than guess a tier.
+
+**Likely cause (`no-entries`)**: `lazycortex-core` is installed fine, but `default-tiers.json` simply has no curated tier for the plugin's agents yet — this happens for a newly added or third-party agent that has not been added to the shared defaults.
+
+**Fix (`sot-missing`)**: Install or reinstall `lazycortex-core` (`/plugin update lazycortex-core@lazycortex`, then `/lazy-core.install`) so `default-tiers.json` is present on disk, then re-run the plugin's own install.
+
+**Fix (`no-entries`)**: There is no default to seed — this is not repairable by reinstalling. Run `/lazy-core.agent-models` to pin a tier for the affected agent by hand; the wizard prompts for exactly the entries that have no curated default.
 
 ---
 
@@ -297,6 +316,78 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Fix**: Run `/lazy-core.setup --dry-run` first to preview the full plan before committing to it. If a specific plugin should be skipped going forward, disable that plugin, then re-run `/lazy-core.setup` — every child is idempotent, so re-running after a partial or unwanted pass is safe.
 
+## `/lazy-core.iterate` loops without converging, stalls at its cap, or aborts with no target
+
+**Symptom**: A `/lazy-core.iterate` run either keeps cycling without visibly improving anything, stops after hitting its cycle cap while issues remain, makes things visibly worse round over round, or refuses immediately with `aborted-no-target`.
+
+**Likely cause (never converges)**: Every cycle's verification finds the same issue list — nothing is actually changing between rounds. The loop trips its own `repeat` stop condition on cycle 2 and halts rather than spin forever.
+
+**Likely cause (cap reached, issues remain)**: The fixes applied each round were too tentative for the scope, or the target bundles more independent issues than one cycle can plausibly clear.
+
+**Likely cause (regression spiral)**: Each fix is breaking more than it solves — a sign the verification action is over-strict (flagging things that don't actually matter) or that the target is structurally wrong for iteration (e.g. a file that should be deleted, not repeatedly patched).
+
+**Likely cause (`aborted-no-target`)**: The request that kicked off the run was too vague for Step 1 to frame a target — "fix the code", "improve everything" — with nothing concrete to iterate against.
+
+**Fix (never converges)**: Stop and rethink the fix strategy rather than re-running as-is; also check whether the verification action itself is too strict and always re-flags work that is already fine.
+
+**Fix (cap reached)**: Split the target into smaller chunks and re-run each separately, or re-invoke with a higher cycle cap once you're confident the loop is making real progress round over round.
+
+**Fix (regression spiral)**: Stop, revert to the pre-loop baseline, and re-approach by hand — either loosen an over-strict verification action, or address the structural problem the spiral is really pointing at.
+
+**Fix (`aborted-no-target`)**: Re-invoke with a concrete, narrowed target — a specific file, module, or finding list — instead of an open-ended instruction.
+
+---
+
+## `/lazy-core.scaffold-local` fails to resolve the registry or the core CLI
+
+**Symptom**: Running `/lazy-core.scaffold-local` fails immediately with "`registry not found at <path>`", "`cannot resolve core CLI — lazycortex-core not installed`", or "`core CLI not found at <path>`".
+
+**Likely cause (registry not found)**: `.claude/rules/lazy-core.scaffold.md` does not exist in this repo yet — the scaffold registry itself was never initialised.
+
+**Likely cause (core CLI unresolved)**: `installed_plugins.json` has no `lazycortex-core@lazycortex` entry, or the `installPath` it does record points at a path that no longer exists (a stale or partially refreshed plugin cache).
+
+**Fix (registry not found)**: Run `/lazy-core.install` to initialise the scaffold registry, then re-run `/lazy-core.scaffold-local`.
+
+**Fix (core CLI unresolved)**: Install `lazycortex-core` if it is genuinely missing (`/lazy-core.install`), or refresh a stale cache with `/plugin update lazycortex-core@lazycortex`. Then re-run `/lazy-core.scaffold-local`.
+
+---
+
+## `/lazy-core.scaffold-local` rejects an entry, or an upsert / validate step fails
+
+**Symptom**: `/lazy-core.scaffold-local` fails with "`entry … not found in the _local registry map`" while removing an entry, an underlying `scaffold upsert` / `scaffold remove` call returns `error`, or the closing `scaffold validate` step reports FAIL-level findings.
+
+**Likely cause (entry not found)**: The entry name passed for removal does not match anything currently registered under the `_local` key.
+
+**Likely cause (upsert/remove error)**: The core CLI rejected the write — malformed input, or a registry-write failure underneath.
+
+**Likely cause (validate FAIL)**: The registry has a structural problem left over after the upsert — usually a hand-edit to `.claude/rules/lazy-core.scaffold.md` made outside this skill.
+
+**Fix (entry not found)**: List the current `_local` entries with `scaffold list --registry <regPath>` to see the exact name on record, then retry with that name.
+
+**Fix (upsert/remove error)**: Read the full error output from the failed call, correct the input it points at, then re-run `/lazy-core.scaffold-local`.
+
+**Fix (validate FAIL)**: Open `.claude/rules/lazy-core.scaffold.md` directly, fix the structural issue the validation output names, and validate again.
+
+---
+
+## A plugin install silently skips scaffold registration, or fails with a scaffold-sync error
+
+**Symptom**: A plugin's install skill reports its scaffold-template step as `none` with nothing copied, or fails outright with "`scaffold-sync: collision — template path "<key>" declared by …`", "`cannot resolve core CLI — lazycortex-core not installed`", "`core CLI not found at <path>`", or a `scaffold upsert` step returning `error`.
+
+**Likely cause (`none`, nothing copied)**: `/lazy-core.scaffold-sync` runs as an internal step of a plugin's own install (`lazy-core.install` Step 4, `lazy-python.install` Step 6) and found no `templates/*/scaffold.entries.json` manifest to copy — the plugin genuinely ships no authoring templates. This is a normal outcome, not an error.
+
+**Likely cause (collision)**: Two of the plugin's own template groups declare the same template path with different globs — an authoring bug in the plugin's own `scaffold.entries.json` manifests, not something this repo's config can fix.
+
+**Likely cause (core CLI unresolved)**: Same underlying cause as the `lazy-core.scaffold-local` entry above — `lazycortex-core` is missing or its cached `installPath` is stale.
+
+**Fix (`none`)**: No action needed.
+
+**Fix (collision)**: This is a defect in the plugin shipping the colliding manifests, not something to fix locally — report it against that plugin so its `scaffold.entries.json` files are edited to stop overlapping.
+
+**Fix (core CLI unresolved)**: Install or refresh `lazycortex-core` (`/lazy-core.install`, or `/plugin update lazycortex-core@lazycortex` for a stale cache), then re-run the plugin's own install so it re-dispatches `/lazy-core.scaffold-sync`.
+
+---
+
 ## `/lazy-core.audit` fails: "lazy.settings.json is not valid JSON"
 
 **Symptom**: Running `/lazy-core.audit` aborts immediately with an error like "lazy.settings.json is not valid JSON".
@@ -391,7 +482,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ## `/lazy-core.agent-models` fails with "invalid --scope value"
 
-**Symptom**: Running `/lazy-core.agent-models` (or `/lazy-core.optimize` Phase 7) produces an error about an unrecognised flag.
+**Symptom**: Running `/lazy-core.agent-models` (or `/lazy-core.slim-context` Phase 7) produces an error about an unrecognised flag.
 
 **Likely cause**: A flag other than `--scope=auto`, `--scope=project`, `--scope=global`, or `--dry-run` was passed to the skill. Any unrecognised token causes an immediate fail.
 
@@ -679,13 +770,37 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
-## `/lazy-expert.dispatch-job` fails with a `JSONDecodeError` on the protocols argument
+## `/lazy-expert.dispatch-job` fails with a `JSONDecodeError` on the protocols or io argument
 
-**Symptom**: `/lazy-expert.dispatch-job` raises a `JSONDecodeError` pointing at the protocols argument instead of dispatching the job.
+**Symptom**: `/lazy-expert.dispatch-job` raises a `JSONDecodeError` pointing at the protocols argument or the io argument instead of dispatching the job.
 
-**Likely cause**: The protocols argument was passed as something other than a JSON array literal — a bare comma-separated string, a single unquoted name, or an empty string instead of `'[]'`.
+**Likely cause (protocols argument)**: The protocols argument was passed as something other than a JSON array literal — a bare comma-separated string, a single unquoted name, or an empty string instead of `'[]'`.
 
-**Fix**: Pass a JSON array literal — `'[]'` for no protocols, or `'["plugin:protocol-name"]'` to attach one — then re-dispatch with the corrected argument.
+**Likely cause (io argument)**: The `source`/`context` io argument was passed as something other than a JSON object literal — the skill's argparse-style invocation expects a JSON-serializable string for both arguments, not a bare path or comma list.
+
+**Fix (protocols argument)**: Pass a JSON array literal — `'[]'` for no protocols, or `'["plugin:protocol-name"]'` to attach one — then re-dispatch with the corrected argument.
+
+**Fix (io argument)**: Pass a JSON object literal — `'{}'` for none, or `'{"source": ["docs/spec.md"]}'` to name source/context files — then re-dispatch with the corrected argument.
+
+---
+
+## `/lazy-expert.dispatch-job` fails with `FileNotFoundError` or `ModuleNotFoundError`
+
+**Symptom**: `/lazy-expert.dispatch-job` fails with a Python `FileNotFoundError` or `ModuleNotFoundError` instead of returning a job_id.
+
+**Likely cause**: `${CLAUDE_PLUGIN_ROOT}/bin` did not resolve in the current environment, or `expert_runtime.py` is absent from it — the same class of plugin-path resolution failure that affects other core skills in a sandboxed session or a partially downloaded plugin cache.
+
+**Fix**: Verify `lazycortex-core` is installed (`/lazy-core.install`) and that `${CLAUDE_PLUGIN_ROOT}` resolves to the actual plugin install path in your session. If the cache looks intact but the variable still doesn't resolve, restart Claude Code and re-dispatch.
+
+---
+
+## A dispatched job fails `logical`: "declared path … does not exist at claim time"
+
+**Symptom**: A job dispatched via `/lazy-expert.dispatch-job` fails with a `logical` error naming a declared path that "does not exist at claim time".
+
+**Likely cause**: A `source` or `context` file named in the dispatch was deleted or renamed in the window between dispatch and the daemon pump actually claiming the job — the runtime resolves those paths only when it claims the job, not at dispatch time.
+
+**Fix**: Re-dispatch pointing at the path the file lives at now, or — when no file will reliably hold the content by the time the job is claimed — pass the content directly via `source_inline` / `context_inline` instead of a file path.
 
 ---
 
@@ -779,6 +894,20 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## `/lazy-routine.offer-protocols` offers nothing, or reports `routine_absent`
+
+**Symptom**: Running `/lazy-routine.offer-protocols` completes without offering any protocol even though candidates exist, or fails with "`routine_absent`".
+
+**Likely cause (nothing offered)**: This is a correct silent drop, not a bug — a candidate protocol either judged irrelevant to the `--context` you passed, or already present in the routine's `protocols` list, is dropped without comment on purpose.
+
+**Likely cause (`routine_absent`)**: The `--routine` named does not exist yet in `.claude/lazy.settings.json` — it hasn't been registered (via `/lazy-routine.register`), or a daemon-disabled gate unregistered it since.
+
+**Fix (nothing offered)**: No action needed if the drop matches your expectation. If a protocol you expected is missing, pass a `--context` string that names what the routine actually does — the relevance judgment reads the protocol's own `description` against it.
+
+**Fix (`routine_absent`)**: Register the routine first with `/lazy-routine.register`, confirm it is still present (it survives any daemon-gate unregister), then re-run `/lazy-routine.offer-protocols`.
+
+---
+
 ## The runtime daemon appears stale after install
 
 **Symptom**: `/lazy-core.doctor` reports "runtime daemon appears stale" even after running `/lazy-core.install` and setting up the supervisor. Re-running the doctor immediately after install still shows the same warning.
@@ -845,7 +974,7 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Likely cause**: The daemon now tells apart a purely local git failure during its pre- or post-tick sync from a genuine remote-reachability problem, instead of folding every non-network git failure into `git_remote_unavailable` and sending the operator to chase a network issue that was never the cause. A held `.git/index.lock` that outlasted the daemon's own short retry backoff, a bad ref, or a checkout-permission error now surfaces honestly as `git_local_failed`. A transient lock contention -- racing an expert job's own commit, for instance -- is retried in place first and never reaches a halt at all; only a lock still held past that backoff halts.
 
-**Fix**: Inspect the checkout directly with `git status`. If `.git/index.lock` is present and you've confirmed no other process actually holds it, remove it by hand. Resolve whatever the local failure was -- a bad ref, a checkout permission problem -- then run `/lazy-runtime.recover` to clear the halt. Unlike `git_remote_unavailable`, this halt does not clear itself on a later health-check tick; it always needs the manual fix followed by an explicit `/lazy-runtime.recover` confirmation.
+**Fix**: Often none needed: when the halt's `triggered_by` is a sync step (`_git_pre` / `_git_post`), the hourly doctor tick probes the remote once the halt is an hour old and resumes the daemon by itself if git answers — this covers the common case of a network failure whose stderr the transport classifier didn't recognise. If it persists past that, inspect the checkout directly with `git status`. If `.git/index.lock` is present and you've confirmed no other process actually holds it, remove it by hand. Resolve whatever the local failure was -- a bad ref, a checkout permission problem -- then run `/lazy-runtime.recover` to clear the halt.
 
 ---
 
@@ -963,6 +1092,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 ---
 
+## `/lazy-memory.index` fails with an import error
+
+**Symptom**: `/lazy-memory.index` fails with a Python import error instead of completing its recovery pass.
+
+**Likely cause**: `${CLAUDE_PLUGIN_ROOT}/bin/memory_runtime.py` is missing from the resolved plugin path — a partially downloaded or stale `lazycortex-core` cache.
+
+**Fix**: Reinstall `lazycortex-core` via `/plugin update lazycortex-core@lazycortex`, then re-run `/lazy-memory.index`.
+
+---
+
 ## `/lazy-memory.reflect` reports no source files found
 
 **Symptom**: `/lazy-memory.reflect` completes but reports `source_count: 0` and the expert returns `outcome=empty`.
@@ -1019,26 +1158,26 @@ New sessions pick up the consolidated hook from `lazycortex-core` cleanly.
 ```mermaid
 %%{init: {'themeVariables':{'lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart TD
-  symptomGroup{"Which symptom group?"}
+  symptomGroup{"Which symptom group are you in?"}
 
-  installOrSetup["Install-or-setup — Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, audit and doctor findings"]
-  agentModels["Agent-models — tier routing, scope flags, floor env, duplicate keys"]
-  mcpOrSecurity["MCP-or-security — allow-mcp server resolution, mark-public gates, pre-commit hook"]
-  gitCoordination["Git-coordination — staging lock, pathspec discipline"]
-  expertRuntime["Expert-runtime — dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models"]
-  routines["Routines — register and unregister, name format, protocol offers"]
-  daemonOrRuntime["Daemon-or-runtime — stale daemon, halts and recovery, remote-sync backoff, post-push hook"]
-  memory["Memory — persona marking, note frontmatter, index and reflect sources"]
-  logClean["Log-clean — log dir resolution, commit recording"]
-  migration["Migration — moving off the retired lazycortex-log plugin"]
+  installSetup["Section: install-or-setup - Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings"]
+  agentModels["Section: agent-models - tier routing, scope flags, floor env, duplicate keys, seed data gaps"]
+  mcpSecurity["Section: mcp-or-security - allow-mcp server resolution, mark-public gates, pre-commit hook"]
+  gitCoordination["Section: git-coordination - staging lock, pathspec discipline"]
+  expertRuntime["Section: expert-runtime - dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time"]
+  routines["Section: routines - register and unregister, name format, protocol offers"]
+  daemonRuntime["Section: daemon-or-runtime - stale daemon, halts and recovery, remote-sync backoff, post-push hook"]
+  memory["Section: memory - persona marking, note frontmatter, index and reflect sources, worker import errors"]
+  logClean["Section: log-clean - log dir resolution, commit recording"]
+  migration["Section: migration - moving off the retired lazycortex-log plugin"]
 
-  symptomGroup -->|install or setup| installOrSetup
+  symptomGroup -->|install or setup| installSetup
   symptomGroup -->|agent models| agentModels
-  symptomGroup -->|mcp or security| mcpOrSecurity
+  symptomGroup -->|mcp or security| mcpSecurity
   symptomGroup -->|git coordination| gitCoordination
   symptomGroup -->|expert runtime| expertRuntime
   symptomGroup -->|routines| routines
-  symptomGroup -->|daemon or runtime| daemonOrRuntime
+  symptomGroup -->|daemon or runtime| daemonRuntime
   symptomGroup -->|memory| memory
   symptomGroup -->|log clean| logClean
   symptomGroup -->|migration| migration
@@ -1047,13 +1186,13 @@ flowchart TD
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
 
   class symptomGroup guard
-  class installOrSetup success
+  class installSetup success
   class agentModels success
-  class mcpOrSecurity success
+  class mcpSecurity success
   class gitCoordination success
   class expertRuntime success
   class routines success
-  class daemonOrRuntime success
+  class daemonRuntime success
   class memory success
   class logClean success
   class migration success

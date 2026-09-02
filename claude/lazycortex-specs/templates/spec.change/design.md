@@ -15,22 +15,22 @@ spec_source_docs: []
 # {{slug}} — design
 
 ## Overview
-_What is being changed and why._
-
-## Goals
-_What the change aims to achieve._
+<!-- Opens with a reference to the sibling vision (goals and value live there, never here). What is being changed and why. -->
 
 ## Current State
-_How it is now — not necessarily behavior: architecture, configuration, structure._
+<!-- How it is now — not necessarily behavior: architecture, configuration, structure. -->
 
 ## Target State
-_How it will be. The diagram anchors here, when there is something to draw._
+<!-- How it will be. The diagram anchors here, when there is something to draw. -->
+
+## Risks
+<!-- The vision-level risks, worked: what this design does about each. -->
 
 ## Known Limitations
-_Things the change does, but with a known ceiling — accepted constraints._
+<!-- Things the change does, but with a known ceiling — accepted constraints. -->
 
 ## Boundaries
-_What the change deliberately does NOT do; seams with neighboring features, who owns what._
+<!-- What the change deliberately does NOT do; seams with neighboring features, who owns what. -->
 
 # Sources
 #protected/spec/sources

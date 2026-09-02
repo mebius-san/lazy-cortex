@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
-summary: Register a product bound to an existing codebase, generate its design and tech docs from source, then scaffold the first feature.
-last_regen: 2026-08-30
+summary: Register a product bound to an existing codebase, generate its vision, design, and tech docs from source, then scaffold the first feature.
+last_regen: 2026-09-02
 diagram_spec:
   anchor: "How the skills hand off"
   request: "Sequence diagram showing the three-skill journey: operator runs lazy-spec.product-config to register the product and write settings, then runs lazy-spec.create-from-code to scan source and produce design + tech docs, then runs lazy-spec.create-feature to scaffold the first feature asset; show the operator, each skill, and the spec vault as actors, with the key handoff points between them."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-spec.product-config
   - lazy-spec.create-from-code
   - lazy-spec.create-feature
-source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
+source_sha: 73781d3513221e28253bd78d907cc43ef85a029c
 ---
 # How do I get specs for a codebase that already exists?
 
@@ -19,14 +19,16 @@ You have a working codebase — a service, a library, an application — and no 
 
 After completing this walkthrough you will have:
 
-- A project-wide vault spec (`design.md` at the spec content root) confirmed present — either an existing one or a freshly seeded draft.
+- A project-wide vault spec (`vision.md` at the spec content root — or, for a vault seeded before the vision-document kind existed, a pre-vision `design.md`) confirmed present — either an existing one or a freshly seeded draft.
 - A product record in `lazy.settings.json[products]` that names your codebase's source repo and the paths within it your product covers.
-- A `design.md` — behavior-only, no source URLs — describing what the product does for its users.
+- A product `vision.md` — goals and value proposition, authored first from the code survey.
+- A `design.md` — behavior-only, no source URLs, opening with a reference to the sibling vision doc — describing what the product does for its users.
 - A `tech.md` — code-grounded, with forge-correct source URLs — covering the source map, architecture, and components.
+- Optionally a product-level `use-cases.md` — actors and cross-feature scenarios — if you opted in when `lazy-spec.create-from-code` asked.
 - At least one feature folder under `features/<slug>/` with a scaffolded `design.md` ready for authoring (`code-plan.md` / `test-plan.md` are opt-in, authored later).
 - Review classes wired so every doc enters the review loop automatically.
 
-Neither `design.md` nor `tech.md` gets a diagram automatically — the product-scan skill draws no pictures at all. If you want one, ask for it afterward via `/lazy-diagram.draw` against a heading in either doc.
+None of `vision.md`, `design.md`, or `tech.md` gets a diagram automatically — the product-scan skill draws no pictures at all. If you want one, ask for it afterward via `/lazy-diagram.draw` against a heading in any of them.
 
 ## What you need
 
@@ -40,13 +42,13 @@ Neither `design.md` nor `tech.md` gets a diagram automatically — the product-s
 
 ### Step 1 — Confirm the vault spec exists
 
-Before any product can be registered, the spec catalog needs a starting point: a project-wide `design.md` at the vault's content root (`specs/design.md` by default), stating what the whole project is and why it exists — every product is a consequence of that document, not the other way around. `/lazy-spec.product-config` enforces this: in create mode it checks for the file and aborts with `aborted:no-vault-spec` when it is missing, before asking you a single wizard question.
+Before any product can be registered, the spec catalog needs a starting point: a project-wide `vision.md` at the vault's content root (`specs/vision.md` by default), stating the intent and value of the whole project — every product is a consequence of that document, not the other way around. `/lazy-spec.product-config` enforces this: in create mode it checks for `vision.md` — or, for a vault seeded before the vision-document kind existed, a pre-existing `design.md` without a vision (the legal pre-vision state; migrating it to a vision doc is the operator's own call, by hand) — and aborts with `aborted:no-vault-spec` when neither is present, before asking you a single wizard question.
 
-If `/lazy-spec.install` has already run in this repo, its own seeding step already created a draft here — either it was `already-present` (your vault already had a `design.md`) or it wrote one (`seeded`), instantiated from a template with your repo's directory name filled in, no questions asked. If you have not run `/lazy-spec.install` yet, run it now; the vault-spec seed is part of its normal setup, not a separate step you invoke by hand.
+If `/lazy-spec.install` has already run in this repo, its own seeding step (Step 6.9) already created a draft `vision.md` here — either it was `already-present` (your vault already had one) or it wrote one (`seeded`), instantiated from a template with your repo's directory name filled in, no questions asked. If you have not run `/lazy-spec.install` yet, run it now; the vault-vision seed is part of its normal setup, not a separate step you invoke by hand.
 
-The seeded draft is deliberately minimal — presence is the whole gate `/lazy-spec.product-config` checks, not any particular level of completeness. You can flesh it out before or after registering your first product; the review loop picks it up through the standard `system-design` class either way.
+The seeded draft is deliberately minimal — presence is the whole gate `/lazy-spec.product-config` checks, not any particular level of completeness. You can flesh it out before or after registering your first product; the review loop picks it up through the standard `system-vision` class either way.
 
-**Verification gate.** `<content-root>/design.md` exists on disk (content root defaults to `specs/`), in any state — draft or approved.
+**Verification gate.** `<content-root>/vision.md` exists on disk (content root defaults to `specs/`), in any state — draft or approved. A vault that predates the vision-document kind may instead carry a pre-vision `<content-root>/design.md` with no vision — either satisfies the gate.
 
 ### Step 2 — Register the product with `/lazy-spec.product-config`
 
@@ -62,11 +64,11 @@ The key decisions you will make:
 - **Dependencies** — the skill dispatches a read-only scan of your source paths and presents each detected dependency (internal products, cross-repo, or external packages) for you to accept or skip, one at a time.
 - **Icon** — every product gets one: pick a concrete suggestion or type your own, or decline and the product still gets the default `LiPackage` — a product never ends up icon-less in the file explorer. The product root is also the only ordinary container the wizard paints a colour on (a neutral, state-independent shade); the group folders that appear under it as you add assets carry no colour of their own.
 - **Guidelines** (optional) — per-role file paths whose contents are folded into an expert's job context whenever an operator later ticks a launch checkbox on this product's assets.
-- **Review experts** — nine roles review this product's docs: **use-case-writer** (`use-cases.md`), **designer** (asset-level `design.md`, plus a validation pass on `use-cases.md`), **system-designer** (the product's own `design.md`, and the project-wide `design.md`), **architect** (the product's `tech.md` plus any `architecture.md`, and a standing validator on every design-shaped doc including `ui-design.md`), **ui-designer** (`ui-design.md`), **planner** (`code-plan.md`), **developer** (`code-report.md`), **tester** (`bug.md`, `test-plan.md`, `test-report.md`), and **data-writer** (`data-report.md`, only relevant if your product produces data-report docs). If the vault already carries a shared expert set from an earlier product, you can ride it as-is or define a product-specific override; otherwise your answers here seed the vault's shared set. A vault whose shared set predates the use-case-writer and ui-designer roles is asked for those two separately, even when it rides the shared set for everything else.
+- **Review experts** — nine roles review this product's docs: **use-case-writer** (`use-cases.md`), **designer** (asset-level `design.md`, plus a validation pass on `use-cases.md`), **system-designer** (the product's own `vision.md` / `design.md`, and the project-wide `vision.md` / `design.md`), **architect** (the product's `tech.md` plus any `architecture.md`, and a standing validator on every design-shaped doc including `ui-design.md`), **ui-designer** (`ui-design.md`), **planner** (`code-plan.md`), **developer** (`code-report.md`), **tester** (`bug.md`, `test-plan.md`, `test-report.md`), and **data-writer** (`data-report.md`, only relevant if your product produces data-report docs). If the vault already carries a shared expert set from an earlier product, you can ride it as-is or define a product-specific override; otherwise your answers here seed the vault's shared set. A vault whose shared set predates the use-case-writer and ui-designer roles is asked for those two separately, even when it rides the shared set for everything else.
 - **Asset types** — optional; declare any beyond the shipped feature/change/bug set now, or later via `/lazy-spec.add-asset-type`.
 - **Workflow mode** — `full` (design through implementation and testing, the default) or `spec-only` (stops after `design.md` approves, released only by an explicit operator word). Most code-bound products want `full`.
 
-When the wizard finishes, the skill writes the product record into settings, creates the product folder with its operator-zone folder-note (carrying a `# Summary` skeleton with a précis and stats markers) plus the shared vault-root request inbox, and generates the built-in review classes — one per document type marked for review (design, system-design, tech, code-plan, test-plan, bug, plus the implementation and testing report docs) — reusing the vault's shared set when your expert choices match it. It then runs `/lazy-spec.doctor` automatically and reports any issues.
+When the wizard finishes, the skill writes the product record into settings, creates the product folder with its operator-zone folder-note (carrying a `# Summary` skeleton with a précis and stats markers) plus the shared vault-root request inbox, and generates the built-in review classes — one per document type marked for review (use-cases, design, system-vision, system-design, system-tech, code-plan, test-plan, bug, plus the implementation and testing report docs) — reusing the vault's shared set when your expert choices match it. It then runs `/lazy-spec.doctor` automatically and reports any issues.
 
 If `/lazy-spec.product-config` points you at `lazycortex-experts` before finishing, it means a chosen expert name is not registered. Compose the persona via `lazycortex-experts`, then re-run `/lazy-spec.product-config`.
 
@@ -83,13 +85,17 @@ The skill resolves your product's source binding, then fans out four parallel Ex
 - **Agent C** — known limitations, TODOs, and cross-repo imports.
 - **Agent D** — candidate features: sub-folders or route groups that cohere as independently nameable units.
 
-After scanning, the skill authors two docs:
+After scanning, the skill authors the product's docs in order.
 
-**`design.md`** is behavior-only: what the product does, who uses it, and what the user-visible limitations are. It never contains source URLs or file paths — just observable behavior. This skill draws no diagrams — if you want a picture under `## Behavior` (or a UI subsection you add later), ask for one via `/lazy-diagram.draw` against that heading once the doc exists.
+**`vision.md`** comes first, when your product does not already have one: goals, value proposition, a short design-concept paragraph pointing at the sibling design, and the risks the intent itself carries — all filled from the code survey, then marked `draft`. A `vision.md` that already exists is left untouched.
 
-**`tech.md`** is code-grounded: the source map, architecture narrative, component breakdown, route tables (if applicable), and a dependency table with forge-correct source URLs. Like `design.md`, no diagram is drawn automatically here either — request one via `/lazy-diagram.draw` against `## Architecture` or `## Components` if you want one.
+**`design.md`** is behavior-only: what the product does, who uses it, and what the user-visible limitations are. It never contains source URLs or file paths — just observable behavior — and it opens with a reference to the sibling vision doc rather than restating goals and value, which live only in `vision.md`. Where the code shows a genuine fork was taken — a real alternative existed, reversal would be expensive, and the "why" is not recoverable from the code itself — the skill records it inline as a decision callout in the design body; approving the design later promotes these into the product's `decisions.md` automatically. This skill draws no diagrams — if you want a picture under `## Behavior` (or a UI subsection you add later), ask for one via `/lazy-diagram.draw` against that heading once the doc exists.
 
-Once both docs are written, the skill presents Agent D's candidate feature list and asks you what to do with each one:
+Once `design.md` is written, the skill asks one question: also author the product-level `use-cases.md` (actors and cross-feature scenarios) from the same code survey? This is opt-in — decline and the doc is simply never created, with no gap to fix later.
+
+**`tech.md`** is code-grounded: the source map, architecture narrative, component breakdown, route tables (if applicable), and a dependency table with forge-correct source URLs. Like the other docs, no diagram is drawn automatically here either — request one via `/lazy-diagram.draw` against `## Architecture` or `## Components` if you want one.
+
+Once every doc is written, the skill presents Agent D's candidate feature list and asks you what to do with each one:
 
 - **scaffold feature** — delegates immediately to `lazy-spec.create-asset`, which opens its own wizard for that feature (see Step 4). Pick this for features you want to document now. Scaffolded features leave no trace in `design.md` — the folder-notes aggregate the decomposition catalog.
 - **treat as architectural area** — adds a subsection to the tech doc's `## Architectural Areas`; no feature folder is created.
@@ -97,7 +103,7 @@ Once both docs are written, the skill presents Agent D's candidate feature list 
 
 Work through each candidate. You do not need to scaffold all of them now — you can run `/lazy-spec.create-feature` again later for any candidate you skipped.
 
-**Verification gate.** Both `design.md` and `tech.md` should exist and carry `spec_stage: draft`. The design doc must contain no source URLs and no `spec_source_branches` frontmatter. Both docs should carry the default `spec_source_docs` frontmatter and a body `# Sources` section pointing at each other.
+**Verification gate.** `vision.md`, `design.md`, and `tech.md` should exist and carry `spec_stage: draft` (`use-cases.md` too, if you opted in). The design doc must contain no source URLs and no `spec_source_branches` frontmatter. All the docs should carry the default `spec_source_docs` frontmatter and a body `# Sources` section pointing at each other.
 
 ### Step 4 — Scaffold the first feature with `/lazy-spec.create-feature`
 
@@ -125,7 +131,7 @@ The product is registered and its initial spec is live. From here:
 - **Add more features** — run `/lazy-spec.create-feature <compound-key> <slug>` for each new feature you want to document. You can scaffold any of the candidates Agent D surfaced, or invent a new slug for a feature the scan did not detect.
 - **Keep docs in sync with code** — when source changes land, run `/lazy-spec.sync-with-code <compound-key>` to reconcile the tech doc, surface behavior changes for the design doc, update branch pins if you are working on a non-default branch, and propose gate/stage corrections (e.g. flipping `spec_develop_done`) grounded in what actually shipped — always with your confirmation before anything is written.
 - **Drive assets through their gates** — use `/lazy-spec.flip-gate` to advance a feature's readiness gates (`spec_design_done` → `spec_plan_done` → …), or let `spec.coordinator` advance derived gates for you on its next wake (the `lazy-spec.gate-tick` routine itself only polls jobs and checks note structure).
-- **Re-run the doc scan** — if the codebase grows significantly, re-run `/lazy-spec.create-from-code <compound-key>` to refresh the design and tech docs. The skill reconciles existing branch pins before overwriting.
+- **Re-run the doc scan** — if the codebase grows significantly, re-run `/lazy-spec.create-from-code <compound-key>` to refresh the design and tech docs. The skill reconciles existing branch pins before overwriting, and leaves an already-present `vision.md` untouched.
 - **Doctor checks** — run `/lazy-spec.doctor <compound-key>` at any time to audit the product tree for broken links, missing sections, role violations, and source-link staleness. It is read-only by default and only reports; pass `--apply` to walk through the findings and confirm fixes one at a time.
 
 ## How the skills hand off

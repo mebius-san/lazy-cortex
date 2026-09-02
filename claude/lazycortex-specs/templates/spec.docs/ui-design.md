@@ -15,22 +15,22 @@ spec_source_docs: []
 # {{slug}} — ui-design
 
 ## Intent
-_What this interface must give the user — the job the screens below exist to do, stated against the goals the approved `design.md` already settled rather than restating them._
+<!-- What this interface must give the user — the job the screens below exist to do, stated against the goals the approved `design.md` already settled rather than restating them. -->
 
 ## Screens
-_Every screen or view the feature introduces or changes, and what each is for._
+<!-- Every screen or view the feature introduces or changes, and what each is for. -->
 
 ## States
-_Per-screen states — loading, empty, error, populated, and any feature-specific state — and what distinguishes each._
+<!-- Per-screen states — loading, empty, error, populated, and any feature-specific state — and what distinguishes each. -->
 
 ## Navigation
-_How a user reaches each screen and where each action leads next._
+<!-- How a user reaches each screen and where each action leads next. -->
 
 ## Decisions
-_Key UI decisions with WHY it is this way and not otherwise._
+<!-- Key UI decisions with WHY it is this way and not otherwise. -->
 
 ## Mockups
-_Links to the HTML mockup attachments filed alongside this document, one per screen or flow — e.g. `[home screen](./home-screen.html)`._
+<!-- Links to the HTML mockup attachments filed alongside this document, one per screen or flow — e.g. `[home screen](./home-screen.html)`. -->
 
 # Sources
 #protected/spec/sources

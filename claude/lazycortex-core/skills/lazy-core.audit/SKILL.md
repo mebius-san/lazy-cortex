@@ -36,11 +36,11 @@ Severity vocabulary (same as Phase 2): `INFO` / `WARN` / `FAIL`.
 
 ### L1 — Logging rule presence
 
-Check two paths: `claude/lazycortex-core/rules/lazy-log.logging.md` (plugin source) and at least one consumer scope.
+Check two paths: `${CLAUDE_PLUGIN_ROOT}/rules/lazy-log.logging.md` (plugin source) and at least one consumer scope.
 
-- Read `claude/lazycortex-core/rules/lazy-log.logging.md`. If absent → `[FAIL] logging rule missing from plugin source at claude/lazycortex-core/rules/lazy-log.logging.md`.
+- Read `${CLAUDE_PLUGIN_ROOT}/rules/lazy-log.logging.md`. If absent → `[FAIL] logging rule missing from plugin source at ${CLAUDE_PLUGIN_ROOT}/rules/lazy-log.logging.md`.
 - Glob `.claude/rules/lazy-log.logging.md`. If absent, also Glob `$HOME/.claude/rules/lazy-log.logging.md` (expand `$HOME` first via `Bash(echo $HOME)`). If neither consumer path exists → `[WARN] lazy-log.logging.md not installed in any consumer scope (.claude/rules/ or ~/.claude/rules/) — run /lazy-core.setup`.
-- If the rule file at the plugin source path exists but has no YAML frontmatter `description:` key → `[WARN] lazy-log.logging.md plugin source has no frontmatter description | claude/lazycortex-core/rules/lazy-log.logging.md`.
+- If the rule file at the plugin source path exists but has no YAML frontmatter `description:` key → `[WARN] lazy-log.logging.md plugin source has no frontmatter description | ${CLAUDE_PLUGIN_ROOT}/rules/lazy-log.logging.md`.
 
 ### L2 — `.logs/` and `.runtime/` directory state
 
@@ -80,7 +80,7 @@ Measure everything that loads at conversation start. Include these sources as on
 
 Also emit `[WARN]` findings for:
 
-- Any rules file > 3 KB (suggest `/lazy-core.optimize`).
+- Any rules file > 3 KB (suggest `/lazy-core.slim-context`).
 - `MEMORY.md` > 5 KB (suggest consolidation).
 
 Include a `total_kb` line in the summary block.
@@ -114,7 +114,7 @@ Emit one `[INFO]` per enabled server. Emit `[WARN]`:
 
 **Python runtime** — every `lazycortex-*` plugin ships hooks that shebang `python3`, and project hooks invoked as `python3 ...` from `settings.json` rely on the same interpreter. If `python3` is missing or too old, hooks silently fail and the user loses distill-after-commit, settings/public guards, agent-model routing, and autobump. Run two short Bash probes:
 
-- `command -v python3` — empty output → `[FAIL] python3 not in PATH — every hook in .claude/settings.json and claude/lazycortex-*/hooks/*.py will fail to execute.`
+- `command -v python3` — empty output → `[FAIL] python3 not in PATH — every hook in .claude/settings.json and every plugin-shipped hooks/*.py will fail to execute.`
 - `python3 --version 2>&1` — parse `Python X.Y.Z`. Floor is **3.12** (shipped Python uses `pathlib` semantics that shifted in 3.12; per-plugin `<ns>.install` skills inherit the floor and must NOT re-probe). Emit:
   - `[INFO] python3 path=<path> version=<X.Y.Z>` when found and ≥ 3.12.
   - `[FAIL] python3 version <X.Y.Z> below floor 3.12 — every shipped hook fails on startup. Run /lazy-core.install to walk the install path.` when found and < 3.12.
@@ -146,18 +146,17 @@ Emit WARN only when the match survives all three gates.
 2. **No "Optional" in phase/step headings** — grep for `^##+ .*[Pp]hase.*[Oo]ptional`, `^##+ .*[Ss]tep.*[Oo]ptional`, and any `^### .*[Oo]ptional`. Match → `[FAIL]`.
 3. **Narrative padding (heuristic)** — grep the body (exclude frontmatter) for the denylist: `\bv\d+\.\d+\.\d+`, `user had to`, `we got burned`, `in a past session`, `in a previous run`, `user had to patch`. Match → `[WARN]` with the offending line. Final decision is the author's — heuristic, not structural.
 4. **Valid `lazy_setup_phase` value** — grep frontmatter for `^lazy_setup_phase:`. Value outside `{pre-install, per-plugin, post-install}` → `[WARN]` with the offending value. See `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.setup-phases-contract.md` for the contract.
-5. **`description:` states when to invoke** — see `lazy-core.skill-writing § 8` and `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`. **Commands are in scope for this check**, unlike the preamble check above: widen the file set to `.claude/commands/*.md` and `claude/*/commands/*.md`. A command is routed by its description exactly as a skill is, and `<ns>.help` commands are the ones an operator most needs the router to find. Read each file's `description:` and judge it against the three trigger shapes; mechanism-only → `[WARN] description states mechanism, not a trigger — <artifact> will not be selected | <path>`. Absent `description:` → `[FAIL]`. This is a judgement call, not a grep — read the reference before ruling on a batch.
+5. **`description:` present** — **Commands are in scope for this check**, unlike the preamble check above: widen the file set to `.claude/commands/*.md` and `claude/*/commands/*.md`. Grep each file's frontmatter for `^description:`. Absent → `[FAIL]`. Judging the description's *content* against the trigger shapes is deliberately NOT an audit check — that reading happens at authoring time per `lazy-core.skill-writing § 8` and `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`, not on every audit pass.
 6. **`allowed-tools` missing `Agent`** — grep frontmatter for `^allowed-tools:`. When present and `Agent` is absent from the list → `[WARN]` (`lazy-core.skill-writing § 9` — mandatory member when the field is used at all). A skill with no `allowed-tools:` field is untouched (inherits the caller's tools, per operator decision). Never flag `Agent`'s presence.
 7. **Research-marker semantics** — see `lazy-core.skill-writing § 10`. Judgement call (read the skill, don't just grep): a skill whose contract is search/pull-shaped (a mode that returns a bounded knowledge slice — a query over a map, tree, dictionary, or index) but carries neither `research: true` frontmatter nor the word "research" in its `description:` → `[WARN] skill has research-skill shape without the research marker | <path>`. A skill carrying the marker (frontmatter or description word) whose body documents no query-mode contract (no invocation shape returning a bounded slice rather than the whole document) → `[WARN] research marker present but no query-contract documented | <path>`.
 
 **Agent-writing compliance** — see `lazy-core.agent-writing`. File set: `.claude/agents/*.md`, `claude/*/agents/*.md`. Checks:
 
 1. **Frontmatter complete** — `name`, `description`, `tools` all present. Missing any → `[FAIL]`.
-2. **`description:` states when to dispatch** — same judgement as skill-writing check 5, against `lazy-core.agent-writing § 1`. An agent whose sole caller is one skill satisfies it by naming that caller. Mechanism-only → `[WARN]`.
-3. **Preamble present** (for multi-phase agents) — same check as skill-writing §1. Agents with `## Phase N` or `## Process` sections must carry the preamble OR a valid `execution-discipline-waiver:` string. Same FAIL/INFO vocabulary.
-4. **No `AskUserQuestion` in agent body** — grep for `AskUserQuestion` outside fenced code/frontmatter. Match → `[FAIL]` (agents have no user channel).
-5. **Tool allowlist hygiene** — `tools: ["*"]` → `[WARN]` (unless a justification comment on the same line). `tools:` present but missing `Agent` → `[WARN]` (`Agent` is a mandatory member per `lazy-core.agent-writing § 5`); never flag its presence.
-6. **No "Optional" in phase/step headings** — same as skill-writing §2 → `[FAIL]`.
+2. **Preamble present** (for multi-phase agents) — same check as skill-writing §1. Agents with `## Phase N` or `## Process` sections must carry the preamble OR a valid `execution-discipline-waiver:` string. Same FAIL/INFO vocabulary.
+3. **No `AskUserQuestion` in agent body** — grep for `AskUserQuestion` outside fenced code/frontmatter. Match → `[FAIL]` (agents have no user channel).
+4. **Tool allowlist hygiene** — `tools: ["*"]` → `[WARN]` (unless a justification comment on the same line). `tools:` present but missing `Agent` → `[WARN]` (`Agent` is a mandatory member per `lazy-core.agent-writing § 5`); never flag its presence.
+5. **No "Optional" in phase/step headings** — same as skill-writing §2 → `[FAIL]`.
 7. **Narrative padding (heuristic)** — same denylist as skill-writing §3 → `[WARN]`.
 
 **Model routing** — load both settings files via `bin/lazy_settings.py`:
@@ -175,10 +174,10 @@ user = load_section(Path.home() / '.claude/lazy.settings.json', 'agent_models')
 Missing files are a silent no-op — `load_section` returns a stub with `_version` intact. Do not add a manual file-existence guard. Build a merged-with-provenance view of `agent_models`:
 
 1. **Files present / `_version` provenance** — emit `[INFO]` per scope: `lazy.settings.json scope=project path=<path> agent_models._version=<N>` or `lazy.settings.json scope=project (missing)`; same for `global`. Surfacing `_version` makes settings-version drift visible — e.g. a global file at `agent_models._version: 1` while the project file is at `_version: 2` after a migration.
-2. **No config anywhere** — if BOTH scopes are missing (both returned only the stub `_version` key and nothing else), emit `[WARN] no lazy.settings.json found (project: <path>, global: <path>) — agent routing disabled. Run /lazy-core.optimize to create and fill.` Skip the remaining checks (merged view / orphans / gaps / invalid values) since there is nothing to validate.
+2. **No config anywhere** — if BOTH scopes are missing (both returned only the stub `_version` key and nothing else), emit `[WARN] no lazy.settings.json found (project: <path>, global: <path>) — agent routing disabled. Run /lazy-core.slim-context to create and fill.` Skip the remaining checks (merged view / orphans / gaps / invalid values) since there is nothing to validate.
 3. **Merged entries** — for every dispatch-string key across both scopes, emit one `[INFO]`: `agent_models <group>.<key> = <value> (<provenance>)`. Provenance is `project`, `global`, or `project, overrides global=<other>` when both scopes carry the same key with different values. Group entries together in the report render by their top-level group name. Skip any top-level key whose value is not a dict (e.g. `_version: int`) — only group sub-dicts carry dispatch mappings. (Filter by shape, not by name, because `_user` / `_project` / `_builtin` are legitimate group-name keys that share the underscore prefix.)
 4. **Orphans** — any key in either scope that does NOT resolve to a discovered agent (see Agent discovery below). Finding: `[WARN] orphan agent_models entry: <group>.<key> (<scope>)`.
-5. **Gaps** — discovered agents with no entry in any scope (exclude agents explicitly set to `"default"` in either scope — those are explicit decisions, not gaps). Finding: `[INFO] no agent_models entry for <dispatch-string> (from <source>) — run /lazy-core.optimize to fill`.
+5. **Gaps** — discovered agents with no entry in any scope (exclude agents explicitly set to `"default"` in either scope — those are explicit decisions, not gaps). Finding: `[INFO] no agent_models entry for <dispatch-string> (from <source>) — run /lazy-core.slim-context to fill`.
 6. **Invalid values** — any value not in `{"haiku", "sonnet", "opus", "default"}`. Finding: `[WARN] invalid value <x> for <group>.<key> (<scope>)`.
 7. **Env-var status** — emit `[INFO]` with `LAZY_AGENT_MODEL_FLOOR=<value>` and a tier-order note (`haiku < sonnet < opus`), else `LAZY_AGENT_MODEL_FLOOR=(unset)`.
 
@@ -187,7 +186,7 @@ Missing files are a silent no-op — `load_section` returns a stub with `_versio
 1. **Built-ins** — hardcoded list: `Explore`, `Plan`, `general-purpose`, `statusline-setup`. Group: `_builtin`. Dispatch string: bare name.
 2. **User-authored, global** — `$HOME/.claude/agents/*.md`. Group: `_user`. Dispatch string: bare filename stem.
 3. **User-authored, project** — `./.claude/agents/*.md`. Group: `_project`. Dispatch string: bare filename stem. (Project entries shadow global entries of the same stem — both still listed separately with provenance.)
-4. **Plugin-shipped** — `$HOME/.claude/plugins/cache/**/agents/*.md`. Extract plugin name from path (`$HOME/.claude/plugins/cache/<marketplace>/<plugin-name>/<version>/agents/<agent>.md` → plugin = `<plugin-name>`). Group: **domain** derived from plugin name via the domain-extraction rule (first `-`-delimited segment, or full name if no `-`). Dispatch string: `<plugin-name>:<stem>`.
+4. **Plugin-shipped** — `$HOME/.claude/plugins/cache/**/agents/*.md`. Extract plugin name from path (`$HOME/.claude/plugins/cache/<marketplace>/<plugin-name>/<version>/agents/<agent>.md` → plugin = `<plugin-name>`). Group: **domain** derived from plugin name via the domain-extraction rule (first `-`-delimited segment, or full name if no `-`). Dispatch string: `<plugin-name>:<stem>`. **Install-scope filter:** the cache is machine-global — keep a plugin's agents only when `~/.claude/plugins/installed_plugins.json` shows it installed at `user` scope, or at `project` scope with a `projectPath` equal to the current repo root; a plugin installed only into another project's scope is not part of this repo's surface and its agents are never flagged missing here.
 
 **Rule-writing compliance** — see `lazy-core.rule-writing`. File set: `.claude/rules/*.md`, `$HOME/.claude/rules/*.md`, `claude/*/rules/*.md`. **Exclude** `**/templates/**/*-template.md` from every check below — templates are skeletons, not rules; their placeholder frontmatter and example clauses would otherwise misfire. Checks:
 
@@ -494,6 +493,10 @@ A hook the plugin family itself installs is still reported: whether a shipped sh
 
 No hook directory, or every hook already listed → emit nothing.
 
+**D16 — Review-class self-validation**
+
+A review class whose validator shares the main writer's expert key proves nothing — the same persona checks its own work. Read `lazy.settings.json[review].classes` (absent or empty → emit nothing). For each class entry: collect the expert names under `experts.main[].name` and the names under `experts.validation.*.name`; a non-empty intersection → `[FAIL] review class <class> is validated by its own main writer <key> | .claude/lazy.settings.json[review.classes]`; `fix: point the validation slot at a different expert, or drop the slot — a class with no validators is legal`. Expert composition is operator content — report only, never auto-repair.
+
 ### Structured report shape (Agents A, B, C — unchanged)
 
 ```
@@ -545,6 +548,9 @@ plugins_scanned: <n>  warn: <m>
 
 ### daemon_liveness
 - [WARN] runtime daemon appears stale — no pgrep match, no launchctl PID, and no JSONL log line in the last <threshold>s | .logs/lazy-core/runtime/
+
+### review_self_validation
+- [FAIL] review class <class> is validated by its own main writer <key> | .claude/lazy.settings.json[review.classes]
 
 ### aspect_resolution
 - [FAIL] expert <key>: aspect reference '<value>' did not resolve | lazy.settings.json[experts]
@@ -626,14 +632,13 @@ One line per Agent B naming `[WARN]`.
 - **Waivered files** (INFO) — one line per file with `execution-discipline-waiver: "<reason>"`.
 - **Narrative-padding heuristic** (WARN) — one line per match with the offending line.
 - **Invalid `lazy_setup_phase` value** (WARN) — one line per match with the offending value.
-- **`description:` states mechanism, not a trigger** (WARN) — one line per skill or command, prefixed by a `<n> of <total>` count line. A skill the router cannot select is dead surface, so the ratio is the finding as much as the individual lines are.
+- **`description:` absent** (FAIL) — one line per skill or command missing the frontmatter key.
 - **`allowed-tools` missing `Agent`** (WARN) — one line per file that declares `allowed-tools:` without `Agent` in the list.
 - **Research-marker semantics** (WARN) — one line per skill with a research-shaped contract missing the marker, or the marker present without a documented query contract.
 
 ### Agent-writing compliance
 
 - **Frontmatter incomplete** (FAIL) — one line per agent missing `name`/`description`/`tools`.
-- **`description:` states mechanism, not a trigger** (WARN) — one line per agent, same `<n> of <total>` count line.
 - **Missing preamble** (FAIL) — multi-phase agents without preamble and without valid waiver.
 - **`AskUserQuestion` in agent body** (FAIL) — one line per match.
 - **`tools: ["*"]` without justification** (WARN) — one line per match.
@@ -743,7 +748,7 @@ If all L1–L4 checks pass: emit a single `PASS: logging rule installed, .logs/ 
 - Rule over size budget → move long guidance to `<plugin>/skills/<skill>/references/*.md` per `lazy-core.rule-writing § 2`.
 - "Optional" in phase/step heading → rename the heading; the user's accept/decline choice belongs inside an `AskUserQuestion`, not at the heading level.
 - Narrative-padding match → review and drop the passage if its removal leaves executable behavior unchanged.
-- Mechanism-only `description:` → rewrite it to open with the invocation condition, per `lazy-core.skill-writing § 8` and the shapes in `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`. Mechanism moves into the body, where it costs nothing. `lazy-core.doctor` Phase 4 offers a per-finding rewrite (never batched).
+- Missing `description:` → write one, opening with the invocation condition per `lazy-core.skill-writing § 8` and the shapes in `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`.
 - `lazy.settings.json[experts]` FAIL → add missing fields per the expert schema; run `/lazy-core.install` wizard step to re-scaffold.
 - Reference resolution FAIL → verify the agent reference uses a valid format (`<plugin>:<name>`, `user:<name>`, or bare `<name>`) and that the referenced artifact exists.
 - Loop settings FAIL → re-run `/lazy-core.install` to scaffold or repair the flat `daemon` and `routines` sections in `lazy.settings.json`.

@@ -36,7 +36,7 @@ Outcome: `asserted (root=<path>)` or `[FAIL]`.
 
 ## Step 2: Dispatch A2–A3 + A5 in parallel
 
-In a SINGLE assistant message, dispatch three `Agent` calls with `subagent_type: "Explore"` and `mode: "dontAsk"`. Each agent's prompt embeds the structured-report contract from `claude/lazycortex-core/references/lazy-core.parallel-scan.md`. Word budget: under 300 words per agent.
+In a SINGLE assistant message, dispatch three `Agent` calls with `subagent_type: "Explore"` and `mode: "dontAsk"`. Each agent's prompt embeds the structured-report contract from `lazycortex-core`'s `references/lazy-core.parallel-scan.md`. Word budget: under 300 words per agent.
 
 ### A2 — Template well-formedness
 
@@ -52,7 +52,7 @@ In a SINGLE assistant message, dispatch three `Agent` calls with `subagent_type:
 
 > Scope: `<root>/templates/diagram.*/diagram-*.md`.
 >
-> For each mermaid exemplar fence, verify the structural sanity-check items the drawer agent enforces (see `claude/lazycortex-diagram/agents/lazy-diagram.draw-mermaid.md` § sanity checks). Init directive content is not applicable in templates — templates ship structure-only and the drawer composes the directive from the scheme; the init check runs at fixture time, not template time. Items checked:
+> For each mermaid exemplar fence, verify the structural sanity-check items the drawer agent enforces (see `${CLAUDE_PLUGIN_ROOT}/agents/lazy-diagram.draw-mermaid.md` § sanity checks). Init directive content is not applicable in templates — templates ship structure-only and the drawer composes the directive from the scheme; the init check runs at fixture time, not template time. Items checked:
 >
 > - **No single-letter IDs**: every node, participant, state, entity, class, region ID is camelCase / PascalCase domain vocabulary.
 > - **Every edge labelled**: no unlabelled edges (bare `-->`, bare `->>`, etc.).

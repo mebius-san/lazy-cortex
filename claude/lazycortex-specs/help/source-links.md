@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Resolve repos, dependencies, and build forge-correct source URLs so every spec link stays accurate regardless of where code is hosted.
-last_regen: 2026-08-30
+last_regen: 2026-09-02
 diagram_spec:
   anchor: "How the three skills compose"
   request: "Show how lazy-spec.resolve-repo, lazy-spec.resolve-dependency, and lazy-spec.source-url call each other: lazy-spec.source-url calls lazy-spec.resolve-repo to get RepoInfo; lazy-spec.resolve-dependency calls lazy-spec.resolve-repo internally for internal-product and internal-repo entries; lazy-spec.resolve-repo reads lazy.settings.json[repos] and inspects the git remote. Output is a URL or a dep record."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-spec.resolve-repo
   - lazy-spec.resolve-dependency
   - lazy-spec.source-url
-source_sha: c6319fd5862972d0cafec847f18eab54aea4d385
+source_sha: d2e8e59bcbf33a3e6c7cd82a7e43b4d3f9143fd6
 ---
 # Source links — repos, dependencies, and forge-correct URLs
 
@@ -41,7 +41,7 @@ A repo's `local_path` is usually an absolute path to a separate checkout, but wh
 
 **Adding a forge override for a self-hosted instance** — if the hostname is not in the known-forges table (for example, `gitlab.internal.company.example`), `/lazy-spec.resolve-repo` aborts with a message naming the missing key. Run `/lazy-spec.product-config`, find the repo record, and set `forge` to one of the supported keys (`github`, `gitlab`, `bitbucket`, `gitea`, `forgejo`, `sourcehut`) — whichever matches the instance's URL scheme. The skill writes the override.
 
-**Changing the default branch** — the `branch` field in the repo record controls which branch source URLs default to. If your project has moved its default branch, run `/lazy-spec.product-config` to update the record. Existing spec docs that had the old branch pinned via `spec_source_branches` are reconciled by `/lazy-spec.finalize-branch` once the old branch merges or is deleted.
+**Changing the default branch** — the `branch` field in the repo record controls which branch source URLs default to. If your project has moved its default branch, run `/lazy-spec.product-config` to update the record. Existing spec docs that had the old branch pinned via `spec_source_branches` are reconciled by `/lazy-spec.rebase-pins` once the old branch merges or is deleted.
 
 **Adding or editing a product dependency** — run `/lazy-spec.product-config` in edit mode to extend the `dependencies` array. The wizard accepts all three entry shapes (`product:`, `repo:`, `external:`) interactively and calls `/lazy-spec.resolve-dependency` to validate each entry before writing. You do not edit the `products` section by hand.
 
@@ -93,5 +93,5 @@ flowchart LR
 ## See also
 
 - [install-and-audit](install-and-audit.md) — register products and repos via `/lazy-spec.product-config`, which is the only writer for the settings this block reads.
-- [code-sync](code-sync.md) — `/lazy-spec.sync-with-code` and `/lazy-spec.finalize-branch` are the primary callers of `/lazy-spec.source-url` in normal operation.
+- [code-sync](code-sync.md) — `/lazy-spec.sync-with-code` and `/lazy-spec.rebase-pins` are the primary callers of `/lazy-spec.source-url` in normal operation.
 - [asset-to-release](walkthroughs/asset-to-release.md) — walkthrough that exercises source-link generation as part of the full gate journey.

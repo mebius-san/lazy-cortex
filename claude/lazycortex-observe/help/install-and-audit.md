@@ -1,18 +1,17 @@
 ---
 chapter_type: block
 summary: Install, verify health, and tear down the lazycortex-observe metrics shipper on any host.
-last_regen: 2026-08-27
+last_regen: 2026-09-02
 no_diagram: true
 source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
   - lazy-observe.doctor
-  - lazy-observe.audit
-source_sha: 890473ef0218899352d3af6d39a3910845b28731
+source_sha: bf704574aa25dc7697e00bebb805686ae6ca145e
 ---
 # Install and audit
 
-Getting lazycortex-observe running on a new host — and keeping it running reliably — involves four skills that cover the full lifecycle: a wizard-driven install, a read-only health check you can run any time, a symmetric teardown, and a plugin audit that checks the plugin's own artifact conventions. Together they give you a reproducible, inspectable metrics shipper with no silent states.
+Getting lazycortex-observe running on a new host — and keeping it running reliably — involves three skills that cover the full lifecycle: a wizard-driven install, a read-only health check you can run any time, and a symmetric teardown. Together they give you a reproducible, inspectable metrics shipper with no silent states.
 
 ## What's in this block
 
@@ -21,8 +20,6 @@ Getting lazycortex-observe running on a new host — and keeping it running reli
 **`/lazy-observe.doctor`** is a read-only diagnostic you run any time the pipeline feels off. It checks the answer file, service unit state, agent process, every metrics-enabled daemon's local `/metrics` endpoint on this host, the agent's own remote_write success counters, observer URL reachability, and WAL directory size, reporting each as `PASS`, `WARN`, or `FAIL` with a one-line fix suggestion. When the host is running in integrate mode (no local shipper), doctor adjusts: instead of checking a service and agent process, it verifies the published scrape-targets file exists, parses, and its target count matches the live daemon count. It never restarts services or mutates anything; all it does is tell you what it sees. Run it right after install to confirm the smoke test passed, and again any time samples stop arriving in your observer.
 
 **`/lazy-observe.uninstall`** is the symmetric undo. It unloads the service, removes the rendered agent config and service unit, and asks whether to keep or delete the WAL and log directories. Operator-private state — the answer file at `observe.toml` and the token file — is preserved by default, so a future reinstall on the same machine can skip the wizard prompts that already have answers. Both the WAL and the private state choices are explicit confirmations, not silent deletes. Re-running on an already-clean host is a no-op.
-
-**`/lazy-observe.audit`** checks the plugin's own artifact conventions — rule-file frontmatter, execution-discipline preambles in skill and agent files, and logging-rule compliance. It is read-first and presents its findings before asking whether to apply any fix. Run it after upgrading the plugin or after making local edits to plugin files; it will surface any drift between what a skill declares and what the conventions require.
 
 ## How they work together
 
@@ -33,8 +30,6 @@ If you already run a Prometheus or collector stack on the host, you usually don'
 When you need to change something — a new remote_write URL, a different agent kind, a rotated token, or a daemon that just got metrics enabled — re-run `/lazy-observe.install`. Because the skill is idempotent, it rewrites only what changed, picks up any new daemon automatically, and reloads the service. You do not need to uninstall first unless the service label or unit name itself is changing (and the install skill will tell you if it is, citing the existing loaded label).
 
 Use `/lazy-observe.uninstall` when you are decommissioning the host or switching the machine out of the rotation entirely. The default of keeping the answer file and token means that if the machine comes back, a reinstall is a one-command operation with no wizard prompts to re-answer.
-
-`/lazy-observe.audit` sits slightly apart from the operational loop — it inspects the plugin itself, not the running service. Run it after a minor-version upgrade of the plugin (a minor bump means re-running install to pick up new templates or settings, and audit confirms the plugin files landed correctly) or any time you have edited a plugin file locally and want to verify it still meets conventions.
 
 If doctor reports a `FAIL not-installed`, the next step is always `/lazy-observe.install`. If it reports `WARN covered-unconfigured` — a collector already scrapes this host but `observe.toml` has no record of it — the fix is the same: `/lazy-observe.install` detects the coverage and records integrate mode without asking any questions. If it reports a service unit that is inactive (`FAIL inactive`), check the agent binary's own logs before restarting — doctor gives you the log path for both launchd and systemd. If it reports `WARN zero-rate` on the remote_write counter, check the observer URL reachability step in the same report: that step catching `FAIL unreachable` explains the zero rate and the fix is on the network side, not in the plugin.
 

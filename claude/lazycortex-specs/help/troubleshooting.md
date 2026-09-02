@@ -1,22 +1,21 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-08-30
+last_regen: 2026-09-02
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
-  - lazy-spec.audit
   - lazy-spec.coverage
   - lazy-spec.create-asset
-  - lazy-spec.create-request
   - lazy-spec.create-from-code
-  - lazy-spec.decide
-  - lazy-spec.doctor
-  - lazy-spec.finalize-branch
+  - lazy-spec.create-request
+  - lazy-spec.drive
   - lazy-spec.flip-gate
   - lazy-spec.install
   - lazy-spec.lookup
   - lazy-spec.product-config
+  - lazy-spec.rebase-pins
+  - lazy-spec.record-decision
   - lazy-spec.refresh-sources
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
@@ -25,7 +24,8 @@ source_skills:
   - lazy-spec.set-stage
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
-source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
+  - lazy-spec.doctor
+source_sha: 73781d3513221e28253bd78d907cc43ef85a029c
 ---
 # Troubleshooting
 
@@ -51,11 +51,11 @@ source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
 
 ## `/lazy-spec.product-config` aborts with `aborted:no-vault-spec`
 
-**Symptom**: Running the wizard in create mode (registering a brand-new product) aborts immediately, saying there is no `design.md` at the spec content-root.
+**Symptom**: Running the wizard in create mode (registering a brand-new product) aborts immediately, saying there is neither a `vision.md` nor a pre-vision `design.md` at the spec content-root.
 
-**Likely cause**: The project-wide vault spec — the content-root `design.md` that states what the project is and why it exists, the document every product split is a consequence of — hasn't been seeded yet. Registering the first product is gated on that file existing.
+**Likely cause**: The project-wide vault spec — the content-root `vision.md` that states what the project is, for whom, and what counts as success, the document every product split is a consequence of — hasn't been seeded yet. Registering the first product is gated on that file existing (an older, pre-vision content-root `design.md` with no `vision.md` beside it is also accepted as a legal starting state).
 
-**Fix**: Run `/lazy-spec.install` — its Step 6.9 seeds a draft vault spec at the content-root if one is missing — fill it in, then re-run `/lazy-spec.product-config`.
+**Fix**: Run `/lazy-spec.install` — its Step 6.9 seeds a draft `vision.md` at the content-root if neither file is missing — fill it in, then re-run `/lazy-spec.product-config`.
 
 ---
 
@@ -171,11 +171,11 @@ source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
 
 ## `/lazy-spec.doctor` reports `vault-spec-missing`
 
-**Symptom**: A doctor run's Check 11 reports `[WARN] vault-spec-missing` — the content-root `design.md` (the vault spec) does not exist.
+**Symptom**: A doctor run's Check 11 reports `[WARN] vault-spec-missing` — neither the content-root `vision.md` nor a pre-vision `design.md` exists.
 
-**Likely cause**: The catalog was registered before the mandatory-vault-spec contract landed, or `/lazy-spec.install` was never re-run afterward — the content-root `design.md` that every product split is a consequence of was never seeded.
+**Likely cause**: The catalog was registered before the mandatory-vault-spec contract landed, or `/lazy-spec.install` was never re-run afterward — the content-root `vision.md` that every product split is a consequence of was never seeded. If a content-root `design.md` exists but no `vision.md` sits beside it, doctor reports `[INFO] pre-vision vault` instead — a legal starting state, migrated by hand whenever you're ready, not a WARN.
 
-**Fix**: Re-run `/lazy-spec.install` — its Step 6.9 seeds a draft vault spec at the content-root when one is missing — then fill it in. This is a WARN, not a FAIL: the rest of the catalog keeps working while it's absent.
+**Fix**: Re-run `/lazy-spec.install` — its Step 6.9 seeds a draft `vision.md` at the content-root when neither file exists — then fill it in. This is a WARN, not a FAIL: the rest of the catalog keeps working while it's absent.
 
 ---
 
@@ -196,6 +196,26 @@ source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
 **Likely cause**: You passed a type nothing declares. The shipped set is `feature`, `change`, `bug`, `content`, `research`; anything else must be declared on the product first.
 
 **Fix**: Run `/lazy-spec.add-asset-type <product> <type-name>` to declare the type, then re-invoke `/lazy-spec.create-asset`.
+
+---
+
+## `/lazy-spec.create-asset` refuses saying the type has no playbook
+
+**Symptom**: The skill refuses before scaffolding anything, saying the asset type declares neither a `playbook` nor an `alias_of`.
+
+**Likely cause**: The type's declaration under `products[<key>].asset_types` is incomplete — the coordinator would have no law to work an asset of this type under, so the skill refuses to create one rather than leave it stranded.
+
+**Fix**: Complete the declaration via `/lazy-spec.add-asset-type <product> <existing-type-name>` — the wizard resumes at the playbook question — then re-invoke `/lazy-spec.create-asset`.
+
+---
+
+## `/lazy-spec.create-asset` refuses saying the type declares no start document
+
+**Symptom**: The skill refuses, saying the asset type carries no `start_doc` token and there is no default layout to fall back on.
+
+**Likely cause**: The type's declaration under `products[<key>].asset_types` is missing `start_doc` — usually an interrupted `/lazy-spec.add-asset-type` run, or a hand-edited entry.
+
+**Fix**: Re-run `/lazy-spec.add-asset-type <product> <existing-type-name>` and answer the start-document question with a `<file>.md:<doc-type>` pair, then re-invoke `/lazy-spec.create-asset`.
 
 ---
 
@@ -259,7 +279,7 @@ source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
 
 ---
 
-## `/lazy-spec.decide` refuses to record, supersede, obsolete, or promote a decision
+## `/lazy-spec.record-decision` refuses to record, supersede, obsolete, or promote a decision
 
 **Symptom**: The `decide` primitive refuses with one of: `no such record: D-NNN`, `no such doc`, or `spec_role '<x>' is not a living doc`.
 
@@ -269,7 +289,7 @@ source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
 
 ---
 
-## `/lazy-spec.decide promote` refuses: the owning asset is cancelled, halted, or released
+## `/lazy-spec.record-decision promote` refuses: the owning asset is cancelled, halted, or released
 
 **Symptom**: `promote` refuses unconditionally, naming `spec_cancelled`, `spec_halted`, or `spec_released` as the reason.
 
@@ -279,7 +299,7 @@ source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
 
 ---
 
-## `/lazy-spec.decide` reports `duplicate: D-NNN`
+## `/lazy-spec.record-decision` reports `duplicate: D-NNN`
 
 **Symptom**: The command reports `duplicate: D-NNN` and nothing new appears in the decisions file.
 
@@ -316,6 +336,26 @@ source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
 **Likely cause**: The path or slug you passed is ambiguous — it could map to multiple products or categories — or it does not match any asset folder.
 
 **Fix**: Pass the unambiguous asset directory path (e.g. `Server/products/api/features/csv-export`).
+
+---
+
+## `/lazy-spec.drive` refuses to start: a daemon is live
+
+**Symptom**: The skill refuses immediately with `refused-daemon-live`, naming a signal (a running process, a launchd job, or a recent runtime log) that means the runtime daemon could still act on this checkout.
+
+**Likely cause**: `/lazy-spec.drive` drives one asset through its ladder by hand, in the same session, with no daemon in the loop — running it while the daemon is also live risks a job being dispatched twice, once by the daemon and once by the drive session, and the daemon's clean-tree invariant would conflict with the drive session's own uncommitted state.
+
+**Fix**: Stop the daemon (or remove this checkout from `daemon.run_here`) before driving by hand. Per the plugin's own contract, going back to daemon mode after a drive session requires the session to close `closed-clean` first — resolve any dirty paths `/lazy-spec.drive` reports at the end of its run before restarting the daemon.
+
+---
+
+## `/lazy-spec.drive`'s dialog loop keeps hitting its 20-iteration ceiling
+
+**Symptom**: The drive loop stops itself after 20 iterations without the ladder settling, and the skill reports this rather than continuing.
+
+**Likely cause**: Either a genuine ladder bug — worth reporting rather than working around — or the asset is caught in a legitimate multi-round cascade that outgrew a single session's patience. The ceiling is a deliberate fixed cap, not a setting to raise.
+
+**Fix**: Re-invoke `/lazy-spec.drive` on the same asset — its resume phase picks up exactly where the loop left off, so a multi-round cascade completes over a couple of re-invocations. If the same asset keeps hitting the ceiling with no progress between runs, that is the ladder bug to report.
 
 ---
 
@@ -409,27 +449,57 @@ source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
 
 ---
 
-## `/lazy-spec.finalize-branch` aborts with "fetch failed"
+## `/lazy-spec.sync-with-code <asset>` refuses naming a bug asset
+
+**Symptom**: Running the skill with an asset path instead of a bare product key refuses, saying asset mode only reconciles `design.md` / `architecture.md`.
+
+**Likely cause**: Asset mode reconciles one feature or change asset's `design.md` / `architecture.md` against the current code by anchor — a bug folder ships neither of those documents, so there's nothing for asset mode to reconcile.
+
+**Fix**: For a bug, run `/lazy-spec.sync-with-code <product>` in product mode instead — its per-asset gate proposals (Step 5) cover bugs the same way they cover features and changes.
+
+---
+
+## `/lazy-spec.sync-with-code <asset>` reports `no-design-doc`
+
+**Symptom**: Asset mode reports `no-design-doc` and reconciles nothing.
+
+**Likely cause**: The asset has no `design.md` yet — most often a `--empty`-scaffolded asset that hasn't had its start document authored.
+
+**Fix**: Author and approve `design.md` for the asset first, then re-invoke asset mode. Or run `/lazy-spec.sync-with-code <product>` in product mode, which doesn't require `design.md` to already exist.
+
+---
+
+## `/lazy-spec.sync-with-code <asset>` reports `no-anchors` on every run
+
+**Symptom**: Asset mode consistently reports `no-anchors` and never surfaces a drift finding for this asset.
+
+**Likely cause**: This is a valid outcome, not a failure — the asset has no `code-plan.md` / `test-plan.md` to anchor source-links against, no `wiki.domains` configured for domain-group anchors, and no `docs/structure.md` for structure anchors. The doc still gets `lazy-spec.doctor`'s structural pass regardless.
+
+**Fix**: Nothing is broken. To sharpen future runs, configure domains via `/lazy-wiki.configure domains` and run `lazy-wiki.domain-sync`, run `lazy-wiki.structure rebuild`, or author a `code-plan.md` for the asset — any one of the three gives asset mode an anchor to reconcile against.
+
+---
+
+## `/lazy-spec.rebase-pins` aborts with "fetch failed"
 
 **Symptom**: The skill aborts before scanning any pinned specs, with an error naming a repo where `git fetch --prune` failed.
 
 **Likely cause**: Network error, auth failure, or no remote configured in `lazy.settings.json[repos]` for one of the registered repos.
 
-**Fix**: Fix connectivity or credentials for the affected repo, then re-run `/lazy-spec.finalize-branch`. The skill never operates on stale remote refs.
+**Fix**: Fix connectivity or credentials for the affected repo, then re-run `/lazy-spec.rebase-pins`. The skill never operates on stale remote refs.
 
 ---
 
-## `/lazy-spec.finalize-branch` reports "still open" for a named branch
+## `/lazy-spec.rebase-pins` reports "still open" for a named branch
 
 **Symptom**: When invoked with an explicit branch name, the skill reports "still open" and makes no changes.
 
 **Likely cause**: The branch is not yet an ancestor of the default branch and still exists on the remote — it has not been merged.
 
-**Fix**: Merge the branch via your normal workflow. If the merge used a squash and the ancestry check therefore fails, re-run `/lazy-spec.finalize-branch <branch> --force-merged` after confirming the squash was deliberate. Alternatively, delete the branch — after `fetch --prune` the skill treats a deleted branch as merged.
+**Fix**: Merge the branch via your normal workflow. If the merge used a squash and the ancestry check therefore fails, re-run `/lazy-spec.rebase-pins <branch> --force-merged` after confirming the squash was deliberate. Alternatively, delete the branch — after `fetch --prune` the skill treats a deleted branch as merged.
 
 ---
 
-## `/lazy-spec.finalize-branch` never proposes a `spec_released` flip after a merge
+## `/lazy-spec.rebase-pins` never proposes a `spec_released` flip after a merge
 
 **Symptom**: A branch merged and its pins rebased cleanly, but the skill never surfaces a `spec_released` proposal for the asset.
 

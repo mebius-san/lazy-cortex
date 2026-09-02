@@ -14,22 +14,22 @@ spec_source_docs: []
 ---
 # {{slug}} — architecture
 
-_Code-structure design — populated once the change's `design.md` is approved, for any change whose work involves code. Module boundaries, dependency direction, public contract versus internals, data migration, and the cost to existing callers. Not behavior — `design.md` already settled WHAT is changing; this doc settles the SHAPE of the code that changes it._
+<!-- Code-structure design — populated once the change's `design.md` is approved, for any change whose work involves code. Module boundaries, dependency direction, public contract versus internals, data migration, and the cost to existing callers. Not behavior — `design.md` already settled WHAT is changing; this doc settles the SHAPE of the code that changes it. -->
 
 ## Overview
-_What part of the codebase this touches and why an architecture step is warranted here._
+<!-- What part of the codebase this touches and why an architecture step is warranted here. -->
 
 ## Module boundaries
-_Which modules/components own which responsibility; public contract versus internals; dependency direction between them._
+<!-- Which modules/components own which responsibility; public contract versus internals; dependency direction between them. -->
 
 ## Data & contracts
-_Data shapes, schemas, and interfaces the change introduces or alters — the seams other code will call across._
+<!-- Data shapes, schemas, and interfaces the change introduces or alters — the seams other code will call across. -->
 
 ## Dependencies & children
-_External dependencies this design pulls in; any sub-feature this decomposes into, proposed via the `[!asset-proposal]` callout rather than created directly._
+<!-- External dependencies this design pulls in; any sub-feature this decomposes into, proposed via the `[!asset-proposal]` callout rather than created directly. -->
 
 ## Migration & cost
-_Data or schema migration this introduces; the cost to existing callers — what breaks, what must be updated alongside this change._
+<!-- Data or schema migration this introduces; the cost to existing callers — what breaks, what must be updated alongside this change. -->
 
 # Sources
 #protected/spec/sources

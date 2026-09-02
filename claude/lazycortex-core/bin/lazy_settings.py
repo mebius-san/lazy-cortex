@@ -55,7 +55,7 @@ CURRENT_VERSIONS = {
   "git": 1,
   "products": 2,
   "repos": 1,
-  "review": 9,
+  "review": 11,
   "spec": 2,
   "structure": 1,
   "terms": 1,

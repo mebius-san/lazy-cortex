@@ -16,7 +16,7 @@ spec_source_docs: []
 
 ## Overview
 
-_One or two sentences stating what is broken and under what circumstances._
+<!-- One or two sentences stating what is broken and under what circumstances. -->
 
 ## Way to reproduce
 
@@ -26,19 +26,19 @@ _One or two sentences stating what is broken and under what circumstances._
 
 ## Observed behavior
 
-_What actually happens._
+<!-- What actually happens. -->
 
 ## Expected behavior
 
-_What should happen instead._
+<!-- What should happen instead. -->
 
 ## Environment
 
-_Versions, OS, configuration, anything that scopes the symptom._
+<!-- Versions, OS, configuration, anything that scopes the symptom. -->
 
 ## Related code / logs
 
-_Forge URLs to the suspected files / logs (use `lazy-spec.source-url` for repo links). Source URLs are permitted in this section only._
+<!-- Forge URLs to the suspected files / logs (use `lazy-spec.source-url` for repo links). Source URLs are permitted in this section only. -->
 
 # Sources
 #protected/spec/sources

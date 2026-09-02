@@ -1,9 +1,9 @@
 ---
-name: lazy-spec.finalize-branch
+name: lazy-spec.rebase-pins
 description: Use after merging or deleting a source-repo branch to rebase any specs pinned to that branch back to the repo's default branch — walks every `spec_source_branches` frontmatter entry in the vault, applies the shared Pin Reconciliation primitive, refuses to rewrite unmerged pins, and proposes `spec_released` for assets whose pinned docs covered the now-merged branch.
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Skill, AskUserQuestion, Agent
 ---
-# Finalize Branch
+# Rebase Pins
 
 Rebase spec source links from a feature branch back to the repo's default branch once that branch has merged (or been deleted), then propose the `spec_released` gate for each affected asset.
 
@@ -30,8 +30,8 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 Two invocation modes:
 
-- **Explicit**: `lazy-spec.finalize-branch <branch>` — reconcile pins only for the named branch. If the branch is still open, report "still open" and exit without changes. Never force-drop an unmerged pin — pass `--force-merged` only when the operator confirms a squash-merge.
-- **Auto**: `lazy-spec.finalize-branch --merged` — walk every pinned spec in the vault and reconcile each. Merged/deleted pins are rewritten; open pins are skipped with a note.
+- **Explicit**: `lazy-spec.rebase-pins <branch>` — reconcile pins only for the named branch. If the branch is still open, report "still open" and exit without changes. Never force-drop an unmerged pin — pass `--force-merged` only when the operator confirms a squash-merge.
+- **Auto**: `lazy-spec.rebase-pins --merged` — walk every pinned spec in the vault and reconcile each. Merged/deleted pins are rewritten; open pins are skipped with a note.
 
 Flag:
 
@@ -77,7 +77,7 @@ For each entry, run the **Pin Reconciliation** primitive from `${CLAUDE_PLUGIN_R
 Print a summary grouped by action:
 
 ```
-## Finalize Branch — <branch-or-"all merged">
+## Rebase Pins — <branch-or-"all merged">
 
 ### Rewrote (N)
 - <file> — <repo-key>:<branch-name> → <default-branch> (merged)
@@ -103,7 +103,7 @@ For every asset folder that had at least one of its docs rewritten in Step 4 (a 
 Skill(skill: "lazycortex-specs:lazy-spec.flip-gate", args: "<asset-dir> spec_released")
 ```
 
-`flip_gate` no longer checks the `spec_released` precondition itself (`spec_tests_passing == true`, and the full ladder behind it: develop-done, plan-done, design-done) — it flips unconditionally once the operator confirms, refusing only when the asset is cancelled. This skill's own job is to check the readiness before proposing: read the status folder-note, and only surface the `AskUserQuestion` proposal when `spec_tests_passing` (and the rest of the ladder) already reads `true`. When it doesn't, skip the release for that asset instead of proposing a flip you know is premature — do NOT propose it and rely on a refusal that will not come. The rebase from Step 4 is already applied regardless; only the release flip is held back. The operator settles the stuck gate (e.g. flips `spec_tests_passing` once a green test report exists, or lets `spec.coordinator` derive it) and re-runs `/lazy-spec.finalize-branch`.
+`flip_gate` no longer checks the `spec_released` precondition itself (`spec_tests_passing == true`, and the full ladder behind it: develop-done, plan-done, design-done) — it flips unconditionally once the operator confirms, refusing only when the asset is cancelled. This skill's own job is to check the readiness before proposing: read the status folder-note, and only surface the `AskUserQuestion` proposal when `spec_tests_passing` (and the rest of the ladder) already reads `true`. When it doesn't, skip the release for that asset instead of proposing a flip you know is premature — do NOT propose it and rely on a refusal that will not come. The rebase from Step 4 is already applied regardless; only the release flip is held back. The operator settles the stuck gate (e.g. flips `spec_tests_passing` once a green test report exists, or lets `spec.coordinator` derive it) and re-runs `/lazy-spec.rebase-pins`.
 
 If `spec_cancelled: true`, skip silently — cancelled assets never advance. Every release flip's audit trail lives in the status folder-note's `# History` section written by `lazy-spec.flip-gate`; no separate product changelog is updated.
 
@@ -113,20 +113,20 @@ Re-check the rewritten files for any surviving source URL whose prefix matches t
 
 ## Failure modes
 
-- **`/lazy-spec.finalize-branch` aborts: "fetch failed"** — network error, auth failure, or no remote configured for one of the repos in `lazy.settings.json[repos]` → fix connectivity or credentials and re-run; the skill never operates on stale refs.
-- **`/lazy-spec.finalize-branch` reports "still open"** — the named branch is not an ancestor of the default branch and still exists on the remote → merge it first, or pass `--force-merged` for a confirmed squash-merge.
+- **`/lazy-spec.rebase-pins` aborts: "fetch failed"** — network error, auth failure, or no remote configured for one of the repos in `lazy.settings.json[repos]` → fix connectivity or credentials and re-run; the skill never operates on stale refs.
+- **`/lazy-spec.rebase-pins` reports "still open"** — the named branch is not an ancestor of the default branch and still exists on the remote → merge it first, or pass `--force-merged` for a confirmed squash-merge.
 - **An asset never gets a `spec_released` proposal** — `spec_tests_passing` doesn't read `true` yet on its status folder-note, so Step 6's own readiness check skips it (the primitive itself no longer refuses this) → settle the holding gate first (flip `spec_tests_passing` once a green test report exists, or let `spec.coordinator` derive it), then re-run; the rebase itself was already applied.
 
 ## Guarantees
 
 - **Never rewrites an unmerged pin** — even in explicit mode, without `--force-merged`.
 - **Deleted = merged** — once a branch is gone locally and remotely (after `fetch --prune`), its pins are rewritten to the default.
-- **Squash-merges**: the `merge-base --is-ancestor` check returns false because the squashed commit is not an ancestor of the source branch tip. Use `lazy-spec.finalize-branch <branch> --force-merged` for a one-shot, or delete the squashed branch and let the "deleted = merged" rule pick it up.
+- **Squash-merges**: the `merge-base --is-ancestor` check returns false because the squashed commit is not an ancestor of the source branch tip. Use `lazy-spec.rebase-pins <branch> --force-merged` for a one-shot, or delete the squashed branch and let the "deleted = merged" rule pick it up.
 - **Idempotent** — re-running on an already-finalized branch is a no-op; the rebase finds no matching pins and `flip_gate` leaves an already-`true` `spec_released` untouched (a re-proposal is declined or the gate is already set).
 
 ## Log the run
 
-Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.finalize-branch/YYYY-MM-DD_HH-MM-SS.md`. Create the dir with `Bash(mkdir -p ./.logs/claude/lazy-spec.finalize-branch)`, then `Write` the file — never chain. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input`. Body: `# lazy-spec.finalize-branch` heading, then `## Actions` and `## Result`. The `## Actions` list MUST record one line per task in the canonical list. Record:
+Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy-spec.rebase-pins/YYYY-MM-DD_HH-MM-SS.md`. Create the dir with `Bash(mkdir -p ./.logs/claude/lazy-spec.rebase-pins)`, then `Write` the file — never chain. Frontmatter: `git_sha`, `git_branch`, `date` (UTC), `input`. Body: `# lazy-spec.rebase-pins` heading, then `## Actions` and `## Result`. The `## Actions` list MUST record one line per task in the canonical list. Record:
 
 - Invocation mode (`<branch>`, `--merged`, with or without `--force-merged`).
 - Files rewritten, skipped (with reason), and any fetch failures.

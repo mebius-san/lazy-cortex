@@ -1,9 +1,9 @@
 ---
-name: lazy-core.optimize
+name: lazy-core.slim-context
 description: "Run when startup feels slow, the always-loaded context budget crosses its WARN threshold, a rules file has grown oversized, or a project-specific permission leaked into global settings. Unlike `lazy-core.audit`, which only reports, this one rewrites: it moves reference material out of rules into on-demand agent definitions and relocates leaked settings entries to the local scope."
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir -p *), Agent
 ---
-# Context Optimization
+# Slim Context
 
 Reduce startup context weight and fix settings layer violations for the current project.
 
@@ -383,7 +383,7 @@ End with a summary:
 
 ## Logging
 
-Log to `./.logs/claude/lazy-core.optimize/YYYY-MM-DD_HH-MM-SS.md`. Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
+Log to `./.logs/claude/lazy-core.slim-context/YYYY-MM-DD_HH-MM-SS.md`. Use `Bash(mkdir -p ...)` then `Write` tool (never chain).
 
 The log's `## Actions` section must include an `## llm-readability audit` subsection when Phase 2.5 ran:
 

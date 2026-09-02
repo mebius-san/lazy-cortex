@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about vault setup, Iconize, diagram render glue, the vault manifest, plugin updates, and tag pages for lazycortex-obsidian.
-last_regen: 2026-08-27
+last_regen: 2026-09-02
 no_diagram: true
 source_skills:
   - lazy-obsidian.install
@@ -14,7 +14,7 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 07686c8fa9ef083334f66cfa6c696cf913a33740
+source_sha: c5789cd250ada25aa79c0fc976a881d7c0be44a4
 ---
 # Frequently asked questions
 
@@ -152,15 +152,15 @@ The tag-page template at `.claude/templates/lazy-obsidian.tag-page-template.md` 
 
 ---
 
-## The audit reports a FAIL about version coherence or the icon-map schema. What should I fix first?
-
-Run `/lazy-obsidian.audit` to see the grouped report. For schema failures (worker version constants mismatching hook templates, or `schema_version` outside the supported set), re-running `/lazy-obsidian.iconize-install` migrates the icon-map in place and brings hook templates up to date. For diagram render glue failures (missing or malformed `mermaid-fit.css` / `ascii-fit.css` / `callouts.css`, or a wrong `mermaid-popup` override block), re-running `/lazy-obsidian.install` (snippets) or `/lazy-obsidian.diagram-install` (`mermaid-popup`) resolves them. The audit presents findings one at a time and asks whether to fix, waive, or skip each.
-
----
-
 ## The audit reports "vault manifest drift". What does that mean?
 
 `/lazy-obsidian.audit` compares your live `.obsidian/` config against `.obsidian.manifest.json`, but only when that manifest exists — a vault that has never run `/lazy-obsidian.capture` is skipped with outcome `no-manifest`, which is not a failure. When drift is found, it means the live vault and the recorded manifest disagree, and the audit never guesses which side is right — it presents each entry and lets you choose: run `/lazy-obsidian.capture` if the live vault is correct and should be recorded, or `/lazy-obsidian.deploy` if the manifest is correct and the live vault should be restored from it. A separate `warnings` list (not drift) covers things like a plugin whose installed version moved past what its settings were captured under, or credentials the manifest can never carry.
+
+---
+
+## Does `/lazy-obsidian.audit` check anything besides vault-manifest drift?
+
+No — it is scoped to that one check. Earlier versions also verified the plugin's own shipped artifacts (worker version constants, icon-map template schema, protocol docs, CSS snippet contracts); those checks now live in the plugin maintainer's own tooling, not in a skill you run against your vault. If you hit a problem that looks like a shipped-artifact defect rather than vault drift — icons stop painting, snippets are missing, the icon-map is rejected as the wrong schema — the fix is still `/lazy-obsidian.install` or `/lazy-obsidian.iconize-install`, not `/lazy-obsidian.audit`; see the questions above for icons, snippets, and the icon-map.
 
 ---
 

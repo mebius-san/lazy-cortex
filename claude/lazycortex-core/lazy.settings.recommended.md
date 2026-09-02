@@ -39,7 +39,7 @@ Values: `"haiku" | "sonnet" | "opus" | "default"`. Unknown values log a warning 
 
 - `/lazy-core.agent-models` — interactive wizard. Discovers every agent that's actually installed (built-ins, plugins, user/project agents), looks up the suggested tier in `default-tiers.json`, and offers batch + per-agent prompts. Writes to the structurally-correct file (`_user.*` → global, `_project.*` → project, plugin-domain → follows the plugin's install scope).
 - `/lazy-core.audit` — surfaces gaps and merged-with-provenance view.
-- `/lazy-core.optimize` — runs the wizard as Phase 7 of the full optimize pipeline.
+- `/lazy-core.slim-context` — runs the wizard as Phase 7 of the full optimize pipeline.
 
 Manual edits are fine — both `~/.claude/lazy.settings.json` and `./.claude/lazy.settings.json` are plain JSON. Don't duplicate the same dispatch in both files unless you intend project to override user.
 

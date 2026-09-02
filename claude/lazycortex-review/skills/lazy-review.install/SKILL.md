@@ -45,7 +45,7 @@ Every file this skill creates or updates follows three cases — no per-file "in
 
 ## Step 1 — Bootstrap settings + dirs
 
-Run `python3 claude/lazycortex-review/bin/install.py --cwd .`. The script applies the File-sync policy at the section level:
+Run `python3 "${CLAUDE_PLUGIN_ROOT}/bin/install.py" --cwd .`. The script applies the File-sync policy at the section level:
 
 - Creates `.claude/lazy.settings.json` if missing, or merges the defaults in for absent top-level keys and absent nested keys only — existing values are never overwritten (cases 1–2; the bin contains no contradicting-region path, so case 3 never arises here).
 - Creates `.experts/.jobs/` and `.logs/lazy-review/runs/` if missing.

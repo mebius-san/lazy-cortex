@@ -102,7 +102,7 @@ If the commit list is large (>5 commits) or touches many files, delegate analysi
 - **Agent B — data & templates**: data structure changes, template/UI changes, constant changes.
 - **Agent C — behavior signals**: commit messages + diffs hinting at user-visible behavior changes (these surface as design-doc candidates).
 
-Each agent returns a structured summary of findings with commit hashes per the parallel-scan coordinator pattern in `claude/lazycortex-core/references/lazy-core.parallel-scan.md`. The main session synthesizes them. For small commit lists, do the analysis inline.
+Each agent returns a structured summary of findings with commit hashes per the parallel-scan coordinator pattern in `lazycortex-core`'s `references/lazy-core.parallel-scan.md`. The main session synthesizes them. For small commit lists, do the analysis inline.
 
 ## Step 3 — Analyze each commit
 
@@ -187,7 +187,7 @@ For each asset (freshly scaffolded or pre-existing), inspect whether the code th
 Skill(skill: "lazycortex-specs:lazy-spec.flip-gate", args: "<asset-dir> spec_develop_done")
 ```
 
-`spec_plan_done` itself is satisfied either by an approved/cancelled `code-plan.md` or by that file's absence (it is opt-in — see `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`); this skill never authors a `code-plan.md` to force it. Never propose `spec_tests_passing` or `spec_released` here — `spec_tests_passing` needs a green test report (and, when a `test-plan.md` exists, its approval — only `approved` waives, unlike `code-plan.md`'s `approved`-or-`cancelled`) and `spec_released` is owned by `/lazy-spec.finalize-branch`. The flip's audit trail lives in the status folder-note's `# History` section (written by `lazy-spec.flip-gate` itself) and in this skill's run log.
+`spec_plan_done` itself is satisfied either by an approved/cancelled `code-plan.md` or by that file's absence (it is opt-in — see `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`); this skill never authors a `code-plan.md` to force it. Never propose `spec_tests_passing` or `spec_released` here — `spec_tests_passing` needs a green test report (and, when a `test-plan.md` exists, its approval — only `approved` waives, unlike `code-plan.md`'s `approved`-or-`cancelled`) and `spec_released` is owned by `/lazy-spec.rebase-pins`. The flip's audit trail lives in the status folder-note's `# History` section (written by `lazy-spec.flip-gate` itself) and in this skill's run log.
 
 **Per-file stage correction**
 

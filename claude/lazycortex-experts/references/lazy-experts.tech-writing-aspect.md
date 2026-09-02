@@ -35,9 +35,18 @@ These never appear in a technical document, whatever the section:
 - **Emotional intensifiers.** "Critically", "dramatically", "massively" — replace with the number or drop.
 - **Filler that carries no checkable content.** A sentence that survives deletion without losing a fact or an obligation was filler.
 - **Jargon and shop talk.** "Wire it up", "dip into the config", "kick off the job", "just pass the flag" — colloquial verbs read differently to every reader and translate badly. Name the operation: the routine registers the entry, the skill reads the settings key, the dispatcher queues the job.
+- **Invented terminology.** A noun phrase coined for this document as if it were an established term — a name-shaped label the reader cannot look up anywhere. A concept that genuinely needs a name goes into the repository's terms dictionary and is introduced per Terminology discipline; everything else is described in plain words, even when the plain description is longer. The test: would a reader searching the repository for this phrase find a definition? No definition anywhere — no coined phrase in the document.
 - **Informal register.** No second-person address to the reader, no rhetorical questions, no exclamation marks, no asides in parentheses that comment on the document instead of stating something about the subject. A document is read by someone who was not in the conversation that produced it.
 - **Invented abbreviations.** `cfg`, `impl`, `req`, `fn`, `svc` save nothing and cost the reader a decoding step. Write the word. Established domain acronyms the upstream document already uses (`API`, `HTTP`, `JSON`) stay as they are; any other short form is introduced once with its expansion before first use, or not used.
 - **Synonym rotation for established terms.** See Terminology discipline.
+- **Connective padding.** Announcing what a sentence is about to say, restating what a neighboring sentence already said, naming the document's own kind in its prose ("The feature is…", "This design describes…") — the section heading and the frontmatter already say what the document is; open with the subject itself.
+- **Prose-text links.** A link's display text is the target's own name, verbatim and untranslated (`[[…/vision|vision]]`, `[[…/decisions#D-007 — thesis|D-007]]`) — never an inflected word, a translated word, or a sentence fragment. A sentence that needs the link woven into its grammar names the target and lets the name carry the link.
+
+## Structure discipline
+
+- **A bullet carries one claim, one to three lines.** Everything beyond the claim — rationale, consequences, edge behavior — is not bullet material: it becomes prose paragraphs, under a `###` subsection when the cluster has a name.
+- **A section longer than a screen splits into `###` subsections.** A flat list of ten or more bullets in one section is a structure defect regardless of each bullet's own quality; group by concern and name the groups.
+- **A paragraph carries one thought.** Every sentence in it works for that thought; a sentence that does not connect to its neighbors moves to where it belongs or gets deleted.
 
 ## Terminology discipline
 
@@ -74,3 +83,6 @@ Red flags in your own output: a sentence with no verifiable fact and no obligati
 - Name every operation with the verb that describes it; never with shop talk ("wire up", "kick off", "dip into").
 - Keep the register formal: no address to the reader, no rhetorical questions, no exclamation marks, no asides about the document itself.
 - Spell words out; use only the domain acronyms the upstream document established, and expand any other short form once before first use.
+- Keep a bullet to one claim in one to three lines; move rationale into prose under `###` subsections, and split any section longer than a screen.
+- Keep a paragraph to one thought; relocate or delete a sentence that does not work for it.
+- Give every link the target's own name as display text, verbatim and untranslated; never an inflected or translated word, never a sentence fragment.

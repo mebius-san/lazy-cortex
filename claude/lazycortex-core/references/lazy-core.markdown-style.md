@@ -189,6 +189,12 @@ A decision that supersedes an earlier one adds a `**Supersedes.**` line naming t
 
 The tag makes the block consumer-owned scaffolding: per the edit-annotation rules above, a tagged callout is never wrapped in marker syntax, and is retired by plain deletion, never rewritten in place.
 
+**The `Why` / `Rejected` pair lives ONLY in a decision record** — a `[!decision]` callout or a `decisions.md` entry. A "Rejected …" tail inline in design prose is a style violation: the prose bullet carries the principle alone, and the rejected alternative, when worth keeping, goes into a decision record beside it. Prose that narrates what was considered and turned down without a record is deleted, not preserved.
+
+**Placement: the callout stands immediately after its owner.** A `[!decision]` — and a `[!decision-candidate]` alike — lands directly under the bullet or paragraph whose call it records, never batched at the end of a section and never orphaned between chapters. The owner is whatever prose states the decided principle; the callout is that prose's footnote, not a sibling chapter.
+
+**Reference forms after promote.** When approval promotes a block into `decisions.md`, the promote primitive replaces the callout in place with a self-describing reference line — the record link followed by the thesis, `[[<path>/decisions#D-NNN — thesis|D-NNN]] — thesis.` — because deterministic code cannot judge which prose owns the decision. That line is mechanical output awaiting weaving: on the document's next writer round, the writer folds it into the owning text as a bare `[[<path>/decisions#D-NNN — thesis|D-NNN]]` reference at the end of the owning bullet or paragraph and drops the duplicated visible thesis — the owner's own words already state the decision. Weaving leftover reference lines into their owners is part of the writer's ordinary round obligation, exactly like folding an answered question; with the placement discipline above, the mechanical line already sits beside its owner and the fold is a one-line move.
+
 ### The `[!asset-proposal]` callout
 
 The single mechanism for proposing a new asset. Any expert may drop one in any document it owns — an architect proposing a child feature in `architecture.md`, a tester proposing a bug in `test-report.md`, a designer proposing a follow-on feature in `design.md`. No expert ever creates an asset directly (`lazy-spec.expert-signals-protocol.md` § Hard prohibitions).
@@ -250,6 +256,8 @@ Marks a call the expert made that its job was never told to make ("used X instea
 > - [ ] accept
 > - [ ] reject — I will decide otherwise (my decision in prose below)
 ```
+
+A candidate obeys the same placement discipline as a `[!decision]` (§ Decision statement shape): it stands immediately after the bullet or paragraph whose call it records, never batched at a section's end.
 
 ## Checkbox rows are operator-facing only
 
@@ -319,6 +327,8 @@ Markers apply to **mutations of existing body prose** only. Plain unmarked repla
 When a consumer dispatches an expert under one of these styles, the expert reads its `edit_marker_style` from `request.json` and locates the matching block above (the `simple` / `diff` / `criticmarkup` / `html` description). This file is the single source of truth for marker shape — no per-request template duplicates it. The expert MUST follow the rules of the named block verbatim.
 
 **No reflow-only markers.** Whitespace-only changes (unwrapping a hard-wrapped paragraph, collapsing blank lines, fixing trailing space) do not earn a marker — they are not a content mutation. Emit the paragraph in its target form raw, without a `` ```diff `` fence or any inline marker. Consumers also defensively strip whitespace-only diff fences before reassembly, so a stray fence is dropped silently — but the rule is "do not emit it in the first place". Touching only the prose you actually mean to change is the discipline; if a paragraph reads correctly as-is, leave its line wrapping alone.
+
+**Template section comments are documentation, not text.** A shipped document template explains each section with an HTML comment (`<!-- … -->`) directly under its heading. Those comments are never rendered as text, never rewritten, and never deleted — a writer composes the section's content on the lines below the comment and leaves it standing; a section holding only its comment reads as empty.
 
 **Tagged callouts are never wrapped in markers.** A callout carrying a tag in any `#<namespace>/<x>` form (`#review/<x>`, `#spec/<x>`, any future consumer's namespace) is consumer-owned scaffolding — the tag itself is the signal "this block is not yours to mark up". Regardless of what edit happens to it (insertion, retention, retirement) and regardless of the configured `edit_marker_style`, a tagged callout is never wrapped in a `` ```diff `` fence, never carries inline `~~del~~` / `{--del--}` / `<del>` markup, never gets any other edit-annotation applied to its block.
 

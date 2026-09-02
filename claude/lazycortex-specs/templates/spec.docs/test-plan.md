@@ -15,19 +15,19 @@ spec_source_docs: []
 # {{slug}} — test-plan
 
 ## Scope
-_What is under test, and what is deliberately left out of this run._
+<!-- What is under test, and what is deliberately left out of this run. -->
 
 ## Mechanisms
-_The testing mechanisms this repository actually ships — runners, fixtures, harnesses, CI targets — verified present before the tests below were written._
+<!-- The testing mechanisms this repository actually ships — runners, fixtures, harnesses, CI targets — verified present before the tests below were written. -->
 
 ## Preconditions
-_Environment, data, and state every test below assumes, and how to restore it afterwards. A test that needs something different says so in its own block._
+<!-- Environment, data, and state every test below assumes, and how to restore it afterwards. A test that needs something different says so in its own block. -->
 
 ## Exit criteria
-_When the run counts as finished: which priorities must have been executed, what may still be open, what blocks the verdict._
+<!-- When the run counts as finished: which priorities must have been executed, what may still be open, what blocks the verdict. -->
 
 ## Tests
-_One `###` block per test, executable by someone who did not write it. Three forms below — keep the ones that fit, delete the rest. One procedure with one outcome takes the first form. The same procedure over different inputs takes the second: the steps are written once and each input is a line under `Cases`. A set of independent checks sharing only their area and type takes the third. A check that needs steps of its own is a block of its own._
+<!-- One `###` block per test, executable by someone who did not write it. Three forms below — keep the ones that fit, delete the rest. One procedure with one outcome takes the first form. The same procedure over different inputs takes the second: the steps are written once and each input is a line under `Cases`. A set of independent checks sharing only their area and type takes the third. A check that needs steps of its own is a block of its own. -->
 
 ### _Test name_
 - **Type**: _one of the tester's test types._
@@ -42,7 +42,7 @@ _One `###` block per test, executable by someone who did not write it. Three for
 
 #### Expected
 
-_The observable outcome that counts as pass._
+<!-- The observable outcome that counts as pass. -->
 
 ### _Test name — one procedure over many inputs_
 - **Type**: _one of the tester's test types._

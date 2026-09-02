@@ -1,14 +1,13 @@
 ---
 chapter_type: faq
 summary: Common operator questions about installing, running, and maintaining the lazycortex-observe metrics shipper.
-last_regen: 2026-08-27
+last_regen: 2026-09-02
 no_diagram: true
 source_skills:
   - lazy-observe.install
   - lazy-observe.uninstall
   - lazy-observe.doctor
-  - lazy-observe.audit
-source_sha: 890473ef0218899352d3af6d39a3910845b28731
+source_sha: bf704574aa25dc7697e00bebb805686ae6ca145e
 ---
 # Frequently asked questions
 
@@ -121,12 +120,6 @@ The `/metrics` endpoint is serving data from the lazycortex-core daemon, but no 
 This release also tightens what counts as a finished job: the runtime is fail-closed, so an expert response that's missing `outcome`, carries an unrecognized value, or otherwise doesn't prove the work completed is now counted `failed` rather than `done` in `expert_jobs_total`. Silence from an expert is a failure, not a free pass.
 
 Three alerts in `claude/lazycortex-observe/alerts/lazycortex-runtime.rules.yml` watch this: `LazyCortexExpertJobsFailing` fires when a job on a repo/expert finishes with any outcome other than `done` in the last 15 minutes; `LazyCortexDeadLetterQueueGrowing` fires when bundles sit parked in `failed`, `deferred`, or `dead` state for 30+ minutes; `LazyCortexIncidentsOpening` fires when the error ledger opens a new incident, by kind and cause, in the last 15 minutes. All three annotations point you at `lazycortex-core error-list --repo <repo>` to triage.
-
----
-
-## What does the audit skill check, and when should I run it?
-
-`/lazy-observe.audit` is a read-only consistency check on the plugin's own artifact conventions. It verifies that each skill and agent file carries the required execution-discipline preamble and references the correct log directory. It is primarily useful after a plugin upgrade (a minor-bump re-install) or if you suspect a file was edited manually. For production health questions — is my shipper actually delivering metrics? — use `/lazy-observe.doctor` instead.
 
 ---
 

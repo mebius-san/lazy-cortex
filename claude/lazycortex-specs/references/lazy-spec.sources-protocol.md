@@ -193,7 +193,7 @@ spec_source_branches:
 - **Key present**: source links for that repo use the named branch — `lazy-spec.source-url(<repo-key>, <path>, <kind>, branch=<branch-name>)`.
 - Dict shape — one spec can pin different branches per repo.
 
-**Which files may carry pins**: only files whose role permits source URLs and may pin — `code-plan` / `test-plan` files and the product-level `tech.md`. A `spec_source_branches` key on any other file is a bug; `lazy-spec.finalize-branch` and `lazy-spec.doctor` treat it as a violation.
+**Which files may carry pins**: only files whose role permits source URLs and may pin — `code-plan` / `test-plan` files and the product-level `tech.md`. A `spec_source_branches` key on any other file is a bug; `lazy-spec.rebase-pins` and `lazy-spec.doctor` treat it as a violation.
 
 **When to pin**: content-generating skills auto-pin a file they are creating IF (a) the source repo is currently checked out on a non-default branch AND (b) the generated file body will contain at least one forge URL for that repo. Files with no source URLs get no pin.
 
@@ -201,7 +201,7 @@ spec_source_branches:
 
 ### Pin Reconciliation
 
-Shared primitive invoked by `lazy-spec.sync-with-code`, `lazy-spec.create-from-code` (regeneration path), `lazy-spec.doctor` (dry-run), and `lazy-spec.finalize-branch`.
+Shared primitive invoked by `lazy-spec.sync-with-code`, `lazy-spec.create-from-code` (regeneration path), `lazy-spec.doctor` (dry-run), and `lazy-spec.rebase-pins`.
 
 **Inputs**: a spec file with a `spec_source_branches` dict.
 
@@ -220,7 +220,7 @@ Shared primitive invoked by `lazy-spec.sync-with-code`, `lazy-spec.create-from-c
 - Idempotent — a second run finds no matching pins.
 - Never rewrites an unmerged pin, even when a skill is explicitly asked about that branch.
 - Deleted = merged (agreed project policy).
-- Squash-merges aren't detected by ancestor check; they're picked up once the branch is deleted, or can be forced via `lazy-spec.finalize-branch --force-merged`.
+- Squash-merges aren't detected by ancestor check; they're picked up once the branch is deleted, or can be forced via `lazy-spec.rebase-pins --force-merged`.
 
 ## Part 3 — Dependencies & prerequisites
 

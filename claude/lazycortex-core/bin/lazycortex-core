@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols, detect-scope, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard")
+         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard")
 
 
 def _cmd_consume_job(argv: list[str]) -> int:
@@ -521,6 +521,47 @@ def _cmd_detect_scope(argv: list[str]) -> int:
     return 0
 
 
+def _cmd_daemon_pause(argv: list[str]) -> int:
+    """Create the local pause semaphore so the daemon skips work until resumed.
+
+    Touches ``.runtime/daemon.pause`` under the repo root (git toplevel of the
+    cwd, or the cwd itself outside a checkout) and prints
+    ``{"paused": true, "semaphore": "<path>"}``. Idempotent: an already-present
+    semaphore is left in place. Purely local — no settings edit, no commit; the
+    daemon keeps serving metrics and reports itself paused.
+    """
+    import argparse, json, subprocess
+    from constants import RuntimeFile
+    p = argparse.ArgumentParser(prog="lazycortex-core daemon-pause")
+    p.parse_args(argv)
+    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                              capture_output=True, text=True).stdout.strip()
+    semaphore = Path(toplevel or os.getcwd()) / RuntimeFile.PAUSE
+    semaphore.parent.mkdir(parents=True, exist_ok=True)
+    semaphore.touch(exist_ok=True)
+    print(json.dumps({"paused": True, "semaphore": str(semaphore)}))
+    return 0
+
+
+def _cmd_daemon_resume(argv: list[str]) -> int:
+    """Remove the local pause semaphore so the daemon resumes on its next wakeup.
+
+    Deletes ``.runtime/daemon.pause`` under the repo root and prints
+    ``{"paused": false, "semaphore": "<path>"}``. Idempotent: an absent
+    semaphore is a no-op.
+    """
+    import argparse, json, subprocess
+    from constants import RuntimeFile
+    p = argparse.ArgumentParser(prog="lazycortex-core daemon-resume")
+    p.parse_args(argv)
+    toplevel = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                              capture_output=True, text=True).stdout.strip()
+    semaphore = Path(toplevel or os.getcwd()) / RuntimeFile.PAUSE
+    semaphore.unlink(missing_ok=True)
+    print(json.dumps({"paused": False, "semaphore": str(semaphore)}))
+    return 0
+
+
 def _cmd_daemon_list(argv: list[str]) -> int:
     """Print every lazycortex runtime daemon installed on this host as JSON.
 
@@ -718,6 +759,10 @@ def main() -> int:
         return cmd_add_protocols(sys.argv[2:])
     elif sub == "detect-scope":
         return _cmd_detect_scope(sys.argv[2:])
+    elif sub == "daemon-pause":
+        return _cmd_daemon_pause(sys.argv[2:])
+    elif sub == "daemon-resume":
+        return _cmd_daemon_resume(sys.argv[2:])
     elif sub == "daemon-list":
         return _cmd_daemon_list(sys.argv[2:])
     elif sub == "metrics-alloc-port":

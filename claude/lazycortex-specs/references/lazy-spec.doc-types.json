@@ -1,5 +1,21 @@
 {
   "doc_types": {
+    "vision": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiTelescope",
+      "color": "#94a3b8",
+      "template": "vision.md"
+    },
+    "system-vision": {
+      "stages": true,
+      "review": true,
+      "append_only": false,
+      "icon": "LiTelescope",
+      "color": "#94a3b8",
+      "template": "system-vision.md"
+    },
     "design": {
       "stages": true,
       "review": true,

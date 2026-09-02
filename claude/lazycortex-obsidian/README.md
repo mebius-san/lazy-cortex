@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fca5a5"
 ---
 # lazycortex-obsidian
 
@@ -71,7 +71,7 @@ Requires these plugins from the same marketplace:
 
 | Skill | Description |
 |---|---|
-| `lazy-obsidian.audit` | Run when the operator asks to audit the lazycortex-obsidian plugin, or when its machinery misbehaves after an update — icons stop being painted, the icon-map is rejected as the wrong schema, or mermaid/ascii fences render unstyled in the vault. Checks the plugin's own shipped artifacts (worker version constants, icon-map template, the Iconize settings block, the render-glue CSS), plus — when the repo carries a vault manifest — how far this vault's live config has drifted from it. Read-first; presents findings, then asks which to fix. |
+| `lazy-obsidian.audit` | Run when the operator asks whether this vault's live Obsidian config still matches its captured manifest — icons or plugin settings changed by hand, a plugin updated past its captured version, or after pulling a checkout onto a new machine. Compares `.obsidian.manifest.json` against the live config directory and reports drift; the fix is the operator's pick between `/lazy-obsidian.capture` and `/lazy-obsidian.deploy`. Read-first; presents findings, then asks which to fix. |
 | `lazy-obsidian.capture` | Run when the operator changed this vault's Obsidian configuration and wants it recorded — new plugin installed, settings tweaked, snippet added, theme or palette changed — or asks to snapshot / capture the vault config. Writes the whole `.obsidian/` surface into the tracked `.obsidian.manifest.json` and commits it, so the config reaches other checkouts as one reviewed file. The sibling `/lazy-obsidian.deploy` rebuilds `.obsidian/` from what this skill wrote. |
 | `lazy-obsidian.deploy` | Run on a checkout whose vault config is missing or stale — a fresh clone of a vault repo, a machine that never opened this vault, a teammate setting up from the repo alone — or when the operator asks to deploy / restore / rebuild the Obsidian config. Rebuilds `.obsidian/` from the tracked `.obsidian.manifest.json`, fetching every plugin bundle at its latest release. The sibling `/lazy-obsidian.capture` is what wrote that manifest. |
 | `lazy-obsidian.diagram-install` | Run when the operator asks to make click-to-zoom work on lazycortex diagrams in Obsidian, or when they report that clicking a mermaid diagram doesn't zoom. Installs the `mermaid-popup` vault plugin. Does NOT install the fit-CSS snippets (mermaid fences overflowing the column, sitting on a white box, or clipped ASCII diagrams) — those are installed and enabled by `/lazy-obsidian.install`'s shared snippet step; run that instead for those symptoms. Project scope only, idempotent, and chained from `/lazy-obsidian.install`. |

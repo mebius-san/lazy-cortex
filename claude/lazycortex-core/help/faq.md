@@ -1,31 +1,44 @@
 ---
 chapter_type: faq
-summary: Non-obvious answers on install/setup, audit/doctor/optimize, expert runtime (incl. the daemon's own OAuth token, manual ticks, and new daemon authoring), memory, routines, git staging (incl. the clean-index precondition, the sync-displaced-index self-heal, and local-vs-remote sync halts), MCP permissions, and change-history search.
-last_regen: 2026-08-30
+summary: Non-obvious answers on install, the runtime daemon and experts, memory, routines, scaffolding, git staging, MCP permissions, and log search.
+last_regen: 2026-09-02
 no_diagram: true
 source_skills:
   - lazy-core.install
   - lazy-core.setup
   - lazy-core.audit
   - lazy-core.doctor
-  - lazy-core.optimize
+  - lazy-core.slim-context
+  - lazy-core.agent-models
+  - lazy-core.agent-models-seed
+  - lazy-core.daemon-authoring
+  - lazy-core.git-status
+  - lazy-core.git-unlock
+  - lazy-core.iterate
+  - lazy-core.scaffold-local
+  - lazy-core.scaffold-sync
   - lazy-repo.mark-public
   - lazy-guard.check-public
   - lazy-guard.allow-mcp
   - lazy-routine.register
+  - lazy-routine.unregister
+  - lazy-routine.offer-protocols
   - lazy-runtime.recover
+  - lazy-runtime.preflight
   - lazy-runtime.tick
-  - lazy-core.daemon-authoring
   - lazy-expert.dispatch-job
   - lazy-expert.collect-job
-  - lazy-memory.mark-persona
+  - lazy-expert.cancel-job
+  - lazy-expert.list-jobs
+  - lazy-memory.write
+  - lazy-memory.index
   - lazy-memory.reflect
-  - lazy-core.agent-models
-  - lazy-core.git-status
+  - lazy-memory.mark-persona
+  - lazy-log.clean
   - lazy-log.recall
   - lazy-log.summary
   - lazy-log.timeline
-source_sha: 4b059db3faee4129ac2de3faa7376ba7212ee3b6
+source_sha: 08eabbb6b10b346b58200e8fafd7061b9f10c24c
 ---
 # FAQ
 
@@ -63,15 +76,15 @@ A **patch bump** (e.g. `1.0.0` → `1.0.1`) is safe to drop in with no action �
 
 ---
 
-## What's the difference between `/lazy-core.audit`, `/lazy-core.doctor`, and `/lazy-core.optimize`?
+## What's the difference between `/lazy-core.audit`, `/lazy-core.doctor`, and `/lazy-core.slim-context`?
 
 `/lazy-core.audit` is a read-only startup-context and compliance scan: it shows what actually loads into context (rule sizes, loading behavior), checks skill/agent/rule authoring compliance (Execution-Discipline preamble, no-Optional headings, narrative padding, and — for skills, agents, and commands alike — whether each `description:` states an invocation trigger rather than just a mechanism), checks help-doc coverage and staleness against each plugin's README scenarios, and reports the expert-runtime config across fourteen sub-checks. It makes no changes.
 
 `/lazy-core.doctor` is the broader health check: it verifies consistency across rules, agents, skills, commands, settings, memory, hooks, and CLAUDE.md files, confirms every installed plugin is at the latest marketplace version, and delegates to sibling audit skills — `lazy-guard.check-public`, plus each installed plugin's own audit skill when it ships one, including `lazycortex-obsidian` and `lazycortex-python` — when they apply. Unlike audit, it offers targeted fixes you can accept interactively, plus a per-warning waive loop.
 
-`/lazy-core.optimize` is action-oriented: it slims oversized rule files (moving reference material into agent definitions) and audits global `settings.json` for project-specific entries that should move to local settings. Run it when startup feels slow or after adding new rules/agents — audit and doctor tell you something is off, optimize is one of the skills that fixes it.
+`/lazy-core.slim-context` is action-oriented: it slims oversized rule files (moving reference material into agent definitions) and audits global `settings.json` for project-specific entries that should move to local settings. Run it when startup feels slow or after adding new rules/agents — audit and doctor tell you something is off, optimize is one of the skills that fixes it.
 
-Run `/lazy-core.audit` for a quick read on context footprint, `/lazy-core.doctor` when something in the config feels broken and you want fixes offered, and `/lazy-core.optimize` specifically to shrink startup context.
+Run `/lazy-core.audit` for a quick read on context footprint, `/lazy-core.doctor` when something in the config feels broken and you want fixes offered, and `/lazy-core.slim-context` specifically to shrink startup context.
 
 ---
 
@@ -181,6 +194,12 @@ Run `/lazy-expert.list-jobs` to see every job in the queue, optionally filtered 
 
 ---
 
+## I dispatched a job to the wrong expert (or the requirements changed) — how do I stop it?
+
+Run `/lazy-expert.cancel-job <expert> <job_id>`. If the job is still running, it sends SIGTERM (then SIGKILL after a grace period) to the executor's process group and marks the bundle `CANCELLED`; if it's already `done`, you're asked whether to mark it cancelled anyway. Either way nothing on disk is deleted — the job directory (request, response, transcript, result) stays for forensics and ages out through the normal failed-job cleanup window. Cancelling also releases the job's dedup key, so a fresh dispatch with the same key creates a brand-new job rather than getting silently deduplicated against the cancelled one. A job that's already cancelled, or one whose directory no longer exists, is reported as such with no further action taken.
+
+---
+
 ## Can my experts use MCP servers?
 
 Yes, but every expert spawn is hermetic by default. When the daemon or `/lazy-expert.dispatch-job` launches an expert, the underlying `claude -p` spawn always runs with `--strict-mcp-config`, which means it never inherits your ambient MCP servers from `~/.claude.json` or the project's `.mcp.json` — even servers you already approved interactively. This is deliberate: a headless spawn has no TTY, so an MCP server that expects interactive auth at startup would hang until the job times out.
@@ -213,6 +232,14 @@ The daemon halts in three distinct situations. A **working-tree halt** (`uncommi
 Run `/lazy-runtime.recover` to unblock it. For working-tree halts the skill walks you through four options: commit the dirty files (you supply the message), stash them, discard them, or abort and leave the halt in place. For remote- and local-sync halts the skill surfaces reason-specific guidance (the exact git commands to inspect and fix the divergence, push failure, or local git problem) and waits for you to confirm you have resolved the situation before clearing the halt block. Once the halt block is cleared from `.runtime/state.json`, the daemon resumes on its next iteration.
 
 If the cleanup does not produce a clean tree, the skill reports "working tree still dirty; refusing to resume" and leaves the halt intact — inspect with `git status` and re-run the skill.
+
+---
+
+## An expert I wired into a routine keeps timing out or never responds — how do I find out why before it burns another wall-timeout?
+
+Run `/lazy-runtime.preflight [<expert-name>]` before wiring a new expert or MCP server into a live routine, or as soon as one starts behaving this way. It validates every routine-attached expert without doing any real work: static checks first (unresolvable agent, missing aspect or protocol, a bad `mcp_config` path), then — unless you pass `--no-probe` for a faster structural-only sweep — an actual headless launch with a trivial prompt, using the same command line the pump itself would use, so a hanging MCP server or an auth prompt that would otherwise eat the routine's timeout shows up here in seconds instead.
+
+The report leads with checkout-level findings that apply to every expert — most importantly a shared inbox another daemon on the same host is already draining, which the skill can't auto-fix (you decide which project keeps that `daemon.run_here` entry), and a sandbox allowlist that doesn't cover a symlinked path, which it can. Per expert it then renders a verdict, static issues, and each MCP server's status (connected / timed-out / auth-required / spawn-failed / pending-approval). For anything it can fix — dropping a broken MCP server from an expert's config, repairing a sandbox path, correcting a bad `mcp_config` path — it asks you one `AskUserQuestion` at a time before applying anything; a server that needs interactive login gets you the exact `claude mcp login` command to run by hand instead, since a headless daemon spawn has no TTY to authenticate through.
 
 ---
 
@@ -258,6 +285,22 @@ All five require a dot-namespaced `name` (e.g. `acme-lint.tick`). The wizard in 
 
 ---
 
+## How do I stop a routine, and can I just re-register it with different settings?
+
+Run `/lazy-routine.unregister <name>` to remove it from the flat `routines` section for good — it's idempotent, so unregistering a name that isn't registered is a harmless no-op reported `already-absent`, not an error. You can't just re-run `/lazy-routine.register` with a new shape over an existing name: register refuses to overwrite an existing entry unless you pass `--force`. Unregister first, then register the new shape.
+
+The one name it won't remove without a fight is the built-in `lazy-expert.pump` — the routine that drains the expert job queue. Unregistering it aborts unless you pass `--force`, and even then the skill prints a warning that expert jobs stop processing until you re-register the routine or re-run `/lazy-core.install`.
+
+---
+
+## What are "optional protocols" on a routine, and how do I attach one?
+
+A routine that dispatches expert jobs (any type carrying an `expert` + `request` pair) can carry a `protocols` list — reference documents its writers may consult. The routine's own install or configure step already seeds whatever protocols are mandatory for it; those are fixed by design and never touched again. `/lazy-routine.offer-protocols --routine <name> --context "<one line describing what the writers produce>"` is how you attach anything beyond that: it discovers every reference file flagged as a protocol candidate across your installed plugins, judges each one against your one-line context, and only asks about the ones that are actually relevant — you never see the whole candidate pool. Pick zero or more via a multi-select prompt; the chosen ones are unioned into the routine's existing `protocols` list, idempotently.
+
+This is an operator-invoked skill only — no install or configure flow dispatches it, since a system routine's protocol set is fixed by design. If it reports `no-relevant-candidates`, nothing in the discovered pool matched your stated context; if it reports `routine-absent`, the named routine isn't currently registered.
+
+---
+
 ## What happens if I register a routine whose `inbox_dir` is not gitignored?
 
 `/lazy-routine.register` checks this for `inbox`-type routines using `git check-ignore`. If the directory is tracked rather than gitignored, the skill warns you: an inbox routine moves files between iterations, which dirties the working tree and triggers the daemon's halt protection on every cycle. You get three options — add the directory to `.gitignore` now (recommended), continue anyway and commit moves manually, or abort the registration. If you choose to add it, the skill appends the entry to `.gitignore` but does not auto-commit; you commit when you are ready to coordinate with other in-flight changes.
@@ -281,6 +324,12 @@ Memory notes are markdown files with frontmatter (`title`, `tags`, `type`, `summ
 `/lazy-memory.write` is the atomic per-note writer — it's how an expert commits a single new memory note to `.memory/<expert>/` during or after a job. `/lazy-memory.reflect <expert>` is a consolidation pass: it dispatches a `kind=reflect` job that hands the expert its own recent run logs (default: last 30 days) plus its current memory notes, and asks it to distill patterns worth retaining — calling `/lazy-memory.write` itself if it finds anything, or returning `outcome=empty` if there is nothing new to consolidate. Both require the expert to be persona-marked first (`/lazy-memory.mark-persona`); `reflect` refuses non-persona-marked experts outright.
 
 Run `reflect` periodically (or via the daemon's `memory-reflect-all` routine, if you enable it) rather than expecting memory to accumulate automatically — dispatching jobs alone only produces run logs, and reflect is what turns those logs into durable notes.
+
+---
+
+## A memory note's topic doesn't show up under `.tags/`, or a global tag file points at a note that's gone — how do I fix that?
+
+Run `/lazy-memory.index`. It's a recovery tool, not something you need on a normal write — `/lazy-memory.write` keeps `.tags/` in sync itself every time it lands a note. Reach for `/lazy-memory.index` specifically when notes were hand-edited or moved outside that skill, when `/lazy-core.audit` reports a note carrying a `memory/<topic>` tag that its tag file doesn't list, or when a global tag file references a local one that no longer exists. It walks every expert under `.memory/`, recomputes each one's topic set straight from note frontmatter, and regenerates the whole local-plus-global `.tags/` tree — stale tag files with no backing note are removed. `/lazy-core.slim-context` also offers to run it as part of its own pass. If `.memory/` doesn't exist yet, run `/lazy-core.install` first to bootstrap it.
 
 ---
 
@@ -318,6 +367,20 @@ Note that `/lazy-core.audit` uses a lower floor of Python 3.12 for its own runti
 
 ---
 
+## Does `/lazy-core.install` write my agent-model tiers and templates for me, or do I have to run something separately?
+
+Both happen automatically as part of install, through two skills you never invoke directly. `lazy-core.agent-models-seed` is dispatched by every plugin's own install skill to seed that plugin's curated model tiers (haiku/sonnet/opus) into `agent_models.lazycortex` in `lazy.settings.json`, reading the tier values from `lazycortex-core`'s own `default-tiers.json`. It never overwrites a tier you already set by hand — an existing value is left alone and reported `kept-local`. `lazy-core.scaffold-sync` is dispatched the same way to copy a plugin's authoring templates into your `.claude/templates/<group>/` directories and register their path globs in `lazy-core.scaffold.md`, overwriting a stale copy of a plugin-owned template on every re-run (a template you want to customize belongs in a `_local` entry instead — see the next question — not a hand-edited copy of the plugin's own file).
+
+Both are idempotent and silent when there is nothing new to seed. If either fails because `lazycortex-core` itself is not installed or its `default-tiers.json`/CLI is missing, the reporting install skill surfaces that as a step failure rather than continuing silently.
+
+---
+
+## How do I add a template for my own repo-specific file type?
+
+Run `/lazy-core.scaffold-local` rather than hand-editing the registry in `.claude/rules/lazy-core.scaffold.md` — that file's plugin-owned entries are `lazy-core.scaffold-sync`'s territory (see the previous question), and the reserved `_local` key is where repo-specific entries live instead. The wizard asks for a `group` (the subdirectory under `.claude/templates/`), a `kind` (the template name), and — for `mode=add` — a list of glob patterns that should start from this template; it creates the template file at `.claude/templates/<group>/<kind>-template.md` if it doesn't exist yet and upserts the registry entry. `mode=remove` deletes both the entry and its template file after confirming it exists. A `_local` entry wins over a plugin-shipped entry at equal glob specificity, so this is also how you override a plugin's own template for one path pattern.
+
+---
+
 ## Which skills support `--dry-run` and what does it do?
 
 Two skills covered in this block accept `--dry-run`:
@@ -326,6 +389,16 @@ Two skills covered in this block accept `--dry-run`:
 - `/lazy-core.agent-models` — walks the wizard and reports what tier assignments would be written, without touching either `lazy.settings.json` file.
 
 In both cases, `--dry-run` is purely read-only: no files are created or modified, and the skill exits after the preview. It is safe to run at any time and does not require undoing anything afterward.
+
+---
+
+## When should I reach for `/lazy-core.iterate` instead of just fixing things by hand?
+
+`/lazy-core.iterate` is for a bounded do-verify-fix loop: fixing round after round against a single automatic verification (a test suite, an audit, a spec read) until nothing is left to fix, or one of six stop conditions catches a run that would otherwise loop forever. Reach for it when the target is a single file/spec/test-suite/diff, "clean" has a concrete verification you can name up front, and the fixes are the kind you'd do in a loop anyway — not for a one-off fix where you already know the exact change.
+
+Before the loop starts, it locks three things: the **target** (a concrete file, PR, spec, or test-suite — never a vague topic), the **done-state** (what "clean" means — zero issues, no FAIL findings, all tests passing), and the **verification action** (the exact command or read that produces an issue list each cycle). All three are asked via `AskUserQuestion` if not already clear from your request.
+
+The loop then runs verify → decide → fix cycles under six stop conditions, checked in priority order every cycle: a hard cycle cap (default 5), a clean run (success), a severity floor (stop once only minor findings remain), repeat detection (the same issue survives a fix attempt twice in a row — stop and escalate rather than keep guessing), a regression spiral (a cycle makes more new issues than it resolves — stop and suggest a revert), and an optional budget. These caps exist so the skill cannot run away chasing a target that isn't converging; it reports what was fixed, what remains, and which condition stopped it.
 
 ---
 
@@ -364,6 +437,12 @@ Because the heal runs automatically on this cadence, you should rarely see the p
 The staging-window mutex is the previous default and is now dormant on a fresh install — it only takes over when you flip `lazy.settings.json["git"]["pathspec_enabled"]` to `false` and `["mutex_enabled"]` to `true`. In that mode, multiple Claude Code sessions sharing one checkout serialize the staging window — from the first `git add` that makes the index non-empty to the `git commit` that empties it again — so only one session stages at a time, with the same auto-break heuristics as before (holder process dead, on a different host, or idle for a while).
 
 `/lazy-core.git-status` and `/lazy-core.git-unlock` only have something to act on under mutex mode; on the pathspec-discipline default no session ever opens a staging window, so there is nothing to inspect or break. Run `/lazy-core.git-status` to check the lock (holder, age, liveness, whether it's currently breakable) without changing anything, and reach for `/lazy-core.git-unlock` — which asks for confirmation before deleting the lock file — only when status shows a lock the automatic heuristics won't break on their own. Setting `lazy.settings.json["git"]["enabled"]` to `false` silences the hook entirely, in either mode.
+
+---
+
+## My `.logs/claude/` directory is cluttered with stray or duplicate-looking folders — how do I clean it up safely?
+
+Run `/lazy-log.clean`. It's read-first: it classifies every folder under `./.logs/claude/` against the live set of skill/agent/command names before touching anything — a folder that's a near-miss of a canonical name (a typo, an old rename) is offered as a merge candidate; folders matching known noise patterns (`task-N`, `subagent-task-N`, `plan-execute`, and similar) are grouped and reviewed together; anything else is reviewed individually. For each group you're asked, one `AskUserQuestion` at a time, to merge into the canonical folder, distill the substantive logs into memory before deleting, delete outright, or leave it alone. Canonical folders themselves are only ever flagged if their newest log is over 30 days old, and even then you choose keep / archive-then-delete / delete — nothing canonical is touched without your say-so. All the mutations you approve are applied in one final pass at the end, after every question has been answered, so a partial run never leaves the directory half-changed.
 
 ---
 

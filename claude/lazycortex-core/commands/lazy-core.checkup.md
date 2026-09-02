@@ -5,7 +5,7 @@ description: "Run when the operator asks for one pass over everything — 'check
 
 Single entry point that runs every read-only health check this plugin orchestrates against consumer config, merges all findings into one per-plugin table, then prompts the user once for which mutating fix-flow(s) to run.
 
-This is pure orchestration — it does **not** re-implement scan logic. It calls existing skills via the `Skill` tool, captures their merged-findings blocks, reformats, and asks. Mutating flows (`lazy-core.optimize`, the doctor's interactive fix loop) only run after explicit user choice in Phase 4.
+This is pure orchestration — it does **not** re-implement scan logic. It calls existing skills via the `Skill` tool, captures their merged-findings blocks, reformats, and asks. Mutating flows (`lazy-core.slim-context`, the doctor's interactive fix loop) only run after explicit user choice in Phase 4.
 
 ## Execution discipline (MANDATORY — read before any action)
 
@@ -63,7 +63,7 @@ Outcome word: `presented`.
 
 Call `AskUserQuestion` with `multiSelect: true`, header `Fix-flows`, and these options:
 
-1. `Run lazy-core.optimize` — consumer-config rewrites
+1. `Run lazy-core.slim-context` — consumer-config rewrites
 2. `Run lazy-core.doctor fix loop` — interactive per-finding fix/waive over consumer config
 3. `Nothing — done`
 
@@ -81,7 +81,7 @@ Example shape:
 - Phase 1 — Read-only audit pass: audited (2 skills)
 - Phase 2 — Build unified table: built (5 sections, 23 findings)
 - Phase 3 — Present table: presented
-- Phase 4 — Prompt next action: dispatched (lazy-core.optimize)
+- Phase 4 — Prompt next action: dispatched (lazy-core.slim-context)
 - Report: reported
 - Log the run: logged (./.logs/claude/lazy-core.checkup/2026-04-26_HH-MM-SS.md)
 ```

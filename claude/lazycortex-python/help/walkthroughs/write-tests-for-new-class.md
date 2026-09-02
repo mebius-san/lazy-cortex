@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Dispatch lazy-python.test-writer against a new class and get a test file that covers all seven Paranoid-Testing categories, verified by tst-py.
-last_regen: 2026-08-27
+last_regen: 2026-09-02
 diagram_spec:
   anchor: "How test-writer walks a class"
   request: "Sequence diagram showing: user invokes lazy-python.test-writer for a target class; agent reads plugin canon (testing-guidelines + checking-guidelines) then project overlay (testing_guidelines.md, checking_guidelines.md, CLAUDE.md ## Testing section); agent identifies test targets (init paths, public methods, properties, documented guarantees, exceptions, operator overloads); agent writes test file covering all 7 Paranoid-Testing categories; agent runs chk-py per file then chk-py all then tst-py on the module; agent logs the run. Show the guideline read order (canon first, overlay second, CLAUDE.md ## Testing third) and the three-step toolchain verification."
@@ -9,7 +9,7 @@ source_skills:
   - lazy-python.test-writer
   - lazy-python.testing-guidelines
   - tst
-source_sha: ddad7a80d6b7298e516d24c5a4cbea11884fbeb8
+source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
 ---
 # Generate tests that cover all seven Paranoid-Testing categories for a new class
 
@@ -162,7 +162,7 @@ The agent re-reads the guidelines on every dispatch. It will add new test method
 
 The test file lives at the mirrored path and is a stable contract. The `lazy-python.tests.md` rule (auto-loaded on any `tests/**/*.py` edit) reminds Claude to use `lazy-python.test-writer` whenever future edits to the test file are needed — Claude does not hand-edit test files when the agent is available.
 
-Run `/lazy-python.audit` at any time to confirm the full installation is intact. Check 10 (`overlay-present`) tells you whether the testing overlay exists; the audit does not validate overlay content.
+Run `/lazy-python.audit` at any time to confirm the full installation is intact. Check 7 (`Overlay scaffolding headers`) tells you whether `testing_guidelines.md` and its three sibling overlay files still open with the canonical header; the audit does not validate overlay content beyond that.
 
 If a future dispatch produces tests that contradict your project's conventions, the fix is a more explicit rule in `docs/guidelines/testing_guidelines.md`, not a hand-edit to the test file. The overlay is re-read on every dispatch; updating it takes effect immediately.
 

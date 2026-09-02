@@ -161,13 +161,13 @@ Otherwise `AskUserQuestion` — single question, three options:
 - **Basic auth** — username collected here; password sourced same way as bearer.
 - **None** — no auth (e.g. mTLS-fronted observer or in-VPC plain HTTP).
 
-If bearer or basic, ask a follow-up `AskUserQuestion` for token-source: `env` (operator handles export themselves) or `file` (we write it 0600). On `file`, prompt for the token value once and call `claude/lazycortex-observe/bin/install.write_token_file()`. Never write the token into the answer file.
+If bearer or basic, ask a follow-up `AskUserQuestion` for token-source: `env` (operator handles export themselves) or `file` (we write it 0600). On `file`, prompt for the token value once and call `${CLAUDE_PLUGIN_ROOT}/bin/install.write_token_file()`. Never write the token into the answer file.
 
 Outcome: `bearer-env` / `bearer-file` / `basic-env` / `basic-file` / `none` / `kept-existing`.
 
 ## Step 6 — Persist non-secret answers
 
-Call `claude/lazycortex-observe/bin/install.write_answer_file()` with:
+Call `${CLAUDE_PLUGIN_ROOT}/bin/install.write_answer_file()` with:
 
 - `agent_kind`
 - `remote_write_url`

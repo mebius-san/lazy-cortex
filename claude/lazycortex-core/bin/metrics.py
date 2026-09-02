@@ -462,6 +462,13 @@ def init(repo_label: str, version: str, daemon_name: str) -> None:
     "1 if the daemon has halted on a dirty working tree, 0 otherwise.",
     ("repo", "reason", "triggered_by"),
   )
+  _state[MetricStateKey.DAEMON_PAUSED] = _Gauge(
+    # waiver: external Prometheus metric name, not a domain constant
+    "lazycortex_runtime_daemon_paused",
+    # waiver: external Prometheus HELP text, not a domain constant
+    "1 while the operator's local pause semaphore is present, 0 otherwise.",
+    ("repo",),
+  )
   _state[MetricStateKey.BUILD_INFO] = _Gauge(
     # waiver: external Prometheus metric name, not a domain constant
     "lazycortex_runtime_build_info",
@@ -639,6 +646,25 @@ def clear_daemon_halt() -> None:
     _state[MetricStateKey.DAEMON_HALTED].clear()
 
 
+def set_paused_gauge(paused: bool) -> None:
+  """
+  Reflect whether the operator's local pause semaphore is currently present.
+
+  Safe to call on every daemon iteration: the gauge simply tracks the caller's latest
+  semaphore check, so scrapes read 1 for exactly as long as the pause lasts and 0 after
+  it lifts.
+
+  Args:
+    paused: Whether the pause semaphore exists right now.
+  """
+  # guard: metrics are off — recording is a no-op
+  if not is_enabled():
+    return
+  repo = _state[MetricStateKey.REPO]
+  with _state[MetricStateKey.LOCK]:
+    _state[MetricStateKey.DAEMON_PAUSED].set({ MetricLabel.REPO: repo }, 1 if paused else 0)
+
+
 def set_halt_gauge(reason: str | None, triggered_by: str | None) -> None:
   """
   Reconcile the daemon-halted gauge with the caller's view of the on-disk halt state.
@@ -713,7 +739,7 @@ def _registry_for(name: str) -> _Counter | _Gauge | _Histogram | None:
     return None
   for key in (
     "ticks", "runs", "errors", "tokens", "duration", "last_tick",
-    "queue_depth", "up", "daemon_halted", "build_info", "halt_count", "dirty_tree",
+    "queue_depth", "up", "daemon_halted", "daemon_paused", "build_info", "halt_count", "dirty_tree",
     "expert_jobs", "expert_job_duration", "incidents",
   ):
     metric = _state.get(key)
@@ -799,7 +825,7 @@ def render() -> bytes:
     "up", "build_info", "ticks", "runs", "errors", "tokens",
     "duration", "last_tick", "queue_depth",
     "expert_jobs", "expert_job_duration", "incidents",
-    "daemon_halted", "halt_count", "dirty_tree",
+    "daemon_halted", "daemon_paused", "halt_count", "dirty_tree",
   ):
     metric = _state.get(key)
     # guard: metric not yet registered — skip silently

@@ -11,19 +11,19 @@ The plugin manages *structure* and *lifecycle*, not the prose — authoring stay
 
 ## Blocks
 
-- **authoring** — Create and populate spec assets of any category. Members: lazy-spec.create-asset, lazy-spec.create-feature, lazy-spec.create-change, lazy-spec.create-bug, lazy-spec.add-asset-type, lazy-spec.create-from-code, lazy-spec.create-request, lazy-spec.decide.
+- **authoring** — Create and populate spec assets of any category. Members: lazy-spec.create-asset, lazy-spec.create-feature, lazy-spec.create-change, lazy-spec.create-bug, lazy-spec.add-asset-type, lazy-spec.create-from-code, lazy-spec.create-request, lazy-spec.record-decision.
 - **gates** — Drive an asset's readiness gates and per-file stages. Members: lazy-spec.flip-gate, lazy-spec.gate-tick, lazy-spec.set-stage.
-- **code-sync** — Keep specs aligned with the source repo across commits and branch merges. Members: lazy-spec.sync-with-code, lazy-spec.finalize-branch, lazy-spec.coverage.
+- **code-sync** — Keep specs aligned with the source repo across commits and branch merges. Members: lazy-spec.sync-with-code, lazy-spec.rebase-pins, lazy-spec.coverage.
 - **upstream** — Mirror external design sources and route their changes through the request pipeline. Members: lazy-spec.upstream-run.
 - **source-links** — Resolve repos, dependencies, and forge-correct source URLs. Members: lazy-spec.resolve-repo, lazy-spec.resolve-dependency, lazy-spec.source-url.
 - **requests** — Ingest free-form requests and route them into the spec tree. Members: spec.coordinator, lazy-spec.request-classify, lazy-spec.request-find-candidates.
-- **install-and-audit** — Bootstrap, configure a product, and audit a spec in this repo. Members: lazy-spec.install, lazy-spec.product-config, lazy-spec.doctor, lazy-spec.audit, lazy-spec.help.
+- **install-and-audit** — Bootstrap, configure a product, and audit a spec in this repo. Members: lazy-spec.install, lazy-spec.product-config, lazy-spec.doctor, lazy-spec.help.
 - **research** — Bounded lookups over the spec tree for agents and operators, without loading whole documents. Members: lazy-spec.lookup.
 
 ## Walkthroughs
 
 - **new-product-from-code** — Register a product and generate its spec from an existing codebase. Path: lazy-spec.product-config → lazy-spec.create-from-code → lazy-spec.create-feature.
-- **asset-to-release** — Take one asset from creation through its gates to release. Path: lazy-spec.create-asset → lazy-spec.set-stage → lazy-spec.flip-gate → lazy-spec.sync-with-code → lazy-spec.finalize-branch.
+- **asset-to-release** — Take one asset from creation through its gates to release. Path: lazy-spec.create-asset → lazy-spec.set-stage → lazy-spec.flip-gate → lazy-spec.sync-with-code → lazy-spec.rebase-pins.
 
 ## Requirements
 

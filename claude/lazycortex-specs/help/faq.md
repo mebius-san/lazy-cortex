@@ -1,13 +1,12 @@
 ---
 chapter_type: faq
-summary: Answers to common questions about products, assets, gates, requests, decisions, coverage gaps, spec lookups, and the coordinator agent.
-last_regen: 2026-08-30
+summary: Answers to common questions about products, assets, vision/design docs, gates, requests, decisions, coverage gaps, spec lookups, and the coordinator agent.
+last_regen: 2026-09-02
 no_diagram: true
 source_skills:
   - lazy-spec.install
   - lazy-spec.product-config
   - lazy-spec.doctor
-  - lazy-spec.audit
   - lazy-spec.create-asset
   - lazy-spec.create-feature
   - lazy-spec.create-change
@@ -15,25 +14,30 @@ source_skills:
   - lazy-spec.create-from-code
   - lazy-spec.create-request
   - lazy-spec.add-asset-type
-  - lazy-spec.decide
+  - lazy-spec.record-decision
   - lazy-spec.flip-gate
   - lazy-spec.gate-tick
   - lazy-spec.set-stage
   - lazy-spec.sync-with-code
-  - lazy-spec.finalize-branch
+  - lazy-spec.rebase-pins
   - lazy-spec.coverage
   - lazy-spec.upstream-run
   - lazy-spec.resolve-repo
   - lazy-spec.source-url
   - lazy-spec.lookup
   - lazy-spec.coordinator
-source_sha: 46ed185e67eedfab6df059e04364075d51b27c22
+  - lazy-spec.drive
+  - lazy-spec.refresh-sources
+  - lazy-spec.request-classify
+  - lazy-spec.request-find-candidates
+  - lazy-spec.resolve-dependency
+source_sha: 73781d3513221e28253bd78d907cc43ef85a029c
 ---
 # Frequently asked questions
 
 ## Do I need to run anything before registering my first product?
 
-Yes — run `/lazy-spec.install` once per project (or once globally, if you want the plugin available everywhere). It ensures the per-type template-override directories exist, seeds the repo's authoring language (asks only if none is on record), registers the `lazy-spec.gate-tick` and `lazy-spec.coordinator-watch` daemon routines — the pair that clears finished job markers / structurally checks each note and hands operator activity to `spec.coordinator`, which is what actually decides and flips gates — and wires the requests-inbox runtime (open / apply routines, the request-routing expert, and its review class) at project scope. At project scope it also seeds a draft of the **vault spec** — the project-wide `design.md` at the spec content-root — whenever one isn't already there; this file is now mandatory groundwork, not an optional nicety, because `/lazy-spec.product-config` refuses to register your first product while it's absent — the split into products is a consequence of the repo-wide spec. It's idempotent — re-running it is always safe and never overwrites config you've customized since. At the end it offers to chain straight into `/lazy-spec.product-config` so you can register your first product in the same pass, or you can skip and run that separately whenever you're ready.
+Yes — run `/lazy-spec.install` once per project (or once globally, if you want the plugin available everywhere). It ensures the per-type template-override directories exist, seeds the repo's authoring language (asks only if none is on record), registers the `lazy-spec.gate-tick` and `lazy-spec.coordinator-watch` daemon routines — the pair that clears finished job markers / structurally checks each note and hands operator activity to `spec.coordinator`, which is what actually decides and flips gates — and wires the requests-inbox runtime (open / apply routines, the request-routing expert, and its review class) at project scope. At project scope it also seeds a draft of the **vault spec** — the project-wide `vision.md` at the spec content-root, instantiated from the `vault-vision.md` template — whenever neither it nor a pre-existing `design.md` without a vision (the legal pre-vision state, migrated by the operator by hand) is already there; this file is now mandatory groundwork, not an optional nicety, because `/lazy-spec.product-config` refuses to register your first product while both are absent — the split into products is a consequence of the repo-wide spec. It's idempotent — re-running it is always safe and never overwrites config you've customized since. At the end it offers to chain straight into `/lazy-spec.product-config` so you can register your first product in the same pass, or you can skip and run that separately whenever you're ready.
 
 ---
 
@@ -47,7 +51,7 @@ Run `/lazy-spec.product-config` to register a new product. The wizard asks for t
 
 ## Can I generate a product's spec from an existing codebase instead of writing it by hand?
 
-Yes, for a product that is already registered with a source binding. Run `/lazy-spec.create-from-code <product>` — it scans the source in parallel, then writes a behaviour-only product design doc and a code-grounded product tech doc, complete with the primary behavioural and architecture diagrams. It also surfaces feature-candidates it found in the code and, per candidate, asks whether to scaffold a full feature (delegating to `/lazy-spec.create-asset`), record it only as an architectural area inside the tech doc, or skip it.
+Yes, for a product that is already registered with a source binding. Run `/lazy-spec.create-from-code <product>` — it scans the source in parallel, then authors the product's `vision.md` (goals and value, from the code's evidenced outcomes) when one doesn't already exist, followed by a behaviour-only product design doc and a code-grounded product tech doc, complete with the primary behavioural and architecture diagrams. It also surfaces feature-candidates it found in the code and, per candidate, asks whether to scaffold a full feature (delegating to `/lazy-spec.create-asset`, which seeds its own `vision.md` + `design.md`), record it only as an architectural area inside the tech doc, or skip it.
 
 The skill requires the product to already carry a `source` binding — register that first with `/lazy-spec.product-config`. On a design-only product (no source attached) it no-ops rather than guessing at code that isn't wired in.
 
@@ -55,9 +59,11 @@ The skill requires the product to already carry a `source` binding — register 
 
 ## What is `system-design` / `system-tech`, and is there a spec for the whole project, not just one product?
 
-Yes. Every product's own `design.md` + `tech.md` pair — loose at the product root, not inside any asset folder — is typed `system-design` / `system-tech` rather than the asset-level `design` type feature/change/bug docs carry. The same pair can also exist loose at the vault's content-root (the `spec.vault_root` setting, default `specs/`), describing the whole project above every individual product — this is the **vault spec**, and its `design.md` half is no longer optional: `/lazy-spec.install` seeds a draft there automatically (project scope only, from the plugin's own template) whenever one is absent, and `/lazy-spec.product-config` refuses to register a product while it's missing — the split into products is a consequence of the repo-wide spec. `/lazy-spec.doctor` also flags a missing vault spec as `[WARN] vault-spec-missing` on a catalog that predates this contract; re-run `/lazy-spec.install` to seed the draft. The content-root `tech.md` half of the pair stays entirely optional and is never auto-created — write it by hand (copying the plugin's own `system-tech.md` template) whenever the project wants one.
+Yes, at three levels. Every asset type that carries a `vision` contract gets its own `vision.md` — goals, value, one-screen "what this is and for whom" (the asset's goals live ONLY here) — ahead of `design.md`, which opens with a reference back to the sibling vision instead of restating goals. The same vision-then-design pairing repeats one level up, at the product root, and one level further up still, at the vault's content-root (the `spec.vault_root` setting, default `specs/`), describing the whole project above every individual product. This is the **vault spec**, and `vision.md` is now its anchor: `/lazy-spec.install` seeds a draft there automatically (project scope only, from the `vault-vision.md` template) whenever neither it nor a pre-vision `design.md` already exists, and `/lazy-spec.product-config` refuses to register a product while both are absent — the split into products is a consequence of the repo-wide spec. A `design.md` present without a sibling `vision.md` is the legal pre-vision state (a vault migrated before the vision document existed); the plugin never seeds over it, only the operator migrates it by hand. `/lazy-spec.doctor` flags a vault carrying neither file as `[WARN] vault-spec-missing`, and a pre-vision vault as `[INFO] pre-vision vault`; re-run `/lazy-spec.install` to seed the missing draft.
 
-Review-wise, a `system-designer` expert writes the design half (the `system-design` class — covers both the product-root and the content-root copy) and the `architect` expert writes the tech half (the `system-tech` class), distinct from the asset-level `designer` (writes a feature/change/bug's own `design.md`) and from `architect`'s other job of writing opt-in `architecture.md` code-structure docs. These are two of the nine roles `/lazy-spec.product-config` Step 8 asks for. `/lazy-spec.create-from-code <product>` still scaffolds the product-level pair for a code-bound product (see above) — the content-root, project-wide `design.md` gets its draft from `/lazy-spec.install` instead, and `tech.md` at that level still has no dedicated creation skill.
+Every product's own `design.md` + `tech.md` pair — loose at the product root, not inside any asset folder — is typed `system-design` / `system-tech` rather than the asset-level `design` type feature/change/bug docs carry; the same three-doc set (`vision.md`, `design.md`, `tech.md`) can also exist loose at the content-root, typed `system-vision` / `system-design` / `system-tech` exactly like the product-root copy. The content-root `tech.md` half stays entirely optional and is never auto-created — write it by hand (copying the plugin's own `system-tech.md` template) whenever the project wants one.
+
+Review-wise, a `system-designer` expert writes both the `system-vision` and `system-design` classes (each covering the product-root and content-root copy), and an `architect` expert writes the `system-tech` class, distinct from the asset-level `designer` (writes a feature/change/bug's own `vision.md` and `design.md`) and from `architect`'s other job of writing opt-in `architecture.md` code-structure docs. `system-vision` (like the asset-level `vision` class) carries no validators — the writer and the operator close the loop — while `system-design` keeps an `architect_review` validation slot, same as the asset-level `design` class. These are among the nine roles `/lazy-spec.product-config` Step 8 asks for. `/lazy-spec.create-from-code <product>` still scaffolds the product-level `vision.md` → `design.md` → `tech.md` trio for a code-bound product (see above) — the content-root, project-wide `vision.md` gets its draft from `/lazy-spec.install` instead, and `tech.md` at that level still has no dedicated creation skill.
 
 ---
 
@@ -65,7 +71,13 @@ Review-wise, a `system-designer` expert writes the design half (the `system-desi
 
 All three are assets — they share the same gate ladder and folder layout — but the problem they capture is different. A **feature** describes new behaviour that does not yet exist. A **change** is the atomic modification of something that already exists: a rename, a constraint relaxation, a behaviour adjustment. A **bug** describes a defect: what was supposed to happen, what happened instead, and how to reproduce it.
 
-The document layout differs too. Features and changes get `design.md` (no `bug.md`); bugs get `bug.md` (no `design.md`). Either way, the scaffold seeds only that one doc — `code-plan.md` and `test-plan.md` are opt-in, authored later, never part of the scaffold. `/lazy-spec.create-feature`, `/lazy-spec.create-change`, and `/lazy-spec.create-bug` are thin wrappers that pin the asset type and delegate to the universal `/lazy-spec.create-asset`, which asks type-scaled clarifying questions, authors the prose, and draws the primary behavioural diagram(s).
+The document layout differs too. Features and changes get `design.md` (no `bug.md`); bugs get `bug.md` (no `design.md`, and no `vision.md` either — the shipped `bug` type declares no vision contract at all). A feature's `vision` contract is `mandatory` — `vision.md` is seeded automatically ahead of `design.md`. A change's `vision` contract is `opt-in` — offered via a multi-select question at scaffold time, alongside `use-cases.md` / `ui-design.md`, and can still be added later if declined up front. Either way, the scaffold seeds only what the type's contract calls for — `code-plan.md` and `test-plan.md` are opt-in, authored later, never part of the scaffold. `/lazy-spec.create-feature`, `/lazy-spec.create-change`, and `/lazy-spec.create-bug` are thin wrappers that pin the asset type and delegate to the universal `/lazy-spec.create-asset`, which asks type-scaled clarifying questions, authors the prose, and draws the primary behavioural diagram(s).
+
+---
+
+## Does every asset get a `vision.md`, or is it optional?
+
+Depends on the asset's declared type. A type's `vision` contract is one of three shapes: `mandatory` (the shipped `feature` type — `vision.md` is seeded automatically ahead of `design.md`, and the `Write design` checkbox does not even appear until `vision.md` reaches `approved`), `opt-in` (the shipped `change` type, plus `content` / `research` — offered through a multi-select question at scaffold time alongside `use-cases.md` / `ui-design.md`, and can still be added later), or absent entirely (the shipped `bug` type declares no vision at all — a `bug.md` captures repro/observed/expected, not goals). `vision.md` covers `Overview / Goals / Value Proposition / Design Concept / Risks` — the asset's goals live ONLY here, never restated in `design.md`, which opens instead with a reference back to the sibling vision and covers what the asset does in behaviour terms. Both `/lazy-spec.create-asset` (and its thin wrappers `create-feature` / `create-change` / `create-bug`) and `/lazy-spec.create-from-code` author `vision.md` first when the type calls for it, and both mark any genuine decision fork the vision or design settles as an inline `[!decision]` callout, ready to `promote` into the decisions registry once the doc is approved.
 
 ---
 
@@ -73,9 +85,9 @@ The document layout differs too. Features and changes get `design.md` (no `bug.m
 
 Yes, on both feature and change assets. `use-cases.md` (written by the use-case-writer) captures actor-level scenarios — main and alternative flows in the user's own language, no system internals — and `ui-design.md` (written by the ui-designer) settles screens, states, and interaction decisions, with self-contained HTML mockups attached beside it; neither ships production code. Both are opt-in: neither is part of `/lazy-spec.create-asset`'s scaffold, and each appears only once its own launch checkbox (`Write use-cases`, `Write ui-design`) is ticked — unless the product or the asset declares it mandatory.
 
-Both hold the step after them. `design.md` is not dispatched (or continued) while a `use-cases.md` sibling exists and hasn't yet reached `approved` or `cancelled` — the use cases are meant to settle before the behaviour they describe is written down for good. `Write architecture` doesn't queue until `ui-design.md` is absent, `approved`, or `cancelled` — the screens are meant to be cast before the module boundaries built to serve them. Once the gap closes, dispatch resumes as an ordinary launch-checkbox job, no special-casing.
+Both hold the step after them, and `vision.md` (where the type declares it) holds ahead of both. The reading chain is `vision → use-cases → design → tech`: a document's review proceeds only once every EXISTING upstream sibling in that chain has reached `approved` — an absent opt-in document never blocks, so a change that declined `vision.md` and `use-cases.md` goes straight to `design.md`. Concretely: on a `feature` (mandatory vision), the `Write design` checkbox does not even appear until `vision.md` is `approved` — the coordinator seeds and starts the vision itself, on the asset's first wake, ahead of any checkbox. Once `design.md` exists, it is not dispatched (or continued) while a `use-cases.md` sibling exists and hasn't yet reached `approved` or `cancelled` — the use cases are meant to settle before the behaviour they describe is written down for good. `Write architecture` doesn't queue until `ui-design.md` is absent, `approved`, or `cancelled` — the screens are meant to be cast before the module boundaries built to serve them. Once each gap closes, dispatch resumes as an ordinary launch-checkbox job, no special-casing.
 
-Each window closes on its own schedule: `Write use-cases` closes the moment `spec_design_done` closes, and `Write ui-design` closes once `architecture.md` is approved (or, for an asset that never becomes code, once `spec_plan_done` closes instead). Past either window a further revision belongs to a new change asset, not a reopening of this one. An edit landing on `use-cases.md` or `ui-design.md` after the document it feeds has already approved triggers no automatic rewrite — the coordinator drops an `[!attention]` callout into the downstream document and names the edit in `# Status brief`, leaving the decision to fold it in with you.
+Each window closes on its own schedule: `vision.md` itself closes the moment `spec_design_done` closes (a late goals revision past that point is a change asset's business, not this asset's own definition half), `Write use-cases` closes at the same point, and `Write ui-design` closes once `architecture.md` is approved (or, for an asset that never becomes code, once `spec_plan_done` closes instead). Past any window a further revision belongs to a new change asset, not a reopening of this one. An edit landing on `vision.md`, `use-cases.md`, or `ui-design.md` after the document it feeds has already approved triggers no automatic rewrite — the coordinator drops an `[!attention]` callout into the downstream document and names the edit in `# Status brief`, leaving the decision to fold it in with you.
 
 `/lazy-spec.product-config` Step 8 assigns the use-case-writer and ui-designer roles alongside the other seven, and generates their `use-cases` / `ui-design` review classes the same way it generates every other doc-kind class.
 
@@ -101,7 +113,7 @@ The first two (`spec_design_done`, `spec_plan_done`) are **derived**: readiness 
 
 No. Gate frontmatter is managed entirely by `/lazy-spec.flip-gate` (interactive, or `spec.coordinator` calling it non-interactively once it decides a gate is ready — `lazy-spec.gate-tick` itself no longer touches a gate at all). Editing it by hand bypasses the side-effects — the callout, the `# History` line — that the primitive writes on every flip. Always use `/lazy-spec.flip-gate` for a manual flip; pass `--off` to regress a gate.
 
-Similarly, a doc's per-file stage (`spec_stage` on `use-cases.md`, `design.md`, `ui-design.md`, `code-plan.md`, `test-plan.md`, `bug.md`) is always changed through `/lazy-spec.set-stage`, never by hand-editing frontmatter. That skill rewrites `spec_stage`, mirrors the matching `spec/<stage>` tag in the same edit, and appends a transition line to the folder-note's `# History` section — the two writes never happen separately.
+Similarly, a doc's per-file stage (`spec_stage` on `vision.md`, `use-cases.md`, `design.md`, `ui-design.md`, `code-plan.md`, `test-plan.md`, `bug.md`) is always changed through `/lazy-spec.set-stage`, never by hand-editing frontmatter. That skill rewrites `spec_stage`, mirrors the matching `spec/<stage>` tag in the same edit, and appends a transition line to the folder-note's `# History` section — the two writes never happen separately.
 
 ---
 
@@ -133,11 +145,17 @@ A product folder-note and every container folder-note under it (`features/`, `ch
 
 ---
 
+## Can I drive an asset through its gates without the daemon running?
+
+Yes — run `/lazy-spec.drive <asset-note-path>` (or a bare `<category>/<slug>` shorthand; with no argument at all it lists every live asset and asks you to pick one). It is a no-daemon session orchestrator: on a checkout where the runtime daemon isn't acting on this asset, it drives the whole ladder in one continuous session by reading the same `lazy-spec.coordination-playbook.md` law `spec.coordinator` follows under the daemon. You speak a word — tick a checkbox, answer a `[!question]`, write a `# Coordinator commands` line — and the skill translates it into the exact gesture an operator would make (never a decision of its own), commits it, wakes the coordinator through the same CLI the daemon's git-watch routine uses, and pumps whatever expert job results to completion with a local manual pump, looping until the ladder settles. It refuses to start while a live daemon could act on the same checkout — the two are mutually exclusive against the same asset, never run in parallel.
+
+---
+
 ## How do I record a design decision, and does the plugin write `decisions.md` for me?
 
-Never by hand-editing `decisions.md` — always through `/lazy-spec.decide`, an interactive wrapper over four operations: `add` a new entry, `supersede` an older one with a new entry that marks it superseded, `obsolete` an existing entry with a reason, or `promote` — transfer decision blocks already written inline in a `design.md` / `bug.md` / `tech.md` / `architecture.md` body out into that asset's or product's own `decisions.md` registry. Before recording a new decision, the skill holds you to a three-part weight test: a real fork existed, reversing it is expensive, and the "why" is unrecoverable from the artifact itself — a cheap, reversible, or self-explanatory detail isn't worth a record.
+Never by hand-editing `decisions.md` — always through `/lazy-spec.record-decision`, an interactive wrapper over four operations: `add` a new entry, `supersede` an older one with a new entry that marks it superseded, `obsolete` an existing entry with a reason, or `promote` — transfer decision blocks already written inline in a `vision.md` / `design.md` / `bug.md` / `tech.md` / `architecture.md` body out into a sibling `decisions.md` registry. `decisions.md` itself lives at one of three levels, resolved along a placement ladder: `<asset_dir>/decisions.md` for a feature/change/bug's own forks, `<spec_path>/decisions.md` for a product-wide decision, or `<content-root>/decisions.md` for a decision about the project as a whole (the system pair, or a cross-product concern) — the file need not exist yet at any level; the first record lazily creates it. Before recording a new decision, the skill holds you to a three-part weight test: a real fork existed, reversing it is expensive, and the "why" is unrecoverable from the artifact itself — a cheap, reversible, or self-explanatory detail isn't worth a record; per `spec.decisions.md`, the Why/Rejected reasoning belongs only in the decision record, never restated in the surrounding design prose.
 
-`promote` also happens automatically: once a living doc (`design.md`, `bug.md`, `tech.md`, `architecture.md`) is approved via `/lazy-spec.set-stage`, that step calls the same promote operation itself, so decision blocks you wrote inline usually reach the registry without you running `/lazy-spec.decide` at all — the manual path exists for adding a decision straight into the registry, or for promoting a doc that skipped the usual approve step. A `promote` call refuses on a plan or report (neither originates decisions), and on a cancelled, halted, or released asset.
+Most decision blocks never need the manual `add` path. `/lazy-spec.create-asset` and `/lazy-spec.create-from-code` already mark a genuine fork the clarification or the code evidence settles — while authoring `vision.md`, `design.md`, or the product-level docs — as an inline `[!decision] <thesis> #spec/decision` callout with its `**Why.**` / `**Rejected.**` lines, right where the fork was made. `promote` then happens automatically too: once a living doc (`vision.md`, `design.md`, `bug.md`, `tech.md`, `architecture.md`) is approved via `/lazy-spec.set-stage`, that step calls the same promote operation itself, lifting those inline blocks into the sibling registry without you running `/lazy-spec.record-decision` at all — the manual path exists for adding a decision straight into the registry, or for promoting a doc that skipped the usual approve step. A `promote` call refuses on a plan or report (neither originates decisions), and on a cancelled, halted, or released asset.
 
 ---
 
@@ -151,9 +169,9 @@ After the tech-doc pass it also reconciles branch pins (source links still point
 
 ## How do I release an asset after its branch merges?
 
-Run `/lazy-spec.finalize-branch <branch>` after merging or deleting the source branch. The skill fetches fresh refs, finds every spec whose `spec_source_branches` frontmatter pins that branch, rewrites those source links to the default branch, and then proposes the `spec_released` gate flip for each affected asset via `/lazy-spec.flip-gate` — but only when its own check finds the release readiness already met (typically `spec_tests_passing` already `true`); `/lazy-spec.flip-gate` itself no longer double-checks this. When it isn't met yet, the skill skips the proposal for that asset instead — the link rebase is applied regardless, so you only need to settle the holding gate and re-run.
+Run `/lazy-spec.rebase-pins <branch>` after merging or deleting the source branch. The skill fetches fresh refs, finds every spec whose `spec_source_branches` frontmatter pins that branch, rewrites those source links to the default branch, and then proposes the `spec_released` gate flip for each affected asset via `/lazy-spec.flip-gate` — but only when its own check finds the release readiness already met (typically `spec_tests_passing` already `true`); `/lazy-spec.flip-gate` itself no longer double-checks this. When it isn't met yet, the skill skips the proposal for that asset instead — the link rebase is applied regardless, so you only need to settle the holding gate and re-run.
 
-For squash-merges, where the ancestor check comes back false, pass `--force-merged` to skip it. To reconcile every merged branch across the vault in one pass, run `/lazy-spec.finalize-branch --merged`.
+For squash-merges, where the ancestor check comes back false, pass `--force-merged` to skip it. To reconcile every merged branch across the vault in one pass, run `/lazy-spec.rebase-pins --merged`.
 
 ---
 
@@ -177,7 +195,7 @@ The vault-root `requests/` folder is the intake inbox. Run `/lazy-spec.create-re
 
 Once the request body is approved during review, `spec.coordinator` wakes at the terminal group of that review cycle and takes over the routing: it classifies the idea, checks the vault for existing assets it could attach to or an asset that already implements it, and always surfaces its proposed routing — spawn a new asset, attach to an existing one, mark an asset that already covers it as the reference (with its reasoning stated in the same block), or a mix — as an explicit `[!question]` confirmation you tick before anything is materialized. You can also edit the proposed routing block directly instead of just accepting or rejecting it.
 
-Applying the decision never seeds document prose anywhere. A **spawn** creates only the asset's folder and its status folder-note, carrying the request's attribution — no `design.md`, no review opened yet. Every document the asset gets, `design.md` included, is created later, one launch-checkbox tick at a time: ticking a `Write <doc>` checkbox seeds an empty skeleton at stage `empty`, copies the folder-note's request attribution onto it, and opens review on it. An **attach** works the other way — it stamps the request's attribution onto the existing target's own primary doc (`design.md` for a feature/change, `bug.md` for a bug) and re-opens review on that doc, without touching its existing content. Either way, the request body itself is never copied into any doc, whole or in sections — the doc's own review writer reads the linked request directly from its job context when it drafts the real prose. A **reference** decision writes nothing onto the target at all — it just links the request to the asset that already covers it. The whole pipeline runs without you hand-editing any frontmatter.
+Applying the decision never seeds document prose anywhere. A **spawn** creates only the asset's folder and its status folder-note, carrying the request's attribution — no `vision.md`, no `design.md`, no review opened yet. Every document the asset gets, `vision.md` and `design.md` included, is created later, one launch-checkbox tick at a time: ticking a `Write <doc>` checkbox seeds an empty skeleton at stage `empty`, copies the folder-note's request attribution onto it, and opens review on it. An **attach** works the other way — it stamps the request's attribution onto the existing target's own primary doc (`design.md` for a feature/change, `bug.md` for a bug) and re-opens review on that doc, without touching its existing content. Either way, the request body itself is never copied into any doc, whole or in sections — the doc's own review writer reads the linked request directly from its job context when it drafts the real prose. A **reference** decision writes nothing onto the target at all — it just links the request to the asset that already covers it. The whole pipeline runs without you hand-editing any frontmatter.
 
 ---
 
@@ -186,12 +204,6 @@ Applying the decision never seeds document prose anywhere. A **spawn** creates o
 Every source URL in the spec system is built by the `lazy-spec.source-url` primitive from a known-forges table (GitHub, GitLab, Bitbucket, Gitea, Forgejo, SourceHut) — never inlined as a hard-coded `/blob/<branch>/<path>`. Run `/lazy-spec.doctor <product>` to find links that were not produced that way; it reports every source link whose format doesn't match, or whose branch segment doesn't match the file's pin or the repo default.
 
 If the underlying repo record is missing or the remote's hostname isn't recognized, `lazy-spec.resolve-repo` — the primitive `lazy-spec.source-url` calls to get the repo's base URL and forge — aborts with a message describing the gap. Fix the repo record by running `/lazy-spec.product-config` (it writes the `repos` entry), then re-run the sync or creation skill that emits the source links.
-
----
-
-## What's the difference between `/lazy-spec.doctor` and `/lazy-spec.audit`?
-
-`/lazy-spec.doctor <product>` audits your own spec content in this repo — a product's folder tree, its status folder-notes, per-file stages, source links, wikilinks — for staleness, broken links, or inconsistency with the actual source code, and can apply targeted fixes. It also runs one vault-wide check outside any single product: whether the mandatory vault spec (`design.md` at the spec content-root) still exists. `/lazy-spec.audit` checks the plugin's own installed surface instead — whether the decisions-registry rule still matches what the code relies on, every CLI verb is documented in `/lazy-spec.help`, and every skill and reference the plugin ships still resolves. It's read-only: findings name the fix (re-run `/lazy-spec.install`, hand-edit the drifted file, run `/lazy-spec.doctor`) rather than applying one itself. Reach for `doctor` when a specific product's specs look wrong; reach for `audit` when the plugin itself seems to be missing a piece.
 
 ---
 

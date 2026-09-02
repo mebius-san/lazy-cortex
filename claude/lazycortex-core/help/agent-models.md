@@ -1,12 +1,12 @@
 ---
 chapter_type: block
 summary: Assign model tiers to every agent in your vault, prune dead entries for deleted agents, and route dispatches automatically.
-last_regen: 2026-08-30
+last_regen: 2026-09-02
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
   - lazy-core.agent-models-seed
-source_sha: 95d5aefa32937ab7c4f1a3a4f4d7f50f3f73c58a
+source_sha: 75345f2daa459e98934fb8870a1bf21b05341737
 ---
 # Per-agent model routing
 
@@ -21,13 +21,15 @@ This block gives you two things: an interactive wizard that assigns each agent a
 - After authoring a new project-local agent in `.claude/agents/`.
 - When you want a project-specific model tier that overrides your global default for a particular agent.
 - When previewing what routing entries would be written before committing to them.
-- When running `/lazy-core.optimize` end-to-end — Phase 7 of that skill delegates to this wizard automatically.
+- When running `/lazy-core.slim-context` end-to-end — Phase 7 of that skill delegates to this wizard automatically.
 - After an automated rollout leaves some agents unrouted — a run driven by `lazy-core.autosetup` only fills in curated defaults and reports the rest as needing your attention; run this wizard yourself to finish them.
 - After removing a plugin or an agent it shipped — the next run cleans up that agent's now-dead tier for you.
 
 ## How it fits together
 
 Run `/lazy-core.agent-models`. The skill loads the `agent_models` sections from both your global `~/.claude/lazy.settings.json` and the project `./.claude/lazy.settings.json`, merges them into a single lookup, and discovers every dispatchable agent across your vault — Claude Code built-ins (`Explore`, `Plan`, `general-purpose`, `statusline-setup`), globally-authored agents under `~/.claude/agents/`, project-local agents under `./.claude/agents/`, and plugin-shipped agents from the plugin cache. Any agent whose dispatch string already appears in the merged lookup — including those explicitly set to `default` — is considered decided and stays out of the wizard.
+
+Plugin-shipped agents are filtered by install scope before they ever reach the missing list. The plugin cache on your machine is shared across every project, so the wizard only counts an agent from a plugin installed at user (global) scope, or installed at project scope for this exact repo. An agent belonging to a plugin some other project installed locally never surfaces here — so it can't get stuck popping up as "needs interactive" in every unrelated repo you happen to run this wizard in.
 
 The remaining agents surface in three ordered batches. The first covers built-ins and agents from LazyCortex plugins that ship a curated tier table. For these the wizard already knows the right tier: `Explore` routes to haiku (fast, cheap navigation), `Plan` to opus (deliberate multi-step reasoning), review dispatchers and log taggers to haiku, and synthesis agents to sonnet. The second batch covers any other plugin agents not in the curated table. The third batch covers your own project agents. Each batch is a single prompt: accept all suggestions, review each agent individually, mass-set the whole batch to `default`, or skip it for now.
 
@@ -51,13 +53,15 @@ When this wizard runs without you at the keyboard — for example when `lazy-cor
 
 **After adding new agents.** The wizard is idempotent — running it again on a fully-configured vault reports "nothing to do". Run it freely after installing a new plugin or authoring a new agent; only the new agents surface.
 
-**Changing an existing tier.** `/lazy-core.agent-models` never overwrites existing entries; it only adds missing ones. To override a tier that is already set globally, run `/lazy-core.agent-models --scope=project` — the project entry shadows the global one. To remove that project-level override and fall back to the global tier, delete the entry from `./.claude/lazy.settings.json` via `/lazy-core.optimize` Phase 7, which re-prompts for any entries that go missing after cleanup.
+**Changing an existing tier.** `/lazy-core.agent-models` never overwrites existing entries; it only adds missing ones. To override a tier that is already set globally, run `/lazy-core.agent-models --scope=project` — the project entry shadows the global one. To remove that project-level override and fall back to the global tier, delete the entry from `./.claude/lazy.settings.json` via `/lazy-core.slim-context` Phase 7, which re-prompts for any entries that go missing after cleanup.
 
 **Relationship to install.** Every plugin's own install skill pre-seeds curated tiers for the agents it ships, through the same shared seeding step every LazyCortex plugin install calls — it reads the identical curated-tiers table this wizard uses, so a tier never drifts between the two paths. An entry already seeded that way, or one already set to `default`, doesn't reappear in the wizard's missing list. `/lazy-core.agent-models` fills the remaining per-agent entries — anything not curated, plus your own project agents — across all discovered sources interactively. They do not overlap — install handles the bootstrap, this wizard handles everything discovered afterwards.
 
 **After an automated rollout.** If a repo was brought current by `lazy-core.autosetup` rather than by you running the install chain by hand, expect only the curated-default agents to already have tiers. Run `/lazy-core.agent-models` yourself afterward to finish routing the rest — it picks up exactly where the automated run left off.
 
 **After removing a plugin agent.** Nothing to do by hand — the next run of `/lazy-core.agent-models` prunes that agent's now-dead tier automatically and lists it in the report as pruned. If the report also warns that an expert still references the removed agent, update that expert's `agent` field yourself; the wizard reports the warning but will not edit your expert config.
+
+**Working across multiple projects.** If the same plugin is installed project-locally in more than one repo, its agents only surface in the wizard for the repo where that install happened — the install-scope filter keeps a project-scoped plugin's agents from bleeding into an unrelated repo's wizard run. Installing the plugin at user (global) scope instead makes its agents visible everywhere in one pass.
 
 ## Failure modes
 

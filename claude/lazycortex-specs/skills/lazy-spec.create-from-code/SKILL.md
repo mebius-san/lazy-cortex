@@ -9,7 +9,7 @@ Generate a specification from existing source code for a product that is **alrea
 
 Two modes:
 
-- **Product mode** (default): document the whole product from code — a behavior-only `design.md`, a code-grounded `tech.md`, and the empty asset-type dirs. Diagrams are not part of this skill's mandate: the operator draws one on request via `/lazy-diagram.draw`, and the writing experts decide their own per the figures rules in `lazy-core.markdown-style`.
+- **Product mode** (default): document the whole product from code — a `vision.md` (goals and value; authored first when absent), a behavior-only `design.md`, a code-grounded `tech.md`, and the empty asset-type dirs. An `AskUserQuestion` in Step P4 offers to also author the product-level `use-cases.md` (actors and cross-feature scenarios) from the same code survey — opt-in, skipped silently when declined. Diagrams are not part of this skill's mandate: the operator draws one on request via `/lazy-diagram.draw`, and the writing experts decide their own per the figures rules in `lazy-core.markdown-style`.
 - **Feature mode**: scaffold ONE feature-candidate discovered in the code by delegating to `lazy-spec.create-asset <product> feature <slug>`. This skill does NOT author the feature folder itself — create-asset owns the asset scaffold and its docs.
 
 Heavy source reading runs through parallel Explore agents so the main session stays on synthesis. Filenames, folder structure, header section, frontmatter keys, and wikilink format are owned by `${CLAUDE_PLUGIN_ROOT}/references/` — this skill never inlines those patterns.
@@ -28,7 +28,7 @@ This skill has two modes (`product` + `feature`) with mode-specific step lists. 
    - `Step P1 — Detect the branch`
    - `Step P2 — Scan source code (parallel agents)`
    - `Step P3 — Create the doc structure`
-   - `Step P4 — Author product-design prose`
+   - `Step P4 — Author product-vision and product-design prose`
    - `Step P5 — Author product-tech prose`
    - `Step P6 — Scaffold candidate features (delegate)`
    - `Step P7 — Verify`
@@ -106,7 +106,7 @@ Suggested splits:
 - **Agent C — hazards & history**: TODO/TMP comments, known limitations, imports (for dependency mapping).
 - **Agent D — candidate features (product mode only)**: feature-sized units of behavior already present in the source, ranked with evidence. See the contract below.
 
-Each agent returns a structured summary (names, one-line purposes, file paths) per the parallel-scan coordinator pattern in `claude/lazycortex-core/references/lazy-core.parallel-scan.md`. The main session synthesizes these into the docs below.
+Each agent returns a structured summary (names, one-line purposes, file paths) per the parallel-scan coordinator pattern in `lazycortex-core`'s `references/lazy-core.parallel-scan.md`. The main session synthesizes these into the docs below.
 
 ### Agent D contract (candidate-feature detection)
 
@@ -158,7 +158,9 @@ Product docs live loose at the product root (no `docs/` subfolder). Per `${CLAUD
 
 Group folders (`features/` and the rest) and their operator-zone folder-notes appear lazily — the first `create-asset` landing an asset creates the folder and seeds its group note (`lazy-spec.layout-protocol.md` Part 1); the vault-root `requests/` inbox is `/lazy-spec.product-config`'s. Do NOT pre-create any of them here, do NOT create `backlog/`, do NOT author any operator-zone folder-note by hand, and do NOT create `human-tasks.md`, any `changelog.md` (the role is removed from the model), any `spec_role: layout` doc, or any `layout.excalidraw` file — those roles are removed from the model (a layout picture, when the operator asks for one, is an inline mermaid fence in `design.md`, not a doc).
 
-### P4 — Author product-design prose
+### P4 — Author product-vision and product-design prose
+
+**Vision first.** Before the design, author `<spec_path>/vision.md` (doc type `system-vision`) when it does not exist yet: instantiate `${CLAUDE_PLUGIN_ROOT}/templates/spec.docs/system-vision.md` with the product key and fill its sections from the code evidence — Overview (what this is and for whom), Goals (the outcomes the code visibly serves; goals live ONLY here), Value Proposition, Design Concept (one paragraph plus a reference to the sibling design), Risks (raw risks of the intent). Then set its stage via `lazy-spec.set-stage` → `draft`. A pre-existing `vision.md` is left untouched.
 
 The product design doc describes WHAT the product is, who uses it, and what it does — behavior terms only. NO source URLs, file paths, or class/function names. Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` this doc MUST NOT contain source URLs, and per "Branch handling" it never carries `spec_source_branches`.
 
@@ -182,10 +184,7 @@ spec_source_docs:
 # <product> — design
 
 ## Overview
-What the product is: the problem it solves, who it's for, what would be missing without it. How to access it (command, entry point) as user-facing behavior, not a route handler name.
-
-## Goals
-What the product aims to achieve — the outcomes that count as success.
+Opens with a reference to the sibling vision (`[[<spec_path>/vision]]` — goals and value live there, never here). What the product is and how to access it (command, entry point) as user-facing behavior, not a route handler name.
 
 ## Principles
 Invariants the product holds as a whole (the rules that never bend, e.g. "the working tree stays clean", "routines run serially"). Violating a principle is a bug, not a taste choice.
@@ -196,6 +195,9 @@ The key product decisions with WHY it is this way and not otherwise. When the pr
 ## Behavior
 Cross-cutting observable behavior that belongs to the product as a whole, not to any single feature (per-feature behavior lives in the feature docs). Do not author an ASCII sketch here — when a picture is wanted, the operator asks for one via `/lazy-diagram.draw` against this heading.
 
+## Risks
+The vision-level risks, worked: what this design does about each.
+
 ## Known Limitations
 Things the product does, but with a known ceiling — accepted constraints, candidates for future work. Phrase as observable behavior, not source-level references.
 
@@ -205,15 +207,20 @@ What the product deliberately does NOT do; the seams with neighboring products a
 # Sources
 ```
 
+**Optional product use-cases.** After the design is written, one `AskUserQuestion`: author the product-level `use-cases.md` from the code survey too? On yes, instantiate `${CLAUDE_PLUGIN_ROOT}/templates/spec.docs/use-cases.md` at `<spec_path>/use-cases.md` (drop the `wiki/category/` pin — a product-level doc has no category), fill the actors and cross-feature scenarios the code evidences, and set its stage `draft`. On no, skip silently — the doc is opt-in and its absence is never a defect.
+
+**Mark the decisions the code embodies.** Where the code shows a real fork was taken (per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` — a genuine alternative existed, reversal is expensive, the why is unrecoverable from the artifact), record it in the design body as a `[!decision] <thesis> #spec/decision` callout with its `**Why.**` / `**Rejected.**` lines per `lazy-core.markdown-style`. On the document's approve these blocks transfer automatically into the sibling `decisions.md` via `lazycortex-specs decide promote`. Do not force forks that are not there.
+
 Write the default `spec_source_docs` (`<spec_path>` resolved to the product's absolute vault path from Step 0):
 
 | Doc | default `spec_source_docs` |
 |---|---|
-| `design.md` | `[[<spec_path>/tech]]` |
+| `vision.md` | `[]` (the vision is sourced from the code survey itself) |
+| `design.md` | `[[<spec_path>/vision]]`, `[[<spec_path>/tech]]` |
 
 Write that array into the doc's `spec_source_docs:` frontmatter key, then project the body `# Sources` section (`## Docs` from that list; `## Requests` empty — no request origin) per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md` — follow its marker boundaries, gloss/display rules, and the `#protected/spec/sources` tag exactly; do not restate the format here. Emit outcome `projected`.
 
-After writing, set the per-file stage authoritatively via the `Skill` tool (`skill: "lazycortex-specs:lazy-spec.set-stage"`) → `draft` on `design.md` (keeps the folder-note `# History` line and the tag mirror in sync).
+After writing, set the per-file stage authoritatively via the `Skill` tool (`skill: "lazycortex-specs:lazy-spec.set-stage"`) → `draft` on `design.md` (the vision already got its `draft` above; the call keeps the folder-note `# History` line and the tag mirror in sync).
 
 ### P5 — Author product-tech prose
 

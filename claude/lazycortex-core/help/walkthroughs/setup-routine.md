@@ -1,15 +1,14 @@
 ---
 chapter_type: walkthrough
 summary: Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
-last_regen: 2026-08-30
+last_regen: 2026-09-02
 diagram_spec:
   anchor: "How registration and pickup flow"
   request: "Sequence diagram showing the user running /lazy-routine.register, the skill writing lazy.settings.json, the daemon picking up the new routine on its next cycle without restart, and the user later running /lazy-routine.unregister to remove it. Include the built-in protection check for lazy-expert.pump."
-  kind_hint: sequence
 source_skills:
   - lazy-routine.register
   - lazy-routine.unregister
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: bf704574aa25dc7697e00bebb805686ae6ca145e
 ---
 # Register a periodic routine with the runtime daemon
 
@@ -120,25 +119,26 @@ The routine is no longer in `routines` and the daemon skips it from the next cyc
 %%{init: {'themeVariables':{'background':'transparent','primaryColor':'#1e3a5f','primaryBorderColor':'#4a90e2','primaryTextColor':'#fff','lineColor':'#4ae290','actorBkg':'#1e3a5f','actorBorder':'#4a90e2','actorTextColor':'#fff','actorLineColor':'#4a90e2','signalColor':'#4ae290','signalTextColor':'#000','noteBkgColor':'#5f4a1e','noteBorderColor':'#e2a14a','noteTextColor':'#fff','labelBoxBkgColor':'#5f4a1e','labelBoxBorderColor':'#e2a14a','labelTextColor':'#fff','loopTextColor':'#e2a14a'},'sequence':{'diagramPadding':5,'useMaxWidth':true}}}%%
 sequenceDiagram
   participant user as User
-  participant registerSkill as lazy-routine.register
-  participant settingsFile as lazy.settings.json
+  participant skill as lazy-routine.register
+  participant settings as lazy.settings.json
   participant daemon as Daemon
-  participant unregisterSkill as lazy-routine.unregister
 
-  user->>registerSkill: /lazy-routine.register
-  Note over registerSkill: built-in protection check for lazy-expert.pump
-  alt routine name is lazy-expert.pump
-    registerSkill-->>user: refuse protected routine
-  else routine allowed
-    registerSkill->>settingsFile: write routine entry
-    settingsFile-->>registerSkill: write confirmed
-    registerSkill-->>user: routine registered
+  user->>skill: run /lazy-routine.register
+  skill->>settings: write new routine entry
+  settings-->>skill: write confirmed
+  skill-->>user: registration complete
+  Note over daemon: next scheduled cycle
+  daemon->>settings: read routines on cycle tick
+  settings-->>daemon: routine list including new entry
+  alt routine targets lazy-expert.pump
+    daemon->>daemon: run built-in protection check
+    daemon-->>daemon: guard confirms safe to dispatch
+  else other routine kind
+    daemon->>daemon: dispatch routine normally
   end
-  loop next daemon cycle
-    daemon->>settingsFile: read lazy.settings.json
-    daemon->>daemon: pick up new routine without restart
-  end
-  user->>unregisterSkill: /lazy-routine.unregister
-  unregisterSkill->>settingsFile: remove routine entry
-  unregisterSkill-->>user: routine unregistered
+  daemon-->>daemon: pick up new routine, no restart needed
+  user->>skill: run /lazy-routine.unregister
+  skill->>settings: remove routine entry
+  settings-->>skill: removal confirmed
+  skill-->>user: unregistration complete
 ```

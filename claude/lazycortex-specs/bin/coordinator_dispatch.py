@@ -1245,6 +1245,22 @@ def coordinator_dispatch(
   # read the current note once — every branch below decides off this one snapshot
   asset_dir = asset_note.parent
   repo_root = flip_gate._repo_root(asset_dir)
+
+  # a manual wake (lazy-spec.drive's path-only item) carries neither `sha` nor `author_email` —
+  # derive both from the newest commit touching the path, so the operator-author check, the
+  # cursor-bounded lookback, and the dispatch-cursor stamp all work exactly as they do for a
+  # daemon git-watch item; a daemon item's own fields always win over the derivation
+  if item.get(_ITEM_PATH) and (not item.get(_ITEM_SHA) or not item.get(_ITEM_AUTHOR_EMAIL)):
+    head = subprocess.run(
+        ["git", "log", "-1", "--format=%H%x00%ae", "--", str(item[_ITEM_PATH])],
+        cwd = str(repo_root), capture_output = True, text = True, check = False,
+    )
+    if head.returncode == 0 and head.stdout.strip():
+      sha, _, email = head.stdout.strip().partition("\x00")
+      item = { **item, _ITEM_SHA: item.get(_ITEM_SHA) or sha,
+               _ITEM_AUTHOR_EMAIL: item.get(_ITEM_AUTHOR_EMAIL) or email }
+
+  # snapshot the note once — every branch below decides off this one read
   today_str = flip_gate._today(today)
   text = asset_note.read_text()
   original_text = text

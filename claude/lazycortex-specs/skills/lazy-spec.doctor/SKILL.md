@@ -38,7 +38,7 @@ Resolve the product record from `lazy.settings.json[products]` — there is NO `
 2. **`record` null** — the product is not registered. Report as an error and stop: "product `<key>` is not in `lazy.settings.json[products]`; register it via `/lazy-spec.product-config`." Do NOT proceed.
 3. **`record` present** — capture `spec_path` (required, vault-relative), optional `source` (`{ repo, paths }`), optional `language` (default `en`), `icon` (optional), and the two declaration blocks `asset_types` / `tool_types` (default `{}` each — the product's own declarations merge key-by-key over the plugin's shipped ones at `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.asset-types.json` and `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.tool-types.json`). The merged pair is what every type / tool check below resolves against; carry it into the Agent C and Agent D prompts.
    - Verify `spec_path` exists as a directory. Missing → error.
-   - Verify the product folder leaf (basename of `spec_path`) is not a reserved name (`design`, `tech`, or `decisions`): such a slug makes the product folder-note (`<leaf>.md`) collide with the product-level `design.md` / `tech.md` / `decisions.md` at the root (FAIL, per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` Part 3). No auto-fix — the operator must rename the product.
+   - Verify the product folder leaf (basename of `spec_path`) is not a reserved name (`vision`, `design`, `tech`, `use-cases`, or `decisions`): such a slug makes the product folder-note (`<leaf>.md`) collide with the product-level docs of those names at the root (FAIL, per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` Part 3). No auto-fix — the operator must rename the product.
    - **Code-bound** (`source` block present) — resolve `source.repo` via the `lazy-spec.resolve-repo` primitive to get `{ local_path, branch, host, owner, repo, forge, base_url, … }`. Resolution failure (repo key not registered in `lazy.settings.json[repos]`, missing `local_path`, no git remote, unknown host with no `forge:` override on the repo record) is an error — report the underlying cause. Code-bound products run the full check set (A + B + C + D).
    - **Design-only** (no `source` block) — there is no code to diff. Run structural-only checks: A (link health, minus source-URL host matching), C (role/header), D (status/gates/folders). Skip Agent B (source staleness) entirely with outcome `no-source-binding`.
    - **Repo records** — repos live in the `lazy.settings.json[repos]` section (read via `lazycortex-core settings-get repos`); `lazy-spec.resolve-repo` reads them. Verify each referenced repo record's `branch` matches the checkout's actual default branch; a mismatch breaks every source link (error, offer to rewrite in `--apply`).
@@ -96,7 +96,7 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.sources-protocol.md`. Diff the d
 
 Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`, and `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`.
 
-- **`spec_role` closed set** — every role-bearing spec doc carries `spec_role` in one of the closed set `{use-cases, design, architecture, ui-design, code-plan, test-plan, code-report, test-report, bug, tech, status, decisions}`. Any other value (including the removed `layout`, `human-tasks`, `changelog`, `plan`, and any `*-index` role) is a FAIL. Operator-zone folder-notes carry NO `spec_role` (validated by Agent D) — finding `spec_role` on a product or container folder-note is a FAIL.
+- **`spec_role` closed set** — every role-bearing spec doc carries `spec_role` in one of the closed set `{vision, use-cases, design, architecture, ui-design, code-plan, test-plan, code-report, test-report, bug, tech, status, decisions}`. Any other value (including the removed `layout`, `human-tasks`, `changelog`, `plan`, and any `*-index` role) is a FAIL. Operator-zone folder-notes carry NO `spec_role` (validated by Agent D) — finding `spec_role` on a product or container folder-note is a FAIL.
 - **`spec_doc_type` present (FAIL)** — every authored catalog document carries `spec_doc_type`. Absence is a FAIL; the fix is `lazycortex-specs doc-type backfill`. The status folder-note (`spec_role: status`) and operator-zone folder-notes are excluded — they have no type and must not have one, so a `spec_doc_type` key found on any of them is itself a FAIL.
 - **`spec_doc_type` declared (FAIL)** — the value resolves through `lazycortex-specs doc-type resolve <type> --product <key>`. A non-zero exit is a FAIL: ``type `<type>` is declared nowhere``. The fix is to declare the type under `products[<key>].doc_types` in `.claude/lazy.settings.json`, or to correct the value.
 - **Type/role agreement (WARN)** — while `spec_role` still lives alongside `spec_doc_type`, a document carrying non-empty values for both must have them equal. A divergence is a WARN, not a FAIL: the type is authoritative and the role is the legacy key, so the role is what gets corrected.
@@ -174,7 +174,7 @@ Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`, `${CLAUD
 **Per-file stage surfacing**
 
 - Any doc stuck at `spec_stage: rejected` is a WARN in every run — valid state, but signals unfinished review work. Fix: `lazy-spec.set-stage <doc> draft` + re-open review (`review_active: true`).
-- **Un-promoted decision block in an approved living doc (WARN)** — a `design.md` / `bug.md` / `tech.md` / `architecture.md` at `spec_stage: approved` that still carries a `[!decision] … #spec/decision` block in its body: the automatic transfer on approve never ran (or the block was added after approval). Fix: `lazycortex-specs decide promote <doc>` (or `/lazy-spec.decide`).
+- **Un-promoted decision block in an approved living doc (WARN)** — a `design.md` / `bug.md` / `tech.md` / `architecture.md` at `spec_stage: approved` that still carries a `[!decision] … #spec/decision` block in its body: the automatic transfer on approve never ran (or the block was added after approval). Fix: `lazycortex-specs decide promote <doc>` (or `/lazy-spec.record-decision`).
   - **Skip entirely** when the owning asset carries `spec_cancelled: true` or `spec_released: true` — both states freeze the automatic transfer permanently by design; a block left in place there is expected, not a finding.
   - **WARN, not skip**, when the owning asset carries `spec_halted: true` — halt is temporary, and a block that got stuck while halted needs the operator to see the debt once the flag is lifted, not silence forever.
   - This check is scoped to living docs only — a `[!decision-candidate]` in a tool's report document (`code-report` / `test-report` / any other declared `report_doc`) is a standing to-do, never a transfer debt; it lives there indefinitely and is never a finding.
@@ -256,9 +256,10 @@ Runs once, vault-wide, like Checks 8–9 — the pairing between the spec plugin
 
 ## Vault-spec check (Check 11, inline in coordinator)
 
-Runs once, vault-wide, like Checks 8–10. The content-root `design.md` (the vault spec) is mandatory per `lazy-spec.layout-protocol.md` Part 1 — seeded by `/lazy-spec.install` Step 6.9, required by `lazy-spec.product-config` before the first product registration.
+Runs once, vault-wide, like Checks 8–10. The content-root `vision.md` (the vault spec) is mandatory per `lazy-spec.layout-protocol.md` Part 1 — seeded by `/lazy-spec.install` Step 6.9, required by `lazy-spec.product-config` before the first product registration. A content-root `design.md` without a vision is the legal pre-vision state and satisfies the check with a note.
 
-- `<content-root>/design.md` absent → `[WARN] vault-spec-missing — the content-root design.md does not exist; re-run /lazy-spec.install to seed the draft (a registered catalog without one predates the mandatory-vault-spec contract).`
+- Neither `<content-root>/vision.md` nor `<content-root>/design.md` exists → `[WARN] vault-spec-missing — the content-root vision.md does not exist; re-run /lazy-spec.install to seed the draft (a registered catalog without one predates the mandatory-vault-spec contract).`
+- `<content-root>/design.md` exists without a `vision.md` → `[INFO] pre-vision vault — goals still live in design.md; migrate by hand when ready.`
 - Otherwise → `scan: Check 11 vault-spec — clean`.
 
 ## Output (Report)
@@ -282,7 +283,7 @@ scan: Check 10 wiki-companion — <clean|INFO> (<0|1> findings)
 - [ ] Broken wikilink: `[[<target>]]` in `<spec_path>/design.md:<line>`
 - [ ] Role violation: source URL in `<spec_path>/design.md:<line>` — belongs in `<spec_path>/tech.md`
 - [ ] Role violation: `source_branches:` frontmatter on `features/<feat>/design.md`
-- [ ] Unknown `spec_role`: `<file>` carries `spec_role: <value>` (closed set: design, architecture, code-plan, test-plan, code-report, test-report, bug, tech, status, decisions)
+- [ ] Unknown `spec_role`: `<file>` carries `spec_role: <value>` (closed set: vision, use-cases, design, architecture, ui-design, code-plan, test-plan, code-report, test-report, bug, tech, status, decisions)
 - [ ] Loose `changelog.md`: `<spec_path>/changelog.md` exists — the role is removed; delete the file
 - [ ] Header mismatch: `features/<feat>/design.md` H1 does not match its path + role
 - [ ] Invalid `spec_stage`: `<doc>` has `spec_stage: <value>` (closed set: empty, draft, approved, rejected, cancelled)

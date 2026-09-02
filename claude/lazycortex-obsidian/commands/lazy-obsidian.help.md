@@ -18,7 +18,7 @@ Output the block below verbatim to the user. Do not summarize, rephrase, or add 
 - `lazy-obsidian.iconize-sync` — worker wrapper; applies the registry to each matched note's `iconize_icon` / `iconize_color` frontmatter via `bin/iconize_sync.py` (Iconize + the bundled `iconize-reloader` repaint from there); callable standalone or from other skills.
 - `lazy-obsidian.capture` — snapshot the vault's whole `.obsidian/` configuration into the tracked `.obsidian.manifest.json` and commit it. Plugin settings, snippets, theme, palette, and top-level config travel as one reviewed file; per-device state, credentials, and Iconize's own database are deliberately left out.
 - `lazy-obsidian.deploy` — rebuild `.obsidian/` from that manifest on a checkout that has none: every plugin at its latest release, the captured settings on top, snippets, theme, and the top-level config files. Never pins a version.
-- `lazy-obsidian.audit` — read-only semantic audit of the plugin surface, delegated from `lazy-core.doctor`. Also reports how far a live vault's config has drifted from its manifest, when the repo carries one.
+- `lazy-obsidian.audit` — read-only vault-manifest drift check: compares the live `.obsidian/` config against `.obsidian.manifest.json` when the repo carries one; resolution is the operator's pick between `/lazy-obsidian.capture` and `/lazy-obsidian.deploy`.
 
 **Agents** (invoke by name via the Agent tool):
 

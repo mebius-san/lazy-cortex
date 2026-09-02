@@ -21,7 +21,7 @@ This skill has 3 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Phase 1 — Run audit script
 
-`python3 claude/lazycortex-review/bin/audit.py --settings .claude/lazy.settings.json`. The script prints a JSON record `{level: PASS|WARN|FAIL, findings: [{severity, check, message}, ...]}` and exits 0/1/2 respectively.
+`python3 "${CLAUDE_PLUGIN_ROOT}/bin/audit.py" --settings .claude/lazy.settings.json`. The script prints a JSON record `{level: PASS|WARN|FAIL, findings: [{severity, check, message}, ...]}` and exits 0/1/2 respectively.
 
 Outcome: `audited`.
 

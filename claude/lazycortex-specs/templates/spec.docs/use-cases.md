@@ -15,7 +15,7 @@ spec_source_docs: []
 # {{slug}} — use-cases
 
 ## Actors
-_Who or what initiates a use case below — a user role, an external system, a scheduled process._
+<!-- Who or what initiates a use case below — a user role, an external system, a scheduled process. -->
 
 ## Use cases
 ### UC-1 — _<name>_
@@ -27,7 +27,7 @@ _Who or what initiates a use case below — a user role, an external system, a s
 **Postconditions**: _what is true once this use case completes._
 
 ## Out of scope
-_Actors, actions, or scenarios deliberately not covered here._
+<!-- Actors, actions, or scenarios deliberately not covered here. -->
 
 # Sources
 #protected/spec/sources

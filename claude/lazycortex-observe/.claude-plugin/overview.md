@@ -11,7 +11,7 @@ The plugin is **observer-server-blind**: every shipped file (templates, dashboar
 
 ## Blocks
 
-- **install-and-audit** — Bootstrap, verify, repair, and tear down the metrics shipper on this host. Members: lazy-observe.install, lazy-observe.uninstall, lazy-observe.doctor, lazy-observe.audit.
+- **install-and-audit** — Bootstrap, verify, repair, and tear down the metrics shipper on this host. Members: lazy-observe.install, lazy-observe.uninstall, lazy-observe.doctor.
 
 ## Walkthroughs
 

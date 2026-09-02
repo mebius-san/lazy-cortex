@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Per-expert long-term memory tracked in git — experts consult notes before primary work, write new notes as a side-effect of jobs, and consolidate via reflect passes.
-last_regen: 2026-08-30
+last_regen: 2026-09-02
 diagram_spec:
   anchor: "How the four skills compose"
   request: "Flow diagram showing the four memory skills and how they compose: mark-persona opts an expert in (writes lazy.settings.json experts entry); write is the only blessed note writer (writes .memory/<expert>/ notes, regenerates .tags/); reflect dispatches a kind=reflect job that feeds run logs and existing notes to the expert, which then calls write; index rebuilds .tags/ from note frontmatter as a recovery path. Show .memory/<expert>/ and .memory/.tags/ as shared state that write maintains and reflect reads."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-memory.index
   - lazy-memory.reflect
   - lazy-memory.mark-persona
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: 1f9cad4ee0e373192857a6ac0443e70da231e4a2
 ---
 # Expert memory — notes that survive runs
 

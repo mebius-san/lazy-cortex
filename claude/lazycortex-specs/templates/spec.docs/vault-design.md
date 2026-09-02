@@ -12,25 +12,25 @@ spec_source_docs: []
 # {{project}} — design
 
 ## Overview
-_What the project is and why it exists._
-
-## Goals
-_What the project aims to achieve — the outcomes that count as success._
+<!-- Opens with a reference to the sibling vision (goals and value live there, never here). What the project is and why it exists. -->
 
 ## Design
-_The project's key decisions with WHY it is this way and not otherwise._
+<!-- The project's key decisions with WHY it is this way and not otherwise. -->
 
 ## Products
-_How the project splits into products and why the split runs along these lines._
+<!-- How the project splits into products and why the split runs along these lines. -->
 
 ## Behavior
-_Observable behavior of the project, as its user experiences it._
+<!-- Observable behavior of the project, as its user experiences it. -->
+
+## Risks
+<!-- The vision-level risks, worked: what this design does about each. -->
 
 ## Known Limitations
-_Things the project does, but with a known ceiling — accepted constraints._
+<!-- Things the project does, but with a known ceiling — accepted constraints. -->
 
 ## Boundaries
-_What the project deliberately does NOT do; seams with neighboring systems, who owns what._
+<!-- What the project deliberately does NOT do; seams with neighboring systems, who owns what. -->
 
 # Sources
 #protected/spec/sources

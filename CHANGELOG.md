@@ -5,6 +5,21 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-core
 
 
+### 9.0.0 — 2026-09-02 UTC
+
+- New `daemon-pause` / `daemon-resume` CLI commands and a local `.runtime/daemon.pause` semaphore let you pause the daemon; the Daemons dashboard now shows a PAUSED state and reports it via the paused gauge.
+- Existing `lazy.settings.json[review]` config now auto-migrates on upgrade: `design`/`system-design` classes gain the document-height protocol, `use-cases` classes gain a `use-cases.md` content-root path, and new `vision` / `system-vision` review classes are seeded where a source class exists.
+- Document-authoring conventions refined: template section explainers are written as HTML comments (never rendered as text), and `Why`/`Rejected` discussion belongs only in decision records — not inline design prose.
+- Fix: the daemon pump's Runs counter no longer mirrors its Ticks count — an idle stdout tick now counts as zero work.
+- New audit check `D16` — a review class can no longer be validated by its own main writer.
+- Fix: agent discovery now filters the plugin cache by install scope.
+- Fix: `lazy-core.audit`, `lazy-expert.dispatch-job`, and `lazy-routine.register` failure/reference messages now point at the installed plugin path instead of a dev-only path.
+- **Breaking:** `lazy-core.doctor` no longer folds Observe or Specs self-audit findings into its report, and its Obsidian coverage narrows to vault-manifest drift only.
+- **Breaking:** the `lazy-core.optimize` skill/command is renamed to `lazy-core.slim-context`.
+- Network-caused git halts now self-heal — the doctor-tick probe clears `git_local_failed` halts raised by sync steps.
+- Audit and doctor checks no longer judge the content of a skill's description-trigger wording — only whether the `description` field is present.
+- The markdown-style canon pins decision callouts to the prose that owns them, defines the reference forms a promote leaves behind, and makes weaving leftover reference lines into their owners part of the writer's ordinary round.
+
 ### 8.1.0 — 2026-08-30 UTC
 
 - New `lazy-core.index-guard` routine heals a `.git/index` displaced by a cloud-sync conflict (the phantom "staged content nobody staged" symptom) — registered by `/lazy-core.install` alongside the expert pump and doctor tick, runs every 5 minutes during halt, with the same heal also available via a pre-flight check in the git-guard hook and as a standalone CLI subcommand.
@@ -569,6 +584,20 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-specs
 
 
+### 7.0.0 — 2026-09-02 UTC
+
+- **Breaking:** New `vision` document kind — products and the vault now get a `vision.md` (plus `system-vision.md` / `vault-vision.md`), with doc types, per-asset-type contracts, class seeds, and playbook wiring anchored to it in place of the previous design anchor.
+- **Breaking:** The `/lazy-spec.audit` skill has been removed from the shipped plugin — its checks now live only in this project's own dev tooling, with no replacement command for consumers.
+- **Breaking:** The `decide` skill is renamed to `record-decision`.
+- **Breaking:** The `finalize-branch` skill is renamed to `rebase-pins`.
+- `create-from-code` and `create-asset` now author a vision document up front, offer optional docs, and mark decision forks explicitly; project-level pins no longer carry a stray product axis.
+- New project-level `decisions.md` at the content-root, so decisions no longer have to be recorded per individual asset.
+- `use-cases.md` is now allowed at the product root and the vault content-root, not only per asset.
+- New doc-height protocol governs where content belongs across design classes — Why/Rejected reasoning now belongs only in decision records, never inline in design prose.
+- Template section explainers are now HTML comments (no longer visible in generated docs), and the product-level design template is retyped `system-design`.
+- The promote primitive replaces a `[!decision]` block with a self-describing line — the record link followed by the thesis — instead of a bare wikilink, so an unwoven replacement still reads on its own.
+- Fix: the coordinator-dispatch worker derives the commit sha and author for a path-only wake item, so a manual (no-daemon) wake no longer re-fires forever on operator commits it has already handled.
+
 ### 6.3.0 — 2026-08-30 UTC
 
 - New mandatory vault spec (`design.md`) at the catalog root — `lazy-spec.install` now seeds a draft, and `lazy-spec.product-config` refuses to register the first product until it exists.
@@ -736,6 +765,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-obsidian
 
 
+### 5.0.0 — 2026-09-02 UTC
+
+- **Breaking:** `/lazy-obsidian.audit` now checks only vault-manifest drift (live `.obsidian/` config vs. the captured manifest) — the plugin-artifact coherence checks it used to run (version coherence across worker/hook constants, icon-map schema validity, two-writer cross-artifact coherence, protocol-doc sanity, skill cross-references, shipped CSS-snippet checks) are gone from this skill.
+
 ### 4.0.0 — 2026-08-27 UTC
 
 - **Breaking:** `/lazy-obsidian.deploy` no longer bundles or restores a vendored theme — it only records the theme's name in the manifest; a vault missing that theme now shows `theme <name>: not installed`, and the operator installs it once by hand from Obsidian's Appearance settings.
@@ -891,6 +924,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-diagram
 
 
+### 1.1.9 — 2026-09-02 UTC
+
+- _no user-visible changes_
+
 ### 1.1.8 — 2026-08-24 UTC
 
 - _no user-visible changes_
@@ -944,6 +981,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+
+### 6.2.3 — 2026-09-02 UTC
+
+- Review skills (`lazy-review.start`, `.stop`, `.submit`, `.status`, `.audit`, `.install`, `.finalize`) now invoke their Python workers through the plugin's own install path instead of a hardcoded dev-repo path, fixing them at a consumer install.
 
 ### 6.2.2 — 2026-08-30 UTC
 
@@ -1056,6 +1097,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-observe
 
 
+### 1.0.0 — 2026-09-02 UTC
+
+- Daemons dashboard: Work/Halted/Paused columns folded into a single Status column; a new PAUSED state reflects daemons stopped via the local pause semaphore; Halted/Work columns narrowed to make room for a wider Busy time column.
+- Busy time and Cost columns dropped their bar charts for a muted background gradient from green to red, scaled to the selected time period — Busy time shown in hours with an `h` suffix, Cost fully red at $250/day; also fixed a cost label bleeding into the `lazy-expert.pump` entry.
+- Runs and Ticks panels: Ticks no longer colored, Runs gets a red gradient ceiling of 2500 runs/day scaled to the selected period.
+- Runtime tables: routines now show their own Cost column, a narrower Repo column, headers without a redundant health label, a more muted color palette, and Deferred rows highlighted yellow.
+- Experts panel: Done column shows percent complete without a bar; routine busy time now shown in minutes.
+- Breaking: removed the `lazy-observe.audit` self-audit skill — its checks now live in the maintainer's own tooling.
+
 ### 0.9.0 — 2026-08-27 UTC
 
 - Install now provisions this plugin's Grafana dashboards automatically — a new step copies the shipped dashboard JSON into the host Grafana's provisioning directory (detected from the answer file, a running Grafana server, or the packaged config), with no manual import or restart needed; the bundled runtime dashboard also gained new panels.
@@ -1151,6 +1201,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-experts
 
 
+### 1.2.1 — 2026-09-02 UTC
+
+- Experts now flag invented terminology in technical writing — a name-shaped phrase with no entry in the terms dictionary is treated as a defect, not just informal register or jargon.
+- The tech-writing aspect gains structure discipline — one claim per bullet, subsections for screen-long sections, one thought per paragraph — plus bans on connective padding and prose-text link labels.
+
 ### 1.2.0 — 2026-08-24 UTC
 
 - New `lazy-experts.use-case-writer` and `lazy-experts.ui-designer` agents join the expert roster — formal use cases ahead of design work, and UI/screen decisions with attached HTML mockups after it.
@@ -1245,6 +1300,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+
+### 4.2.0 — 2026-09-02 UTC
+
+- Knowledge sweep no longer stops to ask about the group cut — it decides on its own, then closes with a consolidation pass over the whole corpus; both writers now judge a candidate against the code alone, never against neighbouring documentation.
+- Knowledge sweep gains a contract-consolidation step that trims canon-excluded formalism, merges near-duplicate phrasings, and folds redundant contract blocks corpus-wide — while keeping a block that a different consumer or a subclass override still needs, even on a word-for-word text match. Presentation details (exact message text, log lines, output formatting) no longer count as contract-worthy.
 
 ### 4.1.0 — 2026-08-27 UTC
 
@@ -1397,6 +1457,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-wiki
 
+
+### 2.2.1 — 2026-09-02 UTC
+
+- Fixed the structure-scan routine spamming a duplicate curator job on every content edit to a tracked file — it now only fires for new files, existing installs migrate the watch setting automatically, and `docs/structure.md` bootstraps itself on first run if it's missing.
+- Fixed terms-curator dispatch so it actually reads the changed document from disk instead of a stale bundle copy — every terms scan had been failing outright.
 
 ### 2.2.0 — 2026-08-27 UTC
 

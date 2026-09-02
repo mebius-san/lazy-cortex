@@ -12,7 +12,7 @@ Operator's quick-look at one document's review state. Always read-only.
 ## Steps
 
 1. **Resolve the file** — argument is the markdown path.
-2. **Read + emit** — `python3 claude/lazycortex-review/bin/status.py <file>`. Output is JSON on stdout: `{file, review_active, review_round, approved, banner, owners[]}`.
+2. **Read + emit** — `python3 "${CLAUDE_PLUGIN_ROOT}/bin/status.py" <file>`. Output is JSON on stdout: `{file, review_active, review_round, approved, banner, owners[]}`.
 
 ## Report
 

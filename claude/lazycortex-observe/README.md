@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#86efac"
+iconize_color: "#fca5a5"
 ---
 # lazycortex-observe
 
@@ -19,7 +19,7 @@ The plugin is **observer-server-blind**: every shipped file (templates, dashboar
 
 ## Blocks
 
-- **install-and-audit** — Bootstrap, verify, repair, and tear down the metrics shipper on this host. Members: lazy-observe.install, lazy-observe.uninstall, lazy-observe.doctor, lazy-observe.audit.
+- **install-and-audit** — Bootstrap, verify, repair, and tear down the metrics shipper on this host. Members: lazy-observe.install, lazy-observe.uninstall, lazy-observe.doctor.
 
 ## Walkthroughs
 
@@ -61,7 +61,6 @@ Requires these plugins from the same marketplace:
 
 | Skill | Description |
 |---|---|
-| `lazy-observe.audit` | Run when the operator asks to audit the lazycortex-observe plugin's own shipped surface — rule bodies still encoding their invariants, execution-discipline preambles, logging conventions. Delegated from `lazy-core.doctor` Phase 3. Not the skill for 'are my metrics arriving' — that is `/lazy-observe.doctor`; this one never looks at the running shipper. |
 | `lazy-observe.doctor` | Run when metrics stopped reaching the observer, a dashboard went flat, an alert says the shipper is down, or the operator asks whether metrics shipping is healthy on this host. Read-only end-to-end check of the service unit, agent process, local `/metrics` endpoints, remote_write success, observer reachability, and WAL size — it reports fixes with PASS / WARN / FAIL, never applies them. |
 | `lazy-observe.install` | Run when the operator asks to start shipping lazycortex runtime metrics off this host, to point the local daemons at their Prometheus / Mimir, or after `/lazy-observe.doctor` reports `not-installed` or `covered-unconfigured`. Pre-flights for an existing collection stack: a foreign collector already covering the host flips the run into integrate mode automatically — scrape targets regenerated, no questions asked; pass `--integrate-only` to force that mode explicitly, `--force-standalone` to install the shipper anyway. URL, auth, and agent kind are asked only when a shipper is actually installed, once, and never re-asked; idempotent and quiet on re-run. |
 | `lazy-observe.uninstall` | Run when the operator asks to stop shipping metrics from this host, remove the lazycortex-observe service, or clean up before switching to a different observer. DESTRUCTIVE — it unloads a supervised launchd/systemd unit; the WAL, log, and operator-private-state deletions each ask first, and answers under `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` are kept by default. Idempotent — a clean host is a silent no-op. |
@@ -99,7 +98,6 @@ Skills appear as `lazycortex-observe:<skill.name>`.
 Invoke skills with slash commands:
 
 ```
-/lazy-observe.audit
 /lazy-observe.doctor
 /lazy-observe.install
 /lazy-observe.uninstall

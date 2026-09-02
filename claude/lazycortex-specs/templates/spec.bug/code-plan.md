@@ -14,19 +14,19 @@ spec_source_docs: []
 ---
 # {{slug}} — code-plan
 
-_Development plan — populated once the bug is reproduced and a fix approach is settled. Scope and implementation notes for the developer._
+<!-- Development plan — populated once the bug is reproduced and a fix approach is settled. Scope and implementation notes for the developer. -->
 
 ## Goals
-_What must be true once the bug is fixed, taken from the bug's expected behavior verbatim — this list is what the final verification task and the test-plan are judged against._
+<!-- What must be true once the bug is fixed, taken from the bug's expected behavior verbatim — this list is what the final verification task and the test-plan are judged against. -->
 
 ## Tasks
-_Ordered tasks. Each names the exact files it creates, modifies, or deletes before its steps begin._
+<!-- Ordered tasks. Each names the exact files it creates, modifies, or deletes before its steps begin. -->
 
 ## Verification
-_The repository's own check and test commands, cited as they exist in the repo. The last task runs the whole check sweep and the entire test suite._
+<!-- The repository's own check and test commands, cited as they exist in the repo. The last task runs the whole check sweep and the entire test suite. -->
 
 ## Rollback
-_How to back the change out — a revert command for a small commit, a step-by-step sequence for a migration._
+<!-- How to back the change out — a revert command for a small commit, a step-by-step sequence for a migration. -->
 
 # Sources
 #protected/spec/sources
