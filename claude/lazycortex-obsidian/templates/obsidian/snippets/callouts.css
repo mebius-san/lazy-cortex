@@ -4,16 +4,52 @@
  * callout vocabulary a look. Grows as lazycortex adds custom callouts;
  * one `.callout[data-callout="<type>"]` block per type, `--callout-color`
  * as an "R, G, B" triple (Obsidian's custom-callout convention, no rgb()
- * wrapper) and `--callout-icon` as a lucide icon name. */
+ * wrapper) and `--callout-icon` as a lucide icon name. Background, border,
+ * and title color are painted explicitly — themes that ignore a bare
+ * `--callout-color` (taking only the icon from it) leave the block grey
+ * otherwise.
+ * Palette rule: base types run muted; a "candidate" variant of a type
+ * takes the SAME hue, brighter, so the pair reads as one family. */
 
 /* [!decision] — a settled, binding decision record (spec-decisions-design). */
 .callout[data-callout="decision"] {
-  --callout-color: 90, 90, 200;
+  --callout-color: 85, 90, 170;
   --callout-icon: gavel;
+  background-color: rgba(85, 90, 170, 0.08);
+  border-left: 3px solid rgb(var(--callout-color));
 }
 
-/* [!decision-candidate] — a proposed decision awaiting promotion to a record. */
+/* [!decision-candidate] — a proposed decision awaiting the operator's verdict:
+   the decision hue, brighter. */
 .callout[data-callout="decision-candidate"] {
-  --callout-color: 200, 150, 60;
+  --callout-color: 125, 130, 245;
   --callout-icon: lightbulb;
+  background-color: rgba(125, 130, 245, 0.10);
+  border-left: 3px solid rgb(var(--callout-color));
+}
+
+/* [!gate] — a launch checkbox on a status folder-note. */
+.callout[data-callout="gate"] {
+  --callout-color: 70, 130, 180;
+  --callout-icon: lucide-flag;
+  background-color: rgba(70, 130, 180, 0.08);
+  border-left: 3px solid rgb(var(--callout-color));
+}
+
+/* [!asset-proposal] — an expert proposing a new asset (create/link/reopen);
+   a candidate awaiting the operator's verdict, so it runs bright like one. */
+.callout[data-callout="asset-proposal"] {
+  --callout-color: 225, 110, 185;
+  --callout-icon: lucide-package-plus;
+  background-color: rgba(225, 110, 185, 0.10);
+  border-left: 3px solid rgb(var(--callout-color));
+}
+
+/* Title + icon follow the type color (SVG icons take currentColor) */
+.callout[data-callout="decision"] > .callout-title,
+.callout[data-callout="decision-candidate"] > .callout-title,
+.callout[data-callout="gate"] > .callout-title,
+.callout[data-callout="asset-proposal"] > .callout-title {
+  color: rgb(var(--callout-color));
+  font-weight: 600;
 }

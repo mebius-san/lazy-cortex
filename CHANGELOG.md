@@ -774,6 +774,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-obsidian
 
 
+### 5.0.2 — 2026-09-03 UTC
+
+- New callout palette for `decision`, `gate`, and `asset-proposal` types — muted base colors with brighter same-hue variants for candidate and proposal callouts. Background, border, and title color are now painted explicitly, so themes that take only the icon color from `--callout-color` no longer render these blocks grey.
+
 ### 5.0.0 — 2026-09-02 UTC
 
 - **Breaking:** `/lazy-obsidian.audit` now checks only vault-manifest drift (live `.obsidian/` config vs. the captured manifest) — the plugin-artifact coherence checks it used to run (version coherence across worker/hook constants, icon-map schema validity, two-writer cross-artifact coherence, protocol-doc sanity, skill cross-references, shipped CSS-snippet checks) are gone from this skill.
@@ -990,6 +994,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+
+### 6.2.4 — 2026-09-03 UTC
+
+- The review-callout Obsidian snippet mutes the base colors for `question`, `todo`, and `attention` callouts so their brighter candidate variants stand out clearly.
 
 ### 6.2.3 — 2026-09-02 UTC
 

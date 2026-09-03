@@ -1,29 +1,31 @@
 /* review-callouts.css — distinct look for lazycortex-review callouts.
    Unconditional per-type rules: no :has()/tag-markup dependency, works
-   identically in reading mode and Live Preview. */
+   identically in reading mode and Live Preview.
+   Base types run muted; a "candidate" variant of a type (see the sibling
+   callouts.css) takes the same hue brighter. */
 
-/* [!question] #review/question — amber, operator must answer */
+/* [!question] #review/question — muted amber, operator must answer */
 .callout[data-callout="question"] {
-  --callout-color: 210, 160, 40;
+  --callout-color: 185, 145, 55;
   --callout-icon: lucide-help-circle;
-  background-color: rgba(210, 160, 40, 0.08);
+  background-color: rgba(185, 145, 55, 0.08);
   border-left: 3px solid rgb(var(--callout-color));
 }
 
-/* [!todo] #review/command — violet, operator command channel */
+/* [!todo] #review/command — muted violet, operator command channel */
 .callout[data-callout="todo"] {
-  --callout-color: 158, 100, 210;
+  --callout-color: 140, 95, 180;
   --callout-icon: lucide-terminal;
-  background-color: rgba(158, 100, 210, 0.08);
+  background-color: rgba(140, 95, 180, 0.08);
   border-left: 3px solid rgb(var(--callout-color));
 }
 
-/* [!attention] #review/concern — red; NOT a built-in Obsidian type, so
+/* [!attention] #review/concern — muted red; NOT a built-in Obsidian type, so
    without this rule it renders as the default grey note */
 .callout[data-callout="attention"] {
-  --callout-color: 210, 80, 60;
+  --callout-color: 185, 80, 65;
   --callout-icon: lucide-alert-triangle;
-  background-color: rgba(210, 80, 60, 0.08);
+  background-color: rgba(185, 80, 65, 0.08);
   border-left: 3px solid rgb(var(--callout-color));
 }
 

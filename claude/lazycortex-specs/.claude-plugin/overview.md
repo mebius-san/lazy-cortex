@@ -14,7 +14,7 @@ The plugin manages *structure* and *lifecycle*, not the prose — authoring stay
 - **authoring** — Create and populate spec assets of any category. Members: lazy-spec.create-asset, lazy-spec.create-feature, lazy-spec.create-change, lazy-spec.create-bug, lazy-spec.add-asset-type, lazy-spec.create-from-code, lazy-spec.create-request, lazy-spec.record-decision.
 - **gates** — Drive an asset's readiness gates and per-file stages. Members: lazy-spec.flip-gate, lazy-spec.gate-tick, lazy-spec.set-stage.
 - **code-sync** — Keep specs aligned with the source repo across commits and branch merges. Members: lazy-spec.sync-with-code, lazy-spec.rebase-pins, lazy-spec.coverage.
-- **upstream** — Mirror external design sources and route their changes through the request pipeline. Members: lazy-spec.upstream-run.
+- **upstream** — Mirror external design sources, route their changes through the request pipeline, and keep a spec doc's visible source list matching its frontmatter. Members: lazy-spec.upstream-run, lazy-spec.refresh-sources.
 - **source-links** — Resolve repos, dependencies, and forge-correct source URLs. Members: lazy-spec.resolve-repo, lazy-spec.resolve-dependency, lazy-spec.source-url.
 - **requests** — Ingest free-form requests and route them into the spec tree. Members: spec.coordinator, lazy-spec.request-classify, lazy-spec.request-find-candidates.
 - **install-and-audit** — Bootstrap, configure a product, and audit a spec in this repo. Members: lazy-spec.install, lazy-spec.product-config, lazy-spec.doctor, lazy-spec.help.
