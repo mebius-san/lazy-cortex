@@ -774,6 +774,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-obsidian
 
 
+### 5.0.3 — 2026-09-03 UTC
+
+- Iconize Reloader bumped to 2.4.1: it now hides the wrong second icon Iconize was rendering on the alias part of aliased wikilinks in live preview, while leaving the correct path-side icon and reading view untouched.
+
 ### 5.0.2 — 2026-09-03 UTC
 
 - New callout palette for `decision`, `gate`, and `asset-proposal` types — muted base colors with brighter same-hue variants for candidate and proposal callouts. Background, border, and title color are now painted explicitly, so themes that take only the icon color from `--callout-color` no longer render these blocks grey.
@@ -994,6 +998,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+
+### 6.3.0 — 2026-09-03 UTC
+
+- A review cycle now pins its edit-marker style at entry (`review_marker_style` frontmatter), so changing the marker style in settings mid-cycle no longer corrupts documents already under review.
+- Fixed the doc-review protocol so the main writer treats an open `#review/command` callout as this round's assignment, carrying it out instead of leaving it stuck unaddressed; the callout itself stays untouched for the dispatcher to clear.
 
 ### 6.2.4 — 2026-09-03 UTC
 
@@ -1217,6 +1226,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+
+### 1.2.2 — 2026-09-03 UTC
+
+- The tech-writing aspect now bans nominalized clause chains: every claim names one concrete subject and one concrete verb, and any sentence needing more than two clauses to parse must split.
 
 ### 1.2.1 — 2026-09-02 UTC
 

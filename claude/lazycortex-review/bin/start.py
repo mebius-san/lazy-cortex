@@ -59,6 +59,8 @@ import note_ops as _note_ops  # type: ignore # noqa: E402
 # `import note_ops` above resolves to that unrelated module instead (this dir's `__init__.py` makes review's
 # own copy package-qualified as `bin.note_ops`), so mypy checks the attribute against the wrong file's shape
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import finalize as _finalize  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import parser as _parser  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from keys import Phase, ReviewKey, Tag  # noqa: E402
@@ -186,6 +188,14 @@ def open_review(file_path: Path, *, expert: str | None = None) -> bool:
     new_text = _fm.set_field(new_text, ReviewKey.PHASE, Phase.MAIN)
   if ReviewKey.MAIN_DONE not in meta:
     new_text = _fm.set_field(new_text, ReviewKey.MAIN_DONE, [])
+
+# Pin the cycle's edit-marker style from the repo settings — every later consumer
+# (dispatch, strip-markup, finalize) reads the pin, so a settings change mid-cycle
+# never reaches this review. An existing pin survives the idempotent re-run.
+  if ReviewKey.MARKER_STYLE not in meta:
+    new_text = _fm.set_field(
+        new_text, ReviewKey.MARKER_STYLE, _finalize.settings_edit_marker_style(file_path)
+    )
 # Clear the terminal apply-gate discriminator if a prior finalize
 # left it on the file. Re-opening for review means the apply-gate
 # has nothing to act on yet — its trigger is the *next* finalize.

@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-review skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-02
+last_regen: 2026-09-03
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree routing on observed symptom. Top-level branches: install/bootstrap failures (settings missing, permission error, malformed JSON), configure failures (audit FAIL after wizard, section-id loop), start/submit problems (file not opted in, no-op on re-run when unexpected), status reporting nothing useful, stop/resume confusion, finalize blocked or partial, audit FAIL findings. Each leaf names the troubleshooting entry that resolves it."
@@ -143,9 +143,9 @@ source_sha: bf704574aa25dc7697e00bebb805686ae6ca145e
 
 **Symptom**: After finalize commits, the document still contains `~~old~~`, `{++ new ++}`, or similar edit-marker syntax in the body.
 
-**Likely cause**: The `edit_marker_style` value recorded in `lazy.settings.json` does not match the actual markers in the document — for example, the document uses `criticmarkup` syntax but the class is configured with `simple`.
+**Likely cause**: Since a document enters the review loop, its edit-marker style is pinned once — into a `review_marker_style` frontmatter field written the moment `/lazy-review.start` or `/lazy-review.submit` opens it — and every later step (dispatch, strip-markup, finalize) reads that pin rather than the live `review.edit_marker_style` setting. This closes the old failure mode where changing the setting mid-cycle corrupted a document already under review, but it means finalize strips against whatever style was pinned at open time. A mismatch shows up when the class's `edit_marker_style` was already wrong *before* the document was opened (for example the class is configured for `simple` but writers actually leave `criticmarkup` spans), or when the document was opened under an older, incorrect setting and never re-opened since.
 
-**Fix**: Run `/lazy-review.audit` to confirm the configured `edit_marker_style`. If it is wrong, run `/lazy-review.configure` to correct the style for this class (the wizard will read the current value and allow you to update it). Then re-run `/lazy-review.finalize <file>`.
+**Fix**: First check whether the class setting itself is wrong: run `/lazy-review.audit` to confirm the configured `edit_marker_style`, and `/lazy-review.configure` to correct it if needed — this fixes every document opened *after* the correction. For a document already mid-cycle with a stale pin, the setting fix alone will not reach it: open the document and check its frontmatter `review_marker_style` field directly against the markers actually present in the body, and correct that field by hand to the matching style. Then re-run `/lazy-review.finalize <file>`.
 
 ---
 

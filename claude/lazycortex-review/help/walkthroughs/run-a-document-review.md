@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one document through a full review cycle from opt-in to finalize.
-last_regen: 2026-09-02
+last_regen: 2026-09-03
 diagram_spec:
   anchor: "How the review loop flows"
   request: "Sequence diagram showing: operator runs /lazy-review.start → banner inserted + commit → daemon dispatches expert jobs per section → operator reads suggestions and ticks approve → operator checks status via /lazy-review.status → all sections approved → operator runs /lazy-review.finalize → finalized commit with Doc-Review-Phase: finalize trailer"
@@ -28,6 +28,8 @@ You have a markdown document — a spec, RFC, or design doc — that needs struc
 ### Step 1 — Opt the document in
 
 Run `/lazy-review.start <file>` with the path to your markdown document. The skill atomically writes `review_active: true`, `review_round: 1`, and `approved: false` into the document's frontmatter, inserts a Waiting banner above the first H1, and produces a single commit under your git identity.
+
+It also pins the review cycle's edit-marker style into a `review_marker_style` frontmatter field — read from your repo's configured `edit_marker_style` review setting (falling back to `simple` when unset). Every later step in the cycle reads that pin off the document itself rather than re-reading settings, so changing the setting mid-cycle never reaches a review that is already open.
 
 If the document is already opted in, the command is a no-op — it exits cleanly without a new commit.
 
@@ -67,7 +69,7 @@ Continue reading suggestions and approving sections across as many rounds as you
 
 Once every section in the final round is approved, run `/lazy-review.finalize <file>`. The skill:
 
-- Folds all edit-annotation markers into the final document text.
+- Folds all edit-annotation markers into the final document text, using the edit-marker style pinned into `review_marker_style` at Step 1 — the document's own pin wins over the current repo setting, so a setting change made mid-cycle never changes how an already-open review gets folded.
 - Strips the Waiting banner, approve checkboxes, and system callouts.
 - Preserves the `# History` section the coordinator built up across rounds.
 - Sets `review_active: false` in frontmatter.
@@ -81,7 +83,7 @@ If `/lazy-review.finalize` reports `already finalized: <file>`, the document is 
 
 The finalized document lives at the same path with no review scaffolding. The `# History` section records what the review cycle produced, opening with a short explanatory line — in your vault's configured language, falling back to English — that marks it as automatically maintained; it isn't meant to be hand-edited.
 
-To resume a document later (e.g. a follow-up review pass), run `/lazy-review.start <file>` again — it re-opens the loop from `review_round: 1`. The old `# History` section is preserved; the coordinator appends a new line to it each time the document reaches an approved state.
+To resume a document later (e.g. a follow-up review pass), run `/lazy-review.start <file>` again — it re-opens the loop from `review_round: 1`. The old `# History` section is preserved; the coordinator appends a new line to it each time the document reaches an approved state. Re-opening also re-pins `review_marker_style` only if the document does not already carry one, so a document finalized under an earlier style keeps that style across a later reopen.
 
 ## How the review loop flows
 

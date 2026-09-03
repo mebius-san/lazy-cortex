@@ -31,6 +31,7 @@ class ReviewKey:
     APPROVED: The whole-document approval flag.
     PHASE: The current writer phase (`main`, `section`, ...).
     RESULT: The terminal apply-gate discriminator stamped at finalize.
+    MARKER_STYLE: The edit-marker style pinned to the review cycle at open time.
     MAIN_DONE: The bracketed list of main writers already run.
     EXPERT: A per-document main-writer override.
     VALIDATION_ROUND: The post-approve validation-barrier round counter.
@@ -43,6 +44,7 @@ class ReviewKey:
   APPROVED = "review_approved"
   PHASE = "review_phase"
   RESULT = "review_result"
+  MARKER_STYLE = "review_marker_style"
   MAIN_DONE = "review_main_done"
   EXPERT = "review_expert"
   VALIDATION_ROUND = "review_validation_round"

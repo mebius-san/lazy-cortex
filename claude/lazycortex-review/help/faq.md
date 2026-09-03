@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-09-02
+last_regen: 2026-09-03
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -61,9 +61,15 @@ Both operations are idempotent — re-running on an already-opted-in document is
 
 ---
 
+## I changed the edit-marker style in `/lazy-review.configure`, but a document already under review still uses the old one. Why?
+
+Because the style is pinned to the document, not read live from settings. The first time a document enters the loop — via `/lazy-review.start` or `/lazy-review.submit` — the class's `edit_marker_style` is copied into that document's own `review_marker_style` frontmatter key, and every later step of that cycle (dispatch, strip-markup, finalize) reads the pin instead of going back to `lazy.settings.json`. A settings change made mid-cycle therefore never reaches a review that is already open; it only takes effect on the next document that opts in fresh. To pick up the new style on the current document, `/lazy-review.stop` it and `/lazy-review.start` it again — re-opening seeds a new pin from whatever the class carries now.
+
+---
+
 ## Can I pause review on a document without losing my progress?
 
-Yes. Run `/lazy-review.stop <file>`. This sets `review_active` to false but preserves `review_round`, `approved`, and the `# History` section. When you are ready to resume, run `/lazy-review.start <file>` again and the daemon picks up from the same round.
+Yes. Run `/lazy-review.stop <file>`. This sets `review_active` to false but preserves `review_round`, `approved`, and the `# History` section. When you are ready to resume, run `/lazy-review.start <file>` again and the daemon picks up from the same round — the document keeps whatever `review_marker_style` it was pinned with at entry.
 
 ---
 
@@ -93,7 +99,7 @@ The audit script could not find `.claude/lazy.settings.json`. Run `/lazy-review.
 
 ## Can I change the edit-marker style after configuring a class?
 
-`/lazy-review.configure`'s style question is read-first: it only asks when nothing is on record for `review.edit_marker_style`, so re-running the wizard on a class that already has a style just reuses it silently — there's no prompt to pick a different one. There is currently no configure flow for changing an already-set style; the wizard is still the correct entry point for everything else about the class (globs, writer groups, sections), just not for revisiting this one value.
+`/lazy-review.configure`'s style question is read-first: it only asks when nothing is on record for `review.edit_marker_style`, so re-running the wizard on a class that already has a style just reuses it silently — there's no prompt to pick a different one. There is currently no configure flow for changing an already-set style; the wizard is still the correct entry point for everything else about the class (globs, writer groups, sections), just not for revisiting this one value. Note that even a settings-level style change only ever reaches documents that have not yet entered review — see the pinning question above for why an open review keeps its own copy.
 
 ---
 

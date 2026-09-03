@@ -1,6 +1,6 @@
 'use strict';
 
-const RELOADER_VERSION = '2.4.0';
+const RELOADER_VERSION = '2.4.1';
 
 const { Plugin, PluginSettingTab, Setting, Platform } = require('obsidian');
 
@@ -186,9 +186,29 @@ function readIconFieldsFromDisk(absPath, iconFieldName, colorFieldName) {
   return { icon, color };
 }
 
+// Iconize's live-preview link decorator hangs an icon widget on EVERY
+// `hmd-internal-link` syntax node. An aliased wikilink [[path|alias]] is TWO
+// such nodes (path + alias), and Iconize resolves the alias text as its own
+// linkpath via getFirstLinkpathDest — landing on whatever same-named file the
+// vault indexes first, so the alias grows a second, usually wrong, icon.
+// Hide the alias-side widget: it sits directly before the `.cm-link-alias`
+// span (sometimes through CodeMirror's cm-widgetBuffer img). Reading view
+// renders one anchor per link and never matches this selector. On a WebView
+// without :has() the rule is inert — both icons stay, nothing breaks.
+const ALIAS_ICON_CSS =
+  '.iconize-icon-in-link:has(+ .cm-link-alias),\n' +
+  '.iconize-icon-in-link:has(+ .cm-widgetBuffer + .cm-link-alias) { display: none; }';
+
 class IconizeReloaderPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
+
+    // Kill Iconize's wrong second icon on aliased wikilinks (see ALIAS_ICON_CSS).
+    const aliasIconStyle = document.createElement('style');
+    aliasIconStyle.id = 'iconize-reloader-alias-icon-fix';
+    aliasIconStyle.textContent = ALIAS_ICON_CSS;
+    document.head.appendChild(aliasIconStyle);
+    this.register(() => aliasIconStyle.remove());
     const adapter = this.app.vault.adapter;
     const isDesktop = !Platform.isMobile;
     const basePath = isDesktop && adapter && adapter.basePath ? adapter.basePath : null;

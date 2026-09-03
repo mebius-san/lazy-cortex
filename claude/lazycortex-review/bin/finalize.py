@@ -75,6 +75,43 @@ _APPROVE_LINE_RE = re.compile(
 )
 
 
+def document_edit_marker_style(file_path: Path) -> str:
+  """
+  Return the edit-marker style in effect for one document.
+
+  The `review_marker_style` frontmatter pin — seeded at review entry — wins whenever it
+  names a supported style, so a settings change mid-cycle never reaches an open review.
+
+  Guarantees:
+    - The edit-marker style stays pinned at the value seeded when the review cycle opened;
+      a `review.edit_marker_style` settings change made mid-cycle never reaches an open review.
+
+  Args:
+    file_path: The document whose frontmatter pin and containing repo determine the style.
+
+  Returns:
+    The document's pinned `review_marker_style` when it is one of the supported styles;
+    otherwise the `settings_edit_marker_style` fallback for the containing repo.
+  """
+
+  # Contract:
+  # A review cycle's edit-marker style stays pinned at the value seeded when the cycle
+  # opened; a `review.edit_marker_style` settings change made mid-cycle never reaches
+  # an open review.
+
+  try:
+    meta, _ = _fm.parse(file_path.read_text())
+  except OSError:
+    return settings_edit_marker_style(file_path)
+
+  # the pin wins only when it names a style the stripper set actually supports;
+  # anything else (absent, empty, unknown, wrong-case) falls through to settings
+  pinned = meta.get(ReviewKey.MARKER_STYLE)
+  if isinstance(pinned, str) and pinned in _edit_markup.SUPPORTED_STYLES:
+    return pinned
+  return settings_edit_marker_style(file_path)
+
+
 def settings_edit_marker_style(file_path: Path) -> str:
   """
   Return the configured edit-marker style for the repo containing `file_path`.
@@ -376,7 +413,7 @@ def main(argv: list[str]) -> int:
   if not file_path.exists():
     sys.stderr.write(f"file not found: {file_path}\n")
     return 2
-  style = settings_edit_marker_style(file_path)
+  style = document_edit_marker_style(file_path)
   original = file_path.read_text()
   meta, _body_text = _fm.parse(original)
   with_concerns = str(meta.get(ReviewKey.APPROVED_WITH_CONCERNS, "")).strip().lower() in ("true", "yes", "1")

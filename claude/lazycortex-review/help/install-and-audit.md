@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-review in a repo, define document review classes, and validate configuration with a read-only audit.
-last_regen: 2026-09-02
+last_regen: 2026-09-03
 diagram_spec:
   anchor: "How install, configure, and audit fit together"
   request: "Show the three-step setup flow: /lazy-review.install seeds settings and dirs, /lazy-review.configure adds review classes via wizard, /lazy-review.audit validates the result. Include the daemon.enabled gate that controls whether the lazy-review.coordinator-watch and lazy-review.collect routines are registered."
@@ -37,7 +37,7 @@ You can run configure multiple times to register additional document classes. Ea
 
 - **Change which experts are assigned to a class** — run `/lazy-review.configure`. The wizard detects existing values and skips settled questions; answer only the prompts that appear for the changed role.
 - **Add a new section (validation or terminal) to a class** — run `/lazy-review.configure`. Existing sections are read from record; only the "Add another section?" loop is active.
-- **Switch the edit-marker style** — run `/lazy-review.configure` and change the `edit_marker_style` value when the prompt appears. Supported values: `simple`, `diff`, `criticmarkup`, `html`.
+- **Switch the edit-marker style** — run `/lazy-review.configure` and change the `edit_marker_style` value when the prompt appears. Supported values: `simple`, `diff`, `criticmarkup`, `html`. The new value only governs review cycles that start after the change: `/lazy-review.start` (and `/lazy-review.submit`) stamps the style into the document's own frontmatter as `review_marker_style` the moment its cycle opens, and the coordinator writes that document's edit markers against the pinned value from then on — a class-wide style change never rewrites the markers on a document already mid-review.
 - **Make the review routines actually run** — `/lazy-review.install` always registers `lazy-review.coordinator-watch`, `lazy-review.collect`, and `lazy-review.sanitize`, whether or not the core daemon is on; a registered-but-idle routine just means nothing is consuming it yet. What decides whether they fire on schedule is the `lazycortex-core` runtime daemon itself — toggle `daemon.enabled` and run the supervisor via `/lazy-core.install`, or use `/lazy-runtime.tick` to fire the same routines by hand on a checkout with no daemon running.
 - **Attach an extra protocol to the coordinator's watch routine** — `/lazy-review.install` only ever attaches the mandatory coordination-playbook and markdown-style protocols, and never asks; run `/lazy-routine.offer-protocols` afterwards to add anything beyond that pair.
 - **Register the CLI allow-pattern after a settings reset** — re-run `/lazy-review.install`. It adds `Bash(lazycortex-review *)` to `settings.local.json` only if the pattern is absent; re-running is safe.

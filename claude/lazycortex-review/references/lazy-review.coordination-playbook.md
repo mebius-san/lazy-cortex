@@ -126,7 +126,7 @@ Every dispatch, whatever its mode, carries:
 | `source` | `[{"path": "source/<file>"}]` — one entry, naming the file the bundle's own `source` or `source_inline` entry lands under. |
 | `context` | `[{"path": "context/<file>"}, …]` — one entry per context file; omit the field entirely when there are none. |
 | `result` | `[{"path": "result/<file>"}]` — the empty file the expert writes its output into. |
-| `edit_marker_style` | The class's marker style, `review.edit_marker_style` (default `simple`). |
+| `edit_marker_style` | The document's pinned `review_marker_style` frontmatter; only when the pin is absent, `review.edit_marker_style` from settings (default `simple`). The pin is seeded at review entry so a settings change mid-cycle never reaches an open review. |
 
 **Decisions-registry context.** Before every main or barrier (`validation` / `terminal`) writer dispatch — never before `doc_doctor`'s repair dispatch — run `Bash(lazycortex-review decisions-context <file>)`. It returns a map keyed by context filename, each value that registry's text: when the reviewed document sits inside a spec asset folder, whichever of `decisions-asset.md` / `decisions-product.md` resolves to an existing registry (a missing `decisions.md` is normal — it is created lazily by the first decision recorded into it — and the verb omits it silently, never a warning); outside a spec asset folder it returns `{}`. Fold every returned key into that dispatch's `context` field above as `{"path": "context/<key>"}`, and the key with its text into the bundle's `context_inline` — the two registries share the basename `decisions.md` on disk, so they take the inline door under their disambiguated names rather than the path bucket, which would land both under one name.
 

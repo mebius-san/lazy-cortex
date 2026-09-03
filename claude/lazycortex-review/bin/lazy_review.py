@@ -359,8 +359,9 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
   """
   Print the document with its edit-annotation markup resolved to final text.
 
-  The body is run through `edit_markup.strip_markers` with the repo's configured
-  `review.edit_marker_style`; the frontmatter is printed untouched. Used by the
+  The body is run through `edit_markup.strip_markers` with the document's pinned
+  `review_marker_style` (repo settings as fallback); the frontmatter is printed
+  untouched. Used by the
   coordinator to build the markup-resolved source for validation / terminal
   writer dispatches — those experts judge the document's final state, not the
   raw diff material main writers work on.
@@ -395,9 +396,9 @@ def cmd_strip_markup(args: argparse.Namespace) -> int:
   _meta, body = _fm.parse(text)
   fm_text = text[: len(text) - len(body)]
 
-  # resolve the body's edit markup per the configured style; an unknown style must not
+  # resolve the body's edit markup per the document's pinned style; an unknown style must not
   # kill the dispatch — `body` stays the raw document half and the verb degrades gracefully
-  style = finalize.settings_edit_marker_style(file_path)
+  style = finalize.document_edit_marker_style(file_path)
   try:
     body = edit_markup.strip_markers(body, style=style)
   except ValueError:

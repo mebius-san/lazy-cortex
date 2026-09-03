@@ -67,7 +67,7 @@ from keys import Bucket, Phase, ReviewKey, Tag  # noqa: E402
 # key outside this set surfaces in the report as `unknown_review_keys` instead of `frontmatter`.
 _KNOWN_REVIEW_KEYS = frozenset({
     ReviewKey.ACTIVE, ReviewKey.ROUND, ReviewKey.APPROVED, ReviewKey.PHASE, ReviewKey.RESULT,
-    ReviewKey.MAIN_DONE, ReviewKey.EXPERT, ReviewKey.VALIDATION_ROUND,
+    ReviewKey.MARKER_STYLE, ReviewKey.MAIN_DONE, ReviewKey.EXPERT, ReviewKey.VALIDATION_ROUND,
     ReviewKey.APPROVED_WITH_CONCERNS,
 })
 _BOOL_REVIEW_KEYS = frozenset({ ReviewKey.ACTIVE, ReviewKey.APPROVED, ReviewKey.APPROVED_WITH_CONCERNS })

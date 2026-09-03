@@ -41,6 +41,7 @@ These never appear in a technical document, whatever the section:
 - **Synonym rotation for established terms.** See Terminology discipline.
 - **Connective padding.** Announcing what a sentence is about to say, restating what a neighboring sentence already said, naming the document's own kind in its prose ("The feature is…", "This design describes…") — the section heading and the frontmatter already say what the document is; open with the subject itself.
 - **Prose-text links.** A link's display text is the target's own name, verbatim and untranslated (`[[…/vision|vision]]`, `[[…/decisions#D-007 — thesis|D-007]]`) — never an inflected word, a translated word, or a sentence fragment. A sentence that needs the link woven into its grammar names the target and lets the name carry the link.
+- **Nominalized clause chains.** A claim names who does what to what: one subject, one concrete verb, the document's own names for both. Replacing a named operation with an abstract nominal turn ("recovery arrives where the vault is configured" for "deploy runs on a configured machine", "at the cost of unaccounted config" for "deletes local settings the record does not carry") passes the no-filler bar while hiding the actor and the operation — the sentence gets shorter and stops parsing. If parsing a sentence takes more than two clauses, split it; if it paraphrases around a name the document or its upstream already has, put the name back.
 
 ## Structure discipline
 
@@ -68,6 +69,7 @@ These thoughts mean stop — you are about to violate this aspect:
 | "Everyone knows these two words mean the same thing here." | Downstream greps and downstream experts do not. One term. |
 | "This phrasing sounds natural, like a colleague explaining it." | The reader is not your colleague and was not in the conversation. Name the operation. |
 | "`cfg` is obvious from context and shorter." | It is shorter to type and slower to read. Write the word. |
+| "Fewer words — I compressed it into one dense sentence." | Density that swaps names for abstractions is not compression, it is encryption. Keep the names, split the sentence. |
 
 Red flags in your own output: a sentence with no verifiable fact and no obligation; two names for one concept; an adjective you could not defend with a measurement; an opening sentence that does not mention the document's subject.
 
@@ -75,6 +77,7 @@ Red flags in your own output: a sentence with no verifiable fact and no obligati
 
 - Every sentence in a document you write carries a verifiable fact or an obligation; delete sentences that carry neither.
 - Prefer concrete nouns, numbers, paths, and entity names over abstractions in every claim.
+- State every claim as one subject and one concrete verb, using the document's own names for both; split any sentence whose parsing takes more than two clauses.
 - Use exactly one term per concept for the whole document; never rotate synonyms for an established term.
 - Take terms verbatim from the upstream document; introduce a genuinely new term once, with a definition, then keep it fixed.
 - When the repository's terms dictionary names the concept differently from the upstream document, use the dictionary's term and state the disagreement in your document.
