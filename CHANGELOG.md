@@ -596,6 +596,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-specs
 
 
+### 7.3.1 — 2026-09-05 UTC
+
+- The vision templates' Requirements guidance now separates a goal from a requirement: a goal names the state the operator wants, a requirement names what the system is obliged to do to reach it. A line that restates the goal with the system as its subject belongs in Goals.
+
 ### 7.3.0 — 2026-09-05 UTC
 
 - New `vault-tech.md` template gives the vault root and its Products section a tech document of their own, separate from a single product's system tech doc.
