@@ -20,6 +20,8 @@ from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from job_response import classify_response, read_response
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from provider_env import resolve_provider
 
 from constants import (
   HookName, IncidentActor, IncidentKey, IncidentKind, IncidentPhase, JobCollectKey, JobConfigKey,
@@ -140,6 +142,9 @@ def dispatch_job(
     - The `source/` and `context/` buckets an expert reads carry the work tree as it stands when
       the pump claims the job, never as it stood at dispatch; only `source_inline` and
       `context_inline` are written at dispatch, for content that exists in no file.
+    - The expert's configured `provider` entry is resolved and validated before any job
+      bundle is written, so a misconfigured provider fails the dispatch loudly rather than
+      surfacing later inside the pump.
 
   Notes:
     - Records a best-effort `unpinned_model` incident on the error ledger when the model
@@ -181,6 +186,10 @@ def dispatch_job(
   Returns:
     `{job_id, queue_path}` on a fresh dispatch, or
     `{job_id, status: "already-queued"}` on a dedup hit.
+
+  Raises:
+    ProviderConfigError: If the expert's configured `provider` entry is missing, incomplete,
+      or violates a naming constraint.
   """
 
   # Contract:
@@ -223,6 +232,16 @@ def dispatch_job(
   # resolve expert settings before any filesystem mutation so a misconfigured
   # expert surfaces at dispatch time rather than after partial setup
   expert_entry = _resolve_expert_entry(repo, expert)
+
+  # Contract:
+  # The expert's configured `provider` entry MUST be resolved and validated before any job
+  # bundle filesystem mutation — a misconfigured provider raises `ProviderConfigError` here,
+  # with no bundle directory created and no `READY` marker touched.
+
+  # provider: resolved and validated NOW so a misconfigured endpoint fails the dispatch
+  # loudly, before READY — never at spawn time inside the pump
+  provider_name = expert_entry.get(JobConfigKey.PROVIDER)
+  provider = resolve_provider(repo, provider_name) if provider_name else None
 
   # the bundle slot: a caller-supplied id keeps dispatches addressable, otherwise mint one
   job_id = job_id or uuid.uuid4().hex[:12]
@@ -275,6 +294,7 @@ def dispatch_job(
     JobConfigKey.ARGUMENTS:         dict(expert_entry.get(JobConfigKey.ARGUMENTS) or {}),
     JobConfigKey.GIT_AUTHOR:        expert_entry.get(JobConfigKey.GIT_AUTHOR, {}),
     JobConfigKey.MODEL:             model,
+    JobConfigKey.PROVIDER:          provider,
     # Per-expert MCP allow-list: path(s) to explicit --mcp-config files. Owner
     # reads its own settings (dev.plugin-boundaries § 3); the spawn always runs
     # --strict-mcp-config so ambient operator MCP servers are never inherited —

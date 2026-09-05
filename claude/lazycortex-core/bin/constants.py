@@ -336,6 +336,7 @@ class JobConfigKey:
       `source/` when it claims the job.
     CONTEXT_PATHS: The `context_paths` key — repo-relative paths the pump copies into
       `context/` when it claims the job.
+    PROVIDER: The resolved provider block for the spawn, or unset for Anthropic.
   """
 
   AGENT = "agent"
@@ -350,6 +351,7 @@ class JobConfigKey:
   WORKSPACE = "workspace"
   SOURCE_PATHS = "source_paths"
   CONTEXT_PATHS = "context_paths"
+  PROVIDER = "provider"
 
 
 # ----------------------------------------------------------------------------------------
@@ -381,6 +383,7 @@ class SettingsKey:
     AGENT_MODELS: The agent-model-tier registry section name.
     HOOKS: The lifecycle-hook enablement section name.
     LEGACY_VERSION: The pre-split root-level version key migrations fold away.
+    PROVIDERS: The provider configuration section name.
     EXTERNAL_DIRS: The externally-sourced working-directory declaration section name.
   """
 
@@ -391,6 +394,7 @@ class SettingsKey:
   AGENT_MODELS = "agent_models"
   HOOKS = "hooks"
   LEGACY_VERSION = "version"
+  PROVIDERS = "providers"
   EXTERNAL_DIRS = "external_dirs"
 
 

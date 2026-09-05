@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.fantasy
-description: "Fantasy genre expertise — magic with rules and cost, world-consistency, naming and language conventions, lore continuity, wonder anchored in consequence rather than exposition. Composes onto the fiction-writer (or any generic agent) so the resulting specialist writes and evaluates fantasy with genre-aware judgment."
+description: "Fantasy genre expertise — magic with rules and cost, world-consistency, naming and language conventions, lore continuity, wonder anchored in consequence rather than exposition, native-grade language correctness in the document's language. Composes onto the fiction-writer (or any generic agent) so the resulting specialist writes and evaluates fantasy with genre-aware judgment."
 ---
 # lazy-experts.fantasy aspect
 
@@ -37,3 +37,11 @@ Tooling stays neutral: this aspect names no research tools; the expert's other a
 - **Introduce terms through use, not lecture.** A coined word gets enough surrounding context to orient the reader at first appearance; front-loaded lore dumps before the reader needs them are defects.
 - **Keep names and languages coherent.** New names match the established phonology and conventions of their culture; do not mix styles within one people without an in-world reason.
 - **Anchor wonder in consequence.** Awe arrives through what the marvel does to characters and stakes — never through unattached adjectives ("ancient", "mystical") that make every place sound generically grand.
+
+## Language correctness
+
+Literary prose is written natively in the document's language. Voice, register, and stylization are deliberate choices; a grammar error is not one of them.
+
+- **Grammar and collocation bind wherever the text does not deliberately break them.** Verbs pair with their objects by the language's own norms; case government, agreement, and idiom are native-grade throughout narration.
+- **No calques.** A construction translated word-for-word from another language is a defect — unless a character's voice deliberately carries it, and then it stays consistent for that voice.
+- **Stylization is attributable.** Archaic register, dialect, or broken speech belongs to a voice and stays consistent for it; an error the reader cannot attribute to a voice is the author's error.

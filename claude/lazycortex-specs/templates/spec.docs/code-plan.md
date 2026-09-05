@@ -23,7 +23,7 @@ spec_source_docs: []
 <!-- Ordered tasks. Each names the exact files it creates, modifies, or deletes before its steps begin. -->
 
 ## Verification
-<!-- The repository's own check and test commands, cited as they exist in the repo. The last task runs the whole check sweep and the entire test suite. -->
+<!-- "Verification: Confirmation by examination and through provision of objective evidence that specified requirements have been fulfilled." — ISO 9000 -->
 
 ## Rollback
 <!-- How to back the change out — a revert command for a small commit, a step-by-step sequence for a migration. -->

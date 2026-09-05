@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-02
+last_regen: 2026-09-05
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -38,7 +38,7 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: dcf8d33f2b4551fe855abfab3c4b83a79f9d63a3
+source_sha: 5f52ac7ab3d1f972b3d8a6f018a3f1c9a3f6607c
 ---
 # Troubleshooting
 
@@ -235,6 +235,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Fix (`parse-error`)**: Fix the malformed frontmatter in the flagged agent file, then re-run `/lazy-core.install` to pick it up.
 
 **Fix (`protocol-unresolvable`)**: Verify the protocol file exists at the referenced path, or reinstall the plugin that should ship it (`/plugin update <plugin>@lazycortex`), then re-run `/lazy-core.install`.
+
+---
+
+## `/lazy-core.install` Step 11.5 reports a provider as `failed`
+
+**Symptom**: `/lazy-core.install` completes, but its Step 11.5 report includes a line like "`<name>: failed — <reason>`" instead of "`<name>: seeded`", and the provider is unusable by any expert afterward. Installation continues regardless — a provider failure never aborts the run.
+
+**Likely cause**: When you opt into naming a provider, Step 11.5 dispatches `/lazy-core.providers add <name>` on your behalf, and that sub-skill's own validation aborted the write before anything reached disk. The `<reason>` names the actual defect — a blank `base_url` or `token_env`, a four-tier `models` map missing coverage for `fable`/`opus`/`sonnet`/`haiku`, a `claude-*` literal used as a tier value, the `openai` provider's tiers missing the required `rt-openai/` prefix, a `token_env` variable that resolves in neither the environment nor `~/.claude/.env`, or an endpoint that doesn't answer `/v1/models` with 200 for the given token.
+
+**Fix**: Run `/lazy-core.providers add <name>` directly and answer its wizard again, correcting the field the reason names. Providers are optional — every expert job still works against the Anthropic default with no entry at all, so there is no need to re-run `/lazy-core.install` just to retry one failed provider.
 
 ---
 
@@ -479,6 +489,26 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: The skip guard for this section only fires when it finds none of an `experts` section, a `lazy-core.runtime` section, or a non-empty `external_dirs.paths` list — if your settings file stores this configuration somewhere non-standard, the guard misses it.
 
 **Fix**: Run `/lazy-core.audit` directly — Agent D surfaces the same expert-runtime findings without the skip guard, so you can confirm what doctor missed.
+
+---
+
+## `/lazy-core.doctor` reports a `provider_*` FAIL finding
+
+**Symptom**: `/lazy-core.doctor` reports one of `provider_unknown`, `provider_endpoint_incomplete`, `provider_tier_gap`, `provider_claude_literal`, or `provider_reserved_route` against your project's provider configuration.
+
+**Likely cause**: This check merges the tracked `providers` block with its gitignored local overlay (local wins) and validates it with the same rules the runtime applies at expert-dispatch time, so a passing check here can never drift from what actually happens at spawn. `provider_unknown` means an expert's `provider` field names something absent from that merged block entirely — a typo, or a provider removed from this machine's local overlay while still assigned to an expert. The other four mirror `/lazy-core.providers`'s own field validation: `provider_endpoint_incomplete` (a blank `base_url` or `token_env`), `provider_tier_gap` (the four-tier `models` map is missing one of `fable`/`opus`/`sonnet`/`haiku`), `provider_claude_literal` (a tier value is a `claude-*` model name, which cannot route through a foreign endpoint or the local proxy), and `provider_reserved_route` (the `openai` provider's tiers must carry the `rt-openai/` prefix rather than the bare `openai/*` interactive-key route).
+
+**Fix**: For `provider_unknown`, either register the missing provider with `/lazy-core.providers add <name>` or point the expert's `provider` field at one that already exists. For the other four, run `/lazy-core.providers update <name>` and correct the field the finding names — the wizard re-validates before writing, so a corrected entry clears the finding on the next doctor run. `/lazy-core.doctor` only surfaces these findings; it does not write the fix for you.
+
+---
+
+## `/lazy-core.doctor` reports `provider_token_missing`
+
+**Symptom**: `/lazy-core.doctor` reports a WARN finding like "`provider_token_missing: providers.<name>.token_env=<var>`".
+
+**Likely cause**: The `token_env` variable name recorded for that provider does not resolve in either the current environment or `~/.claude/.env` — the same two places the runtime checks when an expert actually dispatches against that provider. The entry itself is structurally valid; only the credential is missing right now.
+
+**Fix**: Export the named variable in your shell, or add it to `~/.claude/.env`, then re-run `/lazy-core.doctor` to confirm the warning clears. If the variable name itself is wrong, run `/lazy-core.providers update <name>` to correct `token_env`.
 
 ## `/lazy-core.agent-models` fails with "invalid --scope value"
 

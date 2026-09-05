@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Bootstrap the plugin, register products, audit a product's spec health, and look up its full skill surface.
-last_regen: 2026-09-02
+last_regen: 2026-09-05
 diagram_spec:
   anchor: "How the pieces fit together"
   request: "Flow diagram showing the install-and-audit lifecycle: lazy-spec.install as the first step (creates consumer template dirs, registers lazy-spec.gate-tick routine, wires request-handler runtime across channels 6a–6g), leading to lazy-spec.product-config (product creation wizard: writes product record to lazy.settings.json[products], scaffolds folder tree with # Summary protected sections and précis+stats markers, generates five behavior-keyed review classes — one per doc-kind (design@, code-plan@, test-plan@, tech@, bug@) with wildcard globs spanning every asset folder — and normalizes the lazy-review.scan coarse discovery masks), lazy-spec.doctor as a recurring health-check loop that dispatches four parallel agents (A: link health, B: source staleness, C: role/header/stage, D: status gates/folders/intake) plus inline Check 8 cross-reference and Check 9 upstream-sources checks, and lazy-spec.help as an always-available discovery entry point at the side. Show lazy-spec.install feeding into lazy-spec.product-config, lazy-spec.product-config completing to a registered product, and lazy-spec.doctor pointing back at the registered product as a recurring validation pass. Keep lazy-spec.help separate."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-spec.product-config
   - lazy-spec.doctor
   - lazy-spec.help
-source_sha: 1b689561a0e7e209e2a4702d8e2a62746d8de3dd
+source_sha: a979f4a08bacbe592fccb8e955dd7f39a385eb19
 ---
 # Bootstrapping, configuring products, and auditing spec health
 

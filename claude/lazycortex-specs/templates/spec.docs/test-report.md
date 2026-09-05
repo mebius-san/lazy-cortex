@@ -13,10 +13,10 @@ wiki_pinned_topics:
 <!-- Append-only working journal, written during execution — never after the fact. -->
 
 ## Verdict
-<!-- What is proven to work, what is not, and what was left unexercised. -->
+<!-- "Test completion report: A type of test report produced at completion milestones that provides an evaluation of the corresponding test items against exit criteria." — ISTQB Glossary -->
 
 ## Defects
-<!-- What broke, with the verbatim decisive output and the shortest steps to reproduce it. -->
+<!-- "Defect report: Documentation of the occurrence, nature, and status of a defect." — ISTQB Glossary -->
 
 ## Open questions
 <!-- Questions against the plan or the spec that only the operator can answer, still unanswered. -->
@@ -28,4 +28,4 @@ wiki_pinned_topics:
 <!-- Departures from the plan made without the operator — substituted data, a skipped step, a chosen environment — and the grounds for each. -->
 
 ## Log
-<!-- One entry per test of the plan, in its order and under its name: actual result against expected. A block carrying a `Cases` list gets one entry naming the cases that failed, not one entry per case. A test that could not run is recorded as blocked, with the reason. -->
+<!-- "Test log: A chronological record of relevant details about the execution of tests." — ISTQB Glossary -->

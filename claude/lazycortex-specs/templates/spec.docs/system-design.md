@@ -18,19 +18,22 @@ spec_source_docs: []
 <!-- Opens with a reference to the sibling vision (goals and value live there, never here). What the system is and why it exists. -->
 
 ## Design
-<!-- The system's key decisions with WHY it is this way and not otherwise. -->
+<!-- "Important, expensive, large scale or risky architecture decisions including rationales. With 'decisions' we mean selecting one alternative based on given criteria." — arc42 §9 Architecture Decisions -->
 
 ## Behavior
-<!-- Observable behavior of the system, as its user experiences it. -->
+<!-- "The runtime view describes concrete behavior and interactions of the system's building blocks in form of scenarios." — arc42 §6 Runtime View -->
+
+## Constraints
+<!-- "Constraint: externally imposed limitation on the system, its design, or implementation or on the process used to develop or modify a system." — ISO/IEC/IEEE 29148 § 3.1.7. "Anything that limits the architect's freedom of design decisions." — arc42 §2 Architecture Constraints. Facts of the environment and decisions taken elsewhere that this design works within; the requirements it satisfies live in the sibling vision. -->
 
 ## Risks
-<!-- The risks of this design, worked: what could sink it and what the design does about each. -->
+<!-- "A list of identified technical risks or technical debts, ordered by priority." — arc42 §11 Risks and Technical Debt -->
 
 ## Known Limitations
-<!-- Things the system does, but with a known ceiling — accepted constraints. -->
+<!-- "Identify any product features or characteristics that a stakeholder might anticipate, but which are not planned to be included in the new product." — Wiegers, Vision & Scope, Limitations and Exclusions -->
 
 ## Boundaries
-<!-- What the system deliberately does NOT do; seams with neighboring systems, who owns what. -->
+<!-- "System scope and context — as the name suggests — delimits your system (i.e. your scope) from all its communication partners (neighboring systems and users)." — arc42 §3 Context and Scope -->
 
 # Sources
 #protected/spec/sources

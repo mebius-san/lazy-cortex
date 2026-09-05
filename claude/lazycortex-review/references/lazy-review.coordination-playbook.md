@@ -202,7 +202,7 @@ A section-writer dispatch (`terminal`; a `validation` one is identical but for `
 
 **Mid-command failure.** A step failing partway stops the whole chain — no continuation past a failed step. Lock the block with an outcome line naming where it stopped: `reached step N, failed at <what failed>`.
 
-**Completion.** Once every step reads `✓`, or the chain locked on a failure, the whole block — plan, marks, outcome — moves as one unit into `# History` and the callout is removed, leaving the channel empty again.
+**Completion.** Once every step reads `✓`, or the chain locked on a failure, the callout is removed, leaving the channel empty again, and `# History` gets one ordinary content line for the command: what the document now says (or no longer says) because of it — for a failed command, what the operator asked and where it stopped. The mini-plan with its step marks is the coordinator's working state and dies with the callout; internal dispatch steps are process the operator never needs back.
 
 **A command runs on a stuck document.** Whatever else is true — a turn in flight, a barrier held, a job whose marker never cleared — the command is an operator gesture aimed deliberately at this document, and it is how the operator directs recovery. It is also the operator's manual wake: a trigger that was lost to a detection edge is recovered by dropping a command in. Never blocked.
 
@@ -222,7 +222,7 @@ Three kinds of breakage, and they are handled differently:
 
 ## 7. History
 
-`# History` is one line per **approved state** of the document, written inline by the coordinator in the same wake that reaches that state. There is no historian job and no historian gate on finalize — the entry cannot land in an already-closed document because it is written before the transition that closes it.
+`# History` is one line per **landed round** of the document — the opening round included — written inline by the coordinator in the same wake that lands it. "Awaiting operator" is not an exemption: a round whose landing leaves no line has not been journaled. There is no historian job and no historian gate on finalize — the entry cannot land in an already-closed document because it is written before the transition that closes it.
 
 **The section is bootstrapped, tagged, and terminal.** The entry verb (`start` / `submit`) creates the empty section at the end of the body with `#protected/review/history` as its first content line, followed by an asterisk-italic explainer line (`*...*`, in the vault's language) — the section's self-description for the operator, owned by the entry verb, never one of the coordinator's lines. That tag is the section's identity (recognition is tag-based, never title-based) and marks it persistent under the cross-plugin protected-section contract — it survives every pass, finalize included. The coordinator appends its lines below the explainer, never creates a second `# History`, never removes the tag or the explainer, and the section stays the document's last H1: bottom-positioned validation sections insert before it.
 
@@ -230,11 +230,13 @@ Three kinds of breakage, and they are handled differently:
 
 **What it never says.** Who changed it. That a review happened. Which round it was. Which expert spoke. Any part of the process is out — the process is not what the reader of a finished document came for.
 
+**An operator removal is named, never summarized away.** When the state being journaled includes content the operator took out — a deleted goal or thesis, a proposal turned down on a marked callout, a withdrawn section — the line names that content recognizably: "the document no longer says X", with X concrete enough that a later writer knows exactly what left. The discipline layer binds writers to treat such a line as a one-way door (removed content is never reintroduced without the operator), and a removal folded into "and two smaller changes" disarms that protection. This stays a content line in the section's normal register — what changed, not who removed it.
+
 **Shape.** One sentence. When several unrelated things changed in the same approved state, name the most significant and mention the rest by count rather than listing them.
 
-**Deriving it.** The coordinator has Bash: the diff between the previous approved state's commit and the current one is the input, and the `# History` lines already present say what has been claimed before, so a new line does not repeat one. Reading the document is not optional here — a line written from the diff's mechanics alone narrates edits, which is the process, not the content.
+**Deriving it.** The coordinator has Bash: the diff between the previous landing's commit and the current one is the input, and the `# History` lines already present say what has been claimed before, so a new line does not repeat one. Reading the document is not optional here — a line written from the diff's mechanics alone narrates edits, which is the process, not the content.
 
-**The one block that is not a line.** A finished command block moves into `# History` whole (Chapter 5). It is a record of an operator instruction and its outcome, not a review round, and it is the only exception to the one-line form.
+**A command is a line like any other.** A finished command produces one content line — what changed in the document because of it (Chapter 5). The command's mini-plan, its step marks, and every other trace of how the coordinator executed it never enter `# History`: internal steps are process, and the section has no exceptions to the one-line form.
 
 **Finalize is gated on the line.** A wake whose move is finalize checks `# History` before the transition: when the cycle now closing has produced an approved state and no line records it, write the line first, in the same wake, before finalize — after the transition there is no wake left to write it. An empty `# History` on a finalized document is a coordinator failure, never a valid outcome, and the gate has no document-kind carve-outs: the report journals (`code-report.md` / `test-report.md`) get their line exactly as a design does — the line narrates what the journal now records that it did not before, which is content, not process.
 

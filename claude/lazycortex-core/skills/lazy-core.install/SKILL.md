@@ -27,6 +27,7 @@ This skill has 21 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 10.5 — Bootstrap .memory/ directory`
    - `Step 10.7 — Install lazy-claude wrapper`
    - `Step 11 — Register expert candidates`
+   - `Step 11.5 — Seed providers (optional)`
    - `Step 12 — Bootstrap built-in routines (expert pump, doctor tick, index guard, weekly autocheckup)`
    - `Step 12.5 — Restore externally-sourced working directories`
    - `Step 13 — Daemon gate (enabled + run_here) + supervisor install`
@@ -530,6 +531,41 @@ save_section(p, 'experts', section)
 The two names differ on purpose: the key is the § 3 `<domain>.<role>` form, the `agent` value keeps the artifact's own namespaced name.
 
 State one line per candidate: `<expert_key>: registered`.
+
+## Step 11.5: Seed providers (optional)
+
+If Step 9 resolved no repo (outcome `skipped-not-in-git-repo`), inherit that outcome and skip this step (there is no settings file to write).
+
+Providers are optional — every expert job works against the Anthropic default with no entry at all. Skip silently, no question, when a `providers` block already exists (tracked or local overlay):
+
+```bash
+PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+import json
+from pathlib import Path
+from lazy_settings import load_tracked_section, load_local_only_section
+p = Path('<repo-root>/.claude/lazy.settings.json')
+tracked = load_tracked_section(p, 'providers')
+local = load_local_only_section(p, 'providers')
+print(json.dumps({'tracked': tracked, 'local': local}))
+"
+```
+
+Any key besides `_version` in either view → state **already-configured**, skip to Step 12.
+
+Otherwise ask **once**:
+
+```
+AskUserQuestion:
+  header: "Providers"
+  question: "Connect alternative LLM providers for expert jobs?"
+  description: "A provider entry lets an expert's `provider` field spawn against a non-Anthropic endpoint (base URL, token variable, four-tier model map) instead of the Anthropic default. Entries live in the gitignored `.claude/lazy.settings.local.json`, never in tracked settings — 'No' writes nothing; run `/lazy-core.providers add` any time later."
+  options: ["Yes — name the provider(s)", "No"]
+```
+
+- **"No"** → state **skipped-per-operator-choice**, no write.
+- **"Yes"** → ask which provider name(s) to add (free-form, one or more). For each: if this machine already carries a configured entry for that name — known to this session from another repo's local overlay on the same host (a sibling checkout, an `additionalDirectories` path, or the operator naming the values directly) — dispatch `Skill(skill: "lazycortex-core:lazy-core.providers", args: "add <name>")` and answer its wizard with the known `base_url` / `token_env` / four-tier `models` verbatim, without re-deriving or re-confirming a value already on record elsewhere on this host. Otherwise dispatch the same skill and let its own wizard collect and validate the entry interactively.
+
+State one line per provider: `<name>: seeded` or `<name>: failed — <reason>` (the sub-skill's own validation aborted the write; installation continues regardless).
 
 ## Step 12: Bootstrap built-in routines (expert pump, doctor tick, index guard, weekly autocheckup)
 

@@ -293,9 +293,7 @@ How many to mark depends on the framing:
 
 When framing is ambiguous, default to single-select.
 
-## Recommendation markers in operator-facing tick-lists outside callouts
-
-The same `★` discipline applies to `- [ ]` lists the author writes OUTSIDE callouts (e.g. a `## Routing` section's checkbox rows): every operator-facing tick-list carries at least one `★`. Lists that are NOT operator-facing tick-lists (plain bullets, prose enumeration) do not use `★`.
+The rule covers every operator-facing tick-list, inside a callout or outside one (a `## Routing` section's checkbox rows, for instance). Lists that are not operator-facing tick-lists — plain bullets, prose enumeration — do not use `★`.
 
 ## Edit-annotation markers for prose mutations
 
@@ -338,7 +336,10 @@ Concretely:
 - **Keeping an existing tagged callout** — the block stays byte-for-byte where it was. Don't touch.
 - **Retiring a tagged callout** (e.g. a resolved `[!question]` whose answer was folded into prose) — the whole block is plain-deleted. No marker, no fence. The accompanying prose change that captured the answer goes through `edit_marker_style` markers as a normal body-prose mutation.
 
-**Wholly new sections** (H1 / H2 headings added where nothing existed before) are also written bare — live content downstream needs to parse.
+**A marker annotates a change to existing text; where there is no existing text, none is emitted.** Two cases fall under this and are written bare, so live content downstream parses:
+
+- **A wholly new section** — an H1 or H2 heading added where nothing existed before, together with its body.
+- **The first content of an empty section** — a section whose body holds only its template comment (or nothing at all) is empty; the writer fills it with plain prose. A later round mutating that prose marks its mutation as usual.
 
 At finalize time the consumer strips all markers from the chosen style and the prose lands as final text.
 
@@ -387,3 +388,5 @@ Mathematical formulas in markdown documents are written in Obsidian-compatible L
 ## Links
 
 Wikilinks (`[[target|display]]`) for vault-internal references — they survive moves. Regular markdown links (`[text](url)`) for external URLs.
+
+A link's display text is the target's own name, verbatim and untranslated (`[[…/vision|vision]]`, `[[…/decisions#D-007 — thesis|D-007]]`) — never an inflected word, a translated word, or a sentence fragment. A sentence that needs the link woven into its grammar names the target and lets the name carry the link.

@@ -160,7 +160,7 @@ Group folders (`features/` and the rest) and their operator-zone folder-notes ap
 
 ### P4 — Author product-vision and product-design prose
 
-**Vision first.** Before the design, author `<spec_path>/vision.md` (doc type `system-vision`) when it does not exist yet: instantiate `${CLAUDE_PLUGIN_ROOT}/templates/spec.docs/system-vision.md` with the product key and fill its sections from the code evidence — Overview (what this is and for whom), Goals (the outcomes the code visibly serves; goals live ONLY here), Value Proposition, Design Concept (one paragraph plus a reference to the sibling design), Risks (raw risks of the intent). Then set its stage via `lazy-spec.set-stage` → `draft`. A pre-existing `vision.md` is left untouched.
+**Vision first.** Before the design, author `<spec_path>/vision.md` (doc type `system-vision`) when it does not exist yet: instantiate `${CLAUDE_PLUGIN_ROOT}/templates/spec.docs/system-vision.md` with the product key and fill its sections from the code evidence, following each section's own template comment. Then set its stage via `lazy-spec.set-stage` → `draft`. A pre-existing `vision.md` is left untouched.
 
 The product design doc describes WHAT the product is, who uses it, and what it does — behavior terms only. NO source URLs, file paths, or class/function names. Per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` this doc MUST NOT contain source URLs, and per "Branch handling" it never carries `spec_source_branches`.
 

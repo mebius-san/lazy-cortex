@@ -38,6 +38,7 @@ from reference_resolver import resolve, ReferenceError  # pylint: disable=redefi
 from runtime_daemon import _check_working_tree
 from job_response import classify_response, outcome_tokens, read_response
 from worktree_tasks import WorktreeStartError, WorktreeTaskManager
+from provider_env import ProviderKey, build_spawn_env, resolve_token
 import rate_limit_flag
 from constants import (
   DaemonKey, EnvVar, GitConfigKey, HaltKey, HaltReason, IncidentActor, IncidentKey, IncidentKind, IncidentPhase,
@@ -1049,6 +1050,16 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   attempt per pump tick before the same READY+ERROR outcome. A successful run that leaves
   the working tree dirty raises `_ExpertLeftDirtyTree` so the pump halts the queue.
 
+  When the job carries a resolved provider, the spawn's environment is remapped to that
+  provider's endpoint — tier aliases, `ANTHROPIC_BASE_URL`, and `ANTHROPIC_AUTH_TOKEN` are
+  overridden, and `CLAUDE_CODE_OAUTH_TOKEN` is stripped so the operator's own Anthropic
+  token never reaches it. A token that cannot be found in the environment or in
+  `~/.claude/.env` fails the job before the Claude subprocess is spawned.
+
+  Guarantees:
+    - For a provider-bound job, `CLAUDE_CODE_OAUTH_TOKEN` is absent from the spawn environment —
+      the operator's own Anthropic OAuth token never reaches a foreign endpoint.
+
   Args:
     repo: Repository root the spawn runs inside.
     expert_name: Name of the expert that owns this job.
@@ -1084,6 +1095,7 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
   aspects_refs   = cfg.get(JobConfigKey.ASPECTS) or []
   arguments      = cfg.get(JobConfigKey.ARGUMENTS) or {}
   model          = cfg.get(JobConfigKey.MODEL)
+  provider       = cfg.get(JobConfigKey.PROVIDER)
   mcp_config     = cfg.get(JobConfigKey.MCP_CONFIG)
   setting_sources = cfg.get(JobConfigKey.SETTING_SOURCES)
   # guard: agent reference must be present in config
@@ -1221,6 +1233,31 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
     # pin it on this spawn's own env
     env[EnvVar.MAX_SUBAGENT_SPAWN_DEPTH] = EnvVar.SUBAGENT_SPAWN_DEPTH_PIN
 
+    # a provider-bound job talks to its own endpoint: remap the base URL, swap the
+    # auth token, and pin every tier alias to the provider's model names so nothing
+    # inside the harness leaks a Claude alias to a foreign server
+    if provider:
+      token = resolve_token(provider[ProviderKey.TOKEN_ENV])
+      # guard: no token — fail the job before the spawn, with the variable named
+      if token is None:
+        _write_error(
+          jdir, JobErrorCategory.LOGICAL,
+          f"provider {provider[ProviderKey.NAME]!r}: token variable "
+          f"{provider[ProviderKey.TOKEN_ENV]!r} is set neither in the environment nor in ~/.claude/.env",
+        )
+        return
+      env.update(build_spawn_env(provider, token))
+
+      # Contract:
+      # For a provider-bound job, `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` MUST be
+      # absent from the spawn environment — neither of the operator's own Anthropic credentials
+      # may travel to a foreign endpoint.
+
+      # the Anthropic OAuth token and API key must never travel to a foreign endpoint
+      # waiver: CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are harness-canonical env var names
+      env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+      env.pop("ANTHROPIC_API_KEY", None)
+
     # the buckets are filled now, not at dispatch — a job that waited in the queue starts from
     # the tree as it stands at claim, which is what makes the serial queue safe against a
     # stale snapshot
@@ -1311,7 +1348,9 @@ def _process_one(repo: Path, expert_name: str, jdir: Path) -> None:
 
     # Silence must not read as "all clear": the provider emits a rate-limit frame in every run,
     # so a completed run carrying none means the signal the guard depends on has degraded.
-    if seen_frames == 0:
+    # A provider-bound run is exempt — a foreign endpoint sends no such frames, so silence there
+    # is expected, not a blind spot.
+    if seen_frames == 0 and not provider:
       sys.stderr.write(
         f"rate-limit guard: no rate_limit_event frame in {expert_name}/{jdir.name} "
         f"(exit={returncode}) — guard blind for this run\n"

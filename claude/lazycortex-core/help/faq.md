@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
-summary: Non-obvious answers on install, the runtime daemon and experts, memory, routines, scaffolding, git staging, MCP permissions, and log search.
-last_regen: 2026-09-02
+summary: Non-obvious answers on install, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
+last_regen: 2026-09-05
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -11,6 +11,7 @@ source_skills:
   - lazy-core.slim-context
   - lazy-core.agent-models
   - lazy-core.agent-models-seed
+  - lazy-core.providers
   - lazy-core.daemon-authoring
   - lazy-core.git-status
   - lazy-core.git-unlock
@@ -31,14 +32,7 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-  - lazy-memory.index
-  - lazy-memory.reflect
-  - lazy-memory.mark-persona
-  - lazy-log.clean
-  - lazy-log.recall
-  - lazy-log.summary
-  - lazy-log.timeline
-source_sha: dcf8d33f2b4551fe855abfab3c4b83a79f9d63a3
+source_sha: 5f52ac7ab3d1f972b3d8a6f018a3f1c9a3f6607c
 ---
 # FAQ
 
@@ -307,32 +301,6 @@ This is an operator-invoked skill only — no install or configure flow dispatch
 
 ---
 
-## How do I give an expert long-term memory?
-
-Run `/lazy-memory.mark-persona <expert>` to opt the expert into the memory subsystem. The skill appends `lazycortex-core:lazy-memory.persona-aspect` to the expert's `aspects[]` in `lazy.settings.json[experts]`. From that point:
-
-- The expert may write notes under `.memory/<expert>/` via `/lazy-memory.write` (the only blessed writer of `.memory/`).
-- The expert must consult `.memory/<expert>/.tags/*.md` before its primary work.
-- Periodic consolidation runs via `/lazy-memory.reflect <expert>` (or the daemon's `memory-reflect-all` routine if enabled).
-
-Memory notes are markdown files with frontmatter (`title`, `tags`, `type`, `summary`) and live in `.memory/<expert>/`. They are tracked in git — the directory is un-ignored explicitly so consolidated learnings travel with the repo.
-
----
-
-## What's the difference between `/lazy-memory.write` and `/lazy-memory.reflect`?
-
-`/lazy-memory.write` is the atomic per-note writer — it's how an expert commits a single new memory note to `.memory/<expert>/` during or after a job. `/lazy-memory.reflect <expert>` is a consolidation pass: it dispatches a `kind=reflect` job that hands the expert its own recent run logs (default: last 30 days) plus its current memory notes, and asks it to distill patterns worth retaining — calling `/lazy-memory.write` itself if it finds anything, or returning `outcome=empty` if there is nothing new to consolidate. Both require the expert to be persona-marked first (`/lazy-memory.mark-persona`); `reflect` refuses non-persona-marked experts outright.
-
-Run `reflect` periodically (or via the daemon's `memory-reflect-all` routine, if you enable it) rather than expecting memory to accumulate automatically — dispatching jobs alone only produces run logs, and reflect is what turns those logs into durable notes.
-
----
-
-## A memory note's topic doesn't show up under `.tags/`, or a global tag file points at a note that's gone — how do I fix that?
-
-Run `/lazy-memory.index`. It's a recovery tool, not something you need on a normal write — `/lazy-memory.write` keeps `.tags/` in sync itself every time it lands a note. Reach for `/lazy-memory.index` specifically when notes were hand-edited or moved outside that skill, when `/lazy-core.audit` reports a note carrying a `memory/<topic>` tag that its tag file doesn't list, or when a global tag file references a local one that no longer exists. It walks every expert under `.memory/`, recomputes each one's topic set straight from note frontmatter, and regenerates the whole local-plus-global `.tags/` tree — stale tag files with no backing note are removed. `/lazy-core.slim-context` also offers to run it as part of its own pass. If `.memory/` doesn't exist yet, run `/lazy-core.install` first to bootstrap it.
-
----
-
 ## What is a waivable WARN versus an unwaivable FAIL in the guard scanner?
 
 The distinction is whether the finding represents a certain security boundary violation or a context-dependent judgment call.
@@ -372,6 +340,30 @@ Note that `/lazy-core.audit` uses a lower floor of Python 3.12 for its own runti
 Both happen automatically as part of install, through two skills you never invoke directly. `lazy-core.agent-models-seed` is dispatched by every plugin's own install skill to seed that plugin's curated model tiers (haiku/sonnet/opus) into `agent_models.lazycortex` in `lazy.settings.json`, reading the tier values from `lazycortex-core`'s own `default-tiers.json`. It never overwrites a tier you already set by hand — an existing value is left alone and reported `kept-local`. `lazy-core.scaffold-sync` is dispatched the same way to copy a plugin's authoring templates into your `.claude/templates/<group>/` directories and register their path globs in `lazy-core.scaffold.md`, overwriting a stale copy of a plugin-owned template on every re-run (a template you want to customize belongs in a `_local` entry instead — see the next question — not a hand-edited copy of the plugin's own file).
 
 Both are idempotent and silent when there is nothing new to seed. If either fails because `lazycortex-core` itself is not installed or its `default-tiers.json`/CLI is missing, the reporting install skill surfaces that as a step failure rather than continuing silently.
+
+---
+
+## Does `/lazy-core.install` connect my experts to alternative LLM providers automatically?
+
+Only if you ask it to, and only once. If no `providers` block exists yet (tracked or in the gitignored local overlay), install asks a single yes/no question: connect one or more non-Anthropic endpoints for expert jobs now, or skip and add them later. Answering "No" writes nothing — every expert job keeps running against the Anthropic default with no provider entry at all, since providers are opt-in. Answering "Yes" walks you through naming provider(s) and dispatches `/lazy-core.providers add <name>` for each, which is the same wizard you'd run by hand. If a `providers` block already exists in either the tracked file or the local overlay, install skips the question silently and leaves your existing entries alone.
+
+Once install has asked (either answer), it never asks again — reach for `/lazy-core.providers add <name>` yourself any time later to connect a provider you skipped at install time.
+
+---
+
+## What is `/lazy-core.providers` for, and what does it check before writing an entry?
+
+It manages the `providers` block: named LLM endpoints (base URL, credential env var, a four-tier model map for `fable`/`opus`/`sonnet`/`haiku`) that an expert's own `provider` field in `lazy.settings.json[experts]` can point at instead of the Anthropic default. Because a provider entry is a machine fact — a specific endpoint and a specific credential name — it's written only to the gitignored `.claude/lazy.settings.local.json`, never the tracked settings file; the skill refuses to write at all if that local overlay isn't gitignored.
+
+Before writing an `add` or `update`, it runs the same structural validation the runtime's own dispatch-time resolver applies — so a wizard-approved entry can never diverge from what actually works at spawn time — plus a token-presence check (the named environment variable must resolve via the real environment or `~/.claude/.env`) and a liveness probe (`GET <base_url>/v1/models` with the resolved token must return `200`). Any failing check aborts with no write. Run `/lazy-core.providers list` any time to see registered entries and their source (`tracked` entries are flagged as a WARN — they belong in the local overlay instead).
+
+---
+
+## Why did `/lazy-core.doctor` flag one of my providers, and what do the different findings mean?
+
+`/lazy-core.doctor` re-runs the same validation `/lazy-core.providers` applies at write time against every entry currently on record, so a provider that passed the wizard once but was later hand-edited (or whose upstream requirements changed) doesn't go unnoticed. `provider_unknown` (FAIL) means an expert's `provider` field names something not in the merged `providers` block — register the provider or fix the expert's entry. `provider_endpoint_incomplete` (FAIL) means `base_url` or `token_env` is missing or blank. `provider_tier_gap` (FAIL) means the `models` map is missing one of the four required tiers. `provider_claude_literal` (FAIL) means a tier value is a `claude-*` model name, which can't pass through a foreign endpoint. `provider_reserved_route` (FAIL) is specific to the `openai` provider — its tiers must be prefixed `rt-openai/` rather than routed as a bare `openai/*` interactive key. `provider_token_missing` (WARN, non-blocking) means the named credential variable doesn't currently resolve in the environment or `~/.claude/.env` — the entry is still structurally valid, but a job dispatched against it will fail at spawn time until the variable is set. Fix any of these by re-running `/lazy-core.providers update <name>`, which re-validates before writing.
+
+A provider-bound expert job never receives your own Anthropic credentials — every job dispatched against a provider strips `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` from its spawn environment before the provider's own token is set, so neither of your Anthropic credentials can travel to a foreign endpoint.
 
 ---
 
@@ -437,15 +429,3 @@ Because the heal runs automatically on this cadence, you should rarely see the p
 The staging-window mutex is the previous default and is now dormant on a fresh install — it only takes over when you flip `lazy.settings.json["git"]["pathspec_enabled"]` to `false` and `["mutex_enabled"]` to `true`. In that mode, multiple Claude Code sessions sharing one checkout serialize the staging window — from the first `git add` that makes the index non-empty to the `git commit` that empties it again — so only one session stages at a time, with the same auto-break heuristics as before (holder process dead, on a different host, or idle for a while).
 
 `/lazy-core.git-status` and `/lazy-core.git-unlock` only have something to act on under mutex mode; on the pathspec-discipline default no session ever opens a staging window, so there is nothing to inspect or break. Run `/lazy-core.git-status` to check the lock (holder, age, liveness, whether it's currently breakable) without changing anything, and reach for `/lazy-core.git-unlock` — which asks for confirmation before deleting the lock file — only when status shows a lock the automatic heuristics won't break on their own. Setting `lazy.settings.json["git"]["enabled"]` to `false` silences the hook entirely, in either mode.
-
----
-
-## My `.logs/claude/` directory is cluttered with stray or duplicate-looking folders — how do I clean it up safely?
-
-Run `/lazy-log.clean`. It's read-first: it classifies every folder under `./.logs/claude/` against the live set of skill/agent/command names before touching anything — a folder that's a near-miss of a canonical name (a typo, an old rename) is offered as a merge candidate; folders matching known noise patterns (`task-N`, `subagent-task-N`, `plan-execute`, and similar) are grouped and reviewed together; anything else is reviewed individually. For each group you're asked, one `AskUserQuestion` at a time, to merge into the canonical folder, distill the substantive logs into memory before deleting, delete outright, or leave it alone. Canonical folders themselves are only ever flagged if their newest log is over 30 days old, and even then you choose keep / archive-then-delete / delete — nothing canonical is touched without your say-so. All the mutations you approve are applied in one final pass at the end, after every question has been answered, so a partial run never leaves the directory half-changed.
-
----
-
-## What's the difference between `lazy-log.recall`, `lazy-log.timeline`, and `lazy-log.summary`?
-
-All three search the same sources — `.logs/changelog.md`, run logs under `.logs/claude/`, raw commits in `.logs/commits.jsonl`, git log, and project memory — but return different shapes. `lazy-log.recall` answers a specific question ("why was X changed?" or "when did we touch Y?") with a ranked table of top matches and the git SHAs you need to `git show`. `lazy-log.timeline` takes a date range or topic — or both — and returns a chronological, day-by-day listing; it's the "what happened when" view, and defaults to the last 7 days if you give no range. `lazy-log.summary` aggregates every match for a topic into a multi-paragraph narrative clustered by sub-theme (design decisions, implementation phases, issues encountered, follow-up work) rather than by date — reach for it when you want "the whole story" of a feature or refactor, not a specific answer or a timeline. All three cite git SHAs so you can `git show <sha>` for the exact change, and all three flag gaps or ambiguity rather than guessing.

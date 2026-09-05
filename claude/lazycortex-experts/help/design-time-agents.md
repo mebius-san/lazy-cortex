@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Six agents that turn a raw request into a scoped design, formal use cases, an optional UI, a code-structure design, and an ordered implementation plan.
-last_regen: 2026-08-24
+last_regen: 2026-09-05
 diagram_spec:
   anchor: "The design-time pipeline"
   request: "Flow diagram, five nodes in a line: Interpreter -> Use-Case Writer -> Designer -> Architect -> Planner, edges labeled 'brief', 'use cases', 'design spec', 'architecture doc (optional)'. UI Designer hangs off Designer with a single edge labeled 'approved design' (UI Designer has no edge to Architect or Planner). No other nodes."
@@ -12,7 +12,7 @@ source_skills:
   - lazy-experts.ui-designer
   - lazy-experts.architect
   - lazy-experts.planner
-source_sha: 677538640d7b5a283af2e2e8fbaa99df523fd068
+source_sha: bcdea31f53eb9706332f7cedd297349d426f920b
 ---
 # Design-time agents
 
@@ -24,7 +24,7 @@ Before any code, data, or documentation gets written, six agents turn a raw requ
 
 **lazy-experts.use-case-writer** — Takes a settled brief or request and writes the formal use cases it implies: scenarios in the actor's own language, with no system internals. Every scenario carries an actor, a goal, a main flow, alternative flows, and pre- and postconditions — a scenario missing any of the five ships incomplete. Steps are stated so someone can check them against the running product, never as vague aspiration. It stops short of acceptance criteria and test plans — those belong to the tester's document — and raises a brief that doesn't name the actor or what counts as success as a question rather than guessing.
 
-**lazy-experts.designer** — Takes a gap-free brief and writes a design specification: what is being built and why, never how. It writes declaratively, states facts about the system rather than instructions, and designs the target the brief asks for — never the current implementation's gaps or shortcuts. When a brief surfaces more than one goal, it pushes back: one gets scoped in, the rest deferred. A spec that states no goals, draws no boundary between what the thing does and doesn't do, or slips into imperative sentences ships wrong regardless of how good the prose reads.
+**lazy-experts.designer** — Takes a gap-free brief and writes a design specification: what is being built and why, never how. It designs the target the brief asks for, treating the current implementation's gaps, shortcuts, half-built paths, and TODOs as evidence of where the work stands, never as constraints on the spec — the only thing that narrows scope is an explicit in/out-of-scope line the operator recorded in the brief. Decisions and boundaries already recorded for the product are binding: it follows one or names the contradiction as an open question, never overrides one silently. It stays out of the planner's lane (no file paths, task checklists, test plans, function names, or types) and the interpreter's lane (an incomplete brief gets a question raised against it, never a silent guess). The template's own section skeleton stays exactly as templated, but inside a section it is free to add subheadings wherever they buy structure.
 
 **lazy-experts.ui-designer** — Takes an approved design and settles its user interface: screens, states, navigation, and interaction decisions, written into a ui-design document with self-contained HTML mockups laid down beside it as attachments — no external stylesheets, scripts, fonts, or CDN references, so a reviewer can open one straight in a browser. Every screen states its empty, loading, error, and populated states and what moves it between them. A mockup only ever illustrates a decision the document already states — never the reverse — and it is never production frontend code; it approves a look and a flow, it ships nothing.
 

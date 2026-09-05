@@ -15,7 +15,7 @@ spec_source_docs: []
 # {{slug}} — use-cases
 
 ## Actors
-<!-- Who or what initiates a use case below — a user role, an external system, a scheduled process. -->
+<!-- "Actor: A person in some role, a system or a technical device in the context of a subject under consideration that interacts with that subject." — IREB CPRE Glossary -->
 
 ## Use cases
 ### UC-1 — _<name>_
@@ -27,7 +27,7 @@ spec_source_docs: []
 **Postconditions**: _what is true once this use case completes._
 
 ## Out of scope
-<!-- Actors, actions, or scenarios deliberately not covered here. -->
+<!-- "Functional scope is what functions you choose to deliver or not deliver." — Cockburn, Writing Effective Use Cases -->
 
 # Sources
 #protected/spec/sources

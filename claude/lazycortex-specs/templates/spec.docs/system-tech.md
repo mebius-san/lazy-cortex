@@ -23,7 +23,7 @@ spec_source_docs: []
 <!-- What the product is, in terms of the code that implements it. -->
 
 ## Architecture
-<!-- The modules the product is built from, what each owns, and which way the dependencies run. -->
+<!-- "The building block view shows the static decomposition of the system into building blocks (modules, components, subsystems, classes, interfaces, packages, libraries, frameworks, layers, ...) as well as their dependencies." — arc42 §5 Building Block View -->
 
 ## Components
 <!-- Per component: its responsibility, its public surface, and where it lives. -->

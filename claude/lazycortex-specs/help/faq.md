@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about products, assets, vision/design docs, gates, requests, decisions, coverage gaps, spec lookups, and the coordinator agent.
-last_regen: 2026-09-02
+last_regen: 2026-09-05
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,7 +31,7 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 73781d3513221e28253bd78d907cc43ef85a029c
+source_sha: 8cf0ec8412bf97623e74bdf4d6a5cba5b82d957f
 ---
 # Frequently asked questions
 
@@ -77,7 +77,7 @@ The document layout differs too. Features and changes get `design.md` (no `bug.m
 
 ## Does every asset get a `vision.md`, or is it optional?
 
-Depends on the asset's declared type. A type's `vision` contract is one of three shapes: `mandatory` (the shipped `feature` type — `vision.md` is seeded automatically ahead of `design.md`, and the `Write design` checkbox does not even appear until `vision.md` reaches `approved`), `opt-in` (the shipped `change` type, plus `content` / `research` — offered through a multi-select question at scaffold time alongside `use-cases.md` / `ui-design.md`, and can still be added later), or absent entirely (the shipped `bug` type declares no vision at all — a `bug.md` captures repro/observed/expected, not goals). `vision.md` covers `Overview / Goals / Requirements / Value Proposition / Design Concept` — the asset's goals live ONLY here, never restated in `design.md`, which opens instead with a reference back to the sibling vision and covers what the asset does in behaviour terms. `Requirements` holds the hard constraints the solution must not violate — boundaries, not outcomes — and the sibling design works within them rather than restating them. `vision.md` carries no `Risks` section: risks are worked in the sibling `design.md`'s own `## Risks` section instead, stating what could sink the design and what it does about each. Both `/lazy-spec.create-asset` (and its thin wrappers `create-feature` / `create-change` / `create-bug`) and `/lazy-spec.create-from-code` author `vision.md` first when the type calls for it, and both mark any genuine decision fork the vision or design settles as an inline `[!decision]` callout, ready to `promote` into the decisions registry once the doc is approved.
+Depends on the asset's declared type. A type's `vision` contract is one of three shapes: `mandatory` (the shipped `feature` type — `vision.md` is seeded automatically ahead of `design.md`, and the `Write design` checkbox does not even appear until `vision.md` reaches `approved`), `opt-in` (the shipped `change` type, plus `content` / `research` — offered through a multi-select question at scaffold time alongside `use-cases.md` / `ui-design.md`, and can still be added later), or absent entirely (the shipped `bug` type declares no vision at all — a `bug.md` captures repro/observed/expected, not goals). `vision.md` covers `Overview / Goals / Requirements / Value Proposition / Design Concept` — the asset's goals live ONLY here, never restated in `design.md`, which opens instead with a reference back to the sibling vision and covers what the asset does in behaviour terms. `Requirements` states the obligations the solution must satisfy — each one a single, verifiable statement free of implementation detail (the canonical shape behind the section is "condition, subject, action, object, constraint" per ISO/IEC/IEEE 29148, the same standard `design.md`'s own sections now cite inline) — never a to-do list of tasks. `design.md` does not restate or "work within" those requirements as its own section; instead it carries a separate `## Constraints` section of its own, holding a different thing entirely — facts of the environment and decisions taken elsewhere (a platform limit, a prior architectural commitment) that narrow the design's freedom, distinct from the needs the vision's `Requirements` obliges it to satisfy. `vision.md` carries no `Risks` section: risks are worked in the sibling `design.md`'s own `## Risks` section instead, stating what could sink the design and what it does about each. Both `/lazy-spec.create-asset` (and its thin wrappers `create-feature` / `create-change` / `create-bug`) and `/lazy-spec.create-from-code` author `vision.md` first when the type calls for it, and both mark any genuine decision fork the vision or design settles as an inline `[!decision]` callout, ready to `promote` into the decisions registry once the doc is approved.
 
 ---
 

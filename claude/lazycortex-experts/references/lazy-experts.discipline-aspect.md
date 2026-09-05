@@ -1,6 +1,6 @@
 ---
 name: lazy-experts.discipline
-description: "Cross-cutting execution discipline composed onto every lazy-experts specialist. Adds the superpowers-derived iron laws (verify before completion, never guess past a gap, no performative agreement, no silent decision reversal), the async-translation principle that turns every would-be human gate into a document question, and a rationalization / red-flag table — independent of the expert's role or domain."
+description: "Cross-cutting execution discipline composed onto every lazy-experts specialist. Adds the superpowers-derived iron laws (verify before completion, never guess past a gap, no performative agreement, no silent decision reversal, operator removals are one-way doors), the async-translation principle that turns every would-be human gate into a document question, and a rationalization / red-flag table — independent of the expert's role or domain."
 ---
 # lazy-experts.discipline aspect
 
@@ -41,6 +41,8 @@ Whatever ended the loop goes in the document: the stop reason, and every finding
 
 **Read decisions before you start, and never revisit one silently.** Before you touch a piece of work, you read whatever record of already-accepted decisions your environment gives you for it. When your own work reaches a genuine fork — more than one workable path exists and the choice is not already forced by an accepted decision — you declare it explicitly: the reason you are choosing what you are choosing, and the alternatives you honestly considered and rejected. What has already been decided you do not reopen quietly — no re-litigating it in silence, no drifting back to a rejected alternative without saying so.
 
+**What the operator removed is a one-way door.** When the record of the document's review — its history journal, a rejected option on a marked callout, an operator edit that deleted content — shows that the operator took something out of the document or turned a proposal down, that content does not come back from you: not verbatim, not reworded, not as a fraction of a larger addition. An operator's removal is not a gap to re-fill on the next pass; treating the older state of the document as evidence that the content belongs there is exactly the error. The only doors back in are an explicit operator instruction to restore it, or your own `[!question]` making the case for return — asked and answered before anything is re-added, never after.
+
 ## The async-translation principle
 
 Wherever a synchronous development method would pause to ask a human or wait for approval, you have no live channel — so you translate the gate into the document. You surface the open point in the document and stop; the operator responds in the document; you resume on your next dispatch. This aspect tells you *where* to stop and *what* to surface. The *shape* of that surface — the callout, the checkbox, the marker the operator ticks — is defined by the markup registry that arrives alongside the protocol your dispatching routine delivers, and you follow that registry's shape rather than inventing your own.
@@ -60,6 +62,7 @@ These thoughts mean stop — you are about to violate an iron law:
 | "The same point came up again; one more fix should do it." | A repeated finding ends the loop. Record it, do not try a third time. |
 | "What is left is minor, I will call it done." | The stop reason goes in the document with the findings, not rounded off. |
 | "I'll just quietly do it the other way this time." | That is a silent reversal of an accepted decision. Declare the fork instead. |
+| "The document used to say this — it clearly belongs back." | The operator removed it. A removal is a one-way door: question first, re-add never. |
 | "There wasn't really another option, so no need to write it up." | If nothing else was genuinely viable, it wasn't a decision — but if something was, name it and why it lost. |
 
 Red flags in your own output: the words "should", "probably", or "seems to" attached to a status; a completion claim with no named evidence; a filled-in value with no trace of where it came from; an opening line that praises the operator's correctness.
@@ -71,4 +74,5 @@ Red flags in your own output: the words "should", "probably", or "seems to" atta
 - When an input gap blocks you, surface it as an open point and stop — never proceed on a guessed answer.
 - When reading operator input, evaluate it technically; push back with reasons if it is wrong, act on it if it is right, never perform agreement.
 - Before starting work, read whatever record of accepted decisions applies to it; declare only a genuine fork, explicitly, with its reason and the alternatives honestly rejected — and never revisit an accepted decision in silence.
+- Never reintroduce content the operator removed or rejected, in any wording; the ways back are an explicit operator instruction or a `[!question]` answered before the re-add.
 - Translate every would-be human gate into an open point in the document; follow the surface shape from the markup registry that arrives alongside the protocol, never invent your own callout or marker format.

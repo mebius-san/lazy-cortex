@@ -20,7 +20,7 @@ spec_source_docs: []
 <!-- What part of the codebase this touches and why an architecture step is warranted here. -->
 
 ## Module boundaries
-<!-- Which modules/components own which responsibility; public contract versus internals; dependency direction between them. -->
+<!-- "The building block view shows the static decomposition of the system into building blocks (modules, components, subsystems, classes, interfaces, packages, libraries, frameworks, layers, ...) as well as their dependencies." — arc42 §5 Building Block View -->
 
 ## Data & contracts
 <!-- Data shapes, schemas, and interfaces the feature introduces or changes — the seams other code will call across. -->

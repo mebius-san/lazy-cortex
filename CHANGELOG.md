@@ -5,6 +5,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-core
 
 
+### 9.1.0 — 2026-09-05 UTC
+
+- Expert jobs can now run on alternative LLM providers (Kimi, OpenAI, or any Anthropic-compatible endpoint) — a machine-local provider registry maps base URL, token variable, and per-tier models, with a per-expert `provider` key, tier-alias remapping (subagents included), and validation before dispatch.
+- New `lazy-core.providers` skill — an operator wizard to add, update, remove, and list provider entries, with a liveness probe and token-variable lookup.
+- `lazy-core.install` and `lazy-core.doctor` are provider-aware — install can seed the providers registry, and doctor validates the same schema.
+- Fixed: the operator's `ANTHROPIC_API_KEY` is now stripped before dispatching to a foreign provider endpoint, and doctor checks each provider's endpoint reachability.
+- Fixed: edit markers no longer wrap the first content written into an empty template section — only edits to existing text get annotated, so freshly filled sections parse cleanly downstream.
+
 ### 9.0.1 — 2026-09-02 UTC
 
 - Fixed a false `inbox-conflict` FAIL from the shared-inbox guard in checkouts that would never run a daemon — install and audit now skip the check when `daemon.enabled` is off or `daemon.run_here` maps the host elsewhere.
@@ -588,6 +596,14 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-specs
 
 
+### 7.2.0 — 2026-09-05 UTC
+
+- Vision documents' Design Concept section is no longer capped at one paragraph — length now follows the actual substance — and a vision no longer references its own design, since a source document doesn't cite what's built from it.
+- Section explainers across every spec template now quote the classic canon verbatim (Wiegers, IREB, ISO/IEC/IEEE 29148, arc42, ISTQB, Cockburn, Osterwalder) with attribution, replacing the previous home-grown wording.
+- Vision's Requirements section now carries the canonical requirement definition (ISO/IEC/IEEE 29148 §3.1.19/§5.2.4, INCOSE); the constraint definition it used to carry moved into a new Constraints section on the design templates.
+- The doc-height protocol governing how much content belongs in each spec document now applies as one uniform ladder across every document kind, keyed to asset level rather than feature level; obligations are stated only at their own height, with references running strictly upward — a lower document cites the one above it, never the reverse.
+- Fixed the `ui-design` template's Mockups section, which had stopped linking to its HTML mockup attachments.
+
 ### 7.1.0 — 2026-09-02 UTC
 
 - Vision templates gain a `Requirements` section: hard constraints the solution must not violate, owned by the vision alongside its goals — the sibling design works within them and never restates them.
@@ -999,6 +1015,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-review
 
 
+### 6.3.1 — 2026-09-05 UTC
+
+- History entries now name operator-removed content explicitly instead of folding it into a change count, so a deleted goal or section stays removed instead of quietly creeping back in.
+- A finished coordinator command now collapses into one plain History line instead of the whole step-by-step plan, keeping review logs readable.
+- Fixed a bug where a writer round that finished with no changes could leave a document stuck in "Waiting: writer" for up to a day; it now closes on the next minutely sweep.
+- The History section's explainer line is now an invisible HTML comment instead of italic text (older documents migrate automatically on the next review start), and every landed round — including the opening one — now gets its own History line.
+
 ### 6.3.0 — 2026-09-03 UTC
 
 - A review cycle now pins its edit-marker style at entry (`review_marker_style` frontmatter), so changing the marker style in settings mid-cycle no longer corrupts documents already under review.
@@ -1226,6 +1249,17 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-experts
 
+
+### 1.3.0 — 2026-09-05 UTC
+
+- Tech-writing aspect now enforces a full specification-prose canon drawn from ISO/IEC/IEEE 29148, IEEE 830, INCOSE and ASD-STE100 — one interpretation and one thought per claim, mandatory units, no vague quantifiers or escape clauses (`where possible`, `etc.`), active voice naming the actor, no `TBD`-style placeholders — on every technical document these experts write, alongside its existing ban on circular or vacuous rationale.
+- Every enumeration of three or more items must now be written as a markdown list rather than strung through a sentence with semicolons or commas; lists must also show a recognizable order and group items by concern, and content with real relationships (phases, cause/consequence, alternatives) is written as named structure instead of a flat bullet heap.
+- Docs-writer can now put a badly-written operator sentence in order — fixing grammar, vague quantifiers, or duplicate names — by rewriting it in place under the existing edit markers instead of leaving it standing and appending a cleaner version beside it; the operator's actual claim never changes.
+- Content an operator deleted or rejected is now a one-way door for every expert — never reintroduced in any wording without an explicit operator instruction or an answered `[!question]`.
+- Restored: the research aspect again requires reading the product's `design.md` and `tech.md` before writing anything.
+- Designer agent's content rules were stripped back — the old mandatory overview-before-goals ordering, explicit boundaries section, ban on balance values, and declarative-voice-only rule are gone, leaving only "never silently contradict a recorded decision"; section-order and voice canon now live in the spec templates themselves. Explicit subheadings are also now allowed inside a template section without breaking its fixed skeleton.
+- Fantasy and sci-fi genre aspects now enforce native-grade grammar and calque-free prose in the document's own language, matching the tech-writing aspect.
+- Tech-writing aspect bans any sentence about a derived sibling document (e.g. "the design defines X") and drops its old requirement that link display text be the target's literal, untranslated name.
 
 ### 1.2.2 — 2026-09-03 UTC
 

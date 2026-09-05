@@ -34,7 +34,9 @@ Response-payload fields this module reads (the agent's `response.json`):
       "result": ["result/<relpath>"]   # required when outcome == "edited"
     }
 
-Only `outcome == "edited"` jobs are applied; every other outcome, and every malformed
+Only `outcome == "edited"` jobs carry content to apply. An `outcome == "empty"` job — a
+writer that finished with nothing to change — is consumed without touching the document, so
+the round still closes within one sweep. Every other outcome, and every malformed
 request/response, is left uncollected for a future pass to interpret.
 """
 from __future__ import annotations
@@ -334,8 +336,8 @@ def _consume_job(repo: Path, jdir: Path) -> None:
     # core-CLI call falls through to the local marker rather than aborting the collect pass
     except OSError:
       pass
-  # fallback: same-repo direct marker touch, mirroring dispatcher.py's own `_core_consume_job`
-  # fallback path when the CLI cannot be resolved
+  # fallback: same-repo direct marker touch when the CLI is unresolved, fails, or errors —
+  # mirroring dispatcher.py's own `_core_consume_job` fallback path
   (jdir / Outcome.CONSUMED).touch()
 
 
@@ -345,6 +347,10 @@ def _consume_job(repo: Path, jdir: Path) -> None:
 def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dict:
   """
   Land every DONE-and-not-CONSUMED job targeting `file_path`.
+
+  Guarantees:
+    - An `empty` job is consumed and counted with the document left byte-identical, and a
+      batch holding only `empty` jobs raises no commit.
 
   Args:
     repo: Absolute path to the repository root.
@@ -357,18 +363,33 @@ def collect_for_file(repo: Path, file_path: Path, *, commit: bool = True) -> dic
       `commit-doc` carries the result.
 
   Returns:
-    `{"collected": N}` — the number of jobs whose payload was applied. The document and
-    the job queue are left untouched when `N` is `0`.
+    `{"collected": N}` — the number of jobs consumed: `edited` payloads applied plus `empty`
+    writers drained. The document and the job queue are left untouched when `N` is `0`.
   """
+  # every DONE bundle targeting the document is a landing candidate
   candidates = [jdir for jdir in _job_dirs_for_file(repo, file_path) if _job_status(jdir) == JobStatus.DONE]
+
+  # the document text accumulates payloads across the batch; `applied` collects what to consume
   original = file_path.read_text()
   text = original
   applied: list[Path] = []
+
+  # Contract:
+  # A DONE job with `outcome == "empty"` is consumed and counted with the document left
+  # byte-identical: no text change is applied for it, and a batch of only-empty jobs raises
+  # no commit — the round still closes instead of stranding the `active_job` marker until
+  # the daily sanitizer.
+
+  # apply each parseable bundle: `edited` lands its payload, `empty` is drained content-free
   for jdir in candidates:
     try:
       request = json.loads((jdir / JobFile.REQUEST).read_text())
       response = json.loads((jdir / JobFile.RESPONSE).read_text())
     except (OSError, json.JSONDecodeError):
+      continue
+    # an `empty` writer finished with nothing to change — count it for consumption as-is
+    if response.get(JobKey.OUTCOME) == Outcome.EMPTY:
+      applied.append(jdir)
       continue
     new_text = _apply_one_job(text, jdir, request, response)
     # guard: nothing to apply for this job — leave it uncollected
@@ -451,11 +472,12 @@ def collect_tick(repo: Path) -> dict:
   if not jobs_root.is_dir():
     return {"files": 0, "dispatched": 0}
 
-  # walk every DONE-and-not-CONSUMED job once, collecting its target file and job ids. Only a
-  # deliverable payload counts: an `edited` outcome is the one thing `collect-job` will land
-  # and consume. A coordinator's own DONE job (`handled`), an `empty`/`error` writer, and a
-  # response-less bundle would never be consumed — counting them would re-dispatch the
-  # coordinator every tick forever (found live: 16 self-fed coordinator wakes).
+  # walk every DONE-and-not-CONSUMED job once, collecting its target file and job ids. Only an
+  # outcome `collect-job` will consume counts: an `edited` payload is landed, an `empty` writer
+  # is consumed without a document change. A coordinator's own DONE job (`handled`), an `error`
+  # writer (the pump's retry ladder owns it), and a response-less bundle would never be
+  # consumed — counting them would re-dispatch the coordinator every tick forever (found live:
+  # 16 self-fed coordinator wakes).
   targets: dict[Path, list[str]] = {}
   broken: list[str] = []
   for expert_dir in sorted(jobs_root.iterdir()):
@@ -486,14 +508,14 @@ def collect_tick(repo: Path) -> dict:
       # pipeline (every review dispatch writes one or the other), so it is skipped silently
       if resolved is None:
         continue
-      # guard: only an `edited` payload is deliverable — everything else stays for the
-      # coordinator to judge off the stuck `active_job` marker, exactly as before the merge
+      # guard: only an outcome `collect-job` consumes is deliverable — everything else stays
+      # for the pump's retry ladder or the daily sanitizer to judge
       try:
         outcome = json.loads((jdir / JobFile.RESPONSE).read_text()).get(JobKey.OUTCOME)
       except (OSError, json.JSONDecodeError):
         continue
-      # guard: non-edited outcomes are never consumed by collect-job, so never counted here
-      if outcome != Outcome.EDITED:
+      # guard: a counted-but-never-consumed bundle would re-raise this wake every sweep
+      if outcome not in (Outcome.EDITED, Outcome.EMPTY):
         continue
       targets.setdefault(resolved, []).append(jdir.name)
 

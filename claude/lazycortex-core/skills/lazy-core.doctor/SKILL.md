@@ -118,6 +118,28 @@ Checks the agent performs:
      - `[INFO]` env-var status — current `LAZY_AGENT_MODEL_FLOOR` value if set, plus tier-order note `haiku < sonnet < opus`.
   All non-blocking.
 
+- **Providers schema checks (project scope only)** — merge `providers` (tracked `.claude/lazy.settings.json[providers]` ∪ the gitignored local overlay's `providers` section, local wins — same merge `lazy-core.providers` Step 2 uses) with the merged `experts` section:
+  - `[FAIL]` `provider_unknown` — an `experts[*].provider` value that does not match any name in the merged `providers` block. Finding: `provider_unknown: expert <key> -> provider <name>`.
+  - **Per-entry validation** — for each entry in the merged `providers` block, call `provider_env.validate_entry` (the same disk-free function `resolve_provider` calls at dispatch time, so this check can never drift from the runtime's):
+
+```
+Bash(PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
+from provider_env import validate_entry, ProviderConfigError
+try:
+  validate_entry('<name>', <entry-json>)
+except ProviderConfigError as exc:
+  print(str(exc))
+")
+```
+
+    Empty output → entry structurally sound. A non-empty message maps to one finding code by substring, in order:
+    - `[FAIL]` `provider_endpoint_incomplete` — message contains `is required` (missing/blank `base_url` or `token_env`). Finding: `provider_endpoint_incomplete: providers.<name> — <message>`.
+    - `[FAIL]` `provider_tier_gap` — message contains `must cover tiers`. Finding: `provider_tier_gap: providers.<name> missing <tiers>`.
+    - `[FAIL]` `provider_claude_literal` — message contains `claude-* literal`. Finding: `provider_claude_literal: providers.<name>.<tier>=<value>`.
+    - `[FAIL]` `provider_reserved_route` — message contains `rt-openai/ prefix`. Finding: `provider_reserved_route: providers.openai.<tier>=<value>`.
+  - `[WARN]` `provider_token_missing` — a `providers.<name>.token_env` variable that does not resolve via `provider_env.resolve_token` (environment, then `~/.claude/.env`). Finding: `provider_token_missing: providers.<name>.token_env=<var>`.
+  All non-blocking.
+
 Agent must not propose fixes beyond one-line hints — coordinator owns fixes.
 
 ### Agent B — config + memory

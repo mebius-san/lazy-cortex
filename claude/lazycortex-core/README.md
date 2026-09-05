@@ -68,6 +68,7 @@ It also gives you an **asynchronous team**. You dispatch a job to a named expert
 | `lazy-core.git-unlock` | Run when the operator asks to force the git staging lock open after `/lazy-core.git-status` shows a holder the hook's automatic heuristics (dead PID / other host / stale-and-idle) will not break — typically a live holder that has abandoned its staging window. Confirms before deleting the lock. |
 | `lazy-core.install` | Run when the operator asks to set up lazycortex-core in a repo (or globally), or when core artifacts are missing — the plugin's rules are not in `.claude/rules/`, `lazy.settings.json` has no runtime section, `.experts/` is not initialised, or the daemon was never wired. Installs this plugin only; `/lazy-core.setup` is the one that runs every plugin's install. Idempotent and quiet on re-run — decisions are persisted and never re-asked. |
 | `lazy-core.iterate` | Use when the operator asks to keep going until something is clean — audit this spec until no findings remain, fix these failures round after round, stabilise the refactor, drive the suite green. Locks target, done-state, and the verification action upfront, then loops with hard caps on cycles, repeated findings, and regression spirals so it cannot run away. |
+| `lazy-core.providers` | Run when the operator asks to add, change, remove, or list the LLM providers the expert-job runtime can spawn against — an expert's `provider` field in `experts{}` points at a name registered here. Interactive wizard over the machine-local `providers` block in `.claude/lazy.settings.local.json`; validates each entry against the same rules the runtime's dispatch-time resolver enforces before it ever writes. |
 | `lazy-core.scaffold-local` | Run when the operator asks to add or drop a repo-specific template type — a `_local` scaffold entry with its own group, kind, and path globs, so new files matching those globs start from that template. Use instead of hand-editing the registry in `.claude/rules/lazy-core.scaffold.md`; plugin-shipped entries belong to `/lazy-core.scaffold-sync`. |
 | `lazy-core.scaffold-sync` | Dispatched by a plugin's install skill (`lazy-core.install` Step 4, `lazy-python.install` Step 6) to copy that plugin's authoring templates into the consumer and upsert its scaffold-registry entries; not for direct use. Repo-specific `_local` entries are `/lazy-core.scaffold-local`'s business, not this skill's. |
 | `lazy-core.setup` | Run after `/plugin update`, on a fresh clone, after enabling a new plugin, or whenever the operator asks to set lazycortex up in this project — the meta-installer that discovers and runs every enabled plugin's `<namespace>.install` skill plus any `lazy_setup_phase:` configurator in one ordered pass, so the operator never invokes install skills one by one. Idempotent; `--dry-run` previews the plan without executing. |
@@ -101,7 +102,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 - [setup-routine](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-routine.md) — Register a dot-namespaced periodic routine with the runtime daemon and remove it cleanly when it is no longer needed.
 - [setup-runtime](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/walkthroughs/setup-runtime.md) — Bootstrap the per-repo runtime daemon and know how to recover it with /lazy-runtime.recover from any of its halt reasons — dirty tree, remote sync, bad routine config, or a closed rate-limit window.
 - [troubleshooting](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/troubleshooting.md) — Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Non-obvious answers on install, the runtime daemon and experts, memory, routines, scaffolding, git staging, MCP permissions, and log search.
+- [faq](https://github.com/mebius-san/lazy-cortex/blob/main/claude/lazycortex-core/help/faq.md) — Non-obvious answers on install, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
 
 (`mebius-san` resolves from `.guard-public.json` `public_author` block — fall back to repo name from `git remote get-url origin` if absent.)
 
@@ -177,6 +178,7 @@ Invoke skills with slash commands:
 /lazy-core.git-unlock
 /lazy-core.install
 /lazy-core.iterate
+/lazy-core.providers
 /lazy-core.scaffold-local
 /lazy-core.scaffold-sync
 /lazy-core.setup

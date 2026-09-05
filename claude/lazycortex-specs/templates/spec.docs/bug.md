@@ -16,7 +16,7 @@ spec_source_docs: []
 
 ## Overview
 
-<!-- One or two sentences stating what is broken and under what circumstances. -->
+<!-- "Defect report: Documentation of the occurrence, nature, and status of a defect." — ISTQB Glossary -->
 
 ## Way to reproduce
 
@@ -26,15 +26,15 @@ spec_source_docs: []
 
 ## Observed behavior
 
-<!-- What actually happens. -->
+<!-- "Actual result: The behavior produced/observed when a component or system is tested." — ISTQB Glossary -->
 
 ## Expected behavior
 
-<!-- What should happen instead. -->
+<!-- "Expected result: The observable predicted behavior of a test item under specified conditions based on its test basis." — ISTQB Glossary -->
 
 ## Environment
 
-<!-- Versions, OS, configuration, anything that scopes the symptom. -->
+<!-- "Test environment: An environment containing hardware, instrumentation, simulators, software tools, and other support elements needed to conduct a test." — ISTQB Glossary -->
 
 ## Related code / logs
 

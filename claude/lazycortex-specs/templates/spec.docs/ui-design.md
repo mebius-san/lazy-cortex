@@ -27,10 +27,10 @@ spec_source_docs: []
 <!-- How a user reaches each screen and where each action leads next. -->
 
 ## Decisions
-<!-- Key UI decisions with WHY it is this way and not otherwise. -->
+<!-- "Important, expensive, large scale or risky architecture decisions including rationales. With 'decisions' we mean selecting one alternative based on given criteria." — arc42 §9 Architecture Decisions -->
 
 ## Mockups
-<!-- Links to the HTML mockup attachments filed alongside this document, one per screen or flow — e.g. `[home screen](./home-screen.html)`. -->
+<!-- "Prototype: A preliminary, partial realization of certain characteristics of a system." — IREB CPRE Glossary. Links to the HTML mockup attachments filed alongside this document, one per screen or flow — e.g. `[home screen](./home-screen.html)`. -->
 
 # Sources
 #protected/spec/sources

@@ -13,7 +13,7 @@ Single atomic commit that:
   discriminator.
 - Inserts the initial Waiting banner above the first H1.
 - Appends an empty `# History` section (tagged
-  `#protected/review/history`, with an italic one-line explainer in
+  `#protected/review/history`, with an HTML-comment one-line explainer in
   the vault's language under the tag) at the end of the body when the
   document does not carry one yet — the coordinator appends its
   entries into this section and never creates it itself.
@@ -71,8 +71,8 @@ _REVIEW_SECTION = "review"
 _LANGUAGE_KEY = "language"
 _LANG_EN = "en"
 
-# italic one-liner seeded under the `# History` heading (after its owner tag) so the operator
-# never has to guess what the section is; per vault language, English is the floor
+# comment one-liner seeded under the `# History` heading (after its owner tag) so the section
+# is self-described in source without rendering; per vault language, English is the floor
 _HISTORY_EXPLAINERS = {
     _LANG_EN: "A log of what changed in this document during review. Kept automatically — do not edit by hand.",
     # waiver: deliberate Russian UI string — Cyrillic is content, not a lookalike typo (RUF001)
@@ -126,29 +126,30 @@ def _history_explainer(file_path: Path) -> str:
     file_path: The document the section is being seeded on.
 
   Returns:
-    The asterisk-italic explainer line in the vault's resolved language,
+    The HTML-comment explainer line in the vault's resolved language,
     falling back to English.
   """
   text = _HISTORY_EXPLAINERS.get(_resolve_language(file_path)) or _HISTORY_EXPLAINERS[_LANG_EN]
-  return f"*{text}*"
+  return f"<!-- {text} -->"
 
 
-# an explainer is exactly one asterisk-italic line; underscore-italic lines are content
-_EXPLAINER_LINE_RE = re.compile(r"^\*[^*].*\*\s*$")
+# an explainer is one HTML-comment line, or a legacy asterisk-italic line left by earlier
+# seeders — both are replaced with the fresh comment form; underscore-italic lines are content
+_EXPLAINER_LINE_RE = re.compile(r"^(?:\*[^*].*\*|<!-- .* -->)\s*$")
 
 
 def _reconcile_history_explainer(body: str, explainer: str) -> str:
   """
   Insert or refresh the explainer line under an existing `# History` tag.
 
-  Idempotent: an asterisk-italic line already sitting right under the
+  Idempotent: an explainer line (comment form, or the legacy italic form) already sitting right under the
   `#protected/review/history` tag is replaced (stale language), any other line
   gets the explainer inserted above it, and a body without the tag is returned
   unchanged.
 
   Args:
     body: The document body (post-frontmatter).
-    explainer: The rendered `*...*` line to end up under the tag.
+    explainer: The rendered `<!-- ... -->` line to end up under the tag.
 
   Returns:
     The body with exactly one explainer line under the History tag.

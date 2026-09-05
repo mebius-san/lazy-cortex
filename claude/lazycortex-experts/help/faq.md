@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Common questions about installing lazycortex-experts, the class map, composing specialists, and the thirteen generic agents' lane boundaries.
-last_regen: 2026-08-24
+last_regen: 2026-09-05
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -18,7 +18,7 @@ source_skills:
   - lazy-experts.reviewer
   - lazy-experts.tester
   - lazy-experts.fiction-writer
-source_sha: bd6abf68b291ce676681d87882caf99ee9e57b44
+source_sha: bcdea31f53eb9706332f7cedd297349d426f920b
 ---
 # Frequently asked questions
 
@@ -92,7 +92,13 @@ Yes. Each of the ten technical-lifecycle agents (interpreter, designer, architec
 
 ## What's the actual difference between the designer and the planner?
 
-The designer answers *what and why*; the planner answers *how*. The designer takes a gap-free brief and writes a design specification — premise first, then the solution, with an explicit in-scope/out-of-scope boundary — and it deliberately stays out of file paths, function names, and task ordering. The planner takes that design spec (or the architect's structure document, when the work has one) and turns it into an ordered, file-level implementation plan: which files change, in what order, with a test plan and a rollback procedure for each task. If you ask the designer for a task checklist, or ask the planner to reconsider a scope decision, you're asking the wrong agent — each one raises what it can't resolve as an open question against its own upstream input rather than silently deciding it.
+The designer answers *what and why*; the planner answers *how*. The designer takes a gap-free brief and writes a design specification against whatever section skeleton the dispatching job's template provides, and it deliberately stays out of file paths, function names, and task ordering; its one binding content rule is to never contradict a decision or boundary already recorded for the product without naming the contradiction as an open question — a scope limit justified only by "that is how the code currently works" is a defect it must not ship. The planner takes that design spec (or the architect's structure document, when the work has one) and turns it into an ordered, file-level implementation plan: which files change, in what order, with a test plan and a rollback procedure for each task. If you ask the designer for a task checklist, or ask the planner to reconsider a scope decision, you're asking the wrong agent — each one raises what it can't resolve as an open question against its own upstream input rather than silently deciding it.
+
+---
+
+## Why did the designer stop enforcing a fixed goals/boundaries section order?
+
+Because those were content rules baked into the designer agent itself, and they've been stripped back to a single one — never silently contradict a recorded decision. The agent used to default to a fixed overview-then-goals-then-decisions section order when no template was supplied, require a dedicated boundaries section, ban imperative voice and inline tuning numbers, and police the exact wording of goal and requirement entries. All of that content-shape prescription is gone; what's left is the agent's lane discipline (stay out of the planner's and interpreter's lane), the template-skeleton discipline (fill whatever headings the dispatching job's template declares, in the order it declares them, without renaming or reordering them), and the one content rule above. If your workflow wants a specific document shape enforced, put it in the template you dispatch the designer with — the designer no longer supplies a default shape of its own.
 
 ---
 

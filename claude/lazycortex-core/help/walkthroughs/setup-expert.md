@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-09-02
+last_regen: 2026-09-05
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -11,7 +11,7 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-expert.list-jobs
   - lazy-expert.collect-job
-source_sha: dcf8d33f2b4551fe855abfab3c4b83a79f9d63a3
+source_sha: 6254d7c7ddbf19760ca4ec6593d7edc873dbe8a6
 ---
 # Add a named expert and dispatch your first async job
 
@@ -41,6 +41,7 @@ Run `/lazy-core.install` in the repo you want the async team to work in. Alongsi
 - Seeds `lazy.settings.json[daemon]` with `enabled: false` as the default. A project only gets a background daemon **supervisor** once you explicitly set that flag to `true` in the tracked settings and re-run `/lazy-core.install` — at which point the skill asks the one remaining question, `daemon.run_here` (a per-machine "does this checkout drive the daemon" map), and installs the supervisor (launchd on macOS, systemd on Linux) once you confirm.
 - Does **not** seed `daemon.token_env`. Whenever the daemon process actually runs — the supervisor or the manual shim, never `/lazy-runtime.tick` — it refuses to start under the machine's ambient login and instead requires an explicit token, named by this key. Setting it is on you; see the queue-draining bullet below.
 - Seeds the `git` section of the project's `lazy.settings.json` with the git-guard's `enabled`, `pathspec_enabled`, and `mutex_enabled` flags — defaults that match the guard's current behavior, written down so you (or the expert's dispatched work) can tune them later without reading the hook source.
+- Offers, once, to connect alternative LLM providers for expert jobs — every expert job works against the Anthropic default with no entry at all, so a plain `Yes`/`No` prompt appears only the first time, and only while no `providers` entry exists yet anywhere in `lazy.settings.json`. Answer `No` and nothing is written; answer `Yes` and name one or more providers to have the skill collect and validate each entry (base URL, token variable, a four-tier model map) into the gitignored `.claude/lazy.settings.local.json` on your behalf. Skip the prompt entirely, or add a provider later, by running `/lazy-core.providers add` any time — assigning a registered provider to a given expert is a separate step, covered next.
 
 Confirm two things are in place before dispatching:
 
@@ -59,12 +60,13 @@ The shim resolves the runner from the plugin cache and starts it — the same to
 
 **Verification gate**: `lazy.settings.json[experts]` contains at least one expert key besides `_version`, and either you know to run `/lazy-runtime.tick` by hand, or — for a background daemon — `daemon.token_env` is set and resolves, and the daemon prints its startup message and enters its polling loop instead of exiting on a missing-token error.
 
-### (Optional) Aspects and arguments
+### (Optional) Aspects, arguments, and provider
 
-Two additional fields can be set on a registered expert in `lazy.settings.json[experts][<expert>]`, and both flow through to every dispatched job's `config.json`:
+Three additional fields can be set on a registered expert in `lazy.settings.json[experts][<expert>]`, and all three flow through to every dispatched job's `config.json`:
 
 - `aspects[]` — adds behavior layers. The most commonly used aspect is `lazycortex-core:lazy-memory.persona-aspect` (long-term memory). Run `/lazy-memory.mark-persona <expert>` to opt in; the skill writes the aspects array for you — do not edit it by hand.
 - `arguments{}` — pinned named values rendered into every job's prompt for this expert. These are static values that should follow the expert across all dispatches (e.g. a preferred code style, a target language, a review rubric). For one-off overrides, pass extra fields in the job `payload` instead.
+- `provider` — points this expert's dispatched jobs at a non-Anthropic endpoint registered in the provider registry, instead of the Anthropic default. Register the provider first — via the one-time prompt in Step 1, or by running `/lazy-core.providers add` — then set this field to the provider's name.
 
 ### Step 2 — Dispatch a job
 
