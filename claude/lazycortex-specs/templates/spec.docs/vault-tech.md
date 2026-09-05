@@ -1,13 +1,10 @@
 ---
 tags:
-  - {{product_tag}}
   - spec/draft
-product: {{product}}
 spec_role: tech
 spec_doc_type: system-tech
 wiki_pinned_topics:
   - wiki/doc-kind/tech
-  - wiki/product/{{product}}
 spec_stage: draft
 spec_source_requests: []
 spec_source_docs: []
@@ -17,13 +14,16 @@ spec_source_docs: []
 #   <repo-key>: <current-branch>
 # Omit the key entirely when all URLs are on default branches.
 ---
-# {{product}} — tech
+# {{project}} — tech
 
 ## Overview
 <!-- "Maintain an overview of your source code by making its structure understandable through abstraction. This allows you to communicate with your stakeholder on an abstract level without disclosing implementation details." — arc42 §5 Building Block View, Motivation -->
 
 ## Architecture
 <!-- "The building block view shows the static decomposition of the system into building blocks (modules, components, subsystems, classes, interfaces, packages, libraries, frameworks, layers, ...) as well as their dependencies." — arc42 §5 Building Block View -->
+
+## Products
+<!-- "Level 1 is the white box description of the overall system together with black box descriptions of all contained building blocks." — arc42 §5 Building Block View, Level 1 -->
 
 ## Components
 <!-- "The Composition viewpoint describes the way the design subject is (recursively) structured into constituent parts and establishes the roles of those parts." — IEEE Std 1016-2009 § 5.3 Composition viewpoint -->

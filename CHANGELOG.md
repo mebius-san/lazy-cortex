@@ -596,6 +596,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-specs
 
 
+### 7.3.0 — 2026-09-05 UTC
+
+- New `vault-tech.md` template gives the vault root and its Products section a tech document of their own, separate from a single product's system tech doc.
+- The `system-tech.md` template was rewritten around a canonical section set, each section carrying its definition verbatim from arc42 and IEEE Std 1016-2009 with attribution.
+- `[!decision]` is now the single decision callout every design, architecture, bug, and system-tech writer uses, so a recorded fork reads the same wherever it lands.
+
 ### 7.2.0 — 2026-09-05 UTC
 
 - Vision documents' Design Concept section is no longer capped at one paragraph — length now follows the actual substance — and a vision no longer references its own design, since a source document doesn't cite what's built from it.

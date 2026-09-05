@@ -13,6 +13,10 @@ An expert reaches the coordinator through exactly three markup shapes, all autho
 - **`[!question]` (expert-authored)** — an expert's own question, landed inside the document it is writing, distinct from the coordinator's own `[!question]` on a folder-note. Shape and the doc-resubmit mechanic: `lazy-core.markdown-style.md` § The `[!question]` callout (expert-authored).
 - **`[!decision-candidate]`** — a call the job wasn't told to make, awaiting the operator's explicit accept/reject verdict; a signal, never a decision, and an unanswered one blocks Ready exactly as an unanswered question does. Like every signal, it lands only inside the document the expert is itself writing or reporting into. Shape (mandatory accept/reject checkbox pair): `lazy-core.markdown-style.md` § The `[!decision-candidate]` callout.
 
+A decision the job WAS told to make is not a signal, but it has one legal form in a living doc — `design.md`, `architecture.md`, `bug.md`, the product's `tech.md` — and the coordinator reads that form on approve:
+
+- **`[!decision] … #spec/decision`** — a decision statement, written only for a real fork per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` § 2 (a genuine alternative existed, reversal is expensive, the why is unrecoverable from the artifact). It stands immediately after the prose that states the decided principle. A decision written any other way — a bold bullet, a paragraph, a list item — is a description of the implementation, not a decision, and the approve-time transfer into the sibling `decisions.md` (`lazycortex-specs decide promote`) does not see it. Shape (thesis line, `**Why.**`, `**Rejected.**`): `lazy-core.markdown-style.md` § Decision statement shape.
+
 ## `request.json` extra fields
 
 Two extra fields, both optional, both arrays of repo-relative paths pointing into the working tree:

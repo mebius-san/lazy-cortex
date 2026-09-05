@@ -89,7 +89,8 @@ Doc templates come from a **linear per-doc-type base** plus **per-asset-type spe
 │   ├── code-report.md
 │   ├── test-report.md
 │   ├── bug.md
-│   └── tech.md
+│   ├── system-tech.md                           ← product-level <product>/tech.md
+│   └── vault-tech.md                            ← content-root tech.md
 ├── spec.product/                                ← product-level docs (at the product root)
 │   ├── design.md                                ← specialisation: <product>/design.md diverges from the base
 │   └── group-note.md                            ← <product>.md operator folder-note (product is the "group" of its asset types)
