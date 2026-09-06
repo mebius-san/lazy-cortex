@@ -744,10 +744,12 @@ class RuntimeFile:
   Attributes:
     SANDBOX_SETTINGS: The Claude Code settings file that confines expert spawns to the sandbox scope.
     PAUSE: The operator's local pause semaphore — while present, the daemon skips all work.
+    CONSUMED_UNPUSHED: The ledger of jobs consumed since the last publish, one `expert/job_id` per line.
   """
 
   SANDBOX_SETTINGS = ".runtime/sandbox.settings.json"
   PAUSE = ".runtime/daemon.pause"
+  CONSUMED_UNPUSHED = ".runtime/consumed-unpushed.log"
 
 
 # ----------------------------------------------------------------------------------------

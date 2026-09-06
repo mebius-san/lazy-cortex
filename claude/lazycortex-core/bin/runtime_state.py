@@ -86,16 +86,33 @@ def save(repo_root: Path, state: dict) -> None:
   Raises:
     OSError: If the state file or its parent directory cannot be written.
   """
-  path = _state_path(repo_root)
+  atomic_write_text(_state_path(repo_root), json.dumps(state, indent = 2))
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+  """
+  Write text to a file, replacing its previous content in one atomic step.
+
+  Notes:
+    - Creates the parent directory of `path` when it does not already exist.
+    - The write is crash-safe: an interrupted call leaves the previous content at `path` intact.
+
+  Args:
+    path: Destination file to write.
+    text: Content to write to `path`.
+
+  Raises:
+    OSError: If `path` or its parent directory cannot be written.
+  """
   path.parent.mkdir(parents = True, exist_ok = True)
-  # write to a sibling temp file first so an interrupted call leaves the previous state intact
+  # write to a sibling temp file first so an interrupted call leaves the previous content intact
   # waiver: temp-file naming idiom, not a domain constant
-  fd, tmp_name = tempfile.mkstemp(prefix = ".state.", suffix = ".tmp", dir = str(path.parent))
+  fd, tmp_name = tempfile.mkstemp(prefix = f".{path.name}.", suffix = ".tmp", dir = str(path.parent))
   # noinspection PyBroadException
   try:
     # waiver: stdlib file-mode idiom
     with os.fdopen(fd, "w") as f:
-      json.dump(state, f, indent = 2)
+      f.write(text)
     os.replace(tmp_name, path)
   except Exception:
     # best-effort cleanup of the temp file before re-raising the original failure

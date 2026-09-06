@@ -275,7 +275,7 @@ STDLIB_MODULES = frozenset({
   'builtins', 'calendar', 'cmath', 'codecs', 'collections', 'colorsys',
   'concurrent', 'configparser', 'contextlib', 'copy', 'csv', 'ctypes',
   'dataclasses', 'datetime', 'decimal', 'difflib', 'dis', 'email', 'enum',
-  'errno', 'faulthandler', 'filecmp', 'fileinput', 'fnmatch', 'fractions',
+  'errno', 'faulthandler', 'fcntl', 'filecmp', 'fileinput', 'fnmatch', 'fractions',
   'ftplib', 'functools', 'gc', 'getopt', 'getpass', 'gettext', 'glob',
   'graphlib', 'gzip', 'hashlib', 'heapq', 'hmac', 'html', 'http', 'imaplib',
   'importlib', 'inspect', 'io', 'ipaddress', 'itertools', 'json', 'keyword',

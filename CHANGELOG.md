@@ -5,6 +5,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 ## lazycortex-core
 
 
+### 9.1.1 — 2026-09-06 UTC
+
+- Fixed: a routine hitting a rebase conflict no longer strands the commits of routines that ran before it — the daemon now pushes right after each routine that moves HEAD, instead of once at the end of the tick.
+- Fixed: a tick reset now rolls back the state the aborted tick had already claimed — jobs marked consumed after the last push are un-marked, and git-watch routine cursors rewind to the merge-base. A cursor whose SHA cannot be resolved is treated as unreachable; a failed probe leaves the cursor in place and logs a `cursor_probe_failed` incident.
+
 ### 9.1.0 — 2026-09-05 UTC
 
 - Expert jobs can now run on alternative LLM providers (Kimi, OpenAI, or any Anthropic-compatible endpoint) — a machine-local provider registry maps base URL, token variable, and per-tier models, with a per-expert `provider` key, tier-alias remapping (subagents included), and validation before dispatch.
@@ -1374,6 +1379,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-python
 
+
+### 4.2.1 — 2026-09-06 UTC
+
+- Fixed the `pcf` import-order checker to recognize `fcntl` as a standard-library module, so files importing it no longer get their whole stdlib block flagged as misordered.
 
 ### 4.2.0 — 2026-09-02 UTC
 

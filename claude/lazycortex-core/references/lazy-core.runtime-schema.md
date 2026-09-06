@@ -76,13 +76,15 @@ The `errors` key (nested under the flat `daemon` section) is optional and tunes 
 
 **Post-iteration ops** (when `daemon.git.remote_sync` is `"pull_push"`):
 
+The publish runs once at the end of the tick and, before that, immediately after every routine whose run moved `HEAD` — so a routine's commits are on origin before the next routine starts, and a later routine's conflict can discard only its own commits. A routine that left the tree dirty is not published: the dirty-tree halt (§ 10) comes first.
+
 A retry loop (max 3 attempts):
 
 1. `git fetch origin <base_branch>`.
 2. Compare HEAD vs `origin/<base_branch>`:
    - **Equal** → nothing to push; exit.
    - **Local-ahead** (origin is ancestor of HEAD) → fast-forward `git push origin <base_branch>`. On race (push refused because origin moved between our fetch and our push), retry.
-   - **Diverged** → `git rebase origin/<base_branch>`. On conflict, `git rebase --abort && git reset --hard origin/<base_branch>` (this tick's work is discarded; the next tick re-runs the routine on top of the operator's commits) and exit cleanly (NO halt). On clean rebase, push; on race, retry.
+   - **Diverged** → `git rebase origin/<base_branch>`. On conflict, `git rebase --abort && git reset --hard origin/<base_branch>` — the unpublished work is discarded and its side effects are wound back: every expert job consumed since the last publish loses its `CONSUMED` marker again (the unpushed-consume record, § 9) so the next collector lands it anew, and every `git_watch.<name>.last_seen_sha` no longer reachable from the new `HEAD` is rewound to the merge-base so the routine rescans from the last published commit. Exit cleanly (NO halt); a git-watch routine re-runs on its next tick, an interval routine at its next interval. On clean rebase, push; on race, retry.
 
 **Post-push hook** (when `daemon.git.post_push_hook` is set): immediately after either successful push above (fast-forward or post-rebase), the daemon runs the configured command via `sh -c` with cwd = repo root and five env overrides: `LAZY_PUSH_REPO` (absolute repo path), `LAZY_PUSH_BRANCH` (the pushed branch), `LAZY_PUSH_REMOTE` (`origin`), `LAZY_PUSH_OLD_SHA` (the `origin/<branch>` tip before the push), `LAZY_PUSH_NEW_SHA` (local HEAD after the push — re-read after any rebase). The hook does NOT fire when nothing was pushed: in-sync ticks, the already-published fallthrough, and the rebase-conflict discard all skip it. Hook failures (non-zero exit, timeout past `post_push_timeout_sec`, spawn errors) land in the runtime journal as a `_post_push_hook` record and never halt, retry, or fail the tick.
 
@@ -464,9 +466,13 @@ Schema:
 - `routine_config_invalid` — a `routines[*]` entry failed `validate_routine_entry` when the daemon read the registry (see § 10). `triggered_by` names the offending routine; the schema error text is in the routine's own `routine:<name>` incident. Recovery: operator fixes the settings entry, then `/lazy-runtime.recover` (mode `manual-fix`).
 - `rate_limit` — an expert run's `rate_limit_event` frame tripped the rate-limit guard (`daemon.rate_limit_guard`): the subscription window is closed. The block carries `resets_at` — the latest reopening time across the host-local flag records at `${XDG_CACHE_HOME:-$HOME/.cache}/lazycortex/rate-limit/`. Self-lifting: `_run_iteration` clears the halt (and resolves the `halt:<repo>` incident) once `now >= resets_at`; a block with no `resets_at` is treated as already expired. While halted the loop sleeps `min(resets_at − now, 3600)` instead of the polling interval, git sync stays alive, and the self-update restart is NOT skipped for this reason (state survives the restart, a restart burns no tokens). Recovery: none needed; `/lazy-runtime.recover` (mode `manual-fix`) resumes early — safe, the pump's pre-spawn flag check still defers spawns while the flag lives.
 
+**Unpushed-consume record.** `<repo>/.runtime/consumed-unpushed.log` lists, one `<expert>/<job_id>` per line, every job `consume-job` marked `CONSUMED` since the last successful publish; a sibling `.lock` file serialises appends against the rewrite. A publish that lands (or finds nothing to push) drops the entries it started with; a rebase-conflict discard removes the `CONSUMED` marker of every listed job and empties the record, so a result whose landing commit was thrown away is collected again rather than retired. Without remote push configured the record is emptied on every post-iteration step — nothing can be discarded, so nothing is pending.
+
+**Incident cause `cursor_probe_failed`** (kind `routine_error`, key `routine:<name>`): on a discard, git could not judge whether a `git_watch.<name>.last_seen_sha` is still reachable from the new `HEAD` (a sha the repository cannot resolve counts as unreachable and is rewound; this cause is only the lookup itself failing). The cursor is left as it stands and the tick still completes; the routine's next clean tick resolves the incident. If the incident persists, the routine may be stalled on a sha `HEAD` never reaches — inspect `git_watch.<name>` in `state.json`.
+
 Persistence consequences:
 - `last_run` survives daemon restart and laptop sleep — slow routines (e.g. every 6h) are honored across restarts.
-- `git_watch.<name>.last_seen_sha` survives daemon restart — `git` routines do not re-dispatch already-handled commits after a reboot.
+- `git_watch.<name>.last_seen_sha` survives daemon restart — `git` routines do not re-dispatch already-handled commits after a reboot. A post-tick discard rewinds it to the merge-base with origin when the discarded range held it (§ 2).
 - `git_watch.<name>.failed_items` survives daemon restart — a `command`-shape worker crash across a restart still retries on the next tick rather than being lost with the in-memory tick.
 - `daemon_halted` survives daemon restart — a halted daemon stays halted across reboots until the operator runs `/lazy-runtime.recover`.
 

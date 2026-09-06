@@ -13,26 +13,32 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+import fcntl
 import json
 import time
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from job_response import classify_response, read_response
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from provider_env import resolve_provider
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+import runtime_state
 
 from constants import (
   HookName, IncidentActor, IncidentKey, IncidentKind, IncidentPhase, JobCollectKey, JobConfigKey,
   JobFile,
   JobIODir, JobMarker, JobRequestKey, JobResponseKey, JobStatus,
-  RoutineKey, SettingsFile, SettingsKey, WorkspaceMode,
+  RoutineKey, RuntimeFile, SettingsFile, SettingsKey, WorkspaceMode,
 )
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   from typing import NotRequired
+
+  from collections.abc import Iterator
 
 
 JOBS_BASE = ".experts/.jobs"
@@ -706,6 +712,12 @@ def consume_job(
 
   Idempotent — a second call on the same job is a no-op.
 
+  Notes:
+    - Also records `<expert>/<job_id>` in the unpushed-consume ledger (`RuntimeFile.CONSUMED_UNPUSHED`,
+      at `.runtime/consumed-unpushed.log`); the runtime daemon settles that entry after a successful
+      publish, and rolls it back — removing the `CONSUMED` marker again — when the publish instead
+      discards the tick on a rebase conflict, so the job is consumed anew on a later tick.
+
   Args:
     repo: Absolute path to the repository that hosts the job queue.
     expert: Expert name as registered in `lazy.settings.json[experts]`.
@@ -716,6 +728,114 @@ def consume_job(
   if not d.exists():
     return
   (d / JobMarker.CONSUMED).touch()
+
+  # the marker lands before the commit carrying the consumed result is published; the ledger is
+  # what lets the daemon take the marker back off when that commit is discarded on a push conflict
+  ledger = Path(repo) / RuntimeFile.CONSUMED_UNPUSHED
+  # waiver: stdlib file-mode / encoding literals, not domain constants
+  with _unpushed_consumes_lock(repo), ledger.open("a", encoding = "utf-8") as fh:
+    fh.write(f"{expert}/{job_id}\n")
+
+
+def read_unpushed_consumes(repo: Path) -> list[str]:
+  """
+  Return every job identifier consumed since the last successful publish.
+
+  Each entry names a job that `consume_job` marked consumed before its commit reached the remote, so a
+  publish attempt can tell what it is about to settle or roll back.
+
+  Args:
+    repo: Absolute path to the repository that hosts the job queue.
+
+  Returns:
+    The `<expert>/<job_id>` entries in the order they were first recorded, with duplicates removed. An
+    empty list when nothing has been consumed since the last publish.
+  """
+  ledger = Path(repo) / RuntimeFile.CONSUMED_UNPUSHED
+  # guard: no ledger — nothing has been consumed since the last publish
+  if not ledger.exists():
+    return []
+  # waiver: stdlib encoding literal, not a domain constant
+  lines = ledger.read_text(encoding = "utf-8").splitlines()
+  return list(dict.fromkeys(line.strip() for line in lines if line.strip()))
+
+
+def settle_unpushed_consumes(repo: Path, entries: list[str]) -> None:
+  """
+  Drop the given entries from the unpushed-consume record, keeping every other entry.
+
+  Args:
+    repo: Absolute path to the repository that hosts the job queue.
+    entries: The `<expert>/<job_id>` entries to drop, as returned by `read_unpushed_consumes`.
+  """
+  settled = set(entries)
+  # the read and the rewrite share one lock so an append from another process is never dropped
+  with _unpushed_consumes_lock(repo):
+    _write_unpushed_consumes(repo, [ e for e in read_unpushed_consumes(repo) if e not in settled ])
+
+
+def rollback_unpushed_consumes(repo: Path) -> list[str]:
+  """
+  Undo every consume recorded since the last successful publish.
+
+  Reverts each job's `consume_job` marker so a job whose publish commit was discarded no longer looks
+  already handled on disk, then clears the record.
+
+  Notes:
+    - A job whose bundle directory is already gone is left as is; nothing is treated as an error.
+
+  Args:
+    repo: Absolute path to the repository that hosts the job queue.
+
+  Returns:
+    The `<expert>/<job_id>` entries that were processed, in the order they were read from the record.
+  """
+  # the read, the unmarking, and the clear share one lock so an append from another process is
+  # never dropped
+  with _unpushed_consumes_lock(repo):
+    entries = read_unpushed_consumes(repo)
+    # a job whose bundle the pump already cleaned up has nothing left to unmark
+    for entry in entries:
+      expert, _, job_id = entry.partition("/")
+      (_job_dir(repo, expert, job_id) / JobMarker.CONSUMED).unlink(missing_ok = True)
+    _write_unpushed_consumes(repo, [])
+  return entries
+
+
+@contextmanager
+def _unpushed_consumes_lock(repo: Path) -> Iterator[None]:
+  """
+  Hold the unpushed-consume record locked for the duration of the `with` block.
+
+  Serializes an append from `consume_job` against the read-and-rewrite done by
+  `settle_unpushed_consumes` and `rollback_unpushed_consumes`, so the two never interleave across
+  separate processes. The lock is released on exit, including when the block exits via an exception.
+
+  Args:
+    repo: Absolute path to the repository that hosts the job queue.
+
+  Yields:
+    Nothing; the caller's code runs while the lock is held.
+  """
+  ledger = Path(repo) / RuntimeFile.CONSUMED_UNPUSHED
+  ledger.parent.mkdir(parents = True, exist_ok = True)
+  # waiver: lock-file suffix and stdlib file-mode / encoding literals, not domain constants
+  with ledger.with_suffix(".lock").open("w", encoding = "utf-8") as lock:
+    # closing the descriptor on exit — normal or by exception — releases the lock
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    yield
+
+
+def _write_unpushed_consumes(repo: Path, entries: list[str]) -> None:
+  """
+  Rewrite the unpushed-consume record to contain exactly the given entries.
+
+  Args:
+    repo: Absolute path to the repository that hosts the job queue.
+    entries: The `<expert>/<job_id>` entries to write, one per line, replacing the previous contents.
+  """
+  # the crash-safe rewrite is the same one the daemon's own state file relies on
+  runtime_state.atomic_write_text(Path(repo) / RuntimeFile.CONSUMED_UNPUSHED, "".join(f"{e}\n" for e in entries))
 
 
 def retire_completed_jobs(

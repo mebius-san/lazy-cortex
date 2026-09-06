@@ -26,6 +26,7 @@ from pathlib import Path
 
 from lazy_settings import load_section
 import error_ledger
+import expert_runtime
 import runtime_state
 from routine_types import RoutineConfigError, dispatch_routine, validate_routine_entry
 from worktree_tasks import WorktreeTaskManager
@@ -1036,6 +1037,11 @@ def _run_iteration(repo_root: Path, *, push: bool = True, only: str | None = Non
       above, while the pre-iteration git sync is being skipped.
     - When a routine leaves the tree dirty in a non-stuck system, the daemon records a halt and
       stops dispatching for the remainder of the iteration.
+    - A routine whose run moved `HEAD` is published immediately with the same post-iteration git
+      step, so that a later routine's push conflict discards only that later routine's own commits
+      rather than an earlier routine's already-committed work. The end-of-iteration push at the
+      close of the whole iteration still runs afterward — it covers commits that land between
+      routines, such as an asynchronous job the pump kicked off.
 
   Args:
     repo_root: Absolute path to the repository the daemon is driving.
@@ -1192,6 +1198,7 @@ def _run_iteration(repo_root: Path, *, push: bool = True, only: str | None = Non
   # length), so reading it per tick would scale every routine's cost with the retention window
   open_incidents = _open_incident_keys(repo_root) if due else set()
   for name, routine_cfg in due:
+    head_before = _head_sha(repo_root)
     result = dispatch_routine(repo_root, name, routine_cfg)
     _log_routine_result(repo_root, result)
     # a failed routine tick (any type) lands in the error ledger
@@ -1224,51 +1231,50 @@ def _run_iteration(repo_root: Path, *, push: bool = True, only: str | None = Non
     # to handle stuck state — they may intentionally leave dirt (e.g. writing diagnosis.json for
     # human triage). Don't halt on their post-state, and don't re-halt if we're ALREADY in the
     # system-stuck branch (the halt block they're recovering from already exists).
-    # guard: skip while halted, or when the routine ignores halt
-    if system_stuck or routine_cfg.get(RoutineKey.IGNORE_HALT, False):
-      continue
-    post_dirty = _check_working_tree(repo_root)
-    if post_dirty is not None:
-      # do not overwrite an existing halt block — pump may have already written a more specific
-      # one with expert + job_id attribution
-      if StateKey.DAEMON_HALTED not in state:
-        block = {
-          HaltKey.HALTED_SINCE: time.time(),
-          HaltKey.TRIGGERED_BY: name,
-          HaltKey.REASON: HaltReason.UNCOMMITTED_CHANGES,
-          "dirty_paths": post_dirty,
-          "expert": None,
-          "job_id": None,
-        }
-        # setdefault on the freshly-read state preserves a more-specific halt the pump may have written;
-        # also mirror into the passed in-memory state so callers checking state[StateKey.DAEMON_HALTED] see it
-        state[StateKey.DAEMON_HALTED] = block
-        runtime_state.update(
-          repo_root,
-          # waiver: lambda captures the loop var `block`; each iteration persists it before the next, so the late binding is intentional
-          lambda s: s.setdefault(StateKey.DAEMON_HALTED, block),  # noqa: B023  # pylint: disable=cell-var-from-loop
-        )
-        _emit_halt_metric_if_available(
-          reason = HaltReason.UNCOMMITTED_CHANGES, triggered_by = name,
-        )
-      halted_this_iter = True
-      break
+    # the clean-tree contract binds only a routine that is neither recovering nor halt-exempt
+    if not (system_stuck or routine_cfg.get(RoutineKey.IGNORE_HALT, False)):
+      post_dirty = _check_working_tree(repo_root)
+      if post_dirty is not None:
+        # do not overwrite an existing halt block — pump may have already written a more specific
+        # one with expert + job_id attribution
+        if StateKey.DAEMON_HALTED not in state:
+          block = {
+            HaltKey.HALTED_SINCE: time.time(),
+            HaltKey.TRIGGERED_BY: name,
+            HaltKey.REASON: HaltReason.UNCOMMITTED_CHANGES,
+            "dirty_paths": post_dirty,
+            "expert": None,
+            "job_id": None,
+          }
+          # setdefault on the freshly-read state preserves a more-specific halt the pump may have written;
+          # also mirror into the passed in-memory state so callers checking state[StateKey.DAEMON_HALTED] see it
+          state[StateKey.DAEMON_HALTED] = block
+          runtime_state.update(
+            repo_root,
+            # waiver: lambda captures the loop var `block`; each iteration persists it before the next, intentionally
+            lambda s: s.setdefault(
+              StateKey.DAEMON_HALTED, block,  # noqa: B023  # pylint: disable=cell-var-from-loop
+            ),
+          )
+          _emit_halt_metric_if_available(
+            reason = HaltReason.UNCOMMITTED_CHANGES, triggered_by = name,
+          )
+        halted_this_iter = True
+        break
+
+    # a routine that committed and left the tree clean is published at once, so a later routine's
+    # push conflict discards only its own commits and never this one's; the tail push below still
+    # covers commits that land between routines (an asynchronous job of the pump, for one). The
+    # publish sits after the dirty-tree check above on purpose: a halted iteration never pushes.
+    if push and head_before is not None and _head_sha(repo_root) != head_before:
+      if _publish_tick(repo_root, state, daemon.get(DaemonKey.GIT)):
+        halted_this_iter = True
+        break
 
   # a halted iteration leaves the tree alone rather than pushing partial work; a manual tick
   # (push=False) never publishes — commits stay local until the operator says otherwise
   if not halted_this_iter and push:
-    try:
-      _git_post(repo_root, daemon.get(DaemonKey.GIT))
-    except GitPushFailed as e:
-      # waiver: daemon error/trigger token, not an internal key
-      _halt_daemon(repo_root, state, HaltReason.GIT_PUSH_FAILED, "_git_post", str(e))
-    except Exception as e:
-      _log_routine_result(repo_root, {
-        TickResultKey.NAME: "_git_post", TickResultKey.EXIT: -1, TickResultKey.DURATION_SEC: 0.0,
-        TickResultKey.ERROR: f"git_post failed: {e}",
-      })
-      # waiver: daemon error/trigger token, not an internal key
-      _halt_daemon(repo_root, state, _git_halt_reason(e), "_git_post", str(e))
+    _publish_tick(repo_root, state, daemon.get(DaemonKey.GIT))
 
   # loop-detect — bound the cost of a buggy state machine that commits forever as the same bot;
   # cheap post-iteration scan: if the N most recent commits in the repo all share the same author
@@ -1277,6 +1283,57 @@ def _run_iteration(repo_root: Path, *, push: bool = True, only: str | None = Non
   # cost before a human shows up to investigate.
   if StateKey.DAEMON_HALTED not in state:
     _loop_detect_check(repo_root, state, settings_path)
+
+
+def _head_sha(repo_root: Path) -> str | None:
+  """
+  Read the repository's current `HEAD` commit sha.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is driving.
+
+  Returns:
+    The current `HEAD` commit sha, or `None` when the repository has no `HEAD` yet or the
+    underlying git invocation fails.
+  """
+  try:
+    return _run_git_capture(repo_root, [ "rev-parse", "HEAD" ])
+  except subprocess.CalledProcessError:
+    return None
+
+
+def _publish_tick(repo_root: Path, state: dict, git_cfg: dict | None) -> bool:
+  """
+  Run the post-tick git publish step and turn any failure into a daemon halt.
+
+  Notes:
+    - A `GitPushFailed` becomes a `git_push_failed` halt; any other exception is classified via
+      `_git_halt_reason` and recorded as the halt reason.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is driving.
+    state: Persisted daemon state, mutated in place with the halt block when publishing fails.
+    git_cfg: Sub-section of `daemon.git` from `lazy.settings.json`, or `None` to disable push.
+
+  Returns:
+    `True` when the daemon was halted and the caller must stop dispatching further routines this
+    iteration; `False` when the publish step completed without needing to halt.
+  """
+  try:
+    _git_post(repo_root, git_cfg)
+  except GitPushFailed as e:
+    # waiver: daemon error/trigger token, not an internal key
+    _halt_daemon(repo_root, state, HaltReason.GIT_PUSH_FAILED, "_git_post", str(e))
+    return True
+  except Exception as e:
+    _log_routine_result(repo_root, {
+      TickResultKey.NAME: "_git_post", TickResultKey.EXIT: -1, TickResultKey.DURATION_SEC: 0.0,
+      TickResultKey.ERROR: f"git_post failed: {e}",
+    })
+    # waiver: daemon error/trigger token, not an internal key
+    _halt_daemon(repo_root, state, _git_halt_reason(e), "_git_post", str(e))
+    return True
+  return False
 
 
 def _build_worktree_manager(repo_root: Path, git_cfg: dict | None) -> WorktreeTaskManager | None:
@@ -2215,18 +2272,13 @@ def _run_post_push_hook(repo_root: Path, git_cfg: dict, branch: str, old_sha: st
 
 def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
   """
-  Perform the daemon's post-iteration push, with conflict-aware retry.
+  Perform the daemon's post-iteration publish and settle the consumes it covers.
 
-  Fetches, compares local against origin, and either fast-forwards a push or rebases on top of new
-  origin commits and re-pushes. A rebase conflict with operator commits is resolved by discarding
-  the current tick's work and resetting to origin — the next tick re-runs the routine on the fresh
-  operator state. After a push that advances the remote, the operator's post-push hook runs (see
-  _run_post_push_hook).
-
-  Two retry layers sit here and do not overlap: `_run_git_remote` absorbs an unreachable remote,
-  while this function's own loop re-fetches after a push the remote *rejected* because the operator
-  moved it. An unreachable remote therefore leaves this loop immediately — re-fetching over a dead
-  transport would only burn the remaining attempts.
+  Reads the unpushed consumes recorded since the last publish and delegates the actual publish work
+  to `_publish_branch`. Once the publish succeeds, those consumes are settled; when the underlying
+  publish attempt instead discards the tick because of a rebase conflict, the recorded consumes are
+  rolled back and the affected git-watch cursors are rewound rather than settled, and the work
+  simply re-runs on the next tick.
 
   Args:
     repo_root: Absolute path to the repository the daemon is driving.
@@ -2238,15 +2290,58 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
     subprocess.CalledProcessError: When an underlying git invocation fails outside the rebase /
       push retry paths.
   """
-  # guard: git sync disabled
-  if not git_cfg:
-    return
-  # guard: push not requested
+  # guard: without a publish nothing is ever discarded, so every recorded consume is final as it stands
   # waiver: daemon error/trigger token, not an internal key
-  if git_cfg.get(GitConfigKey.REMOTE_SYNC) != "pull_push":
+  if not git_cfg or git_cfg.get(GitConfigKey.REMOTE_SYNC) != "pull_push":
+    expert_runtime.settle_unpushed_consumes(repo_root, expert_runtime.read_unpushed_consumes(repo_root))
     return
   branch = git_cfg[GitConfigKey.BASE_BRANCH]
 
+  # the consumes recorded before this publish are the ones it either settles or rolls back; a
+  # consume landing while the push is in flight stays pending for the next publish
+  pending = expert_runtime.read_unpushed_consumes(repo_root)
+  # guard: a discarded tick already rolled its consumes and cursors back — nothing to settle
+  if not _publish_branch(repo_root, git_cfg, branch):
+    return
+  expert_runtime.settle_unpushed_consumes(repo_root, pending)
+
+
+def _publish_branch(repo_root: Path, git_cfg: dict, branch: str) -> bool:
+  """
+  Fetch, compare local against origin, and publish local commits to the branch.
+
+  Each of up to `POST_TICK_MAX_PUSH_ATTEMPTS` attempts re-fetches origin, then either finds local
+  and remote already in sync, fast-forward-pushes when local is a strict descendant of origin, or
+  rebases local commits onto origin when histories diverged and re-pushes the result. A push race
+  (the operator pushed between the fetch and the push) retries the loop. After a push that advances
+  the remote, the operator's post-push hook runs (see `_run_post_push_hook`).
+
+  Two retry layers sit here and do not overlap: `_run_git_remote` absorbs an unreachable remote,
+  while this function's own loop re-fetches after a push the remote *rejected* because the operator
+  moved it. An unreachable remote leaves this loop immediately — re-fetching over a dead transport
+  would only burn the remaining attempts.
+
+  Notes:
+    - When a rebase hits a real content conflict with operator commits, the tick is discarded:
+      local is hard-reset to origin, the discarded tick's consumed jobs are un-marked via
+      `rollback_unpushed_consumes`, and any git-watch cursor the discarded commits had advanced
+      past what origin knows is wound back via `_rewind_git_watch_cursors`.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is driving.
+    git_cfg: Sub-section of `daemon.git` from `lazy.settings.json`.
+    branch: Name of the branch being published.
+
+  Returns:
+    `True` when local ends up published, or was already in sync with origin. `False` when the tick
+    was discarded because a rebase hit a real content conflict with operator commits.
+
+  Raises:
+    GitPushFailed: When every attempt is exhausted without publishing.
+    subprocess.CalledProcessError: When an underlying git invocation fails outside the retry paths
+      (for example an unreachable remote, which is not retried here since re-fetching over a dead
+      transport cannot help).
+  """
   # every attempt re-fetches: the operator may have moved origin since the previous one
   for _attempt in range(POST_TICK_MAX_PUSH_ATTEMPTS):
     _run_git_remote(repo_root, [ "fetch", "origin", branch ])
@@ -2255,7 +2350,7 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
 
     # guard: nothing to push, local and remote agree
     if local == remote:
-      return
+      return True
 
     # the merge-base tells which of the three history shapes this attempt is dealing with
     base = _run_git_capture(repo_root, [ "merge-base", "HEAD", f"origin/{branch}" ])
@@ -2272,13 +2367,13 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
         # race: operator pushed between our fetch and our push; retry
         continue
       _run_post_push_hook(repo_root, git_cfg, branch, old_sha = remote)
-      return
+      return True
 
     # guard: origin moved forward but contains nothing of ours — our local HEAD became an ancestor
     # of origin between our fetch and now; extremely unlikely but possible if another process
     # already rebased + pushed for us. Just fall through to "no work".
     if base == local:
-      return
+      return True
 
     # histories diverged within the tick (operator pushed a commit while the routine was running);
     # try to rebase our local commits onto the new origin tip
@@ -2286,15 +2381,21 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
       _run_git(repo_root, [ "rebase", f"origin/{branch}" ])
     except subprocess.CalledProcessError:
       # conflict on rebase — operator's commits and ours touch the same content; abort the rebase,
-      # hard-reset to origin (discarding this tick's work), log the discard, and let the next tick
-      # re-run the routine on the fresh operator state
+      # hard-reset to origin (discarding this tick's work) and log the discard. A git-watch routine
+      # rescans from its rewound cursor on the next tick; an interval routine retries at its next
+      # interval, its `last_run` having already advanced
       _run_git(repo_root, [ "rebase", "--abort" ])
       _run_git(repo_root, [ "reset", "--hard", f"origin/{branch}" ])
+      # the discarded commits carried consumed job results and moved git-watch cursors past what
+      # origin knows; both are wound back so the discarded work is landed again rather than lost
+      rolled = expert_runtime.rollback_unpushed_consumes(repo_root)
+      rewound = _rewind_git_watch_cursors(repo_root, base)
       _log_routine_result(repo_root, {
         TickResultKey.NAME: "_git_post", TickResultKey.EXIT: 0, TickResultKey.DURATION_SEC: 0.0,
         TickResultKey.ERROR: "tick discarded: operator-conflict",
+        TickResultKey.NOTE: f"rolled back {len(rolled)} consume(s), rewound {len(rewound)} git-watch cursor(s)",
       })
-      return
+      return False
 
     # rebase clean — push the rebased commits
     try:
@@ -2307,12 +2408,118 @@ def _git_post(repo_root: Path, git_cfg: dict | None) -> None:
       # loop
       continue
     _run_post_push_hook(repo_root, git_cfg, branch, old_sha = remote)
-    return
+    return True
 
   # every attempt was consumed without publishing — the caller turns this into a daemon halt
   raise GitPushFailed(
     f"push to origin/{branch} failed after {POST_TICK_MAX_PUSH_ATTEMPTS} attempts"
   )
+
+
+def _rewind_git_watch_cursors(repo_root: Path, base: str) -> list[str]:
+  """
+  Rewind git-watch cursors that no longer point at an ancestor of the new `HEAD`.
+
+  Runs after a discarded tick has been hard-reset to origin. Every `git_watch.<name>.last_seen_sha`
+  entry in `state.json` that git confirms is no longer an ancestor of the new `HEAD` is rewound to
+  `base`, so the next scan replays exactly the range the discarded commits would have covered plus
+  whatever operator commits won the conflict. A cursor whose ancestry could not be determined is
+  left untouched and its name is recorded in a runtime-log note.
+
+  Notes:
+    - Besides the runtime-log note, each cursor left unjudged also opens an error-ledger incident
+      keyed `routine:<name>` (kind `routine_error`, cause `cursor_probe_failed`), which the
+      routine's next clean tick resolves.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is driving.
+    base: Merge-base of local and origin captured before the reset.
+
+  Returns:
+    The names of the git-watch entries that were actually rewound; excludes cursors that were
+    still reachable from the new `HEAD` and cursors whose ancestry could not be determined. Empty
+    when nothing needed rewinding.
+  """
+  watch = runtime_state.load(repo_root).get(StateKey.GIT_WATCH, {})
+  verdicts = {
+    name: _is_ancestor_of_head(repo_root, entry[StateKey.LAST_SEEN_SHA])
+    for name, entry in watch.items()
+    if isinstance(entry, dict) and entry.get(StateKey.LAST_SEEN_SHA)
+  }
+  stale = [ name for name, reachable in verdicts.items() if reachable is False ]
+  # a cursor git could not judge is left where it is and reported: mid-teardown, a wrong rewind
+  # or an abort would cost more than a cursor the routine's own force-push guard already handles
+  unjudged = [ name for name, reachable in verdicts.items() if reachable is None ]
+  if unjudged:
+    _log_routine_result(repo_root, {
+      TickResultKey.NAME: "_git_post", TickResultKey.EXIT: 0, TickResultKey.DURATION_SEC: 0.0,
+      TickResultKey.NOTE: f"cursor probe failed, left untouched: {', '.join(unjudged)}",
+    })
+    # the discard itself succeeded, but a routine whose cursor could not be judged may now be stalled
+    # on a sha HEAD never reaches; the incident sits on the routine's own axis, so its next clean
+    # tick resolves it
+    for name in unjudged:
+      error_ledger.record(repo_root, {
+        IncidentKey.INCIDENT: f"routine:{name}", IncidentKey.PHASE: IncidentPhase.OPENED,
+        IncidentKey.KIND: IncidentKind.ROUTINE_ERROR,
+        # waiver: closed-set incident cause token, not an internal key
+        IncidentKey.CAUSE: "cursor_probe_failed", IncidentKey.ACTOR: IncidentActor.DAEMON,
+        IncidentKey.ROUTINE: name,
+        IncidentKey.DETAIL: (
+          f"git could not judge last_seen_sha {watch[name][StateKey.LAST_SEEN_SHA][:8]} after a tick discard"
+        ),
+      })
+  # guard: every judged cursor is still reachable from the new HEAD — nothing was lost
+  if not stale:
+    return []
+
+  # the merge-base is the last commit both sides share, so scanning from it replays the operator
+  # commits that won the conflict together with whatever the discarded range would have covered
+  def _rewind(s: dict) -> None:
+    for name in stale:
+      s.setdefault(StateKey.GIT_WATCH, {}).setdefault(name, {})[StateKey.LAST_SEEN_SHA] = base
+  runtime_state.update(repo_root, _rewind)
+  return stale
+
+
+def _is_ancestor_of_head(repo_root: Path, sha: str) -> bool | None:
+  """
+  Check whether a commit is an ancestor of the repository's current `HEAD`.
+
+  Args:
+    repo_root: Absolute path to the repository the daemon is driving.
+    sha: Commit sha to test.
+
+  Returns:
+    `True` when `sha` resolves to a commit that is an ancestor of `HEAD`, including `HEAD`
+    itself. `False` when `sha` resolves to a commit that is not an ancestor, or when the
+    repository cannot resolve `sha` to a commit at all — a pruned or foreign sha can never be
+    reached from `HEAD`, so it counts as "not an ancestor". `None` only when git could not run
+    the lookup, or could not answer the ancestry question itself.
+  """
+  # a sha the repository cannot resolve at all (pruned, or minted in another clone) can never be
+  # reached from HEAD, so it is answered "not an ancestor" rather than left as a failed probe
+  known = subprocess.run(
+    [ "git", "rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}" ],
+    cwd = repo_root, check = False, capture_output = True,
+  )
+  # waiver: git's documented exit code for an unresolvable `--verify --quiet` name, not a domain constant
+  if known.returncode == 1:
+    return False
+  # guard: git could not even run the lookup — no verdict, the caller leaves the cursor alone
+  if known.returncode != 0:
+    return None
+
+  # git answers the question with exit 0 / 1; any other code means it could not answer, and that
+  # must not read as "not an ancestor" — a healthy cursor would be rewound on a broken probe
+  proc = subprocess.run(
+    [ "git", "merge-base", "--is-ancestor", sha, "HEAD" ],
+    cwd = repo_root, check = False, capture_output = True,
+  )
+  # waiver: git's documented exit code for a negative `--is-ancestor` answer, not a domain constant
+  if proc.returncode not in ( 0, 1 ):
+    return None
+  return proc.returncode == 0
 
 
 def dispatch_subprocess(repo_root: Path, name: str, cfg: dict) -> dict:
