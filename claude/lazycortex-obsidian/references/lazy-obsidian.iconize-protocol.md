@@ -2,7 +2,7 @@
 name: lazy-obsidian.iconize-protocol
 version: 2
 description: Vault-local Iconize protocol — how the Python worker, the bundled `iconize-reloader` Obsidian plugin, and Iconize itself cooperate to compute file/folder icons from frontmatter and apply them at the live `data.json`.
-protocol_version: 2.2.0
+protocol_version: 2.3.0
 hook_version: 4.0.0
 owner_skill: lazy-obsidian.iconize-sync
 ---
@@ -55,7 +55,15 @@ Input: `(vault_relative_path, frontmatter_dict)`. Output: zero or one `(icon, co
 
 The matcher list is a **composition of layers**, rebuilt on every run: the personal map's `matchers` plus every matcher from the plugin-shipped registries discovered via `$LAZYCORTEX_PLUGIN_DIRS` (see `lazy-obsidian.iconize-registry-contract.md`). Evaluation is first-match-wins over the composed list, ordered by descending matcher `priority`; on equal priority the operator's matcher beats a plugin's. Personal matchers without `priority` default to `1000` (above every registry band), so a map that never heard of priorities behaves exactly as before. Each matcher has a `when` predicate and a `resolve` spec. (The `emit` field retired at schema 2 — folder decoration flows from folder-notes, not from matcher output.)
 
-**No-match keeps, never strips.** A note no matcher claims is left untouched: sibling plugins (e.g. lazycortex-specs) write managed `iconize_icon` / `iconize_color` keys of their own, and the absence of a rule is not an instruction to remove them. The worker rewrites the keys only when a matcher resolves a value.
+**Paint roots bound the whole resolver.** The icon-map's optional top-level `paint_roots` is a list of repo-relative directory prefixes the worker may paint inside — `[ "specs", "claude" ]`, say. Outside `paint_roots` the worker does not read or write the note: no matcher is consulted for it, no frontmatter is parsed, nothing is written, and it never appears in a run's `touched`. Whatever `iconize_icon` / `iconize_color` it carries stays exactly as whoever put it there left it. A prefix claims a path across a directory boundary only, so `specs` never claims `specsheets/...`.
+
+The key **absent** — the whole vault is in scope, exactly as it was before the key existed, so an icon-map authored by an earlier install keeps working untouched. `lazy-obsidian.iconize-install` seeds the key from the consumer's spec content root (`spec.vault_root` in `.claude/lazy.settings.json`, defaulting to `specs`) on install and adds it to an existing map on merge.
+
+Narrowing `paint_roots` therefore leaves icons standing in the areas it closes; no run removes them. Clearing them is a manual edit, exactly as removing any other unclaimed note's icon is.
+
+Paint roots are independent of the reconcile walk's own scope: the walk still skips the infrastructure directories `.obsidian`, `.git`, `.claude`, `.githooks` and never enumerates a template tree at all. The template exemption also outranks the paint roots — a template tree resolves to no match even when it sits inside a listed prefix.
+
+**No-match keeps, never strips.** Inside a paint root, a note no matcher claims is left untouched: sibling plugins (e.g. lazycortex-specs) write managed `iconize_icon` / `iconize_color` keys of their own, and the absence of a rule is not an instruction to remove them. The worker rewrites the keys only when a matcher resolves a value.
 
 **Templates are never painted.** Every path under a scaffolding-template tree — a plugin's own `claude/<plugin>/templates/**` and the consumer's `.claude/templates/**` override tree — resolves to no match regardless of frontmatter, and the reconcile walk never enumerates it. A template carries the frontmatter of the notes it scaffolds, so a frontmatter-keyed rule would otherwise fire on the template itself: painting it dirties a shipped source file on every reconcile and bakes a stale icon into every note scaffolded from it afterwards.
 

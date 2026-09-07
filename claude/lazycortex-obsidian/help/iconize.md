@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Scaffold, configure, and run the iconize-sync system to keep Obsidian file and folder icons in sync with your vault's frontmatter-driven icon registry.
-last_regen: 2026-09-02
+last_regen: 2026-09-07
 diagram_spec:
   anchor: "How the three skills fit together"
   request: "Flow diagram showing the three-skill iconize block: iconize-install scaffolds plugins + icon-map + hooks; iconize-config edits the icon-map registry; iconize-sync runs the worker to write iconize_icon/iconize_color into note frontmatter; Iconize plugin and iconize-reloader plugin then paint icons on screen from frontmatter and data.json respectively."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-obsidian.iconize-install
   - lazy-obsidian.iconize-config
   - lazy-obsidian.iconize-sync
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: 0e0562d0fc4bb9457ff9d14758e688f4eac27c87
 ---
 # Iconize — frontmatter-driven icon management for Obsidian vaults
 
@@ -25,14 +25,17 @@ Three skills divide the work cleanly: `/lazy-obsidian.iconize-install` sets up t
 - Applying a changed registry across the whole vault, a path prefix, or just the files touched in a pending commit.
 - Keeping icons consistent across machines — the registry lives in `.claude/iconize/obsidian-icon-map.json` and is tracked by git; Iconize's runtime `data.json` is gitignored because the worker regenerates it.
 - Upgrading a vault that still carries an old `.githooks/pre-commit` shim from a pre-3.0 install — re-running `/lazy-obsidian.iconize-install` removes it for you.
+- Keeping the worker's painting confined to the part of the repo that actually holds your semantic content — e.g. a spec catalog — so notes elsewhere in the repo keep whatever icons they already have.
 
 ## How it fits together
 
-You start with `/lazy-obsidian.iconize-install`. This skill installs the three required Obsidian plugins (`obsidian-icon-folder`, `folder-notes`, and the bundled `iconize-reloader`) into your vault via `/lazy-obsidian.update-plugin`, scaffolds the icon-map at `.claude/iconize/obsidian-icon-map.json`, registers the `lazy-obsidian.repaint` daemon routine (when the repo runs a daemon), and adds Iconize's `data.json` to `.gitignore` so runtime state does not pollute commits. It also asserts the Iconize frontmatter-feature settings (`iconInFrontmatterEnabled`, `iconInFrontmatterFieldName`, `iconColorInFrontmatterFieldName`) in your vault's plugin config so the worker's output keys match what Iconize expects to read. The install is quiet and idempotent — safe to re-run on any repo that already has it set up.
+You start with `/lazy-obsidian.iconize-install`. This skill installs the three required Obsidian plugins (`obsidian-icon-folder`, `folder-notes`, and the bundled `iconize-reloader`) into your vault via `/lazy-obsidian.update-plugin`, scaffolds the icon-map at `.claude/iconize/obsidian-icon-map.json`, registers the `lazy-obsidian.repaint` daemon routine (when the repo runs a daemon), and adds Iconize's `data.json` to `.gitignore` so runtime state does not pollute commits. It also asserts the Iconize frontmatter-feature settings (`iconInFrontmatterEnabled`, `iconInFrontmatterFieldName`, `iconColorInFrontmatterFieldName`) in your vault's plugin config so the worker's output keys match what Iconize expects to read. The install is quiet and idempotent — safe to re-run on any repo that already has it set up. The vault root the install and worker resolve against is always your repo's git toplevel, so nothing here depends on where `.obsidian/` happens to sit.
 
 Commit-time repaint is entirely the `lazy-obsidian.repaint` daemon routine's job now — there is no pre-commit shim any more. If your vault still has one from an older install (a `.githooks/pre-commit` file with the shim's `HOOK_VERSION` marker), `/lazy-obsidian.iconize-install` removes it automatically and unsets `core.hooksPath` if `.githooks/` ends up empty; a foreign `pre-commit` file without that marker is left alone. Nothing here disturbs the PostToolUse hook that already keeps individual notes current as you edit them — that hook ships with the plugin itself and is unaffected.
 
 The install also tells you which plugin-shipped icon registries are visible from this vault. Any LazyCortex plugin can ship its own `references/<namespace>.iconize-registry.json` alongside its skills; the worker discovers and composes those live on every reconcile without ever merging them into your local icon-map, so a plugin's own iconography ships and updates with the plugin, not with your vault's registry file.
+
+On a fresh install, the icon-map also seeds a top-level `paint_roots` list — the repo-relative directory prefixes the worker is allowed to paint inside. Outside those roots the worker neither reads nor writes a note's icon keys, so the rest of your repo keeps whatever it already has. The seeded value comes from `spec.vault_root` in `.claude/lazy.settings.json` (falling back to `specs` when that setting is absent), never from a hardcoded template default, and only when the key doesn't already exist — an icon-map you already authored a `paint_roots` list into is never widened, narrowed, or overwritten. An icon-map that predates this key (or one where you deliberately never added it) still paints the whole vault, exactly as before.
 
 Once the system is scaffolded, `/lazy-obsidian.iconize-config` is how you grow the registry. It walks you through adding, editing, or removing entries in any named registry (roles, steps, requests, or a custom one you name) via one-question-at-a-time prompts. Each entry needs a key name, a Lucide icon name (PascalCase with `Li` prefix) or emoji, and an optional hex color. After every session the skill writes the updated JSON back with stable formatting. Run `/lazy-obsidian.iconize-sync reconcile` after any registry edit so the new entries land in your vault's frontmatter.
 
@@ -50,6 +53,8 @@ The PostToolUse hook (on Write/Edit) plus the `lazy-obsidian.repaint` daemon rou
 **Adding or changing icons for a new frontmatter value.** Run `/lazy-obsidian.iconize-config` and pick the registry that holds the value. The wizard prompts for the key, icon name, and color. After saving, run `/lazy-obsidian.iconize-sync reconcile` to apply everywhere.
 
 **Scoping a reconcile to one plugin or folder.** Pass `--prefix <path>` to `reconcile`, or use `reconcile-plugin <plugin>` if you want to reconcile a specific LazyCortex plugin subtree. Neither writes to the git index — `reconcile-plugin` reports every rewritten path in its `touched` array, and it's on you (or the pipeline calling it) to fold those paths into the commit that should carry them.
+
+**Limiting where the worker is allowed to paint at all.** This is a different knob from `--prefix` — `--prefix` narrows a single reconcile run, while `paint_roots` in `.claude/iconize/obsidian-icon-map.json` is the standing scope for every run, including the PostToolUse hook and the repaint routine. Edit the list directly in the icon-map (it's a structural key, not a registry entry, so `/lazy-obsidian.iconize-config` doesn't manage it) if the seeded value doesn't match where your semantic content actually lives. An empty or absent list means the whole vault stays in scope.
 
 **Checking whether your install is current after a plugin update.** Run `/lazy-obsidian.iconize-sync check-versions`. Exit code 0 means the icon-map schema is compatible. If it exits 5, re-run `/lazy-obsidian.iconize-install` to migrate the schema.
 

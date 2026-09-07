@@ -19,7 +19,7 @@ if sys.version_info < (3, 12):
 
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
-from runtime_daemon import run, set_plugin_dirs
+from runtime_daemon import PLUGIN_CACHE_REL, run, set_plugin_dirs
 
 repo = None
 plugin_dirs: list[Path] = []
@@ -40,5 +40,5 @@ while i < len(sys.argv):
     sys.stderr.write(f"unexpected argument: {a}\n")
     sys.exit(2)
 
-set_plugin_dirs(plugin_dirs)
+set_plugin_dirs(plugin_dirs, cache_root = Path.home() / PLUGIN_CACHE_REL)
 run(repo if repo is not None else Path(os.getcwd()))

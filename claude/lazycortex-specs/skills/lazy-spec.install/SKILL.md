@@ -19,7 +19,7 @@ Every file this skill creates or updates — settings sections, routine entries,
 
 1. **Absent or unchanged** — target missing, or byte-identical to the shipped / last-known version → write silently. State `installed` / `unchanged`.
 2. **Locally changed but cleanly mergeable** — target diverged, but the shipped delta applies without contradicting local edits (new keys / entries / globs added, every local-only chunk left untouched) → merge silently. State `merged`.
-3. **Genuine conflict** — the same region (a key, a line, a block) was changed both locally and in the shipped version in ways that cannot be reconciled automatically → the ONLY case that asks. `AskUserQuestion` naming the file, quoting the conflicting region, and showing a unified diff; options `merge-shipped` / `keep-local`.
+3. **Genuine conflict** — the same region (a key, a line, a block) was changed both locally and in the shipped version in ways that cannot be reconciled automatically → the ONLY case that asks. The site that raises it prints the context first, filled from the run (`lazy-core.skill-writing` § 11): **Where** — `/lazy-spec.install · Step <N>`, the file and the key / entry in conflict; **Found** — the conflicting region quoted, local and shipped, as a unified diff; **Why asking** — the two edits contradict and neither can be picked mechanically; **Answers** — `merge-shipped` (the shipped region replaces the local one now; every other local chunk stays untouched) / `keep-local` (the local region stays; the shipped delta for that region is dropped, and the conflict is raised again on the next run while it persists). Then `AskUserQuestion`: `header` names the file, `question` names the entry and asks which version survives, options `merge-shipped` / `keep-local` with those descriptions.
 
 "Conflict" means you cannot determine what should survive — not merely "the bytes differ". No contradiction → no question. A no-longer-shipped entry (orphan) is left in place silently (`kept-orphan`); this skill never deletes consumer config.
 
@@ -43,7 +43,7 @@ This skill has 18 ordered steps. The executing agent MUST NOT skip, merge, reord
    - `Step 6 — Wire the request-handler runtime`
    - `Step 6.5 — Seed agent-model tiers`
    - `Step 6.7 — Register the upstream-tick routine`
-   - `Step 6.9 — Seed the vault spec`
+   - `Step 6.9 — Seed the vault spec and the catalog root's level note`
    - `Step 7 — Offer first product registration`
    - `Step 7b — Ensure product/category wiki axes (wiki-conditional)`
    - `Step 7c — Backfill spec_doc_type across the catalog`
@@ -129,16 +129,29 @@ The repo authoring language is GENUINE project config — it cannot be derived �
 
 **Read first.** Run `Bash(lazycortex-core settings-get spec)` and inspect `language`. If the section already carries a non-`en` `language` (a prior install or hand-edit set it), state outcome `language-on-record:<code>` and skip the question entirely. Only when nothing is on record (section absent, or `language` still the `en` default) do you ask.
 
-The plugin's effective default language is `en` until overridden. Ask via `AskUserQuestion`:
+The plugin's effective default language is `en` until overridden.
 
-- **question**: `Set a non-default repo language for spec docs? The plugin defaults to en. Pick another only if this repo's specs are authored in a different language.`
-- **options**:
-  - `keep-en` — accept the `en` default; write nothing.
-  - `set-other` — seed a different language code into the `spec` section.
+```
+Context (print before asking):
+- Where: /lazy-spec.install · Step 4 — Seed default language; target `spec.language` in <settings-dir>/lazy.settings.json
+- Found: `settings-get spec` → `language` <absent | "en" (the default)>
+- Why asking: the repo authoring language is genuine project config that cannot be derived
+- Answers: `keep-en` — nothing written, outcome `language-default-en`; `set-other` — the follow-up below asks the code, then `language` is written into the `spec` section (read-patch-write, `_version` preserved), outcome `language-set:<code>`; a non-`en` value on record is never re-asked (`language-on-record:<code>`)
+AskUserQuestion: header "Spec language", question "Set a non-default authoring language for spec docs in <repo>? The plugin defaults to en. Pick another only if this repo's specs are authored in a different language.", options `keep-en` — accept the `en` default; write nothing / `set-other` — seed a different language code into the `spec` section.
+```
 
 If `keep-en`: outcome `language-default-en`. Skip the write.
 
-If `set-other`: ask the operator for the language code (e.g. `ru`, `de`), then read-patch-write the `spec` section so the auto-init `_version` is preserved:
+If `set-other`: ask the operator for the language code, then read-patch-write the `spec` section so the auto-init `_version` is preserved:
+
+```
+Context (print before asking):
+- Where: Step 4 — language code; target `spec.language`
+- Found: nothing on record (the operator just chose `set-other`)
+- Why asking: the code itself is the config
+- Answers: any ISO 639-1 code via "other" — written as `spec.language` below; never re-asked once on record
+AskUserQuestion: header "Language code", question "ISO 639-1 code for spec docs in <repo> (e.g. `ru`, `de`)?", free text via "other".
+```
 
 ```
 Bash(lazycortex-core settings-get spec)
@@ -190,7 +203,7 @@ If `/lazy-routine.register` reports the routine is already registered, accept it
 
 `spec.coordinator` wakes on: a non-`@bot.`-authored commit reaching this checkout and changing an asset's status folder-note (the operator's own gesture — a tick, an edit — committed and pushed from wherever the operator works, then pulled in by this checkout's next daemon iteration); a non-empty `# Coordinator commands` section; a ticked option under one of the coordinator's own `[!question]` callouts; a launch-checkbox job's terminal marker landing, raised by `lazy-spec.gate-tick` as a `job-done` wake in the runtime sidecar and fired whoever authored the commit it landed alongside (`lazy-spec.coordination-playbook.md` § 1); or a sibling authored doc's own `review_result` appearing or changing, also regardless of that commit's authorship (`CoordinatorTrigger.DOC_TRANSITION`, same § 1). This step registers the `lazy-spec.coordinator-watch` **git-watch** routine via the blessed `/lazy-routine.register` skill — it does NOT hand-write the routine JSON into settings. Unlike `lazy-spec.gate-tick` (Step 5, an `md-scan` routine that re-scans every candidate file each tick), this routine watches the spec content root's own git history: the daemon computes each changed markdown file's last-changing commit and author once per tick (`lazy-core.runtime-schema.md` § 8 `git` / `watch: changed_files`) and hands that to the worker directly — there is no dirty-tree signal to read in the daemon's own checkout, and no separate "have I seen this commit" marker for the worker to maintain (the git-watch routine keeps its own cursor in `state.json`).
 
-Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool, passing a `cfg` dict so the wizard runs programmatically (no per-field prompts). The routine's `filter.any_of` matches two shapes, scoped to the spec content root via `path_filter` rather than `paths`: the same set of live asset status folder-notes `lazy-spec.gate-tick` (Step 5) watches (one composite member, unchanged), OR any typed document of the content root (the other member) — `worker.py` resolves each matched sibling to its owning asset before deciding anything:
+Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool, passing a `cfg` dict so the wizard runs programmatically (no per-field prompts). The routine's `filter.any_of` matches two shapes, scoped to the spec content root via `path_filter` rather than `paths`: every live coordination note — an asset status folder-note, a product's level note, or the catalog root's level note (one composite member) — OR any typed document of the content root (the other member); `coordinator_dispatch` resolves each matched document to its owning note before deciding anything, and routes that note to `spec.coordinator` or `spec.catalog-coordinator` by its role:
 
 ```json
 {
@@ -206,9 +219,8 @@ Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool, passing a `
       "any_of": [
         {
           "frontmatter": {
-            "spec_role": {"in": ["status"], "not_in": []},
-            "spec_cancelled": {"in": [null, false], "not_in": []},
-            "spec_released": {"in": [null, false], "not_in": []}
+            "spec_role": {"in": ["status", "product", "catalog"], "not_in": []},
+            "spec_cancelled": {"in": [null, false], "not_in": []}
           }
         },
         {
@@ -228,6 +240,8 @@ Invoke `lazycortex-core:lazy-routine.register` via the `Skill` tool, passing a `
 
 `group_globs` collapses multiple changed paths under the same asset directory into ONE worker dispatch per tick (`lazy-core.runtime-schema.md` § git `group_globs`) — one glob per registered product, generated from the same `products` settings data the `<vault_root>`/`<spec_path>` resolution above already reads, at category/asset depth: `<vault_root>/<spec_path>/*/*` (drop the `<vault_root>/` prefix when `spec.vault_root` is `.`, same as `path_filter`). A path AT the glob's own depth (the category folder-note) and any path outside every product's glob stay ordinary single-file items — `coordinator-dispatch`'s `{path}` branch still serves those unchanged; only paths strictly below `<spec_path>/<category>/<slug>` (`asset_dir`) collapse into the grouped `{dir, paths, ...}` item. **On a from-scratch install with zero products registered yet** (Step 7, the first product registration, runs after this one), core's `routine_types.py` rejects an empty `group_globs` list (`'group_globs' must be a non-empty list`) — OMIT the `group_globs` key from the `cfg` dict entirely in that case, rather than writing it as `[]`, as the JSON shape above shows for the ≥1-product case. `lazy-spec.product-config` Step 12 then CREATES the key, with this product's own glob, the first time a product is registered or edited, and unions further products' globs into it from there. Re-running this step against an ALREADY-registered routine that lacks the key backfills it the same way — idempotently, as the union of every currently-registered product's glob (empty when there are none, in which case the key stays omitted), never removing an operator-added entry.
 
+The first member carries no `spec_released` exclusion — a note is filtered out only while it is cancelled. An asset crossing `spec_released` into true is exactly the commit that must reach the dispatcher, since that is where the one-hop upward `asset-released` wake onto the product's level note is decided (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.catalog-playbook.md` § 5); excluding released notes would drop the release flip's own commit and the upward wake with it. A released asset is otherwise quiet — no gate moves, no checkbox hangs — so the widened member costs a resolved-and-discarded tick, never a spurious job. `product` and `catalog` never carry `spec_released` at all.
+
 The second member selects on the presence of `spec_doc_type` rather than on a closed list of filenames: an empty `in` declares no allow-list, and `not_in: [null]` rejects a file where the key is absent or null. That leaves exactly the typed documents of the content root — the canonical authored docs and an expert's markdown attachments alike, without the routine having to know either set by name. An untyped stray markdown file under the vault matches nothing and wakes no coordinator.
 
 `architecture.md` is an ordinary sibling doc kind — its review class (main writer `architect`, one `planner_review` validation slot) is wired in § 6e below, same as the other five doc kinds.
@@ -237,6 +251,20 @@ The second member selects on the presence of `spec_doc_type` rather than on a cl
 The daemon resolves `command[0]` (`lazycortex-specs`) to the plugin's bin script and runs it once per changed file OR once per matched asset group (per `group_globs` above) as `lazycortex-specs coordinator-dispatch '<item-json>'` — a single JSON argv carrying either `{"path", "status", "sha", "author_name", "author_email"}` for an ungrouped file or `{"dir", "paths", "sha", "author_name", "author_email"}` for a grouped asset directory (`routine_types.dispatch_git`'s `command:` sub-shape), **not** a bare file path the way `lazy-spec.gate-tick` / `lazy-review.scan` pass one. For an ungrouped item, `coordinator-dispatch` resolves `item["path"]` against its `cwd` (the repo root, set by the daemon); when it names a status folder-note directly it detects whether the note carries a wake trigger, and when it names a sibling doc instead (the `any_of` filter's other member) it resolves the OWNING asset's status folder-note and detects a `review_result` transition against that note's own marker. For a grouped item, `coordinator-dispatch` resolves `item["dir"]` to the same owning asset's status folder-note directly and scans every member in `item["paths"]` for a wake trigger in one pass, dispatching at most one `spec.coordinator` job per tick regardless of how many members changed. Either shape dispatches one `spec.coordinator` job when a trigger fires; a no-op tick touches nothing.
 
 If `/lazy-routine.register` reports the routine is already registered, accept its outcome (`unchanged` / `present`) — do not force-overwrite. A pre-existing `md-scan`-shaped entry from an install that predates the git-watch resew is a genuine shape conflict, not an `unchanged` match — surface it through the skill's normal conflict path rather than silently upgrading it. Outcome: `routine-registered` or `routine-already-present`.
+
+**Stale-filter migration — read the registered filter before accepting `already-present`.** `/lazy-routine.register` aborts on a name it already knows, so accepting its outcome on an install that predates the level coordinator leaves the OLD filter in place forever: the routine keeps matching `spec_role: status` only, no level note ever reaches `coordinator-dispatch`, and every product's and the catalog root's system documents sit unstaged with nobody to promote them. Read the entry before accepting anything:
+
+```
+Bash(lazycortex-core settings-get routines)
+```
+
+Inspect `routines["lazy-spec.coordinator-watch"].filter.any_of[0].frontmatter`. It is **stale** when either holds: `spec_role.in` does not contain both `product` and `catalog`, or a `spec_released` key is present at all. A stale entry is the same class of finding Step 6d's terminal-writer swap is — a genuine conflict against the shipped shape, not an `unchanged` match — and it is resolved the same way, by replacing the entry rather than editing settings by hand:
+
+1. Hold the entry's `group_globs` list from the `settings-get` read above — `/lazy-routine.unregister` prints only `unregistered`, so the read just made is the only copy. Never re-derive the list from `products` alone: an operator-added glob is not in `products` and would be lost.
+2. `Skill(skill: "lazycortex-core:lazy-routine.unregister", args: "lazy-spec.coordinator-watch")`.
+3. Re-run this step's `/lazy-routine.register` call with the `cfg` above, carrying the held `group_globs` list verbatim (omit the key entirely when the removed entry had none).
+
+The two calls are one migration, never left half-done: an unregister without the re-register leaves the daemon with no coordinator routine at all. A filter that already carries both level roles and no `spec_released` key is current — accept `already-present` and skip the migration entirely. Outcome: `filter-current` or `filter-migrated`.
 
 ### 5b-a. Seed the mandatory protocols
 
@@ -290,7 +318,7 @@ Request files at `<vault-root>/requests/` are processed by three runtime channel
 
 - **md-scan open (mechanical, command-based)** — fires on naked request files (no `review_active`, no `review_result`). Pure state flip: writes the opt-in frontmatter keys + Waiting banner and commits under the `lazy-spec.request-open` bot identity. No LLM spawn, ~1s latency. Routine `routines.lazy-spec.request-open` with `command:` shape pointing at `lazycortex-specs open-request`.
 - **md-scan apply (mechanical, command-based)** — fires on post-finalize request files (`request_status: draft` + `review_result` in {`approved`, `approved-with-concerns`}). Reads the resolved routing prose, calls `lazycortex-specs scaffold-asset` for spawn targets — asset folder + status folder-note only, the note carrying the `spec_source_requests` union and its `## Source requests` projection; no document is seeded and no review is opened at apply (documents come later, one launch-checkbox tick at a time, via `lazycortex-specs seed-doc`) — records attribution on each attach target's primary doc (no callout) and re-opens its review, stamps terminal markers (`request_class`, `request_status`, mirror tag, status callout) and strips `# Routing`, atomic commit under `lazy-spec.request-apply` bot identity. No LLM dispatch — the worker is the Python primitive at `${CLAUDE_PLUGIN_ROOT}/bin/apply_request.py`, which also implements the attach and spawn enactment directly (no separate `spec.request-attach` / `spec.request-spawn` skills exist). Routine `routines.lazy-spec.request-apply` with `command:` shape pointing at `lazycortex-specs apply-request`.
-- **lazy-review specialist** — `spec.coordinator`, running in its routing mode (`lazy-spec.coordination-playbook.md` Chapter 7), runs all content work (classify, find candidates, surface the routing decision, fold to prose) during the review loop. Requires the agent registered as an expert AND a review class entry mapping `requests/*.md` to `spec.coordinator` under `terminal.routing` (the post-approve terminal-action section writer group that owns the `# Routing` heading — surfaces only after the operator approves the body, persists through finalize so the apply worker can read the resolved routing prose, and never triggers revert-to-main since operator choices are not concerns). The class declares a separate `main` chain — the consumer-supplied interpreter expert.
+- **lazy-review specialist** — `spec.catalog-coordinator`, running in its routing mode (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.catalog-playbook.md` § 10), runs all content work (classify, find candidates, surface the routing decision, fold to prose) during the review loop. Requires the agent registered as an expert AND a review class entry mapping `requests/*.md` to `spec.catalog-coordinator` under `terminal.routing` (the post-approve terminal-action section writer group that owns the `# Routing` heading — surfaces only after the operator approves the body, persists through finalize so the apply worker can read the resolved routing prose, and never triggers revert-to-main since operator choices are not concerns). The class declares a separate `main` chain — the consumer-supplied interpreter expert.
 
 Without all three wired, the request inbox is dead from the daemon's perspective. The request runtime is part of the plugin's own surface — enabling the plugin means wanting it — so this step writes the blocks unconditionally; there is no `wire-now` / `skip` opt-in (per § Install philosophy).
 
@@ -321,7 +349,7 @@ The joint filter `review_active: [null] + review_result: [null]` catches files t
 
 Once the script commits with `review_active: true`, the file falls out of this routine's filter and into `lazy-review.scan`'s loop. After finalize stamps `review_result`, the apply routine (6b) takes over.
 
-If the routine already exists, apply the File-sync policy: byte-identical → `unchanged`; a stale shape that the shipped delta upgrades cleanly → merge silently (`merged`). Upgrades that count as clean: adding the missing `review_result: [null]` clause; adding the missing `filter.folder_note: false` clause; setting `interval_sec` to `60` when it still carries the legacy `5` (an operator-chosen value other than 5 stays untouched) — all provided no local edit contradicts them. Only a genuine contradiction (a local edit that the shipped shape would overwrite incompatibly — older `expert:` form replaced by `command:`, a deliberately narrowed `request_status: [null]` filter, an operator-set `folder_note: true`) triggers an `AskUserQuestion` with a unified diff.
+If the routine already exists, apply the File-sync policy: byte-identical → `unchanged`; a stale shape that the shipped delta upgrades cleanly → merge silently (`merged`). Upgrades that count as clean: adding the missing `review_result: [null]` clause; adding the missing `filter.folder_note: false` clause; setting `interval_sec` to `60` when it still carries the legacy `5` (an operator-chosen value other than 5 stays untouched) — all provided no local edit contradicts them. Only a genuine contradiction (a local edit that the shipped shape would overwrite incompatibly — older `expert:` form replaced by `command:`, a deliberately narrowed `request_status: [null]` filter, an operator-set `folder_note: true`) triggers the File-sync conflict question, filled as: Where — Step 6a, `routines.lazy-spec.request-open` in `<settings-dir>/lazy.settings.json`; Found — the local entry against the shipped shape as a unified diff; Why asking — that local edit contradicts the shipped shape; Answers — `merge-shipped` / `keep-local` per the policy.
 
 ### 6b. md-scan apply routine (mechanical, command-based)
 
@@ -346,7 +374,7 @@ The daemon resolves `command[0]` (`lazycortex-specs`) to the plugin's bin script
 
 The joint filter `request_status: ["draft"] + review_result: ["approved", "approved-with-concerns"]` matches only the post-finalize state: finalize stamped `review_result` (clean approve OR approve-with-concerns) as its last step, and the terminal `request_status` has not been written yet (still `draft`). Stop-aborted reviews (no `review_result` ever written) and mid-review files (transient `review_*` keys present but `review_result` not yet stamped) do not match — apply only fires on a clean finalize. The worker reads the resolved routing prose that `spec.coordinator` folded into `# Routing` during review (its routing mode, per `lazy-spec.coordination-playbook.md` Chapter 7) and enacts it.
 
-If the routine already exists, apply the File-sync policy: the older `expert: lazy-spec.request-apply` form (LLM-dispatched apply) is superseded by the shipped `command:` shape; the missing `filter.folder_note: false` clause is added; and `interval_sec` is set to `60` when it still carries the legacy `5` (an operator-chosen value other than 5 stays untouched) — when no local edit contradicts these, merge silently (`merged`); only when a local edit on that entry would be lost does it become a genuine conflict and ask with a unified diff.
+If the routine already exists, apply the File-sync policy: the older `expert: lazy-spec.request-apply` form (LLM-dispatched apply) is superseded by the shipped `command:` shape; the missing `filter.folder_note: false` clause is added; and `interval_sec` is set to `60` when it still carries the legacy `5` (an operator-chosen value other than 5 stays untouched) — when no local edit contradicts these, merge silently (`merged`); only when a local edit on that entry would be lost does it become a genuine conflict and raise the File-sync conflict question, filled as: Where — Step 6b, `routines.lazy-spec.request-apply` in `<settings-dir>/lazy.settings.json`; Found — the local entry against the shipped shape as a unified diff; Why asking — that local edit would be lost; Answers — `merge-shipped` / `keep-local` per the policy.
 
 ### 6c. Expert entry
 
@@ -365,6 +393,19 @@ The coordinator's own writes always carry this identity, and its `@bot.` substri
 
 `can_commit_in_repo: true` is required, not optional — the same convention the `design` / `test-plan` cascade writers use below. Absent, `expert_pump` extends the coordinator's spawn prompt with a no-commit clause forbidding it from committing its own pen writes (`# Status brief`, `[!question]` callouts, `# Coordinator commands` locking) — but the coordinator has no dispatcher-side apply path the way a reviewed document does, so those writes would either never land (the clause obeyed) or leave the tree dirty forever (the clause ignored), and a dirty tree after `lazy-expert.pump` halts the daemon before its next `_git_post` push, stranding the whole tick.
 
+Under `experts` also add the key `spec.catalog-coordinator` if missing — the level coordinator that owns the catalog root's and each product's system documents (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.catalog-playbook.md`):
+
+```yaml
+spec.catalog-coordinator:
+  agent: lazycortex-specs:lazy-spec.catalog-coordinator
+  can_commit_in_repo: true
+  git_author:
+    name: spec.catalog-coordinator
+    email: spec.catalog-coordinator@bot.invalid
+```
+
+Both coordinators are fired by the SAME routine (Step 5b): `coordinator_dispatch.py` resolves the owning note of every changed document and routes it by `spec_role` — `status` to `spec.coordinator`, `product` / `catalog` to this one. There is no second routine to register, and the `can_commit_in_repo` / `@bot.` reasoning above applies to this entry identically.
+
 The apply transition does NOT register an expert — its routine is `command:`-shape (the Python primitive). The bot identity for the apply commit is hardcoded as `lazy-spec.request-apply` / `lazy-spec.request-apply@bot.invalid` in the worker's CLI defaults. Override with `--author-name` / `--author-email` if a consumer needs a different identity.
 
 If an older `spec.request-router` or `lazy-spec.request-apply` expert entry remains (from a previous install predating the coordinator model, where routing decisions were a dedicated LLM-dispatched router rather than `spec.coordinator`'s own call), it is now an orphan. Per the File-sync policy, orphans are left in place silently (`kept-orphan`); this skill never deletes consumer config.
@@ -382,14 +423,14 @@ Under `review.classes` append an entry for `requests/*.md` if no existing entry 
       - name: <consumer-interpreter-expert>
     terminal:
       routing:
-        name: spec.coordinator
+        name: spec.catalog-coordinator
         section: Routing
         position: top
 ```
 
-Writer shapes per the new schema (audit-enforced): `main` is a LIST of `{name}` writer objects; each `validation` / `terminal` section is a SINGLE writer object `{name, section, position}` (no list, no `repo` — the deprecated `repo` field is omitted). `main` is the body-content interpreter expert the consumer supplies. `terminal.routing` is `spec.coordinator`, the post-approve routing-decision writer that owns the `# Routing` heading — routing is one instance of the coordinator's general "decide what happens next on this asset" mandate (`lazy-spec.coordination-playbook.md`), not a dedicated router persona. It fires only AFTER the operator approves the body, follows `lazy-review.doc-review-protocol` § `mode == terminal` (surfaces the routing decision as a `[!question]`, folds the operator's answer into prose naming the targets), the `# Routing` section persists through finalize so `lazy-spec.request-apply` can read the resolved routing prose, and the section never triggers revert-to-main (operator choices are not concerns). The coordinator declares no `frontmatter` block in this role — per the doc-review protocol, terminal-mode writers do not write frontmatter at all; everything it decides lives in its section body. `request_class` is stamped by `lazy-spec.request-apply` post-finalize (it reads the class verdict from the routing prose and writes the field alongside `request_status` and the mirror tag — see the `lazy-spec.request-apply` agent body for the full apply contract). `main` writers and validators likewise own the document BODY only; daemon state keys (`review_*`) are written mechanically, never through an expert overlay.
+Writer shapes per the new schema (audit-enforced): `main` is a LIST of `{name}` writer objects; each `validation` / `terminal` section is a SINGLE writer object `{name, section, position}` (no list, no `repo` — the deprecated `repo` field is omitted). `main` is the body-content interpreter expert the consumer supplies. `terminal.routing` is `spec.catalog-coordinator`, the post-approve routing-decision writer that owns the `# Routing` heading — routing is decided at the catalog level, the one place every product and both level ladders are visible at once (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.catalog-playbook.md` § 10), not by a dedicated router persona. An install that predates this move carries `spec.coordinator` in this slot; per the File-sync policy the mismatch is a genuine conflict — surface it and rewrite the name on the operator's word, since the asset coordinator no longer has a routing mode to serve it with. It fires only AFTER the operator approves the body, follows `lazy-review.doc-review-protocol` § `mode == terminal` (surfaces the routing decision as a `[!question]`, folds the operator's answer into prose naming the targets), the `# Routing` section persists through finalize so `lazy-spec.request-apply` can read the resolved routing prose, and the section never triggers revert-to-main (operator choices are not concerns). The coordinator declares no `frontmatter` block in this role — per the doc-review protocol, terminal-mode writers do not write frontmatter at all; everything it decides lives in its section body. `request_class` is stamped by `lazy-spec.request-apply` post-finalize (it reads the class verdict from the routing prose and writes the field alongside `request_status` and the mirror tag — see the `lazy-spec.request-apply` agent body for the full apply contract). `main` writers and validators likewise own the document BODY only; daemon state keys (`review_*`) are written mechanically, never through an expert overlay.
 
-If the consumer has not yet registered an interpreter expert, omit `main` — the class still dispatches `spec.coordinator` on `# Routing` changes.
+If the consumer has not yet registered an interpreter expert, omit `main` — the class still dispatches `spec.catalog-coordinator` on `# Routing` changes.
 
 If `review` section is absent, create `{_version: 1, classes: [<entry>]}`. If `classes` is present but no entry covers `requests/*.md`, append.
 
@@ -618,13 +659,22 @@ The writers of the 6d/6e classes are dispatched by `lazycortex-review`'s coordin
 **Legacy cleanup.** Two leftovers from the retired md-scan sieve model may survive on an older repo:
 
 - `routines["lazy-review.scan"]` — retired by `/lazy-review.install` (its `process-file` consumer no longer exists). Do not touch it here; report `legacy-scan-routine-present` so the operator re-runs that install.
-- `.experts/.spec-imports/` — the retired `/spec.import` clone cache; nothing will ever populate it again. `Bash(test -d .experts/.spec-imports)`: **absent** → outcome `spec-imports-cache-absent`. **Present** → `AskUserQuestion` naming the directory (this deletes data — propose, never silently delete): "Delete the cache and its `.gitignore` line" (outcome `spec-imports-cache-removed`) / "Leave it for now" (outcome `skipped-operator-kept-cache`). **No answer** → outcome `refused-no-answer`, cache untouched.
+- `.experts/.spec-imports/` — the retired `/spec.import` clone cache; nothing will ever populate it again. `Bash(test -d .experts/.spec-imports)`: **absent** → outcome `spec-imports-cache-absent`. **Present** → ask (this deletes data — propose, never silently delete). **No answer** → outcome `refused-no-answer`, cache untouched.
+
+  ```
+  Context (print before asking):
+  - Where: /lazy-spec.install · Step 6f — Retired-sieve cleanup; target `<repo-root>/.experts/.spec-imports/` and its `.gitignore` line
+  - Found: the directory exists (<N> entries); nothing will ever populate it again
+  - Why asking: deleting data — the only case a cleanup proposes instead of acting
+  - Answers: `Delete the cache and its .gitignore line` — both removed now, outcome `spec-imports-cache-removed`; `Leave it for now` — untouched, outcome `skipped-operator-kept-cache`, offered again on the next run while the directory exists
+  AskUserQuestion: header "Retired cache", question "Delete the retired `/spec.import` clone cache at `.experts/.spec-imports/` in <repo> together with its `.gitignore` line?", options `Delete the cache and its .gitignore line` / `Leave it for now` with the descriptions above.
+  ```
 
 Outcome: `wiring-applied:<N>` where N is 0..11 (the four 6a–6d blocks plus the six 6e classes plus the 6f class-protocols sync), plus the 6f sub-outcomes (`class-protocols-seeded:<M>` / `class-protocols-already-present`, and the legacy-cleanup outcomes above when they fire).
 
 ## Step 6.5: Seed agent-model tiers
 
-The plugin ships the `spec.coordinator` subagent (wired as an expert in Step 6). Seed the `agent_models.lazycortex` group with this plugin's subagents by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-specs:`-prefix filter, and the non-destructive per-key semantics (absent→add, equal→unchanged, different→kept-local). There is no inline tier logic here.
+The plugin ships the `spec.coordinator` and `spec.catalog-coordinator` subagents (both wired as experts in Step 6c). Seed the `agent_models.lazycortex` group with this plugin's subagents by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-specs:`-prefix filter, and the non-destructive per-key semantics (absent→add, equal→unchanged, different→kept-local). There is no inline tier logic here.
 
 Dispatch, passing the scope resolved in Step 1 (`project` | `user`):
 
@@ -662,7 +712,7 @@ The daemon resolves `command[0]` (`lazycortex-specs`) to the plugin's bin script
 
 If `/lazy-routine.register` reports the routine is already registered, accept its outcome (`unchanged` / `present`) — do not force-overwrite. Outcome: `routine-registered`, `routine-already-present`, or `skipped-no-upstream-configured`.
 
-## Step 6.9: Seed the vault spec
+## Step 6.9: Seed the vault spec and the catalog root's level note
 
 The project-wide `vision.md` at the spec content-root — the **vault spec** — is the starting point of the whole catalog: it states what the project is, for whom, and what counts as success; the split into products is a consequence of it (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md` Part 1). `lazy-spec.product-config` refuses to register the first product while it is absent (accepting a pre-existing `design.md` without one as a legal pre-vision state), so this step seeds a draft before Step 7 offers that registration.
 
@@ -674,17 +724,36 @@ The project-wide `vision.md` at the spec content-root — the **vault spec** —
 
 No question — the seed is fully derivable. No review dispatch either: the shared `system-vision` review class already covers the content-root `vision.md` glob, so the review loop picks the document up through the normal channels once the operator starts filling it in. The gate `lazy-spec.product-config` enforces is the file's presence; any stricter condition (written / approved) is deliberately not part of this contract yet.
 
+4. Seed (or repair) the catalog root's **level note** — the folder-note `spec.catalog-coordinator` owns, at `<content-root>/<basename of content-root>.md`, carrying `spec_role: catalog`, the four level gates, and the coordinator's own body sections:
+
+   ```
+   Bash(lazycortex-specs catalog-note backfill --root)
+   ```
+
+   The verb creates the note from the shipped level-note template when it is absent and, when it is present, adds only what it lacks — no key is rewritten, no section is moved, and the operator's `# Coordinator rules` and rendered `# Summary` survive byte-for-byte. Re-running it on a conforming note writes nothing. Fold its returned `note` path into the install's own commit.
+
+5. Backfill **every registered product's** level note the same way — one call per key in `products`, each landing at `<spec_path>/<leaf of spec_path>.md` (the folder-note convention, never the product's own key), so an existing catalog gains the level role, gates, and sections it predates:
+
+   ```
+   Bash(lazycortex-specs catalog-note backfill <product-key>)
+   ```
+
+   Zero products registered yet (the from-scratch path — Step 7 registers the first one, and `lazy-spec.product-config` Step 11 calls this same verb for it) makes this a silent no-op.
+
+Step outcome folds all three: `<vision seeded|already-present>` + `root-note-<created|updated|unchanged>` + `products-backfilled:<n>`.
+
 ## Step 7: Offer first product registration
 
 The vault spec from Step 6.9 now exists, so registration can follow it — products are a consequence of the repo-wide spec.
 
-Ask via `AskUserQuestion`:
-
-- **question**: `Register your first product now?`
-- **description**: Every product lives in the `products` settings section; a code-bound product also references a repo record in the `repos` settings section describing its source checkout. The `lazy-spec.product-config` skill is the wizard that writes both. You can also run it later by dispatching `lazy-spec.product-config` directly.
-- **options**:
-  - `register-now` — invoke `lazy-spec.product-config` via the `Skill` tool to walk through repo cfg + product cfg creation.
-  - `skip` — leave the consumer config empty; user runs `lazy-spec.product-config` later when ready.
+```
+Context (print before asking):
+- Where: /lazy-spec.install · Step 7 — Offer first product registration; target `products` and `repos` in <settings-dir>/lazy.settings.json
+- Found: `products` on record: <keys, or "none">; vault spec `<content-root>/vision.md`: <seeded | already-present>
+- Why asking: the first product is genuine project config, and whether to register it now or later is the operator's call
+- Answers: `register-now` — invoke `lazy-spec.product-config` via the `Skill` tool to walk through repo cfg + product cfg creation; it writes the product record into `products` and, for a code-bound product, the repo record describing its source checkout into `repos` (outcome `registered: <compound-key>`); `skip` — consumer config stays empty, outcome `skipped-per-user-choice`; the operator runs `lazy-spec.product-config` later when ready, and this step offers again on the next install run
+AskUserQuestion: header "First product", question "Register the first product of <repo> now via the `lazy-spec.product-config` wizard, or later?", options `register-now` / `skip` with the descriptions above.
+```
 
 If `register-now`: invoke `lazy-spec.product-config` via the `Skill` tool. Report the dispatch outcome. If `skip`: state `skipped-per-user-choice`.
 
@@ -697,7 +766,7 @@ If `register-now`: invoke `lazy-spec.product-config` via the `Skill` tool. Repor
 Every sub-step below uses only `Bash(test *)` / `Bash(ls *)` — already on this skill's `allowed-tools` line — rather than a single compound multi-line script, so no new Bash pattern needs whitelisting for this step:
 
 1. **Env-dirs stage.** `Bash(test -n "$LAZYCORTEX_PLUGIN_DIRS" && echo "$LAZYCORTEX_PLUGIN_DIRS")`. Empty output → go to stage 2. Non-empty → split the printed value on `:`; for each candidate `<dir>`, `Bash(test -f "<dir>/bin/lazycortex-wiki" && echo "<dir>/bin/lazycortex-wiki")` until one prints a path — hold that as `$WIKI_CLI` and skip stage 2.
-2. **Plugin-cache glob** (only when stage 1 found nothing). `Bash(ls -d ~/.claude/plugins/cache/*/lazycortex-wiki/*/bin/lazycortex-wiki 2>/dev/null)`. No output → `$WIKI_CLI` stays unresolved. One or more lines → each names a version-embedding path (`.../<version>/bin/lazycortex-wiki`); take the lexicographically greatest one (plain string comparison of the full path — matching `coordinator_dispatch.py`'s own `sorted(..., reverse=True)[0]` newest-version pick, NOT a true semver sort) as `$WIKI_CLI`.
+2. **Plugin-cache glob** (only when stage 1 found nothing). `Bash(ls -d ~/.claude/plugins/cache/*/lazycortex-wiki/*/bin/lazycortex-wiki 2>/dev/null)`. No output → `$WIKI_CLI` stays unresolved. One or more lines → each names a version-embedding path (`.../<version>/bin/lazycortex-wiki`); take the newest version — `Bash(ls -d ~/.claude/plugins/cache/*/lazycortex-wiki/*/bin/lazycortex-wiki 2>/dev/null | sort -V | tail -1)`, a numeric version sort so `10.0.0` outranks `9.1.1`, matching `coordinator_dispatch.py`'s own newest-version pick — as `$WIKI_CLI`.
 
 - `$WIKI_CLI` unresolved after both stages → `lazycortex-wiki` is not installed on this machine. State `skipped-no-wiki` and move on to Step 8 — this is the normal, expected outcome for a repo without the wiki plugin.
 - `$WIKI_CLI` resolved → continue below.
@@ -712,7 +781,7 @@ Idempotent union into `wiki.tag_axes` — a repository that already declares bot
 
 A non-zero exit is non-fatal: surface its stderr first line in the report and continue below; do NOT abort the install.
 
-**Seed the spec-catalog scope defaults.** A spec catalog's wiki scope skips unfinished and working documents by default: a stage-bearing doc is curated only once `spec_stage` reaches `approved` (a doc with no `spec_stage` at all — a terms dictionary, a decisions registry — passes; markdown attachments mirror their owner's stage per `lazy-spec.layout-protocol.md` § Attachments, so they follow the owner), a doc whose own review rejected it stays out via `review_result`, a doc under review is already skipped by the `review_active` predicate the configure wizard seeds, and plan/report working papers are excluded by name. The seed is idempotent and never overwrites an operator's own predicate for the same key, so a project that deliberately loosened the default keeps its loosening on every re-run.
+**Seed the spec-catalog scope defaults.** A spec catalog's wiki scope skips unfinished and working documents by default: a stage-bearing doc is curated only once `spec_stage` reaches `approved` (a doc with no `spec_stage` at all — a terms dictionary, a decisions registry — passes; markdown attachments mirror their owner's stage per `lazy-spec.layout-protocol.md` § Attachments, so they follow the owner), a doc whose own review rejected it stays out via `review_result`, a doc under review is already skipped by the `review_active` predicate the configure wizard seeds, and the request inbox (`<vault_root>/requests/**`, raw requests and their archive) plus plan/report working papers are excluded by name — the scope's own `topics_index` is skipped structurally and needs no entry. `/lazy-wiki.configure` asks no exclude question for a scope covering the catalog; this seed is the one source. The seed is idempotent and never overwrites an operator's own predicate for the same key, so a project that deliberately loosened the default keeps its loosening on every re-run.
 
 Resolve the scope covering each registered product: for every entry in `products` (skip the `_version` meta key), build the repo-relative probe path `<vault_root>/<spec_path>/design.md` — `<vault_root>` is the `spec.vault_root` setting (default `specs`); drop the `<vault_root>/` segment when it is `.`. `resolve-scope` matches the path against configured globs only — the file need not exist on disk yet:
 
@@ -723,12 +792,20 @@ Bash(test -x "$WIKI_CLI" && "$WIKI_CLI" resolve-scope <vault_root>/<spec_path>/d
 `{"scope_id": null}` → no configured wiki scope covers this product yet; count it under `no-scope` and skip it. Two products resolving to the same scope must not double-trigger the seed — dedupe scope ids across the loop. For every distinct `<id>`:
 
 ```
-Bash(test -x "$WIKI_CLI" && "$WIKI_CLI" ensure-scope-config <id> --filter-json '{"spec_stage": {"in": [null, "approved"]}, "review_result": {"not_in": ["rejected"]}}' --exclude '**/*-plan.md' '**/*-report.md' --repo <repo-root>)
+Bash(test -x "$WIKI_CLI" && "$WIKI_CLI" ensure-scope-config <id> --filter-json '{"spec_stage": {"in": [null, "approved"]}, "review_result": {"not_in": ["rejected"]}}' --exclude '<vault_root>/requests/**' '**/*-plan.md' '**/*-report.md' --repo <repo-root>)
 ```
 
 A non-zero exit from either call is the same non-fatal case as above — count it under `cli-failed`, surface its stderr first line, continue.
 
-Outcome: `skipped-no-wiki`, or `axes-<added: N|unchanged>, preset-<seeded: N-scopes|unchanged> (no-scope: <M>, cli-failed: <K>)` — the parenthetical is omitted when both counts are `0`.
+**Keep deferred documents out of the wiki routines.** The scope filter above keeps a `spec_stage: deferred` document out of the wiki graph, but the wiki's git-watch routines judge a changed file by their own `filter` block, not by the scope's: without a predicate of their own, every commit touching a parked document still dispatches a terms-curator job and a structure-curator job. Seed the predicate into each wiki routine the repository has registered, through the core CLI's routine seed — the same absent-key-only contract as the scope seed, so an operator's own `spec_stage` predicate on a routine is never overwritten. For each `<routine>` in `lazy-wiki.scan`, `lazy-wiki.terms-scan-<id>` (one per scope id resolved above), `lazy-wiki.structure-scan`, `lazy-wiki.structure-scan-deletes`, `lazy-wiki.structure-scan-renames`:
+
+```
+Bash(lazycortex-core routine-ensure-filter <routine> --filter-json '{"spec_stage": {"not_in": ["deferred"]}}')
+```
+
+`{"status": "error", "reason": "no such routine"}` (exit 1) means the repository never registered that routine — count it under `no-routine` and continue; it is the normal case for a repo without the structure map or without a terms dictionary. Files without frontmatter and documents without `spec_stage` pass a `not_in` predicate, so the seed narrows nothing but parked documents.
+
+Outcome: `skipped-no-wiki`, or `axes-<added: N|unchanged>, preset-<seeded: N-scopes|unchanged>, routines-<seeded: N|unchanged> (no-scope: <M>, no-routine: <R>, cli-failed: <K>)` — the parenthetical is omitted when every count is `0`.
 
 ## Step 7c: Backfill `spec_doc_type` across the catalog
 

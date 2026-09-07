@@ -41,7 +41,14 @@ Outcome: `loaded` or `not-configured`.
 
 Parse the invocation: `group <group-key> [<section>]` or `term "<text>"`. `<group-key>` is the dot-separated dictionary key (e.g. `mechanics.actions`); `<section>` is one of `Terms` / `Principles` / `Mechanics` / `Contracts`, case-insensitive, and optional. `Terms`, `Principles`, `Mechanics` are always present; `Contracts` is optional — the writer omits it when the group has no attributed `Contract:` blocks.
 
-Neither keyword given → `AskUserQuestion`: *"Query a domain group's doc, or search for a term across the domain tree?"* with options `group` / `term`; follow up asking for the missing key/section or the search text.
+Neither keyword given → ask.
+
+Context (print before asking):
+- Where: /lazy-wiki.domains · Phase 2 — Resolve query target; target `<output>/domains.md`
+- Found: the invocation carried neither `group` nor `term`; groups listed in the index `<n>`
+- Why asking: the query kind and its key are the caller's intent
+- Answers: `group` — Phase 3 returns one group doc's overview or one `##` section, after asking for the key and optional section; `term` — Phase 4 greps the tree and returns excerpts, after asking for the text; read-only, nothing persisted
+AskUserQuestion: header "Domain query", question "Query one domain group's doc under `<output>`, or search a term across the whole domain tree?", options `group` / `term` with those descriptions. Follow up, free text — on `group`: header "Group key", question "Group key (dot-separated, e.g. `mechanics.actions`) and optional section (Terms / Principles / Mechanics / Contracts)?"; on `term`: header "Search term", question "Text to search across `<output>/**/*.md`?".
 
 Outcome: `resolved: <group|term>`.
 

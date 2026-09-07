@@ -1,7 +1,7 @@
 ---
 name: lazy-observe.install
 description: "Run when the operator asks to start shipping lazycortex runtime metrics off this host, to point the local daemons at their Prometheus / Mimir, or after `/lazy-observe.doctor` reports `not-installed` or `covered-unconfigured`. Pre-flights for an existing collection stack: a foreign collector already covering the host flips the run into integrate mode automatically — scrape targets regenerated, no questions asked; pass `--integrate-only` to force that mode explicitly, `--force-standalone` to install the shipper anyway. URL, auth, and agent kind are asked only when a shipper is actually installed, once, and never re-asked; idempotent and quiet on re-run."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(test *), Bash(date *), Bash(brew *), Bash(which *), Bash(curl *), Bash(uname *), Bash(python3 *), Agent
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(chmod *), Bash(launchctl *), Bash(systemctl *), Bash(test *), Bash(date *), Bash(brew *), Bash(which *), Bash(curl *), Bash(uname *), Bash(python3 *), AskUserQuestion, Agent
 ---
 # Install lazy-observe
 
@@ -21,7 +21,7 @@ Every file this skill renders or writes (agent config, service unit from shipped
 
 1. **Absent or unchanged** — target missing, or byte-identical to the freshly-rendered version → write silently. State `rendered` / `unchanged`.
 2. **Locally changed but cleanly mergeable** — target diverged, but re-rendering only overwrites the generated region while every operator-owned value is preserved (no contradiction) → render silently. State `rendered`.
-3. **Genuine conflict** — the same region was changed both locally and in the freshly-rendered version in ways that cannot be reconciled automatically → the ONLY case that asks. `AskUserQuestion` naming the file, quoting the conflicting region, options `take-rendered` / `keep-local`.
+3. **Genuine conflict** — the same region was changed both locally and in the freshly-rendered version in ways that cannot be reconciled automatically → the ONLY case that asks. The site that hits one prints the four context items before the call, filled from the run: **Where** — `/lazy-observe.install · Step <N> — <title>`; target the rendered file's path. **Found** — the local region quoted beside the freshly-rendered region. **Why asking** — both sides changed the same region and the skill cannot tell which should survive. **Answers** — `take-rendered` — the rendered region replaces the local one now, operator-owned values elsewhere stay, not re-asked while the file matches the render; `keep-local` — the file stays byte-for-byte, nothing is persisted so the next run asks again while the conflict persists. Then `AskUserQuestion`: header `"<file basename> conflict"`, question `"<file path> has a local change in <region> that the re-render also changes. Take the rendered version or keep the local one?"`, options `take-rendered` / `keep-local` with those descriptions.
 
 "Conflict" means you cannot determine what should survive — not merely "the bytes differ". Re-rendering = overwrite the generated region, preserve operator-owned values; no contradiction → no question.
 
@@ -134,10 +134,16 @@ Outcome: `reachable-<N>-of-<M>` / `core-metrics-disabled`.
 
 Read `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` first (per Read-first config). If `agent_kind` is already on record, reuse it silently and skip the question (outcome `kept-existing`).
 
-Otherwise `AskUserQuestion` — single question, two options:
+Otherwise print the context, then ask (single question, two options):
 
-- **Grafana Alloy** (recommended for Grafana Cloud / Mimir-stack operators).
-- **OpenTelemetry Collector** (vendor-neutral; recommended for everyone else).
+```
+Context (print before asking):
+- Where: /lazy-observe.install · Step 3 — Collect agent kind; target ${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml
+- Found: observe.toml <absent | present without agent_kind>; host <darwin|linux> (Step 1); <N> of <M> daemon metrics endpoints reachable (Step 2)
+- Why asking: the shipper that scrapes the local daemons and forwards to the observer is operator infrastructure nothing on disk derives
+- Answers: `Grafana Alloy` — agent config rendered from alloy.river.j2 (Step 7); recommended for Grafana Cloud / Mimir-stack operators; `OpenTelemetry Collector` — rendered from otelcol.yaml.j2; vendor-neutral, recommended for everyone else. Either is persisted as agent_kind in observe.toml (Step 6) and never re-asked
+AskUserQuestion: header "Agent kind", question "Which metrics shipper should run on this host and forward the lazycortex daemons' metrics to your observer?", options `Grafana Alloy` / `OpenTelemetry Collector` with those descriptions.
+```
 
 Persist the choice as `agent_kind` ∈ `{alloy, otelcol}`.
 
@@ -147,7 +153,18 @@ Outcome: `alloy` / `otelcol` / `kept-existing`.
 
 Read `observe.toml` first. If `remote_write_url` is already on record, reuse it silently and skip the question (outcome `kept-existing`) — do NOT re-prompt to keep-or-overwrite.
 
-Otherwise `AskUserQuestion` — single free-form prompt for the operator's Prometheus `remote_write` endpoint URL. Validate that it parses as `http(s)://...`. Persist as `remote_write_url`.
+Otherwise print the context, then ask (single free-form prompt):
+
+```
+Context (print before asking):
+- Where: /lazy-observe.install · Step 4 — Collect remote_write URL; target ${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml
+- Found: observe.toml <absent | present without remote_write_url>; agent_kind <alloy|otelcol> (Step 3)
+- Why asking: the observer's remote_write endpoint is operator infrastructure nothing on disk derives
+- Answers: a URL — validated as http(s)://…, persisted as remote_write_url in observe.toml (Step 6), rendered into the agent config (Step 7), never re-asked; a value that does not parse is rejected and asked again
+AskUserQuestion: header "remote_write URL", question "What is the Prometheus remote_write endpoint URL of your observer (Prometheus / Mimir / …) that the <agent_kind> shipper on this host should forward to?", free-form answer.
+```
+
+Validate that it parses as `http(s)://...`. Persist as `remote_write_url`.
 
 Outcome: `collected` / `kept-existing`.
 
@@ -155,13 +172,29 @@ Outcome: `collected` / `kept-existing`.
 
 Read `observe.toml` first. If `auth_kind` (and `basic_auth_username` when applicable) is already on record, reuse it silently and skip both the kind and source questions (outcome `kept-existing`) — the operator's token continues to be sourced from the env var or 0600 file as previously recorded.
 
-Otherwise `AskUserQuestion` — single question, three options:
+Otherwise print the context, then ask (single question, three options):
 
-- **Bearer token** — token sourced from `LAZYCORTEX_OBSERVE_TOKEN` env var or a 0600 file at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.token`.
-- **Basic auth** — username collected here; password sourced same way as bearer.
-- **None** — no auth (e.g. mTLS-fronted observer or in-VPC plain HTTP).
+```
+Context (print before asking):
+- Where: /lazy-observe.install · Step 5 — Collect auth kind + credentials; target ${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml
+- Found: observe.toml <absent | present without auth_kind>; remote_write_url <url> (Step 4)
+- Why asking: how the observer at <url> authenticates remote_write is operator infrastructure nothing on disk derives
+- Answers: `Bearer token` — token sourced from the LAZYCORTEX_OBSERVE_TOKEN env var or a 0600 file at ${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.token; a token-source follow-up comes next; `Basic auth` — username collected here, password sourced the same way as bearer; same follow-up; `None` — no auth (e.g. mTLS-fronted observer or in-VPC plain HTTP), no follow-up. Each is persisted as auth_kind in observe.toml (Step 6) and never re-asked; the secret itself is never written there
+AskUserQuestion: header "Auth kind", question "How does the observer at <url> authenticate remote_write from this host?", options `Bearer token` / `Basic auth` / `None` with those descriptions.
+```
 
-If bearer or basic, ask a follow-up `AskUserQuestion` for token-source: `env` (operator handles export themselves) or `file` (we write it 0600). On `file`, prompt for the token value once and call `${CLAUDE_PLUGIN_ROOT}/bin/install.write_token_file()`. Never write the token into the answer file.
+If bearer or basic, print the context, then ask a follow-up for token-source:
+
+```
+Context (print before asking):
+- Where: /lazy-observe.install · Step 5 — Collect auth kind + credentials; target ${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.token
+- Found: auth_kind <bearer|basic> just chosen for <url>; observe.token <present|absent>
+- Why asking: the secret must come from somewhere the service unit can read, and only the operator knows where it will live
+- Answers: `env` — the operator exports LAZYCORTEX_OBSERVE_TOKEN themselves, nothing written; `file` — one more prompt collects the token value once and install.write_token_file() writes it 0600 to observe.token. The source is recorded with the auth answers and never re-asked; the token value is never written into observe.toml
+AskUserQuestion: header "Token source", question "Where should the <bearer|basic> secret for <url> come from on this host?", options `env` / `file` with those descriptions.
+```
+
+On `file`, prompt for the token value once — context printed first: Where — the same step, target `observe.token`; Found — `observe.token` `<present|absent>`; Why asking — the value is a secret only the operator holds; Answer — written 0600 by `${CLAUDE_PLUGIN_ROOT}/bin/install.write_token_file()`, never into the answer file, never re-asked while the file exists — then call the helper. Never write the token into the answer file.
 
 Outcome: `bearer-env` / `bearer-file` / `basic-env` / `basic-file` / `none` / `kept-existing`.
 

@@ -40,11 +40,18 @@ Outcome: `manifest: <repo_root>/.obsidian.manifest.json`.
 
 `test -d <repo_root>/.obsidian` — absent is the normal case (fresh checkout); proceed with outcome `fresh`.
 
-Present means the checkout already has a configured vault, and deploy would overwrite its config files with the manifest's. Ask once via `AskUserQuestion`:
+Present means the checkout already has a configured vault, and deploy would overwrite its config files with the manifest's. Ask once:
 
-> `.obsidian/` already exists at `<repo_root>`. Deploy overwrites its config from the manifest — local changes made since the last capture are lost. Proceed?
+```
+Context (print before asking):
+- Where: /lazy-obsidian.deploy · Step 2 — Guard an existing vault; target <repo_root>/.obsidian/
+- Found: `.obsidian/` present at <repo_root>; manifest located in Step 1 at <repo_root>/.obsidian.manifest.json
+- Why asking: overwriting a live config is destructive — local changes made since the last capture are lost
+- Answers: `Deploy anyway` — Step 3 rewrites the config files from the manifest (outcome `overwrite-approved`); `Cancel` — nothing written, outcome `cancelled-by-operator`, straight to Step 5; not persisted, asked on every run that finds a vault
+AskUserQuestion: header "Existing vault", question ".obsidian/ already exists at <repo_root>. Deploy overwrites its config from .obsidian.manifest.json — local changes made since the last capture are lost. Proceed?", options `Deploy anyway` — "overwrite the live config from the manifest", `Cancel` — "leave the vault untouched" (default).
+```
 
-Options: `Deploy anyway` / `Cancel`. Default is `Cancel`. On cancel, stop the skill with outcome `cancelled-by-operator` and go straight to Step 5.
+On cancel, stop the skill with outcome `cancelled-by-operator` and go straight to Step 5.
 
 Outcome: `fresh`, `overwrite-approved`, or `cancelled-by-operator`.
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Adopt lazycortex-python in a repo with pre-existing Python, run chk-py all to surface every drift violation (including pcf's language and project-package checks), then backfill Domain/Contract markers with knowledge-sweep.
-last_regen: 2026-09-06
+last_regen: 2026-09-07
 diagram_spec:
   anchor: "Migration flow"
   request: "Sequence diagram: user invokes /lazy-python.install in a repo with pre-existing Python → install runs its ordered steps fully automatically (mirror rules, deploy chk-py/tst-py wrappers, detect PyCharm, bootstrap pyproject.toml, scaffold overlay, sync scaffold template, record python.env_source with a one-time disambiguation prompt only when multiple bootstrap-script candidates exist, seed agent-model tiers, register the code-reviewer expert, log) → user runs chk-py all -q → the six-step gate (pcf, toi, cmp, mypy, ruff, pylint) surfaces existing violations, including pcf's language and project-package findings → user fixes violations in chunks and commits iteratively until chk-py all exits clean → user dispatches lazy-python.knowledge-sweep to grow the domain-groups dictionary from any parked Domain(unfiled) blocks the fixes surfaced and file them under real groups"
@@ -11,7 +11,7 @@ source_skills:
   - chk
   - pcf.py
   - lazy-python.knowledge-sweep
-source_sha: 8506774fc3a7c0e7c006dce9ca39cf02b9407b1b
+source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 ---
 # Adopt the plugin in a repo with pre-existing Python that drifted from the canon
 
@@ -47,7 +47,7 @@ In your Claude Code session, with the repo open, invoke:
 /lazy-python.install
 ```
 
-The install runs its ordered steps automatically and asks you almost nothing. Install scope doesn't need resolving — lazycortex-python always targets your project's `${CLAUDE_PROJECT_DIR}`, regardless of where the plugin is enabled. PyCharm support (`pch`) is derived from whether `inspect.sh` is present on the machine — the install probes for it and deploys `[tool.pch]` in `pyproject.toml` only when PyCharm is actually available. It records `python.env_source` in `.claude/lazy.settings.json` when your repo ships a recognised bootstrap script (`cli/env`, `.env.sh`, `scripts/env.sh`) — zero or one candidate is handled silently, and more than one triggers a one-time disambiguation prompt naming each candidate. That prompt, plus a genuine file-sync conflict, are the only two questions this install ever raises. The install never touches `CLAUDE.md` (the plugin rules load from `.claude/rules/` automatically once the plugin is enabled).
+The install runs its ordered steps automatically and asks you almost nothing. Install scope doesn't need resolving — lazycortex-python always targets your project's `${CLAUDE_PROJECT_DIR}`, regardless of where the plugin is enabled. PyCharm support (`pch`) is derived from whether `inspect.sh` is present on the machine — the install probes for it and deploys `[tool.pch]` in `pyproject.toml` only when PyCharm is actually available. It records `python.env_source` in `.claude/lazy.settings.json` when your repo ships a recognised bootstrap script (`cli/env`, `.env.sh`, `scripts/env.sh`) — zero or one candidate is handled silently, and more than one triggers a one-time disambiguation prompt naming each candidate. That prompt, plus a genuine file-sync conflict, are the only two questions this install ever raises — and both now open with a short context block (which step raised it, what the install found, why it can't decide alone) printed before the question itself, so you see the reasoning before picking an answer. The install never touches `CLAUDE.md` (the plugin rules load from `.claude/rules/` automatically once the plugin is enabled).
 
 One step matters specifically for a migration: the install scaffolds `docs/guidelines/*.md` overlay stubs but deliberately does **not** seed `docs/guidelines/domain-groups.md` — that dictionary is a language-neutral registry the install leaves for Step 4 of this walkthrough to build from what your repo actually contains, rather than guessing at empty groups up front.
 

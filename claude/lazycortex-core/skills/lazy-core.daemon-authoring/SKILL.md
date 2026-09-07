@@ -29,7 +29,16 @@ Check whether the target repository is driven by the lazycortex runtime — `.cl
 
 If the repository is not under the lazycortex runtime (or the process must outlive/precede it), proceed as a **standalone daemon**.
 
-Confirm the choice via `AskUserQuestion` when the situation is ambiguous — an existing runtime but a workload that arguably needs its own lifecycle.
+When the situation is ambiguous — an existing runtime but a workload that arguably needs its own lifecycle — confirm the choice:
+
+```
+Context (print before asking):
+- Where: /lazy-core.daemon-authoring · Step 1 — Routine or standalone daemon; target repo `<repo>`, workload `<what the process does>`
+- Found: <`.claude/lazy.settings.json` has a `routines` section | supervisor unit `com.lazycortex.runtime.<label>` present> — the checkout is runtime-driven; the workload <reason it may need its own lifecycle: must outlive/precede the daemon, …>
+- Why asking: a routine reuses the daemon's rate-limit guard, serial scheduling, and git discipline; a second daemon beside a running one is justified only by a lifecycle the runtime cannot provide — the operator knows which
+- Answers: `Routine` — register via `/lazy-routine.register`, Steps 2–3 skipped; `Standalone daemon` — LLM calls wired through `lazy-claude`, supervisor skeleton handed over. Not persisted; asked once per authoring run
+AskUserQuestion: header "Routine or daemon", question "Repo `<repo>` already runs the lazycortex runtime — register `<workload>` as a routine, or write it as a standalone daemon?", options `Routine` / `Standalone daemon` with the descriptions above.
+```
 
 Outcome: `routine` (registered or handed to `/lazy-routine.register`) or `standalone`.
 

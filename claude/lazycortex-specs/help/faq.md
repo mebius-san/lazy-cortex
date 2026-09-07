@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about products, assets, vision/design docs, gates, requests, decisions, coverage gaps, spec lookups, and the coordinator agent.
-last_regen: 2026-09-05
+last_regen: 2026-09-07
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,7 +31,7 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 8cf0ec8412bf97623e74bdf4d6a5cba5b82d957f
+source_sha: 349e60422166e7fd5411543ace245f516361b6c5
 ---
 # Frequently asked questions
 
@@ -61,7 +61,7 @@ The skill requires the product to already carry a `source` binding — register 
 
 Yes, at three levels. Every asset type that carries a `vision` contract gets its own `vision.md` — goals, value, one-screen "what this is and for whom" (the asset's goals live ONLY here) — ahead of `design.md`, which opens with a reference back to the sibling vision instead of restating goals. The same vision-then-design pairing repeats one level up, at the product root, and one level further up still, at the vault's content-root (the `spec.vault_root` setting, default `specs/`), describing the whole project above every individual product. This is the **vault spec**, and `vision.md` is now its anchor: `/lazy-spec.install` seeds a draft there automatically (project scope only, from the `vault-vision.md` template) whenever neither it nor a pre-vision `design.md` already exists, and `/lazy-spec.product-config` refuses to register a product while both are absent — the split into products is a consequence of the repo-wide spec. A `design.md` present without a sibling `vision.md` is the legal pre-vision state (a vault migrated before the vision document existed); the plugin never seeds over it, only the operator migrates it by hand. `/lazy-spec.doctor` flags a vault carrying neither file as `[WARN] vault-spec-missing`, and a pre-vision vault as `[INFO] pre-vision vault`; re-run `/lazy-spec.install` to seed the missing draft.
 
-Every product's own `design.md` + `tech.md` pair — loose at the product root, not inside any asset folder — is typed `system-design` / `system-tech` rather than the asset-level `design` type feature/change/bug docs carry; the same three-doc set (`vision.md`, `design.md`, `tech.md`) can also exist loose at the content-root, typed `system-vision` / `system-design` / `system-tech` exactly like the product-root copy. The content-root `tech.md` half stays entirely optional and is never auto-created — write it by hand, copying the plugin's own `vault-tech.md` template (a dedicated template for this one level, carrying a `## Products` section the product-level `system-tech.md` template does not) whenever the project wants one.
+Every product's own `design.md` + `tech.md` pair — loose at the product root, not inside any asset folder — is typed `system-design` / `system-tech` rather than the asset-level `design` type feature/change/bug docs carry; the same three-doc set (`vision.md`, `design.md`, `tech.md`) can also exist loose at the content-root, typed `system-vision` / `system-design` / `system-tech` exactly like the product-root copy. The content-root `tech.md` half stays entirely optional and is never auto-created — write it by hand, copying the plugin's own `vault-tech.md` template (the content-root variant, carrying the same narrow Stack / Platforms / Constraints / Infrastructure decisions / Boundaries sections as the product-level `system-tech.md` template, minus the per-product frontmatter) whenever the project wants one. Both `design.md` and `tech.md` at either level are optional too — a level with nothing but an approved vision is a complete, honest state, not a gap to fill.
 
 Review-wise, a `system-designer` expert writes both the `system-vision` and `system-design` classes (each covering the product-root and content-root copy), and an `architect` expert writes the `system-tech` class, distinct from the asset-level `designer` (writes a feature/change/bug's own `vision.md` and `design.md`) and from `architect`'s other job of writing opt-in `architecture.md` code-structure docs. `system-vision` (like the asset-level `vision` class) carries no validators — the writer and the operator close the loop — while `system-design` keeps an `architect_review` validation slot, same as the asset-level `design` class. These are among the nine roles `/lazy-spec.product-config` Step 8 asks for. `/lazy-spec.create-from-code <product>` still scaffolds the product-level `vision.md` → `design.md` → `tech.md` trio for a code-bound product (see above) — the content-root, project-wide `vision.md` gets its draft from `/lazy-spec.install` instead, and `tech.md` at that level still has no dedicated creation skill.
 
@@ -111,7 +111,7 @@ The first two (`spec_design_done`, `spec_plan_done`) are **derived**: readiness 
 
 ## How do I move an asset forward — do I edit the gate frontmatter directly?
 
-No. Gate frontmatter is managed entirely by `/lazy-spec.flip-gate` (interactive, or `spec.coordinator` calling it non-interactively once it decides a gate is ready — `lazy-spec.gate-tick` itself no longer touches a gate at all). Editing it by hand bypasses the side-effects — the callout, the `# History` line — that the primitive writes on every flip. Always use `/lazy-spec.flip-gate` for a manual flip; pass `--off` to regress a gate.
+No. Gate frontmatter is managed entirely by `/lazy-spec.flip-gate` (interactive, or `spec.coordinator` calling it non-interactively once it decides a gate is ready — `lazy-spec.gate-tick` itself no longer touches a gate at all). Editing it by hand bypasses the side-effect the primitive writes on every flip — a dated line appended to `# History`. The gate's own state lives only in the frontmatter boolean now; the flip's reason (with an `auto:` mark when the coordinator called it) is recorded in the run log, not in a note callout on the folder-note itself. Always use `/lazy-spec.flip-gate` for a manual flip; pass `--off` to regress a gate.
 
 Similarly, a doc's per-file stage (`spec_stage` on `vision.md`, `use-cases.md`, `design.md`, `ui-design.md`, `code-plan.md`, `test-plan.md`, `bug.md`) is always changed through `/lazy-spec.set-stage`, never by hand-editing frontmatter. That skill rewrites `spec_stage`, mirrors the matching `spec/<stage>` tag in the same edit, and appends a transition line to the folder-note's `# History` section — the two writes never happen separately.
 
@@ -120,6 +120,14 @@ Similarly, a doc's per-file stage (`spec_stage` on `vision.md`, `use-cases.md`, 
 ## Does `/lazy-spec.set-stage` also touch a doc's markdown attachments?
 
 Yes, automatically. A markdown attachment — a file carrying `spec_owner_doc` pointing back at the doc, e.g. a note an expert dropped beside `design.md` — has no per-file stage of its own: `/lazy-spec.set-stage` cascades the new `spec_stage` and its `spec/<stage>` tag onto every sibling attachment in the same commit, skipping only an attachment that is currently in its own review (the coordinator re-stamps that one once its review finalizes). You can't target an attachment directly — running the skill on one refuses with "document is an attachment of `<owner>`" and points you at the owner document instead.
+
+---
+
+## What does the `deferred` stage do, and how do I get a parked document moving again?
+
+`deferred` is a sixth `spec_stage` value alongside `empty | draft | approved | rejected | cancelled` — a park, not a review outcome. Run `/lazy-spec.set-stage <doc> deferred` on any stage-bearing document, at asset level or at a product/vault system-document level, and nothing acts on it automatically afterward: no gate closes on it, the coordinator never promotes it by review result, replaces it, or edits it, and (with the wiki plugin installed, once `/lazy-spec.install` has seeded the predicate into its scan routines) the terms and structure curators skip it too. `/lazy-spec.sync-with-code` uses this stage by default for every document it creates from scratch rather than edits — a batch of retro-specs generated from your codebase lands parked instead of flooding the review queue before you've picked which ones to work on.
+
+A committed edit to a parked document still wakes its owning coordinator the same as any operator edit — the folder-note's gates and status brief stay current — but the document's own content is left alone. The only way out is `draft`: either tick the `Review <doc>` row the folder note grows in place of the usual `Write <doc>` checkbox (ticking it moves the document to `draft` and opens its review in one action), or run `/lazy-spec.set-stage <doc> draft` yourself. Asking for any other stage on a parked document — `approved`, `rejected`, `cancelled`, `empty` — is refused.
 
 ---
 
@@ -161,9 +169,9 @@ Most decision blocks never need the manual `add` path. `/lazy-spec.create-asset`
 
 ## What does `/lazy-spec.sync-with-code` actually change?
 
-It compares the source commits that landed since the last sync against the product's tech doc and proposes updates for anything that changed at the code level — new routes, renamed functions, new files, removed components, changed constants. It never silently rewrites files: every tech-doc edit is presented for approval first, and any change that looks user-visible is flagged as a candidate for the product design doc for you to decide on separately.
+It reads the source commits that landed since the last sync and flags every change that looks user-visible as a candidate for the product design doc, for you to approve or decline one by one. It never silently rewrites a file, and it never touches the product's `tech.md` at all: that document is a narrow hand-written statement of stack, platforms, constraints, infrastructure decisions and boundaries, not a mirror of the code, and it changes only through its own review. A code-level change nothing user-visible follows from — a renamed internal function, a moved file — lands in the run log and in no document. Any authored document a run creates from scratch — a new asset `design.md` or `architecture.md`, for instance — is written parked at `spec_stage: deferred` rather than `draft`, so nothing acts on it until you tick its `Review <doc>` row or run `/lazy-spec.set-stage <doc> draft`; a document the run only edits keeps whatever stage it already carried.
 
-After the tech-doc pass it also reconciles branch pins (source links still pointing at a feature branch that has since merged or been deleted) and, per asset, proposes a `spec_develop_done` flip when the synced commits objectively landed that asset's code on the default branch — always via a confirmation, never silently. The skill no-ops on a design-only product that has no source binding, and it always finishes by running `/lazy-spec.doctor` so you see whether the sync introduced any structural issues.
+After the design-doc pass it also reconciles branch pins (source links still pointing at a feature branch that has since merged or been deleted) and, per asset, proposes a `spec_develop_done` flip when the synced commits objectively landed that asset's code on the default branch — always via a confirmation, never silently. The skill no-ops on a design-only product that has no source binding, and it always finishes by running `/lazy-spec.doctor` so you see whether the sync introduced any structural issues.
 
 ---
 

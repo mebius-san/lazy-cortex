@@ -53,9 +53,25 @@ fields the router decides and this worker never guesses at:
 - `drop=<name>[,...]` on an attach line — the documents a pre-launch
   rollback removes; absent rolls the gates back and deletes nothing.
 
+A fourth verb, `spawn-product key=<key> path=<spec_path> [experts=<role>:<name>[,...]] ::
+<description>`, registers a whole design-only product: `key=`, `path=` and the
+`::` separator are all mandatory, `experts=` is optional. Enacting one writes
+the `products[<key>]` record, clones the shared review classes into
+product-scoped overrides for the role experts that diverge, creates the spec
+folder, backfills the product level note, seeds its `vision.md`, stamps the
+request's attribution on that document and opens its review — all inside the
+one apply commit.
+
+An `attach` target naming a level document (`vision.md` / `design.md` /
+`ui-design.md` / `tech.md` sitting directly in the content root or in a
+registered product's `spec_path`) is stamped on the document itself: a level
+has no status folder-note above its documents, so none is looked for.
+
 A spawn line's asset type is validated against the shipped
 declarations plus whatever every registered product declares, so an
-operator's own type is admissible without touching this worker.
+operator's own type is admissible without touching this worker. The two
+level roles are never admissible — a product or a catalog is registered
+through `spawn-product`, never spawned as an asset kind.
 A `reference <path>` line names an existing asset the router judges
 already implements the request — registers a link via `spec_targets`
 on the request itself, spawns/attaches nothing.
@@ -103,6 +119,7 @@ JSON `error` object.
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as _dt
 import json
 import os
@@ -129,17 +146,22 @@ from spec_paths import find_settings_root, resolve_plugin_cli, spec_content_root
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402
     BOOL_TRUE,
+    LEVEL_ROLES,
     FlipResult,
     Gate,
     GateCheckbox,
     HaltReason,
     JobMarker,
+    LevelDoc,
+    PlanReview,
     SiblingDoc,
     SpecHaltKey,
     SpecTargetsKey,
 )
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import asset_types  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import catalog_note  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import flip_gate  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
@@ -152,6 +174,31 @@ import spec_job_markers  # noqa: E402
 # carries them from `spec_plan_done` onward — the design gate is left alone since design is
 # what the incoming request is about to revise.
 _ROLLBACK_GATES = ( Gate.PLAN_DONE, Gate.DEVELOP_DONE, Gate.TESTS_PASSING, Gate.RELEASED )
+
+# Placeholder a product-scoped override glob carries where the product's own `spec_path` goes.
+_SPEC_PATH_TOKEN = "{spec_path}"
+
+# The product-scoped globs each review class is re-emitted with when a spawned product's role
+# experts diverge from the shared set, and the role that class's own `experts.main` writer fills.
+# Both mirror `lazy-spec.product-config`'s Step 12 binding table; a validation writer's role is
+# read off its section id instead (`<role>_review`), so no second table names those.
+_OVERRIDE_CLASSES = {
+    "use-cases": ( "use-case-writer", [ f"{_SPEC_PATH_TOKEN}/*/*/use-cases.md" ] ),
+    "design": ( "designer", [ f"{_SPEC_PATH_TOKEN}/*/*/design.md" ] ),
+    "vision": ( "designer", [ f"{_SPEC_PATH_TOKEN}/*/*/vision.md" ] ),
+    "system-vision": ( "system-designer", [ f"{_SPEC_PATH_TOKEN}/vision.md" ] ),
+    "system-design": ( "system-designer", [ f"{_SPEC_PATH_TOKEN}/design.md" ] ),
+    "system-tech": ( "architect", [ f"{_SPEC_PATH_TOKEN}/tech.md" ] ),
+    "architecture": ( "architect", [ f"{_SPEC_PATH_TOKEN}/*/*/architecture.md" ] ),
+    "ui-design": ( "ui-designer", [ f"{_SPEC_PATH_TOKEN}/*/*/ui-design.md" ] ),
+    "code-plan": ( "planner", [ f"{_SPEC_PATH_TOKEN}/*/*/code-plan.md" ] ),
+    "test-plan": ( "tester", [ f"{_SPEC_PATH_TOKEN}/*/*/test-plan.md" ] ),
+    "bug": ( "tester", [ f"{_SPEC_PATH_TOKEN}/bugs/*/bug.md" ] ),
+    "code-report": ( "developer", [ f"{_SPEC_PATH_TOKEN}/*/*/code-report.md" ] ),
+    "test-report": ( "tester", [ f"{_SPEC_PATH_TOKEN}/*/*/test-report.md" ] ),
+    "data-report": ( "data-writer", [ f"{_SPEC_PATH_TOKEN}/*/*/data-report.md" ] ),
+    "docs-report": ( "docs-writer", [ f"{_SPEC_PATH_TOKEN}/*/*/docs-report.md" ] ),
+}
 
 
 class _K:
@@ -196,6 +243,36 @@ class _K:
     DECISION_VERB_REFERENCE: The routing-decision verb for a reference target — an existing
       asset the router judges already implements the request; registers a link, spawns/attaches
       nothing.
+    DECISION_VERB_SPAWN_PRODUCT: The routing-decision verb registering a whole design-only product.
+    DECISION_KEY_PREFIX: Prefix marking the mandatory `key=` field naming a spawned product's key.
+    DECISION_EXPERTS_PREFIX: Prefix marking the optional `experts=` field naming a spawned
+      product's role experts.
+    ROLE_NAME_SEP: Token separating a role from its expert name inside the `experts=` field.
+    SETTINGS_SPEC: Settings section holding the vault-wide spec configuration.
+    SETTINGS_REVIEW: Settings section holding the review configuration.
+    SETTINGS_EXPERTS: Settings section holding the registered experts, keyed by expert name.
+    LANGUAGE: Settings key naming a product's authoring language.
+    ICON: Settings key naming a product's explorer icon.
+    ICON_PRODUCT: The default explorer icon every registered product carries.
+    TOOL_TYPES: Settings key holding a product's own tool-type declarations.
+    GUIDELINES: Settings key holding a product's per-role guideline paths.
+    REVIEW_CLASSES: Review-section key holding the ordered class list.
+    CLASS_LABEL: Review-class key carrying the class's identity label.
+    CLASS_PATHS: Review-class key carrying the class's glob list.
+    CLASS_EXPERTS: Review-class key carrying the class's writer buckets.
+    EXPERTS_MAIN: Expert-bucket key holding the opening-writer chain.
+    EXPERTS_VALIDATION: Expert-bucket key holding the named validation writers.
+    EXPERTS_TERMINAL: Expert-bucket key holding the named post-approve routing writers.
+    EXPERT_NAME: Writer-object key carrying the expert's registered name.
+    OVERRIDE_LABEL_SEP: Token joining a class label to the product key it is scoped to.
+    VALIDATION_ROLE_SUFFIX: Suffix a validation section id carries after the role it binds.
+    NOTE_KEY: Result key under which `catalog-note backfill` reports the note it wrote.
+    CLI_SETTINGS_GET: The `lazycortex-core` subcommand reading one settings section.
+    CLI_SETTINGS_SET: The `lazycortex-core` subcommand persisting one settings section.
+    CLI_SEED_DOC: The `lazycortex-specs` subcommand seeding one document beside a folder-note.
+    CLI_CWD_FLAG: The flag naming the repo a sibling CLI resolves settings against.
+    SEED_DOC_FLAG: The `seed-doc` flag naming the produced document.
+    VISION_DOC_TOKEN: The `<name>:<type>` token seeding a level's own vision document.
     DECISION_DESC_SEP: Token separating a routing-decision line's target spec from its free-text description.
     DECISION_TARGETS_PREFIX: Prefix marking the optional design-cascade `targets=` field on a change-spawn line.
     DECISION_PRODUCT_PREFIX: Prefix marking the optional spawning-product `product=` field on a spawn line.
@@ -239,6 +316,17 @@ class _K:
     REVIEW_START_IDEMPOTENT_MARK: Substring identifying an already-active review start as a no-op.
     ERR_NO_PRODUCTS: Error message used when a spawn target needs products but none are registered.
     CAT_LOGICAL: The error category for invalid-input failures.
+    OUT_OUTCOME: The stdout-envelope field carrying the outcome token.
+    OUT_ERROR: The stdout-envelope field carrying a failure's own object.
+    OUT_CATEGORY: The error object's field naming the failure category.
+    OUT_MESSAGE: The error object's field carrying the one-line cause.
+    OUT_SKIP: The stdout-envelope field naming which no-op a skip was.
+    OUT_RESULT: The stdout-envelope field carrying the request's terminal verdict.
+    OUT_REQUEST_CLASS: The stdout-envelope field carrying the classified request class.
+    OUT_SPAWN_COUNT: The stdout-envelope field counting the assets the pass spawned.
+    OUT_ATTACH_COUNT: The stdout-envelope field counting the folder-notes the pass attached to.
+    OUT_POPULATED_COUNT: The stdout-envelope field counting the documents the pass stamped.
+    OUT_WARNINGS: The stdout-envelope field listing the pass's non-fatal warnings.
     OUTCOME_SUCCESS: Outcome token for a completed apply transition.
     OUTCOME_ERROR: Outcome token for a failed apply transition.
     OUTCOME_TERMINAL_SKIP: Outcome token for a no-op on an already-terminal request.
@@ -287,6 +375,10 @@ class _K:
   DECISION_VERB_SPAWN = "spawn"
   DECISION_VERB_ATTACH = "attach"
   DECISION_VERB_REFERENCE = "reference"
+  DECISION_VERB_SPAWN_PRODUCT = "spawn-product"
+  DECISION_KEY_PREFIX = "key="
+  DECISION_EXPERTS_PREFIX = "experts="
+  ROLE_NAME_SEP = ":"
   DECISION_DESC_SEP = "::"
   DECISION_TARGETS_PREFIX = "targets="
   DECISION_PRODUCT_PREFIX = "product="
@@ -297,6 +389,26 @@ class _K:
   SCAFFOLD_GROUP_NOTE_KEY = "group_note"
   SPEC_TOOLS_KEY = "spec_tools"
   ASSET_TYPES = "asset_types"
+  # Settings sections and the product-record / review-class keys a spawn-product writes
+  SETTINGS_SPEC = "spec"
+  SETTINGS_REVIEW = "review"
+  SETTINGS_EXPERTS = "experts"
+  LANGUAGE = "language"
+  ICON = "icon"
+  ICON_PRODUCT = "LiPackage"
+  TOOL_TYPES = "tool_types"
+  GUIDELINES = "guidelines"
+  REVIEW_CLASSES = "classes"
+  CLASS_LABEL = "class"
+  CLASS_PATHS = "paths"
+  CLASS_EXPERTS = "experts"
+  EXPERTS_MAIN = "main"
+  EXPERTS_VALIDATION = "validation"
+  EXPERTS_TERMINAL = "terminal"
+  EXPERT_NAME = "name"
+  OVERRIDE_LABEL_SEP = "@"
+  VALIDATION_ROLE_SUFFIX = "_review"
+  NOTE_KEY = "note"
   SOURCES_H1 = "# Sources"
   SOURCES_TAG = "#protected/spec/sources"
   REQUESTS_H2 = "## Requests"
@@ -317,6 +429,12 @@ class _K:
   CLI_LAZYCORTEX_SPECS = "lazycortex-specs"
   CLI_LAZYCORTEX_REVIEW = "lazycortex-review"
   CLI_LAZYCORTEX_CORE = "lazycortex-core"
+  CLI_SETTINGS_GET = "settings-get"
+  CLI_SETTINGS_SET = "settings-set"
+  CLI_SEED_DOC = "seed-doc"
+  CLI_CWD_FLAG = "--cwd"
+  SEED_DOC_FLAG = "--doc"
+  VISION_DOC_TOKEN = f"{LevelDoc.VISION}:system-vision"
   ENV_PLUGIN_DIRS = "LAZYCORTEX_PLUGIN_DIRS"
   ENV_REPO_ROOT = "LAZY_REPO_ROOT"
   ROLLBACK_GATE_OFF_REASON = "request attached before implementation launched"
@@ -334,6 +452,18 @@ class _K:
   )
   # Outcome / error categories
   CAT_LOGICAL = "logical"
+  # stdout-envelope field names — the wire contract the calling routine parses
+  OUT_OUTCOME = "outcome"
+  OUT_ERROR = "error"
+  OUT_CATEGORY = "category"
+  OUT_MESSAGE = "message"
+  OUT_SKIP = "skip"
+  OUT_RESULT = "result"
+  OUT_REQUEST_CLASS = "request_class"
+  OUT_SPAWN_COUNT = "spawn_count"
+  OUT_ATTACH_COUNT = "attach_count"
+  OUT_POPULATED_COUNT = "populated_count"
+  OUT_WARNINGS = "warnings"
   OUTCOME_SUCCESS = "success"
   OUTCOME_ERROR = "error"
   OUTCOME_TERMINAL_SKIP = "terminal-state-skip"
@@ -351,8 +481,8 @@ def _fail(category: str, message: str) -> NoReturn:
       (internal failure).
     message: Single-line human-readable cause.
   """
-  print(json.dumps({ "outcome": _K.OUTCOME_ERROR,
-                     "error": { "category": category, "message": message } }))
+  print(json.dumps({ _K.OUT_OUTCOME: _K.OUTCOME_ERROR,
+                     _K.OUT_ERROR: { _K.OUT_CATEGORY: category, _K.OUT_MESSAGE: message } }))
   sys.exit(1)
 
 
@@ -487,8 +617,10 @@ def _parse_routing_decision_rich(
     identity (preserves insertion order, first occurrence wins).
   """
   # the admissible set is open: an operator declares types of their own, and the caller that
-  # knows the product resolves them before handing the set down here
+  # knows the product resolves them before handing the set down here; the level roles are
+  # subtracted either way — a product or a catalog is registered through `spawn-product`
   kinds = known_kinds if known_kinds is not None else frozenset(asset_types.builtin_defaults())
+  kinds = kinds - LEVEL_ROLES
 
   # Decision: kept `_parse_routing_decision_rich` / `_parse_routing`'s return arity unchanged,
   # added `reference` / `product=` support via `_parse_reference_targets` and
@@ -528,7 +660,7 @@ def _parse_routing_decision_rich(
         for tok in tokens[3:]:
           if tok.startswith(_K.DECISION_TARGETS_PREFIX):
             raw_targets = tok[len(_K.DECISION_TARGETS_PREFIX):]
-            targets = [ t.strip() for t in raw_targets.split(",") if t.strip() ]
+            targets = [ tok.strip() for tok in raw_targets.split(",") if tok.strip() ]
             break
       pair = ( kind, slug )
       if pair not in seen_spawn:
@@ -578,6 +710,83 @@ def _parse_reference_targets(block: str) -> list[tuple[str, str]]:
       seen.add(target)
       reference.append(( target, description ))
   return reference
+
+
+def _parse_spawn_product_targets(block: str) -> list[tuple[str, str, str, dict[str, str]]]:
+  """
+  Scan a `<!-- routing-decision ... -->` block body for `spawn-product` lines.
+
+  Grammar: `spawn-product key=<key> path=<spec_path> [experts=<role>:<name>[,...]] ::
+  <description>`. `key=`, `path=` and the `::` separator are all mandatory — a line missing any
+  of them names no product and is skipped, exactly as every other malformed decision line is, so
+  a routing block carrying nothing else leaves the request rejected. `experts=` is optional and
+  names the role experts the request's own review already settled.
+
+  Args:
+    block: Inner text of the comment block (between the opening and closing markers).
+
+  Returns:
+    List of `(key, spec_path, description, experts)` tuples, dedup applied per product key
+    (preserves insertion order, first occurrence wins). `experts` maps a role to the expert name
+    bound to it, and is empty when the line carried no `experts=` field.
+  """
+  targets: list[tuple[str, str, str, dict[str, str]]] = []
+  seen: set[str] = set()
+  for raw_line in block.splitlines():
+    stripped = raw_line.strip()
+    # guard: skip blank lines — a non-decision prose line is dropped by a later guard instead
+    if not stripped:
+      continue
+    head, sep, desc_part = stripped.partition(_K.DECISION_DESC_SEP)
+    tokens = head.split()
+    # guard: not a `spawn-product ...` line, or the mandatory `::` separator is absent
+    if not tokens or tokens[0].lower() != _K.DECISION_VERB_SPAWN_PRODUCT or not sep:
+      continue
+    # every field is scanned rather than read positionally, so their order stays free
+    fields: dict[str, str] = {}
+    for tok in tokens[1:]:
+      for prefix in ( _K.DECISION_KEY_PREFIX, _K.DECISION_PATH_PREFIX, _K.DECISION_EXPERTS_PREFIX ):
+        if tok.startswith(prefix):
+          fields[prefix] = tok[len(prefix):].strip()
+          break
+    key = fields.get(_K.DECISION_KEY_PREFIX, "")
+    spec_path = fields.get(_K.DECISION_PATH_PREFIX, "")
+    # guard: both named fields are mandatory — a line missing either names no product
+    if not key or not spec_path or key in seen:
+      continue
+    experts: dict[str, str] = {}
+    for pair in fields.get(_K.DECISION_EXPERTS_PREFIX, "").split(","):
+      role, _rsep, name = pair.strip().partition(_K.ROLE_NAME_SEP)
+      if role.strip() and name.strip():
+        experts[role.strip()] = name.strip()
+    seen.add(key)
+    targets.append(( key, spec_path, desc_part.strip(), experts ))
+  return targets
+
+
+def _class_expert_names(entry: dict) -> list[str]:
+  """
+  Collect every expert name one review class's writer buckets carry.
+
+  Args:
+    entry: A review-class object as `review.classes` stores it.
+
+  Returns:
+    The names found under `experts.main`, `experts.validation` and `experts.terminal`, in that
+    order; duplicates are preserved and a bucket the class omits contributes nothing.
+  """
+  names: list[str] = []
+  experts_block = entry.get(_K.CLASS_EXPERTS) or {}
+  # the main bucket is a writer list, the other two are section-id keyed dicts of writers
+  for writer in experts_block.get(_K.EXPERTS_MAIN) or []:
+    if isinstance(writer, dict) and isinstance(writer.get(_K.EXPERT_NAME), str):
+      names.append(writer[_K.EXPERT_NAME])
+  for bucket in ( _K.EXPERTS_VALIDATION, _K.EXPERTS_TERMINAL ):
+    section = experts_block.get(bucket)
+    if isinstance(section, dict):
+      names.extend(writer[_K.EXPERT_NAME] for writer in section.values()
+                   if isinstance(writer, dict) and isinstance(writer.get(_K.EXPERT_NAME), str))
+  return names
 
 
 def _parse_spawn_products(block: str) -> dict[tuple[str, str], str]:
@@ -710,11 +919,11 @@ def _extract_decision_block(routing_text: str) -> str | None:
   Returns:
     The comment's inner text, or `None` when no such comment is present.
   """
-  m = re.search(
+  match = re.search(
       rf"(?s){re.escape(_K.ROUTING_DECISION_OPEN)}\s*(.*?)\s*{re.escape(_K.ROUTING_DECISION_CLOSE)}",
       routing_text,
   )
-  return m.group(1) if m else None
+  return match.group(1) if match else None
 
 
 def _parse_routing_decision(block: str) -> tuple[list[tuple[str, str]], list[str]]:
@@ -735,6 +944,7 @@ def _parse_routing_decision(block: str) -> tuple[list[tuple[str, str]], list[str
   spawn = [ ( kind, slug ) for kind, slug, _description, _targets in spawn_rich ]
   attach = [ path for path, _description in attach_rich ]
   return spawn, attach
+
 
 
 def _parse_routing(body: str) -> tuple[str | None, list[tuple[str, str]], list[str], str]:
@@ -761,24 +971,41 @@ def _parse_routing(body: str) -> tuple[str | None, list[tuple[str, str]], list[s
     by the caller that needs them (see the `# Decision:` note on
     `_parse_routing_decision_rich`).
   """
-  m = re.search(
+
+  # Domain(spec.requests):
+  # # Routing grammar — prose verdict versus structured decision
+  # A request carries its routing decision in one of two grammars. The older one is prose an
+  # operator wrote: a class verdict named in a marked line, and spawn or attach intents phrased as
+  # sentences, recognised by the words they contain. The newer one is a structured decision block,
+  # one decision per line, each naming a verb and its target with an optional human description.
+  # When the structured block is present it is authoritative in full and the prose is not consulted
+  # at all — the block's vocabulary is language-independent, while the prose markers are English
+  # only, so a vault authored in another language can express a decision only through the block.
+  # A block whose spawn lines all name one kind also settles the request's class, overriding any
+  # prose verdict, because the decisions themselves are stronger evidence of the class than a word
+  # somebody typed above them. Once a decision has been applied, the routing section is removed
+  # from the request outright: it is an instruction to the apply pass, not a record, and leaving it
+  # behind would invite a second application of decisions already enacted.
+
+  # the section's own raw text, or an early exit when the request carries no routing at all
+  match = re.search(
       rf"(?ms)^{re.escape(_K.ROUTING_H1)}\s*$(.*?)(?=^# \S|\Z)",
       body,
   )
-  if not m:
+  if not match:
     return None, [], [], ""
-  routing_text = m.group(1)
+  routing_text = match.group(1)
   cls: str | None = None
-  cm = re.search(
+  class_match = re.search(
       r"(?im)\bclass\b\s*[:|]\s*\**\s*`?([a-z][a-z-]*)`?",
       routing_text,
   )
-  if cm:
-    candidate = cm.group(1).lower()
+  if class_match:
+    candidate = class_match.group(1).lower()
     if candidate in _K.CLASS_ENUM:
       cls = candidate
-  # PRIMARY: structured `<!-- routing-decision ... -->` block. When present, its
-  # contents are authoritative and prose-parsing is skipped entirely. Format:
+  # primary source: the structured `<!-- routing-decision ... -->` block; when present, its
+  # contents are authoritative and prose-parsing is skipped entirely. format:
   # one decision per line, each with an optional `:: <description>` suffix and,
   # on a change spawn, an optional `targets=` field (see _parse_routing_decision_rich):
   #     spawn <kind> <slug> [targets=<category>/<slug>[,...]] [:: <description>]
@@ -804,27 +1031,27 @@ def _parse_routing(body: str) -> tuple[str | None, list[tuple[str, str]], list[s
     return cls, spawn_structured, attach_structured, routing_text
   spawn: list[tuple[str, str]] = []
   seen_spawn: set[tuple[str, str]] = set()
-  # Spawn line shape examples:
+  # spawn line shape examples:
   #   "Spawn one cross-cutting change entity — `slug`"
   #   "Spawn change: slug"
   #   "spawn: bug — `slug`"
-  for sm in re.finditer(
+  for match in re.finditer(
       r"(?im)\bspawn\b[^\n]*?\b(feature|change|bug)\b[^\n]*?`([a-z][a-z0-9-]*)`",
       routing_text,
   ):
-    pair = ( sm.group(1).lower(), sm.group(2) )
+    pair = ( match.group(1).lower(), match.group(2) )
     if pair not in seen_spawn:
       seen_spawn.add(pair)
       spawn.append(pair)
   # Plain `<kind>: <slug>` form (router may emit a structured fallback). A trailing
   # `:: <description>` suffix (the block grammar's per-target description) is tolerated
   # and ignored here — this prose fallback surfaces only the identity, never the detail.
-  for sm in re.finditer(
+  for match in re.finditer(
       r"(?im)^\s*(?:[-*]\s*)?(?:spawn[^\n:]*[:|]\s*)?(feature|change|bug)\s*[:|]\s*"
       r"`?([a-z][a-z0-9-]*)`?\s*(?:::.*)?$",
       routing_text,
   ):
-    pair = ( sm.group(1).lower(), sm.group(2) )
+    pair = ( match.group(1).lower(), match.group(2) )
     # collect only pairs the prose-form pass above has not already recorded
     if pair not in seen_spawn:
       seen_spawn.add(pair)
@@ -833,11 +1060,11 @@ def _parse_routing(body: str) -> tuple[str | None, list[tuple[str, str]], list[s
   # backticks (e.g. "spawn `request/products/test/changes/<slug>`"). The kind is
   # the singular of the second-to-last path segment ("changes" → "change"); the
   # slug is the last path segment.
-  for sm in re.finditer(
+  for match in re.finditer(
       r"(?im)\bspawn\b[^\n]*?`([^`\s]+/(?:features|changes|bugs)/[a-z][a-z0-9-]*)`",
       routing_text,
   ):
-    path_target = sm.group(1)
+    path_target = match.group(1)
     parts = path_target.rstrip("/").split("/")
     slug = parts[-1]
     folder = parts[-2]
@@ -849,8 +1076,8 @@ def _parse_routing(body: str) -> tuple[str | None, list[tuple[str, str]], list[s
       spawn.append(pair)
   attach: list[str] = []
   seen_attach: set[str] = set()
-  for wm in re.finditer(r"\[\[([^\]|]+?)(?:\|[^\]]*?)?\]\]", routing_text):
-    target = wm.group(1).strip()
+  for match in re.finditer(r"\[\[([^\]|]+?)(?:\|[^\]]*?)?\]\]", routing_text):
+    target = match.group(1).strip()
     parts = target.split("/")
     # collect only fresh folder-note links, whose shape is "<...>/<slug>/<slug>"
     if len(parts) >= 2 and parts[-1] == parts[-2] and target not in seen_attach:
@@ -926,8 +1153,8 @@ def _format_status_callout(*, accepted: bool, wikilinks: list[str], reason: str 
   """
   if accepted:
     lines = [ f"> {_K.CALLOUT_SUCCESS}" ]
-    for wl in wikilinks:
-      lines.append(f"> [[{wl}]]")
+    for link in wikilinks:
+      lines.append(f"> [[{link}]]")
     return "\n".join(lines)
   lines = [ f"> {_K.CALLOUT_WARNING}" ]
   if reason:
@@ -995,7 +1222,7 @@ def _set_fm_list(fm_text: str, key: str, values: list[str]) -> str:
     `- ` block is replaced in place, a missing key is appended before the
     closing fence.
   """
-  block_lines = "\n".join(f"  - {v}" for v in values)
+  block_lines = "\n".join(f"  - {value}" for value in values)
   replacement = f"{key}:\n{block_lines}\n" if values else f"{key}: []\n"
   pat_inline = re.compile(rf"(?m)^{re.escape(key)}\s*:\s*\[\s*\]\s*$\n?")
   pat_block = re.compile(rf"(?m)^{re.escape(key)}\s*:\s*\n(?:\s+- .*\n)*")
@@ -1090,14 +1317,14 @@ def _sweep_request_tag(fm_text: str, new_tag_member: str) -> str:
     non-`request/*` members untouched.
   """
   tags_re = re.compile(r"(?m)^tags\s*:\s*\n((?:\s+- .*\n)*)")
-  m = tags_re.search(fm_text)
-  if not m:
+  match = tags_re.search(fm_text)
+  if not match:
     close_idx = fm_text.rfind("---\n")
     # guard: cannot splice without a closing fence
     if close_idx < 0:
       return fm_text
     return fm_text[:close_idx] + f"tags:\n  - {new_tag_member}\n" + fm_text[close_idx:]
-  existing = m.group(1)
+  existing = match.group(1)
   kept: list[str] = []
   added = False
   for line in existing.splitlines(keepends = True):
@@ -1116,7 +1343,7 @@ def _sweep_request_tag(fm_text: str, new_tag_member: str) -> str:
   if not added:
     kept.append(f"  - {new_tag_member}\n")
   new_block = "".join(kept)
-  return fm_text[:m.start(1)] + new_block + fm_text[m.end(1):]
+  return fm_text[:match.start(1)] + new_block + fm_text[match.end(1):]
 
 
 def _stamp_request_terminal(fm_text: str, *, request_class: str, request_status: str) -> str:
@@ -1147,8 +1374,8 @@ def _request_h1_title(body: str) -> str:
   Returns:
     The title text, or `"request"` when no H1 is present.
   """
-  m = re.search(r"(?m)^# (.+)$", body)
-  return m.group(1).strip() if m else "request"
+  match = re.search(r"(?m)^# (.+)$", body)
+  return match.group(1).strip() if match else "request"
 
 
 def _request_content_block(body: str) -> str:
@@ -1247,9 +1474,9 @@ class _Attach:
       `True` when the doc text changed, `False` when the request was already listed.
     """
     text = doc_path.read_text()
-    fm_text = text[:_parse_frontmatter(text)[1]]
-    body = text[_parse_frontmatter(text)[1]:]
-    values, _ = _parse_frontmatter(text)
+    values, fm_end = _parse_frontmatter(text)
+    fm_text = text[:fm_end]
+    body = text[fm_end:]
     existing = values.get(_K.SPEC_SOURCE_REQUESTS) or []
     target_member = f"[[{request_wikilink}]]"
     # guard: idempotent — request already listed
@@ -1285,11 +1512,11 @@ class _Attach:
           f"{_K.SPEC_SOURCE_REQUESTS}:\n  - \"{member}\""
       )
       return pat_inline.sub(replacement, fm_text, count = 1)
-    m = pat_block.search(fm_text)
-    if m:
-      existing = m.group(1)
+    match = pat_block.search(fm_text)
+    if match:
+      existing = match.group(1)
       new_block = existing + f"  - \"{member}\"\n"
-      return fm_text[:m.start(1)] + new_block + fm_text[m.end(1):]
+      return fm_text[:match.start(1)] + new_block + fm_text[match.end(1):]
     close_idx = fm_text.rfind("---\n")
     # guard: cannot splice without a closing fence
     if close_idx < 0:
@@ -1325,15 +1552,15 @@ class _Attach:
           rf"({re.escape(start_marker)}\n)(.*?)(\n?{re.escape(end_marker)})",
           re.DOTALL,
       )
-      m = pat.search(body)
-      if m:
-        block = m.group(2)
+      match = pat.search(body)
+      if match:
+        block = match.group(2)
         # guard: bullet already projected, a re-run must not duplicate it
         if new_bullet in block:
           return body
         new_block = block.rstrip("\n")
         new_block = (new_block + "\n" if new_block else "") + new_bullet
-        return body[:m.start(2)] + new_block + body[m.end(2):]
+        return body[:match.start(2)] + new_block + body[match.end(2):]
 
     # no marker pair yet, so the whole container and sub-section are created around the bullet
     container = "\n".join([
@@ -1395,20 +1622,18 @@ class _FolderNote:
     section_re = re.compile(
         rf"(?ms)^{re.escape(_K.SOURCE_REQUESTS_H2)}\s*$(.*?)(?=^## \S|^# \S|\Z)",
     )
-    m = section_re.search(text)
-    if m:
-      block = m.group(1)
+    match = section_re.search(text)
+    if match:
+      block = match.group(1)
       cleaned = block.rstrip("\n")
       new_block = cleaned + ("\n\n" if cleaned else "\n") + bullet + "\n"
-      new_text = text[:m.start(1)] + new_block + text[m.end(1):]
+      new_text = text[:match.start(1)] + new_block + text[match.end(1):]
     else:
-      # Insert section before ## History anchor when present, otherwise append.
-      # NOTE: The status folder-note body shape uses `# History` (H1, Section.HISTORY) since A4.
-      # HISTORY_H2 = "## History" is a stale anchor — the `## Source requests` block is written
-      # into the operator-zone of the folder-note, where the legacy H2 anchor may still appear in
-      # pre-migration notes. This constant and the insertion logic are intentionally left as-is
-      # pending an A9-code task that updates the anchor to Section.HISTORY and verifies the insert
-      # correctly lands above the protected `# History` section.
+      # insert the section before the `## History` anchor when present, otherwise append
+      # TODO: the status folder-note body shape uses `# History` (H1, Section.HISTORY) since A4,
+      # so HISTORY_H2 = "## History" is a stale anchor kept only for pre-migration notes whose
+      # operator-zone still carries the legacy H2; update the anchor to Section.HISTORY and
+      # verify the insert lands above the protected `# History` section (A9-code task).
       hist_idx = text.find(f"\n{_K.HISTORY_H2}\n")
       block_text = f"{_K.SOURCE_REQUESTS_H2}\n\n{bullet}\n\n"
       if hist_idx >= 0:
@@ -1454,6 +1679,9 @@ class _Apply:
       target named in a change spawn's `targets=` field.
     submit_docs: Populated docs that must re-enter review via `submit` (skipping the opening
       writer round) instead of `start`, because a pre-launch ladder rollback re-opened them.
+    spawn_product_dirs: Spec folders created by enacting a `spawn-product` target during this run.
+    settings_written: True once this run has persisted a settings section, so the settings file
+      joins the commit set.
   """
 
   def __init__(self, *, file_path: Path, author_name: str, author_email: str) -> None:
@@ -1477,6 +1705,8 @@ class _Apply:
     self.attach_folder_notes: list[Path] = []
     self.warnings: list[str] = []
     self.submit_docs: list[Path] = []
+    self.spawn_product_dirs: list[Path] = []
+    self.settings_written = False
 
   @property
   def request_wikilink(self) -> str:
@@ -1495,14 +1725,18 @@ class _Apply:
 
     Returns:
       The product record (`spec_path` and friends).
+
+    Raises:
+      SystemExit: When the settings file is missing or malformed, the key names no registered
+        product, or that product's record carries no `spec_path`.
     """
     settings_path = self.repo / _K.CLAUDE_DIR / _K.SETTINGS_FILE
     if not settings_path.exists():
       _fail(_K.CAT_LOGICAL, f".claude/lazy.settings.json absent at {settings_path}")
     try:
       data = json.loads(settings_path.read_text())
-    except json.JSONDecodeError as e:
-      _fail(_K.CAT_LOGICAL, f".claude/lazy.settings.json malformed: {e}")
+    except json.JSONDecodeError as error:
+      _fail(_K.CAT_LOGICAL, f".claude/lazy.settings.json malformed: {error}")
     products_section = data.get(_K.PRODUCTS) or {}
     record = products_section.get(product) if isinstance(products_section, dict) else None
     if not isinstance(record, dict):
@@ -1517,14 +1751,17 @@ class _Apply:
     Pick the default product key.
 
     Returns:
-      The first product key from settings; aborts when no product is registered.
+      The first product key from settings.
+
+    Raises:
+      SystemExit: When no product is registered at all, so a spawn has nothing to land under.
     """
     settings_path = self.repo / _K.CLAUDE_DIR / _K.SETTINGS_FILE
     data = json.loads(settings_path.read_text())
     products_section = data.get(_K.PRODUCTS) or {}
     keys = sorted(
-        k for k, v in products_section.items()
-        if isinstance(k, str) and not k.startswith("_") and isinstance(v, dict)
+        key for key, record in products_section.items()
+        if isinstance(key, str) and not key.startswith("_") and isinstance(record, dict)
     )
     # guard: at least one product must exist before apply can act on a spawn
     if not keys:
@@ -1606,6 +1843,10 @@ class _Apply:
       Two-tuple of the new folder-note's absolute path
       (`<content_root>/<spec_path>/<folder>/<slug>/<slug>.md`, where the content root is
       `spec.vault_root`, default `specs`) and the spawning product's `spec_path`.
+
+    Raises:
+      SystemExit: When the named product resolves to no record, or the scaffold-asset
+        subprocess fails.
     """
     product = product or self._default_product()
     record = self._load_product_record(product)
@@ -1616,7 +1857,7 @@ class _Apply:
     target_folder = spec_content_root(self.repo) / spec_path / folder / slug
     folder_note = target_folder / f"{slug}.md"
     if folder_note.exists():
-      # Idempotent — earlier apply attempt already scaffolded; no-op.
+      # idempotent — an earlier apply attempt already scaffolded this; no-op
       return folder_note, spec_path
     argv = [ str(self.specs_cli), "scaffold-asset", product, kind, slug ]
     if path:
@@ -1650,6 +1891,339 @@ class _Apply:
       folder_note.write_text(
           _set_fm_list(note_text[:fm_end], _K.SPEC_TOOLS_KEY, tools) + note_text[fm_end:])
     return folder_note, spec_path
+
+  def _settings_section(self, section: str) -> dict:
+    """
+    Read one tracked section of the consumer's settings through the `lazycortex-core` CLI.
+
+    Args:
+      section: Top-level settings section name.
+
+    Returns:
+      The section's tracked content, empty when the section itself holds no object; a section
+      the CLI cannot produce aborts the run instead of returning.
+
+    Raises:
+      SystemExit: When the CLI exits non-zero or its output is not JSON.
+    """
+    cli = _resolve_sibling_cli(_K.CLI_LAZYCORTEX_CORE)
+    res = subprocess.run(
+        [ str(cli), _K.CLI_SETTINGS_GET, section, _K.CLI_CWD_FLAG, str(self.repo) ],
+        cwd = str(self.repo), capture_output = True, text = True, check = False,
+    )
+    # guard: the section is unreadable — abort rather than enact against guessed content
+    if res.returncode != 0:
+      _fail(_K.CAT_LOGICAL,
+            f"settings-get {section} failed: exit={res.returncode} "
+            f"stderr={res.stderr.strip()[:240]}")
+    try:
+      loaded = json.loads(res.stdout or "{}")
+    except json.JSONDecodeError as error:
+      _fail(_K.CAT_LOGICAL, f"settings-get {section} returned malformed JSON: {error}")
+    return loaded if isinstance(loaded, dict) else {}
+
+  def _write_settings_section(self, section: str, value: dict) -> None:
+    """
+    Persist one tracked settings section through the `lazycortex-core` CLI.
+
+    Args:
+      section: Top-level settings section name.
+      value: Whole section content to store; surrounding sections stay untouched.
+    """
+    cli = _resolve_sibling_cli(_K.CLI_LAZYCORTEX_CORE)
+    res = subprocess.run(
+        [ str(cli), _K.CLI_SETTINGS_SET, section, _K.CLI_CWD_FLAG, str(self.repo) ],
+        input = json.dumps(value), cwd = str(self.repo),
+        capture_output = True, text = True, check = False,
+    )
+    # guard: a failed write leaves the enactment half-done, so it aborts the whole run
+    if res.returncode != 0:
+      _fail(_K.CAT_LOGICAL,
+            f"settings-set {section} failed: exit={res.returncode} "
+            f"stderr={res.stderr.strip()[:240]}")
+    # the settings file changed, so it must reach this pass's commit pathspec
+    self.settings_written = True
+
+  @staticmethod
+  def _retarget_experts(experts_block: dict, label: str, experts: dict[str, str]) -> bool:
+    """
+    Rewrite one cloned review class's writer names onto a spawned product's role experts.
+
+    Args:
+      experts_block: The class's own `experts` object, mutated in place.
+      label: The bare class label, naming which role its main writer fills.
+      experts: The spawned product's role-to-expert mapping.
+
+    Returns:
+      True when at least one writer name actually changed, False when the class already carries
+      the product's experts and therefore needs no product-scoped override.
+    """
+    changed = False
+    main_role = _OVERRIDE_CLASSES[label][0]
+    # the main bucket's role comes from the class's own identity
+    for writer in experts_block.get(_K.EXPERTS_MAIN) or []:
+      if (isinstance(writer, dict) and main_role in experts
+          and writer.get(_K.EXPERT_NAME) != experts[main_role]):
+        writer[_K.EXPERT_NAME] = experts[main_role]
+        changed = True
+    # a validation writer names its own role in its section id (`<role>_review`)
+    validation = experts_block.get(_K.EXPERTS_VALIDATION)
+    if isinstance(validation, dict):
+      for section_id, writer in validation.items():
+        role = str(section_id).removesuffix(_K.VALIDATION_ROLE_SUFFIX)
+        if isinstance(writer, dict) and role in experts and writer.get(_K.EXPERT_NAME) != experts[role]:
+          writer[_K.EXPERT_NAME] = experts[role]
+          changed = True
+    return changed
+
+  def _plan_review_classes(self, key: str, spec_path: str,
+                           experts: dict[str, str]) -> dict | None:
+    """
+    Compose the review section a spawned product needs, without writing anything.
+
+    Follows `lazy-spec.product-config` Step 12's deterministic branch: a product whose experts
+    match the shared set rides that set and gets no class of its own; a product with at least one
+    diverging role gets the affected classes re-emitted as `<type>@<key>` overrides, carrying
+    product-scoped globs and inserted before the shared set so first-match-wins routes this
+    product's documents to them.
+
+    Composing and persisting are split so every refusal this planning raises lands before the
+    caller's first settings write, leaving the settings file byte-identical on a refused run.
+
+    Args:
+      key: The spawned product's compound key.
+      spec_path: The product's content-root-relative spec directory.
+      experts: The product's role-to-expert mapping, as the routing decision resolved it.
+
+    Returns:
+      The whole `review` section with this product's overrides spliced in, or `None` when the
+      product needs no class of its own and nothing should be written.
+
+    Raises:
+      SystemExit: When an override would name an expert absent from the registry.
+    """
+    # limit: overrides are cloned from the shared classes already on record, so a vault carrying
+    # no shared set gets none; seeding a whole class table from nothing is `/lazy-spec.product-config`'s
+    # interactive job, which also settles the nine roles this line never sees
+    review = self._settings_section(_K.SETTINGS_REVIEW)
+    classes = review.get(_K.REVIEW_CLASSES)
+    # guard: no class list to clone from — nothing this worker can derive an override out of
+    if not isinstance(classes, list):
+      return None
+
+    # the shared set is every bare-labelled class; a later duplicate never displaces the first
+    shared: dict[str, dict] = {}
+    for entry in classes:
+      if isinstance(entry, dict) and isinstance(entry.get(_K.CLASS_LABEL), str):
+        label = entry[_K.CLASS_LABEL]
+        if _K.OVERRIDE_LABEL_SEP not in label:
+          shared.setdefault(label, entry)
+
+    # Decision: only the classes whose writer actually changed are re-emitted, not Step 12's full
+    # fifteen — a class the product does not diverge on is served correctly by the shared set, and
+    # a needless `<type>@<key>` clone would freeze today's shared writers for this product,
+    # silently opting it out of every later change to them.
+
+    # a class is cloned only when the product's experts actually differ from the shared writer's
+    overrides: list[dict] = []
+    for label, ( _role, globs ) in _OVERRIDE_CLASSES.items():
+      base = shared.get(label)
+      # guard: a type the vault declares no shared class for has nothing to shadow
+      if base is None:
+        continue
+      entry = copy.deepcopy(base)
+      # guard: the shared class already names this product's experts — it needs no shadow
+      if not self._retarget_experts(entry.get(_K.CLASS_EXPERTS) or {}, label, experts):
+        continue
+      entry[_K.CLASS_LABEL] = f"{label}{_K.OVERRIDE_LABEL_SEP}{key}"
+      entry[_K.CLASS_PATHS] = [ glob.replace(_SPEC_PATH_TOKEN, spec_path) for glob in globs ]
+      overrides.append(entry)
+    # guard: every role matches the shared set — the product rides it, no class is written
+    if not overrides:
+      return None
+
+    # a dangling expert reference must be impossible to persist (`lazy-spec.product-config`
+    # Step 12), so every name the overrides are about to carry is re-checked against the registry
+    registered = self._settings_section(_K.SETTINGS_EXPERTS)
+    missing = sorted({ name for entry in overrides for name in _class_expert_names(entry)
+                       if name not in registered })
+    # guard: a class naming an expert nobody registered would dispatch its documents to nothing
+    if missing:
+      _fail(_K.CAT_LOGICAL,
+            f"spawn-product '{key}': review classes would name unregistered experts: "
+            f"{', '.join(missing)}")
+
+    # a re-run replaces this product's own overrides and leaves every other product's alone
+    suffix = f"{_K.OVERRIDE_LABEL_SEP}{key}"
+    kept = [ entry for entry in classes
+             if not (isinstance(entry, dict)
+                     and str(entry.get(_K.CLASS_LABEL, "")).endswith(suffix)) ]
+    insert_at = next(
+        ( index for index, entry in enumerate(kept)
+          if isinstance(entry, dict) and entry.get(_K.CLASS_LABEL) in _OVERRIDE_CLASSES ),
+        len(kept),
+    )
+    review[_K.REVIEW_CLASSES] = kept[:insert_at] + overrides + kept[insert_at:]
+    return review
+
+  def _register_product(self, key: str, spec_path: str) -> None:
+    """
+    Write a spawned product's settings record, refusing to claim a directory already in use.
+
+    The record is design-only by contract: no `source` block, because a request registers the
+    spec tree and the operator binds code to it later through `/lazy-spec.product-config`.
+
+    Guarantees:
+      - A key already on record under the very same `spec_path` is re-applied as a no-op: the
+        recorded record is never rewritten, so a re-run never clobbers fields an operator has
+        since edited.
+      - Both refusals are raised before the first settings write, so a refused registration
+        leaves `lazy.settings.json` byte-identical.
+
+    Args:
+      key: The product compound-key the routing decision named.
+      spec_path: The product's content-root-relative spec directory.
+
+    Raises:
+      SystemExit: When the key is on record under a different `spec_path`, or when it is
+        unregistered and its directory already exists on disk.
+    """
+
+    # Contract:
+    # A key already on record under the same `spec_path` is re-applied as a no-op — the recorded
+    # record is never rewritten, so a re-run never clobbers fields an operator has since edited.
+
+    # Contract:
+    # Both refusals are raised before the first settings write, so a refused registration leaves
+    # `lazy.settings.json` byte-identical.
+
+    products = self._settings_section(_K.PRODUCTS)
+    recorded = products.get(key)
+    if isinstance(recorded, dict):
+      # guard: the registry keeps the path, the decision drives the folder and the review globs —
+      # a divergence would coordinate one tree and scaffold another, so it is never guessed
+      if recorded.get(_K.SPEC_PATH) != spec_path:
+        _fail(_K.CAT_LOGICAL,
+              f"spawn-product '{key}': registered spec_path "
+              f"'{recorded.get(_K.SPEC_PATH)}' does not match the decision's path '{spec_path}'")
+      # a key already on record under the same path is re-applied idempotently, never rewritten
+      return
+    # guard: a fresh key must not claim a tree somebody else already put there
+    if (spec_content_root(self.repo) / spec_path).exists():
+      _fail(_K.CAT_LOGICAL,
+            f"spawn-product '{key}': path '{spec_path}' already exists on disk and belongs to "
+            "no registered product")
+    record: dict = { _K.SPEC_PATH: spec_path }
+    # the vault's own language governs a product the request registers; a vault that declares
+    # none leaves the key absent, so the product keeps following whatever `spec.language` becomes
+    language = self._settings_section(_K.SETTINGS_SPEC).get(_K.LANGUAGE)
+    if isinstance(language, str) and language:
+      record[_K.LANGUAGE] = language
+    record[_K.ICON] = _K.ICON_PRODUCT
+    record[_K.ASSET_TYPES] = {}
+    record[_K.TOOL_TYPES] = {}
+    record[_K.GUIDELINES] = {}
+    products[key] = record
+    self._write_settings_section(_K.PRODUCTS, products)
+
+  def _seed_level_vision(self, key: str, note: Path) -> Path:
+    """
+    Seed a level note's own `vision.md` through the `seed-doc` CLI, skipping an existing one.
+
+    Args:
+      key: The product compound-key the document is seeded under.
+      note: Absolute path to the product's level folder-note.
+
+    Returns:
+      Absolute path to the level's vision document.
+    """
+    vision = note.parent / LevelDoc.VISION
+    # guard: idempotent — an earlier apply attempt already seeded the document
+    if vision.is_file():
+      return vision
+    res = subprocess.run(
+        [ str(self.specs_cli), _K.CLI_SEED_DOC, key, str(note.relative_to(self.repo)),
+          _K.SEED_DOC_FLAG, _K.VISION_DOC_TOKEN, _K.CLI_CWD_FLAG, str(self.repo) ],
+        cwd = str(self.repo), capture_output = True, text = True, check = False,
+    )
+    # guard: an unseeded vision leaves the product without the first rung of its ladder
+    if res.returncode != 0:
+      _fail(_K.CAT_LOGICAL,
+            f"seed-doc failed for product '{key}': exit={res.returncode} "
+            f"stderr={res.stderr.strip()[:240]}")
+    return vision
+
+  def _spawn_product(self, key: str, spec_path: str, experts: dict[str, str],
+                     request_display: str) -> Path:
+    """
+    Enact one `spawn-product` decision, from the settings record through to the opened review.
+
+    Runs the registration order the catalog spec fixes: the settings record, the product's own
+    review classes, the spec folder, the level note, its seeded `vision.md`, and the request's
+    attribution on that document — every write landing in this pass's single commit.
+
+    Guarantees:
+      - Every refusal this enactment can raise over the settings file lands before its first
+        settings write, so a refused spawn-product leaves the settings file byte-identical.
+
+    Args:
+      key: The product compound-key the routing decision named.
+      spec_path: The product's content-root-relative spec directory.
+      experts: The product's role-to-expert mapping; empty when the decision named none.
+      request_display: Display gloss used in the vision document's `## Requests` bullet.
+
+    Returns:
+      Absolute path to the product's level folder-note.
+    """
+
+    # Contract:
+    # Both settings refusals — an occupied `spec_path` and an override naming an unregistered
+    # expert — MUST be raised before the first `settings-set`, so a refused spawn-product never
+    # leaves half of its registration (the product record without its classes, or the reverse)
+    # persisted in `lazy.settings.json`.
+
+    # a decision that settled no role experts leaves the vault's shared classes serving the product
+    pending_review = self._plan_review_classes(key, spec_path, experts) if experts else None
+    self._register_product(key, spec_path)
+    if pending_review is not None:
+      self._write_settings_section(_K.SETTINGS_REVIEW, pending_review)
+    folder = spec_content_root(self.repo) / spec_path
+    folder.mkdir(parents = True, exist_ok = True)
+    self.spawn_product_dirs.append(folder)
+    note = self.repo / catalog_note.backfill(self.repo, product = key, root = False)[_K.NOTE_KEY]
+
+    # attribution on the document itself is the review trigger, exactly as an attach's is
+    vision = self._seed_level_vision(key, note)
+    if _Attach.ensure_source_request(vision, self.request_wikilink, request_display):
+      self.populated_docs.append(vision)
+    return note
+
+  def _level_doc_target(self, attach_target: str) -> Path | None:
+    """
+    Decide whether a routing attach target names a level document rather than an asset.
+
+    A level document is one of `LevelDoc.BASENAMES` sitting directly in the spec content root or
+    in a registered product's own `spec_path`; the `.md` suffix is optional in the token.
+
+    Args:
+      attach_target: The attach line's own target token, repo-relative.
+
+    Returns:
+      The document's absolute path when it is a level document, `None` otherwise.
+    """
+    candidate = self.repo / (
+        attach_target if attach_target.endswith(_K.MD_SUFFIX)
+        else attach_target + _K.MD_SUFFIX)
+    # guard: only the level ladder's own filenames, and only for a file that exists
+    if candidate.name not in LevelDoc.BASENAMES or not candidate.is_file():
+      return None
+    content_root = spec_content_root(self.repo)
+    # a product's own level documents sit directly in its spec_path, never deeper
+    record = self._record_for_note(candidate)
+    if record and candidate.parent == content_root / str(record.get(_K.SPEC_PATH, "")):
+      return candidate
+    # the catalog root's level documents sit directly in the content root
+    return candidate if candidate.parent == content_root else None
 
   def _resolve_folder_note_path(self, wikilink_target: str) -> Path:
     """
@@ -1817,6 +2391,7 @@ class _Apply:
     except (OSError, subprocess.SubprocessError):
       pass
 
+
   def _rollback_pre_launch_ladder(self, folder_note: Path, drop_docs: list[str]) -> None:
     """
     Roll a feature's implementation ladder back to the pre-launch state.
@@ -1837,12 +2412,30 @@ class _Apply:
         rolls the gates back and leaves every file on disk — which documents a rollback removes
         is the router's decision, not a fixed ladder this worker knows.
     """
+
+    # Domain(spec.lifecycle):
+    # # Pre-launch rollback
+    # An asset whose ladder has started but has not yet launched implementation can be returned to
+    # the state it held before it started, so a late change of direction does not require
+    # abandoning the asset. Rollback is defined only between those two points: an asset that never
+    # started has nothing to undo, and one that already launched has produced work no gate flip can
+    # take back. The rollback moves the ladder's later gates back to their unmet state, cancels any
+    # expert job still running against the asset, and removes the documents the routing decision
+    # named — which documents those are is the router's judgement, not a fixed list, so a decision
+    # naming none rolls the gates back and leaves every file where it is.
+    #
+    # Every failure along the way halts the asset instead of continuing. A half-finished rollback —
+    # a cancelled job and deleted documents with the gates still claiming the work is done — is a
+    # worse state than the one the rollback started from, because nothing downstream can tell it
+    # apart from real progress. Halting stops the whole pass before the request is ever attributed,
+    # leaving a state an operator can see and resolve rather than one the automation will act on.
+
     asset_dir = folder_note.parent
 
-    # Step 1a — read the tracked job off the runtime sidecar; the folder-note carries no marker.
+    # step 1a — read the tracked job off the runtime sidecar; the folder-note carries no marker
     job_info = spec_job_markers.read(self.repo, folder_note)[JobMarker.ACTIVE_JOB]
     if isinstance(job_info, dict):
-      # Step 1b — a live expert job must be cancelled before anything else touches the ladder.
+      # step 1b — a live expert job must be cancelled before anything else touches the ladder
       # guard: cancel-job could not confirm the job is dead — a half-dropped ladder is worse
       # than an intact one, so halt the asset and abort rather than continue past a live job
       if not self._cancel_active_job(job_info):
@@ -1854,13 +2447,13 @@ class _Apply:
       # Step 1c — the job is confirmed dead, so its stale marker comes off the sidecar.
       spec_job_markers.update(self.repo, folder_note, { JobMarker.ACTIVE_JOB: None })
 
-    # Step 2 — best-effort review stop on each pre-launch sibling before it is deleted.
+    # step 2 — best-effort review stop on each pre-launch sibling before it is deleted
     ladder_siblings = [ asset_dir / name for name in drop_docs ]
     for sibling in ladder_siblings:
       if sibling.is_file():
         self._stop_review_best_effort(sibling)
 
-    # Step 3 — drop the pre-launch siblings from the worktree; a survivor means a half-dropped ladder.
+    # step 3 — drop the pre-launch siblings from the worktree; a survivor means a half-dropped ladder
     # Deleted paths are named explicitly to the first Step 4 commit below, rather than staged
     # here for whichever commit happens to run next.
     deleted_siblings: list[Path] = []
@@ -1881,7 +2474,7 @@ class _Apply:
                 f"pre-launch rollback halted on {asset_dir.name}: {sibling.name} did not unlink")
         deleted_siblings.append(sibling)
 
-    # Step 4 — flip every gate from spec_plan_done onward back to false, unconditionally. Only
+    # step 4 — flip every gate from spec_plan_done onward back to false, unconditionally; only
     # the first flip's commit carries the Step 3 deletions — each commit names its own paths.
     for gate_index, gate in enumerate(_ROLLBACK_GATES):
       result = flip_gate.flip_gate(
@@ -1933,7 +2526,7 @@ class _Apply:
     _FolderNote.append_source_request(folder_note, self.request_wikilink, request_display)
     return populated
 
-  def _open_review(self, doc_path: Path, *, verb: str = "start") -> None:
+  def _open_review(self, doc_path: Path, *, verb: str = PlanReview.START_VERB) -> None:
     """
     Open a review cycle on a populated doc via the `lazycortex-review` CLI.
 
@@ -1994,7 +2587,8 @@ class _Apply:
 
     Returns:
       Repo-relative path strings — the request file, the inbox note when present, each
-      populated document, each attach target, and the whole folder of each spawned asset.
+      populated document, each attach target, the whole folder of each spawned asset and of each
+      spawned product, and the settings file when this pass registered anything in it.
     """
     paths = [ self.file_path ]
     if inbox.is_file():
@@ -2005,14 +2599,19 @@ class _Apply:
     paths.extend(note.parent for note in self.spawn_folder_notes)
     # a group folder-note the scaffolder seeded is a sibling of the asset folder, never inside it
     paths.extend(self.spawn_group_notes)
+    # a spawned product's level note and seeded vision both live under its own spec folder
+    paths.extend(self.spawn_product_dirs)
+    # the product record and its review classes are part of the same atomic apply
+    if self.settings_written:
+      paths.append(self.repo / _K.CLAUDE_DIR / _K.SETTINGS_FILE)
 
     # the same path can arrive from several sources, and git rejects a duplicated pathspec
-    seen: list[str] = []
+    pathspec: list[str] = []
     for path in paths:
       rel = str(path.resolve().relative_to(self.repo))
-      if rel not in seen:
-        seen.append(rel)
-    return seen
+      if rel not in pathspec:
+        pathspec.append(rel)
+    return pathspec
 
   def _commit(self, *, subject: str) -> None:
     """
@@ -2082,7 +2681,12 @@ class _Apply:
     Drive one apply transition on the request file.
 
     Returns:
-      Exit code: `0` on success or idempotent terminal-state skip; `1` on logical error.
+      Exit code: `0` on success or idempotent terminal-state skip.
+
+    Raises:
+      SystemExit: On any logical refusal — an unresolvable target, an occupied `spec_path`, a
+        registered key whose path diverges from the decision's, or a failed sibling CLI —
+        carrying a JSON error object on stdout and exit `1`.
     """
     # the frontmatter status decides whether this pass has anything left to do
     text = self.file_path.read_text()
@@ -2091,7 +2695,7 @@ class _Apply:
     # guard: terminal-state idempotence (md-scan filter normally excludes these,
     # but a same-tick race could still hand us one)
     if status in ( _K.STATUS_ACCEPTED, _K.STATUS_REJECTED ):
-      print(json.dumps({ "outcome": _K.OUTCOME_SUCCESS, "skip": _K.OUTCOME_TERMINAL_SKIP }))
+      print(json.dumps({ _K.OUT_OUTCOME: _K.OUTCOME_SUCCESS, _K.OUT_SKIP: _K.OUTCOME_TERMINAL_SKIP }))
       return 0
 
     # the `# Routing` section the router wrote is the whole instruction set for this pass
@@ -2113,6 +2717,7 @@ class _Apply:
     spawn_paths: dict[tuple[str, str], str] = {}
     spawn_tools: dict[tuple[str, str], list[str]] = {}
     attach_drops: dict[str, list[str]] = {}
+    product_targets: list[tuple[str, str, str, dict[str, str]]] = []
     if decision_block is not None:
       spawn_rich, _attach_rich = _parse_routing_decision_rich(
           decision_block, known_kinds = self._known_kinds())
@@ -2123,7 +2728,8 @@ class _Apply:
       spawn_paths = _parse_spawn_paths(decision_block)
       spawn_tools = _parse_spawn_tools(decision_block)
       attach_drops = _parse_attach_drops(decision_block)
-    # Display gloss must come from the request's OWN H1, not from `# Routing` (which is the
+      product_targets = _parse_spawn_product_targets(decision_block)
+    # the display gloss must come from the request's OWN H1, not from `# Routing` (which is the
     # first H1 in the raw body before strip). Read from `_request_content_block` which already
     # filters out `# Routing` and `# History` sections.
     request_display = _request_h1_title(_request_content_block(body))
@@ -2133,7 +2739,7 @@ class _Apply:
     # (playbook Chapter 7 / upstream § 10 — a request made up of reference targets alone is
     # still a fully accepted request)
     resolved_wikilinks: list[str] = []
-    if not spawn_targets and not attach_targets and not reference_targets:
+    if not spawn_targets and not attach_targets and not reference_targets and not product_targets:
       self._stamp_request_file(
           request_class = request_class,
           request_status = _K.STATUS_REJECTED,
@@ -2143,9 +2749,15 @@ class _Apply:
       self._commit(
           subject = f"apply: stamp rejected on {self.file_path.relative_to(self.repo)}",
       )
-      print(json.dumps({ "outcome": _K.OUTCOME_SUCCESS, "result": _K.STATUS_REJECTED,
-                         "request_class": request_class }))
+      print(json.dumps({ _K.OUT_OUTCOME: _K.OUTCOME_SUCCESS, _K.OUT_RESULT: _K.STATUS_REJECTED,
+                         _K.OUT_REQUEST_CLASS: request_class }))
       return 0
+
+    # a product is registered before any asset spawn, so a spawn line may already name it in its
+    # own `product=` field within the same routing decision
+    for key, spec_path, _description, product_experts in product_targets:
+      note = self._spawn_product(key, spec_path, product_experts, request_display)
+      resolved_wikilinks.append(str(note.relative_to(self.repo).with_suffix("")))
 
     # a spawn target scaffolds its folder and folder-note alone — documents are seeded later,
     # by the coordinator's launch checkboxes, so only the note's attribution is written here
@@ -2177,6 +2789,17 @@ class _Apply:
     # a launched feature must never reach this path at all (the router should have
     # spawned a change instead, so a launched target here is a worker-side refusal, not a rollback)
     for target in attach_targets:
+      # a level has no status note above its documents, so a level document is stamped directly
+      # and re-enters review on its own, with nothing else to resolve or roll back
+      level_doc = self._level_doc_target(target)
+      if level_doc is not None:
+        # the token may carry `.md`, a wikilink never does — the spawn branch drops it the same way
+        resolved_wikilinks.append(str(level_doc.relative_to(self.repo).with_suffix("")))
+        if _Attach.ensure_source_request(level_doc, self.request_wikilink, request_display):
+          self.populated_docs.append(level_doc)
+        continue
+
+      # an asset target is read through its status folder-note, whose state gates what follows
       folder_note = self._resolve_attach_folder_note(target)
       fm_values, _ = _parse_frontmatter(folder_note.read_text())
       # guard: a cancelled asset refuses every attach outright, before any rollback runs — a
@@ -2230,7 +2853,8 @@ class _Apply:
 
     # every doc whose attribution changed enters the review loop
     for doc in self.populated_docs:
-      self._open_review(doc, verb = "submit" if doc in self.submit_docs else "start")
+      self._open_review(doc, verb = PlanReview.SUBMIT_VERB if doc in self.submit_docs
+                        else PlanReview.START_VERB)
 
     # the stamp records where the request landed, and the commit makes the whole pass atomic
     self._stamp_request_file(
@@ -2246,13 +2870,13 @@ class _Apply:
 
     # the counts let the calling routine report what this pass produced
     print(json.dumps({
-        "outcome": _K.OUTCOME_SUCCESS,
-        "result": _K.STATUS_ACCEPTED,
-        "request_class": request_class,
-        "spawn_count": len(self.spawn_folder_notes),
-        "attach_count": len(self.attach_folder_notes),
-        "populated_count": len(self.populated_docs),
-        "warnings": self.warnings,
+        _K.OUT_OUTCOME: _K.OUTCOME_SUCCESS,
+        _K.OUT_RESULT: _K.STATUS_ACCEPTED,
+        _K.OUT_REQUEST_CLASS: request_class,
+        _K.OUT_SPAWN_COUNT: len(self.spawn_folder_notes),
+        _K.OUT_ATTACH_COUNT: len(self.attach_folder_notes),
+        _K.OUT_POPULATED_COUNT: len(self.populated_docs),
+        _K.OUT_WARNINGS: self.warnings,
     }))
     return 0
 

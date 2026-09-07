@@ -56,15 +56,28 @@ class SpecValue:
 
   Attributes:
     ROLE_REQUEST: The canonical `spec_role` value for a request file.
+    ROLE_STATUS: The `spec_role` value marking an asset's own status folder-note.
+    ROLE_PRODUCT: The `spec_role` value marking a product's level note — the folder-note
+      owning the product's own system documents.
+    ROLE_CATALOG: The `spec_role` value marking the catalog root's level note — the
+      folder-note owning the content-root's system documents and its split into products.
     CLASS_UNKNOWN: The unclassified `request_class` value.
     STATUS_DRAFT: The pre-terminal `request_status` value.
     TAG_DRAFT: The `tags:` member added on opt-in.
   """
 
   ROLE_REQUEST = "request"
+  ROLE_STATUS = "status"
+  ROLE_PRODUCT = "product"
+  ROLE_CATALOG = "catalog"
   CLASS_UNKNOWN = "unknown"
   STATUS_DRAFT = "draft"
   TAG_DRAFT = "request/draft"
+
+
+# The two roles the catalog coordinator owns; an asset's `ROLE_STATUS` note stays the asset
+# coordinator's, so the dispatcher routes on membership here rather than on a per-role branch.
+LEVEL_ROLES = frozenset({ SpecValue.ROLE_PRODUCT, SpecValue.ROLE_CATALOG })
 
 
 # ----------------------------------------------------------------------------------------
@@ -130,7 +143,11 @@ class Outcome:
 # ----------------------------------------------------------------------------------------
 class Gate:
   """
-  Flat top-level boolean gate key names carried by an asset status folder-note.
+  Flat top-level boolean gate key names carried by an asset status folder-note, or — for the
+  four level gates — by a product's or the catalog root's own level note.
+
+  `DESIGN_DONE` serves both ladders: the key is the same string on either note, and the note's
+  own `spec_role` says which ladder it belongs to.
 
   Attributes:
     DESIGN_DONE: The design-accepted gate.
@@ -139,6 +156,9 @@ class Gate:
     TESTS_PASSING: The tests-passing gate.
     RELEASED: The released gate.
     SPEC_CANCELLED: The asset-cancelled flag that refuses every gate flip.
+    VISION_DONE: The level ladder's vision-accepted gate.
+    UI_DESIGN_DONE: The level ladder's ui-design-accepted gate.
+    TECH_DONE: The level ladder's tech-accepted gate.
   """
 
   DESIGN_DONE = "spec_design_done"
@@ -147,6 +167,9 @@ class Gate:
   TESTS_PASSING = "spec_tests_passing"
   RELEASED = "spec_released"
   SPEC_CANCELLED = "spec_cancelled"
+  VISION_DONE = "spec_vision_done"
+  UI_DESIGN_DONE = "spec_ui_design_done"
+  TECH_DONE = "spec_tech_done"
 
 
 # ----------------------------------------------------------------------------------------
@@ -160,6 +183,8 @@ class Stage:
     APPROVED: An accepted doc.
     REJECTED: A doc turned away.
     CANCELLED: A doc whose work is abandoned.
+    DEFERRED: A doc parked out of the automation's reach — no coordinator reacts to it, no gate
+      reads it, and `draft` is the only way back out.
   """
 
   EMPTY = "empty"
@@ -167,6 +192,7 @@ class Stage:
   APPROVED = "approved"
   REJECTED = "rejected"
   CANCELLED = "cancelled"
+  DEFERRED = "deferred"
 
 
 # ----------------------------------------------------------------------------------------
@@ -214,8 +240,20 @@ ASSET_STATES = frozenset({
 })
 
 
-# Gates whose precondition is strictly derivable from per-file approval stages.
-DERIVED_GATES = frozenset({Gate.DESIGN_DONE, Gate.PLAN_DONE})
+# Linear precedence order of the level ladder — the order the level documents are written in.
+LEVEL_GATE_ORDER = [
+    Gate.VISION_DONE,
+    Gate.DESIGN_DONE,
+    Gate.UI_DESIGN_DONE,
+    Gate.TECH_DONE,
+]
+
+# Every gate a level note carries; the asset ladder's `GATE_ORDER` is a separate set.
+LEVEL_GATES = frozenset(LEVEL_GATE_ORDER)
+
+# Gates whose precondition is strictly derivable from per-file approval stages — every level
+# gate is one of these: the level ladder has no human-signal gate at all.
+DERIVED_GATES = frozenset({Gate.DESIGN_DONE, Gate.PLAN_DONE}) | LEVEL_GATES
 
 # Gates whose flip depends on an out-of-band human signal, not a derivable stage.
 HUMAN_GATES = frozenset({Gate.DEVELOP_DONE, Gate.TESTS_PASSING, Gate.RELEASED})
@@ -228,6 +266,24 @@ GATE_ORDER = [
     Gate.TESTS_PASSING,
     Gate.RELEASED,
 ]
+
+# Every gate an asset's own status folder-note carries: the five-rung ladder plus the terminal
+# cancellation flag that freezes it.
+ASSET_GATES = frozenset(GATE_ORDER) | { Gate.SPEC_CANCELLED }
+
+# Every gate name the flip primitive accepts at all. A name outside this set is a caller typo,
+# refused before the folder-note is touched — `Gate.DESIGN_DONE` is the one member both ladders
+# share, and the note's own role decides which of the two it means.
+FLIPPABLE_GATES = ASSET_GATES | LEVEL_GATES
+
+# The gates each folder-note role may flip. An asset's status note runs the asset ladder; a
+# product's or the catalog root's level note runs the level ladder and nothing else. A role
+# absent from this mapping bears no gates at all, so every flip on such a note is refused.
+ROLE_GATES = {
+    SpecValue.ROLE_STATUS: ASSET_GATES,
+    SpecValue.ROLE_PRODUCT: LEVEL_GATES,
+    SpecValue.ROLE_CATALOG: LEVEL_GATES,
+}
 
 
 # ----------------------------------------------------------------------------------------
@@ -275,6 +331,38 @@ class SiblingDoc:
   CODE_REPORT = "code-report.md"
   TEST_REPORT = "test-report.md"
   DECISIONS = "decisions.md"
+
+
+# ----------------------------------------------------------------------------------------
+class LevelDoc:
+  """
+  The system documents a level note owns, paired with their doc types and gates.
+
+  A level note is a product's or the catalog root's own folder-note. Only `VISION` is
+  mandatory; the other three are opt-in and hang as launch checkboxes once the vision gate
+  closes. `DESIGN` and `TECH` share their basenames with the product-level docs the asset
+  coordinator already reads, and the doc types keep them apart.
+
+  Attributes:
+    VISION: The level vision doc.
+    DESIGN: The level design doc.
+    UI_DESIGN: The level ui-design doc.
+    TECH: The level tech doc.
+    CHAIN: The ladder as `(filename, doc_type, gate)` triples, in writing order.
+    BASENAMES: The four filenames, for deciding whether a changed file is a level document.
+  """
+
+  VISION = "vision.md"
+  DESIGN = "design.md"
+  UI_DESIGN = "ui-design.md"
+  TECH = "tech.md"
+  CHAIN = [
+      ( VISION, "system-vision", Gate.VISION_DONE ),
+      ( DESIGN, "system-design", Gate.DESIGN_DONE ),
+      ( UI_DESIGN, "system-ui-design", Gate.UI_DESIGN_DONE ),
+      ( TECH, "system-tech", Gate.TECH_DONE ),
+  ]
+  BASENAMES = frozenset({ VISION, DESIGN, UI_DESIGN, TECH })
 
 
 # ----------------------------------------------------------------------------------------
@@ -359,8 +447,9 @@ class FlipResult:
   REFUSED = "refused"
 
 
-# Frontmatter boolean literal compared and written for gate values.
+# Frontmatter boolean literals compared and written for gate values.
 BOOL_TRUE = "true"
+BOOL_FALSE = "false"
 
 
 # ----------------------------------------------------------------------------------------
@@ -616,6 +705,10 @@ class CoordinatorTrigger:
       it never fires this trigger without any author check needed (model-audit.md C3, the
       deferred half — `lazy-spec.coordination-playbook.md` § 1 trigger 1's own scope only ever
       covered the status folder-note itself).
+    ASSET_RELEASED: An asset's `Gate.RELEASED` crossed to true, dispatched upward onto the
+      product's own level note so the catalog coordinator can reconcile the released asset
+      against the product design. One hop, best-effort, raised on the same asset wake that
+      already scans reverse dependencies; no gate of the asset's own is touched.
     DEPENDENCY_READY: A wake resolved on a dependency asset — one this asset itself names in
       its own `spec_depends_on` — reached this asset as a one-hop reverse-edge dispatch
       (`coordinator_dispatch._scan_dependents`). Carries `payload["dep"]` naming the ready
@@ -630,6 +723,7 @@ class CoordinatorTrigger:
   JOB_DONE = "job-done"
   DOC_TRANSITION = "doc-transition"
   DEPENDENCY_READY = "dependency-ready"
+  ASSET_RELEASED = "asset-released"
 
 
 # ----------------------------------------------------------------------------------------

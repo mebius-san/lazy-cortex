@@ -1,7 +1,7 @@
 ---
 name: lazy-python.check-style
 description: "Use when the user asks to review, check, or clean up Python code they just changed — 'check my style', 'review these files against our guidelines', 'is this ready to commit'. Run it after a batch of edits and before committing: it pairs manual guideline inspection (the things `chk-py` cannot see, read fresh from the canon plus the project overlay) with the full `chk-py` + `tst-py` gate and a re-verify pass."
-allowed-tools: Bash, Read, Edit, Glob, Grep, Agent
+allowed-tools: Bash, Read, Edit, Glob, Grep, AskUserQuestion, Agent
 user-invocable: true
 ---
 # Python check-style — six-step review
@@ -92,7 +92,16 @@ Outcome: `<N>-violations-from-chk` or `chk-clean`.
 
 For each issue identified in Step 3 or Step 4, apply a minimal targeted fix via `Edit`. One fix per violation; do not bundle unrelated changes (e.g. do not reorganise the file's imports while fixing a docstring line-length issue — the next checker pass will surface the import change as noise).
 
-**Test-edit guard**: if a proposed fix would modify any file under `tests/**`, STOP and ask the user via `AskUserQuestion` before editing. Naming the specific test file in the question is mandatory — silently doctoring a test to keep things green hides the regression the test was meant to catch. See `.claude/CLAUDE.md` § "Test edits require explicit user permission".
+**Test-edit guard**: if a proposed fix would modify any file under `tests/**`, STOP and ask the user via `AskUserQuestion` before editing. Naming the specific test file in the question is mandatory — silently doctoring a test to keep things green hides the regression the test was meant to catch. See `.claude/CLAUDE.md` § "Test edits require explicit user permission". One question per test file:
+
+```
+Context (print before asking):
+- Where: /lazy-python.check-style · Step 5 — Fix remaining issues; target <test file path>
+- Found: <issue from Step 3 or 4, with file:line>; the proposed fix would change <the assertion / fixture / expected value it touches>
+- Why asking: a test edit can turn a real regression green; the CLAUDE.md test-edit rule reserves that call for the user
+- Answers: `edit-test` — the fix is applied to <test file path> now, this run only, never persisted; `keep-test` — the test stays untouched, any fix goes to the code, the issue stays in the Step 6 remaining list if none does
+AskUserQuestion: header "Test edit", question "The fix for <issue> would modify <test file path>. Edit the test, or keep it and fix the code instead?", options `edit-test` / `keep-test` with those descriptions.
+```
 
 If no issues were found in Steps 3 and 4, skip the fix loop and emit `no-fixes-needed`.
 

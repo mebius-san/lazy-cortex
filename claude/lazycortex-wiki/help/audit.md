@@ -1,11 +1,11 @@
 ---
 chapter_type: block
 summary: Run integrity checks across a wiki scope, its terms dictionary, structure map, mirrors, and domain tree — with optional auto-repair.
-last_regen: 2026-09-02
+last_regen: 2026-09-07
 no_diagram: true
 source_skills:
   - lazy-wiki.doctor
-source_sha: 330b97960670773e9761442bb7daab587dc239e0
+source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 ---
 # Wiki integrity audit
 
@@ -37,7 +37,7 @@ Structure configuration checks also cover the three scan routines' `watch` setti
 
 **Phase 3 — presentation.** Every finding from both phases is summarised: per-scope counts by severity, plus check name, affected node or entry, and message — with fixable findings called out separately from report-only ones, and a named repair route for each report-only class.
 
-**Phase 4 — confirm and apply.** If any fixable findings exist, you're asked whether to apply them; on yes, the skill re-runs the command with `--apply` and reports each fix individually. Terms findings are never part of this batch — each one is decided with you individually (see below), because which side is "right" — the document's wording or the dictionary's — is a judgment call the skill will not default. If you decline the batch apply, or there's nothing fixable, the read-only result stands.
+**Phase 4 — confirm and apply.** If any fixable findings exist, you're asked whether to apply them — the skill states exactly what a yes does (index rebuild, See-also path rewrite, broken-line drop, gloss refresh) and what a no leaves in place (nothing written; the same findings ask again next run) before the question lands. On yes, the skill re-runs the command with `--apply` and reports each fix individually. Terms findings are never part of this batch — each one is decided with you individually (see below), because which side is "right" — the document's wording or the dictionary's — is a judgment call the skill will not default. If you decline the batch apply, or there's nothing fixable, the read-only result stands.
 
 Applying a fix only touches the lines that need it — the rest of a node's See-also section, or the rest of the topic index, is left exactly as it was.
 
@@ -61,7 +61,7 @@ Applying a fix only touches the lines that need it — the rest of a node's See-
 - **Resolving unknown axes** — run `/lazy-wiki.configure` to add the axis to the scope definition, or to rename the axis used in existing tags. The skill writes the settings; then re-run `/lazy-wiki.doctor` to confirm the finding is cleared.
 - **Missing summaries** — these are report-only. Run `/lazy-wiki.relink` (the curation block) to have the curator fill in summaries for uncurated nodes.
 - **A `broken-see-also` finding keeps appearing after deleting a node** — if the background daemon isn't running, the automatic pruning happens on your next `/lazy-wiki.relink` rather than instantly. Run `/lazy-wiki.relink` on the affected scope, then re-run `/lazy-wiki.doctor` to confirm the finding is gone.
-- **A `divergence` or `dead` terms finding** — the audit will not auto-apply either side; when it asks, name which word wins (the document's or the dictionary's) and it edits accordingly. A document with `review_active: true`, or anything under an upstream mirror tree, is never touched this way — resolve those by hand.
+- **A `divergence` or `dead` terms finding** — the audit will not auto-apply either side; when it asks, it shows both words and names which side each answer picks, and you tell it which one wins (the document's or the dictionary's). A document with `review_active: true`, or anything under an upstream mirror tree, is never touched this way — resolve those by hand.
 - **Structure or domain drift after a rename sweep** — `missing-dir` / `missing-file` / `dead-entry` / `divergence` findings usually clear with a wholesale `/lazy-wiki.structure rebuild` rather than fixing entries one at a time; `domain-hash-stale` clears with `/lazy-wiki.domain-sync`.
 - **A structure-scan routine reports `config` right after registration** — if `docs/structure.md` doesn't exist yet, every one of the three scan routines fails its precondition until you run `/lazy-wiki.structure rebuild` once to create the map.
 - **`docs/structure.md` shows up as a finding in its own scope** — the map has no frontmatter to defend itself against being curated as an ordinary node. The exclusion belongs to the whole vault, not one scope: add `docs/structure.md` to `wiki.exclude` via `/lazy-wiki.configure vault` rather than excluding it scope by scope.

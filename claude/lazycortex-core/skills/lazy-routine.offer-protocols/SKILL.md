@@ -43,7 +43,16 @@ If no optional candidate survives the relevance judgment, stop with outcome `no-
 
 ### Ask the operator
 
-`AskUserQuestion` with `multiSelect: true` — one option per relevant optional candidate: label = its `id`, description = its `description`. Frame the question as: these are optional protocols the `<routine>` writers may use; pick the ones to attach. The operator may pick none.
+```
+Context (print before asking):
+- Where: /lazy-routine.offer-protocols — Ask the operator; target `routines.<routine>.protocols` in `.claude/lazy.settings.json`
+- Found: on record `[<current ids>]`; <n> optional candidates judged relevant to `--context` "<context>": `<id>` — <description>, …
+- Why asking: optional protocols attach only on the operator's word — nothing derives which ones this routine's writers should follow
+- Answers: each picked `<id>` — unioned into `routines.<routine>.protocols` now, idempotent, never removed by this skill; none picked — nothing written, outcome `declined`
+AskUserQuestion: multiSelect true, header "Optional protocols", question "Which optional protocols should the writers of routine `<routine>` (<context>) follow? Pick any, or none.", one option per relevant optional candidate: label = its `id`, description = its `description`.
+```
+
+The operator may pick none.
 
 ### Attach the chosen
 

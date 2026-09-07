@@ -1,7 +1,7 @@
 ---
 name: lazy-core.doctor
 description: "Run when the operator asks whether the project config is healthy, or when something feels off — a rule or skill is not firing, plugins may be behind the marketplace, settings / agents / memory / hooks / CLAUDE.md have drifted apart. Merges its own cross-artifact scan with the installed plugins' audits, applies the repairs that follow mechanically from what it read, and asks per finding about the rest; the sibling `/lazy-core.audit` only measures context weight and authoring compliance and never fixes."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash(python3 *), Bash(claude plugin update *), mcp__*__recall, mcp__*__retain, Agent
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(wc *), Bash(mkdir -p *), Bash(python3 *), Bash(claude plugin update *), mcp__*__recall, mcp__*__retain, AskUserQuestion, Agent
 ---
 # Project Health Check
 
@@ -559,13 +559,24 @@ Fixes split into two classes, marked per bullet below:
 - **(auto)** — the correct result follows from what the check already read; there is no second defensible answer. Doctor writes it during the run and records one line under `### Applied`. No prompt, no diff preview. The write is small, in-file, and recoverable from git.
 - **(ask)** — the fix encodes a decision the checks cannot derive (a rule's audience, whether a plugin should be enabled), or it deletes something. Doctor proposes and waits.
 
-After the report, ask the user which of the **(ask)** fixes to apply, and apply only those. Then enter the **per-WARN waive loop** described in 4a below. Fixes available in-coordinator:
+After the report, ask the user which of the **(ask)** fixes to apply, and apply only those. Then enter the **per-WARN waive loop** described in 4a below.
+
+```
+Context (print before asking):
+- Where: /lazy-core.doctor · Phase 4 — Present + fix + waive; target `<repo>` (plus `$HOME/.claude/` for personal-scope findings)
+- Found: the `### Fixes available` list above — <N> (ask) fixes, each naming its finding, path, and the write it would make; <N> (auto) fixes already under `### Applied`
+- Why asking: each (ask) fix encodes a decision the checks cannot derive (a rule's audience, which servers to trust, whether to enable a plugin) or deletes something
+- Answers: one option per (ask) fix — selecting it applies that fix now to the path in its bullet; `None` — nothing applied, the findings reappear next run. Not persisted; a declined fix is offered again (waive it in 4a to stop that).
+AskUserQuestion: header "Apply fixes", question "Which of the <N> (ask) fixes listed above should doctor apply to `<repo>` now?", multi-select, one option per fix with the descriptions above.
+```
+
+Fixes available in-coordinator:
 
 - Rules oversized (ask) → suggest running `/lazy-core.slim-context`; don't auto-slim here.
 - Rule drift on an install-managed rule (auto) → restore the file from the owning plugin's shipped source. A plugin rule is not an editing surface: a project that needs different behaviour writes its own rule alongside it, so a divergence from the plugin source is stale content rather than a deliberate override, and preserving it means the consumer silently runs on a rule the plugin no longer ships. Identify install-managed status from the owning install skill's registry (`lazy-log.*` rules are owned by `/lazy-core.install`), never from the filename. Report which rules were restored so an operator who did mean to edit one sees it immediately.
 - Orphan rule — a `.claude/rules/*.md` no installed plugin claims (ask) → report; deleting a file whose owner is simply not installed right now is not doctor's call.
 - Missing rules frontmatter (mixed) → `description:` is derived from the rule body and written (auto). The scope key (`paths:` vs `always_loaded:`) is a separate decision — see the next bullet.
-- Rule lacks scope AND waiver (ask) → ask the user, per rule, whether the rule is legitimately always-loaded. If yes, add `always_loaded: <reason>` (reason must be substantive — one line explaining *why* every turn needs it, not `true`). If no, add a `paths:` block-list narrowing it to the folders where it applies. Show the proposed frontmatter diff before writing. Never auto-pick a scope — only the user knows the rule's true audience.
+- Rule lacks scope AND waiver (ask) → ask the user, per rule, whether the rule is legitimately always-loaded. Context printed before each question: where — `/lazy-core.doctor · Phase 4`, target the rule file path; found — its frontmatter as read, with neither `paths:` nor `always_loaded:`; why asking — only the user knows the rule's true audience; answers — `Yes — always-loaded` adds `always_loaded: <reason>` (reason must be substantive — one line explaining *why* every turn needs it, not `true`), `No — scope to paths` adds a `paths:` block-list narrowing it to the folders where it applies; either persists in the file's frontmatter and is never re-asked. `header` "Rule scope"; `question` names the file: "Is `<rule path>` legitimately loaded on every turn, or should it be scoped to paths?". Show the proposed frontmatter diff before writing. Never auto-pick a scope — only the user knows the rule's true audience.
 - Inline-array `paths:` shape (FAIL from `lazy-core.audit` rule-writing check 3) (auto) → in-place migration to canonical YAML block-list. Parse the existing `paths: ["a", "b", ...]` line, preserve all globs verbatim (including quote style), rewrite as a key on its own line followed by one `  - "<glob>"` per array element. No glob is added, dropped, or reworded, so the rule's scope is byte-equivalent before and after.
 - Authoring rule without template reference (WARN from `lazy-core.audit` rule-writing check 9) (auto) → two-step scaffold. (1) Derive `<artifact-type>` from the rule filename (`*.writing.md` → strip `-writing`/`.writing` and pluralize as needed; e.g. `lazy-core.skill-writing.md` → `skill`), copy the matching base template (`<plugin>/templates/core/{rule,skill,agent}-template.md`) to `<plugin>/templates/<group>/<derived-name>-template.md`, with `<group>` = the plugin's primary namespace (`core` for `lazycortex-core`). (2) Prepend `**Template:** ${CLAUDE_PLUGIN_ROOT}/templates/<group>/<derived-name>-template.md — start here when creating a new <artifact-type>.` immediately after the rule's H1 + orientation paragraph, before the first `## ` section. Per `lazy-core.scaffold`. Both the derived name and the group follow from names already on disk; a maintainer who wants a different group renames the file afterwards.
 - Missing mandatory routine protocol (auto): `Bash(lazycortex-core add-protocols --routine <name> --ids <id>)` per finding. The routine and the protocol both come from the check's own table, and the union only appends — nothing the operator attached is touched.
@@ -588,9 +599,14 @@ These seven fix offers are conditional on findings from Phase 3 § 11f. Each is 
 
 **Fix L1 — Daemon stalled** (trigger: D10 WARN "runtime daemon appears stale")
 
-`AskUserQuestion`: "Daemon is stalled — no log activity in the last <N>s (last seen: <timestamp or 'never'>). Restart the runtime daemon?"
-
-Options: `Restart via supervisor`, `Skip`.
+```
+Context (print before asking):
+- Where: /lazy-core.doctor · Phase 4 — Fix L1 Daemon stalled; target service `com.lazycortex.runtime.<repo-name>` (macOS) / `lazy-core-runtime.service` (Linux) of `<repo>`
+- Found: D10 — no runtime log activity in the last <N>s (last seen: <timestamp or 'never'>); pgrep / supervisor state: <detail>
+- Why asking: a restart interrupts any job the daemon may still be running
+- Answers: `Restart via supervisor` — kickstart / systemctl restart now, liveness re-probed, reported `restarted` or `restart-attempted`; `Skip` — untouched, D10 reappears next run. Not persisted.
+AskUserQuestion: header "Restart daemon", question "The runtime daemon of `<repo>` is stalled — no log activity in the last <N>s (last seen: <timestamp or 'never'>). Restart it via the supervisor?", options `Restart via supervisor` / `Skip` with the descriptions above.
+```
 
 On Restart:
 1. Detect OS: `Bash(uname -s)` → `Darwin` or `Linux`.
@@ -601,9 +617,14 @@ On Restart:
 
 **Fix L2 — Stale orphan jobs** (trigger: D8 WARN "orphan job directory")
 
-`AskUserQuestion`: "Found <N> orphan job director(y/ies) under `.jobs/` for experts no longer in `lazy.settings.json[experts]`. Delete them?"
-
-Options: `Delete all`, `Keep`.
+```
+Context (print before asking):
+- Where: /lazy-core.doctor · Phase 4 — Fix L2 Stale orphan jobs; target `.jobs/` of `<repo>`
+- Found: D8 — <N> job director(y/ies) `<comma-joined .jobs/<expert>/ paths>` for experts no longer in `lazy.settings.json[experts]`
+- Why asking: deletion is irreversible and the directories may still hold job output
+- Answers: `Delete all` — each listed directory removed with `shutil.rmtree` now, one report line per directory; `Keep` — untouched, D8 reappears next run. Not persisted.
+AskUserQuestion: header "Delete orphan jobs", question "Found <N> orphan job director(y/ies) under `.jobs/` of `<repo>` for experts no longer in `lazy.settings.json[experts]` (<comma-joined paths>). Delete them?", options `Delete all` / `Keep` with the descriptions above.
+```
 
 On Delete: for each orphan job dir identified in D8, run:
 ```
@@ -617,9 +638,14 @@ Report one line per deleted directory: `deleted: .jobs/<expert>/`.
 
 **Fix L3 — Routine command unresolvable** (trigger: D7 FAIL "routine <name> command path does not exist")
 
-`AskUserQuestion`: "Routine `<name>` references plugin bin path `<path>` which does not exist. The plugin may not be installed. Unregister the routine from `routines`?"
-
-Options: `Unregister`, `Keep — I'll fix the plugin install`.
+```
+Context (print before asking):
+- Where: /lazy-core.doctor · Phase 4 — Fix L3 Routine command unresolvable; target `.claude/lazy.settings.json[routines.<name>]` of `<repo>`
+- Found: D7 — routine `<name>` references plugin bin path `<path>`, which does not exist; the plugin may not be installed
+- Why asking: unregistering deletes the routine entry, and a missing plugin may be a pending install rather than a retired routine
+- Answers: `Unregister` — `unregister_routine` removes the entry now; `Keep — I'll fix the plugin install` — untouched, D7 reappears next run. Not persisted.
+AskUserQuestion: header "Unregister routine", question "Routine `<name>` of `<repo>` references plugin bin path `<path>` which does not exist. The plugin may not be installed. Unregister the routine from `routines`?", options `Unregister` / `Keep — I'll fix the plugin install` with the descriptions above.
+```
 
 On Unregister:
 ```
@@ -633,13 +659,18 @@ import sys
 ```
 Report: `unregistered routine: <name>`. If `unregister_routine` raises (e.g. settings file not writable), surface the exception text as a FAIL finding and skip the write.
 
-Offer Fix L3 per-routine when multiple routines are unresolvable — one `AskUserQuestion` per routine. Do not batch them silently.
+Offer Fix L3 per-routine when multiple routines are unresolvable — one `AskUserQuestion` per routine, each filling the block from that routine. Do not batch them silently.
 
 **Fix L4 — External directory broken** (trigger: D11 FAIL, status `missing` / `dangling` / `wrong_target`)
 
-`AskUserQuestion`: "<N> declared external director(y/ies) do not resolve in this checkout (<comma-joined paths>). Re-link them from `external_dirs.root`?"
-
-Options: `Re-link`, `Skip`.
+```
+Context (print before asking):
+- Where: /lazy-core.doctor · Phase 4 — Fix L4 External directory broken; target `external_dirs.paths` of `<repo>`
+- Found: D11 — <N> declared external director(y/ies) do not resolve in this checkout: <path: missing | dangling | wrong_target, …>; `external_dirs.root` = `<root>`
+- Why asking: re-linking rewrites symlinks inside the checkout
+- Answers: `Re-link` — `external_dirs.apply` recreates each symlink from `external_dirs.root` now, one report line per path; `Skip` — untouched, D11 reappears next run. Not persisted.
+AskUserQuestion: header "Re-link external dirs", question "<N> declared external director(y/ies) of `<repo>` do not resolve in this checkout (<comma-joined paths>). Re-link them from `external_dirs.root`?", options `Re-link` / `Skip` with the descriptions above.
+```
 
 On Re-link:
 ```
@@ -658,11 +689,16 @@ Report only, no fix offer: print the conflicting `other_repo` and state that one
 
 **Fix L6 — `daemon.git` unconfigured** (trigger: D3 FAIL "daemon.git is null" or "daemon.git missing required field base_branch")
 
-`AskUserQuestion`: "`daemon.git` carries no `base_branch`, so routine commits ride no branch and never sync with origin — they stay in this checkout. Derive the block from this checkout?"
+```
+Context (print before asking):
+- Where: /lazy-core.doctor · Phase 4 — Fix L6 `daemon.git` unconfigured; target `.claude/lazy.settings.json[daemon.git]` of `<repo>`
+- Found: D3 — `daemon.git` is <null | missing `base_branch`>; derived values: `base_branch` = `<current branch>`, `remote_sync` = <`pull_push` (origin exists) | omitted (no origin)>
+- Why asking: the block decides which branch routine commits ride and whether they sync with origin
+- Answers: `Derive` — `bootstrap_daemon_git` writes the derived block now (receipt `seeded` / `kept-local` / `skipped-no-branch`); never re-asked once the block has content; `Skip` — untouched, routine commits stay in this checkout, D3 reappears next run
+AskUserQuestion: header "Seed daemon.git", question "`daemon.git` of `<repo>` carries no `base_branch`, so routine commits ride no branch and never sync with origin — they stay in this checkout. Derive the block from this checkout (`base_branch` = `<branch>`, `remote_sync` = `<value>`)?", options `Derive` / `Skip` with the descriptions above.
+```
 
-Options: `Derive`, `Skip`.
-
-The derived values are shown in the question description before the write: `base_branch` = the current branch, `remote_sync` = `pull_push` when an `origin` remote exists (omitted otherwise).
+The derived values are shown in the context block and the question before the write: `base_branch` = the current branch, `remote_sync` = `pull_push` when an `origin` remote exists (omitted otherwise).
 
 On Derive:
 ```
@@ -676,9 +712,14 @@ Report the receipt verbatim: `seeded`, `kept-local`, or `skipped-no-branch`. `ke
 
 **Fix L7 — Sandbox scope misses a resolved location** (trigger: D13 FAIL / WARN)
 
-`AskUserQuestion`: "The expert-spawn sandbox does not cover <N> location(s) its own allowlist resolves to (<comma-joined paths>). Confined spawns fail every write there with `Operation not permitted`. Record them?"
-
-Options: `Record`, `Skip`.
+```
+Context (print before asking):
+- Where: /lazy-core.doctor · Phase 4 — Fix L7 Sandbox scope; target the gitignored sandbox-scope state of `<repo>`
+- Found: D13 — <N> location(s) the expert-spawn allowlist resolves to lie outside the sandbox scope: <comma-joined paths>
+- Why asking: confined spawns fail every write there with `Operation not permitted`; recording widens where spawned experts may write
+- Answers: `Record` — `sandbox_scope.sync` appends the missing locations now (receipt `changed=… added_write=…`), never drops an entry, nothing to commit; `Skip` — untouched, D13 reappears next run
+AskUserQuestion: header "Record sandbox paths", question "The expert-spawn sandbox of `<repo>` does not cover <N> location(s) its own allowlist resolves to (<comma-joined paths>). Confined spawns fail every write there with `Operation not permitted`. Record them?", options `Record` / `Skip` with the descriptions above.
+```
 
 On Record:
 ```
@@ -697,22 +738,38 @@ For any finding surfaced by a delegated audit (Guard / Logging), direct the user
 
 After the fix batch is applied (or declined), iterate the remaining `WARN` findings — i.e. every WARN that was not auto-fixed and not already suppressed by Phase 2.7. `FAIL` findings are **never** offered a waive option.
 
-For each remaining WARN, `AskUserQuestion` with two options:
+For each remaining WARN, one question per finding. Each iteration fills the block from that finding:
 
-- **Skip for now** *(default-recommended — safest)* — no persistent effect; the finding will reappear on the next doctor run.
-- **Waive permanently** — opens the permanence confirmation sub-prompt.
+```
+Context (print before asking):
+- Where: /lazy-core.doctor · Phase 4a — Per-WARN waive loop; target `<finding path>` (scope `<project | personal | ambiguous>`)
+- Found: `[WARN] <finding title>` — <detail line>; `check_id` `<check_id>`; not auto-fixable, not previously waived
+- Why asking: only the operator knows whether this WARN is accepted state or something to fix later
+- Answers: `Skip for now` — no persistent effect; the finding reappears on the next doctor run; `Waive permanently` — opens the permanence confirmation below, then writes a waiver to `<resolved backend + location>` that suppresses this fingerprint on every later run
+AskUserQuestion: header "Waive finding", question "`<finding title>` at `<finding path>` — skip it for now, or waive it permanently?", options `Skip for now` (default-recommended — safest) / `Waive permanently` with the descriptions above.
+```
 
 If the user picks **Waive permanently**, a second `AskUserQuestion`:
 
-> This will write a permanent waiver to `<resolved backend + location>`. Future doctor runs will suppress this finding. **This is not a temporary skip — the waiver persists across sessions.** Confirm?
->
-> - **Confirm permanent waiver** — writes to the resolved backend.
-> - **Cancel — treat as a skip** — no write; finding reappears next run.
+```
+Context (print before asking):
+- Where: /lazy-core.doctor · Phase 4a — permanence confirmation; target `<resolved backend + location>`
+- Found: waiver record to write — `check_id` `<check_id>`, `normalized_path` `<normalized_path>`, `detail_hash` `<detail_hash>`, reason "<finding title> — accepted permanently on <YYYY-MM-DD>"
+- Why asking: the write persists across sessions and hides the finding from every later run
+- Answers: `Confirm permanent waiver` — writes to the resolved backend now; undone only by deleting the file / memory entry; `Cancel — treat as a skip` — no write; the finding reappears next run
+AskUserQuestion: header "Confirm waiver", question "Write a permanent waiver for `<finding title>` (`<check_id>` | `<normalized_path>`) to `<resolved backend + location>`? Future doctor runs will suppress this finding. This is not a temporary skip — the waiver persists across sessions.", options with the descriptions above.
+```
 
 If the finding's `scope` is `ambiguous`, insert a **storage-choice** question between the permanence confirmation and the write:
 
-- **Save under this project** *(default-recommended — smaller blast radius, easy to revert by deleting the file)* — project scope.
-- **Save for all projects on this machine** — personal scope.
+```
+Context (print before asking):
+- Where: /lazy-core.doctor · Phase 4a — storage choice; target `<check_id>` | `<normalized_path>`
+- Found: the finding's path spans both scopes (<e.g. a global hook referencing a project path>), so no single waiver store follows from it
+- Why asking: the store decides whether the waiver applies to this repo only or to every project on this machine
+- Answers: `Save under this project` — `$HOME/.claude/projects/<slug>/memory/doctor.waivers/` (project scope); `Save for all projects on this machine` — `$HOME/.claude/memory/doctor.waivers/` (personal scope). Persisted with the waiver; never re-asked for this fingerprint.
+AskUserQuestion: header "Waiver scope", question "Store the waiver for `<finding title>` under this project (`<repo>`) or for all projects on this machine?", options `Save under this project` (default-recommended — smaller blast radius, easy to revert by deleting the file) / `Save for all projects on this machine` with the descriptions above.
+```
 
 On confirmation, resolve the backend via the Phase 2.7a priority ladder using the finding's `scope`:
 

@@ -124,7 +124,16 @@ Outcome: `presented`.
 ## Step 5: Ask which to fix
 
 - If `fail + warn == 0` → `nothing-to-fix`. Skip to Step 7.
-- Else, use `AskUserQuestion` (single multi-select) listing each `WARN`/`FAIL` finding as an option. Capture the user's selection.
+- Else print the context, then ask (single multi-select) and capture the selection:
+
+```
+Context (print before asking):
+- Where: /lazy-diagram.audit · Step 5 — Ask which to fix; target <root>/templates/diagram.*/ (the plugin's own templates and schemes)
+- Found: <n> WARN / <m> FAIL findings from Step 4, each as `[<sev>] <title> | <path>`
+- Why asking: fixes edit shipped templates and schemes; nothing is mutated until the user picks
+- Answers: a selected finding — its Step 6 fix vocabulary is applied now (or the un-auto-fixable part is surfaced); an unselected finding — untouched, reported `skipped-per-user-choice`, listed again on the next audit
+AskUserQuestion: header "Fixes", question "Which of the <n+m> WARN/FAIL findings in <root>/templates/ should be fixed now?", multiSelect, one option per finding with its `[<sev>] <title> | <path>` line as the description.
+```
 
 Outcome: `confirmed (<n> selected)` or `nothing-to-fix`.
 

@@ -1,7 +1,7 @@
 ---
 name: lazy-diagram.draw
 description: "Use when a NEW diagram should land under a named heading in a markdown file — an authoring skill reaching a declared draw seam, or a direct request to draw a flow / sequence / state / architecture / layout picture of something. Picks (kind, format) from the free-form request, dispatches the per-format drawer agent, and writes one fenced diagram. For re-conforming a fence that already exists, see `/lazy-diagram.fix`."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion, Agent
 ---
 # lazy-diagram.draw
 
@@ -114,7 +114,16 @@ When two kinds compete (e.g. "flow vs state machine"), prefer the kind whose **u
 #### Confirmation
 
 - If the heuristic produces a single confident pick (no tie), use it directly.
-- If two kinds tie within the heuristic, OR the user pinned only one of `(kind, format)` and the unpinned axis has multiple plausible values, surface candidates via `AskUserQuestion` (single question, one option per candidate; the first option carries `(Recommended)`).
+- If two kinds tie within the heuristic, OR the user pinned only one of `(kind, format)` and the unpinned axis has multiple plausible values, surface candidates:
+
+  ```
+  Context (print before asking):
+  - Where: /lazy-diagram.draw · Step 3 — Resolve kind and format; target <target_file> under <anchor_section>
+  - Found: request "<request, trimmed>"; <pinned axis and value, or "nothing pinned">; candidates <kind/format>, <kind/format> from heuristic rows <row triggers> — no single confident pick
+  - Why asking: the heuristic ties and the skill never switches kind or format silently
+  - Answers: `<kind>/<format> (Recommended)` — drawn with that pair this run; `<kind>/<format>` — likewise; nothing is persisted, a re-run with the same request asks again unless the caller pins `kind=` / `format=`
+  AskUserQuestion: header "Diagram kind", question "Which (kind, format) should the diagram under <anchor_section> in <target_file> use?", one option per candidate, the first carrying `(Recommended)`, each described by the heuristic row that proposed it.
+  ```
 - If no row in the heuristic matches the request → `failed:no-kind-fits-request`. Short-circuit to Step 8.
 
 Outcome: `resolved kind=<kind> format=<format> source=<pinned-by-caller|heuristic-top|user-confirmed>` or `failed:no-kind-fits-request`.

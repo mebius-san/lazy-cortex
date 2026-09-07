@@ -12,7 +12,7 @@ The authoritative definition of per-file stage semantics lives in `${CLAUDE_PLUG
 ## Input
 
 1. **File path** — absolute or vault-relative path to an authored doc. The doc MUST carry a `spec_doc_type` whose declaration exists in the owning product's scope and carries `stages: true`. Neither the basename nor the path takes part in this: a document named `races.md` carrying `spec_doc_type: design` is a design document. A type declared `stages: false` (the shipped `code-report` / `test-report` / `decisions`, and any project type declaring the same) carries no independently-settable stage and is rejected here.
-2. **New stage** — exactly one of the closed set `empty | draft | approved | rejected | cancelled`. Anything else (including the removed `review` / `done` / `wtr` values) is rejected with a clear error. "In review" is now expressed as `spec_stage: draft` + `review_active: true` on the doc; "accepted" is `approved`.
+2. **New stage** — exactly one of the closed set `empty | draft | approved | rejected | cancelled | deferred`. Anything else (including the removed `review` / `done` / `wtr` values) is rejected with a clear error. "In review" is now expressed as `spec_stage: draft` + `review_active: true` on the doc; "accepted" is `approved`.
 3. **Optional author** — free-text name recorded in the folder-note history line. Defaults to `lazy-spec.set-stage` (the skill's own name).
 
 ## Process
@@ -40,7 +40,9 @@ Three checks, in order. None of them reads a filename or a path.
 
 2a. **The document is not an attachment.** A doc carrying `spec_owner_doc` is a markdown attachment; its `spec_stage` is a mirror of its owner's, written only by the owner's own stage cascade (step 2b below) and by the coordinator's reconciliation. Refuse: ``document is an attachment of `<owner>` — its stage mirrors the owner's; set the owner's stage instead``.
 
-3. **The requested stage is in the closed set** `empty | draft | approved | rejected | cancelled`. If the value is not in the set, refuse — name the offending value and list the closed set. For the removed values specifically: `review` → use `draft` + `review_active: true`; `done` → use `approved`; `wtr` → use `draft` or `approved` per intent. The set of TYPES is open and validated by declaration; the set of STAGES is closed and validated by this list.
+3. **The requested stage is in the closed set** `empty | draft | approved | rejected | cancelled | deferred`. If the value is not in the set, refuse — name the offending value and list the closed set. For the removed values specifically: `review` → use `draft` + `review_active: true`; `done` → use `approved`; `wtr` → use `draft` or `approved` per intent. The set of TYPES is open and validated by declaration; the set of STAGES is closed and validated by this list.
+
+`deferred` parks a document out of the automation's reach — its approval moves nothing, no gate reads it, and nothing edits it. It is allowed on every stage-bearing type, asset-level and level alike, with no mandatoriness rule to check. Only two transitions touch it: `deferred` parks a document from wherever it stood, and `draft` is the single way back out. A caller asking for any other stage on a parked document is refused: ``document is deferred — set it to `draft` first``.
 
 Then check the `cancelled`-allowed rules in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`: `cancelled` is refused on a document whose type is mandatory for its asset's category. Mandatoriness is declared by the category's playbook; until that playbook exists, the standing list applies — refuse `cancelled` on types `design`, `system-design`, `bug`, and `architecture`; types `system-tech`, `code-plan`, and `test-plan` MAY be cancelled (docs-only feature / no dev or test work needed). Moving this rule into the category playbook belongs to the category-playbooks plan, not to this skill.
 
@@ -81,7 +83,9 @@ A doc with no attachments makes this a silent no-op.
 
 ### 3. Append to the nearest folder-note's `# History`
 
-The folder-note is the file whose basename matches the enclosing folder (e.g., `features/chapter-log/chapter-log.md`). For `design.md` / `tech.md` / `architecture.md` / `code-plan.md` / `test-plan.md` under `<spec_path>/features/<feat>/` or `<spec_path>/changes/<change-name>/`, and for `bug.md` / `code-plan.md` / `test-plan.md` under `<spec_path>/bugs/<bug-name>/`, the folder-note is in the same directory. For system-level authored docs at the product root (`<spec_path>/design.md` / `<spec_path>/tech.md`) or at the content-root (the project-wide pair), there is no status folder-note in scope (the product folder-note is operator-zone) — skip the history step.
+The folder-note is the file whose basename matches the enclosing folder (e.g., `features/chapter-log/chapter-log.md`). For `design.md` / `tech.md` / `architecture.md` / `code-plan.md` / `test-plan.md` under `<spec_path>/features/<feat>/` or `<spec_path>/changes/<change-name>/`, and for `bug.md` / `code-plan.md` / `test-plan.md` under `<spec_path>/bugs/<bug-name>/`, the folder-note is in the same directory.
+
+A **system-level** authored doc — `vision.md` / `design.md` / `ui-design.md` / `tech.md` loose at a product root (`<spec_path>/`) or at the content-root — has a folder-note in scope too: the level note beside it (`<spec_path>/<leaf>.md`, or `<content-root>/<basename of content-root>.md`), the one carrying `spec_role: product` or `spec_role: catalog`. Append the history line there exactly as for an asset — the level note is `spec.catalog-coordinator`'s own note, not operator-zone, and its `# History` is where a level document's stage transitions belong. Skip the history step only when no such note exists on disk (a catalog that predates the level schema; the fix is `lazycortex-specs catalog-note backfill`).
 
 When a folder-note is in scope, append one line to its `# History` section:
 
@@ -123,7 +127,7 @@ This primitive only edits the doc's own per-file `spec_stage`. It does NOT evalu
 
 - The file's new `spec_stage`.
 - The attachments the cascade re-stamped (or nothing when the doc has none).
-- The folder-note path + the appended history line (or `no folder-note in scope` when at product level).
+- The folder-note path + the appended history line — an asset's status note, or the level note beside a system document (or `no folder-note in scope` when the level note does not exist yet).
 - On an `approved` transition of a living doc: the `touched_paths` returned by `decide promote`, or nothing when it no-opped (no `[!decision]` blocks) or refused (asset flag / not a living doc).
 
 ## Failure modes
@@ -131,8 +135,9 @@ This primitive only edits the doc's own per-file `spec_stage`. It does NOT evalu
 - **`/lazy-spec.set-stage` refuses with: document carries no `spec_doc_type`** — the target file has no type key, so no declaration can be resolved → run `lazycortex-specs doc-type backfill` to type the catalog, or add the key to that one document.
 - **`/lazy-spec.set-stage` refuses with: type `<type>` is not declared in this product's scope** — the value resolves to no declaration, shipped or project-level → fix the typo, or declare the type under `products[<key>].doc_types` in `.claude/lazy.settings.json`.
 - **`/lazy-spec.set-stage` refuses with: type `<type>` carries no `spec_stage`** — the declaration exists but carries `stages: false` → that kind of document has no independently-settable stage; nothing to set.
-- **`/lazy-spec.set-stage` refuses with: stage `<value>` is not in the closed set** — passed a value outside `empty | draft | approved | rejected | cancelled` (e.g. the removed `review` / `done` / `wtr`) → pass `draft` + set `review_active: true` for in-review, `approved` for accepted, or the correct closed-set value per intent.
+- **`/lazy-spec.set-stage` refuses with: stage `<value>` is not in the closed set** — passed a value outside `empty | draft | approved | rejected | cancelled | deferred` (e.g. the removed `review` / `done` / `wtr`) → pass `draft` + set `review_active: true` for in-review, `approved` for accepted, or the correct closed-set value per intent.
 - **`/lazy-spec.set-stage` refuses with: document is an attachment of `<owner>`** — the target carries `spec_owner_doc`, so its stage is a mirror → set the stage on the owner document; the cascade re-stamps the attachment in the same commit.
+- **`/lazy-spec.set-stage` refuses with: document is deferred** — the target is parked and the requested stage is anything but `draft` → set it to `draft` first; that is the only exit from `deferred`, and the coordinators start reacting to the document again the moment it lands.
 - **`/lazy-spec.set-stage` refuses with: cancelled not allowed on `<file>`** — attempted `cancelled` on a type mandatory for the asset's category (`design`, `bug`, `architecture`) → cancellation belongs on `system-tech`, `code-plan`, or `test-plan`; use those instead.
 
 ## Run Log
@@ -142,9 +147,10 @@ Per `.claude/rules/lazy-log.logging.md`, write a run log to `./.logs/claude/lazy
 ## Key Rules
 
 - **One primitive, one file** — never accept a list of files. Callers loop over files themselves.
-- **Open type set, closed stage set** — a type is valid because a declaration for it exists (shipped or project-level), never because its name is in a list here. A stage is valid only against `empty | draft | approved | rejected | cancelled`. Reject anything else, including the removed `review` / `done` / `wtr`.
+- **Open type set, closed stage set** — a type is valid because a declaration for it exists (shipped or project-level), never because its name is in a list here. A stage is valid only against `empty | draft | approved | rejected | cancelled | deferred`. Reject anything else, including the removed `review` / `done` / `wtr`.
 - **Path and basename never validate** — a document's type comes from its `spec_doc_type` key alone; where the file sits and what it is called are not inputs to any check in this skill.
 - **Refuse silently-wrong transitions** — `cancelled` on a category-mandatory type returns an error, not a warning.
+- **`deferred` has exactly one exit** — `draft`. Parking is allowed from any stage on any stage-bearing type; leaving is not, and a request for `approved` / `rejected` / `cancelled` / `empty` on a parked document is refused rather than silently honoured.
 - **`spec_stage:` and `spec/<stage>` tag are coupled** — every stage write also rewrites the tag in the same edit. Never write one without the other.
 - **An attachment's stage is a mirror** — a doc carrying `spec_owner_doc` is refused as a target, and every stage write on an owner cascades to its markdown attachments in the same commit, skipping only attachments in their own review.
 - **Never touch the folder-note's gate** — this primitive only edits the doc's own `spec_stage`.

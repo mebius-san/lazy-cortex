@@ -1,7 +1,7 @@
 ---
 name: lazy-guard.allow-mcp
 description: "Use when the user says 'allow context7 mcp', 'allow all mcp tools', 'trust the brave-search MCP server', or asks to stop being prompted for one server's tools on every call. Classifies each tool into three buckets — safe/reversible into `permissions.allow`, truly destructive into `permissions.ask`, medium-risk into neither so Claude Code still prompts per call — and writes them to the gitignored `settings.local.json` so personal permission choices never land in tracked settings."
-allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(date -u *), Bash(git rev-parse *), Agent
+allowed-tools: Read, Write, Edit, Glob, Bash(mkdir -p *), Bash(date -u *), Bash(git rev-parse *), AskUserQuestion, Agent
 lazy_setup_phase: post-install
 requires_live_session: true
 ---
@@ -143,9 +143,27 @@ When a server is defined in `~/.mcp.json`, a permission entry at either scope is
 
 **Silence on no-ops is mandatory.** If the inferred target scope already contains every tool the Phase 3 classifier would route to `allow`/`ask` for that server, there is nothing to write — skip the question entirely and let Phase 5 report the idempotent no-op. Only prompt when a write is actually going to happen *and* the scope is genuinely undetermined.
 
-When a prompt is required, use `AskUserQuestion` with two options — "Global (all projects on this machine)" and "Project only (this repo)". Ask at most once per run, batched across all servers that still need a scope decision. Default recommendation: **Project only** — smaller blast radius, easier to revert by deleting the file.
+When a prompt is required, ask at most once per run, batched across all servers that still need a scope decision. Default recommendation: **Project only** — smaller blast radius, easier to revert by deleting the file.
 
-If both a global and project definition exist for the same server name in `.mcp.json` sources, ask which server definition is authoritative before routing.
+```
+Context (print before asking):
+- Where: /lazy-guard.allow-mcp · Phase 4b — Globally-defined servers; target `<server list>` from `~/.mcp.json`
+- Found: `mcp__<server>__*` entries in `~/.claude/settings.local.json`: <none | N>; in `./.claude/settings.local.json`: <none | N> (Neither → no scope on record; Both → ambiguous); <N> tools to write
+- Why asking: a globally-defined server is valid at either scope, no existing entry pins it, and a write is about to happen
+- Answers: `Project only (this repo)` — writes to `./.claude/settings.local.json` now; inferred from those entries on later runs, never re-asked; `Global (all projects on this machine)` — writes to `~/.claude/settings.local.json` now (the 4c audit trail); inferred likewise. In the Both case the unchosen scope's entries surface as a leak in Phase 6.5b.
+AskUserQuestion: header "Permission scope", question "Register `<server list>` tool permissions at which scope — project `./.claude/settings.local.json` of `<repo>` or global `~/.claude/settings.local.json`?", options `Project only (this repo)` (Recommended) / `Global (all projects on this machine)` with the descriptions above.
+```
+
+If both a global and project definition exist for the same server name in `.mcp.json` sources, ask which server definition is authoritative before routing:
+
+```
+Context (print before asking):
+- Where: /lazy-guard.allow-mcp · Phase 4b — Globally-defined servers; target server `<server>`
+- Found: `<server>` defined in both `~/.mcp.json` (`<command or url>`) and `./.mcp.json` (`<command or url>`)
+- Why asking: the definition decides the default target file (Phase 4a) and nothing on disk says which one this repo means
+- Answers: `Project definition (./.mcp.json)` — routed to `./.claude/settings.local.json`; `Global definition (~/.mcp.json)` — routed per the 4b scope rules. Not persisted; re-asked while both definitions exist.
+AskUserQuestion: header "Authoritative definition", question "`<server>` is defined in both `~/.mcp.json` and `./.mcp.json` of `<repo>` — which definition is authoritative for routing its permissions?", options with the descriptions above.
+```
 
 ### 4c. Never add to `~/.claude/settings.local.json` unless user explicitly chose "Global" in 4b
 
@@ -187,11 +205,31 @@ For each target settings file (always a `settings.local.json` unless user overro
    ``` Omit any sub-block with no entries.
 5. **Per-tool confirmation for every reversal of a prior trust choice.** Any entry in `to_move_to_ask` (user previously allowed → classifier now says destructive) is a reversal of a choice the user made in a past run or by hand. These MUST NOT be bundled into the general write confirmation — each needs its own `AskUserQuestion`, one at a time:
 
-   - For each `t ∈ to_move_to_ask`: `AskUserQuestion` **"Promote `<t>` from `allow` to `ask`? Classifier marks it destructive; promotion means Claude Code prompts every call."** options: `promote` (default) / `keep-in-allow`. On `keep-in-allow`, drop `t` from `to_move_to_ask` for this run (and surface as a note: "left in allow per user override — classifier considered it destructive").
+   - For each `t ∈ to_move_to_ask`, one question per tool. Each iteration fills the block from that tool:
+
+     ```
+     Context (print before asking):
+     - Where: /lazy-guard.allow-mcp · Phase 5 step 5 — Reconcile and preview; target `<target settings.local.json, absolute path>`
+     - Found: `<t>` is in `permissions.allow` (a prior run or a hand edit); the Phase 3 classifier puts it in `ask` (<matched destructive pattern>)
+     - Why asking: moving it reverses a trust choice the operator made; the skill never unmakes one silently
+     - Answers: `promote` — removed from `allow`, appended to `ask` in Phase 6; Claude Code prompts every call from now on; `keep-in-allow` — no change this run, Phase 8 note "left in allow per user override — classifier considered it destructive"; re-asked next run
+     AskUserQuestion: header "Promote to ask", question "Promote `<t>` from `allow` to `ask` in `<target file>`? The classifier marks it destructive; promotion means Claude Code prompts every call.", options `promote` (default) / `keep-in-allow` with the descriptions above.
+     ```
+
+     On `keep-in-allow`, drop `t` from `to_move_to_ask` for this run (and surface as a note: "left in allow per user override — classifier considered it destructive").
 
    Skip-bucket tools that the user pinned in a prior run are **never** subject to this confirmation — Phase 5 step 2 deliberately omits a `to_remove_skip` set. The user's pin stands until they un-pin it by hand.
 
    One tool call per question — never combined. After all per-tool answers are collected, re-render the preview reflecting the user's overrides, then ask a single bundled confirmation covering: additions to both lists, any promotions/removals the user approved, and tracked-scope cleanup. If `--dry-run`, stop here after the per-tool questions (preview reflects the dry-run outcome).
+
+   ```
+   Context (print before asking):
+   - Where: /lazy-guard.allow-mcp · Phase 5 — Reconcile and preview; target `<target file(s), absolute>` for `<server list>`
+   - Found: the re-rendered preview above — +<N> allow, +<N> ask, <N> promotions approved, <N> tracked-scope entries to strip, <N> skipped
+   - Why asking: the skill never writes permissions silently; this is the one write gate for the additions
+   - Answers: `Write` — Phase 6 applies exactly the preview to the gitignored `settings.local.json`; `Cancel` — nothing written, the run ends at Phase 8 with the preview as its report. Not persisted; the preview is recomputed every run.
+   AskUserQuestion: header "Write permissions", question "Apply the previewed permission changes for `<server list>` to `<target file>` in `<repo>`?", options with the descriptions above.
+   ```
 
 ## Phase 6: Write
 
@@ -231,7 +269,18 @@ Permission entries should not live in tracked `settings.json`. Once the target `
 3. Load the tracked file. Skip if it doesn't exist or has no `mcp__<server>__*` entries in `permissions.allow` or `permissions.ask`.
 4. Enumerate every such entry (both arrays):
    - `tracked_leaks = { e ∈ allow ∪ ask : e startswith "mcp__<server>__" }`
-5. **For each leak**, `AskUserQuestion` (one at a time): **"`<entry>` is in tracked `<tracked-file>` — permissions belong in `settings.local.json`. Remove from tracked?"** options: `remove` (default) / `keep`. On `keep`, leave untouched and record as a "user-kept leak" note in Phase 8.
+5. **For each leak**, one question at a time. Each iteration fills the block from that entry:
+
+   ```
+   Context (print before asking):
+   - Where: /lazy-guard.allow-mcp · Phase 6.5a — Paired tracked settings.json; target `<tracked-file, absolute>`
+   - Found: `<entry>` in `permissions.<allow | ask>` of tracked `<tracked-file>`; the same server's permissions now live in `<target settings.local.json>`
+   - Why asking: removing a tracked entry is a per-entry operator decision; the skill never removes silently
+   - Answers: `remove` — dropped from the tracked file via a minimal `Edit` (step 6), `[]` left if the array empties; `keep` — untouched, recorded as a "user-kept leak" note in Phase 8; re-asked next run
+   AskUserQuestion: header "Remove tracked leak", question "`<entry>` is in tracked `<tracked-file>` — permissions belong in `settings.local.json`. Remove it from the tracked file?", options `remove` (default) / `keep` with the descriptions above.
+   ```
+
+   On `keep`, leave untouched and record as a "user-kept leak" note in Phase 8.
 6. For every leak the user approved, use `Edit` with minimal old/new replacements to drop just that entry. Preserve all other keys, entries, formatting, and comments. If a removal empties an array, leave `"allow": []` / `"ask": []` — do not delete the key.
 7. Re-read the file; assert JSON still parses and each approved removal is gone.
 
@@ -246,7 +295,18 @@ A project-scoped server's permissions should live in `./.claude/settings.local.j
 3. Load the opposite file. Skip if it doesn't exist or has no `mcp__<server>__*` entries.
 4. Enumerate every such entry in both `permissions.allow` and `permissions.ask`:
    - `opposite_scope_leaks = { e ∈ allow ∪ ask : e startswith "mcp__<server>__" }`
-5. **For each leak**, `AskUserQuestion` (one at a time): **"`<entry>` is in `<opposite-file>` (wrong scope — `<server>` is routed to `<target-scope>`). Remove from `<opposite-file>`?"** options: `remove` (default) / `keep` (retain out-of-scope entry). On `keep`, record as a "user-kept wrong-scope entry" note in Phase 8.
+5. **For each leak**, one question at a time. Each iteration fills the block from that entry:
+
+   ```
+   Context (print before asking):
+   - Where: /lazy-guard.allow-mcp · Phase 6.5b — Opposite-scope settings.local.json; target `<opposite-file, absolute>`
+   - Found: `<entry>` in `permissions.<allow | ask>` of `<opposite-file>`; `<server>` is routed to `<target-scope>` (Phase 4)
+   - Why asking: removing an entry from the other scope is a per-entry operator decision; the skill never removes silently
+   - Answers: `remove` — dropped from `<opposite-file>` via a minimal `Edit` (step 6); `keep` — out-of-scope entry retained, recorded as a "user-kept wrong-scope entry" note in Phase 8; re-asked next run
+   AskUserQuestion: header "Remove wrong-scope entry", question "`<entry>` is in `<opposite-file>` (wrong scope — `<server>` is routed to `<target-scope>`). Remove it from `<opposite-file>`?", options `remove` (default) / `keep` with the descriptions above.
+   ```
+
+   On `keep`, record as a "user-kept wrong-scope entry" note in Phase 8.
 6. For every leak the user approved, `Edit` with minimal old/new replacements. Same preservation rules as 6.5a.
 7. Re-read and re-verify.
 
@@ -287,12 +347,31 @@ Routing rules (mirror Phase 4b's "infer first, ask only if undetermined"):
 
 **Two separate `AskUserQuestion` calls in the "neither" case** — never combined (one question at a time is mandatory per the interaction rule):
 
-1. **Install?** options:
+1. **Install?**
+
+   ```
+   Context (print before asking):
+   - Where: /lazy-guard.allow-mcp · Phase 7b — SessionStart preload hook; target `./.claude/settings.local.json` of `<repo>` or `~/.claude/settings.local.json`
+   - Found: no SessionStart hook mentioning `ToolSearch` + `select:mcp__` at either scope; preload set from Phase 3: <N> tools across `<server list>`
+   - Why asking: the hook costs ≈1.1k tokens per session — a personal trade-off nothing on disk records
+   - Answers: `Yes — install SessionStart preload hook (Recommended)` — scope asked next, hook written (7c/7d) after the 7e confirmation; presence is inferred on later runs, never re-asked; `No — skip, accept ToolSearch round-trips per call` — nothing written; re-asked every later run (a decline is not remembered)
+   AskUserQuestion: header "Preload hook", question "Install a SessionStart hook that preloads the <N> MCP tool schemas of `<server list>` for `<repo>` (≈1.1k tokens per session)?", options:
    - `Yes — install SessionStart preload hook (Recommended)` — description: "Pays ≈1.1k tokens per session so MCP tools are first-class; the alternative `ENABLE_TOOL_SEARCH=false` costs ≈13–16k tokens per session by loading every tool upfront."
    - `No — skip, accept ToolSearch round-trips per call` — description: "Keeps session-start context minimal. The agent may still drift to Bash equivalents when MCP schemas feel expensive to fetch."
-2. **Scope?** (only if the user chose Yes) options:
+   ```
+
+2. **Scope?** (only if the user chose Yes)
+
+   ```
+   Context (print before asking):
+   - Where: /lazy-guard.allow-mcp · Phase 7b — SessionStart preload hook; target `<repo>`
+   - Found: <Neither: no preload hook at either scope | Both: a preload hook in both `~/.claude/settings.local.json` (<N> entries) and `./.claude/settings.local.json` (<N> entries)>; <N> tool names to preload
+   - Why asking: the scope is undetermined (Neither) or ambiguous (Both) and the write is about to happen
+   - Answers: `Project (./.claude/settings.local.json) (Recommended)` — hook written / merged there; in the Both case the other scope is left as-is and noted in Phase 8; `Global (~/.claude/settings.local.json)` — same, at global scope. Inferred from hook presence on later runs.
+   AskUserQuestion: header "Preload hook scope", question "Write the preload hook for `<server list>` into which gitignored file — project `./.claude/settings.local.json` of `<repo>` or global `~/.claude/settings.local.json`?", options:
    - `Project (./.claude/settings.local.json) (Recommended)` — description: "Smaller blast radius; easier to revert by deleting the hook entry. Right choice when the servers being registered are project-specific."
    - `Global (~/.claude/settings.local.json)` — description: "One install covers every project on this machine (personal preference — not shared with other contributors since this is gitignored). Right choice when the server is always loaded everywhere (e.g. `git`, `memory-personal`)."
+   ```
 
 If the user chose **No** on a prior run, re-ask on subsequent runs — hook presence/absence is the only persistent state; don't treat a past decline as permanent.
 
@@ -348,6 +427,15 @@ Extend the Phase 5 preview with a `hooks:` block when a write is planned, e.g.:
 ```
 
 Request a second confirmation specifically for this write — Phase 5's confirmation covered only permissions + cross-scope cleanup. One tool call per question per Phase 7b.
+
+```
+Context (print before asking):
+- Where: /lazy-guard.allow-mcp · Phase 7e — Preview + confirm; target `<chosen-scope settings.local.json, absolute>`
+- Found: the `hooks:` preview above — <N> tool names added to the `select:` list (<existing N> → <new M> entries), or a fresh hook when none exists
+- Why asking: the hook write is a separate personal-optimization decision from the permission write
+- Answers: `Write hook` — 7d merge applied now, verified in 7f; presence inferred on later runs; `Cancel` — nothing written, Phase 8 reports `—`; re-asked next run
+AskUserQuestion: header "Write preload hook", question "Write the SessionStart preload hook (<N> tool names) into `<target file>` of `<repo>`?", options with the descriptions above.
+```
 
 ### 7f. Post-write verification
 

@@ -1,9 +1,18 @@
-"""Declarative gate-flip primitive for spec assets.
+"""
+Declarative gate-flip primitive for spec assets.
 
 An asset is a folder `<spec_path>/<category>/<slug>/` holding a status
 folder-note `<slug>/<slug>.md` whose frontmatter carries flat boolean
 gates (`spec_design_done`, `spec_plan_done`, `spec_develop_done`,
 `spec_tests_passing`, `spec_released`) plus a `spec_cancelled` flag.
+
+A level note — a product's `<spec_path>/<leaf>.md` or the catalog root's
+`<vault_root>/<root>.md` — carries the level ladder instead
+(`spec_vision_done`, `spec_design_done`, `spec_ui_design_done`,
+`spec_tech_done`). The note's own `spec_role` says which ladder it runs, and
+a gate off that ladder is refused; `spec_design_done` is the one key both
+ladders share, so the role is what tells the two apart. A note declaring no
+role at all is read as an asset status note.
 
 `flip_gate` moves one gate from false to true (or, with `off`, back to
 false). The flip is unconditional on call — `spec.coordinator` (per
@@ -13,8 +22,8 @@ table of its own. A cancelled asset still refuses every flip, on or off —
 that check is not a sequencing decision, it is the asset's own terminal
 state.
 
-Design choice — the `auto` flag controls ONLY the callout annotation; the
-primitive always performs the mutation when called.
+Design choice — the `auto` flag only marks the run log's reason as the
+coordinator's own; the primitive always performs the mutation when called.
 """
 from __future__ import annotations
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -45,17 +54,23 @@ import note_explainers  # noqa: E402
 import spec_paths  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402
+    BOOL_FALSE,
     BOOL_TRUE,
     FLIP_GATE_NAME,
+    FLIPPABLE_GATES,
+    LEVEL_ROLES,
     LOG_CLAUDE,
     LOG_NO_GIT,
     LOG_ROOT,
+    ROLE_GATES,
     FlipResult,
     Gate,
     HistoryEvent,
     PlanReview,
     Section,
     SpecHaltKey,
+    SpecKey,
+    SpecValue,
 )
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from summary_render import parent_container_note, apply_container_stats  # noqa: E402
@@ -64,6 +79,9 @@ from summary_render import parent_container_note, apply_container_stats  # noqa:
 def _today(today: str | None) -> str:
   """
   Return the effective date string for callout and history lines.
+
+  Args:
+    today: An ISO date pinned by the caller, or None to read the clock.
 
   Returns:
     The supplied `today` when given, else the current UTC date in ISO form.
@@ -77,6 +95,9 @@ def _today(today: str | None) -> str:
 def _parse_frontmatter(text: str) -> tuple[dict, int]:
   """
   Parse the leading YAML frontmatter block of a file's text.
+
+  Args:
+    text: The full file text, its frontmatter first when it has one.
 
   Returns:
     A two-tuple `(values, fm_end_idx)` where `values` is a flat dict of
@@ -114,6 +135,10 @@ def _is_true(values: dict, key: str) -> bool:
   """
   Return whether a frontmatter boolean key reads as true.
 
+  Args:
+    values: The parsed frontmatter mapping.
+    key: The frontmatter key to read.
+
   Returns:
     True when the key's value is the literal `true`; False otherwise.
   """
@@ -127,10 +152,15 @@ def _set_bool(fm_text: str, key: str, value: bool) -> str:
   Replaces the existing line in place when the key is present; inserts before
   the closing `---` when absent.
 
+  Args:
+    fm_text: The frontmatter block text, fences included.
+    key: The frontmatter key to write.
+    value: The boolean to write as its literal.
+
   Returns:
     The updated frontmatter text.
   """
-  literal = "true" if value else "false"
+  literal = BOOL_TRUE if value else BOOL_FALSE
   pat = re.compile(rf"(?m)^{re.escape(key)}\s*:.*$")
   if pat.search(fm_text):
     return pat.sub(f"{key}: {literal}", fm_text, count = 1)
@@ -149,6 +179,11 @@ def _append_under_heading(body: str, heading: str, line: str) -> str:
   ATX heading (`^#{1,6}\\s`); appends a fresh section at end-of-body when
   the heading is absent. Lines beginning with `#` but no space (e.g.
   `#protected/spec/…` tags) are NOT treated as section boundaries.
+
+  Args:
+    body: The note body (post-frontmatter) to insert into.
+    heading: The section heading the line belongs under.
+    line: The line to append inside that section.
 
   Returns:
     The body text with the new line placed inside the named section.
@@ -170,12 +205,49 @@ def _append_under_heading(body: str, heading: str, line: str) -> str:
     if re.match(r"^#{1,6}\s", lines[j]):
       insert_at = j
       break
-  # Trim trailing blanks inside the section so the new line sits flush.
+  # trim trailing blanks inside the section so the new line sits flush
   end = insert_at
   while end > head_idx + 1 and not lines[end - 1].strip():
     end -= 1
   new_lines = [*lines[:end], line, *lines[end:]]
   return "\n".join(new_lines) + ("\n" if body.endswith("\n") else "")
+
+
+def _note_role(fm_values: dict) -> str:
+  """
+  Report which folder-note role the frontmatter declares.
+
+  A note that declares no `spec_role` at all is read as an asset status note, so a pre-role
+  folder-note keeps behaving exactly as it did before roles existed.
+
+  Args:
+    fm_values: The folder-note's parsed frontmatter values.
+
+  Returns:
+    The declared `spec_role` value, or the asset status role when the key is absent or empty.
+  """
+  return fm_values.get(SpecKey.ROLE, "").strip() or SpecValue.ROLE_STATUS
+
+
+def _role_refusal(role: str, gate: str) -> str | None:
+  """
+  Report why a folder-note's role forbids this gate, or nothing when it allows it.
+
+  Args:
+    role: The folder-note's own role, as `_note_role` resolves it.
+    gate: The gate key the caller asked to flip.
+
+  Returns:
+    A message naming why the note's role refuses the gate, or None when the flip may proceed.
+  """
+  allowed = ROLE_GATES.get(role)
+  # guard: a role outside the three gate-bearing ones carries no ladder to flip at all
+  if allowed is None:
+    return f"note role '{role}' carries no gates"
+  # guard: the gate belongs to the other ladder — the roles keep the two ladders apart
+  if gate not in allowed:
+    return f"gate {gate} is not on the '{role}' ladder"
+  return None
 
 
 def _write_log(asset_dir: Path, gate: str, value: bool, reason: str) -> None:
@@ -216,6 +288,11 @@ def _git_field(cwd: Path, args: list[str], fallback: str) -> str:
   """
   Run a read-only `git` query, returning a fallback on any failure.
 
+  Args:
+    cwd: The directory the query runs in.
+    args: The git arguments, without the leading `git`.
+    fallback: The value returned when git is unavailable or errors.
+
   Returns:
     The trimmed git output, or `fallback` when git is unavailable or errors.
   """
@@ -231,6 +308,9 @@ def _git_field(cwd: Path, args: list[str], fallback: str) -> str:
 def _repo_root(cwd: Path) -> Path:
   """
   Resolve the git repo root for log placement, falling back to `cwd`.
+
+  Args:
+    cwd: The directory the lookup starts from.
 
   Returns:
     The repository top-level `Path`, or `cwd` when not inside a git repo.
@@ -255,6 +335,10 @@ def _resolve_review_cli() -> Path | None:
 
 _FLIP_AUTHOR_NAME = FLIP_GATE_NAME
 _FLIP_AUTHOR_EMAIL = f"{FLIP_GATE_NAME}@bot.invalid"
+
+# The note written into a flip's `[!gate]` callout when no operator reason accompanies it, and
+# the prefix the reason carries when the coordinator derived the flip rather than being told.
+_AUTO_NOTE = "auto"
 
 
 def _stage_reachable_paths(repo: Path, paths: list[Path] | None) -> list[str]:
@@ -283,13 +367,14 @@ def _stage_reachable_paths(repo: Path, paths: list[Path] | None) -> list[str]:
 
 
 def _commit_flip(
-    asset_dir: Path, note: Path, gate: str, value: bool, *, extra_paths: list[Path] | None = None,
+    asset_dir: Path, note: Path, gate: str, value: bool, *,
+    role: str = SpecValue.ROLE_STATUS, extra_paths: list[Path] | None = None,
 ) -> None:
   """
   Atomically commit the folder-note flip under the `lazy-spec.flip-gate` bot identity.
 
-  Stages the status folder-note (plus the parent container note's stats line, when the flip
-  changed its asset count, plus any caller-supplied `extra_paths`) and commits that exact set
+  Stages the folder-note (plus the parent container note's stats line, when the flip changed its
+  asset count and the note is an asset's own, plus any caller-supplied `extra_paths`) and commits that exact set
   with a deterministic subject naming the gate and its new value. Skipped silently when the
   asset does not live inside a git repository (the unit-test fixture path, where the worker is
   exercised against a bare tmp dir). The daemon always runs the routine inside the operator's
@@ -303,6 +388,9 @@ def _commit_flip(
     note: The folder-note path that was just rewritten.
     gate: The gate key that was flipped.
     value: The boolean value the gate was set to.
+    role: The folder-note's own role. A level role skips the container refresh entirely — a
+      level note has no category container above it, and the folder holding it is a catalog
+      root, not a container of assets whose stats a flip could move.
     extra_paths: Additional paths to fold into this same commit, named explicitly by the caller
       (e.g. sibling files a rollback already deleted from the worktree). None commits the note
       (and the container note, when refreshed) alone.
@@ -318,8 +406,10 @@ def _commit_flip(
   repo = Path(top)
   add_paths = [str(note)]
 
-  # the parent container's stats line goes stale on a flip, so refresh it and carry it along
-  parent = parent_container_note(asset_dir)
+  # the parent container's stats line goes stale on a flip, so refresh it and carry it along;
+  # guard: a level note has no container above it — the folder holding it is a catalog root,
+  # whose asset stats no level flip can move, so it is left untouched
+  parent = None if role in LEVEL_ROLES else parent_container_note(asset_dir)
   if parent is not None and apply_container_stats(parent):
     add_paths.append(str(parent))
 
@@ -364,20 +454,23 @@ def flip_gate(
     extra_paths: list[Path] | None = None,
 ) -> dict:
   """
-  Flip one boolean gate on an asset's status folder-note.
+  Flip one boolean gate on an asset's status folder-note or on a level note.
 
-  The flip is unconditional on call, `off` or forward alike, except that any flip is refused
-  while the asset is cancelled. On success the folder-note frontmatter is rewritten, a `[!gate]`
-  callout is appended to `# Gates`, a line is appended to `# History`, and a run-log file is
-  written. Halting an asset (`main`'s `--halt`) is a separate primitive, `halt_asset` — it never
-  calls this function.
+  The flip is unconditional on call, `off` or forward alike, except for three refusals: a gate
+  name belonging to neither ladder, a gate the note's own `spec_role` does not carry, and any
+  flip at all while the asset is cancelled. Each refuses before anything is written, leaving the
+  folder-note byte-identical. On success the folder-note frontmatter is rewritten, a line is
+  appended to `# History`, and a run-log file is written — a level note takes the same treatment
+  an asset note does. Nothing is written to `# Gates`: the gate's state is its frontmatter
+  boolean, and the flip's reason lives in the run log. Halting an asset (`main`'s
+  `--halt`) is a separate primitive, `halt_asset` — it never calls this function.
 
   Args:
-    asset_dir: The asset folder holding `<asset_dir.name>.md` and siblings.
-    gate: The `spec_*` gate key to flip.
+    asset_dir: The asset or level folder holding `<asset_dir.name>.md` and siblings.
+    gate: The `spec_*` gate key to flip, from the ladder the note's role carries.
     off: When True, set the gate to false.
-    auto: When True, annotate the callout with an `auto:` prefix.
-    reason: Optional human-or-source note recorded in the callout.
+    auto: When True, mark the run log's reason with an `auto:` prefix.
+    reason: Optional human-or-source note recorded in the run log.
     today: Optional ISO date pinned into the callout and history line.
     extra_paths: Additional paths to fold into this flip's commit, named explicitly by the
       caller (see `_commit_flip`).
@@ -386,35 +479,45 @@ def flip_gate(
     `{"status": "flipped", "gate": gate, "value": <bool>}` on success, or
     `{"status": "refused", "gate": gate, "reason": <message>}` when refused.
   """
-  # the status folder-note's frontmatter carries every gate this function can flip
+  # guard: a name outside the two ladders is a caller typo, refused before the note is read —
+  # writing it would leave an invented boolean in the frontmatter that nothing ever reads
+  if gate not in FLIPPABLE_GATES:
+    return {FlipResult.STATUS: FlipResult.REFUSED, "gate": gate, "reason": f"unknown gate: {gate}"}
+
+  # the folder-note's frontmatter carries every gate this function can flip
   note = asset_dir / f"{asset_dir.name}.md"
   text = note.read_text()
   fm_values, fm_end = _parse_frontmatter(text)
+
+  # guard: the note's own role decides which of the two ladders it runs, so a gate off that
+  # ladder is refused before anything is written
+  role = _note_role(fm_values)
+  role_refusal = _role_refusal(role, gate)
+  if role_refusal is not None:
+    return {FlipResult.STATUS: FlipResult.REFUSED, "gate": gate, "reason": role_refusal}
 
   # guard: a cancelled asset refuses every flip, on or off — the asset's own terminal state,
   # not a sequencing precondition
   if _is_true(fm_values, Gate.SPEC_CANCELLED):
     return {FlipResult.STATUS: FlipResult.REFUSED, "gate": gate, "reason": "asset is cancelled"}
 
-  # the flip lands in the frontmatter, its audit trail in the body's callout and history sections
+  # the flip lands in the frontmatter, its audit trail in the body's history section
   value = not off
   fm_text = _set_bool(text[:fm_end], gate, value)
   body = text[fm_end:]
   date_str = _today(today)
-  note_text = (reason or "auto") if not auto else f"auto: {reason}" if reason else "auto"
-  callout = f"> [!gate] {gate} — flipped {date_str} ({note_text})"
-  body = _append_under_heading(body, Section.GATES, callout)
+  note_text = f"{_AUTO_NOTE}: {reason}" if auto and reason else (_AUTO_NOTE if auto else reason or _AUTO_NOTE)
   hist = f"- {date_str} — {FLIP_GATE_NAME} · {gate} → {str(value).lower()}"
   body = _append_under_heading(body, Section.HISTORY, hist)
   note.write_text(fm_text + note_explainers.ensure_explainers(body, note_explainers.lang_for_note(note)))
 
-  # Atomic commit of the folder-note edit under the flip-gate bot identity. Without this the
+  # atomic commit of the folder-note edit under the flip-gate bot identity; without this the
   # daemon's next iteration trips its dirty-tree guard and silently skips every routine until
-  # the operator commits by hand.
-  _commit_flip(asset_dir, note, gate, value, extra_paths = extra_paths)
+  # the operator commits by hand
+  _commit_flip(asset_dir, note, gate, value, role = role, extra_paths = extra_paths)
 
-  # the run log records the flip, then the caller gets the outcome
-  _write_log(asset_dir, gate, value, reason)
+  # the run log records the flip and its reason, then the caller gets the outcome
+  _write_log(asset_dir, gate, value, note_text)
   return {FlipResult.STATUS: FlipResult.FLIPPED, "gate": gate, "value": value}
 
 
@@ -626,11 +729,11 @@ def main(argv: list[str]) -> int:
   # waiver: argparse CLI signature -- option flag + standard argparse action
   parser.add_argument("--auto", action = "store_true",
                       # waiver: one-off human-facing message -- argparse help text
-                      help = "annotate the callout with an auto: prefix")
+                      help = "mark the run-log reason with an auto: prefix")
   # waiver: argparse CLI signature -- option flag + default
   parser.add_argument("--reason", default = "",
                       # waiver: one-off human-facing message -- argparse help text
-                      help = "note recorded in the gate callout")
+                      help = "reason recorded in the run log")
   # waiver: argparse CLI signature -- option flag + default
   parser.add_argument("--halt", default = None,
                       # waiver: one-off human-facing message -- argparse help text

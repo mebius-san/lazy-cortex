@@ -46,7 +46,7 @@ This skill has two modes (`product` + `feature`) with mode-specific step lists. 
 
 ## Input
 
-The user provides a product compound-key (e.g. `dashboards`, `server-tester-chapter`) or a source path under a registered product. For feature mode, the user names a feature-candidate slug (or picks one from the product-mode candidate preview). If ambiguous, ask which product or candidate they mean.
+The user provides a product compound-key (e.g. `dashboards`, `server-tester-chapter`) or a source path under a registered product. For feature mode, the user names a feature-candidate slug (or picks one from the product-mode candidate preview). If ambiguous, ask which product or candidate they mean — context first: where (`/lazy-spec.create-from-code · Input`), found (the code-bound keys under `lazy.settings.json[products]`, or the candidate slugs the preview listed), why asking (the input maps to none or several), answers (one option per key or slug — the run continues on it; nothing persisted); then `AskUserQuestion` header "Product" or "Candidate", question naming what is being picked, one option per key or slug with a description.
 
 ## Product nesting is forbidden
 
@@ -207,7 +207,18 @@ What the product deliberately does NOT do; the seams with neighboring products a
 # Sources
 ```
 
-**Optional product use-cases.** After the design is written, one `AskUserQuestion`: author the product-level `use-cases.md` from the code survey too? On yes, instantiate `${CLAUDE_PLUGIN_ROOT}/templates/spec.docs/use-cases.md` at `<spec_path>/use-cases.md` (drop the `wiki/category/` pin — a product-level doc has no category), fill the actors and cross-feature scenarios the code evidences, and set its stage `draft`. On no, skip silently — the doc is opt-in and its absence is never a defect.
+**Optional product use-cases.** After the design is written, one `AskUserQuestion`:
+
+```
+Context (print before asking):
+- Where: /lazy-spec.create-from-code · Step P4 — Author product-vision and product-design prose; target <spec_path>/use-cases.md
+- Found: <spec_path>/use-cases.md is absent; design.md just written; the code survey evidences actors <list> and <n> cross-feature scenarios
+- Why asking: the doc is opt-in — its absence is never a defect, so nothing derives whether the product wants one
+- Answers: `yes` — use-cases.md is instantiated from the template now and set to `draft`; `no` — skipped silently, can be added later. Not re-asked this run
+AskUserQuestion: header "Use cases", question "Also author the product-level use-cases.md for <product> from the same code survey?", options `yes` / `no` with descriptions.
+```
+
+On yes, instantiate `${CLAUDE_PLUGIN_ROOT}/templates/spec.docs/use-cases.md` at `<spec_path>/use-cases.md` (drop the `wiki/category/` pin — a product-level doc has no category), fill the actors and cross-feature scenarios the code evidences, and set its stage `draft`. On no, skip silently — the doc is opt-in and its absence is never a defect.
 
 **Mark the decisions the code embodies.** Where the code shows a real fork was taken (per the weight test in `${CLAUDE_PLUGIN_ROOT}/rules/spec.decisions.md` — a genuine alternative existed, reversal is expensive, the why is unrecoverable from the artifact), record it in the design body as a `[!decision] <thesis> #spec/decision` callout with its `**Why.**` / `**Rejected.**` lines per `lazy-core.markdown-style`. On the document's approve these blocks transfer automatically into the sibling `decisions.md` via `lazycortex-specs decide promote`. Do not force forks that are not there.
 
@@ -282,7 +293,16 @@ After writing, set the per-file stage via `lazy-spec.set-stage` → `draft` on `
 
 ### P6 — Scaffold candidate features (delegate)
 
-Print Agent D's candidate list to the operator as an informational preview (no question yet). Then, **per candidate, one `AskUserQuestion`** (full-context block per the Wizard-question explanation standard in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`) with options:
+Print Agent D's candidate list to the operator as an informational preview (no question yet). Then, **per candidate, one `AskUserQuestion`** — each iteration fills the block from that candidate:
+
+```
+Context (print before asking):
+- Where: /lazy-spec.create-from-code · Step P6 — Scaffold candidate features (delegate); target <spec_path>/features/<candidate-slug>/
+- Found: candidate <candidate-slug> — <one-line purpose>; evidence <file-path — symbol or route group, …>; rationale <sentence>; <no existing asset names it | already covered by <asset>>
+- Why asking: whether a code unit deserves its own feature folder, an architectural-area note, or nothing is the operator's decomposition call
+- Answers: `scaffold feature` — `lazy-spec.create-asset <product> feature <candidate-slug>` runs once every candidate is decided; `treat as architectural area` — a subsection lands under tech.md `## Architectural Areas` now; `skip` — no trace, offered again on the next product-mode run
+AskUserQuestion: header "Candidate <n>/<N>", question "How should the code unit `<candidate-slug>` (<purpose>) of <product> enter the spec tree?", options below with descriptions.
+```
 
 - `scaffold feature` — delegate to `lazy-spec.create-asset` (below).
 - `treat as architectural area` — append a subsection under the product tech doc's `## Architectural Areas` with the candidate's source link and short description. No feature folder.
@@ -321,7 +341,7 @@ Feature mode scaffolds ONE feature-candidate from code by delegating to `lazy-sp
 
 ### F1 — Determine the feature slug
 
-If the slug is obvious from the user's input or the source path, use it (lowercase-with-hyphens per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`). Otherwise ask the user via `AskUserQuestion`. If the parent product's `source` is needed for grounding, it was already captured in Step 0.
+If the slug is obvious from the user's input or the source path, use it (lowercase-with-hyphens per `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`). Otherwise ask the user via `AskUserQuestion` — context first: where (`/lazy-spec.create-from-code · Step F1 — Determine the feature slug`, target `<spec_path>/features/<slug>/`), found (the source path or candidate the input named, and the slug(s) it suggests), why asking (the slug is the folder's permanent identity and the input fixed none), answers (each suggested slug — the folder is scaffolded under that name in F2, never re-asked; `other` — type one, lowercase-with-hyphens); header "Feature slug", question "Which slug should the feature scaffolded from `<source-path>` on `<product>` take?". If the parent product's `source` is needed for grounding, it was already captured in Step 0.
 
 ### F2 — Delegate to lazy-spec.create-asset
 

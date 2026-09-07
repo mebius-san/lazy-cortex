@@ -474,23 +474,20 @@ def _resolve_core_cli(repo: Path) -> Path:
     Absolute path to the resolved `lazycortex-core` binary.
 
   Raises:
-    RuntimeError: When neither the env-declared plugin dirs nor the dev-vault fallback resolve.
+    RuntimeError: When neither the env-declared plugin dirs, the plugin cache, nor the dev-vault
+      fallback resolve.
   """
-  dirs = os.environ.get(_K.PLUGIN_DIRS_ENV, "").split(os.pathsep)
-  for plugin_dir in dirs:
-    # guard: empty path segment from a trailing/double separator
-    if not plugin_dir:
-      continue
-    cli = Path(plugin_dir) / _K.BIN_DIR / _K.CORE_CLI_NAME
-    if cli.is_file():
-      return cli
+  # env-declared plugin dirs (the daemon's export), then the plugin cache a consumer install runs from
+  cli = spec_paths.resolve_plugin_cli(_K.CORE_CLI_NAME)
+  if cli is not None:
+    return cli
   # waiver: sibling-plugin path reach is intentional — this dev vault IS lazycortex-core's own
   # source tree, so a session with no plugin-cache env still resolves the CLI
   fallback = repo / _K.PLUGIN_TREE_DIR / _K.CORE_CLI_NAME / _K.BIN_DIR / _K.CORE_CLI_NAME
   if fallback.is_file():
     return fallback
   raise RuntimeError(
-      f"lazycortex-core CLI not resolvable: ${_K.PLUGIN_DIRS_ENV} yields no match "
+      f"lazycortex-core CLI not resolvable: ${_K.PLUGIN_DIRS_ENV} and the plugin cache yield no match "
       f"and {fallback} is absent from this repo"
   )
 

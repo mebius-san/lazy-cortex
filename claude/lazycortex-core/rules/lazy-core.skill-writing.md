@@ -1,5 +1,5 @@
 ---
-description: Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, no-dirty-tree clause, the optional Failure-modes section, and the mandatory `Agent` member of a restricting `allowed-tools` list.
+description: Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, no-dirty-tree clause, the optional Failure-modes section, the mandatory `Agent` member of a restricting `allowed-tools` list, and the context block every `AskUserQuestion` site carries.
 paths:
   - ".claude/skills/**"
   - ".claude/commands/**"
@@ -158,6 +158,34 @@ Nothing that consumes research skills — an aspect, a rule, another skill's bod
 
 Marking a skill `research: true` without also documenting a query-mode contract (an invocation shape that returns a bounded slice, not the whole tree) is a broken marker — it tells a consumer "ask me a question" with no way to actually ask one narrowly.
 
+## 11. Every question carries its context
+
+`AskUserQuestion` shows the operator only `header`, `question`, and the option labels with their `description`. Nothing the skill body says around the call reaches the operator unless the agent prints it, and a `description:` line under the question in a SKILL.md is not a tool field — the agent drops it. A bare `Metrics?` with two buttons is unanswerable for someone who has not read the SKILL.md, and no operator has.
+
+### Rule
+
+Every `AskUserQuestion` site in a skill or command is written as a **context block followed by the call**, and the executing agent prints the context block to the operator as prose immediately before the call. The block covers, in this order:
+
+1. **Where** — the skill and step (`/lazy-core.install · Step 13 — Metrics`) and the concrete target: repo path, file, scope.
+2. **Found** — the read-first result that led here: the value on record, the file present or absent, the conflicting region quoted.
+3. **Why asking** — the one reason the skill cannot decide alone: genuine project config nobody can derive, a contradiction between local and shipped, or a destructive action.
+4. **Answers** — what each option does on disk now, and later: where the answer is persisted, whether it is ever re-asked.
+
+The call itself: `question` is self-contained and names the target (`Enable the Prometheus /metrics endpoint for the daemon of <repo>?`, never `Metrics?`); `header` is a short label, not the question; every option carries a `description` restating its consequence. Placeholders in angle brackets are filled from the run at hand — a context block that could be printed unchanged in any repo is not a context block.
+
+Shape in the skill body:
+
+```
+Context (print before asking):
+- Where: <skill> · Step <N> — <title>; target <path or scope>
+- Found: <what the read-first probe returned>
+- Why asking: <the one reason>
+- Answers: `<label>` — <effect now / later>; `<label>` — <effect now / later>
+AskUserQuestion: header "<label>", question "<self-contained question naming the target>", options with descriptions.
+```
+
+A policy paragraph that describes a class of question (the File-sync "genuine conflict" prompt, a destructive-delete confirmation) names the same four items instead of a literal block; the site that raises the question fills them from the run.
+
 ## Cross-referenced contracts (not copied here)
 
 - `lazy-core.agent-writing` — agent-specific authoring (single-response model, tool allowlist, structured-report contract).
@@ -175,6 +203,7 @@ Opting a skill into `lazy-core.setup`: see `${CLAUDE_PLUGIN_ROOT}/references/laz
 - § 7 is informational: `lazy-core.audit` Agent B emits `INFO` when a SKILL.md with documented aborts lacks a `## Failure modes` section.
 - § 8: `lazy-core.audit` Agent B judges each `description:` against the three trigger shapes and emits `WARN` on a mechanism-only one, across skills, agents, **and commands** — a command is routed by its description exactly as a skill is. Judgement, not a grep: a description may phrase its trigger in its own words. A missing `description:` is `FAIL`.
 - § 9: `lazy-core.audit` Agent B flags `allowed-tools:` missing `Agent` as `WARN`. A file with no `allowed-tools:` field is out of scope for this check.
+- § 11: `lazy-core.audit` Agent B flags an `AskUserQuestion` site with no preceding `Context (print before asking):` block (or, for a policy paragraph, no naming of the four items) as `WARN`.
 - § 10: `lazy-core.audit` Agent B judges each skill's description/body against the research-marker convention — search/pull-shaped without the marker, or marker present without a documented query contract, both `WARN`.
 
 ## Scope

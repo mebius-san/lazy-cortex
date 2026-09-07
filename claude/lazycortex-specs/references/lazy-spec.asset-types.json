@@ -43,6 +43,18 @@
       "default_tools": [],
       "playbook": "lazycortex-specs:lazy-spec.research-playbook",
       "vision": "opt-in"
+    },
+    "catalog": {
+      "icon": "LiLibrary",
+      "color": "#64748b",
+      "start_doc": "vision.md:system-vision",
+      "playbook": "lazycortex-specs:lazy-spec.catalog-playbook"
+    },
+    "product": {
+      "icon": "LiPackage",
+      "color": "#64748b",
+      "start_doc": "vision.md:system-vision",
+      "playbook": "lazycortex-specs:lazy-spec.catalog-playbook"
     }
   }
 }

@@ -7,7 +7,7 @@ description: Asset progression contract — per-file spec_stage on authored docs
 
 Asset progression is tracked at two levels that feed each other:
 
-- **Per-file `spec_stage`** on every authored doc — author-level state of `use-cases.md` / `design.md` / `architecture.md` / `ui-design.md` / `code-plan.md` / `test-plan.md` / `bug.md` / product-level `tech.md` / `design.md`. Closed set: `empty | draft | approved | rejected | cancelled`. The append-only report journals (`code-report.md` / `test-report.md` / `data-report.md` / `docs-report.md`), and the opt-in `decisions.md` registry, carry no `spec_stage` — they sit outside this whole layer (see § Applies to below).
+- **Per-file `spec_stage`** on every authored doc — author-level state of `use-cases.md` / `design.md` / `architecture.md` / `ui-design.md` / `code-plan.md` / `test-plan.md` / `bug.md` / product-level `tech.md` / `design.md`. Closed set: `empty | draft | approved | rejected | cancelled | deferred`. The append-only report journals (`code-report.md` / `test-report.md` / `data-report.md` / `docs-report.md`), and the opt-in `decisions.md` registry, carry no `spec_stage` — they sit outside this whole layer (see § Applies to below).
 - **Five flat gates** on the status folder-note — the asset's overall progress through `S0..S5`.
 
 **Who decides, who executes.** `spec.coordinator` (agent + expert record; its law is `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md`) is the SOLE judge of every sequencing decision this protocol used to hardcode — which sibling doc to promote, which gate's precondition currently holds, which launch checkbox to hang or dispatch, whether and how a change cascades. It acts only through a small set of primitives that remain script-level and unconditional on call: `lazy-spec.set-stage` (per-file stage), `lazy-spec.flip-gate` (gate booleans — refuses only a cancelled asset, no precondition check of its own), `lazy-spec.gate-tick`'s worker (a pure poller now, no decisions), and the `note-set-key` / `note-check` verbs (`${CLAUDE_PLUGIN_ROOT}/skills/lazy-spec.doctor/SKILL.md`'s sibling primitives, documented in `${CLAUDE_PLUGIN_ROOT}/bin/note_ops.py`). Anything below that reads like a rule the SYSTEM enforces is, since the coordinator's arrival, a rule the COORDINATOR follows, declared by the asset's type playbook (`asset_types.<name>.playbook`) and the playbooks of the tools in its `spec_tools` (`tool_types.<name>.playbook`) — marked "playbook, not code" wherever the distinction matters. The shapes (frontmatter keys, callout formats, the launch-marker record) are still exact contracts; the workflow that decides when to apply them lives in the playbooks, never here.
@@ -19,20 +19,21 @@ Asset progression is tracked at two levels that feed each other:
 Every authored doc carries:
 
 ```yaml
-spec_stage: draft        # empty | draft | approved | rejected | cancelled
+spec_stage: draft        # empty | draft | approved | rejected | cancelled | deferred
 tags:
   - spec/draft           # mirror of spec_stage value (see "Status mirror tag" below)
 ```
 
 ### Closed stage set
 
-Exactly five values. The old `review`, `done`, and `wtr` are gone — "in review" is now `spec_stage: draft` + `review_active: true`; "accepted" is `approved`.
+Exactly six values. The old `review`, `done`, and `wtr` are gone — "in review" is now `spec_stage: draft` + `review_active: true`; "accepted" is `approved`.
 
 - `empty` — doc not needed right now (resolved for optional docs). No review.
 - `draft` — content being written. Maps to `review_active: true` once opted into the loop, OR pre-review (authored but not yet submitted). No separate waiting-room state.
 - `approved` — accepted: `review_active: false` AND `review_approved: true`. Approved-with-concerns collapses to `approved` (the `review_approved_with_concerns` flag stays readable on the doc for downstream consumers, but `spec_stage` is plain `approved`).
 - `rejected` — review or developer flagged the doc unworkable (a finalize-revert): a rejection callout sits in the body. **NOT terminal** — the doc returns to `draft` to re-open the loop.
 - `cancelled` — doc abandoned. Terminal.
+- `deferred` — doc parked: it exists, it is not abandoned, and nothing automatic acts on it. Its own `review_result` raises no doc-transition wake, stage promotion passes it over, it closes no gate, no `Write` row is hung or replacement seeded for it, and no coordinator edits it. A commit touching it still wakes the owning coordinator as an ordinary operator edit, so the folder note is kept in order around it. Not terminal — `draft` is the one way back out, and it is the only transition that leaves the stage.
 
 ### Applies to
 
@@ -49,6 +50,7 @@ Does NOT carry `spec_stage` — every type declared `stages: false`, plus the un
 | `approved` | `review_active: false` + `review_approved: true`; approved-with-concerns collapses here (`review_approved_with_concerns` stays readable) |
 | `rejected` | finalize-revert; a rejection callout in the body |
 | `cancelled` | abandoned, terminal |
+| `deferred` | parked; whatever review flags the doc carries raise no transition while it stays here |
 
 ### Transitions
 
@@ -57,6 +59,8 @@ Forward: `empty → draft → approved`.
 `rejected` is reachable when a review or developer rejects the doc; the only path out is back to `draft` (re-open). `cancelled` is reachable from any non-terminal stage.
 
 `approved` and `cancelled` are terminal; `rejected` is a re-open marker, NOT terminal.
+
+`deferred` is reachable from any stage on any stage-bearing type — asset-level and level documents alike — and `draft` is its single exit. Those two calls are the whole vocabulary of parking: `lazy-spec.set-stage <doc> deferred` parks, `lazy-spec.set-stage <doc> draft` unparks, and no other target stage is accepted while the document sits parked. Nothing else moves the stage on its own — a review verdict landing on a parked document is recorded on the file and read by nobody until it comes back.
 
 `cancelled` is refused on `design.md` (asset-level and system-level alike), on `bug.md`, and on `architecture.md` — an asset's defining documents are abandoned as a whole through `spec_cancelled`, never one at a time, and a system's design is its defining document too. `tech.md` (type `system-tech`) and the plan documents (`code-plan.md`, `test-plan.md`) MAY be `cancelled` — a plan whose work turned out not to be needed is walked back without abandoning the asset. (Enforced by `lazy-spec.set-stage`.) Report journals carry no `spec_stage` at all (see § Applies to), so cancellability is not a question that applies to them.
 
@@ -87,7 +91,7 @@ It does NOT advance the folder-note's gates — deciding whether a gate is ready
 
 ### Stage promotion — a coordinator decision, executed through this same primitive
 
-**Playbook, not code.** Nothing in this repo auto-promotes a stage anymore. Per `lazy-spec.coordination-playbook.md` Chapter 4 ("Stage promotion"), the coordinator itself walks the asset's sibling authored docs on every wake, before evaluating any gate, and calls `lazy-spec.set-stage <doc> approved` on each one whose review just finalized approved (`review_result ∈ {approved, approved-with-concerns}`) while its `spec_stage` still reads `draft`. This is the exact same mutation `lazy-spec.set-stage` always performed (scalar + mirror tag + folder-note `# History` line), simply invoked by the coordinator through the ordinary primitive rather than by a dedicated worker step. There is no longer a separate "auto-promotion" code path, and no separate `empty → draft` pre-review promotion tied to a gate flip's own side effect — opening review on a freshly-authored plan document is itself now a coordinator-dispatched launch-checkbox job (§ Part 3), not something a gate flip triggers as a cascade.
+**Playbook, not code.** Nothing in this repo auto-promotes a stage anymore. Per `lazy-spec.coordination-playbook.md` Chapter 4 ("Stage promotion"), the coordinator itself walks the asset's sibling authored docs on every wake, before evaluating any gate, and calls `lazy-spec.set-stage <doc> approved` on each one whose review just finalized approved (`review_result ∈ {approved, approved-with-concerns}`) while its `spec_stage` still reads `draft`. A document at `spec_stage: deferred` is skipped by that walk even when it carries an approved `review_result` — parking outranks the verdict, and the promotion happens on the wake after it returns to `draft`. This is the exact same mutation `lazy-spec.set-stage` always performed (scalar + mirror tag + folder-note `# History` line), simply invoked by the coordinator through the ordinary primitive rather than by a dedicated worker step. There is no longer a separate "auto-promotion" code path, and no separate `empty → draft` pre-review promotion tied to a gate flip's own side effect — opening review on a freshly-authored plan document is itself now a coordinator-dispatched launch-checkbox job (§ Part 3), not something a gate flip triggers as a cascade.
 
 ## Part 2 — Gates (asset progression)
 
@@ -156,10 +160,9 @@ Each gate is still one of two kinds, a distinction the coordinator's own reasoni
 1. Reads the folder-note frontmatter.
 2. Refuses only when the asset is cancelled (`spec_cancelled: true`) — no other precondition check.
 3. Rewrites the gate boolean in frontmatter.
-4. Appends a callout to the `# Gates` section: `> [!gate] spec_<gate> — flipped <date> (<reason>)`, carrying an `auto:` annotation when invoked with `--auto`.
-5. Appends a line to `# History`.
-6. **Atomic git commit of the folder-note edit** under `lazy-spec.flip-gate@bot.invalid` (subject `lazy-spec.flip-gate: <gate> → <true|false> on <asset>`). Without this commit the daemon's next iteration trips its dirty-tree-skip guard and silently halts every routine on the asset. Defensive skip when the asset is not inside a git repository (test-fixture path) — the file write remains but the commit step is no-op.
-7. Writes a run log under `.logs/claude/lazy-spec.flip-gate/`.
+4. Appends a line to `# History`. Nothing is written to `# Gates`; the reason (`--reason`, prefixed `auto:` under `--auto`) is recorded in the run log only.
+5. **Atomic git commit of the folder-note edit** under `lazy-spec.flip-gate@bot.invalid` (subject `lazy-spec.flip-gate: <gate> → <true|false> on <asset>`). Without this commit the daemon's next iteration trips its dirty-tree-skip guard and silently halts every routine on the asset. Defensive skip when the asset is not inside a git repository (test-fixture path) — the file write remains but the commit step is no-op.
+6. Writes a run log under `.logs/claude/lazy-spec.flip-gate/`.
 
 There is no post-flip cascade anymore — a forward flip of `spec_design_done` does not itself open review on a plan document. Opening that review is now a coordinator decision executed as an ordinary launch-checkbox dispatch (§ Part 3), ordered by the playbooks, not a side effect wired into the flip primitive.
 
@@ -177,6 +180,26 @@ CLI: `lazycortex-specs flip-gate <asset_dir> <gate> [--off] [--auto] [--reason T
 Everything this worker used to decide — sibling-doc stage promotion, gate readiness, the launch-checkbox ladder, downward reconciliation, change-cascade dispatch — is gone from this file entirely; it lives in `lazy-spec.coordination-playbook.md`, executed by `spec.coordinator`. A no-op tick (no terminal marker yet, note structurally clean) returns `{"action": "noop"}`.
 
 CLI: `lazycortex-specs gate-tick <asset_note> [--today YYYY-MM-DD]`.
+
+## Part 2b — Level gates (catalog root and product root)
+
+A LEVEL note — the catalog root's (`spec_role: catalog`) or a product root's (`spec_role: product`), see [layout](./lazy-spec.layout-protocol.md) Part 4b — carries its own four booleans instead of the five above:
+
+```yaml
+spec_vision_done: false
+spec_design_done: false
+spec_ui_design_done: false
+spec_tech_done: false
+spec_halted: false
+```
+
+- **All four are derived, and each from exactly one document** loose beside the note: `spec_vision_done` from `vision.md`, `spec_design_done` from `design.md`, `spec_ui_design_done` from `ui-design.md`, `spec_tech_done` from `tech.md`. There is no human-signal gate at this level and no operator gesture that closes one — `spec.catalog-coordinator` flips every one of them with `flip-gate --auto`.
+- **An absent optional document closes its gate.** `design.md`, `ui-design.md` and `tech.md` are optional, so `spec_design_done` / `spec_ui_design_done` / `spec_tech_done` each close when their document is ABSENT or exists at stage `approved`, and open only in the middle state — the document exists at some other stage. `vision.md` is the one mandatory document of the ladder, so `spec_vision_done` alone requires an approved document and never closes on absence.
+- **There is no ladder among them.** Unlike the asset gates' strict S0..S5 order, the four level gates are independent booleans: `vision` gates the launch CHECKBOXES that write the other three documents, never their gate values, and any of `design` / `ui-design` / `tech` may close before another or never close at all. A doctor precedence check does not apply here.
+- **A gate may be undeclared.** `spec_ui_design_done` takes no part in anything until the `system-ui-design` doc type is declared, and an operator may declare in a level note's `# Coordinator rules` that this level needs no `design` or no `tech` document at all (a `tech.md` at stage `cancelled` says the same after the fact). An undeclared gate is not a gap and never a finding — the level playbook owns which of the four this level actually has.
+- **`spec_halted` is the level's only overlay.** There is no `spec_cancelled` and no `spec_released` on a level note: a level is not abandoned and not shipped.
+
+`lazy-spec.flip-gate` validates both halves of the pairing on every call: a gate name outside `{the five asset gates} ∪ {the four level gates}` is refused, and so is an asset gate on a level note or a level gate on a status note. What each gate closes on is the level playbook's (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.catalog-playbook.md` § 2), exactly as the asset gates' readiness is the type playbook's.
 
 ## Part 3 — Launch checkboxes (operator-triggered dispatch)
 
@@ -217,7 +240,7 @@ The one label outside that arrangement is the review-launch label documented bel
 > tick to dispatch: planner writes code-plan.md from design.md
 ```
 
-Three lines, in this order: a `[!gate]` callout head carrying the bare label, a `- [ ]` / `- [x]` line repeating the same label, and a `tick to dispatch: <one-line description>` line. The block shares the `[!gate]` callout mark with `lazy-spec.flip-gate`'s own flip-record callout (`> [!gate] <gate> — flipped <date> (<reason>)`), but the two never collide: a flip-record's head line names a gate key plus `— flipped …`, while a checkbox block's head line is a bare label and its block is the only one of the two that carries a `- [ ]` / `- [x]` line.
+Four lines, in this order: a `[!gate]` callout head carrying the bare label, a `- [ ]` / `- [x]` line repeating the same label, a blank quoted line (`>`), and a `tick to dispatch: <one-line description>` line. The blank quoted line is structural: without it the description is the checkbox item's continuation, and Obsidian's task renderer hides it in reading view (`lazy-spec.layout-protocol.md` Part 4). `[!gate]` blocks in `# Gates` are checkbox blocks and nothing else — `lazy-spec.flip-gate` writes no callout of its own.
 
 A head line therefore reads one of two ways, and both are checkbox blocks: a **dispatch label** declared by the asset's type or tool playbook, or the **review-launch label** `Review <file>.md`, naming a reviewable markdown file of the asset. The second is the one label class this protocol names itself, because it belongs to no playbook's vocabulary — see below.
 

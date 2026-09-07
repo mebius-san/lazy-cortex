@@ -1,5 +1,5 @@
 ---
-description: Request routing — the coordinator's routing mode in full; spawn/attach/reference grammar, structural fields, research passes, and the launched-asset rule. Conditional chapter 9 of the coordination playbook, read on a Routing wake.
+description: Request routing — the catalog coordinator's routing mode in full; spawn/spawn-product/attach/reference grammar, structural fields, research passes, and the launched-asset rule. Conditional chapter 9 of the coordination playbook, read on a Routing wake.
 ---
 # Request routing — conditional chapter of the coordination playbook
 
@@ -33,15 +33,22 @@ Request routing is a coordinator MODE, dispatched at the terminal group of the r
 
 **A `reference` decision is formulated LOUD, every time.** Every `reference` line is accompanied, in the routing section's operator-readable prose (the block tolerates prose lines beside its structured decisions), by full sentences stating which existing asset covers the request and what evidence backs that call (a spec doc section, a code path, a prior feature's own scope) — never a bare path with no rationale. The reason is asymmetric risk: a wrong `spawn` produces a redundant asset an operator notices and can merge or cancel; a wrong `reference` produces NOTHING VISIBLE — the design is quietly marked "already done" and nobody builds it. Ambiguous evidence (a partial match, a candidate that covers only part of the request) is never resolved by picking `reference` anyway "to be safe" — it goes through the same operator `[!question]` confirmation as any other disputed routing call, per the duplicate-behavior check above, and Chapter 13's disputed-reference scenario governs what happens when the operator disagrees with a `reference` call after the fact.
 
-**Grammar note — one structured block, three verbs.** The routing-decision block's full grammar (parsed by `apply_request.py`, documented verbatim in `lazy-spec.request-protocol.md`'s "Routing-block grammar" section) is:
+**Grammar note — one structured block, four verbs.** The routing-decision block's full grammar (parsed by `apply_request.py`, documented verbatim in `lazy-spec.request-protocol.md`'s "Routing-block grammar" section) is:
 
 ```
 spawn <asset-type> <slug> [product=<key>] [path=<dir>] [tools=<tool>[,...]] [targets=<folder>/<slug>[,...]]
-attach <repo-relative-folder-note-path> [drop=<file>[,...]]
+spawn-product key=<key> path=<spec_path> [experts=<role>:<name>[,...]] :: <description>
+attach <repo-relative-folder-note-path | level-doc-path> [drop=<file>[,...]]
 reference <repo-relative-folder-note-path>
 ```
 
-The optional fields on a spawn line are order-independent (any, all, or none); `targets=` only takes effect on a `change`-kind spawn. A legacy `:: <description>` tail or `docs=` field is tolerated on any line and ignored — nothing is seeded from either. `reference` takes the same path shape as `attach` — a resolvable repo-relative folder-note path, not a bare `<folder>/<slug>` token, since a reference target is not scoped to the routing request's own product the way a change's cascade targets are.
+The optional fields on a spawn line are order-independent (any, all, or none); `targets=` only takes effect on a `change`-kind spawn. A legacy `:: <description>` tail or `docs=` field is tolerated on `spawn` / `attach` / `reference` and ignored — nothing is seeded from either. `reference` takes the same path shape as `attach` — a resolvable repo-relative folder-note path, not a bare `<folder>/<slug>` token, since a reference target is not scoped to the routing request's own product the way a change's cascade targets are.
+
+**`attach` also takes a level document.** Besides an asset's folder-note, an `attach` line may name a system document loose at a product root or at the content root (`vision.md` / `design.md` / `ui-design.md` / `tech.md`). Apply stamps `spec_source_requests` onto that document directly and reopens its review — a level note carries no `## Source requests` section, so there is no intermediate stamp on the note and no status folder-note is looked for. `drop=` is meaningless on such a line: a level's documents are never rolled back as a set.
+
+**`spawn-product` — registering a new product.** `key=` and `path=` are both required, and so is the `:: <description>` (one or two sentences naming what the product is): this is the one line whose description is READ rather than ignored, since no target document exists yet to carry the intent. The optional `experts=<role>:<name>[,...]` field names the product's role experts, and it is never guessed — the candidates are put to the operator as a `[!question]` callout during the request's own review, so the line the coordinator finally writes carries an already-decided set (absent the field, apply wires no role experts and the operator adds them later through `/lazy-spec.product-config`).
+
+**No precondition.** A `spawn-product` line may be written at any time, whatever state the catalog root's own ladder is in — a vault spec still being written does not block a product the operator has already accepted a request for. An unregistered `key=` whose `path=` already exists is an apply-time hard refusal, never a silent merge. What apply then enacts — the `products[<key>]` record with no `source` block, the folder and its `spec_role: product` level note, the seeded `vision.md` and its opened review — is the level coordinator's business, described in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.catalog-playbook.md` § 10.
 
 **The launched-asset rule.** Before proposing a direct attach onto an asset, the coordinator checks the same three launched signals the router used to check: `spec_develop_done: true`, a tracked `active_job` whose `checkbox` is an implementation-side label, or an existing implementation report. Any one true means implementation has already started — the coordinator does NOT offer a plain attach; it proposes a change-spawn naming the asset via `targets=` instead. An asset with none of these signals stays a normal attach candidate.
 

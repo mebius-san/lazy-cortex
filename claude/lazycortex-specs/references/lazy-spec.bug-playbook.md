@@ -61,6 +61,8 @@ The coordinator reconciles this set on every relevant wake: it hangs the ones wh
 
 No `Write` row's tick is a writer job. For `Write bug` the coordinator seeds the document with `lazycortex-specs seed-doc <product> <folder-note-path> --doc bug.md:bug` — the type's template chain, stage `empty`, the folder-note's `spec_source_requests` copied onto the doc — and then branches on the folder-note's `## Source requests`. With at least one entry there, review opens immediately with `Skill(lazycortex-review:lazy-review.start, "bug.md")`, and the class's main writer works round 1 reading the request(s) `context_from_frontmatter` resolves from the doc's own attribution. With none (a bug filed without a request), the seed is the whole enactment: the operator writes the reproduction into the skeleton and commits, that commit is the coordinator's ordinary operator-edit wake, and on it — seeing a non-empty body on a doc with no active review — the coordinator opens review with `lazy-review.start`, the writer refining the operator's text as round 1.
 
+**A parked document hangs no `Write` row.** Every row of this table reads "the document doesn't exist", and a document at `spec_stage: deferred` exists — so its row stays down and nothing seeds a replacement beside it, ever. The row that hangs for it instead is the review-launch `Review <doc>` block, whose deferred-document case (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md` Chapter 5) unparks and resubmits the document in one commit when the operator ticks it.
+
 Block shape in `# Gates`:
 
 ```

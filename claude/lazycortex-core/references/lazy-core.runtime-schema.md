@@ -704,7 +704,7 @@ On the same hourly cadence as runtime-log cleanup, `mgr.sweep()` runs `git workt
 
 The daemon watches its own loaded `.py` source and restarts at an iteration boundary when that source changes — so a `/plugin update` (or a dev-vault source edit under `--dev-mode`) takes effect without a manual restart. Owned by `CodeFingerprint` in `bin/code_fingerprint.py`.
 
-- At `run()` startup the daemon snapshots the hashes of every loaded module whose file lives under a watched plugin root. Watched roots are the directories in `LAZYCORTEX_PLUGIN_DIRS` plus the running module's own parent directory.
+- At `run()` startup the daemon snapshots the hashes of every loaded module whose file lives under a watched plugin root. Watched roots are the `--plugin-dir` source trees in `LAZYCORTEX_PLUGIN_DIRS` (cached versions in that list are skipped — they never change in place, and a `/plugin update` lands a new version directory that the newer-runner check picks up) plus the running module's own parent directory.
 - After each iteration (and only when the daemon is not halted), the fingerprint is re-checked. A change is acted on **only once it is stable across two consecutive observations**, so an in-flight half-written update never triggers a premature restart.
 - On a stable change the daemon logs `restart: own code changed` and restarts:
   - Under a supervisor (`LAZYCORTEX_SUPERVISED=1`, exported by the launchd plist / systemd unit) → clean `SystemExit(0)`; the supervisor relaunches the process with fresh code. The systemd unit uses `Restart=always` (not `on-failure`) so the clean exit-0 still relaunches; launchd's `KeepAlive` relaunches on any exit.

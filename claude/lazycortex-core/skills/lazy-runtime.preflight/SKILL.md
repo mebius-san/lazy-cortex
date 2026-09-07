@@ -76,17 +76,23 @@ Branch on each fix's `kind`:
 
 ### `drop-mcp-server` — offending server times out / fails to spawn
 
-Ask via `AskUserQuestion`:
+```
+Context (print before asking):
+- Where: /lazy-runtime.preflight · Step 3 — Confirm + apply fixes; target `experts.<expert>.mcp_config` → <config file path(s)>
+- Found: probe of expert `<expert>` reported MCP server `<name>`: <status> — <detail>
+- Why asking: removing a server is a capability change only the operator can weigh against the expert's job
+- Answers: `drop` — `<name>` removed from every mcp_config file the expert references, committed in this run, never re-asked; `keep` — no change, the expert stays failing and preflight re-reports it on every run
+AskUserQuestion: header "Drop MCP server", question "Drop MCP server `<name>` from expert `<expert>`'s mcp_config in <repo-root>?", options with descriptions.
+```
 
-> Expert `<expert>`'s MCP server `<name>` <detail>. Drop it from `<expert>`'s `mcp_config`?
-> - **drop** — remove server `<name>` from every `mcp_config` file the expert references. The expert spawns hermetically for that server.
-> - **keep** — leave the config as-is. The expert stays failing until the server is fixed by hand.
+- **drop** — remove server `<name>` from every `mcp_config` file the expert references. The expert spawns hermetically for that server.
+- **keep** — leave the config as-is. The expert stays failing until the server is fixed by hand.
 
 On **drop**: locate the offending server. The `target` is `<expert>.mcp_config:<name>`. Read `experts.<expert>.mcp_config` from `.claude/lazy.settings.json` (a path string or list). For each referenced config file, if its `mcpServers` object contains `<name>`, remove that key via `Edit` on the config JSON file (not `lazy.settings.json` — the server lives in the MCP-config file the expert points at). Confirm the file still parses. Outcome `dropped`. On **keep**: outcome `kept-per-user-choice`.
 
 ### `mcp-login` / `pending-approval` — server needs interactive auth
 
-These cannot be auto-fixed (the daemon spawns headless with no TTY). Print the exact instruction and ask only whether to continue to the next fix:
+These cannot be auto-fixed (the daemon spawns headless with no TTY). Print the exact instruction, then ask only whether to continue to the next fix:
 
 > Expert `<expert>`'s MCP server `<name>` requires authentication. Run this by hand in a terminal, then re-run `/lazy-runtime.preflight`:
 >
@@ -94,38 +100,67 @@ These cannot be auto-fixed (the daemon spawns headless with no TTY). Print the e
 >
 > (For a headless host: `claude mcp login --no-browser <name>`.)
 
+```
+Context (print before asking):
+- Where: /lazy-runtime.preflight · Step 3 — Confirm + apply fixes; target expert `<expert>`, MCP server `<name>`
+- Found: server `<name>` reported `<auth-required | pending-approval>` — the daemon spawns headless, so no login can happen from this run
+- Why asking: nothing on disk changes; the operator decides whether to walk the remaining fixes now or stop and log in first
+- Answers: `continue` — next fix; this server stays flagged until the login is done and preflight re-run; `stop` — fix walk ends here, remaining fixes wait for the next run
+AskUserQuestion: header "Login required", question "MCP server `<name>` of expert `<expert>` needs `claude mcp login <name>` by hand — continue to the next fix?", options with descriptions.
+```
+
 Do not mutate settings for this kind. Outcome `login-instructed`.
 
 ### `fix-path` — bad `mcp_config` path
 
-Ask via `AskUserQuestion`:
+```
+Context (print before asking):
+- Where: /lazy-runtime.preflight · Step 3 — Confirm + apply fixes; target `experts.<expert>.mcp_config` in .claude/lazy.settings.json
+- Found: entry `<path>` <does not exist | does not parse>: <detail>
+- Why asking: the right path is project knowledge the probe cannot derive
+- Answers: `correct` — one follow-up asks for the replacement repo-relative path, written into `experts.<expert>.mcp_config` and committed in this run, never re-asked; `remove` — bad entry dropped (field cleared if it was the only one), committed in this run, never re-asked; `leave` — no change, the expert stays failing and preflight re-reports it
+AskUserQuestion: header "Bad mcp_config path", question "Expert `<expert>`'s mcp_config entry `<path>` <does not exist | does not parse> — how should it be resolved?", options with descriptions.
+```
 
-> Expert `<expert>`'s `mcp_config` points at a path that <does not exist | does not parse>: <detail>. How should I resolve it?
-> - **correct** — you supply the right repo-relative path; I write it into `experts.<expert>.mcp_config`.
-> - **remove** — drop the bad path from `experts.<expert>.mcp_config` (or clear the field when it was the only entry).
-> - **leave** — no change; the expert stays failing.
+- **correct** — you supply the right repo-relative path; I write it into `experts.<expert>.mcp_config`.
+- **remove** — drop the bad path from `experts.<expert>.mcp_config` (or clear the field when it was the only entry).
+- **leave** — no change; the expert stays failing.
 
-On **correct**: ask one follow-up for the replacement path, then `Edit` `experts.<expert>.mcp_config` in `.claude/lazy.settings.json`. On **remove**: `Edit` out the bad entry (clear the field entirely if it becomes empty). On **leave**: outcome `kept-per-user-choice`. Otherwise outcome `path-fixed`.
+On **correct**: ask one follow-up via `AskUserQuestion` — Where: same step, target `experts.<expert>.mcp_config`; Found: replacing `<path>`; Why asking: the path is the operator's to supply; Answers: free-form repo-relative path, written and committed in this run. Header "Replacement path", question "Which repo-relative path should replace `<path>` in expert `<expert>`'s mcp_config?". Then `Edit` `experts.<expert>.mcp_config` in `.claude/lazy.settings.json`. On **remove**: `Edit` out the bad entry (clear the field entirely if it becomes empty). On **leave**: outcome `kept-per-user-choice`. Otherwise outcome `path-fixed`.
 
 ### `pin-model` — expert resolves no explicit model
 
-Ask via `AskUserQuestion`:
+```
+Context (print before asking):
+- Where: /lazy-runtime.preflight · Step 3 — Confirm + apply fixes; target `agent_models.<group>.<dispatch>` in .claude/lazy.settings.json
+- Found: expert `<expert>` (agent `<dispatch>`) resolves no explicit model in either settings scope — headless spawns would inherit the operator's interactive CLI default
+- Why asking: a tier is a spend decision and nothing on record says which
+- Answers: `pin sonnet` / `pin opus` / `pin haiku` — that tier written for `<dispatch>` into the project file, committed in this run, never re-asked (change later via /lazy-core.agent-models); `leave` — no change, the expert stays failing and preflight re-reports it
+AskUserQuestion: header "Pin model tier", question "Pin a model tier for expert `<expert>` (agent `<dispatch>`) in <repo-root>/.claude/lazy.settings.json?", options with descriptions.
+```
 
-> Expert `<expert>` resolves no explicit model — its headless spawns would inherit whatever the operator's interactive CLI default happens to be. Pin a tier?
-> - **pin sonnet** (Recommended) — balanced default for routine experts.
-> - **pin opus** — for heavyweight reasoning experts.
-> - **pin haiku** — for mechanical/formatting experts.
-> - **leave** — no change; the expert stays failing.
+- **pin sonnet** (Recommended) — balanced default for routine experts.
+- **pin opus** — for heavyweight reasoning experts.
+- **pin haiku** — for mechanical/formatting experts.
+- **leave** — no change; the expert stays failing.
 
 On any **pin**: write the tier as an `agent_models` entry for the expert's `agent` dispatch string into the project `.claude/lazy.settings.json` (group = the agent's plugin domain — plugin name up to the first `-`, e.g. `lazycortex`; `_project` for project-local agents) via `lazy_settings.load_section` + `save_section` (same Bash/python pattern as `lazy-core.agent-models` Step 8). Commit per this step's settings-write rules. Outcome `model-pinned`. On **leave**: outcome `kept-per-user-choice`.
 
 ### repo-level `sandbox` finding — allowlist misses a resolved location
 
-Not an entry in any expert's `fixes[]` — it comes from `repo[]` and is offered once, before the per-expert fixes. Ask via `AskUserQuestion`:
+Not an entry in any expert's `fixes[]` — it comes from `repo[]` and is offered once, before the per-expert fixes.
 
-> The expert-spawn sandbox does not cover `<path>`, which its own allowlist resolves to. Confined spawns fail every write there with `Operation not permitted`. Record the resolved locations?
-> - **record** (Recommended) — run `lazycortex-core sandbox-sync`; it appends only what is missing and drops nothing.
-> - **leave** — no change; every job writing through that symlink keeps failing.
+```
+Context (print before asking):
+- Where: /lazy-runtime.preflight · Step 3 — Confirm + apply fixes; target .runtime/sandbox.settings.json (gitignored daemon state)
+- Found: repo-level `<fail | warn>` — sandbox `<allowWrite | allowRead>` does not cover `<path>`, which its own entries resolve to through a symlink
+- Why asking: the sync widens a confinement allowlist — what spawns may touch is the operator's call
+- Answers: `record` — `lazycortex-core sandbox-sync --repo-root "$PWD"` runs now, appends only what is missing, drops nothing, never re-asked once covered; `leave` — no change, every job writing through that symlink keeps failing with `Operation not permitted`
+AskUserQuestion: header "Sandbox allowlist", question "Record the resolved location `<path>` in the expert-spawn sandbox allowlist of <repo-root>?", options with descriptions.
+```
+
+- **record** (Recommended) — run `lazycortex-core sandbox-sync`; it appends only what is missing and drops nothing.
+- **leave** — no change; every job writing through that symlink keeps failing.
 
 On **record**: `Bash(lazycortex-core sandbox-sync --repo-root "$PWD")`. The file is gitignored daemon state, so there is nothing to commit. Outcome `sandbox-synced`. On **leave**: outcome `kept-per-user-choice`.
 

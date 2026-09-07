@@ -1,7 +1,7 @@
 ---
 name: lazy-core.slim-context
 description: "Run when startup feels slow, the always-loaded context budget crosses its WARN threshold, a rules file has grown oversized, or a project-specific permission leaked into global settings. Unlike `lazy-core.audit`, which only reports, this one rewrites: it moves reference material out of rules into on-demand agent definitions and relocates leaked settings entries to the local scope."
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir -p *), Agent
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(mkdir -p *), AskUserQuestion, Agent
 ---
 # Slim Context
 
@@ -74,7 +74,16 @@ For each rules file **over 3 KB**:
    - **Constraint**: prohibitions, "never do X", "always do Y", one-liner facts needed by every conversation
    - **Reference**: layouts, tables, API details, code examples, procedures, migration history, version tables
 
-3. Show the classification to the user and ask for confirmation before proceeding.
+3. Show the classification to the user and ask for confirmation before proceeding:
+
+   ```
+   Context (print before asking):
+   - Where: /lazy-core.slim-context · Phase 2 — Fix oversized rules files; target `<rules file path>` (<size> KB) → `<agent file path, or "no matching agent">`
+   - Found: the classification above — <N> constraint sections kept, <N> reference sections (`<section titles>`) moving to `<agent file>`
+   - Why asking: which sections every conversation needs is the rule's audience, and only the operator knows it
+   - Answers: `Rewrite` — rules file reduced to the constraint bullets, agent file absorbs the reference sections under `## Reference: <topic>`, before/after sizes shown (step 5); `Skip` — file untouched, reappears next run. Not persisted.
+   AskUserQuestion: header "Slim rule", question "Move the <N> reference sections of `<rules file>` into `<agent file>` and keep only its constraints?", options with the descriptions above.
+   ```
 
 4. Rewrite:
    - Rules file: keep only constraints as a bullet list (target < 2 KB)
@@ -172,11 +181,30 @@ Then, per non-waived finding, render:
 <rewrite_class>
 ```
 
-`AskUserQuestion` with three options:
+Then one question per finding. Each iteration fills the block from that finding:
 
-- **Apply rewrite** *(default-recommended for clear cases)* — coordinator generates the rewritten snippet, shows the diff via a second `AskUserQuestion` ("Apply this diff? / Edit further / Cancel"), and on confirmation writes via the Edit tool.
+```
+Context (print before asking):
+- Where: /lazy-core.slim-context · Phase 2.5e — LLM-readability audit; target `<file>:<line_start>–<line_end>` (scope `<project | personal>`)
+- Found: `[<pattern>]` <reason> — the original snippet and proposed rewrite class rendered above; `check_id` `llm-readability.<pattern-slug>`
+- Why asking: a rewrite changes an authored artifact and a waiver hides the finding for good; neither follows from the scan alone
+- Answers: `Apply rewrite` — coordinator generates the rewritten snippet and shows the diff in a second question below; `Skip for now` — no action; finding reappears next run; `Waive permanently` — permanence confirmation (same wording as doctor Phase 4a), then a waiver file at `<doctor.waivers-dir>/llm-readability.<pattern-slug>__<detail_hash>.md` suppresses this fingerprint on every later run
+AskUserQuestion: header "Readability finding", question "`<file>:<line_start>` — <rewrite_class> for this <pattern name>. Apply the rewrite, skip for now, or waive permanently?", options `Apply rewrite` (default-recommended for clear cases) / `Skip for now` / `Waive permanently` with the descriptions above.
+```
+
+- **Apply rewrite** — coordinator generates the rewritten snippet, shows the diff via a second `AskUserQuestion`, and on confirmation writes via the Edit tool:
+
+  ```
+  Context (print before asking):
+  - Where: /lazy-core.slim-context · Phase 2.5e — rewrite diff; target `<file>:<line_start>–<line_end>`
+  - Found: the generated diff above (original → rewritten snippet, `<rewrite_class>`)
+  - Why asking: the operator reviews the exact bytes before an authored file changes
+  - Answers: `Apply this diff` — written via `Edit` now; `Edit further` — no write yet; the snippet is revised and the diff re-shown; `Cancel` — no write, counted as skipped. Not persisted.
+  AskUserQuestion: header "Apply diff", question "Apply this rewrite to `<file>:<line_start>–<line_end>`?", options `Apply this diff` / `Edit further` / `Cancel` with the descriptions above.
+  ```
+
 - **Skip for now** — no action; finding reappears next run.
-- **Waive permanently** — opens the permanence confirmation sub-prompt (same wording as doctor Phase 4a), then writes a waiver file via `Bash(mkdir -p <doctor.waivers-dir>)` followed by the `Write` tool (never chained). File path: `<doctor.waivers-dir>/llm-readability.<pattern-slug>__<detail_hash>.md`. Frontmatter shape matches the template in `lazy-core.doctor` Phase 2.7d.
+- **Waive permanently** — opens the permanence confirmation sub-prompt (same wording and context block as doctor Phase 4a), then writes a waiver file via `Bash(mkdir -p <doctor.waivers-dir>)` followed by the `Write` tool (never chained). File path: `<doctor.waivers-dir>/llm-readability.<pattern-slug>__<detail_hash>.md`. Frontmatter shape matches the template in `lazy-core.doctor` Phase 2.7d.
 
 **Rewrites are generated by the main coordinator, not the scan agent.** Scan agents identify constructs; the coordinator synthesizes the rewrite so the user can review the diff in the same turn.
 
@@ -249,16 +277,15 @@ For every note under `.memory/<expert>/*.md` (skip `.tags/`):
 - Read its frontmatter `tags:`. For each tag, check whether the matching local tag file `.memory/<expert>/.tags/<topic>.md` lists this note.
 - A note is **orphan** when none of its tags are listed in any local tag file. This is symmetric drift — either the note's tags are stale or the tag files are.
 
-For each orphan note, `AskUserQuestion`:
+For each orphan note, one question per note. Each iteration fills the block from that note:
 
 ```
-AskUserQuestion:
-  question: "Orphan memory note `<path>` — its tags are listed in no local .tags file."
-  description: "Either the note's tags are stale or the .tags files are. Pick a remedy."
-  options:
-    - "Run /lazy-memory.index — regenerate .tags/ from notes"
-    - "Delete the note (it's no longer reachable)"
-    - "Leave alone (I'll fix it manually)"
+Context (print before asking):
+- Where: /lazy-core.slim-context · Phase 5.5a — Orphan notes; target `<path>` under `.memory/<expert>/`
+- Found: frontmatter tags `<tags>`; none of them lists this note in `.memory/<expert>/.tags/<topic>.md` (<tag files checked>)
+- Why asking: either the note's tags are stale or the `.tags` files are — the drift is symmetric and the scan cannot tell which side is right
+- Answers: `Run /lazy-memory.index — regenerate .tags/ from notes` — the sibling skill rebuilds `.tags/` now; outcome **reindexed**; `Delete the note (it's no longer reachable)` — `rm <path>` now, irreversible; outcome **deleted**; `Leave alone (I'll fix it manually)` — untouched, re-asked next run; outcome **kept-orphan**
+AskUserQuestion: header "Orphan memory note", question "Orphan memory note `<path>` — its tags `<tags>` are listed in no local `.tags` file. Which remedy?", options with the descriptions above.
 ```
 
 - Run `/lazy-memory.index` → invoke the sibling skill; state **reindexed**.
@@ -269,18 +296,18 @@ AskUserQuestion:
 
 For every pair of notes within the same `.memory/<expert>/` that share at least one tag and whose titles match by Levenshtein distance ≤ 3:
 
-`AskUserQuestion`:
+One question per pair. Each iteration fills the block from that pair:
 
 ```
-AskUserQuestion:
-  question: "Near-duplicate memory notes: `<note-a>` and `<note-b>` share tags `<topics>` and similar titles."
-  description: "Consolidating may reduce noise; keeping both is fine if they cover different angles."
-  options:
-    - "Show me both (Read each and decide)"
-    - "Leave alone"
+Context (print before asking):
+- Where: /lazy-core.slim-context · Phase 5.5b — Near-duplicate notes; target `<note-a>` and `<note-b>` under `.memory/<expert>/`
+- Found: shared tags `<topics>`; titles "<title-a>" / "<title-b>" (Levenshtein distance <d> ≤ 3)
+- Why asking: consolidating may reduce noise; keeping both is fine if they cover different angles — only a reader can tell
+- Answers: `Show me both (Read each and decide)` — both notes read and compared in one line, then a follow-up question (keep both / merge manually); nothing written by this phase; `Leave alone` — untouched, re-asked next run; outcome **kept**
+AskUserQuestion: header "Near-duplicate notes", question "Near-duplicate memory notes `<note-a>` and `<note-b>` share tags `<topics>` and similar titles. Show both, or leave alone?", options with the descriptions above.
 ```
 
-- Show me both → `Read` each, present a one-line comparison, then ask whether to keep both or merge manually. This phase never auto-merges; merges go through a separate `/lazy-memory.write` invocation by the operator.
+- Show me both → `Read` each, present a one-line comparison, then ask whether to keep both or merge manually. Context for that follow-up: where — Phase 5.5b, the same pair; found — the one-line comparison; why asking — only the operator decides a merge; answers — `Keep both` ends as **kept**, `Merge manually` writes nothing here and leaves the merge to the operator. `header` "Duplicate notes"; `question` names both notes. This phase never auto-merges; merges go through a separate `/lazy-memory.write` invocation by the operator.
 - Leave alone → state **kept**.
 
 ### 5.5c. Summary row

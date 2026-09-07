@@ -1,11 +1,11 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-experts by seeding agent-model tiers and class-mapped composed expert entries into lazy.settings.json.
-last_regen: 2026-09-05
+last_regen: 2026-09-07
 no_diagram: true
 source_skills:
   - lazy-experts.install
-source_sha: bd6abf68b291ce676681d87882caf99ee9e57b44
+source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 ---
 # Installing lazycortex-experts
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Six agents that turn a raw request into a scoped design, formal use cases, an optional UI, a code-structure design, and an ordered implementation plan.
-last_regen: 2026-09-05
+last_regen: 2026-09-07
 diagram_spec:
   anchor: "The design-time pipeline"
   request: "Flow diagram, five nodes in a line: Interpreter -> Use-Case Writer -> Designer -> Architect -> Planner, edges labeled 'brief', 'use cases', 'design spec', 'architecture doc (optional)'. UI Designer hangs off Designer with a single edge labeled 'approved design' (UI Designer has no edge to Architect or Planner). No other nodes."

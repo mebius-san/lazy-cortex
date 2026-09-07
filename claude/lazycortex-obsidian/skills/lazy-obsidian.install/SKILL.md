@@ -165,12 +165,16 @@ These are quiet-sync artifacts — no per-file install prompt, no drift overwrit
 
 - **Absent or byte-identical** (target missing, or present and equal to source) → `cp <source> <target>` silently (`mkdir -p` parents first). State **installed** (missing) or **unchanged** (identical). No prompt.
 - **Locally changed, shipped delta applies cleanly** — the local file differs from source but the difference is confined to regions the shipped version did not change (the local edits and the shipped edits touch disjoint regions). Apply the shipped delta on top of the local edits silently. State **merged**.
-- **Genuine conflict** — the local file and the shipped version changed the *same* region incompatibly, and there is no way to tell which should survive. This is the ONLY case that prompts. `AskUserQuestion`:
-  - question: `<name>.css — conflicting edits in the same region. Which version wins for that region?`
-  - description: ``**Conflicting region:**\n```diff\n<the conflicting hunk(s), both sides>\n```\n\nYou customized this snippet (e.g. tightened the selector, added per-theme tweaks) in the same place the shipped version changed. Merge-shipped takes the shipped version for that region; keep-local preserves yours and skips that part of the upstream change.``
-  - options: **merge-shipped** / **keep-local**.
-  - **merge-shipped** → write the shipped version for the conflicting region, keep non-conflicting local edits. State **merged**.
-  - **keep-local** → leave the conflicting region as the user has it; still apply any non-conflicting shipped delta. State **kept-local**.
+- **Genuine conflict** — the local file and the shipped version changed the *same* region incompatibly, and there is no way to tell which should survive. This is the ONLY case that prompts:
+
+  ```
+  Context (print before asking):
+  - Where: /lazy-obsidian.install · Step 6.5 — Sync + enable plugin snippets; target <vault>/snippets/<name>.css
+  - Found: local and shipped both changed the same region — the conflicting hunk(s), both sides, quoted as a unified diff
+  - Why asking: you customized this snippet (e.g. tightened the selector, added per-theme tweaks) where the shipped version changed; nothing can tell which should survive
+  - Answers: `merge-shipped` — shipped version written for that region, non-conflicting local edits kept (state **merged**); `keep-local` — your version stays for that region, any non-conflicting shipped delta still applied (state **kept-local**); not persisted, asked again on the next conflicting update
+  AskUserQuestion: header "Snippet conflict", question "<name>.css in <vault>/snippets/ — conflicting edits in the same region. Which version wins for that region?", options `merge-shipped` — "take the shipped version for that region; your edits elsewhere are kept", `keep-local` — "keep yours and skip that part of the upstream change".
+  ```
 
 Use `Read` + `Write` so the merge stays visible. "Conflict" means same region changed incompatibly on both sides — not merely "bytes differ".
 

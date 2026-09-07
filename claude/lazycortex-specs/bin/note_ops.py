@@ -19,7 +19,8 @@ other key outside its schema.
 `note-check` is a read-only structural scan: unrecognized or mistyped frontmatter keys, and a
 missing or misordered required section from the canonical roster (`# Gates`, `# Status brief`
 with its `#protected/spec/status-brief` marker, `# Coordinator rules`, `# Coordinator commands`,
-`# History`). It reports violations as JSON and fixes nothing — repairing a broken note is the
+`# History`, plus `# Attachments` on a `product` / `catalog` level note). It reports violations
+as JSON and fixes nothing — repairing a broken note is the
 coordinator's own job, done through its pen and through `note-set-key`. Its result also carries
 the note's `job_markers` sidecar entry, so a reader that used to find the two markers in
 frontmatter still gets them from one call.
@@ -56,7 +57,10 @@ import note_explainers  # noqa: E402
 import spec_job_markers  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 from spec_keys import (  # noqa: E402
+    BOOL_FALSE,
     BOOL_TRUE,
+    LEVEL_GATES,
+    LEVEL_ROLES,
     PROTECTED_ATTACHMENTS,
     PROTECTED_COORD_COMMANDS,
     PROTECTED_COORD_RULES,
@@ -96,11 +100,6 @@ class _Kind:
   DICT = "dict"
 
 
-# The frontmatter boolean-false literal, paired with `spec_keys.BOOL_TRUE` to validate/parse a
-# `_Kind.BOOL` value without a bare string literal at each comparison site.
-_BOOL_FALSE = "false"
-
-
 # ----------------------------------------------------------------------------------------
 class _ResultKey:
   """
@@ -110,11 +109,51 @@ class _ResultKey:
     STATUS: The `note_set_key` outcome-field key.
     OK: The `note_check` overall-pass field key.
     JOB_MARKERS: The `note_check` field carrying the note's runtime job-marker sidecar entry.
+    NOTE: The `note_check` field naming the note that was checked.
+    VIOLATIONS: The `note_check` field listing every finding.
+    KIND: The field naming which violation a finding is.
+    KEY: The field naming the frontmatter key a finding is about.
+    REASON: The field carrying a refusal's human-readable cause.
+    VALUE: The field carrying the offending raw value.
+    EXPECTED: The field naming the shape a `BAD_TYPE` finding expected.
+    SECTION: The field naming the body section a finding is about.
+    SECTIONS: The field listing the canonical section order a finding compares against.
+    MARKER: The field carrying the owner tag a section was missing.
   """
 
   STATUS = "status"
   OK = "ok"
   JOB_MARKERS = "job_markers"
+  NOTE = "note"
+  VIOLATIONS = "violations"
+  KIND = "kind"
+  KEY = "key"
+  REASON = "reason"
+  VALUE = "value"
+  EXPECTED = "expected"
+  SECTION = "section"
+  SECTIONS = "sections"
+  MARKER = "marker"
+
+
+# ----------------------------------------------------------------------------------------
+class _Violation:
+  """
+  `_ResultKey.KIND` values `note_check` reports, the vocabulary its callers branch on.
+
+  Attributes:
+    UNKNOWN_KEY: A frontmatter key the note schema does not recognize.
+    BAD_TYPE: A recognized key whose raw value does not parse into its declared shape.
+    MISSING_SECTION: A required body section the note does not carry.
+    MISSING_MARKER: A present section whose next line is not its protected-owner tag.
+    SECTION_ORDER: The required sections are present but not in canonical order.
+  """
+
+  UNKNOWN_KEY = "unknown-key"
+  BAD_TYPE = "bad-type"
+  MISSING_SECTION = "missing-section"
+  MISSING_MARKER = "missing-marker"
+  SECTION_ORDER = "section-order"
 
 
 # ----------------------------------------------------------------------------------------
@@ -158,6 +197,9 @@ _WRITABLE_SCHEMA = {
     # the coordinator's tool verdict — LIST of open-vocabulary tool names (products declare
     # their own beyond the shipped four), so no member regex; an empty list is a legal verdict
     AssetTypeKey.TOOLS: _Kind.LIST,
+    # the level ladder's own four gates, spread from the closed set so the schema cannot drift
+    # from it; `spec_design_done` is already above and the two ladders share that one key name
+    **dict.fromkeys(LEVEL_GATES, _Kind.BOOL),
 }
 
 # Member-shape regex for the two `<category>/<slug>` token lists — `spec_targets` and
@@ -217,17 +259,25 @@ _REQUIRED_SECTIONS = (
     Section.HISTORY,
 )
 
+# The same roster on a level note (`spec_role` in `LEVEL_ROLES`), where `# Attachments` closes
+# the body as the registry of the level documents' own attachments. It is required there rather
+# than optional because every level note is brought to this shape by `catalog-note backfill`,
+# so an absent section means the backfill was never run — exactly what the check should say.
+_LEVEL_REQUIRED_SECTIONS = ( *_REQUIRED_SECTIONS, Section.ATTACHMENTS )
+
 # Sections that must carry their `#protected/<owner>/<region>` tag as the very next line
 # — a scaffolded placeholder is never a legitimate substitute.
 _PROTECTED_MARKERS = {
     Section.STATUS_BRIEF: PROTECTED_STATUS_BRIEF,
     Section.COORD_RULES: PROTECTED_COORD_RULES,
     Section.COORD_COMMANDS: PROTECTED_COORD_COMMANDS,
+    Section.ATTACHMENTS: PROTECTED_ATTACHMENTS,
 }
 
 # Sections the plugin owns but does not require — absent without complaint, marker-checked
 # when present. `# Attachments` only exists once an asset actually has one, and pre-existing
-# notes predate it, so requiring it would fail every existing asset.
+# notes predate it, so requiring it would fail every existing asset. An entry here that the
+# checked note's own role requires is skipped: the required pass already covered it.
 _OPTIONAL_PROTECTED_MARKERS = {
     Section.ATTACHMENTS: PROTECTED_ATTACHMENTS,
 }
@@ -285,7 +335,7 @@ def _parse_value(kind: str, raw: str, key: str) -> tuple[object, str | None]:
   """
   if kind == _Kind.BOOL:
     # guard: only the two literal tokens `flip_gate._set_bool` writes are accepted
-    if raw not in (BOOL_TRUE, _BOOL_FALSE):
+    if raw not in (BOOL_TRUE, BOOL_FALSE):
       return None, f"expected 'true' or 'false', got {raw!r}"
     return raw == BOOL_TRUE, None
   if kind == _Kind.STR:
@@ -429,13 +479,14 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str, *, today: str | None
   kind = _WRITABLE_SCHEMA.get(key)
   # guard: key outside the coordinator's closed writable schema — clean refusal, no write
   if kind is None:
-    return {_ResultKey.STATUS: _SetKeyStatus.REFUSED, "key": key, "reason": f"unknown key: {key}"}
+    return {_ResultKey.STATUS: _SetKeyStatus.REFUSED, _ResultKey.KEY: key,
+            _ResultKey.REASON: f"unknown key: {key}"}
 
   # validate and parse the CLI value against the key's declared shape
   value, error = _parse_value(kind, raw_value, key)
   # guard: value does not parse into the key's expected shape — clean refusal, no write
   if error is not None:
-    return {_ResultKey.STATUS: _SetKeyStatus.REFUSED, "key": key, "reason": error}
+    return {_ResultKey.STATUS: _SetKeyStatus.REFUSED, _ResultKey.KEY: key, _ResultKey.REASON: error}
 
   # read the note's current frontmatter so the value write lands precisely
   note = asset_dir / f"{asset_dir.name}.md"
@@ -447,7 +498,7 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str, *, today: str | None
   new_fm_text = _apply_value(fm_text, key, kind, value)
   # guard: the value already matches what is on disk — nothing to write or commit
   if new_fm_text == fm_text:
-    return {_ResultKey.STATUS: _SetKeyStatus.NOOP, "key": key}
+    return {_ResultKey.STATUS: _SetKeyStatus.NOOP, _ResultKey.KEY: key}
 
   # render the value, append the audit trail, and refresh the section explainers before writing
   value_str = _format_value(kind, value)
@@ -473,7 +524,7 @@ def _is_value_ok(raw: str, kind: str) -> bool:
     True when the value's shape matches `kind`; False otherwise.
   """
   if kind == _Kind.BOOL:
-    return raw.lower() in (BOOL_TRUE, _BOOL_FALSE)
+    return raw.lower() in (BOOL_TRUE, BOOL_FALSE)
   if kind == _Kind.STR:
     return bool(raw)
   if kind == _Kind.LIST:
@@ -507,20 +558,26 @@ def _find_section_line_index(body: str, heading: str) -> int | None:
 
 def note_check(asset_note: Path) -> dict:
   """
-  Structurally check an asset's status folder-note: frontmatter schema + required sections.
+  Structurally check a folder-note — asset status or level: frontmatter schema + required sections.
 
   Read-only — reports every violation found, applies no fix. An unrecognized frontmatter key is
   an "unknown-key" violation — which is how a job marker written into frontmatter surfaces, since
   both markers belong to the runtime sidecar and neither is in the recognized schema; a
   recognized key shaped wrong for its declared kind is "bad-type";
   a missing required section (`# Gates`, `# Status brief`, `# Coordinator rules`,
-  `# Coordinator commands`, `# History`) is "missing-section"; a present protected section
-  (`# Status brief`, `# Coordinator rules`, `# Coordinator commands`) whose very next line is
-  not its own protected-owner tag is "missing-marker"; the optional `# Attachments` section is
-  never "missing-section" when absent, but a present one whose very next line is not its own
-  protected-owner tag is "missing-marker" just like the required sections, and it takes no part
-  in the section-order check; the required sections found out of canonical order is one
-  "section-order" violation.
+  `# Coordinator commands`, `# History`, plus `# Attachments` on a level note) is
+  "missing-section"; a present protected section whose very next line is not its own
+  protected-owner tag is "missing-marker"; the required sections found out of canonical order is
+  one "section-order" violation. The roster follows the note's own `spec_role`: on an asset's
+  status note `# Attachments` stays optional — never "missing-section" when absent, still
+  "missing-marker" when present and untagged, and outside the order check — while on a product
+  or catalog level note it closes the required roster like any other section. No asset-only key
+  is ever required of a level note.
+
+  Guarantees:
+    - The required-section roster follows the note's own `spec_role`, so no asset-only key and
+      no asset-only section is ever demanded of a level note, and vice versa.
+    - Read-only: the note is never written, and no violation is repaired.
 
   Args:
     asset_note: The status folder-note path to check.
@@ -530,6 +587,15 @@ def note_check(asset_note: Path) -> dict:
     exactly when `violations` is empty; `job_markers` is the note's sidecar entry, every field of
     the closed marker schema present, unrecorded ones as `None`.
   """
+
+  # Contract:
+  # The required-section roster follows the note's own `spec_role`: no asset-only key and no
+  # asset-only section is ever demanded of a level note, and no level-only one of an asset note.
+
+  # Contract:
+  # Read-only — the note is never written and no violation is repaired.
+
+  # split the note into the two halves the checks below read, and open the findings list
   text = asset_note.read_text()
   fm, fm_end = flip_gate._parse_frontmatter(text)
   body = text[fm_end:]
@@ -539,17 +605,21 @@ def note_check(asset_note: Path) -> dict:
   for key, raw in fm.items():
     kind = _NOTE_SCHEMA.get(key)
     if kind is None:
-      violations.append({"kind": "unknown-key", "key": key})
+      violations.append({ _ResultKey.KIND: _Violation.UNKNOWN_KEY, _ResultKey.KEY: key })
       continue
     if not _is_value_ok(raw, kind):
-      violations.append({"kind": "bad-type", "key": key, "expected": kind, "value": raw})
+      violations.append({ _ResultKey.KIND: _Violation.BAD_TYPE, _ResultKey.KEY: key,
+                          _ResultKey.EXPECTED: kind, _ResultKey.VALUE: raw })
+
+  # the note's own role picks the roster: a level note owes one section more than an asset's
+  required = _LEVEL_REQUIRED_SECTIONS if fm.get(SpecKey.ROLE) in LEVEL_ROLES else _REQUIRED_SECTIONS
 
   # locate each required section's line, recording its position for the order check below
   positions: dict[str, int] = {}
-  for heading in _REQUIRED_SECTIONS:
+  for heading in required:
     idx = _find_section_line_index(body, heading)
     if idx is None:
-      violations.append({"kind": "missing-section", "section": heading})
+      violations.append({ _ResultKey.KIND: _Violation.MISSING_SECTION, _ResultKey.SECTION: heading })
     else:
       positions[heading] = idx
 
@@ -561,30 +631,35 @@ def note_check(asset_note: Path) -> dict:
       continue
     marker_idx = positions[section] + 1
     if marker_idx >= len(lines) or lines[marker_idx] != marker:
-      violations.append({ "kind": "missing-marker", "section": section, "marker": marker })
+      violations.append({ _ResultKey.KIND: _Violation.MISSING_MARKER, _ResultKey.SECTION: section,
+                          _ResultKey.MARKER: marker })
 
   # an optional section is never a missing-section finding, but a present one still has to
   # carry its owner tag — an untagged block means some other writer has claimed the heading
   for section, marker in _OPTIONAL_PROTECTED_MARKERS.items():
+    # guard: this role requires the section — the required pass above already checked its marker
+    if section in required:
+      continue
     idx = _find_section_line_index(body, section)
     # guard: the optional section is absent — nothing to validate
     if idx is None:
       continue
     if idx + 1 >= len(lines) or lines[idx + 1] != marker:
-      violations.append({ "kind": "missing-marker", "section": section, "marker": marker })
+      violations.append({ _ResultKey.KIND: _Violation.MISSING_MARKER, _ResultKey.SECTION: section,
+                          _ResultKey.MARKER: marker })
 
   # order is checked only over the sections that were actually found — a missing one is already
   # reported above and must not also trip a spurious order violation
-  present_order = [positions[heading] for heading in _REQUIRED_SECTIONS if heading in positions]
+  present_order = [positions[heading] for heading in required if heading in positions]
   if present_order != sorted(present_order):
-    violations.append({"kind": "section-order", "sections": list(_REQUIRED_SECTIONS)})
+    violations.append({ _ResultKey.KIND: _Violation.SECTION_ORDER, _ResultKey.SECTIONS: list(required) })
 
   # the coordinator branches on `ok` alone to decide whether a repair pass is owed at all, and
   # reads the sidecar block for the two markers it used to find in the frontmatter above
   return {
-      "note": str(asset_note),
+      _ResultKey.NOTE: str(asset_note),
       _ResultKey.OK: not violations,
-      "violations": violations,
+      _ResultKey.VIOLATIONS: violations,
       _ResultKey.JOB_MARKERS: spec_job_markers.read(flip_gate._repo_root(asset_note.parent), asset_note),
   }
 

@@ -72,7 +72,7 @@ Sole exception: `lazy-core.scaffold.md` wraps a consumer-owned `## Registry` blo
 
 Files the consumer authors, where this skill contributes keys or sections: `settings.json`, `lazy.settings.json`, `.gitignore`, the sandbox and permission files, `pyproject.toml`-shaped config. Add what is missing, leave what is there byte-for-byte.
 
-A **genuine conflict** — an existing value that directly opposes a required one (e.g. `sandbox.enabled: false` against a required `true`) — is the only case that asks. `AskUserQuestion` naming the file, quoting the region, showing a unified diff; options `merge-shipped` / `keep-local`. "Conflict" means you cannot determine what should survive, not merely that the bytes differ.
+A **genuine conflict** — an existing value that directly opposes a required one (e.g. `sandbox.enabled: false` against a required `true`) — is the only case that asks. The raising step prints the four context items before the call (`lazy-core.skill-writing` § 11): **where** — `/lazy-core.install · Step <N> — <title>` and the target file path; **found** — the conflicting region quoted, with a unified diff of local against shipped; **why asking** — the local value contradicts the required one and the skill cannot tell which should survive; **answers** — `merge-shipped` writes the required value into the file now, `keep-local` leaves the file untouched and the step states its conflict outcome; nothing beyond the file itself is persisted, so the question returns on the next run while the contradiction stands. The call: `header` a short label, `question` naming the file and the key, options `merge-shipped` / `keep-local`, each with a description of its effect. "Conflict" means you cannot determine what should survive, not merely that the bytes differ.
 
 ## Step 0: Verify Python ≥ 3.12 (floor)
 
@@ -332,10 +332,17 @@ The runtime layer is **not** gated on the daemon. Routines, `.experts/`, the exp
 What the runtime layer does need is a repo: `.experts/`, the routine commits, and the tracked settings all live in one. When `is_git = false` (from 9a), ask once:
 
 ```
+Context (print before asking):
+- Where: /lazy-core.install · Step 9 — Bootstrap runtime defaults (9b); target <cwd>
+- Found: `git rev-parse --show-toplevel` failed in <cwd> — the directory is not inside a git repository
+- Why asking: the runtime layer (`.experts/`, the tracked `lazy.settings.json`, the commits routines make) needs a repo, with or without a background daemon; creating one is the operator's call
+- Answers: `Initialize git here` — runs `git init` in <cwd> now, Steps 9c–13.5 proceed; `Skip — no runtime setup this run` — nothing written, Steps 9c–13.5 state `skipped-not-in-git-repo`; not persisted, asked again on the next run in a non-repo directory
 AskUserQuestion:
-  question: "Initialize a git repository here so the runtime config can be tracked?"
-  description: "The current directory is not a git repo, but the runtime layer needs one for `.experts/`, the tracked settings, and the commits routines make — with or without a background daemon. 'Initialize' runs `git init` here; 'Skip' bypasses runtime/experts setup on this run (re-run after `git init`)."
-  options: ["Initialize git here", "Skip — no runtime setup this run"]
+  header: "Init git?"
+  question: "Initialize a git repository in <cwd> so the lazycortex runtime config can be tracked?"
+  options:
+    - "Initialize git here" — "Runs `git init` here; runtime setup continues in this run."
+    - "Skip — no runtime setup this run" — "Leaves the directory as is; re-run `/lazy-core.install` after `git init`."
 ```
 
   - `Initialize git here` → `Bash(git init)` in cwd, keep `<repo-root>` = cwd, continue with 9c.
@@ -450,9 +457,9 @@ Register every expert candidate the enabled plugins ship — there is no per-can
 
 ### 1. Discover candidates
 
-Glob for agent files containing `expert_protocol:` frontmatter at three scopes. For the plugin cache, resolve the latest version per plugin via lexicographic sort on the version directory:
+Glob for agent files containing `expert_protocol:` frontmatter at three scopes. For the plugin cache, resolve the latest version per plugin via numeric version sort on the version directory (`sort -V`, so `10.0.0` outranks `9.1.1`):
 
-- `~/.claude/plugins/cache/*/*/` — list subdirectories, take the lexicographically last one as latest version, then glob `<latest-version>/agents/*.md`
+- `~/.claude/plugins/cache/*/*/` — list subdirectories, take the highest by numeric version sort as latest version, then glob `<latest-version>/agents/*.md`
 - `~/.claude/agents/*.md`
 - `<repo-root>/.claude/agents/*.md`
 
@@ -555,11 +562,17 @@ Any key besides `_version` in either view → state **already-configured**, skip
 Otherwise ask **once**:
 
 ```
+Context (print before asking):
+- Where: /lazy-core.install · Step 11.5 — Seed providers (optional); target <repo-root>/.claude/lazy.settings.local.json (`providers`)
+- Found: no `providers` key besides `_version` in the tracked `lazy.settings.json` or the local overlay (probe output: <json>)
+- Why asking: a provider entry lets an expert's `provider` field spawn against a non-Anthropic endpoint (base URL, token variable, four-tier model map) instead of the Anthropic default; which endpoints exist on this host is config nobody can derive
+- Answers: `Yes — name the provider(s)` — a follow-up collects the name(s), each is added now via `/lazy-core.providers add` into the gitignored local overlay, never tracked settings; `No` — nothing written, not persisted, asked again on the next run while the block stays empty (or run `/lazy-core.providers add` any time later)
 AskUserQuestion:
   header: "Providers"
-  question: "Connect alternative LLM providers for expert jobs?"
-  description: "A provider entry lets an expert's `provider` field spawn against a non-Anthropic endpoint (base URL, token variable, four-tier model map) instead of the Anthropic default. Entries live in the gitignored `.claude/lazy.settings.local.json`, never in tracked settings — 'No' writes nothing; run `/lazy-core.providers add` any time later."
-  options: ["Yes — name the provider(s)", "No"]
+  question: "Connect alternative LLM providers for expert jobs in <repo-root>? (entries go to the gitignored `.claude/lazy.settings.local.json` only)"
+  options:
+    - "Yes — name the provider(s)" — "Next question asks for the provider name(s); each entry lands in the local overlay."
+    - "No" — "Writes nothing; run `/lazy-core.providers add` any time later."
 ```
 
 - **"No"** → state **skipped-per-operator-choice**, no write.
@@ -618,11 +631,17 @@ else:
 - Output `unconfigured` → ask **once**:
 
 ```
+Context (print before asking):
+- Where: /lazy-core.install · Step 12.5 — Restore externally-sourced working directories; target <repo-root>/.claude/lazy.settings.local.json (`external_dirs.root`)
+- Found: tracked `external_dirs.paths` declares <N> director(y/ies): <comma-joined paths>; this checkout's local overlay has neither `external_dirs.root` nor `declined` (probe: `unconfigured`)
+- Why asking: where those directories live on this machine is per-checkout and recorded nowhere (e.g. the interactive copy of this project)
+- Answers: `Link them from a source root — I'll give the absolute path` — a follow-up takes the absolute path, persisted as `external_dirs.root` in the gitignored local overlay, and the declared paths are linked from it now; `Leave as is — don't ask again` — persists `external_dirs.declined = true` in the local overlay, the directories stay absent and any routine that needs one fails loudly on its next tick; never re-asked either way (delete `declined` to be asked again)
 AskUserQuestion:
   header: "External dirs"
   question: "This repo declares <N> working director(y/ies) it does not carry in git (<comma-joined paths>). Where are they on this machine?"
-  description: "Recorded for THIS checkout in its own gitignored `lazy.settings.local.json` as `external_dirs.root` — the absolute path the declared paths are linked from (e.g. the interactive copy of this project). 'Leave as is' records the decision so this is never asked again; the declared directories stay absent and any routine that needs one fails loudly on its next tick."
-  options: ["Link them from a source root — I'll give the absolute path", "Leave as is — don't ask again"]
+  options:
+    - "Link them from a source root — I'll give the absolute path" — "Next question asks for the source root; recorded for this checkout only, links created now."
+    - "Leave as is — don't ask again" — "Records the decision in the local overlay; the declared directories stay absent."
 ```
 
 On the first option, ask one follow-up for the absolute path, then persist and apply:
@@ -676,11 +695,17 @@ print('proposed: ' + ' '.join(ignore_fix_lines(p)) if ignore_fix_lines(p) else '
 `.gitignore` is a tracked file, so this is never a silent write. Ask once, quoting the exact lines:
 
 ```
+Context (print before asking):
+- Where: /lazy-core.install · Step 12.5 — Restore externally-sourced working directories (ignore coverage); target <repo-root>/.gitignore
+- Found: git can see the just-linked director(y/ies) <comma-joined paths>; proposed lines: <the proposed lines, one per line, each with its reason — 'no rule' or 'existing <path>/ rule matches directories only, not the symlink'>
+- Why asking: `.gitignore` is a tracked file — appending to it is never a silent write
+- Answers: `Append the lines` — appends exactly the proposed lines now, existing lines untouched, file left modified and uncommitted; `Leave .gitignore as is` — nothing written, the links stay visible to git, the working tree stays dirty and a daemon on this checkout halts with `uncommitted_changes` on its first tick; not persisted, asked again on the next run while the lines are missing
 AskUserQuestion:
   header: "Ignore links?"
-  question: "git can see the external director(y/ies) just linked (<comma-joined paths>). Append <N> line(s) to .gitignore?"
-  description: "Appends exactly: <the proposed lines, one per line, each with its reason — 'no rule' or 'existing <path>/ rule matches directories only, not the symlink'>. Existing lines are left untouched. Declining leaves the links visible to git: the working tree stays dirty and a daemon on this checkout halts with `uncommitted_changes` on its first tick."
-  options: ["Append the lines", "Leave .gitignore as is"]
+  question: "git can see the external director(y/ies) just linked (<comma-joined paths>). Append <N> line(s) to <repo-root>/.gitignore?"
+  options:
+    - "Append the lines" — "Appends exactly the proposed lines; existing lines untouched."
+    - "Leave .gitignore as is" — "Links stay visible to git; the daemon halts with `uncommitted_changes` on its first tick."
 ```
 
 On **Append the lines**:
@@ -770,11 +795,17 @@ else:
 The project has `daemon.enabled` on record as true; this decides which machine and checkout actually drive the supervisor:
 
 ```
+Context (print before asking):
+- Where: /lazy-core.install · Step 13 — Daemon gate (enabled + run_here) + supervisor install; target <repo-root>/.claude/lazy.settings.json (`daemon.run_here`)
+- Found: `daemon.enabled` is `true` on record; `daemon.run_here` is `unset` (or `invalid-shape` — offending value: <value>) — no hostname-to-checkout map names a driver
+- Why asking: which machine and which checkout drive the daemon is known only to the operator; a wrong guess starts a second daemon on the same project
+- Answers: `Yes — this checkout drives it` — maps <hostname> to <repo-root> in the tracked file now and installs a supervisor (launchd on macOS, systemd on Linux); `No — no checkout yet` — records an empty map, the project keeps its daemon config and nothing starts it until a checkout is named; persisted in the tracked file (travels with the project to every clone), never re-asked — change it by editing the map and re-running `/lazy-core.install`
 AskUserQuestion:
   header: "Run here?"
-  question: "Drive this project from THIS checkout on this machine? (the project is daemon-driven — this names the one checkout that drives it)"
-  description: "Recorded in the tracked `lazy.settings.json` as `daemon.run_here`, a hostname-to-checkout map that travels with the project to every clone. 'Yes' maps this machine to this checkout's path and installs a supervisor (launchd on macOS, systemd on Linux). 'No' records an empty map — the project keeps its daemon config, and nothing starts it until a checkout is named. Only the named pair runs the daemon; the daemon itself refuses to start anywhere else, including a second checkout on this same machine. Change it later by editing the map and re-running `/lazy-core.install`."
-  options: ["Yes — this checkout drives it", "No — no checkout yet"]
+  question: "Drive the daemon for <repo-root> from THIS checkout on <hostname>? (the project is daemon-driven — this names the one checkout that drives it; the daemon refuses to start anywhere else, including a second checkout on this machine)"
+  options:
+    - "Yes — this checkout drives it" — "Maps this host to this checkout in the tracked `lazy.settings.json` and installs the supervisor."
+    - "No — no checkout yet" — "Records an empty map; no supervisor starts anywhere until a checkout is named."
 ```
 
   Persist the answer into the tracked file, keeping entries for other machines untouched:
@@ -937,7 +968,21 @@ Run the `sandbox-sync` call above and read its JSON result:
 1. `changed: true` and `present: false` → State **sandbox-created**.
 2. `changed: true` and `present: true` → State **sandbox-merged** (`added_read` / `added_write` name what was appended).
 3. `changed: false` → State **sandbox-unchanged**.
-4. `enabled: false` → the checkout has confinement recorded as off, which contradicts the required `true`; the CLI left it alone. Raise one `AskUserQuestion` per the consumer-owned-config policy and state **sandbox-conflict** when the operator keeps it off.
+4. `enabled: false` → the checkout has confinement recorded as off, which contradicts the required `true`; the CLI left it alone. Raise one `AskUserQuestion` per the consumer-owned-config policy and state **sandbox-conflict** when the operator keeps it off:
+
+```
+Context (print before asking):
+- Where: /lazy-core.install · Step 13.5 — Configure expert-spawn sandbox in .runtime/sandbox.settings.json; target <repo-root>/.runtime/sandbox.settings.json
+- Found: `sandbox.enabled` is `false` on record (region quoted, unified diff against the required `true`); `sandbox-sync` left it alone
+- Why asking: the local value contradicts the required one and the skill cannot tell which should survive — confinement may have been switched off on purpose
+- Answers: `merge-shipped` — writes `enabled: true` into the file now, expert spawns run confined; `keep-local` — file untouched, expert spawns on this checkout run unconfined, state **sandbox-conflict**; nothing beyond the file is persisted, so the question returns on the next run while the value stays `false`
+AskUserQuestion:
+  header: "Sandbox off"
+  question: "<repo-root>/.runtime/sandbox.settings.json records `enabled: false`, but expert spawns require `true`. Merge the shipped value or keep the local one?"
+  options:
+    - "merge-shipped" — "Writes `enabled: true`; expert spawns are confined."
+    - "keep-local" — "Leaves `false`; expert spawns on this checkout run unconfined (`sandbox-conflict`)."
+```
 
 `Read <repo-root>/.claude/settings.local.json` and apply Block 2 + migrate:
 
@@ -970,11 +1015,17 @@ print((sec.get('metrics') or {}).get('enabled', 'unset'))
 - Output `unset` → ask once:
 
 ```
+Context (print before asking):
+- Where: /lazy-core.install · Step 13.6 — Provision metrics (port + repo label + scrape-targets file); target <repo-root>/.claude/lazy.settings.json (`daemon.metrics`)
+- Found: Step 13 stated **run-here** for this checkout; `daemon.metrics.enabled` is `unset` in the tracked file
+- Why asking: whether this checkout's daemon is scraped is project policy — nothing on disk says a Prometheus-compatible scraper exists
+- Answers: `Yes — enable metrics` — persists `metrics.enabled = true`, `repo_label` (default: folder basename) and `bind` in the tracked file, allocates a free loopback port into the gitignored local overlay, regenerates the host scrape-targets file, all now; `No — this checkout stays unscraped` — persists `metrics.enabled = false` in the tracked file; either answer is on record and never re-asked (edit the key to change it)
 AskUserQuestion:
   header: "Metrics?"
-  question: "Enable the Prometheus /metrics endpoint for this checkout's daemon?"
-  description: "Exposes runtime health (routine ticks, errors, tokens, queue depth) on a loopback HTTP port for a Prometheus-compatible scraper. A free port is picked automatically and recorded per-machine; the repo label defaults to the folder name. 'No' is recorded and never re-asked."
-  options: ["Yes — enable metrics", "No — this checkout stays unscraped"]
+  question: "Enable the Prometheus /metrics endpoint for the daemon of <repo-root> on <hostname>?"
+  options:
+    - "Yes — enable metrics" — "Exposes routine ticks, errors, tokens, queue depth on a loopback HTTP port; the port is picked automatically and recorded per-machine."
+    - "No — this checkout stays unscraped" — "Recorded as `metrics.enabled = false`; never re-asked."
 ```
 
   - `No` → persist `metrics.enabled = false` into the tracked `daemon` section (`save_section`); state **metrics-declined**.

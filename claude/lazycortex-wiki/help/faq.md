@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, and the tag-values canon.
-last_regen: 2026-09-02
+last_regen: 2026-09-07
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,7 +13,7 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 330b97960670773e9761442bb7daab587dc239e0
+source_sha: 5fcbdd05ba8f7b53d2a1781f6bc628c2c6208637
 ---
 # Frequently asked questions
 
@@ -39,13 +39,15 @@ The id must match `^[a-z][a-z0-9_-]*$` — lowercase letters, digits, hyphens, a
 
 ---
 
-## What does the "review-skip filter" question in `/lazy-wiki.configure` do?
+## Does `/lazy-wiki.configure` ask me to skip documents currently under review?
 
-During Phase 7 of the configure wizard, you are asked whether to skip documents that are currently under review. If you answer yes, the scope gains a filter that excludes any node with `review_active: true` in its frontmatter — the same flag set by `lazycortex-review` when a review opens. While a document is under active review, the curator will not classify or link it, and it will not appear in the topics index. When the review closes and `review_active` is removed, the document re-enters the wiki on the next relink.
+No — that used to be a yes/no question, but the wizard no longer asks it. Every scope now gets the review-skip filter seeded automatically: whenever a scope's `filter.frontmatter` sub-block lacks a `review_active` key, the wizard adds `review_active.not_in = [true]` for you. In a repo that doesn't run `lazycortex-review`, this is harmless — no document ever carries the flag. In a repo that does, it means a document with `review_active: true` in its frontmatter (the same flag `lazycortex-review` sets when a review opens) is left out of the wiki — not classified, not linked, not indexed — until the review closes and the flag is removed, at which point it re-enters the wiki on the next relink.
+
+If you have already set your own predicate on that key by hand in `lazy.settings.json`, the wizard never overwrites it — the auto-seed only fills in the key when it's absent.
 
 The same filter is also seeded into the `lazy-wiki.scan` routine at install time so that the runtime daemon drops review-active documents before they ever reach the curator. Both filters work together — you do not need to configure them separately.
 
-Alongside the review-skip answer, every scope is seeded with `folder_note: false`. A note named after its own folder (`sync/sync.md` inside `sync/`) displays as the folder itself under the folder-notes convention, so it is a structural navigation node rather than a document worth curating; excluding it keeps summaries, tags, and See-also sections off your folder tree. You are not asked about this — it is the default. Set `folder_note: true` in the scope's `filter` by hand for the opposite selection, or remove the key to curate folder notes alongside everything else.
+Alongside the review-skip filter, every scope is seeded with `folder_note: false`, also without a question. A note named after its own folder (`sync/sync.md` inside `sync/`) displays as the folder itself under the folder-notes convention, so it is a structural navigation node rather than a document worth curating; excluding it keeps summaries, tags, and See-also sections off your folder tree. Set `folder_note: true` in the scope's `filter` by hand for the opposite selection, or remove the key to curate folder notes alongside everything else. Richer predicates — other frontmatter keys, `in` allow-lists — follow the same schema and are hand-editable in `lazy.settings.json`; the wizard only seeds these two structural defaults.
 
 ---
 
@@ -127,7 +129,7 @@ The scope id you passed is not present in `lazy.settings.json[wiki.scopes]`. Eit
 
 The axis vocabulary itself — `wiki.tag_axes` — is repository-wide, not per scope: it is the closed set of coordinate dimensions (`domain`, `kind`, `layer`, and so on) every scope draws from, seeded with the mandatory `doc-kind` axis by `/lazy-wiki.install`. Edit it with `/lazy-wiki.configure vault`. A scope's own `tag_axes` is only a **narrowing** of that vocabulary — an empty or absent list means the scope uses the full vault vocabulary, and a scope can never widen it by naming an axis the vault doesn't declare.
 
-To narrow one scope's axes, run `/lazy-wiki.configure` for that scope and answer Phase 5 with the subset it should use. To grow or shrink the vocabulary itself for every scope at once, run `/lazy-wiki.configure vault` instead — `/lazy-wiki.configure` for a single scope offers only what `wiki.tag_axes` already contains and cannot add a new axis to it.
+To narrow one scope's axes, run `/lazy-wiki.configure` for that scope and answer Phase 5 with the subset it should use. To grow or shrink the vocabulary itself for every scope at once, run `/lazy-wiki.configure vault` instead — `/lazy-wiki.configure` for a single scope offers only what `wiki.tag_axes` already contains and cannot add a new axis to it. Removing an axis at the vault level is a destructive write: the wizard names how many tagged nodes and narrowing scopes would be orphaned before you confirm it.
 
 Either way, expect a normalization pass on the next relink or on the weekly `lazy-wiki.tag-normalize` routine. On the next `/lazy-wiki.relink` run, Step 2 resolves each scope's effective axis list (vault vocabulary narrowed by the scope), and the tag-canon step dispatches the `wiki.tag-curator` expert to judge a canonical axis-value set for the scope and apply it via the deterministic `retag` primitive, consolidating any values that drifted into near-synonyms. Findings of `unknown-axis` from `/lazy-wiki.doctor` indicate nodes that carry axis keys not in the current effective set — a relink clears them.
 
@@ -147,7 +149,7 @@ Two things trigger a canon pass: `/lazy-wiki.relink` runs it for every configure
 
 Run `/lazy-wiki.configure vault`. It edits the two repository-wide keys of `lazy.settings.json[wiki]` that no other branch of the wizard reaches: `tag_axes`, the closed vocabulary every scope narrows from (see the tag-axes question above), and `exclude`, the glob list unioned into every scope's `exclude_paths` automatically. `docs/structure.md` is seeded into `wiki.exclude` by `/lazy-wiki.install` and should stay there — the project-structure map has no frontmatter to defend itself, and without the entry the curator would append a `# See also` block to it. The generated domain-spec tree needs no entry in either scope or vault `exclude` — it is derived from `wiki.domains.output` and excluded from every scope structurally, so `/lazy-wiki.configure` won't let you add it there.
 
-The regular scope branch of `/lazy-wiki.configure` still collects an `exclude_paths` list per scope, but only for exclusions specific to that one scope, on top of what `wiki.exclude` already covers — you never need to repeat the vault-wide list per scope.
+The regular scope branch of `/lazy-wiki.configure` still collects an `exclude_paths` list per scope, but only for exclusions specific to that one scope, on top of what `wiki.exclude` already covers — you never need to repeat the vault-wide list per scope. When a scope's `paths` reach into a spec catalog managed by `lazycortex-specs` (a glob starting with the configured `spec.vault_root`, `specs` by default), the wizard skips the exclude question for that scope entirely — the catalog's own request-inbox and working-paper exclusions are seeded by `/lazy-spec.install`, so nothing is collected here.
 
 ---
 
@@ -175,7 +177,7 @@ Mirror bodies are overwritten on every sync, so a hand-edit to a mirrored node's
 
 ## Is it safe to re-run `/lazy-wiki.install` on a project that is already set up?
 
-Yes. `/lazy-wiki.install` is fully idempotent. It will not overwrite existing scope configurations, agent model overrides, routine entries, or expert definitions that you have customised. It reports each item's outcome (`already-present`, `kept-local`, `unchanged`) so you can see what it skipped. The only interactive prompt you may see is around rule file drift — if the shipped navigation rule differs from your local copy, the install will ask whether to overwrite.
+Yes. `/lazy-wiki.install` is fully idempotent. It will not overwrite existing scope configurations, agent model overrides, routine entries, or expert definitions that you have customised. It reports each item's outcome (`already-present`, `kept-local`, `unchanged`) so you can see what it skipped. The one interactive prompt you may still see is around a genuine conflict — an existing `lazy.settings.json` value that contradicts a value the install requires; when nothing in your settings contradicts what's shipped, install proceeds without asking.
 
 ---
 
@@ -228,6 +230,8 @@ Without the daemon, the map only updates when you run `/lazy-wiki.structure rebu
 `wiki.domains` (configured via `/lazy-wiki.configure domains`) generates a tree of documentation — `docs/domains/` by default — synthesised from `Domain(…)` markers annotated on code, grouped by a dictionary of accepted group keys. Each generated doc carries fixed Terms, Principles, and Mechanics sections, with formulas verified against the annotated code, plus a trailing Contracts section for any attributed `Contract:` blocks. Query the generated tree with `/lazy-wiki.domains group <group-key> [<section>]` or `/lazy-wiki.domains term "<text>"` — it returns one doc's section or matching excerpts, never the whole tree, mirroring how `/lazy-wiki.structure query` works over the project-structure map instead.
 
 Each generated doc also carries `wiki/<axis>/<value>` tags in its own frontmatter, drawn from the same repository-wide `wiki.tag_axes` vocabulary the wiki scopes use, and reusing a value already settled in the tag-values dictionary where one fits. You never set these by hand — the domain-spec writer chooses them from the group's `Domain(…)` blocks, carrying forward any tags an existing doc already had rather than re-minting them on every regeneration.
+
+Setting up `wiki.domains` for the first time only asks you for the code globs to scan; the dictionary path (`docs/guidelines/domain-groups.md`) and the output directory (`docs/domains`) are taken from their shipped defaults without a question, and the dictionary is seeded from a skeleton template the first time it's missing. Moving either path afterwards is an `/lazy-wiki.configure domains` edit-mode run, not a fresh-setup question.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-09-06
+last_regen: 2026-09-07
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,7 +21,7 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 8506774fc3a7c0e7c006dce9ca39cf02b9407b1b
+source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 ---
 # Frequently asked questions
 
@@ -214,6 +214,12 @@ Always use the `lazy-python.test-writer` agent. The agent applies the Paranoid T
 ## A test written by the agent fails against the current implementation. Should I fix the test?
 
 No. Per the Golden Rule in `lazy-python.test-writer`: if a test correctly reflects documented behaviour but fails against the current implementation, the implementation is suspect. The agent will add a `# FAILS: <reason>` comment above the test method and report the divergence to you. Fix the production code (or update the docstring if the spec has changed), not the test. Modifying an existing test also requires your explicit approval naming the specific test file — the agent will ask before touching it.
+
+---
+
+## `/lazy-python.check-style` wants to fix an issue by editing a test file. Why is it stopping to ask?
+
+Step 5's test-edit guard fires whenever the minimal fix for a Step 3 or Step 4 finding would touch a file under `tests/**`. The skill names the exact test file and the finding it's tied to, then asks you to choose between letting it edit that test just for this run or leaving the test untouched and fixing the code instead — it never doctors a test on its own judgement, because a test edit can just as easily paper over a real regression as fix a stale expectation. Choosing to keep the test means any remaining issue attached to it stays open in Step 6's report rather than being silently cleared.
 
 ---
 

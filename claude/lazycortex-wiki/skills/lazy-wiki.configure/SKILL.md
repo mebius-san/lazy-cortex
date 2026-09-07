@@ -5,7 +5,7 @@ allowed-tools: Read, Edit, Write, AskUserQuestion, Skill, Bash(python3 *), Bash(
 ---
 # lazy-wiki.configure
 
-Interactive wizard. Creates or edits a scope entry in `lazy.settings.json[wiki.scopes]` for the current repo — or, invoked as `/lazy-wiki.configure domains`, the `wiki.domains` section that drives domain-spec generation (see **Domains branch** below) — or, invoked as `/lazy-wiki.configure mirror`, an existing scope's nested `mirror` block that mirrors a foreign repo's markdown into the vault (see **Mirror branch** below) — or, invoked as `/lazy-wiki.configure terms`, a scope of the `terms` section that drives the terms dictionary (see **Terms branch** below) — or, invoked as `/lazy-wiki.configure structure`, the `structure` section that drives the project-structure map (see **Structure branch** below) — or, invoked as `/lazy-wiki.configure vault`, the repository-wide keys of the `wiki` section itself: the axis vocabulary `wiki.tag_axes` every scope narrows from, and the exclusion list `wiki.exclude` every scope inherits (see **Vault branch** below). Each field is collected one question at a time via `AskUserQuestion`. This wizard only collects **genuine project config that cannot be derived** — the topics-index path, scope globs, exclude globs, classification axes, and review-skip filter. There is no install-scope question (the wizard always edits the current repo's `lazy.settings.json`) and no environment probe.
+Interactive wizard. Creates or edits a scope entry in `lazy.settings.json[wiki.scopes]` for the current repo — or, invoked as `/lazy-wiki.configure domains`, the `wiki.domains` section that drives domain-spec generation (see **Domains branch** below) — or, invoked as `/lazy-wiki.configure mirror`, an existing scope's nested `mirror` block that mirrors a foreign repo's markdown into the vault (see **Mirror branch** below) — or, invoked as `/lazy-wiki.configure terms`, a scope of the `terms` section that drives the terms dictionary (see **Terms branch** below) — or, invoked as `/lazy-wiki.configure structure`, the `structure` section that drives the project-structure map (see **Structure branch** below) — or, invoked as `/lazy-wiki.configure vault`, the repository-wide keys of the `wiki` section itself: the axis vocabulary `wiki.tag_axes` every scope narrows from, and the exclusion list `wiki.exclude` every scope inherits (see **Vault branch** below). Each field is collected one question at a time via `AskUserQuestion`. This wizard only collects **genuine project config that cannot be derived** — the topics-index path, scope globs, exclude globs, and classification axes; the review-skip filter, the domain dictionary path, and the domain output directory are seeded from shipped defaults without a question. There is no install-scope question (the wizard always edits the current repo's `lazy.settings.json`) and no environment probe.
 
 **Read-first.** Re-running for an existing scope `id` (or for an existing `wiki.domains` section) enters edit mode: each persisted value is read from `lazy.settings.json` first and shown as the current value; pressing Enter keeps it untouched. A field is re-asked only to let the operator change it — never to re-collect a value already on record.
 
@@ -26,7 +26,7 @@ This skill has six mutually exclusive branches; exactly one runs per invocation.
    - `Phase 8 — Write back + log`
    - `Phase 9 — Refresh navigation-rule Coverage`
    - `Report`
-2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Outcomes: `verified` / `collected` / `skipped-per-user-choice` / `written` / `logged` / `refreshed` / `unchanged` / `absent` / `report-emitted`.
+2. **Re-emit the ledger line for each step — `in_progress` on enter, `completed` on exit.** Outcomes: `verified` / `collected` / `derived` / `skipped-per-user-choice` / `written` / `logged` / `refreshed` / `unchanged` / `absent` / `report-emitted`.
 3. **Do not reach the Report step until every prior task is `completed`.**
 4. **The Report step is a structural verifier.** Its output MUST contain one line per task above. A missing line is a bug; do not render the report with gaps.
 5. **Orient before the branch's first `AskUserQuestion`.** Print two to four lines naming what the section governs, which artifact it produces and where that artifact lives, and what the values being collected mean — the vocabulary of the questions ahead (`depth_profiles` classes and their three depths, `source_exclude` versus `exclude_paths`, `tag_axes`, a `mirror` block). An operator who has not read this SKILL.md cannot answer a question phrased in its internal vocabulary, and a guessed answer is written to settings as a decision. Say it once per invocation, before the first question; do not repeat it per question.
@@ -39,7 +39,12 @@ Outcome: `verified`.
 
 ## Phase 2 — Collect scope id
 
-`AskUserQuestion`: *"Scope id (alphanumeric + hyphens/underscores, e.g. `docs` or `codebase`)?"*
+Context (print before asking):
+- Where: /lazy-wiki.configure · Phase 2 — Collect scope id; target `lazy.settings.json[wiki.scopes]`
+- Found: scope ids on record `<ids joined, or none>`
+- Why asking: the id names a new scope or picks an existing one to edit — nothing on record derives into a name
+- Answers: an existing id — edit mode, persisted values shown, Enter keeps each; a new id — the scope is created in Phase 8 under `wiki.scopes[<id>]`; the id is the key and is never re-asked
+AskUserQuestion: header "Scope id", question "Id of the wiki scope to create or edit in `lazy.settings.json[wiki.scopes]` — lowercase letters, digits, hyphens, underscores, e.g. `docs` or `codebase` (existing: `<ids>`)?", options one per existing id (description: its `paths`) plus free text for a new one.
 
 Validate: must match `^[a-z][a-z0-9_-]*$`. Re-ask until valid.
 
@@ -49,9 +54,12 @@ Outcome: `collected`.
 
 ## Phase 3 — Collect paths globs
 
-`AskUserQuestion`:
-- New mode: *"Path glob(s) that define this scope — comma-separated (e.g. `docs/**/*.md, src/**/*.py`):"*
-- Edit mode: *"Path glob(s) for scope `<id>` (current: `<current paths joined>`; comma-separated, Enter to keep):"*
+Context (print before asking):
+- Where: Phase 3 — Collect paths globs; target scope `<id>`
+- Found: new mode — no `paths` on record; edit mode — current `paths`: `<current paths joined>`
+- Why asking: which files the wiki covers is project config nothing can derive
+- Answers: comma-separated globs — written to `wiki.scopes[<id>].paths` in Phase 8 and rendered into the navigation rule's Coverage in Phase 9; Enter (edit mode) — current list kept; re-asked only on the next edit run
+AskUserQuestion: header "Scope paths", question — new mode: "Path glob(s) that define wiki scope `<id>` — comma-separated (e.g. `docs/**/*.md, src/**/*.py`)?"; edit mode: "Path glob(s) for scope `<id>` (current: `<current paths joined>`; comma-separated, Enter to keep)?"; free text.
 
 Split on commas, trim whitespace, discard empty entries. Must have at least one entry; re-ask if empty. Hold as an array.
 
@@ -59,15 +67,22 @@ Outcome: `collected`.
 
 ## Phase 4 — Collect exclude_paths
 
-`AskUserQuestion`:
-- New mode: *"Exclude glob(s) to omit from the scope — comma-separated, or leave blank for none (e.g. `**/.obsidian/**, **/node_modules/**`):"*
-- Edit mode: *"Exclude glob(s) for scope `<id>` (current: `<current exclude_paths joined or "none">`; comma-separated, blank to clear, Enter to keep):"*
+**A spec catalog's excludes are not asked.** When the settings loaded in Phase 1 carry a `spec` section and one of this scope's `paths` globs starts with `<spec.vault_root>/` (default `specs`), skip the question: print one line — *"scope `<id>` covers the spec catalog; its excludes (request inbox, plan and report working papers) are seeded by `/lazy-spec.install`, nothing to collect here"* — hold the current `exclude_paths` unchanged (new mode: no key) and state outcome `derived`.
+
+Otherwise ask. The `Found` line lists only what is on record; never propose candidate globs derived from reading the tree — an operator who accepts an invented exclusion silently drops nodes from the wiki.
+
+Context (print before asking):
+- Where: Phase 4 — Collect exclude_paths; target scope `<id>`
+- Found: new mode — no `exclude_paths` on record; edit mode — current: `<current exclude_paths joined or "none">`; repository-wide `wiki.exclude` already carries `<wiki.exclude joined>`
+- Why asking: what this scope omits beyond the vault-wide list is project config
+- Answers: comma-separated globs — written as `wiki.scopes[<id>].exclude_paths` in Phase 8, rendered into Coverage in Phase 9; blank — no key (new mode) or the key cleared (edit mode); Enter (edit mode) — kept; re-asked only on the next edit run
+AskUserQuestion: header "Scope excludes", question — new mode: "Exclude glob(s) to omit from wiki scope `<id>` beyond `wiki.exclude` — comma-separated, or blank for none (e.g. `**/.obsidian/**, **/node_modules/**`)?"; edit mode: "Exclude glob(s) for scope `<id>` (current: `<current exclude_paths joined or "none">`; comma-separated, blank to clear, Enter to keep)?"; free text.
 
 Split on commas, trim, discard empty entries. Empty input means no `exclude_paths` key (or clear existing). Hold as an array (may be empty).
 
 **The scope list is additive on top of `wiki.exclude`.** The section-level `wiki.exclude` list is unioned into every scope's exclusions, so what is collected here is only what this scope excludes *beyond* the repository-wide set — never a repetition of it. Two entries in particular are already covered and must not be re-collected here: `docs/structure.md` (the fixed-path project-structure map, seeded into `wiki.exclude` by `/lazy-wiki.install`), and the generated domain-spec tree, which is derived from `wiki.domains.output` and excluded structurally without being declared anywhere. Edit the repository-wide list itself with `/lazy-wiki.configure vault`.
 
-Outcome: `collected`.
+Outcome: `collected` / `derived`.
 
 ## Phase 5 — Collect tag_axes
 
@@ -75,9 +90,12 @@ The axis vocabulary belongs to the repository, not to the scope: `wiki.tag_axes`
 
 Read `wiki.tag_axes` from the settings loaded in Phase 1 and offer exactly those axes. An empty vocabulary means there is nothing to narrow — say so, skip the question, hold an empty array, and point at `/lazy-wiki.configure vault`, which is where the vocabulary is authored.
 
-`AskUserQuestion`:
-- New mode: *"Which of the vault's tag axes does this scope use — `<repository tag_axes joined>` — comma-separated, or blank for all of them:"*
-- Edit mode: *"Tag axes for scope `<id>` (vault vocabulary: `<repository tag_axes joined>`; current narrowing: `<current tag_axes joined or "all">`; comma-separated, blank for all, Enter to keep):"*
+Context (print before asking):
+- Where: Phase 5 — Collect tag_axes; target scope `<id>`
+- Found: vault vocabulary `wiki.tag_axes`: `<repository tag_axes joined>`; edit mode — current narrowing: `<current tag_axes joined or "all">`
+- Why asking: which axes this scope classifies on is the operator's; a scope can only narrow the vault's set
+- Answers: a subset — written to `wiki.scopes[<id>].tag_axes`, the curator receives only those; blank — empty array, the scope uses every vault axis; Enter (edit mode) — kept; re-asked only on the next edit run
+AskUserQuestion: header "Scope tag axes", question — new mode: "Which of the vault's tag axes does wiki scope `<id>` use — `<repository tag_axes joined>` — comma-separated, or blank for all of them?"; edit mode: "Tag axes for scope `<id>` (vault vocabulary: `<repository tag_axes joined>`; current narrowing: `<current tag_axes joined or "all">`; comma-separated, blank for all, Enter to keep)?"; options one per vault axis (multi-select; description: the `wiki/<axis>/…` tags it governs).
 
 Split on commas, trim, discard empty entries. Lowercase-normalise each axis slug. Drop — and name — any entry outside the vault vocabulary rather than writing it: it would be silently ignored on every dispatch. Blank input means the scope uses the full vocabulary; hold it as an empty array.
 
@@ -85,9 +103,12 @@ Outcome: `collected`.
 
 ## Phase 6 — Collect topics_index
 
-`AskUserQuestion`:
-- New mode: *"Path to the scope's `topics.md` index file, relative to the repo root (e.g. `wiki/docs-topics.md`):"*
-- Edit mode: *"Topics index path for scope `<id>` (current: `<current topics_index>`; Enter to keep):"*
+Context (print before asking):
+- Where: Phase 6 — Collect topics_index; target scope `<id>`
+- Found: new mode — no `topics_index` on record; edit mode — current: `<current topics_index>` (file `<present|absent>`)
+- Why asking: where the scope's topic catalog lives is a per-repo path choice; the file is created on the first scan, so nothing exists to detect
+- Answers: a repo-relative path — written to `wiki.scopes[<id>].topics_index`, the index built there by the first full scan; Enter (edit mode) — kept; re-asked only on the next edit run
+AskUserQuestion: header "Topics index path", question — new mode: "Path to wiki scope `<id>`'s `topics.md` index file, relative to the repo root (e.g. `wiki/docs-topics.md`)?"; edit mode: "Topics index path for scope `<id>` (current: `<current topics_index>`; Enter to keep)?"; free text.
 
 Trim whitespace. Must be non-empty; re-ask if blank. The file need not exist yet — it is created on first full scan.
 
@@ -99,16 +120,11 @@ The per-scope `filter` excludes a node from the wiki on the fly (the node is not
 
 `folder_note: false` is not asked — it is the structural default for every scope. Seed it whenever the key is absent (new scope, or an edit-mode scope whose filter predates it); never overwrite an operator's explicit `true`, which selects folder notes exclusively.
 
-`AskUserQuestion` collects the review-skip half only:
-- New mode: *"Skip documents that are currently in review? While `review_active: true` (set by lazycortex-review) is present, the document is left out of the wiki and re-enters when review closes. (yes / no)"*
-- Edit mode: *"Review-skip filter for scope `<id>` (current: `<"on" when filter.frontmatter.review_active present, else "off">`; yes keeps it on, no clears it):"*
+The review-skip half is not asked either. Seed `frontmatter.review_active.not_in = [true]` whenever the sub-filter lacks that key: harmless in a repo without lazycortex-review (no document ever carries the flag) and required in one that runs it (a document under an open review must stay out of the wiki until review closes). Never overwrite an operator's own predicate on that key. Hold the merged filter `{ "frontmatter": { "review_active": { "not_in": [true] } }, "folder_note": false }` over whatever is on record.
 
-- **yes** → hold `{ "frontmatter": { "review_active": { "not_in": [true] } }, "folder_note": false }`.
-- **no** → hold `{ "folder_note": false }` (clears any existing frontmatter sub-filter in edit mode).
+Richer predicates (other frontmatter keys, `in` allow-lists) follow the same schema as a routine's `filter` block and are hand-editable in `lazy.settings.json` — this wizard seeds the two structural defaults and collects nothing.
 
-Default: **yes**. Richer predicates (other frontmatter keys, `in` allow-lists) follow the same schema as a routine's `filter` block and are hand-editable in `lazy.settings.json` — this wizard only collects the review-skip default.
-
-Outcome: `collected`.
+Outcome: `derived`.
 
 ## Phase 8 — Write back + log
 
@@ -165,9 +181,12 @@ Outcome: `verified`.
 
 ### Domains 2 — Collect code globs
 
-`AskUserQuestion`:
-- New mode: *"Code glob(s) to scan for `Domain(…)` blocks — comma-separated (e.g. `src/**/*.py`):"*
-- Edit mode: *"Code glob(s) (current: `<current code joined>`; comma-separated, Enter to keep):"*
+Context (print before asking):
+- Where: Domains 2 — Collect code globs; target `lazy.settings.json[wiki.domains].code`
+- Found: new mode — no `wiki.domains` on record; edit mode — current `code`: `<current code joined>`
+- Why asking: which source files carry `Domain(…)` blocks is project layout
+- Answers: comma-separated globs — written to `wiki.domains.code` in Domains 5, scanned by every domain tick; Enter (edit mode) — kept; re-asked only on the next edit run
+AskUserQuestion: header "Domain code globs", question — new mode: "Code glob(s) to scan for `Domain(…)` blocks in this repo — comma-separated (e.g. `src/**/*.py`)?"; edit mode: "Code glob(s) for `wiki.domains` (current: `<current code joined>`; comma-separated, Enter to keep)?"; free text.
 
 Split on commas, trim, discard empty entries. Must have at least one entry; re-ask if empty. Hold as an array.
 
@@ -175,23 +194,40 @@ Outcome: `collected`.
 
 ### Domains 3 — Collect dictionary path + seed
 
-`AskUserQuestion`:
-- New mode: *"Path of the domain-groups dictionary (Enter for the default `docs/guidelines/domain-groups.md`):"*
-- Edit mode: *"Dictionary path (current: `<current dictionary>`; Enter to keep):"*
+**New mode does not ask**: take the shipped default `docs/guidelines/domain-groups.md`, print one line naming it, outcome `derived`. A different path is an edit-mode change or a hand edit of `lazy.settings.json`. Edit mode asks:
+
+Context (print before asking):
+- Where: Domains 3 — Collect dictionary path + seed; target `wiki.domains.dictionary`
+- Found: current: `<current dictionary>` (file `<present|absent>`)
+- Why asking: the path is on record and only the operator can decide to move it
+- Answers: a repo-relative path — written to `wiki.domains.dictionary`; when the file is absent the skeleton template is copied there now, an existing file is never touched; Enter — the current value kept; re-asked only on the next edit run
+AskUserQuestion (edit mode only): header "Domain dictionary", question "Dictionary path for `wiki.domains` (current: `<current dictionary>`; Enter to keep)?"; free text.
 
 Then **ensure the dictionary exists** — the configurator owns this guarantee: `Bash(test -f <repo-root>/<dictionary>)`; when absent, seed it from the skeleton template shipped by this plugin — `Bash(mkdir -p <dictionary-parent-dir>)` then `Bash(cp ${CLAUDE_PLUGIN_ROOT}/templates/domain-groups.md <repo-root>/<dictionary>)` — and tell the operator it holds a sample group to replace. An existing file is never touched (idempotent; `/lazy-python.knowledge-sweep` is the other creator and builds a populated one).
 
-Outcome: `collected` + `dictionary-<seeded|already-present>`.
+Outcome: `derived` (new mode) / `collected` (edit mode) + `dictionary-<seeded|already-present>`.
 
 ### Domains 4 — Collect output + language
 
-`AskUserQuestion` (output):
-- New mode: *"Output directory for the generated domain-spec tree (Enter for the default `docs/domains`):"*
-- Edit mode: *"Output directory (current: `<current output>`; Enter to keep):"*
+**New mode does not ask** for the output directory: take the shipped default `docs/domains`, print one line naming it, outcome `derived` for this half. Edit mode asks:
+
+Context (print before asking):
+- Where: Domains 4 — Collect output + language; target `wiki.domains.output`
+- Found: current: `<current output>`; wiki scopes whose globs reach it: `<id: glob, … or none>`
+- Why asking: the directory is on record and only the operator can decide to move the generated tree
+- Answers: a repo-relative directory — written to `wiki.domains.output`, the tree materialised there by `/lazy-wiki.domain-sync` and the domain routines, excluded from every wiki scope structurally; Enter — the current value kept; re-asked only on the next edit run
+AskUserQuestion (output, edit mode only): header "Domain output dir", question "Output directory for `wiki.domains` (current: `<current output>`; Enter to keep)?"; free text.
 
 **Overlap warning:** check every `wiki.scopes` entry's `paths` globs against the chosen output directory; when a glob covers files under it, warn — *"Scope `<id>` glob `<glob>` reaches `<output>`, which is excluded from every scope regardless — the glob claims nothing there. Narrow it so the scope says what it actually covers."* Warn only. The generated tree is derived from this very setting and excluded structurally, so the warning is about a misleading glob, never about a contested file: handing the tree to the wiki is not something a scope can do.
 
-`AskUserQuestion` (language): sample a few of the vault's authored spec/doc files to judge the language they are written in, and propose it as the default — *"Language for the generated domain docs (Enter for `<detected>`, the language this vault's specs are written in):"*. Edit mode shows the current value instead.
+Then the language: sample a few of the vault's authored spec/doc files to judge the language they are written in, and propose it as the default.
+
+Context (print before asking):
+- Where: Domains 4 — Collect output + language; target `wiki.domains.language`
+- Found: `<n>` authored docs sampled, written in `<detected>`; edit mode — current: `<current language>`
+- Why asking: the language the generated docs are written in is an editorial choice the sample only suggests
+- Answers: a language — written to `wiki.domains.language`, every generated group doc is written in it; Enter — `<detected>` (new mode) or the current value (edit mode); re-asked only on the next edit run
+AskUserQuestion (language): header "Domain docs language", question — new mode: "Language for the generated domain docs under `<output>` (Enter for `<detected>`, the language this vault's specs are written in)?"; edit mode: "Language for the generated domain docs (current: `<current language>`; Enter to keep)?"; free text.
 
 Outcome: `collected` (+ `overlap-warned` when the warning fired).
 
@@ -229,27 +265,63 @@ Configures the nested `mirror` block of an **existing** scope in `lazy.settings.
 
 ### Mirror 1 — Verify install + pick scope
 
-Same as Phase 1: resolve `<repo-root>`, read `lazy.settings.json`, abort with *"Run `/lazy-wiki.install` first."* when the file or its `wiki` key is missing. Then `AskUserQuestion`: *"Which scope gets the mirror block?"* — offer the existing `wiki.scopes` ids. The scope MUST already exist; when `wiki.scopes` is empty, abort: *"No scopes configured — create one with `/lazy-wiki.configure` first."* If the chosen scope already carries a `mirror` block, announce edit mode (persisted values shown, Enter keeps them).
+Same as Phase 1: resolve `<repo-root>`, read `lazy.settings.json`, abort with *"Run `/lazy-wiki.install` first."* when the file or its `wiki` key is missing. The scope MUST already exist; when `wiki.scopes` is empty, abort: *"No scopes configured — create one with `/lazy-wiki.configure` first."* Otherwise pick it.
+
+Context (print before asking):
+- Where: /lazy-wiki.configure mirror · Mirror 1 — Verify install + pick scope; target `lazy.settings.json[wiki.scopes]`
+- Found: configured scopes `<id: paths, …>`; scopes already carrying a `mirror` block: `<ids or none>`
+- Why asking: a mirror nests inside exactly one scope, and which one is the operator's choice
+- Answers: one option per scope id — its `mirror` block is created in Mirror 5 (edit mode when it already has one: persisted values shown, Enter keeps them); persisted under `wiki.scopes[<id>].mirror`; never re-asked for that block
+AskUserQuestion: header "Mirror scope", question "Which configured wiki scope gets the mirror block (`<ids>`)?", options one per scope id (description: its `paths`, and `has mirror` when one is on record).
+
+If the chosen scope already carries a `mirror` block, announce edit mode (persisted values shown, Enter keeps them).
 
 Outcome: `verified`.
 
 ### Mirror 2 — Collect url + branch
 
-`AskUserQuestion` (url): *"Git URL of the source repository?"* — must be non-empty; re-ask if blank. Then (branch): *"Branch to mirror (Enter for the source's default branch)?"* — blank means no `branch` key (the clone follows the source's default).
+Context (print before asking):
+- Where: Mirror 2 — Collect url + branch; target `wiki.scopes[<id>].mirror.url`
+- Found: new mode — none on record; edit mode — current `url`: `<current url>`
+- Why asking: the source repository is external config nothing local can derive
+- Answers: a git URL — written to `mirror.url`, cloned into the gitignored runtime dir on every sync; Enter (edit mode) — kept; re-asked only on the next edit run
+AskUserQuestion (url): header "Mirror source URL", question "Git URL of the repository to mirror into wiki scope `<id>`?" (edit mode: "… (current: `<current url>`; Enter to keep)?"); free text — must be non-empty; re-ask if blank.
+
+Context (print before asking):
+- Where: Mirror 2 — Collect url + branch; target `wiki.scopes[<id>].mirror.branch`
+- Found: new mode — none on record; edit mode — current `branch`: `<current branch or "source default">`
+- Why asking: which branch of `<url>` is the wanted one is the operator's
+- Answers: a branch name — written to `mirror.branch`, the clone checks it out; blank — no `branch` key, the clone follows the source's default; Enter (edit mode) — kept
+AskUserQuestion (branch): header "Mirror branch", question "Branch of `<url>` to mirror (Enter for the source's default branch)?"; free text.
 
 Outcome: `collected`.
 
 ### Mirror 3 — Collect source_paths + exclude
 
-`AskUserQuestion` (source_paths): *"Glob(s) of markdown to mirror, relative to the source repo root — comma-separated (e.g. `docs/domains/**`); only `.md` files under them are mirrored:"* — must have at least one entry; re-ask if empty.
+Context (print before asking):
+- Where: Mirror 3 — Collect source_paths + exclude; target `wiki.scopes[<id>].mirror.source_paths`
+- Found: new mode — none on record; edit mode — current `source_paths`: `<current source_paths joined>`
+- Why asking: which markdown of `<url>` is wanted in this vault is per-mirror config
+- Answers: comma-separated globs — written to `mirror.source_paths`, only `.md` files under them are mirrored on every sync; Enter (edit mode) — kept; re-asked only on the next edit run
+AskUserQuestion (source_paths): header "Mirror source globs", question "Glob(s) of markdown to mirror from `<url>`, relative to the source repo root — comma-separated (e.g. `docs/domains/**`); only `.md` files under them are mirrored?"; free text — must have at least one entry; re-ask if empty.
 
-Then (exclude): *"Exclude glob(s), comma-separated, or blank for none. Put the source's service files here — e.g. a generated index like `docs/domains/domains.md` that would otherwise become a node and go to pointless curation:"* — empty input means no `exclude` key.
+Context (print before asking):
+- Where: Mirror 3 — Collect source_paths + exclude; target `wiki.scopes[<id>].mirror.exclude`
+- Found: new mode — none on record; edit mode — current `exclude`: `<current exclude joined or "none">`
+- Why asking: which of the source's service files must not become nodes is per-mirror config
+- Answers: comma-separated globs — written to `mirror.exclude`, matching files are never mirrored; blank — no `exclude` key; Enter (edit mode) — kept
+AskUserQuestion (exclude): header "Mirror excludes", question "Exclude glob(s) under `<source_paths>` of `<url>`, comma-separated, or blank for none — put the source's service files here, e.g. a generated index like `docs/domains/domains.md` that would otherwise become a node and go to pointless curation?"; free text.
 
 Outcome: `collected`.
 
 ### Mirror 4 — Collect mirror_path
 
-`AskUserQuestion`: *"Directory in this vault where the mirror lands (repo-relative)?"* — **required, no default**; re-ask until non-empty. Files land at `<mirror_path>/<source-relative-path>`.
+Context (print before asking):
+- Where: Mirror 4 — Collect mirror_path; target `wiki.scopes[<id>].mirror.mirror_path`
+- Found: new mode — none on record; edit mode — current `mirror_path`: `<current mirror_path>`; scope `paths` today: `<paths joined>`
+- Why asking: where foreign markdown lands in this vault is a layout choice with no default
+- Answers: a repo-relative directory — written to `mirror.mirror_path`, files land at `<mirror_path>/<source-relative-path>`, and `<mirror_path>/**` joins the scope's `paths` in Mirror 5; Enter (edit mode) — kept; re-asked only on the next edit run
+AskUserQuestion: header "Mirror directory", question "Directory in this vault where the mirror of `<url>` lands for scope `<id>` (repo-relative)?"; free text — **required, no default**; re-ask until non-empty. Files land at `<mirror_path>/<source-relative-path>`.
 
 Outcome: `collected`.
 
@@ -294,9 +366,21 @@ Configures one scope of `lazy.settings.json[terms.scopes]` — the terms diction
 
 Same as Phase 1: resolve `<repo-root>`, read `lazy.settings.json`, abort with *"Run `/lazy-wiki.install` first."* when the file is absent. When it has no `terms` key, abort: *"Run `/lazy-wiki.install` first — the `terms` section is missing."*
 
-`AskUserQuestion`: *"Create a new terms scope, edit an existing one, or remove one?"* — offer `create` / `edit` / `remove`, listing the existing `terms.scopes` ids. With no scopes on record, `create` is the only option; do not offer the other two.
+Context (print before asking):
+- Where: /lazy-wiki.configure terms · Terms 1 — Verify install + pick scope + mode; target `lazy.settings.json[terms.scopes]`
+- Found: terms scopes on record `<id: file, … or none>`
+- Why asking: create, edit, or remove is the operator's intent
+- Answers: `create` — a new id is collected next, the scope written in Terms 5, its scan routine registered in Terms 6; `edit` — persisted values shown per field, Enter keeps each, the routine re-registered when `paths` change; `remove` — the entry deleted, its routine unregistered, the dictionary file's fate asked in Terms 5; not persisted, asked on every run
+AskUserQuestion: header "Terms scope mode", question "Create a new terms scope, edit an existing one, or remove one (existing: `<ids>`)?", options `create` / `edit` / `remove` with the descriptions above. With no scopes on record, `create` is the only option; do not offer the other two.
 
-On `create`, collect the id: *"Scope id (lowercase slug)?"* — must match `^[a-z][a-z0-9_-]*$`, must not collide with an existing id; re-ask on either failure.
+On `create`, collect the id.
+
+Context (print before asking):
+- Where: Terms 1; target `terms.scopes[<id>]`
+- Found: ids already taken `<ids or none>`
+- Why asking: the id is the scope's settings key and its routine's name suffix; nothing derives it
+- Answers: free text — becomes the key `terms.scopes[<id>]` and the routine `lazy-wiki.terms-scan-<id>`; never re-asked
+AskUserQuestion: header "Terms scope id", question "Id for the new terms scope (lowercase slug; taken: `<ids>`)?"; free text — must match `^[a-z][a-z0-9_-]*$`, must not collide with an existing id; re-ask on either failure.
 
 On `remove`, jump straight to the removal path in `Terms 5`; `Terms 2`–`Terms 4` are marked `skipped-per-user-choice`.
 
@@ -304,9 +388,12 @@ Outcome: `verified` + `mode-<create|edit|remove>`.
 
 ### Terms 2 — Collect paths globs
 
-`AskUserQuestion`:
-- New mode: *"Which documents does this dictionary serve — comma-separated globs (e.g. `specs/**/*.md`)? A document under them may consult the dictionary."*
-- Edit mode: *"Served documents (current: `<current paths joined>`; comma-separated, Enter to keep):"*
+Context (print before asking):
+- Where: Terms 2 — Collect paths globs; target `terms.scopes[<id>].paths`
+- Found: new mode — none on record; edit mode — current `paths`: `<current paths joined>`; other terms scopes' `paths`: `<id: globs, … or none>`
+- Why asking: which documents consult this dictionary is per-repo, and one document belongs to one dictionary
+- Answers: comma-separated globs — written to `terms.scopes[<id>].paths` in Terms 5, the first glob becomes the scan routine's `path_filter` in Terms 6; a glob overlapping another scope re-asks; Enter (edit mode) — kept; re-asked only on the next edit run
+AskUserQuestion: header "Served documents", question — new mode: "Which documents does terms dictionary `<id>` serve — comma-separated globs (e.g. `specs/**/*.md`)? A document under them may consult the dictionary."; edit mode: "Served documents of terms scope `<id>` (current: `<current paths joined>`; comma-separated, Enter to keep)?"; free text.
 
 Split on commas, trim, discard empties; at least one entry, re-ask if empty.
 
@@ -316,9 +403,12 @@ Outcome: `collected`.
 
 ### Terms 3 — Collect dictionary file + create
 
-`AskUserQuestion`:
-- New mode: *"Path of the dictionary file for this scope (repo-relative, e.g. `specs/terms.md`)?"*
-- Edit mode: *"Dictionary path (current: `<current file>`; Enter to keep):"*
+Context (print before asking):
+- Where: Terms 3 — Collect dictionary file + create; target `terms.scopes[<id>].file`
+- Found: new mode — none on record; edit mode — current `file`: `<current file>` (file `<present|absent>`)
+- Why asking: where the dictionary lives is a per-repo path with no default
+- Answers: a repo-relative path — written to `terms.scopes[<id>].file`; an absent file is created empty now, a present one is never touched or truncated; Enter (edit mode) — kept; re-asked only on the next edit run
+AskUserQuestion: header "Dictionary file", question — new mode: "Path of the dictionary file for terms scope `<id>` (repo-relative, e.g. `specs/terms.md`)?"; edit mode: "Dictionary path for terms scope `<id>` (current: `<current file>`; Enter to keep)?"; free text.
 
 Required, no default — re-ask until non-empty. Then `Bash(test -f <repo-root>/<file>)`; when absent, `Bash(mkdir -p <parent-dir>)` and `Write` an empty file. An existing file is never touched or truncated — a quiet recreation would destroy every term it holds.
 
@@ -335,9 +425,19 @@ Seed the array with the dictionary itself plus every tool-report glob, and show 
 
 Add `<upstream-mirror-glob>/**` to the seed when the repo carries an upstream mirror tree whose files fall under the collected `paths` — mirrored foreign markdown would otherwise fill the dictionary with another studio's vocabulary, and the doctor would then propose edits to mirrors that must not be edited.
 
-`AskUserQuestion`: *"Are plan documents (`code-plan.md`, `test-plan.md`) sources of terminology for this dictionary?"* — options `yes, take terms from them` / `no, exclude them`. On `no`, add `**/code-plan.md` and `**/test-plan.md` to the array, plus the `plan_doc` glob of any operator-declared tool type that names one.
+Context (print before asking):
+- Where: Terms 4 — Collect source_exclude; target `terms.scopes[<id>].source_exclude`
+- Found: seed so far `<file>`, `<report globs>`, `<upstream mirror glob when present>`; edit mode — current `source_exclude`: `<current source_exclude joined>`; plan docs under `paths`: `<count>`
+- Why asking: whether plan documents set terminology is an editorial choice
+- Answers: `yes, take terms from them` — plan docs stay term sources, the seed is written as is; `no, exclude them` — `**/code-plan.md`, `**/test-plan.md`, and every declared `plan_doc` glob are appended before the write in Terms 5; re-asked only on the next edit run
+AskUserQuestion: header "Plan docs as sources", question "Are plan documents (`code-plan.md`, `test-plan.md`) sources of terminology for dictionary `<file>` of terms scope `<id>`?", options `yes, take terms from them` / `no, exclude them` with the descriptions above. On `no`, add `**/code-plan.md` and `**/test-plan.md` to the array, plus the `plan_doc` glob of any operator-declared tool type that names one.
 
-`AskUserQuestion`: *"Anything else to exclude as a term source — comma-separated globs, or blank for none:"* — append what comes back.
+Context (print before asking):
+- Where: Terms 4 — Collect source_exclude; target `terms.scopes[<id>].source_exclude`
+- Found: array so far `<source_exclude joined>`
+- Why asking: further documents that consult the dictionary but must not feed it are per-repo
+- Answers: comma-separated globs — appended to `source_exclude` before the write in Terms 5; blank — nothing added; re-asked only on the next edit run
+AskUserQuestion: header "More source excludes", question "Anything else under `<paths>` to exclude as a term source for scope `<id>` — comma-separated globs, or blank for none?"; free text — append what comes back.
 
 Outcome: `collected`.
 
@@ -357,7 +457,14 @@ Preserve every other key; write with `Write`.
 
 Then **protect the dictionary from the wiki curator**: for every `wiki.scopes` entry whose `paths` globs cover `<file>`, append `<file>` to that scope's `exclude_paths` when it is not already there. The dictionary carries no frontmatter by design, so it has none of the `wiki_role` self-defence `topics.md` has; without this entry the wiki curator appends a `# See also` block to it within a scan tick and the file stops being its own truth.
 
-**Remove.** Delete the `terms.scopes[<id>]` entry and drop from every `wiki.scopes` entry's `exclude_paths` the entries this wizard put there for that scope's dictionary. Then `AskUserQuestion`: *"Keep the dictionary file `<file>`, or delete it?"* — options `keep` / `delete`; on `delete`, `Bash(rm <repo-root>/<file>)`.
+**Remove.** Delete the `terms.scopes[<id>]` entry and drop from every `wiki.scopes` entry's `exclude_paths` the entries this wizard put there for that scope's dictionary. Then ask about the file.
+
+Context (print before asking):
+- Where: Terms 5 — remove path; target `<repo-root>/<file>`
+- Found: `terms.scopes[<id>]` removed from settings; the dictionary at `<file>` `<is absent | holds <n> terms>`
+- Why asking: deleting the file is destructive and nothing in settings can restore its terms
+- Answers: `keep` — the file stays in the worktree, no longer served or scanned; `delete` — `rm <repo-root>/<file>` now, the terms are gone; not persisted
+AskUserQuestion: header "Dictionary file", question "Keep the dictionary file `<file>` of removed terms scope `<id>`, or delete it?", options `keep` / `delete` with the descriptions above; on `delete`, `Bash(rm <repo-root>/<file>)`.
 
 Outcome: `written` (or `removed`).
 
@@ -407,20 +514,35 @@ Outcome: `verified`.
 
 ### Structure 2 — Collect depth_profiles
 
-Classes are collected one at a time; after each, ask whether to add another. Per class, two questions:
+Classes are collected one at a time; after each, ask whether to add another. One context block covers the loop — print it before each iteration's first question, with Found filled from the classes collected so far:
 
-- *"Class name (a short label, e.g. `code`, `specs`, `tests`)?"* — must be unique within the section; re-ask on a duplicate.
-- *"Glob(s) for this class, comma-separated (e.g. `src/**, cli/**`), and its depth — `file` (directory line + per-file lines for load-bearing files), `dir` (directory line only), or `brief` (half a line)?"* — at least one glob; depth must be one of the three.
+Context (print before asking):
+- Where: /lazy-wiki.configure structure · Structure 2 — Collect depth_profiles; target `lazy.settings.json[structure].depth_profiles`
+- Found: classes so far `<name: globs → depth, … or none>` (edit mode: the persisted classes); overlapping globs `<pair, … or none>`
+- Why asking: which trees the map describes at which depth is per-repo; nothing derives it
+- Answers: class name — the key of a new `depth_profiles` entry; globs + depth — that class's `paths` and `depth`, `file` = directory line + per-file lines for load-bearing files, `dir` = directory line only, `brief` = half a line, first class by key order wins on a shared path; `keep` / `change` / `remove` (edit mode) — leave the class, re-collect it, or drop it; `yes` / `no` — collect another class or continue. Written in Structure 4; re-asked only on the next edit run.
+
+Per class, two questions:
+
+- AskUserQuestion: header "Class name", question "Name of the next depth-profile class for the structure map (a short label, e.g. `code`, `specs`, `tests`; taken: `<names>`)?"; free text — must be unique within the section; re-ask on a duplicate.
+- AskUserQuestion: header "Class globs + depth", question "Glob(s) for class `<name>`, comma-separated (e.g. `src/**, cli/**`), and its depth — `file` (directory line + per-file lines for load-bearing files), `dir` (directory line only), or `brief` (half a line)?", options `file` / `dir` / `brief` with those descriptions, globs as free text — at least one glob; depth must be one of the three.
+
+Then AskUserQuestion: header "Another class", question "Add another depth-profile class to `structure.depth_profiles` (so far: `<names>`)?", options `yes` / `no`.
 
 **Warn on overlap** between two classes' globs — the first class by key order wins on a shared path, and that precedence should be chosen, not discovered. Warn only; overlap is legal.
 
-Edit mode offers each existing class for keep / change / remove before offering to add new ones.
+Edit mode offers each existing class before offering to add new ones — AskUserQuestion: header "Class `<name>`", question "Keep, change, or remove structure class `<name>` (`<globs>` → `<depth>`)?", options `keep` / `change` / `remove`.
 
 Outcome: `collected`.
 
 ### Structure 3 — Collect exclude
 
-`AskUserQuestion`: *"Paths the map must not describe — comma-separated globs, or blank to keep just the default:"*. Always ensure `docs/structure.md` itself is in the array — the one mandatory entry (without it the map describes itself and the curator's own commit wakes the scan in a loop); append it silently when missing. Gitignored trees need no entry: the git watches never see them.
+Context (print before asking):
+- Where: Structure 3 — Collect exclude; target `lazy.settings.json[structure].exclude`
+- Found: current `exclude`: `<current exclude joined>` (`docs/structure.md` seeded by install)
+- Why asking: which trees the map must not describe is per-repo
+- Answers: comma-separated globs — written as `structure.exclude` in Structure 4, `docs/structure.md` kept in it whatever is typed; blank — the default entry alone; re-asked only on the next edit run
+AskUserQuestion: header "Map excludes", question "Paths the structure map `docs/structure.md` must not describe — comma-separated globs, or blank to keep just the default (current: `<current exclude joined>`)?"; free text. Always ensure `docs/structure.md` itself is in the array — the one mandatory entry (without it the map describes itself and the curator's own commit wakes the scan in a loop); append it silently when missing. Gitignored trees need no entry: the git watches never see them.
 
 Outcome: `collected`.
 
@@ -479,9 +601,21 @@ Outcome: `verified`.
 
 ### Vault 2 — Collect tag_axes
 
-`AskUserQuestion`: *"Tag axes — the closed vocabulary of classification dimensions for the whole vault (current: `<current tag_axes joined or "none">`; comma-separated, Enter to keep):"*
+Context (print before asking):
+- Where: /lazy-wiki.configure vault · Vault 2 — Collect tag_axes; target `lazy.settings.json[wiki].tag_axes`
+- Found: current `tag_axes`: `<current tag_axes joined or "none">`; scopes narrowing to each: `<axis: ids, … or none>`
+- Why asking: the closed classification vocabulary is the vault's editorial choice
+- Answers: comma-separated slugs — replaces `wiki.tag_axes` in Vault 4 (`doc-kind` kept whatever is typed), every scope without a narrowing speaks the new set at once; Enter — kept; removing an axis triggers the confirmation below; re-asked on every vault run
+AskUserQuestion: header "Vault tag axes", question "Tag axes — the closed vocabulary of classification dimensions for the whole vault (current: `<current tag_axes joined or "none">`; comma-separated, Enter to keep)?"; free text.
 
 Split on commas, trim, discard empties, lowercase-normalise each slug. Keep `doc-kind`: it is the mandatory axis `/lazy-wiki.install` unions in, and dropping it here is undone by the next install run. Before writing a set that removes any other axis, name what it costs — every `wiki/<axis>/…` tag already carried by a node on that axis becomes unknown (the doctor's `unknown-axis` finding), and every scope narrowing to it silently loses it — then ask whether to proceed.
+
+Context (print before asking):
+- Where: Vault 2 — Collect tag_axes; target `wiki.tag_axes`
+- Found: axes to be removed `<axes>`; nodes carrying tags on them `<n>`; scopes narrowing to them `<ids or none>`
+- Why asking: the write orphans existing classification — destructive, not derivable
+- Answers: `proceed` — the reduced list is written in Vault 4, those tags surface as `unknown-axis` findings and the narrowing scopes lose the axis; `cancel` — the current list stays, nothing written; not persisted
+AskUserQuestion: header "Remove axes", question "Write `wiki.tag_axes` without `<axes>`, orphaning `<n>` tagged nodes and the narrowing of scopes `<ids>`?", options `proceed` / `cancel` with the descriptions above.
 
 An axis added here becomes available to every scope at once; nothing else has to be edited for a scope to use it, since a scope that declares no narrowing speaks the full vocabulary.
 
@@ -489,7 +623,12 @@ Outcome: `collected`.
 
 ### Vault 3 — Collect exclude
 
-`AskUserQuestion`: *"Exclude glob(s) no scope may opt out of (current: `<current exclude joined or "none">`; comma-separated, blank to clear, Enter to keep):"*
+Context (print before asking):
+- Where: Vault 3 — Collect exclude; target `lazy.settings.json[wiki].exclude`
+- Found: current `exclude`: `<current exclude joined or "none">`
+- Why asking: which files every scope must leave alone is project config
+- Answers: comma-separated globs — replaces `wiki.exclude` in Vault 4 and is unioned into every scope's exclusions (`docs/structure.md` kept whatever is typed); blank — cleared down to that mandatory entry; Enter — kept; re-asked on every vault run
+AskUserQuestion: header "Vault excludes", question "Exclude glob(s) no wiki scope may opt out of (current: `<current exclude joined or "none">`; comma-separated, blank to clear, Enter to keep)?"; free text.
 
 Split on commas, trim, discard empties. Keep `docs/structure.md` — the project-structure map is a generated document with no frontmatter to defend itself, and without the entry the curator appends a `# See also` block to it. Do not add the `wiki.domains.output` tree: it is excluded structurally from the setting itself, and an entry here would go stale the moment the output directory moves.
 

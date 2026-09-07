@@ -63,23 +63,45 @@ State outcome `resolved`.
 
 ## Step 3 — Gather user inputs
 
-Ask one `AskUserQuestion` at a time. Wait for each answer before the next.
+Ask one `AskUserQuestion` at a time. Wait for each answer before the next. Print each question's context block first.
 
 **For both `add` and `remove`:**
 
-1. If `group` was not provided in args, ask:
-   - question: `Which template group does this entry belong to?`
-   - description: `The group is the subdirectory name under \`.claude/templates/\` (e.g. \`core\`, \`help\`, \`review\`). It groups related template kinds.`
+1. If `group` was not provided in args:
 
-2. If `kind` was not provided in args, ask:
-   - question: `What is the kind (template name) for this entry?`
-   - description: `The kind names the template file: \`.claude/templates/<group>/<kind>-template.md\`. For \`add\`, this file will be created if it does not already exist. For \`remove\`, this entry and its template file will be deleted.`
+```
+Context (print before asking):
+- Where: /lazy-core.scaffold-local · Step 3 — Gather user inputs; target <regPath> [_local]
+- Found: mode `<add|remove>`; groups present under .claude/templates/: <list, or none>; `_local` entries on record: <list, or none>
+- Why asking: the group is a repo-specific naming decision nothing on disk derives
+- Answers: free-form text — the subdirectory under `.claude/templates/` this entry lives in; builds the template path in Step 4 and is recorded in the registry, never re-asked once the entry exists
+AskUserQuestion: header "Template group", question "Which template group under .claude/templates/ does this `_local` entry belong to (e.g. `core`, `help`, `review`)?", free-form text.
+```
+
+2. If `kind` was not provided in args:
+
+```
+Context (print before asking):
+- Where: /lazy-core.scaffold-local · Step 3 — Gather user inputs; target .claude/templates/<group>/<kind>-template.md
+- Found: group `<group>`; kinds already in that group: <list, or none>
+- Why asking: the kind names the template file — for `add` it is created if absent, for `remove` the entry and its file are deleted
+- Answers: free-form text — becomes `<kind>` in the template path; `add` creates the file (or keeps it after Step 4a's prompt), `remove` targets the existing entry
+AskUserQuestion: header "Template kind", question "What is the kind (template name) for the `_local` entry in group `<group>`? The file becomes .claude/templates/<group>/<kind>-template.md", free-form text.
+```
 
 **For `add` only:**
 
-3. Ask for the glob list:
-   - question: `Enter the glob patterns (one per line) that this template should match.`
-   - description: `These are the file globs that trigger this template in \`lazy-core.scaffold\`. Example: \`.claude/rules/*.md\` or \`claude/*/references/*-schema.md\`. Provide one glob per line.`
+3. Glob list:
+
+```
+Context (print before asking):
+- Where: /lazy-core.scaffold-local · Step 3 — Gather user inputs; target registry entry `.claude/templates/<group>/<kind>-template.md` in <regPath>
+- Found: globs already registered under `_local`: <list, or none>
+- Why asking: which new files start from this template is a repo convention only the operator can state
+- Answers: free-form, one glob per line — written as the entry's glob list in Step 4c, checked for overlap in Step 5; re-run `add` to change them
+AskUserQuestion: header "Match globs", question "Which file globs should start from .claude/templates/<group>/<kind>-template.md (one per line, e.g. `.claude/rules/*.md` or `claude/*/references/*-schema.md`)?", free-form text.
+```
+
    - Parse the answer into a list by splitting on newlines; trim whitespace; discard empty lines.
 
 **For `remove` only:**
@@ -115,9 +137,17 @@ Check whether the file exists:
 
   State **created**.
 
-- **Present** → `AskUserQuestion`:
-  - question: ``Template \`.claude/templates/<group>/<kind>-template.md\` already exists — overwrite it?``
-  - description: `Overwriting replaces the current file with a fresh seed. Choose \`keep\` to leave the file untouched and only update the registry entry.`
+- **Present** →
+
+```
+Context (print before asking):
+- Where: /lazy-core.scaffold-local · Step 4 — Execute add (4a); target <repo-root>/.claude/templates/<group>/<kind>-template.md
+- Found: file present — <size> bytes, first heading "<heading>"
+- Why asking: overwriting replaces an authored template with the bare seed — irreversible outside git
+- Answers: `keep` — file untouched, only the registry entry is upserted in 4c; `overwrite` — file replaced with the seed header, then the registry upsert
+AskUserQuestion: header "Template exists", question "Template .claude/templates/<group>/<kind>-template.md already exists — keep it or overwrite it with a fresh seed?", options with descriptions.
+```
+
   - options: **keep** / **overwrite**
   - **keep** → no file write. State **kept**.
   - **overwrite** → write the seed as above. State **overwritten**.
@@ -196,9 +226,15 @@ Remove the key `.claude/templates/<group>/<kind>-template.md` from the map.
 
 **4c. Delete the template file (confirm first).**
 
-`AskUserQuestion`:
-- question: ``Also delete the template file \`.claude/templates/<group>/<kind>-template.md\`?``
-- description: `The registry entry has been removed. Deleting the file removes it entirely; keeping it leaves an unused file on disk.`
+```
+Context (print before asking):
+- Where: /lazy-core.scaffold-local · Step 4 — Execute remove (4c); target <repo-root>/.claude/templates/<group>/<kind>-template.md
+- Found: registry entry removed in 4b; file <present — <size> bytes | absent>
+- Why asking: deleting an authored template is irreversible outside git
+- Answers: `delete` — file removed now; `keep` — file stays on disk, referenced by no registry entry
+AskUserQuestion: header "Delete template file", question "Also delete the now-unregistered template file .claude/templates/<group>/<kind>-template.md?", options with descriptions.
+```
+
 - options: **delete** / **keep**
 - **delete** → `Bash(rm "<repo-root>/.claude/templates/<group>/<kind>-template.md")`. State **deleted**.
 - **keep** → no action. State **kept**.

@@ -516,18 +516,70 @@ _CORE_CLI_TIMEOUT_SEC = 30
 _SCRAPER_PROCESS_NAMES = ("prometheus", "otelcol", "alloy", "grafana-agent")
 
 
+def _version_sort_key(name: str) -> tuple[int, ...]:
+  """
+  Build a numeric sort key for a plugin-cache version directory name.
+
+  Args:
+    name: Version directory name as it appears in the plugin cache.
+
+  Returns:
+    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
+  """
+  out: list[int] = []
+  for part in name.split("."):
+    digits = "".join(c for c in part if c.isdigit())
+    out.append(int(digits) if digits else 0)
+  return tuple(out)
+
+
+def _cached_sibling_root(name: str) -> Path | None:
+  """
+  Locate a sibling plugin's newest cached install next to this plugin's own cached install.
+
+  A cached install lives at `<cache>/<registry>/<plugin>/<version>/`, so when this file runs from
+  one, the cache root is four levels above `bin/` and every sibling's versions sit under it. A dev
+  source tree has no version level above `bin/`, so the walk finds nothing there — the dev layout
+  is served by the daemon's env export and each caller's own dev fallback.
+
+  Args:
+    name: Sibling plugin name, which is also its cache directory and CLI name.
+
+  Returns:
+    The sibling's highest cached version directory, or None outside a cached install or when no
+    version of the sibling is cached.
+  """
+  own = Path(__file__).resolve()
+  # guard: not a cached install — a dev checkout has no version directory above bin/
+  if not own.parents[1].name.replace(".", "").isdigit():
+    return None
+  # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
+  try:
+    cache = own.parents[4]
+  except IndexError:
+    return None
+  versions = [
+    version
+    for registry in cache.iterdir() if (registry / name).is_dir()
+    for version in (registry / name).iterdir()
+    if version.is_dir() and version.name.replace(".", "").isdigit()
+  ]
+  return max(versions, key = lambda v: _version_sort_key(v.name)) if versions else None
+
+
 def resolve_core_cli() -> Path:
   """
   Locate the `lazycortex-core` CLI binary across the blessed discovery order.
 
   Order: every entry of `$LAZYCORTEX_PLUGIN_DIRS` (the daemon exports it for routine
   subprocesses), then `$PATH`, then the dev-vault sibling layout (this plugin's checkout
-  living next to lazycortex-core under `claude/`).
+  living next to lazycortex-core under `claude/`), then the plugin cache this plugin itself
+  runs from (its sibling's newest installed version).
 
   Guarantees:
     - The discovery order is fixed — every `$LAZYCORTEX_PLUGIN_DIRS` entry, then `$PATH`, then
-      the dev-vault sibling layout — and the first location that carries the binary always
-      wins, independent of unrelated environment state.
+      the dev-vault sibling layout, then the plugin cache — and the first location that carries
+      the binary always wins, independent of unrelated environment state.
 
   Returns:
     Absolute path to the CLI binary.
@@ -538,8 +590,8 @@ def resolve_core_cli() -> Path:
 
   # Contract:
   # The discovery order is fixed — every `$LAZYCORTEX_PLUGIN_DIRS` entry, then `$PATH`, then
-  # the dev-vault sibling layout — and the first location that carries the binary always wins,
-  # independent of unrelated environment state.
+  # the dev-vault sibling layout, then the plugin cache — and the first location that carries
+  # the binary always wins, independent of unrelated environment state.
 
   # Domain(plugin.boundaries):
   # # A shipper reaches its sibling plugin only through its published command line
@@ -548,9 +600,11 @@ def resolve_core_cli() -> Path:
   # own published command-line program instead and reads back its answer. The search for that program
   # follows a fixed order of decreasing certainty: first every directory a runtime-launched process is
   # explicitly told the enabled plugins live in, then wherever the general command search path already
-  # resolves it, and only as a last resort the layout of a development checkout where every plugin's
-  # sources sit side by side. Nothing found by any of the three means the run cannot reach its sibling
-  # at all, and that failure is reported rather than papered over with a guess.
+  # resolves it, then the layout of a development checkout where every plugin's sources sit side by
+  # side, and as a last resort the store of installed plugins this plugin itself was installed into,
+  # where the sibling's newest installed version is taken. Nothing found by any of the four means the
+  # run cannot reach its sibling at all, and that failure is reported rather than papered over with a
+  # guess.
 
   # walk the discovery order and return the first location that actually carries the binary
   # waiver: external env-var name of the plugin-dirs boundary contract
@@ -571,8 +625,15 @@ def resolve_core_cli() -> Path:
   # guard: dev-vault fallback — plugin sources checked out side by side under claude/
   if sibling.is_file():
     return sibling
+  # plugin-cache fallback — a consumer install running from the cache with no daemon export
+  cached_root = _cached_sibling_root(_CORE_CLI_NAME)
+  # waiver: plugin-tree layout directory name, not an internal key
+  cached = None if cached_root is None else cached_root / "bin" / _CORE_CLI_NAME
+  if cached is not None and cached.is_file():
+    return cached
   raise RuntimeError(
-    "lazycortex-core CLI not found — LAZYCORTEX_PLUGIN_DIRS empty, not on PATH, no dev-vault sibling"
+    "lazycortex-core CLI not found — LAZYCORTEX_PLUGIN_DIRS empty, not on PATH, no dev-vault sibling, "
+    "no cached sibling"
   )
 
 

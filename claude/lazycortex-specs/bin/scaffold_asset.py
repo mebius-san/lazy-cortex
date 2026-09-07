@@ -239,8 +239,8 @@ def _resolve_product(repo: Path, product: str) -> dict:
     _fail(_K.CAT_LOGICAL, f".claude/lazy.settings.json absent at {settings_path}")
   try:
     data = json.loads(settings_path.read_text())
-  except json.JSONDecodeError as e:
-    _fail(_K.CAT_LOGICAL, f".claude/lazy.settings.json malformed: {e}")
+  except json.JSONDecodeError as error:
+    _fail(_K.CAT_LOGICAL, f".claude/lazy.settings.json malformed: {error}")
   products_section = data.get(_K.PRODUCTS) or {}
   record = products_section.get(product) if isinstance(products_section, dict) else None
   if not isinstance(record, dict):
@@ -319,12 +319,12 @@ def _resolve_template(repo: Path, category: str, product: str, name: str, *,
   # the type-agnostic base: a shipped type that declares no directory of its own (`content`,
   # `research`) still needs a folder-note, and every per-type copy of it is byte-identical
   candidates.append(_plugin_root() / _K.TEMPLATES_DIR / _K.SHARED_TMPL_DIR / name)
-  for p in candidates:
-    if p.is_file():
-      return p
+  for candidate in candidates:
+    if candidate.is_file():
+      return candidate
   _fail(_K.CAT_LOGICAL,
         f"no template '{name}' for category '{category}' in product '{product}' "
-        f"(checked: {', '.join(str(p) for p in candidates)})")
+        f"(checked: {', '.join(str(path) for path in candidates)})")
 
 
 def _type_folder(asset_type: str, record: dict, explicit: str) -> str:
@@ -394,7 +394,7 @@ def _parse_doc_token(token: str) -> tuple[str, str]:
   return name, doc_type
 
 
-def _template_name(repo: Path, doc_type: str, product: str) -> str:
+def _template_name(repo: Path, doc_type: str, product: str | None) -> str:
   """
   Resolve the template filename a document of one type is seeded from.
 
@@ -405,7 +405,8 @@ def _template_name(repo: Path, doc_type: str, product: str) -> str:
   Args:
     repo: Repository root the declarations are resolved against.
     doc_type: The document's own declared type.
-    product: Product compound-key scoping the declaration lookup.
+    product: Product compound-key scoping the declaration lookup, or None when the caller has no
+      product in scope and only the shipped declarations apply.
 
   Returns:
     The declared template filename, falling back to the type's own name with the markdown suffix.
@@ -413,7 +414,8 @@ def _template_name(repo: Path, doc_type: str, product: str) -> str:
   declaration = spec_doc_types.resolve(repo, doc_type, product)
   # guard: a type no declaration covers cannot seed a document at all
   if declaration is None:
-    _fail(_K.CAT_LOGICAL, f"document type '{doc_type}' is declared nowhere in product '{product}'")
+    scope = f" in product '{product}'" if product else ""
+    _fail(_K.CAT_LOGICAL, f"document type '{doc_type}' is declared nowhere{scope}")
   return declaration.get(spec_doc_types.DocTypeFlag.TEMPLATE) or f"{doc_type}{_K.MD_SUFFIX}"
 
 
@@ -540,33 +542,38 @@ def _inject_iconize(text: str, icon: str, color: str) -> str:
   return f"---\n{new_fm}\n---\n" + text[m.end():]
 
 
-def _default_source_docs(spec_path: str, _category_folder: str, _slug: str,
+def _default_source_docs(_spec_path: str, _category_folder: str, _slug: str,
                          _doc: str, _layout: list[tuple[str, str]],
-                         product: str) -> list[tuple[str, str]]:
-  # waiver: plan removal simplified this — signature retained for forward compat
+                         _product: str) -> list[tuple[str, str]]:
+  # waiver: every parameter is unused — the signature is retained for forward compat
   """
   Return the default `spec_source_docs` list for an authored doc at scaffold time.
 
-  Each entry is a `(target, display)` tuple. Now returns only product-level docs
-  since plan-specific sibling logic was removed with the artifact model change.
+  A fresh document cites nothing. The key records only what the vault layout cannot derive —
+  requests and cross-references between assets — and the documents of the asset's own level are
+  read by rule rather than by link, so scaffolding one as a citation would only invite drift.
 
   Args:
-    spec_path: Product's `spec_path`.
+    _spec_path: Unused; retained for forward compatibility.
     _category_folder: Unused; retained for forward compatibility.
     _slug: Unused; retained for forward compatibility.
     _doc: Unused; retained for forward compatibility.
     _layout: Unused; retained for forward compatibility.
-    product: Product compound-key, used for the product-doc display gloss.
+    _product: Unused; retained for forward compatibility.
 
   Returns:
-    List of `(wikilink_target, display)` tuples in projection order.
+    The empty list — a scaffolded document starts with no source documents at all.
   """
-  return [
-      (f"{spec_path}/{_K.DESIGN_STEM}",
-       f"{product} — product {_K.DESIGN_STEM}"),
-      (f"{spec_path}/{_K.TECH_STEM}",
-       f"{product} — product {_K.TECH_STEM}"),
-  ]
+  return []
+
+
+# The two YAML spellings of the citation key a template may carry, and the body region the
+# projection owns. All three are matched over the whole file: the key never appears outside
+# frontmatter, and the markers never outside `# Sources`.
+_FM_DOCS_INLINE_RE = re.compile(rf"(?m)^{_K.SPEC_SOURCE_DOCS}\s*:\s*\[\s*\]\s*$\n?")
+_FM_DOCS_BLOCK_RE = re.compile(rf"(?m)^{_K.SPEC_SOURCE_DOCS}\s*:\s*\n(?:[ \t]+- .*\n)*")
+_DOCS_BLOCK_RE = re.compile(
+    re.escape(_K.DOCS_MARKER_START) + r".*?" + re.escape(_K.DOCS_MARKER_END), re.DOTALL)
 
 
 def _set_source_docs(text: str, docs: list[tuple[str, str]]) -> str:
@@ -579,6 +586,11 @@ def _set_source_docs(text: str, docs: list[tuple[str, str]]) -> str:
   without operator rewrites; the operator may later override individual displays
   and the projection writer (per `lazy-spec.sources-protocol`) preserves those edits.
 
+  Guarantees:
+    - The seeded document's citation list and its `## Docs` projection state exactly what the
+      caller passed, whatever the template carried: a template shipping stale citations, in
+      either YAML spelling or as projected bullets, is normalised rather than inherited.
+
   Args:
     text: Full file text with the template scaffold.
     docs: `(wikilink_target, display)` tuples to project.
@@ -586,22 +598,32 @@ def _set_source_docs(text: str, docs: list[tuple[str, str]]) -> str:
   Returns:
     Text with both the frontmatter array and body projection updated.
   """
-  fm_lines = [ f"  - \"[[{target}]]\"" for target, _ in docs ]
-  fm_value = "\n".join(fm_lines)
+
+  # Contract:
+  # Both regions are written from `docs` alone. A template layer that ships its own citations —
+  # a block-form list in the frontmatter, bullets between the projection markers — MUST NOT
+  # survive into the seeded document; the caller's list is the only source.
+
+  # render the frontmatter half first: a block list when the caller cited anything, the empty
+  # inline list when it cited nothing
+  fm_value = "\n".join(f"  - \"[[{target}]]\"" for target, _ in docs)
   fm_replacement = (
-      f"{_K.SPEC_SOURCE_DOCS}:\n{fm_value}" if docs
-      else f"{_K.SPEC_SOURCE_DOCS}: []"
+      f"{_K.SPEC_SOURCE_DOCS}:\n{fm_value}\n" if docs
+      else f"{_K.SPEC_SOURCE_DOCS}: []\n"
   )
-  text = re.sub(rf"^{_K.SPEC_SOURCE_DOCS}:\s*\[\]\s*$", fm_replacement,
-                text, count=1, flags=re.MULTILINE)
-  body_lines = [ f"- [[{target}|{display}]]" for target, display in docs ]
-  body_proj = "\n".join(body_lines)
-  marker_block = f"{_K.DOCS_MARKER_START}\n{_K.DOCS_MARKER_END}"
+  # both YAML spellings of the key are rewritten: the empty inline list the shipped templates
+  # carry, and the block form a project override may have filled in
+  if _FM_DOCS_INLINE_RE.search(text):
+    text = _FM_DOCS_INLINE_RE.sub(fm_replacement, text, count = 1)
+  else:
+    text = _FM_DOCS_BLOCK_RE.sub(fm_replacement, text, count = 1)
+  body_proj = "\n".join(f"- [[{target}|{display}]]" for target, display in docs)
   body_replacement = (
       f"{_K.DOCS_MARKER_START}\n{body_proj}\n{_K.DOCS_MARKER_END}" if docs
-      else marker_block
+      else f"{_K.DOCS_MARKER_START}\n{_K.DOCS_MARKER_END}"
   )
-  return text.replace(marker_block, body_replacement, 1)
+  # the whole marked region is replaced, so bullets a template shipped go with it
+  return _DOCS_BLOCK_RE.sub(lambda _m: body_replacement, text, count = 1)
 
 
 def _append_history(folder_note_path: Path, lines: list[str]) -> None:

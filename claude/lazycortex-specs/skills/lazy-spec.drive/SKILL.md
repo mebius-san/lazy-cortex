@@ -50,7 +50,7 @@ Every commit either loop step produces lands under a `@bot.` identity already (g
 
 ## Phase 1 — Resolve asset + preflight
 
-**Resolve the asset note.** `$ARGUMENTS` names the asset's status folder-note — a repo-relative path (`specs/products/<product>/features/<slug>/<slug>.md`) or a bare `<category>/<slug>` shorthand. For the shorthand, `Glob("**/<slug>/<slug>.md")` under the vault's spec content root (`spec.vault_root` in `.claude/lazy.settings.json`, default `specs/`) and pick the match whose parent dir name matches `<category>`'s folder. `Read` the result and confirm `spec_role: status` in frontmatter — refuse (outcome `not-a-status-note`) otherwise. With no argument at all: `Glob` every status note under the content root, `Read` each frontmatter, list those with `spec_released` false and `spec_cancelled` false; if the list is short enough to offer, `AskUserQuestion` with one option per asset (label = product/category/slug); otherwise print the count and ask the operator to re-invoke naming a path — never guess. Outcome: `asset-resolved` or `no-asset-picked`.
+**Resolve the note.** `$ARGUMENTS` names a coordination folder-note — an asset's status note (a repo-relative path `specs/products/<product>/features/<slug>/<slug>.md`, or a bare `<category>/<slug>` shorthand), a product's level note (`<spec_path>/<leaf>.md`), or the catalog root's level note (`<content-root>/<basename>.md`). For the shorthand, `Glob("**/<slug>/<slug>.md")` under the vault's spec content root (`spec.vault_root` in `.claude/lazy.settings.json`, default `specs/`) and pick the match whose parent dir name matches `<category>`'s folder. `Read` the result and confirm its `spec_role` is one of `status`, `product`, `catalog` — refuse (outcome `not-a-coordination-note`) otherwise. The role decides which coordinator the drive loop wakes: `status` drives an asset through the S0..S5 ladder under `spec.coordinator`, while `product` and `catalog` drive a LEVEL through the four level gates under `spec.catalog-coordinator` (`${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.catalog-playbook.md`) — the loop, the gestures, and the CLI calls below are identical either way, since `coordinator-dispatch` routes by the note's own role. With no argument at all: `Glob` every status note under the content root, `Read` each frontmatter, list those with `spec_released` false and `spec_cancelled` false; if the list is short enough to offer, `AskUserQuestion` with one option per asset (label = product/category/slug) — context first: where (`/lazy-spec.drive · Phase 1 — Resolve asset + preflight`, target the spec content root), found (no argument; the `<n>` open assets — neither released nor cancelled — listed), why asking (the skill drives exactly one asset and never guesses which), answers (one option per asset — this session drives that note; nothing persisted, asked again on the next argument-less run); header "Asset", question "Which open asset under `<content-root>` should this drive session work?", each option's description its `# Status brief` first line; otherwise print the count and ask the operator to re-invoke naming a path — never guess. Outcome: `asset-resolved` or `no-asset-picked`.
 
 **Derive `LAZYCORTEX_PLUGIN_DIRS` for this session's own CLI calls.** `coordinator-dispatch` internally subprocesses `lazycortex-core dispatch-job` via the `$LAZYCORTEX_PLUGIN_DIRS` walk (the blessed cross-plugin CLI contract) — with the var unset it raises `lazycortex-core CLI not resolvable`, not a soft failure. Export it before any other Bash call this session makes to these CLIs, mirroring the daemon's own precedence (`runtime_daemon.set_plugin_dirs` / `expert_preflight._derive_plugin_dirs`): dev-vault sources under `<repo>/claude/*/.claude-plugin/plugin.json` first (when this checkout IS the lazycortex dev vault), then the latest cached version per plugin under `~/.claude/plugins/cache/*/<plugin>/<version>/`.
 
@@ -72,7 +72,7 @@ if cache.is_dir():
             if not plugin.is_dir(): continue
             versions = [v for v in plugin.iterdir() if v.is_dir()]
             if not versions: continue
-            latest = sorted(versions, key=lambda v: v.name, reverse=True)[0]
+            latest = max(versions, key=lambda v: tuple(int(''.join(ch for ch in p if ch.isdigit()) or 0) for p in v.name.split('.')))
             r = str(latest.resolve())
             if r not in dirs: dirs.append(r)
 print(os.pathsep.join(dirs))
@@ -91,7 +91,7 @@ Any signal `running`/`ok` → refuse: print which signal fired and that the daem
 
 ## Phase 2 — Resume: settle outstanding state
 
-Re-running this skill on an asset MUST resume, never blindly restart. `Read` the note's current frontmatter (`spec_halted`, `spec_cancelled`, the five gates), run `Bash(lazycortex-specs note-check <asset-note>)` for its `job_markers` block (the two job markers live in the runtime sidecar, not in the note), and `Bash(git status --porcelain -- <spec content root>)` for anything left uncommitted by a prior interrupted session.
+Re-running this skill on an asset MUST resume, never blindly restart. `Read` the note's current frontmatter (`spec_halted`, `spec_cancelled`, and its gates — the five asset gates on a status note, the four level gates on a `product` / `catalog` note), run `Bash(lazycortex-specs note-check <asset-note>)` for its `job_markers` block (the two job markers live in the runtime sidecar, not in the note), and `Bash(git status --porcelain -- <spec content root>)` for anything left uncommitted by a prior interrupted session.
 
 Run **the drive loop** once, unconditionally — this catches a job that finished while nobody was watching (a stale `active_job` / `coordinator_job` marker) and lets the ladder settle before the operator sees anything. `spec_cancelled: true` still runs the loop (gate-tick/coordinator-dispatch are read-first and no-op safely on a cancelled asset) but the render below says so plainly.
 
@@ -101,7 +101,16 @@ Render the current state to the operator: `# Status brief`, every hung `[!gate] 
 
 Repeat until the operator says stop:
 
-**Build the menu from current state**, `AskUserQuestion` with one option per row (never a bulk prose list):
+**Build the menu from current state**, `AskUserQuestion` with one option per row (never a bulk prose list) — one context block per round, filled from the state just rendered:
+
+```
+Context (print before asking):
+- Where: /lazy-spec.drive · Phase 3 — Drive the dialog loop; target <asset-note-path>
+- Found: gates <the note's own booleans — five on an asset, four on a level>; hung checkboxes <labels>; open questions <summaries>; coordinator commands <n>; dirty paths <list | none>; last drive-loop action <noop | dispatched | dispatch-stale>
+- Why asking: every gesture is the operator's decision — the skill only performs the edit and commits it on their behalf
+- Answers: `Tick <Label>` — the box is ticked and committed, then the drive loop runs; `<question option>` — that option is ticked under its [!question] and committed; `Add a Coordinator command` — a follow-up free-text question collects the line, then it is appended and committed; `Commit accumulated changes` — the dirty pathspec is shown and confirmed, then committed; `Stop driving this asset` — ends Phase 3 (`driving-stopped`). The menu is rebuilt after every gesture
+AskUserQuestion: header "Next gesture", question "What should happen next on <product>/<category>/<slug>?", options below with descriptions.
+```
 
 - One option per hung checkbox block: "Tick `<Label>`".
 - One option per option under each unanswered `[!question]` callout.
@@ -114,7 +123,7 @@ Repeat until the operator says stop:
 - **Tick a checkbox** — `Edit` the block's `- [ ] <Label>` line to `- [x] <Label>` in `# Gates`. Commit with the ambient (non-bot) git identity — `Bash(git commit -m "lazy-spec.drive: tick <Label> on <asset-slug>" -- <asset-note-path>)`, pathspec-scoped to the note only. Before ticking a box whose dispatch reads `design.md` / `architecture.md` (per the checkbox table in `lazy-spec.coordination-playbook.md` Ch. 3), the operator may run `/lazy-spec.sync-with-code <asset>` first — its asset mode is an available pre-step to check those docs against current code before trusting them.
 - **Answer a question** — `Edit` the chosen option's `- [ ]` to `- [x]` under the `[!question]` callout. Commit the same way: `lazy-spec.drive: answer <question-summary> on <asset-slug>` -- `<asset-note-path>`.
 - **Add a command** — `Edit` a new line into the (protected, but operator-owned-by-convention) `# Coordinator commands` section. Commit: `lazy-spec.drive: command "<text>" on <asset-slug>` -- `<asset-note-path>`.
-- **Commit accumulated changes** — show the dirty pathspec, ask the operator to confirm (or narrow) it, then `Bash(git commit -m "<operator-supplied or default message>" -- <confirmed pathspec>)`. New untracked files need `git add -N <path>` first (registers the path, stages no content) before the pathspec commit picks them up.
+- **Commit accumulated changes** — show the dirty pathspec, ask the operator to confirm (or narrow) it — context first: where (`/lazy-spec.drive · Phase 3 — Drive the dialog loop`, target the spec content root), found (the `git status --porcelain` list, quoted), why asking (these are the operator's own hand-edits and the index is theirs), answers (`confirm` — the listed paths ride one commit; `narrow` — type the subset to commit; declining leaves everything uncommitted, offered again next round); header "Commit", question "Commit these `<n>` dirty paths under `<content-root>`?" — then `Bash(git commit -m "<operator-supplied or default message>" -- <confirmed pathspec>)`. New untracked files need `git add -N <path>` first (registers the path, stages no content) before the pathspec commit picks them up.
 
 **Run the drive loop** after every gesture, then re-render the refreshed state (same fields as Phase 2's render) before asking the next question.
 
@@ -136,7 +145,7 @@ One line per task in the canonical list, with its outcome word.
 
 ## Failure modes
 
-- **`lazycortex-core CLI not resolvable: $LAZYCORTEX_PLUGIN_DIRS yields no match`** — Phase 1's export step did not run, or found no dev-vault sources and no plugin cache → re-run Phase 1's export, or confirm `~/.claude/plugins/cache/*/lazycortex-core/` exists (install/update the plugin if not).
+- **`lazycortex-core CLI not resolvable: $LAZYCORTEX_PLUGIN_DIRS and the plugin cache yield no match`** — Phase 1's export step did not run, or found no dev-vault sources and no plugin cache → re-run Phase 1's export, or confirm `~/.claude/plugins/cache/*/lazycortex-core/` exists (install/update the plugin if not).
 - **`agent not found in dev plugin: <ref> → .../cache/<plugin>/<version>/agents/<name>.md`** — the resolved `LAZYCORTEX_PLUGIN_DIRS` entry points at a cached plugin version that predates the agent this job needs (common right after a dev-vault-only change that hasn't been published yet) → when this checkout IS the dev vault that ships the agent, confirm Phase 1's derivation put the `claude/<plugin>/` source dir ahead of the cache entry for the same plugin; in a consumer checkout, update the plugin so its cache carries the agent.
 - **The drive loop hits its 20-iteration ceiling without settling** — either a genuine ladder bug (report it, do not raise the ceiling to paper over it) or the asset is caught in a legitimate multi-round cascade (playbook Ch. 4) that outgrew one session's patience → re-invoke `/lazy-spec.drive` on the same asset; Phase 2's resume picks up exactly where the loop left off.
 - **`refused-daemon-live`** — a live daemon owns this checkout → stop it (or drop this checkout from `daemon.run_here`) before driving by hand; per taskdoc § 8, going back to daemon mode after a drive session requires Phase 4 to report `closed-clean` first.

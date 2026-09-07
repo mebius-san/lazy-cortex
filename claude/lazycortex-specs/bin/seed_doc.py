@@ -15,6 +15,15 @@ the folder-note's `spec_source_requests` list, so the review dispatcher's
 `context_from_frontmatter` can resolve the originating request(s) when the
 doc's writer is dispatched.
 
+Level mode: `seed-doc --root <folder-note-path> --doc <name>:<spec_doc_type>
+[--cwd <repo>]` seeds a system document beside a level folder-note — the
+catalog root's or a product's own — where there is no product record to
+resolve. The template comes from the shipped per-type chain with the
+project's override layer in front of it, the product tokens carry the
+content root's directory name, and the paint comes from the type's own
+declaration. Naming a product alongside `--root` is refused; the two
+spellings never combine.
+
 Stdout: a JSON object with `outcome` and the created doc's repo-relative
 path under `doc`. On error: a JSON object with `error` field and non-zero
 exit.
@@ -32,6 +41,8 @@ from pathlib import Path
 import apply_request
 import scaffold_asset
 import spec_doc_types
+import spec_paths
+from spec_keys import SpecKey
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -40,10 +51,21 @@ if TYPE_CHECKING:
 
 _PROG = "lazycortex-specs seed-doc"
 _ARG_NOTE = "note"
+_ARG_ROOT = "--root"
 _HELP_DOC = "Produced document as <name>:<spec_doc_type>; exactly one, required"
 _HELP_NOTE = "Repo-relative path of the asset's status folder-note"
+_HELP_ROOT = "Repo-relative path of a level folder-note; seeds with no product in scope"
 _STAGE_KEY = "spec_stage"
 _SOURCE_REQUESTS_KEY = "spec_source_requests"
+# waiver: one-off human-facing messages -- the two mode-selection refusal lines
+_ERR_ROOT_WITH_PRODUCT = "--root takes no product and no positional folder-note"
+_ERR_MODE_INCOMPLETE = "seed-doc needs <product> <folder-note-path>, or --root <folder-note-path>"
+
+# The template family a level document is seeded from: `_resolve_template` prefixes the value
+# with `spec.`, so `docs` names the shipped per-type directory every document type lives in, and
+# the empty product below collapses the per-product layer, leaving project override then plugin.
+_ROOT_TEMPLATE_FAMILY = "docs"
+_NO_PRODUCT = ""
 
 
 def _note_source_requests(note_text: str) -> list[str]:
@@ -82,6 +104,28 @@ def _set_stage_empty(fm_text: str) -> str:
   return fm_text.rstrip("\n").removesuffix("---") + f"{_STAGE_KEY}: {scaffold_asset._K.STAGE_EMPTY}\n---\n"
 
 
+def _root_seed_inputs(repo: Path, note_fm: dict, slug: str, doc_type: str) -> tuple[dict, Path]:
+  """
+  Resolve the template tokens and the template file a level document is seeded from.
+
+  Args:
+    repo: Repository root the templates and declarations are resolved against.
+    note_fm: The level folder-note's parsed frontmatter.
+    slug: The level folder-note's own filename stem.
+    doc_type: The document's declared type.
+
+  Returns:
+    A `(tokens, template_path)` pair — the substitution mapping and the chosen template file.
+  """
+  # a level has no product record, so the content root's own directory names it in both tokens
+  label = spec_paths.spec_content_root(repo).name
+  tokens = { "product": label, "product_tag": label, "slug": slug,
+             "category": note_fm.get(SpecKey.ROLE, "") }
+  return tokens, scaffold_asset._resolve_template(
+      repo, _ROOT_TEMPLATE_FAMILY, _NO_PRODUCT,
+      scaffold_asset._template_name(repo, doc_type, None))
+
+
 def main(argv: list[str]) -> int:
   """
   Run the `seed-doc` subcommand: seed one authored doc beside an existing folder-note.
@@ -90,37 +134,60 @@ def main(argv: list[str]) -> int:
     - An existing target document is never overwritten: the request is refused with a JSON
       error object and a non-zero exit status, and the existing file is never opened for
       writing.
-    - A refusal at any guard — a missing folder-note, a malformed `--doc` token, or an existing
-      target document — writes nothing to disk.
+    - A refusal at any guard — a missing folder-note, a malformed `--doc` token, an existing
+      target document, or a product named alongside `--root` — writes nothing to disk.
 
   Args:
-    argv: CLI arguments after the subcommand token —
-      `<product> <folder-note-path> --doc <name>:<type> [--cwd <repo>]`.
+    argv: CLI arguments after the subcommand token — `<product> <folder-note-path> --doc
+      <name>:<type> [--cwd <repo>]`, or `--root <folder-note-path> --doc <name>:<type>
+      [--cwd <repo>]`.
 
   Returns:
-    Process exit code — `0` on success (refusals exit via SystemExit with a JSON error object).
+    Process exit code — `0` on success.
+
+  Raises:
+    SystemExit: On any refusal — a missing folder-note, a malformed `--doc` token, an existing
+      target document, or a product named alongside `--root` — carrying a JSON error object on
+      stdout and a non-zero status.
   """
 
   # Contract:
-  # A refusal at any guard — a missing folder-note, a malformed `--doc` token, or an existing
-  # target document — writes nothing to disk: no document file, template substitution, or
-  # folder-note history entry is created before the guard that refuses the request runs.
+  # A refusal at any guard — a missing folder-note, a malformed `--doc` token, an existing
+  # target document, or a product named alongside `--root` — writes nothing to disk: no document
+  # file, template substitution, or folder-note history entry is created before the guard that
+  # refuses the request runs.
 
+  # the CLI surface: both target spellings are optional positionals so `--root` can replace them
   parser = argparse.ArgumentParser(prog = _PROG)
-  parser.add_argument(scaffold_asset._K.ARG_PRODUCT, help = scaffold_asset._K.HELP_PRODUCT)
-  parser.add_argument(_ARG_NOTE, help = _HELP_NOTE)
+  # waiver: argparse CLI signature -- the positionals are optional so `--root` can replace them
+  parser.add_argument(scaffold_asset._K.ARG_PRODUCT, nargs = "?", default = None,
+                      help = scaffold_asset._K.HELP_PRODUCT)
+  parser.add_argument(_ARG_NOTE, nargs = "?", default = None, help = _HELP_NOTE)
+  parser.add_argument(_ARG_ROOT, default = None, help = _HELP_ROOT)
   parser.add_argument(scaffold_asset._K.ARG_DOC, required = True, help = _HELP_DOC)
   parser.add_argument(scaffold_asset._K.ARG_CWD, default = None, help = scaffold_asset._K.HELP_CWD)
   args = parser.parse_args(argv)
 
+  # the two spellings name the same seed at different levels and never combine
+  if args.root:
+    # guard: a product alongside --root would silently pick one of two conflicting scopes
+    if args.product or args.note:
+      scaffold_asset._fail(scaffold_asset._K.CAT_LOGICAL, _ERR_ROOT_WITH_PRODUCT)
+    product, note_rel = None, args.root
+  else:
+    # guard: product mode needs both positionals — argparse cannot express the pairing
+    if not args.product or not args.note:
+      scaffold_asset._fail(scaffold_asset._K.CAT_LOGICAL, _ERR_MODE_INCOMPLETE)
+    product, note_rel = args.product, args.note
+
   # resolve the repo, the product record, and the note before any write
   repo = Path(args.cwd).resolve() if args.cwd else scaffold_asset._repo_root(Path.cwd())
-  record = scaffold_asset._resolve_product(repo, args.product)
-  note_path = repo / args.note
-  # guard: the asset must already exist — seeding never scaffolds a folder
+  record = scaffold_asset._resolve_product(repo, product) if product else {}
+  note_path = repo / note_rel
+  # guard: the note must already exist — seeding never scaffolds a folder
   if not note_path.is_file():
     scaffold_asset._fail(scaffold_asset._K.CAT_LOGICAL,
-                         f"folder-note does not exist: {args.note}")
+                         f"folder-note does not exist: {note_rel}")
   name, doc_type = scaffold_asset._parse_doc_token(args.doc)
   doc_path = note_path.parent / name
 
@@ -137,18 +204,21 @@ def main(argv: list[str]) -> int:
   # the note's own declarations drive the template chain, exactly as a scaffold's would
   note_text = note_path.read_text()
   note_fm, _fm_end = apply_request._parse_frontmatter(note_text)
-  asset_type = note_fm.get(scaffold_asset._K.ASSET_TYPE, "") or scaffold_asset._K.DESIGN_STEM
-  alias_base = scaffold_asset._alias_base(asset_type, record)
   slug = note_path.stem
-  tokens = { "product": args.product, "product_tag": scaffold_asset._product_tag(record),
-             "slug": slug, "category": asset_type }
-  tmpl_path = scaffold_asset._resolve_template(
-      repo, asset_type, args.product,
-      scaffold_asset._template_name(repo, doc_type, args.product), alias_base = alias_base)
+  if product:
+    asset_type = note_fm.get(scaffold_asset._K.ASSET_TYPE, "") or scaffold_asset._K.DESIGN_STEM
+    alias_base = scaffold_asset._alias_base(asset_type, record)
+    tokens = { "product": product, "product_tag": scaffold_asset._product_tag(record),
+               "slug": slug, "category": asset_type }
+    tmpl_path = scaffold_asset._resolve_template(
+        repo, asset_type, product,
+        scaffold_asset._template_name(repo, doc_type, product), alias_base = alias_base)
+  else:
+    tokens, tmpl_path = _root_seed_inputs(repo, note_fm, slug, doc_type)
   doc_text = scaffold_asset._substitute(tmpl_path.read_text(), tokens)
   doc_text = scaffold_asset._ensure_doc_type(doc_text, doc_type)
   # the type's own paint: the icon names the kind of document, matchers own the colour later
-  if (doc_paint := spec_doc_types.icon_color(repo, doc_type, args.product)):
+  if (doc_paint := spec_doc_types.icon_color(repo, doc_type, product)):
     doc_text = scaffold_asset._inject_iconize(doc_text, doc_paint[0], doc_paint[1] or "")
 
   # the seeded doc is an unwritten skeleton inheriting the note's request attribution

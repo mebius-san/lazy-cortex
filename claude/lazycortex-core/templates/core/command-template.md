@@ -59,6 +59,16 @@ Authoring notes (delete before saving):
   routing table, and a command the router cannot select never fires (WARN). Shapes and worked
   rewrites: `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.description-triggers.md`.
 
+  § 11 A step that asks via `AskUserQuestion` is written as a context block followed by the call
+      (WARN when missing). Ask only for genuine project config nothing can derive — not a value
+      already in settings, not a path a convention fixes, not what another plugin seeds; a step
+      that need not ask carries no block at all. Shape, printed to the operator before the call:
+        Context (print before asking):
+        - Where: /<skill> · Step <N> — <title>; target <path or scope>
+        - Found: <what the read-first probe returned>
+        - Why asking: <the one reason the skill cannot decide alone>
+        - Answers: `<label>` — <effect now / later>; `<label>` — <…>
+        AskUserQuestion: header "<label>", question "<self-contained, names the target>", options with descriptions.
 - Filename: `<namespace>.<name>.md` under `.claude/commands/` or `<plugin>/commands/`.
 
 - Logging: only if your project has a logging contract installed (e.g. `lazy-log.logging` from

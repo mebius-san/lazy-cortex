@@ -29,6 +29,23 @@ class ReferenceError(Exception):  # pylint: disable=redefined-builtin
   """
 
 
+def _version_sort_key(name: str) -> tuple[int, ...]:
+  """
+  Build a numeric sort key for a plugin-cache version directory name.
+
+  Args:
+    name: Version directory name as it appears in the plugin cache.
+
+  Returns:
+    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
+  """
+  out: list[int] = []
+  for part in name.split("."):
+    digits = "".join(c for c in part if c.isdigit())
+    out.append(int(digits) if digits else 0)
+  return tuple(out)
+
+
 def _dev_plugin_dirs() -> list[Path]:
   """
   Return the dev-plugin directories declared by the runtime daemon.
@@ -156,8 +173,8 @@ def resolve(ref: str, *, category: str, repo: Path) -> Path:
       # guard: plugin dir exists but contains no cached versions
       if not all_versions:
         raise ReferenceError(f"no versions cached for plugin: {scope}")
-      # Pick the latest version by lexicographic sort (consistent with runtime_daemon).
-      latest = sorted(all_versions, key = lambda v: v.name, reverse = True)[0]
+      # highest version by numeric order (consistent with runtime_daemon)
+      latest = max(all_versions, key = lambda v: _version_sort_key(v.name))
       p = latest / dir_name / f"{name}.md"
   else:
     # bare reference resolves under the repo-local .claude tree

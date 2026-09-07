@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
-         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard")
+         "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, routine-ensure-filter, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard")
 
 
 def _cmd_consume_job(argv: list[str]) -> int:
@@ -751,6 +751,9 @@ def main() -> int:
     elif sub == "settings-set":
         from settings_cli import cmd_settings_set
         return cmd_settings_set(sys.argv[2:])
+    elif sub == "routine-ensure-filter":
+        from routine_filter import cmd_routine_ensure_filter
+        return cmd_routine_ensure_filter(sys.argv[2:])
     elif sub == "permission-allow":
         from permission_cli import cmd_permission_allow
         return cmd_permission_allow(sys.argv[2:])

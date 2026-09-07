@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about vault setup, Iconize, diagram render glue, the vault manifest, plugin updates, and tag pages for lazycortex-obsidian.
-last_regen: 2026-09-02
+last_regen: 2026-09-07
 no_diagram: true
 source_skills:
   - lazy-obsidian.install
@@ -14,7 +14,7 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: c5789cd250ada25aa79c0fc976a881d7c0be44a4
+source_sha: 0e0562d0fc4bb9457ff9d14758e688f4eac27c87
 ---
 # Frequently asked questions
 
@@ -38,7 +38,7 @@ The plugin cache is the installed copy of the plugin's files. An empty cache usu
 
 ## I ran `/lazy-obsidian.install` but icons are not showing up in Obsidian. What should I check?
 
-Icons are painted by Iconize reading `iconize_icon` and `iconize_color` from each note's frontmatter. Three things are required: Iconize's `iconInFrontmatterEnabled` setting must be `true` with the field names set to `iconize_icon` and `iconize_color` (asserted automatically by `/lazy-obsidian.iconize-install`), the icon-map at `.claude/iconize/obsidian-icon-map.json` must have matchers that cover your notes, and `/lazy-obsidian.iconize-sync reconcile` must have been run to write the frontmatter. If the matchers are missing entries, run `/lazy-obsidian.iconize-config` to add them, then run `/lazy-obsidian.iconize-sync reconcile` to apply.
+Icons are painted by Iconize reading `iconize_icon` and `iconize_color` from each note's frontmatter. Four things are required: Iconize's `iconInFrontmatterEnabled` setting must be `true` with the field names set to `iconize_icon` and `iconize_color` (asserted automatically by `/lazy-obsidian.iconize-install`), the icon-map at `.claude/iconize/obsidian-icon-map.json` must have matchers that cover your notes, the note's path must fall under one of the icon-map's `paint_roots` (see the question below if it doesn't), and `/lazy-obsidian.iconize-sync reconcile` must have been run to write the frontmatter. If the matchers are missing entries, run `/lazy-obsidian.iconize-config` to add them, then run `/lazy-obsidian.iconize-sync reconcile` to apply.
 
 ---
 
@@ -86,9 +86,17 @@ No. That file is runtime state — Iconize rewrites it on every icon click and t
 
 ## Why don't the templates under a plugin's `templates/` tree (or my vault's `.claude/templates/`) ever get icons?
 
-Iconize-sync never paints a template tree, on purpose. A scaffolding template — a plugin's own `claude/<plugin>/templates/**`, or the consumer-side `.claude/templates/**` override tree — carries the same frontmatter shape as the notes it scaffolds, so a frontmatter-keyed matcher would fire on the template itself. Painting it would dirty a shipped source file on every reconcile and bake a stale icon into every note scaffolded from it afterwards. So every path under a template tree resolves to no match, and `reconcile` never even enumerates it.
+Iconize-sync never paints a template tree, on purpose. A scaffolding template — a plugin's own `claude/<plugin>/templates/**`, or the consumer-side `.claude/templates/**` override tree — carries the same frontmatter shape as the notes it scaffolds, so a frontmatter-keyed matcher would fire on the template itself. Painting it would dirty a shipped source file on every reconcile and bake a stale icon into every note scaffolded from it afterwards. So every path under a template tree resolves to no match, and `reconcile` never even enumerates it. This exemption applies even inside a directory that is otherwise open to painting.
 
 If you upgraded from a version that predates this behavior, a template may still carry stale `iconize_icon` / `iconize_color` keys painted by an earlier worker run — no-match keeps frontmatter rather than stripping it, so nothing removes them automatically. Strip the two keys by hand from the affected `.md` files under your template trees once; notes scaffolded from them afterwards then take their icon from the matchers as expected.
+
+---
+
+## Why are icons only painted under `specs/` and not across the rest of the vault?
+
+Painting is scoped by `paint_roots`, a top-level key in `.claude/iconize/obsidian-icon-map.json` listing the repo-relative directory prefixes the worker is allowed to touch. Outside those prefixes the worker never reads or writes a note at all — no matcher runs, no frontmatter is parsed, nothing is written, and any `iconize_icon` / `iconize_color` the note already carries (for example one written by a sibling plugin) is left exactly as it stands. A prefix claims a path only across a directory boundary, so `specs` covers `specs/product/design.md` but never `specsheets/design.md`.
+
+`/lazy-obsidian.iconize-install` seeds this key on a fresh icon-map, and adds it to an existing one that does not carry it yet, with a single entry: your spec content root from `spec.vault_root` in `.claude/lazy.settings.json`, defaulting to `specs` when that setting is absent. An icon-map already carrying an authored `paint_roots` is never rewritten. To paint additional areas of the vault, add more prefixes to the `paint_roots` array by hand — `/lazy-obsidian.iconize-config` manages registry entries, not this key. Narrowing the list later does not clean up icons already painted in an area it no longer covers; removing those is a manual edit. If your icon-map predates this key entirely and you have not re-run `/lazy-obsidian.iconize-install` since, `paint_roots` stays absent and the whole vault remains in scope, exactly as before.
 
 ---
 

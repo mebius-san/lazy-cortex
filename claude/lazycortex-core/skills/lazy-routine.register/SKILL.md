@@ -34,14 +34,16 @@ The remaining fields depend on the routine **type**. Allowed types: `subprocess`
 
 If the caller passed a `cfg` dict, take `cfg.get("type", "subprocess")` and skip to 1c with the dict.
 
-In wizard mode (no `cfg`), ask via `AskUserQuestion`:
+In wizard mode (no `cfg`), ask:
 
-> Which routine type?
-> - subprocess — periodic command (default)
-> - inbox — scan a dir, fire once per file (job-queue moves the file; command leaves it in place)
-> - schedule — cron-driven; one fire per cron boundary
-> - git — watch local HEAD; fire once per item
-> - md-scan — scan markdown files matching globs, filter by frontmatter; fire in-place (no file move)
+```
+Context (print before asking):
+- Where: /lazy-routine.register · Step 1a — Resolve the type; target routine `<name>` in `.claude/lazy.settings.json`
+- Found: no `cfg` dict passed — wizard mode; name `<name>` given, no type on record
+- Why asking: the type decides which fields Step 1b collects and how the daemon fires the routine; nothing derives it
+- Answers: `subprocess` — periodic command (default); `inbox` — scan a dir, fire once per file (job-queue moves the file; command leaves it in place); `schedule` — cron-driven, one fire per cron boundary; `git` — watch local HEAD, fire once per item; `md-scan` — scan markdown files matching globs, filter by frontmatter, fire in-place (no file move). Persisted as `routines.<name>.type` in Step 3; never re-asked (re-registration refuses without `--force`)
+AskUserQuestion: header "Routine type", question "Which routine type should `<name>` be registered as in `.claude/lazy.settings.json`?", options `subprocess` / `inbox` / `schedule` / `git` / `md-scan`, each with the description above.
+```
 
 ### 1b. Collect type-specific fields
 
@@ -67,7 +69,16 @@ Build a single `cfg` dict carrying `type` + the collected fields.
 
 1. `name` matches `<plugin>.<verb>` or `<plugin>.<verb>.<scope>` (two or three non-empty dot-separated parts). `<plugin>` is the plugin's own namespace — `lazy-wiki`, `lazy-core`, and so on per `lazy-core.hygiene` § Naming; the third segment exists for routines registered per scope, one instance each (`lazy-wiki.mirror-sync.<scope-id>`). Else abort: "routine names must be `<plugin>.<verb>[.<scope>]` format. Got: `<name>`."
 2. Call `validate_routine_entry(name, cfg)` to enforce the per-type schema. On `RoutineConfigError`, abort with the message verbatim.
-3. **Working-area gitignore check** — for `inbox` routines, run `git check-ignore -q -- <inbox_dir>` (the `--` is mandatory: an inbox directory whose name starts with a dash, e.g. `-Inbox`, is otherwise parsed as options and git fails with `unknown switch`). Exit 0 = ignored. Exit 1 = tracked → ask via `AskUserQuestion`: > `<inbox_dir>` is not gitignored. Inbox routines move tracked files between iterations, which dirties the working tree and triggers the daemon's halt protection. > - Add `<inbox_dir>/` to `.gitignore` now (recommended) > - Continue anyway — I will commit moves manually > - Abort registration
+3. **Working-area gitignore check** — for `inbox` routines, run `git check-ignore -q -- <inbox_dir>` (the `--` is mandatory: an inbox directory whose name starts with a dash, e.g. `-Inbox`, is otherwise parsed as options and git fails with `unknown switch`). Exit 0 = ignored. Exit 1 = tracked → ask:
+
+   ```
+   Context (print before asking):
+   - Where: /lazy-routine.register · Step 1c — Pre-flight validation; target `<inbox_dir>` (inbox of routine `<name>`)
+   - Found: `git check-ignore -q -- <inbox_dir>` exited 1 — the directory is tracked, not gitignored
+   - Why asking: inbox routines move tracked files between iterations, which dirties the working tree and triggers the daemon's halt protection; touching `.gitignore` is the operator's call
+   - Answers: `Add <inbox_dir>/ to .gitignore now` — appended to `.gitignore` now, not committed (operator commits when ready); `Continue anyway — I will commit moves manually` — registered as is, nothing written to `.gitignore`; `Abort registration` — nothing written, outcome `aborted`
+   AskUserQuestion: header "Inbox gitignore", question "`<inbox_dir>` is not gitignored — add `<inbox_dir>/` to `.gitignore` before registering inbox routine `<name>`?", options `Add <inbox_dir>/ to .gitignore now` (recommended) / `Continue anyway — I will commit moves manually` / `Abort registration`, each with the description above.
+   ```
 
    On "Add" → append to `.gitignore`; do not auto-commit (operator commits when ready). On "Abort" → outcome `aborted`.
 

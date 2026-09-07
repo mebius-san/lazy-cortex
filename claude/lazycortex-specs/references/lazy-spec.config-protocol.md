@@ -63,6 +63,10 @@ Example product record:
 }
 ```
 
+### Icon and colour — what each axis carries
+
+The **icon** is the type. It says what a note IS — its asset type, its document type, its role — and it is written once, by whoever scaffolds the note, from the type's own declaration. **No state ever repaints it.** Every state this catalog tracks — `spec_stage`, `spec_state`, `spec_halted`, `spec_cancelled`, an upstream status, a level gate, a request status — moves the **colour** and nothing else. Accordingly every state matcher in `references/lazy-spec.iconize-registry.json` resolves its icon as `"{{frontmatter.iconize_icon}}"`, borrowing whatever the note already carries; the three `spec_role: request` matchers are the sole literal, and they all carry the same `LiMail` because that IS the request type's icon — one icon, three status colours. The full rule, and what the worker does when a matcher fires before anything wrote the note's icon, is `lazycortex-obsidian:lazy-obsidian.iconize-registry-contract.md` § 3a.
+
 ### Container colour
 
 Colour is the state axis: an asset's folder takes its colour from its own `spec_state`, and a document from its stage. A container has no state, so the catalog paints containers on a three-tier rule rather than giving every shelf a colour it cannot mean.

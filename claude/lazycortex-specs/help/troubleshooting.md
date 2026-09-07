@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-specs skills — symptoms, likely causes, and targeted fixes.
-last_regen: 2026-09-05
+last_regen: 2026-09-07
 no_diagram: true
 source_skills:
   - lazy-spec.add-asset-type
@@ -25,7 +25,7 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.doctor
-source_sha: 8cf0ec8412bf97623e74bdf4d6a5cba5b82d957f
+source_sha: 349e60422166e7fd5411543ace245f516361b6c5
 ---
 # Troubleshooting
 
@@ -359,6 +359,26 @@ source_sha: 8cf0ec8412bf97623e74bdf4d6a5cba5b82d957f
 
 ---
 
+## `/lazy-spec.drive` aborts: can't find the lazycortex-core CLI
+
+**Symptom**: The skill aborts immediately, saying the `lazycortex-core` CLI cannot be resolved.
+
+**Likely cause**: `lazycortex-core` — the plugin `/lazy-spec.drive` calls to resolve settings and dispatch jobs — isn't installed in this environment, or its plugin-cache entry is missing or stale.
+
+**Fix**: Install or update `lazycortex-core`, then re-invoke `/lazy-spec.drive` on the same asset.
+
+---
+
+## `/lazy-spec.drive` aborts partway through: agent not found
+
+**Symptom**: The drive session gets partway through the ladder, then aborts naming an agent it can't locate for the job it's about to dispatch.
+
+**Likely cause**: The installed version of the plugin that should ship that agent predates it — usually because that plugin was updated on another machine or checkout but not the one you're running `/lazy-spec.drive` from.
+
+**Fix**: Update the plugin that owns the missing agent to its latest published version, then re-invoke `/lazy-spec.drive` on the same asset — its resume phase picks up exactly where the abort left off.
+
+---
+
 ## `/lazy-spec.set-stage` refuses: document carries no `spec_doc_type`
 
 **Symptom**: The skill refuses, saying the target document carries no `spec_doc_type`.
@@ -393,7 +413,7 @@ source_sha: 8cf0ec8412bf97623e74bdf4d6a5cba5b82d957f
 
 **Symptom**: The skill refuses, saying the stage value isn't in the closed set.
 
-**Likely cause**: You passed a stage outside `empty | draft | approved | rejected | cancelled` — often a leftover from an older model (`review`, `done`, `wtr`).
+**Likely cause**: You passed a stage outside `empty | draft | approved | rejected | cancelled | deferred` — often a leftover from an older model (`review`, `done`, `wtr`).
 
 **Fix**: Pass `draft` and set `review_active: true` for a doc that's currently in review, `approved` once it's accepted, or whichever closed-set value matches your intent.
 
@@ -406,6 +426,16 @@ source_sha: 8cf0ec8412bf97623e74bdf4d6a5cba5b82d957f
 **Likely cause**: The file carries `spec_owner_doc`, marking it a markdown attachment — its `spec_stage` is a mirror the owner's own stage cascade writes, never set directly (except while the attachment is itself under active review, when nobody writes the file).
 
 **Fix**: Set the stage on the owner document instead — `/lazy-spec.set-stage <owner-doc> <stage>` cascades the same stage to every sibling attachment (except one currently in review) in the same commit.
+
+---
+
+## `/lazy-spec.set-stage` refuses: document is deferred
+
+**Symptom**: The skill refuses, saying the target document is deferred and cannot take the stage you asked for.
+
+**Likely cause**: The document's `spec_stage` currently reads `deferred` — parked out of sight of the coordinator and every other automation — and the stage you passed is anything but `draft`.
+
+**Fix**: Run `/lazy-spec.set-stage <doc> draft` first; that is the only way out of `deferred`. Once it lands, the coordinator and every other automation start reacting to the document again, and you can move it on to whatever stage you actually intended.
 
 ---
 

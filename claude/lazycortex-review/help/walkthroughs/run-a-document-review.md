@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one document through a full review cycle from opt-in to finalize.
-last_regen: 2026-09-03
+last_regen: 2026-09-07
 diagram_spec:
   anchor: "How the review loop flows"
   request: "Sequence diagram showing: operator runs /lazy-review.start → banner inserted + commit → daemon dispatches expert jobs per section → operator reads suggestions and ticks approve → operator checks status via /lazy-review.status → all sections approved → operator runs /lazy-review.finalize → finalized commit with Doc-Review-Phase: finalize trailer"

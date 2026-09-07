@@ -271,6 +271,23 @@ def _apply_one_job(text: str, jdir: Path, request: dict, response: dict) -> str 
 # ------------------------------------------------------------- consume (§1c)
 
 
+def _version_sort_key(name: str) -> tuple[int, ...]:
+  """
+  Build a numeric sort key for a plugin-cache version directory name.
+
+  Args:
+    name: Version directory name as it appears in the plugin cache.
+
+  Returns:
+    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
+  """
+  out: list[int] = []
+  for part in name.split("."):
+    digits = "".join(c for c in part if c.isdigit())
+    out.append(int(digits) if digits else 0)
+  return tuple(out)
+
+
 def _resolve_core_cli() -> Path | None:
   """
   Find the `lazycortex-core` CLI binary.
@@ -301,7 +318,7 @@ def _resolve_core_cli() -> Path | None:
   # guard: no installed version found — nothing further to try
   if not all_versions:
     return None
-  latest = sorted(all_versions, key=lambda v: v.name, reverse=True)[0]
+  latest = max(all_versions, key = lambda v: _version_sort_key(v.name))
   cli = latest / Paths.BIN_DIR / Plugin.CORE
   return cli if cli.is_file() else None
 

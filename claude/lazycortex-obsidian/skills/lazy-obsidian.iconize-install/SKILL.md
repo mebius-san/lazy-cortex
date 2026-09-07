@@ -131,12 +131,16 @@ Procedure:
 3. Classify each of the three keys:
    - **Absent or already equal to the required value** → set/leave it to the required value silently (a missing key or an equal key is not a conflict — the shipped default applies cleanly). Preserve all other `settings` keys and all other top-level keys (`rules`, `recentlyUsedIcons`, path-keyed entries). Atomic write (`data.json.tmp` → `mv`) only when something changed. Outcome contribution: **asserted** (already equal) / **merged** (set from absent).
    - **Present with a non-default value the user deliberately set** (e.g. a custom `iconInFrontmatterFieldName` pointing at a different frontmatter key) → this is a genuine conflict: the shipped value and the local value disagree about the same setting and we can't tell which should win. This is the ONLY case that prompts.
-4. If any key is a genuine conflict, `AskUserQuestion` (one prompt for the whole frontmatter-feature block — the three settings are conceptually a single toggle and make no sense partial):
-   - question: `Iconize frontmatter settings conflict with shipped defaults — which wins?`
-   - description: quote each conflicting key with both the local value and the required value, and note that frontmatter-driven icons paint from `iconize_icon` / `iconize_color` only when the shipped values are in effect.
-   - options: **merge-shipped** / **keep-local**.
-   - **merge-shipped** — rewrite the conflicting keys to the required values (preserving everything else; atomic write). Outcome: **merged**.
-   - **keep-local** — leave the conflicting keys as the user has them; record that frontmatter-driven icons will not paint until the user reconciles Iconize settings manually. Outcome: **kept-local**.
+4. If any key is a genuine conflict, ask once for the whole frontmatter-feature block — the three settings are conceptually a single toggle and make no sense partial:
+
+   ```
+   Context (print before asking):
+   - Where: /lazy-obsidian.iconize-install · Step 2.6 — Assert Iconize frontmatter-feature settings; target <vault>/plugins/obsidian-icon-folder/data.json → `settings`
+   - Found: `<key>`: local `<local value>` vs required `<required value>` — one line per conflicting key
+   - Why asking: you set a non-default value deliberately; frontmatter-driven icons paint from `iconize_icon` / `iconize_color` only with the shipped values in effect, and nothing can tell which should win
+   - Answers: `merge-shipped` — conflicting keys rewritten to the required values, everything else preserved, atomic write (outcome **merged**); `keep-local` — your values stay and frontmatter-driven icons will not paint until you reconcile Iconize settings by hand (outcome **kept-local**); not persisted, asked again on the next run while the conflict stands
+   AskUserQuestion: header "Iconize settings", question "Iconize frontmatter settings in <vault>/plugins/obsidian-icon-folder/data.json conflict with the shipped defaults — which wins?", options `merge-shipped` — "set the three keys to the shipped values; icons paint from frontmatter", `keep-local` — "keep your values; icons from frontmatter stay off".
+   ```
 5. Report state (aggregate across the three keys): **asserted** / **merged** / **kept-local** / **iconize-absent**.
 
 ## Step 2.7 — Icon-map scaffold (schema-aware, file-sync policy)
@@ -160,7 +164,18 @@ Cases 1–5 below operate on `<repo-root>/.claude/iconize/obsidian-icon-map.json
      - Keys present only in shipped template → **add** to authored file (silent).
      - Keys present only in authored file → **keep** verbatim (silent).
      - Keys present in both with byte-equal values → no-op.
-     - Keys present in both with **different** values → genuine conflict. Emit one `AskUserQuestion` per conflict (key path + both values shown): **keep-authored** / **take-shipped**. No bulk "resolve all" shortcut — each conflict is a separate decision. This is the ONLY prompt this case can raise; when there are no value conflicts the merge is fully silent.
+     - Keys present in both with **different** values → genuine conflict. One `AskUserQuestion` per conflict — no bulk "resolve all" shortcut, each conflict is a separate decision — with its context filled per key:
+
+       ```
+       Context (print before asking):
+       - Where: /lazy-obsidian.iconize-install · Step 2.7 — Icon-map scaffold, case 2 merge; target <repo-root>/.claude/iconize/obsidian-icon-map.json
+       - Found: `<key path>`: authored `<authored value>` vs shipped `<shipped value>`
+       - Why asking: the same key carries incompatible values on both sides; nothing can tell which should survive
+       - Answers: `keep-authored` — your value stays for this key; `take-shipped` — the template value replaces it; applied in the single atomic write that ends the merge; not persisted, asked again on the next run while the values still differ
+       AskUserQuestion: header "Icon-map conflict", question "obsidian-icon-map.json key `<key path>` — keep your value `<authored value>` or take the shipped `<shipped value>`?", options `keep-authored` — "your value stays", `take-shipped` — "the template value replaces yours".
+       ```
+
+       This is the ONLY prompt this case can raise; when there are no value conflicts the merge is fully silent.
      Atomic write (`icon-map.json.tmp` → `mv`). State: **merged** (annotate count of additions, conflicts-kept-authored, conflicts-took-shipped).
 3. **Target present, `schema_version` (call it `N`) `< SCHEMA_VERSION` and a migration chain `N → N+1 → … → SCHEMA_VERSION` is fully covered by the transforms table below.** A missing `schema_version` is treated as `N=1` (pre-handshake back-compat). The schema transform is a non-contradicting in-place upgrade — **apply it silently**, no prompt. Apply each chain step in order; each step mutates `schema_version` to its target and applies its transform. Final atomic write (`icon-map.json.tmp` → `mv`). Preserve all keys not touched by any step (registries, stage_colors, matchers' unrelated fields, key order). State: **migrated-v`N`-to-v`SCHEMA_VERSION`** (e.g. `migrated-v1-to-v2`, future `migrated-v2-to-v3`, `migrated-v1-to-v3` for a two-step walk). After migrating, if the file now byte-differs from the current-schema template, run the case-2 three-way merge on top (silent except per-key value conflicts).
 
@@ -174,9 +189,31 @@ Cases 1–5 below operate on `<repo-root>/.claude/iconize/obsidian-icon-map.json
 
    #### 3a. Older schema with no migration path
 
-   `schema_version < SCHEMA_VERSION` but the chain is incomplete (some intermediate step has no transforms-table row). Treat as a configuration error in the plugin itself, not a consumer fault — the plugin can't safely transform the file, so this IS a genuine conflict (we can't reconcile the authored content with the current schema without losing data). Render a single `AskUserQuestion`: **merge-shipped** (replace with the plugin's empty current-schema template — description MUST spell out that this wipes all authored registries, matchers, and stage-colors) / **keep-local** (state: **migration-path-missing**, surface as FAIL). Do not offer a partial migration — half-applying the chain is worse than not applying it.
+   `schema_version < SCHEMA_VERSION` but the chain is incomplete (some intermediate step has no transforms-table row). Treat as a configuration error in the plugin itself, not a consumer fault — the plugin can't safely transform the file, so this IS a genuine conflict (we can't reconcile the authored content with the current schema without losing data). Ask once; do not offer a partial migration — half-applying the chain is worse than not applying it.
+
+   ```
+   Context (print before asking):
+   - Where: /lazy-obsidian.iconize-install · Step 2.7 — Icon-map scaffold, case 3a; target <repo-root>/.claude/iconize/obsidian-icon-map.json
+   - Found: file at `schema_version: <N>`, worker `SCHEMA_VERSION: <M>`; no transforms-table row for step `<K → K+1>`
+   - Why asking: the plugin cannot transform the file without losing data — a plugin defect, not a consumer fault
+   - Answers: `merge-shipped` — file replaced with the plugin's empty current-schema template; EVERY authored registry, matcher, and stage-colour is wiped; `keep-local` — file untouched, state **migration-path-missing**, surfaced as FAIL; syncing stays disabled until a plugin release adds the missing transform
+   AskUserQuestion: header "Icon-map schema", question "obsidian-icon-map.json is at schema v<N>, the worker needs v<M>, and no migration path covers step <K → K+1>. Replace it with the empty current-schema template, or keep it as is?", options `merge-shipped` — "replace with the empty template — all authored registries, matchers, and stage-colours are lost", `keep-local` — "keep the file; report migration-path-missing as FAIL".
+   ```
 4. **Target present, `schema_version` outside `SUPPORTED_SCHEMA` on the high side** (future version the installed worker doesn't know) → **plugin too old** blocker. Report and do not edit. State: **blocker-plugin-too-old**.
 5. **Target present, `schema_version == SCHEMA_VERSION` but `min_hook_version` exceeds the installed `HOOK_VERSION`** → same **plugin too old** blocker.
+
+### Seeding `paint_roots`
+
+`paint_roots` is the top-level list of repo-relative directory prefixes the worker may paint inside; outside them the worker neither reads nor writes the note; existing icon keys there stay as they are. The shipped template carries `[ "specs" ]`, but the consumer's spec content root is theirs to name, so the seeded value is read from config rather than copied from the template.
+
+Run this after the case above has landed its write, and only when the key is being **introduced** — case 1 (fresh install), or case 2 / case 3 where the merge added `paint_roots` because the authored file did not carry it. An authored `paint_roots` already on disk is the operator's; never rewrite it here, and never widen or narrow it to match the template.
+
+1. Read `spec.vault_root` from `<repo-root>/.claude/lazy.settings.json`. Absent key, absent `spec` section, or absent settings file → `specs`.
+2. Write `paint_roots` as that single value: `[ "<vault_root>" ]`. Atomic write (`icon-map.json.tmp` → `mv`) folded into the same write the case already performs.
+
+No prompt: this seeds a key the consumer did not have, which is a non-contradicting addition exactly like every other shipped-key addition in case 2. Outcome contributes `paint-roots-seeded=<vault_root>` to the Step 2.7 report line; omit the annotation when the key was already authored.
+
+A consumer whose icon-map predates this key and who has not re-run the install keeps the key absent, and the worker reads that as the whole vault being open to painting — the behaviour every icon-map had before the key existed.
 
 ### Conflict-prompt discipline
 
@@ -260,7 +297,7 @@ Idempotent: re-running reports **already-ignored** every time after the first wr
 
 Plugin-shipped iconize registries (`claude/<plugin>/references/<ns>.iconize-registry.json`, see `${CLAUDE_PLUGIN_ROOT}/references/lazy-obsidian.iconize-registry-contract.md`) are **never merged into the icon-map** — the worker discovers and composes them live on every run. This step only shows the operator which registries the worker will see from here.
 
-Enumerate them the way the worker does: walk each root in `$LAZYCORTEX_PLUGIN_DIRS` (when set) or `<vault>/claude/*` (dev-vault fallback) for `references/*.iconize-registry.json`, and list `<plugin>: <registry filename> (<N> matchers)` per hit. An empty result is normal on a vault with no registry-shipping plugins installed.
+Enumerate them the way the worker does: walk each root in `$LAZYCORTEX_PLUGIN_DIRS` (when set), else `<vault>/claude/*` (dev-vault fallback), else the newest cached version of every plugin under `~/.claude/plugins/cache/*/` (consumer install) for `references/*.iconize-registry.json`, and list `<plugin>: <registry filename> (<N> matchers)` per hit. An empty result is normal on a vault with no registry-shipping plugins installed.
 
 Outcome: **registries-visible-<count>** / **no-registries**.
 
@@ -287,7 +324,7 @@ One bullet per step, in order — missing bullet = skipped step, back up and run
 - **Step 2.5** legacy PostToolUse: **kept-orphan** (count) / **not-present**.
 - **Step 2.55** legacy pre-commit shim: **legacy-shim-removed** (+ **hooksPath-unset**) / **kept-foreign** / **not-present**.
 - **Step 2.6** Iconize frontmatter settings: **asserted** / **merged** / **kept-local** / **iconize-absent**.
-- **Step 2.7** icon-map: **installed** / **unchanged** / **merged** (with `additions=N conflicts-kept-authored=N conflicts-took-shipped=N`) / **migrated-v`N`-to-v`SCHEMA_VERSION`** / **migration-path-missing** / **blocker-plugin-too-old**. Prepend **path-migrated** when the v1.0.0 legacy-path pre-flight moved the file; **kept-orphan** for the legacy path when both old and new paths exist.
+- **Step 2.7** icon-map: **installed** / **unchanged** / **merged** (with `additions=N conflicts-kept-authored=N conflicts-took-shipped=N`; append `paint-roots-seeded=<vault_root>` when the key was introduced this run) / **migrated-v`N`-to-v`SCHEMA_VERSION`** / **migration-path-missing** / **blocker-plugin-too-old**. Prepend **path-migrated** when the v1.0.0 legacy-path pre-flight moved the file; **kept-orphan** for the legacy path when both old and new paths exist.
 - **Step 3.5** repaint routine: **registered** / **already-present** / **no-daemon**, plus the identity (**identity-seeded** / **identity-present**) and backfill outcomes.
 - **Step 4** callbacks dir: **created** / **already-present** / **.gitkeep-added**.
 - **Step 4.5** `.gitignore` (iconize data.json): **added** / **already-ignored** / **gitignore-created**; WARN if `git ls-files --error-unmatch` exits 0 (user runs `git rm --cached`, never auto).

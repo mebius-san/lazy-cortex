@@ -36,9 +36,16 @@ If the lock exists, the one-liner output includes the holder's session ID, PID, 
 
 ## Step 2 — Confirm with the operator
 
-Use `AskUserQuestion` with one question. Phrase it as:
+One question:
 
-> "Lock held by session `<state.session_id>` (PID `<state.pid>`, started `<age>s` ago, host `<state.host>`, branch `<state.branch>`). Liveness: `<alive|dead>`. Break the lock?"
+```
+Context (print before asking):
+- Where: /lazy-core.git-unlock · Step 2 — Confirm with the operator; target `<repo>/.git/lazy-git.lock`
+- Found: lock held by session `<state.session_id>` (PID `<state.pid>`, started `<age>s` ago, host `<state.host>`, branch `<state.branch>`); liveness `<alive|dead>`; auto-breakable `<yes|no>`
+- Why asking: deleting the lock lets another session open a staging window while the holder may still be mid-stage; the automatic heuristics declined to break it
+- Answers: `Yes, break it` — lock file deleted now, worktree and index untouched, not re-asked; `Cancel` — lock stays, outcome `cancelled`
+AskUserQuestion: header "Break git lock", question "Break the staging lock on `<repo>` held by session `<state.session_id>` (PID `<state.pid>`, `<alive|dead>`, started `<age>s` ago)?", options `Yes, break it` / `Cancel` with the descriptions above.
+```
 
 - "Yes, break it" → proceed to Step 3.
 - "Cancel" → emit outcome `cancelled` and stop.

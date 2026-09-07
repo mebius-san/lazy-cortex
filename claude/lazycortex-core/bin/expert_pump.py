@@ -35,7 +35,7 @@ from reference_resolver import resolve, ReferenceError  # pylint: disable=redefi
 # `runtime_daemon`'s top-level `from constants import …` then exploded with
 # `ImportError: cannot import name X from constants`. Binding the import at module load
 # means the lookup happens ONCE per process lifetime, not per job.
-from runtime_daemon import _check_working_tree
+from runtime_daemon import _check_working_tree, is_cache_root
 from job_response import classify_response, outcome_tokens, read_response
 from worktree_tasks import WorktreeStartError, WorktreeTaskManager
 from provider_env import ProviderKey, build_spawn_env, resolve_token
@@ -1028,7 +1028,9 @@ def build_expert_argv(repo: Path, env: dict[str, str], *, contract_path: Path,
   # skills via slow `find` on Dropbox checkouts. Set by runtime_daemon.
   # waiver: environment-variable name, not a domain key
   for pd in (env.get("LAZYCORTEX_PLUGIN_DIRS") or "").split(os.pathsep):
-    if pd:
+    # guard: a cached root is the install Claude Code already loads — passing it again would load
+    # the plugin twice; only dev source trees need the flag
+    if pd and not is_cache_root(Path(pd)):
       argv.extend([ "--plugin-dir", pd ])
   argv.extend(_spawn_settings_argv(repo))
   if model:

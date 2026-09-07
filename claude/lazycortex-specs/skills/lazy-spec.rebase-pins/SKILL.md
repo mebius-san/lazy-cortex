@@ -97,7 +97,18 @@ Print a summary grouped by action:
 
 The flat-gate model is owned by `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md` — five top-level booleans (`spec_design_done`, `spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, `spec_released`) plus the `spec_cancelled` overlay on each asset's status folder-note. There is no `stage:`, no `awaits_human:`, no `## Workflow`, no per-step `flips_gate` machinery. The ONLY gate mutation channel is `/lazy-spec.flip-gate`.
 
-For every asset folder that had at least one of its docs rewritten in Step 4 (a pinned `tech.md` or asset `code-plan.md` / `test-plan.md` whose branch just merged), read its status folder-note and check `spec_released`, `spec_cancelled`, AND `spec_tests_passing` — `/lazy-spec.flip-gate` no longer checks the release ladder itself (it flips unconditionally once confirmed, refusing only a cancelled asset), so this is the skill's own readiness check now, not a backstop. When `spec_released` is currently `false`, `spec_cancelled` is `false`, AND `spec_tests_passing` is `true`, PROPOSE the flip via one `AskUserQuestion` per asset (full-context block per the Wizard-question standard in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`): name the asset, state that its source branch just merged, and that confirming runs `/lazy-spec.flip-gate <asset> spec_released`. Default-recommend "release" when the rebase covered the only open pin(s) on that asset. When `spec_tests_passing` is `false`, do NOT propose — report the asset as not yet release-ready and move on; do not rely on the primitive to catch it. On confirm, invoke via the `Skill` tool:
+For every asset folder that had at least one of its docs rewritten in Step 4 (a pinned `tech.md` or asset `code-plan.md` / `test-plan.md` whose branch just merged), read its status folder-note and check `spec_released`, `spec_cancelled`, AND `spec_tests_passing` — `/lazy-spec.flip-gate` no longer checks the release ladder itself (it flips unconditionally once confirmed, refusing only a cancelled asset), so this is the skill's own readiness check now, not a backstop. When `spec_released` is currently `false`, `spec_cancelled` is `false`, AND `spec_tests_passing` is `true`, PROPOSE the flip via one `AskUserQuestion` per asset — each iteration fills the block from that asset:
+
+```
+Context (print before asking):
+- Where: /lazy-spec.rebase-pins · Step 6 — Propose spec_released for affected assets; target <asset-dir>/<slug>.md
+- Found: spec_released false, spec_cancelled false, spec_tests_passing true; Step 4 rewrote <doc(s)> pinned to <repo-key>:<branch>, now merged into <default-branch>; <that was the asset's only open pin | <n> pin(s) on this asset remain open>
+- Why asking: the release is a human-signal gate — the merge is evidence, the operator asserts the release; the primitive flips unconditionally once confirmed
+- Answers: `release` — runs `/lazy-spec.flip-gate <asset> spec_released` now, the folder-note's `# History` records it, never re-proposed; `skip` — gate untouched, proposed again on the next run that finds it ready
+AskUserQuestion: header "Release", question "Branch <branch> of <repo-key> merged and its pins on <product>/<category>/<slug> are rebased — flip spec_released to true?", options `release` / `skip` with descriptions.
+```
+
+Default-recommend "release" when the rebase covered the only open pin(s) on that asset. When `spec_tests_passing` is `false`, do NOT propose — report the asset as not yet release-ready and move on; do not rely on the primitive to catch it. On confirm, invoke via the `Skill` tool:
 
 ```
 Skill(skill: "lazycortex-specs:lazy-spec.flip-gate", args: "<asset-dir> spec_released")

@@ -42,7 +42,7 @@ Two classes of file, two policies. Which applies follows from who owns the bytes
 
 The navigation rule's `## Coverage` section is the one region a mirror carries that the shipped source cannot: `/lazy-wiki.configure` derives it from the configured scopes. It is **derived**, not authored — Step 4 overwrites the rule and then re-renders Coverage from `lazy.settings.json`, so nothing is preserved and nothing is lost.
 
-**Consumer-owned config** — `lazy.settings.json` and anything else the consumer authors: add what is missing, leave what is there byte-for-byte. A direct contradiction (an existing value that opposes a required one) is the ONLY case that asks. `AskUserQuestion` naming the file, quoting the region, showing a unified diff; options `merge-shipped` / `keep-local`. "Conflict" means you cannot determine what should survive, not merely that the bytes differ.
+**Consumer-owned config** — `lazy.settings.json` and anything else the consumer authors: add what is missing, leave what is there byte-for-byte. A direct contradiction (an existing value that opposes a required one) is the ONLY case that asks. The site that raises it fills the four context items from the run and prints them before the call (`lazy-core.skill-writing § 11`): where — `/lazy-wiki.install · Step <N>`, the settings file path and the key in conflict; found — the local value and the required value, both quoted, with a unified diff of the region; why asking — the two contradict and nothing says which should survive; answers — `merge-shipped` writes the required value over the local one now, `keep-local` leaves the file byte-for-byte and the step reports `kept-local`; neither answer is persisted, so a contradiction still present on the next run asks again. `AskUserQuestion`: header "Settings conflict", question naming the file and the key (`Replace <key> in <settings-path> — local <local value>, shipped <required value>?`), options `merge-shipped` / `keep-local` with those descriptions. "Conflict" means you cannot determine what should survive, not merely that the bytes differ.
 
 ## Step 1: Detect install scope
 
@@ -441,8 +441,6 @@ Outcome (one line per seeded entry): `experts.wiki.curator: <seeded|kept-local>`
 ### First scope pointer
 
 Do NOT ask. When `wiki.scopes` is empty, print a one-line pointer so the operator knows the next step — *"No wiki scopes configured yet — run `/lazy-wiki.configure` to add the first one."* When `wiki.scopes` already has entries, say nothing. Configuring a scope is genuine project work the operator drives via `/lazy-wiki.configure`; this install step only points at it, never prompts.
-
-If yes → invoke `Skill(skill: "lazycortex-wiki:lazy-wiki.configure")`.
 
 ## Step 9: Register the plugin-CLI Bash allow-pattern
 

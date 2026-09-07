@@ -88,11 +88,12 @@ Decide on the **domain entries only**:
 - **No domain entries** (fresh project, or only system experts so far) → ask the operator which classes to register:
 
 ```
-AskUserQuestion:
-  question: "Which expert classes should this project register?"
-  description: "Each class is a domain the generic experts specialise in (the aspect they load). Pick the domain(s) this project works in — re-run later to add more. Roles are seeded per the class map: technical classes get all twelve engineering roles; sci-fi/fantasy get fiction-writer."
-  multiSelect: true
-  options: one per available class (e.g. "claude-plugin", "game-dev", "dotfiles", "obsidian-plugin", "data-pipeline", "software-product", "sci-fi", "fantasy")
+Context (print before asking):
+- Where: /lazy-experts.install · Step 3 — Determine expert classes; target <lazy.settings.json path from Step 2>
+- Found: experts section <absent | holds only system entries: <keys>>; no domain-class entry on record; available classes <list from the references glob>
+- Why asking: which domains this project works in is project config nothing on disk derives
+- Answers: each selected class — Step 5 seeds one expert per role the class map assigns (technical classes: all twelve engineering roles; sci-fi / fantasy: fiction-writer) into experts now; the set is sticky — later runs derive it from the entries and never re-ask; a class added later is registered by hand (see Notes)
+AskUserQuestion: header "Expert classes", question "Which expert classes should <lazy.settings.json path> register for this project?", multiSelect, one option per available class (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, `sci-fi`, `fantasy`), each described as the domain aspect the generic experts load for it.
 ```
 
   The chosen classes are the class set. State `asked: <classes>`.

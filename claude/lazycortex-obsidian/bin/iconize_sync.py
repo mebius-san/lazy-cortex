@@ -33,7 +33,7 @@ if TYPE_CHECKING:
   from typing import NoReturn
 
 
-PROTOCOL_VERSION = "2.2.0"
+PROTOCOL_VERSION = "2.3.0"
 HOOK_VERSION = "4.0.0"
 
 # Schema versioning for icon-map.json (bilateral handshake).
@@ -94,6 +94,9 @@ OPERATOR_DEFAULT_PRIORITY = 1000
 # callback engine can resolve a matcher's callbacks from its shipping plugin's own tree.
 # Never present in any JSON document on disk.
 _MATCHER_CB_ROOT = "_callback_root"
+# The note-side frontmatter key holding the icon a state rule borrows through
+# `{{frontmatter.iconize_icon}}`. Read only as the fallback for a colour-only resolution.
+_NOTE_ICON_KEY = "iconize_icon"
 # waiver: module-level mutable — ambient callback-root of the matcher being evaluated; threading it
 # through eval_when → _build_entry → _invoke_callback would widen four signatures for one read
 _ACTIVE_CB_ROOT: Path | None = None
@@ -513,6 +516,38 @@ def is_template_path(rel: str) -> bool:
   return len(parts) > 2 and parts[0] == ".claude" and parts[1] == "templates"
 
 
+def _is_in_paint_roots(icon_map: dict, rel: str) -> bool:
+  """
+  Report whether a vault-relative path lies inside the icon-map's declared paint roots.
+
+  Guarantees:
+    - An icon-map that declares no `paint_roots` list puts the entire vault in scope, so a
+      map authored before the key existed keeps its original whole-vault behaviour.
+
+  Args:
+    icon_map: Composed icon-map dict.
+    rel: Vault-relative POSIX path of the note.
+
+  Returns:
+    True when the icon-map declares no paint roots, or when the path sits under one of the
+    declared directory prefixes; False otherwise.
+  """
+
+  # Contract:
+  # An icon-map with no `paint_roots` list — absent, or present but not a list — puts every
+  # note in scope. Callers MUST NOT read the absence as an empty root set; a map authored
+  # before the key existed keeps painting the whole vault.
+
+  roots = icon_map.get(MapKey.PAINT_ROOTS)
+  # guard: nothing declared — the whole vault stays in scope
+  if not isinstance(roots, list):
+    return True
+
+  # a root claims a path only across a directory boundary, so `specs` never claims `specsheets/...`
+  # waiver: filesystem path idiom (the POSIX separator)
+  return any(isinstance(root, str) and rel.startswith(root.rstrip("/") + "/") for root in roots)
+
+
 def _resolve_icon_pair(icon_map: dict, vault: Path, rel: str) -> tuple[str | None, str | None] | None:
   """
   Resolve the icon/color pair one note should carry, or report that no rule claims it.
@@ -523,6 +558,8 @@ def _resolve_icon_pair(icon_map: dict, vault: Path, rel: str) -> tuple[str | Non
       rewrite entirely on a None return.
     - A scaffolding template is never painted: every path under a template tree resolves
       to None regardless of what its frontmatter would otherwise match.
+    - A note outside the icon-map's declared paint roots is never read for matching and
+      never written: every such path resolves to None regardless of its frontmatter.
 
   Args:
     icon_map: Composed icon-map dict.
@@ -530,8 +567,9 @@ def _resolve_icon_pair(icon_map: dict, vault: Path, rel: str) -> tuple[str | Non
     rel: Vault-relative POSIX path of the note.
 
   Returns:
-    `(icon, color)` when a matcher resolved an entry, or None when no matcher claims the
-    note (including a matched matcher whose resolution produced nothing).
+    `(icon, color)` when a matcher resolved an entry, or None when the note lies outside the
+    declared paint roots or no matcher claims it (including a matched matcher whose
+    resolution produced nothing).
   """
 
   # Contract:
@@ -544,8 +582,18 @@ def _resolve_icon_pair(icon_map: dict, vault: Path, rel: str) -> tuple[str | Non
   if is_template_path(rel):
     return None
 
+  # Contract:
+  # A note outside the declared paint roots is never read for matching and never written.
+  # Its existing `iconize_icon` / `iconize_color` are another manager's business exactly as
+  # an unclaimed note's are, so this returns the same None and callers skip the rewrite.
+
+  # guard: outside the declared paint roots — the note is ignored entirely
+  if not _is_in_paint_roots(icon_map, rel):
+    return None
+
   # every other path is decided by the composed matchers alone
-  entries = resolve_matchers(icon_map, rel, _read_frontmatter_for(vault, rel))
+  frontmatter = _read_frontmatter_for(vault, rel)
+  entries = resolve_matchers(icon_map, rel, frontmatter)
 
   # Domain(obsidian.icon-repaint):
   # # A note with no matching rule is left exactly as another manager wrote it
@@ -565,7 +613,10 @@ def _resolve_icon_pair(icon_map: dict, vault: Path, rel: str) -> tuple[str | Non
   if not entries:
     return None
   _, entry = entries[0]
-  return entry.get(IconKey.NAME), entry.get(IconKey.COLOR)
+
+  # a colour-only entry is a state rule that borrowed an icon this note does not carry yet: hand
+  # back whatever the note itself declares, so the key the TYPE owns is left exactly as it stands
+  return entry.get(IconKey.NAME) or frontmatter.get(_NOTE_ICON_KEY), entry.get(IconKey.COLOR)
 
 
 def _vault_relative_or_none(vault: Path, raw: str) -> str | None:
@@ -1677,13 +1728,90 @@ def _load_registry_or_none(path: Path) -> dict | None:
   return reg
 
 
+def _version_sort_key(name: str) -> tuple[int, ...]:
+  """
+  Build a numeric sort key for a plugin-cache version directory name.
+
+  Args:
+    name: Version directory name as it appears in the plugin cache.
+
+  Returns:
+    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
+  """
+  out: list[int] = []
+  for part in name.split("."):
+    digits = "".join(c for c in part if c.isdigit())
+    out.append(int(digits) if digits else 0)
+  return tuple(out)
+
+
+def _cached_plugin_roots() -> list[Path]:
+  """
+  Enumerate the newest cached version of every plugin in the cache this plugin runs from.
+
+  A cached install lives at `<cache>/<registry>/<plugin>/<version>/`, so when this file runs from
+  one, the cache root is four levels above `bin/`. A dev source tree has no version level above
+  `bin/`, so the walk yields nothing there.
+
+  Returns:
+    One root per plugin name, sorted by plugin name; empty outside a cached install.
+  """
+  own = Path(__file__).resolve()
+  # guard: not a cached install — a dev checkout has no version directory above bin/
+  if not own.parents[1].name.replace(".", "").isdigit():
+    return []
+  # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
+  try:
+    cache = own.parents[4]
+  except IndexError:
+    return []
+  versions: dict[str, list[Path]] = {}
+  for registry in cache.iterdir():
+    # guard: skip non-directory entries in the cache root
+    if not registry.is_dir():
+      continue
+    for plugin in registry.iterdir():
+      # guard: skip non-directory entries under a registry
+      if not plugin.is_dir():
+        continue
+      versions.setdefault(plugin.name, []).extend(
+        v for v in plugin.iterdir() if v.is_dir() and v.name.replace(".", "").isdigit()
+      )
+  return [
+    max(found, key = lambda v: _version_sort_key(v.name))
+    for _name, found in sorted(versions.items()) if found
+  ]
+
+
+def _plugin_root_name(root: Path) -> str:
+  """
+  Name the plugin a root belongs to.
+
+  Args:
+    root: Plugin root directory — a dev source tree named after the plugin, or one cached
+      version whose own name is a version string.
+
+  Returns:
+    The manifest's `name` when the root carries one, else the directory name.
+  """
+  # waiver: plugin-manifest layout idiom, not a domain key
+  manifest = root / ".claude-plugin" / "plugin.json"
+  try:
+    # waiver: plugin-manifest key, Claude Code's own schema
+    name = json.loads(manifest.read_text()).get("name")
+  except (OSError, ValueError, AttributeError):
+    return root.name
+  return name if isinstance(name, str) and name else root.name
+
+
 def load_plugin_registries(vault: Path) -> list[tuple[str, Path, dict]]:
   """
   Enumerate the iconize registries every visible plugin ships, freshly on each run.
 
   Plugin roots come from the `LAZYCORTEX_PLUGIN_DIRS` environment the runtime daemon
   exports; outside a daemon context (an operator shell) the walk falls back to the
-  dev-vault sibling layout `<vault>/claude/*`. A plugin that is not visible simply
+  dev-vault sibling layout `<vault>/claude/*`, then to the plugin cache this plugin itself
+  runs from (every plugin's newest installed version). A plugin that is not visible simply
   contributes no rules — best-effort, like every other part of the hook surface.
 
   Args:
@@ -1711,6 +1839,9 @@ def load_plugin_registries(vault: Path) -> list[tuple[str, Path, dict]]:
     dev = vault / "claude"
     if dev.is_dir():
       roots = [ dev / name for name in sorted(os.listdir(dev)) ]
+  # guard: no dev-vault tree either — a consumer install reads the cache it runs from
+  if not roots:
+    roots = _cached_plugin_roots()
 
   # collect every registry file each visible plugin root ships
   out: list[tuple[str, Path, dict]] = []
@@ -1726,7 +1857,7 @@ def load_plugin_registries(vault: Path) -> list[tuple[str, Path, dict]]:
         continue
       reg = _load_registry_or_none(refs / name)
       if reg is not None:
-        out.append(( root.name, root, reg ))
+        out.append(( _plugin_root_name(root), root, reg ))
 
   # deterministic layer order: plugin name, then the per-root filename order above
   out.sort(key = lambda triple: triple[0])
@@ -2229,11 +2360,15 @@ def _build_entry(resolve_spec: dict, icon_map: dict, frontmatter: dict, basename
   """
   if IconKey.NAME in resolve_spec or IconKey.COLOR in resolve_spec:
     name = _resolve_field(resolve_spec.get(IconKey.NAME), icon_map, frontmatter, basename)
-    # guard: no name → no entry
-    if not name:
-      return None
-    entry = { IconKey.NAME: name }
     color = _resolve_field(resolve_spec.get(IconKey.COLOR), icon_map, frontmatter, basename)
+    # guard: a state rule paints the colour and borrows the note's own icon through a token; on a
+    # note carrying no icon yet that token comes back empty, and dropping the entry there would
+    # silently skip the repaint the rule exists for. A lookup spec that resolves nothing keeps the
+    # old behaviour — an unresolved registry key is a broken rule, not a borrowed icon.
+    if not name:
+      spec = resolve_spec.get(IconKey.NAME)
+      return { IconKey.COLOR: color } if color and isinstance(spec, str) and "{{" in spec else None
+    entry = { IconKey.NAME: name }
     if color:
       entry[IconKey.COLOR] = color
     return entry

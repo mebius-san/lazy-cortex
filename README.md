@@ -93,7 +93,7 @@ See [`claude/lazycortex-review/`](claude/lazycortex-review/) for details.
 
 Specification and design skills for Claude Code
 
-26 skills, 1 agent.
+26 skills, 2 agents.
 
 Requires: lazycortex-core, lazycortex-diagram, lazycortex-review
 

@@ -1,7 +1,7 @@
 ---
 name: lazy-core.iterate
 description: "Use when the operator asks to keep going until something is clean — audit this spec until no findings remain, fix these failures round after round, stabilise the refactor, drive the suite green. Locks target, done-state, and the verification action upfront, then loops with hard caps on cycles, repeated findings, and regression spirals so it cannot run away."
-allowed-tools: Read, Edit, Write, Bash, Grep, Glob, Agent
+allowed-tools: Read, Edit, Write, Bash, Grep, Glob, AskUserQuestion, Agent
 user-invocable: true
 ---
 
@@ -25,7 +25,16 @@ This skill has 5 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Step 1 — Frame target
 
-State explicitly three things — if any is unclear or absent from user's request, ask via `AskUserQuestion` (one decision at a time) before proceeding:
+State explicitly three things — if any is unclear or absent from user's request, ask via `AskUserQuestion` (one decision at a time) before proceeding. One question per missing item, each filled from the request and the repo:
+
+```
+Context (print before asking):
+- Where: /lazy-core.iterate · Step 1 — Frame target; target `<file / PR / spec / suite / code-area named so far, or none yet>`
+- Found: request "<user's words>" — <Target | Done-state | Verification action> not stated; the other two: `<value | also missing>`
+- Why asking: the three form the iteration contract Step 3 applies mechanically — a guessed one loops on the wrong thing or never terminates
+- Answers: each option is a concrete candidate read from the request and the repo (a path, a pass criterion, a runnable command) — recorded in this run's ledger only, never persisted; `Other` — operator types the value
+AskUserQuestion: header "<Target | Done-state | Verification>", question "<self-contained, naming what is known — e.g. Which command verifies `tests/core/runtime/` each cycle?>", options with descriptions of what each candidate means for the loop.
+```
 
 - **Target** — what is being iterated. Concrete file / PR / spec / test-suite / code-area, not a vague topic. Examples: «`docs/design/feature-spec.md`», «test failures in `tests/core/runtime/`», «the diff between current branch and main».
 - **Done-state** — what does "stable" mean for this target. Examples: «verification finds zero issues», «no FAIL-severity findings», «all tests pass», «no diff between rounds».

@@ -42,6 +42,8 @@ _SUB_RENDER_CONTAINER_STATS = "render-container-stats"
 _SUB_COORDINATOR_DISPATCH = "coordinator-dispatch"
 _SUB_NOTE_SET_KEY = "note-set-key"
 _SUB_NOTE_CHECK = "note-check"
+_SUB_CATALOG_NOTE = "catalog-note"
+_SUB_REQUEST_DRAFT = "request-draft"
 _SUB_MARK_JOB = "mark-job"
 _SUB_UPSTREAM_TICK = "upstream-tick"
 _SUB_UPSTREAM_DOCTOR = "upstream-doctor"
@@ -61,7 +63,7 @@ _USAGE = (
     "  collect-tick [--repo DIR]      sweep the job-marker sidecar, gate-tick every recorded note\n"
     "  scaffold-asset <product> <type> <slug> [--doc <name>:<type> ...] [--path <dir>]\n"
     "                                  deterministic scaffold of a new asset folder\n"
-    "  seed-doc <product> <folder-note-path> --doc <name>:<type>\n"
+    "  seed-doc (<product> <folder-note-path> | --root <folder-note-path>) --doc <name>:<type>\n"
     "                                  seed one authored doc beside an existing folder-note\n"
     "  apply-request <file>           deterministic post-finalize apply transition for a request file\n"
     "  render-container-stats <note>  recompute a container note's stats region\n"
@@ -69,6 +71,10 @@ _USAGE = (
     "  note-set-key <asset_dir> <key> <value> [--today YYYY-MM-DD]\n"
     "                                  validating frontmatter write from the coordinator's closed schema\n"
     "  note-check <asset_note>        structural check: frontmatter schema + required section roster\n"
+    "  catalog-note backfill (<product> | --root) [--today YYYY-MM-DD]\n"
+    "                                  bring a product's or the catalog root's level note up to schema\n"
+    "  request-draft --source <doc> --title <text> --body <file> [--cwd DIR]\n"
+    "                                  drop one candidate request into the vault's requests inbox\n"
     "  mark-job <asset_note> coordinator|active|wake <value>|--clear [--repo DIR]\n"
     "                                  write one runtime job marker into the gitignored sidecar\n"
     "  upstream-tick [--cwd DIR]       fetch/detect pass over every configured spec.upstream source\n"
@@ -157,6 +163,14 @@ def main(argv: list[str]) -> int:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import note_ops  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
     return note_ops.main_check(rest)
+  if sub == _SUB_CATALOG_NOTE:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import catalog_note  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return catalog_note.main(rest)
+  if sub == _SUB_REQUEST_DRAFT:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import request_draft  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return request_draft.main(rest)
   if sub == _SUB_MARK_JOB:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import spec_job_markers  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy

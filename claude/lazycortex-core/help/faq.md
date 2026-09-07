@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-09-05
+last_regen: 2026-09-07
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -32,7 +32,7 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: 5f52ac7ab3d1f972b3d8a6f018a3f1c9a3f6607c
+source_sha: 49c3acca48d76212bd8165bbd0df7bc23243faa9
 ---
 # FAQ
 
@@ -244,6 +244,14 @@ Yes. Set `daemon.git.post_push_hook` to a shell command in the `daemon.git` bloc
 The hook is fully isolated from the daemon's own tick: a non-zero exit, a timeout past `post_push_timeout_sec` (30 seconds by default), or a spawn failure is journaled and never halts the daemon, retries the push, or fails the tick. It also never fires when nothing was actually pushed — an in-sync tick, the already-published fallthrough, and a discarded rebase-conflict retry all skip it. This only applies when `daemon.git.remote_sync` is `"pull_push"`; a `"pull"`-only daemon never pushes, so the hook never fires.
 
 If the hook's own job is fanning those commits out into other local checkouts of the same repo — a second clone, a Dropbox-synced sibling — pull with the daemon's own `safe-pull <repo-dir> <remote> <ref> [--timeout-sec N]` primitive rather than a bare `git pull`; it is exactly what the daemon's own post-push fan-out is built to pair with. It waits out a held `index.lock` in the target checkout, refuses to touch an index that already carries staged content, and merges only a strict fast-forward — every guarded outcome (a timed-out wait, staged content in the way, a non-fast-forward) exits `0` with a JSON `{"outcome": ...}` result instead of failing your hook script, so it can never leave the kind of index residue a racing bare `git pull` would.
+
+---
+
+## If publishing a routine's commits hits a rebase conflict, do I lose work from other routines that ran in the same tick?
+
+No. The daemon publishes right after each routine that moved `HEAD`, not once at the end of the whole tick — so by the time a later routine's push conflicts, every earlier routine in that same tick has already landed on origin. A conflict discards only the offending routine's own unpushed commits (`git rebase --abort && git reset --hard origin/<base_branch>`), and that discard is not a halt — the routine simply re-runs on its next scheduled tick, on top of whatever the operator pushed in the meantime.
+
+The discard also winds back two side effects the discarded commits carried, so nothing is silently lost: any expert job whose `CONSUMED` marker only landed in the discarded range gets that marker removed again (tracked in `.runtime/consumed-unpushed.log`), so `/lazy-expert.collect-job` sees it as pending and the daemon lands the result again instead of retiring a result that never actually reached origin; and any `git`-routine's `last_seen_sha` cursor that only the discarded commits advanced past is rewound to the merge-base with origin, so that routine rescans from the last published commit rather than skipping events it only thought it had handled. If git itself can't determine whether a cursor is still reachable after the discard, the daemon leaves that cursor as it stands, logs a `cursor_probe_failed` incident against the routine, and resolves the incident automatically on the routine's next clean tick.
 
 ---
 

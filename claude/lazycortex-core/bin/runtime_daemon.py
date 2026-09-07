@@ -126,25 +126,105 @@ class GitPushFailed(RuntimeError):
 _PLUGIN_DIRS: list[Path] = []
 
 
-def set_plugin_dirs(dirs: list[Path]) -> None:
+# A plugin-cache root is `<cache>/<registry>/<plugin>/<version>`, so its own directory name is a
+# version string; a dev-plugin source root is named after the plugin. That shape difference is the
+# one test every consumer can run without knowing where the cache lives.
+_VERSION_DIR_RE = re.compile(r"\d+(\.\d+)*")
+
+
+def is_cache_root(path: Path) -> bool:
+  """
+  Tell whether a plugin root is a versioned plugin-cache install rather than a dev source tree.
+
+  Args:
+    path: Plugin root directory.
+
+  Returns:
+    True when the directory is named like a version (`9.1.1`), which only a cache install is.
+  """
+  return _VERSION_DIR_RE.fullmatch(path.name) is not None
+
+
+def _manifest_name(root: Path) -> str | None:
+  """
+  Read the plugin name a plugin root declares in its manifest.
+
+  Args:
+    root: Plugin root directory (dev source tree or one cached version).
+
+  Returns:
+    The manifest's name, or None when the manifest is missing or unreadable.
+  """
+  manifest = root / PluginFile.MANIFEST_DIR / PluginFile.MANIFEST
+  try:
+    name = json.loads(manifest.read_text()).get(PluginFile.NAME)
+  except (OSError, json.JSONDecodeError, AttributeError):
+    return None
+  return name if isinstance(name, str) else None
+
+
+def cached_plugin_roots(cache: Path) -> list[Path]:
+  """
+  Resolve the newest installed version of every plugin in the Claude Code plugin cache.
+
+  Walks `<cache>/<registry>/<plugin>/<version>/`; when a plugin is cached under several registries
+  or versions, the highest version wins, compared numerically so `10.0.0` outranks `9.1.1`.
+
+  Args:
+    cache: The plugin-cache root (`~/.claude/plugins/cache`).
+
+  Returns:
+    One root per plugin name, sorted by plugin name; empty when the cache does not exist.
+  """
+  # guard: no plugin cache on this machine
+  if not cache.is_dir():
+    return []
+  versions: dict[str, list[Path]] = {}
+  for registry in cache.iterdir():
+    # guard: skip non-directory entries in the cache root
+    if not registry.is_dir():
+      continue
+    for plugin in registry.iterdir():
+      # guard: skip non-directory entries under a registry
+      if not plugin.is_dir():
+        continue
+      versions.setdefault(plugin.name, []).extend(
+        v for v in plugin.iterdir() if v.is_dir() and is_cache_root(v)
+      )
+  return [
+    max(found, key = lambda v: _version_sort_key(v.name)).resolve()
+    for _name, found in sorted(versions.items()) if found
+  ]
+
+
+def set_plugin_dirs(dirs: list[Path], cache_root: Path | None = None) -> None:
   """
   Register plugin source directories the daemon should prefer over the plugin cache.
 
-  Also exports the resolved paths to the environment so downstream subprocess routines (such as
-  `lazycortex-core expert-pump-once` or `lazycortex-review tick`) and their own resolvers can match
-  the same dev-plugin paths, and pins `EnvVar.MAX_SUBAGENT_SPAWN_DEPTH` for the same subprocesses.
+  Also exports the visible plugin roots to the environment so downstream subprocess routines (such
+  as `lazycortex-core expert-pump-once` or `lazycortex-review tick`) and their own resolvers can
+  reach every enabled plugin: the dev-plugin paths first, then the newest cached version of every
+  other plugin, so a consumer install with no `--plugin-dir` at all still resolves its siblings.
+  Pins `EnvVar.MAX_SUBAGENT_SPAWN_DEPTH` for the same subprocesses.
 
   Args:
     dirs: Plugin source directories to register, in caller-preferred order. Each entry should be the
       root of a plugin source tree containing `.claude-plugin/` and `bin/`.
+    cache_root: The plugin-cache root whose newest versions join the export; None exports `dirs`
+      alone.
   """
   # waiver: a genuine module-level rebind, not a false positive — this is the one writer of that cache
   global _PLUGIN_DIRS  # noqa: PLW0603  # pylint: disable=global-statement
   _PLUGIN_DIRS = [ Path(d).resolve() for d in dirs ]
+  # a dev dir shadows the cached copy of the same plugin, so the cached one stays out of the export
+  shadowed = { _manifest_name(d) for d in _PLUGIN_DIRS } - { None }
+  cached = [] if cache_root is None else [
+    root for root in cached_plugin_roots(cache_root) if _manifest_name(root) not in shadowed
+  ]
   # arguments are not ref-resolved (pass-through JSON values), but flow through to <jdir>/config.json
   # the same way; daemon-internal `resolve_routine_command` uses `_PLUGIN_DIRS` directly, while this
   # env handle exists for everyone else
-  os.environ["LAZYCORTEX_PLUGIN_DIRS"] = os.pathsep.join(str(p) for p in _PLUGIN_DIRS)
+  os.environ["LAZYCORTEX_PLUGIN_DIRS"] = os.pathsep.join(str(p) for p in [ *_PLUGIN_DIRS, *cached ])
   # same pin as `expert_pump.py`'s own env construction (see its `Decision:` comment), applied
   # here too so every routine this daemon spawns inherits it, not only the pump's own spawn
   os.environ[EnvVar.MAX_SUBAGENT_SPAWN_DEPTH] = EnvVar.SUBAGENT_SPAWN_DEPTH_PIN
@@ -1374,7 +1454,9 @@ def _plugin_roots() -> list[Path]:
   for part in env.split(os.pathsep):
     # waiver: the loop variable is deliberately rebound — each line is normalised in place before use
     part = part.strip()  # noqa: PLW2901
-    if part:
+    # guard: cached installs never change in place — a newer version lands in a new directory, which
+    # `_newer_core_runner` notices; only dev source trees are worth fingerprinting
+    if part and not is_cache_root(Path(part)):
       roots.append(Path(part).resolve())
   roots.append(Path(__file__).resolve().parent)
   # de-dup while preserving order
@@ -1904,8 +1986,8 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
   Resolve a `[plugin, *args]` command vector to a runnable `[bin_path, *args]` invocation.
 
   Consults dev-plugin source directories registered via `set_plugin_dirs` first, then falls back to
-  the Claude Code plugin cache. When the cache holds multiple versions of the plugin, the latest is
-  picked by lexicographic version-string ordering.
+  the Claude Code plugin cache. When the cache holds multiple versions of the plugin, the highest
+  version wins, compared numerically.
 
   Args:
     cmd: Routine command vector whose first element is the plugin name and the rest are arguments
@@ -1948,9 +2030,8 @@ def resolve_routine_command(cmd: list[str]) -> list[str]:
   # guard: no version subdirectories present
   if not all_versions:
     raise FileNotFoundError(f"no versions cached for plugin: {plugin}")
-  # lex-sort by version-string-name, take latest; caveat: lex sort works for single-digit majors —
-  # revisit when 10.x ships (matches the deferred decision in reference_resolver)
-  latest = sorted(all_versions, key = lambda v: v.name, reverse = True)[0]
+  # numeric version order: a plain string sort ranks `9.1.1` above `10.0.0`
+  latest = max(all_versions, key = lambda v: _version_sort_key(v.name))
   # waiver: filesystem path idiom, not a domain constant
   bin_path = latest / "bin" / plugin
   # guard: latest version has no bin entrypoint

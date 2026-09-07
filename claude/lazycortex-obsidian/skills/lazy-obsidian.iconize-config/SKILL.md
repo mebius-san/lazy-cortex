@@ -38,32 +38,113 @@ Abort with a helpful message if missing.
 
 ## Step 2 — Pick registry (one AskUserQuestion)
 
-Enumerate top-level registry names present in `registries` (plus allow nested dotted paths like `requests.classification`). Ask the user which to edit. Options: each registry path + "add new registry" + "exit".
+Enumerate top-level registry names present in `registries` (plus allow nested dotted paths like `requests.classification`).
 
-If "add new registry" → ask for registry name (free-text via `AskUserQuestion` with an "Other" answer), then branch to Step 3 with an empty registry.
+```
+Context (print before asking):
+- Where: /lazy-obsidian.iconize-config · Step 2 — Pick registry; target <repo-root>/.claude/iconize/obsidian-icon-map.json
+- Found: registries on record: <path (N keys)> per registry, or none
+- Why asking: which registry to edit is the operator's intent
+- Answers: `<registry path>` — opens it for Step 3, nothing written; `add new registry` — asks for a name, then Step 3 with an empty registry; `exit` — stop and Report
+AskUserQuestion: header "Registry", question "Which registry in <repo-root>/.claude/iconize/obsidian-icon-map.json do you want to edit?", options: one per registry path (description `<N> keys`), `add new registry`, `exit`.
+```
+
+If "add new registry":
+
+```
+Context (print before asking):
+- Where: Step 2 — new registry name; same icon-map
+- Found: registry paths already on record: <list>
+- Why asking: the name is what matchers and the resolver address the registry by
+- Answers: free text — a new empty registry under `registries.<name>` (a dotted name nests), written in Step 5; a name already on record re-asks
+AskUserQuestion: header "New registry", question "Name for the new registry in obsidian-icon-map.json (top-level like `roles`, or dotted like `requests.classification`)?", free text via an "Other" answer.
+```
+
+Then branch to Step 3 with an empty registry.
 
 ## Step 3 — Pick action (one AskUserQuestion)
 
-Options: **add** / **edit** / **remove** / **back**.
+```
+Context (print before asking):
+- Where: Step 3 — Pick action; target registry `<registry path>` in obsidian-icon-map.json
+- Found: <N> keys on record: <keys, or empty>
+- Why asking: add / edit / remove is the operator's intent
+- Answers: `add` — Step 4a, a new key; `edit` — Step 4b, change an existing key's icon; `remove` — Step 4c, drop a key after confirmation; `back` — return to Step 2; nothing written until Step 5
+AskUserQuestion: header "Action", question "What do you want to do in registry `<registry path>`?", options `add`, `edit`, `remove`, `back` with those descriptions.
+```
 
 ## Step 4 — Apply action (add / edit / remove)
 
 ### Step 4a — Add
 
 One `AskUserQuestion` per field:
-1. Key name (the new registry key — e.g. "blocker").
-2. `iconName` (Lucide PascalCase with `Li` prefix, or emoji).
-3. `iconColor` (optional — user can pick "none" for monochrome).
+1. Key name:
+
+   ```
+   Context (print before asking):
+   - Where: Step 4a — Add, key name; target `registries.<registry path>`
+   - Found: keys on record: <list, or empty>
+   - Why asking: the key is the frontmatter value the resolver matches
+   - Answers: free text — becomes the new key; a key already on record re-asks; written in Step 5
+   AskUserQuestion: header "Key name", question "New key for registry `<registry path>` (the value the resolver matches, e.g. `blocker`)?", free text via an "Other" answer.
+   ```
+2. `iconName`:
+
+   ```
+   Context (print before asking):
+   - Where: Step 4a — Add, `iconName`; target `registries.<registry path>.<key>`
+   - Found: key `<key>` accepted; no icon yet
+   - Why asking: the icon is content only the operator can pick
+   - Answers: free text — Lucide PascalCase with `Li` prefix, or an emoji; validated by the worker, a rejected value re-asks; written in Step 5
+   AskUserQuestion: header "Icon", question "Icon for `<registry path>.<key>` (Lucide PascalCase with `Li` prefix, or an emoji)?", free text via an "Other" answer.
+   ```
+3. `iconColor`:
+
+   ```
+   Context (print before asking):
+   - Where: Step 4a — Add, `iconColor`; target `registries.<registry path>.<key>`
+   - Found: icon `<iconName>` accepted
+   - Why asking: colour is optional content
+   - Answers: `none` — monochrome, no `iconColor` key written; free text — a colour value, validated by the worker; written in Step 5
+   AskUserQuestion: header "Icon colour", question "Colour for `<registry path>.<key>`, or `none` for monochrome?", options `none` — "monochrome; no iconColor key", plus free text via an "Other" answer.
+   ```
 
 Validate with the worker's validators (shell out to `python3 ${CLAUDE_PLUGIN_ROOT}/bin/iconize_sync.py --validate-entry ...` — see Task 11b below for this helper flag).
 
 ### Step 4b — Edit
 
-List existing keys as options. Pick one. Then edit iconName/iconColor per Step 4a.
+```
+Context (print before asking):
+- Where: Step 4b — Edit, pick key; target `registries.<registry path>`
+- Found: keys on record: <key → iconName / iconColor> per key
+- Why asking: which entry to change is the operator's intent
+- Answers: `<key>` — its `iconName` / `iconColor` are re-collected per Step 4a (fields 2–3); written in Step 5
+AskUserQuestion: header "Edit key", question "Which key in registry `<registry path>` do you want to edit?", options: one per key, description = its current `iconName` / `iconColor`.
+```
+
+Then edit iconName/iconColor per Step 4a.
 
 ### Step 4c — Remove
 
-List existing keys as options. Pick one. Confirm via a second `AskUserQuestion` (**confirm-remove** / **cancel**).
+```
+Context (print before asking):
+- Where: Step 4c — Remove, pick key; target `registries.<registry path>`
+- Found: keys on record: <key → iconName / iconColor> per key
+- Why asking: which entry to drop is the operator's intent
+- Answers: `<key>` — selected for removal; nothing written until confirmed below
+AskUserQuestion: header "Remove key", question "Which key in registry `<registry path>` do you want to remove?", options: one per key, description = its current `iconName` / `iconColor`.
+```
+
+Confirm via a second `AskUserQuestion`:
+
+```
+Context (print before asking):
+- Where: Step 4c — Remove, confirm; target `registries.<registry path>.<key>`
+- Found: `<key>` → `<iconName>` / `<iconColor>`
+- Why asking: removal is destructive — the resolver has no icon for that value from the next reconcile on
+- Answers: `confirm-remove` — entry deleted in Step 5; `cancel` — nothing changes, back to Step 3
+AskUserQuestion: header "Confirm removal", question "Remove `<key>` from registry `<registry path>` in obsidian-icon-map.json?", options `confirm-remove` — "delete the entry", `cancel` — "keep it".
+```
 
 ## Step 5 — Write back
 
@@ -71,7 +152,14 @@ Rewrite `obsidian-icon-map.json` with `json.dumps(..., indent=2, ensure_ascii=Fa
 
 ## Step 6 — Loop or exit / Report
 
-One `AskUserQuestion`: **continue** / **exit**. Continue returns to Step 2.
+```
+Context (print before asking):
+- Where: Step 6 — Loop or exit; target obsidian-icon-map.json
+- Found: this run so far: <added / edited / removed entries>, written in Step 5
+- Why asking: whether there is more to change is the operator's intent
+- Answers: `continue` — back to Step 2; `exit` — Report, then Step 7
+AskUserQuestion: header "More changes?", question "Change another entry in obsidian-icon-map.json, or exit?", options `continue` — "pick another registry", `exit` — "print the report and log the run".
+```
 
 On exit, print one report line per task in the canonical list above, each with an outcome word (e.g. `located`, `picked`, `added`, `edited`, `removed`, `written`, `exited`).
 

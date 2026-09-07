@@ -39,3 +39,17 @@ Settings UI labels are defined in the `FrontmatterOptions` class (line 5058):
 The template at `claude/lazycortex-obsidian/templates/obsidian/plugin-settings.json` already encodes the three required values shown in the table above (`iconInFrontmatterEnabled: true`, `iconInFrontmatterFieldName: "iconize_icon"`, `iconColorInFrontmatterFieldName: "iconize_color"`) under its `obsidian-icon-folder.settings` key.
 
 `/lazy-obsidian.update-plugin obsidian-icon-folder` is the applier — it deep-merges that override block onto the vault's `obsidian-icon-folder/data.json` after every binary sync. `lazy-obsidian.audit` Phase 2.5 re-verifies those three keys against this reference file, to catch drift if a future Iconize release renames them.
+
+## Icon-map key: `paint_roots`
+
+The three keys above configure Iconize itself. The worker's own configuration lives in a separate file, the icon-map at `.claude/iconize/obsidian-icon-map.json`, whose resolver semantics are documented in `lazy-obsidian.iconize-protocol.md`. One of its top-level keys governs which part of the vault is configured at all, so it is recorded here beside the settings it interacts with.
+
+| Key | Type | Meaning | Absent |
+|---|---|---|---|
+| `paint_roots` | list of repo-relative directory prefixes | The only areas of the vault the worker may paint. Outside `paint_roots` the worker does not read or write the note: no matcher runs for it, nothing is written, and any `iconize_icon` / `iconize_color` it already carries is left exactly as it stands. | The whole vault is in scope — the behaviour every icon-map had before this key existed. |
+
+A prefix claims a path across a directory boundary only, so `specs` claims `specs/product/design.md` and never `specsheets/design.md`. Scaffolding-template trees stay exempt from painting whether or not they fall inside a listed prefix.
+
+Narrowing the list does not clean up after itself: icons already written in an area the list no longer covers stay put, because no run touches that area again. Removing them is a manual edit.
+
+`/lazy-obsidian.iconize-install` Step 2.7 seeds the key with a single entry — the consumer's spec content root, read from `spec.vault_root` in `.claude/lazy.settings.json` and defaulting to `specs` — on a fresh install, and adds it to an existing icon-map that does not carry it. An authored value is never rewritten.

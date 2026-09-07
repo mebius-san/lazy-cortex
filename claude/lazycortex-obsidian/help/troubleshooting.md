@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, likely causes, and fixes for lazycortex-obsidian — install, iconize, diagram render, plugin updates, tag pages, and vault manifest capture/deploy.
-last_regen: 2026-09-02
+last_regen: 2026-09-07
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree branching first on which skill aborted or misbehaved (install / iconize-install / iconize-config / iconize-sync / diagram-install / update-plugin / gen-tag-pages); each branch then splits on the specific symptom; each leaf names the troubleshooting entry that resolves it"
@@ -16,7 +16,7 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: c5789cd250ada25aa79c0fc976a881d7c0be44a4
+source_sha: 0e0562d0fc4bb9457ff9d14758e688f4eac27c87
 ---
 # Troubleshooting
 
@@ -87,6 +87,26 @@ source_sha: c5789cd250ada25aa79c0fc976a881d7c0be44a4
 **Likely cause**: The plugin was updated via `/plugin update lazycortex-obsidian@lazycortex` and the vault's icon-map declares a `schema_version` this worker no longer supports (or a `min_hook_version` the worker does not satisfy).
 
 **Fix**: Run `/lazy-obsidian.iconize-sync check-versions` to confirm the drift report, then re-run `/lazy-obsidian.iconize-install` — it migrates the icon-map schema where a migration path exists.
+
+---
+
+## Icons stopped painting outside `specs/` after re-running `/lazy-obsidian.iconize-install`
+
+**Symptom**: After a plugin update and a fresh `/lazy-obsidian.iconize-install`, notes and folders outside your spec content root (or wherever `spec.vault_root` points, `specs` by default) no longer get an icon, even though the registry still carries a rule that used to match them. Nothing was removed — icons already there stay put, but nothing new gets painted.
+
+**Likely cause**: The icon-map now carries a `paint_roots` key — the only repo-relative directory prefixes the sync worker may read or write. `/lazy-obsidian.iconize-install` seeds this key from `spec.vault_root` in `.claude/lazy.settings.json` (defaulting to `specs`) the first time it introduces the key into an icon-map that predates it. Outside those prefixes the worker no longer parses frontmatter, runs matchers, or writes anything for that note — the same behaviour the whole vault had before this key existed, just scoped down.
+
+**Fix**: Open `.claude/iconize/obsidian-icon-map.json` and widen `paint_roots` to include the directories you want painted, e.g. `["specs", "claude"]`, then re-run `/lazy-obsidian.iconize-sync reconcile`. Removing the key entirely restores whole-vault painting. Narrowing the list never cleans up after itself — icons already written in an area the list no longer covers are left standing until removed by hand.
+
+---
+
+## A scaffolding template still shows a stale icon after upgrading
+
+**Symptom**: A `.md` file under a `templates/**` tree — a plugin's own `claude/<plugin>/templates/**`, or the consumer's `.claude/templates/**` override tree — keeps an `iconize_icon` / `iconize_color` pair from before an upgrade, and every new note scaffolded from that template inherits the same stale icon.
+
+**Likely cause**: Template trees are exempt from painting — the worker never enumerates them during reconcile and no matcher resolves against them regardless of frontmatter — but the worker only ever writes keys it currently owns; it never strips keys it has stopped writing. A template painted by an earlier version of the worker (before this exemption existed) keeps whatever it wrote back then.
+
+**Fix**: One-time manual cleanup after upgrading — strip the `iconize_icon` / `iconize_color` keys by hand from every `.md` under the affected template trees. Notes scaffolded from them afterward take their icon from the matchers again, as intended.
 
 ---
 

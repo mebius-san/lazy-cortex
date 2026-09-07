@@ -88,9 +88,23 @@ Outcome: `presented`.
 
 If there are no fixable findings, skip with outcome `skipped-per-user-choice`.
 
-Otherwise ask the operator via `AskUserQuestion` whether to apply the fixable repairs. State exactly what `--apply` will do: rebuild the topic index, drop the broken See-also lines, and refresh stale glosses — these write tracked files. Offer at minimum: apply fixes, leave read-only.
+Otherwise ask the operator whether to apply the fixable repairs. State exactly what `--apply` will do: rebuild the topic index, drop the broken See-also lines, and refresh stale glosses — these write tracked files. Offer at minimum: apply fixes, leave read-only.
 
-**Terms findings are decided one at a time, never in a batch.** Each carries two sides — the word the document uses and the word the dictionary carries — and which one is right is the operator's call, not a default. Show both, ask, apply only what was chosen; an unanswered finding is left alone. Two things are never edited whatever the answer: a document whose frontmatter has `review_active: true` (an edit from outside the job counts against the open review round) and anything under an upstream mirror tree (editing a mirror breaks the drift detection it exists for).
+Context (print before asking):
+- Where: /lazy-wiki.doctor · Phase 4 — Confirm and apply fixes; target scope `<scope-id or "all scopes">`
+- Found: `<n>` fixable findings from Phase 1 — `<check: count, …>`; `<m>` report-only findings stay as they are
+- Why asking: `--apply` rewrites tracked files — `topics.md` and the nodes' See-also lines
+- Answers: `apply fixes` — `lazycortex-wiki doctor <scope-id> --apply` runs now: index rebuilt, path-base targets rewritten, broken lines dropped, glosses refreshed, the files left in the worktree uncommitted; `leave read-only` — nothing written; not persisted, the same findings ask again on the next run
+AskUserQuestion: header "Apply wiki fixes", question "Apply the `<n>` fixable wiki repairs for `<scope-id or "all scopes">` — index rebuild, See-also path rewrite, broken-line drop, gloss refresh?", options `apply fixes` / `leave read-only` with those descriptions.
+
+**Terms findings are decided one at a time, never in a batch.** Each carries two sides — the word the document uses and the word the dictionary carries — and which one is right is the operator's call, not a default. Show both, ask, apply only what was chosen; an unanswered finding is left alone. Two things are never edited whatever the answer: a document whose frontmatter has `review_active: true` (an edit from outside the job counts against the open review round) and anything under an upstream mirror tree (editing a mirror breaks the drift detection it exists for). One context block covers the loop — print it before each finding's question, filled from that finding:
+
+Context (print before asking):
+- Where: Phase 4 — terms finding `<i>/<total>`; target `<document path>` and dictionary `<file>` of terms scope `<id>`
+- Found: `<kind>` — the document says `<word in document>`, the dictionary carries `<term>` (`missing` / `dead`: only the one side present)
+- Why asking: which word is right is the operator's call, not a default
+- Answers: `divergence` — `rename in document` / `rename term in dictionary`; `missing` — `add term`; `duplicate` — `merge`, keeping the name the corpus uses; `dead` — `drop term`; every kind — `leave`, nothing written; a `review_active` document or an upstream mirror path is never edited whichever answer; `leave` is not persisted, the finding returns on the next run
+AskUserQuestion per finding: header "Terms: `<kind>`", question naming the document, the two words, and the scope (`<document path> says "<word>", dictionary <file> carries "<term>" — which is right?`), options per kind as above with descriptions.
 
 - **Operator declines** → outcome `skipped-per-user-choice`. Do not run `--apply`.
 - **Operator confirms** → run `Bash(lazycortex-wiki doctor <scope-id> --apply)` (same scope argument as Phase 1, add `--apply`). The command reports each fix as `(fixed)`. Report what was applied. Outcome `applied`.

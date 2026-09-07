@@ -67,7 +67,16 @@ All narrative prose this skill authors (doc bodies) is rendered in the product's
 - **Shipped** — the type appears in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.asset-types.json`. Always accepted.
 - **Anything else** — MUST appear as a key in the resolved product's `asset_types`. If it does not, refuse with a message naming `<asset-type>` and the product, and suggest `/lazy-spec.add-asset-type` to declare it on the product. Do NOT proceed.
 
-Then settle **where the asset lands**. The type's `default_path` is the default and needs no question when the caller named no folder; the operator may put the asset at ANY path under the product's `spec_path`, including a folder inside another asset — a nested asset is an ordinary asset, and its boundary is its own folder-note carrying `spec_role: status`, never its depth. Location is a placement decision, not a fact of the type: type resolution reads `spec_asset_type` off the note and never the path, so nothing downstream breaks when an asset sits somewhere unusual. Ask via `AskUserQuestion` (offering the `default_path` folder first, then a path the operator types) only when the caller passed no explicit folder AND the request itself suggests the asset belongs next to something else; otherwise take `default_path` silently. Under `--empty` never ask — take `default_path`.
+Then settle **where the asset lands**. The type's `default_path` is the default and needs no question when the caller named no folder; the operator may put the asset at ANY path under the product's `spec_path`, including a folder inside another asset — a nested asset is an ordinary asset, and its boundary is its own folder-note carrying `spec_role: status`, never its depth. Location is a placement decision, not a fact of the type: type resolution reads `spec_asset_type` off the note and never the path, so nothing downstream breaks when an asset sits somewhere unusual. Ask only when the caller passed no explicit folder AND the request itself suggests the asset belongs next to something else; otherwise take `default_path` silently. Under `--empty` never ask — take `default_path`.
+
+```
+Context (print before asking):
+- Where: /lazy-spec.create-asset · Step 2 — Validate the asset type; target <spec_path>/<folder>/<slug>/
+- Found: type `<asset-type>` declares default_path <default_path>; the request mentions <the asset or folder it seems to belong beside>
+- Why asking: placement is a decision, not a fact of the type — the caller named no folder and the request points elsewhere
+- Answers: `<default_path>` — scaffold under the type's default folder (`path-default`); `other (type a path)` — any folder under spec_path, including inside another asset (`path-chosen`, passed as `--path` in Step 5). Fixed at scaffold, never re-asked
+AskUserQuestion: header "Asset folder", question "Where under <product>'s spec_path should `<slug>` (`<asset-type>`) land?", options: the default_path folder first, then `other (type a path)`, each with a description.
+```
 
 Record the validated type and the resolved folder for use by later steps. Outcome word: `shipped` or `product-declared`, with suffix `path-default` or `path-chosen`.
 
@@ -75,7 +84,7 @@ Record the validated type and the resolved folder for use by later steps. Outcom
 
 Skip entirely under `--empty` (outcome `skipped-empty-mode`).
 
-Otherwise ask 2–5 targeted questions via `AskUserQuestion` — ONE question at a time. Author every question as a full-context block per the wizard-question standard in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` → Wizard-question explanation standard (stem + why-it-matters + per-option copy + reference pointer). Never ask yes/no questions; offer concrete options with tradeoffs.
+Otherwise ask 2–5 targeted questions via `AskUserQuestion` — ONE question at a time. Every question prints its context first: where (`/lazy-spec.create-asset · Step 3 — Ask clarifying questions`, target `<spec_path>/<folder>/<slug>/<start-doc>`), found (what the invocation and any dispatch prompt already state about the asset, quoted, and the prose section the answer will fill), why asking (that section cannot be authored from what is on record), answers (each option's consequence for the doc's prose — the answer is written into Step 7's prose and, for a `change`'s targets, into `spec_targets`; never re-asked). Per-option copy keeps the concrete example and tradeoff from the wizard-question standard in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` → Wizard-question explanation standard; `question` names the asset and the topic, `header` is the topic. Never ask yes/no questions; offer concrete options with tradeoffs.
 
 Scale the topics to the asset type:
 
@@ -91,7 +100,18 @@ Scale the topics to the asset type:
 **Widening the set is the playbook's call, not this skill's.** `Read` the reference named by the declaration's `playbook` (resolving one `alias_of` hop when the type declares none of its own). A declaration carrying neither `playbook` nor `alias_of` is refused: the coordinator would have no law to work the asset under, so creating it would strand it. Refuse with a message naming the type and pointing at `/lazy-spec.add-asset-type` to complete the declaration. Two widening channels:
 
 - **Mandatory definition documents ride automatically.** When the type record carries `vision: mandatory` (the shipped `feature` does), `vision.md:vision` joins the doc set BEFORE the start doc, so the seed order matches the reading chain and the coordinator has nothing left to seed on its first wake. Any other document the playbook's definition-documents chapter declares unconditionally mandatory joins the same way.
-- **Opt-in documents are offered, not assumed.** In normal mode (not `--empty`), one `AskUserQuestion` (multiSelect) offers the opt-in documents the playbook allows on this type — `vision.md` (where the contract is `opt-in`, e.g. a change), `use-cases.md`, `ui-design.md` — each with a one-line description of what it is for. Selected ones join the doc set with their `spec_doc_type` values from the playbook; declined ones stay opt-in for later launch checkboxes, their absence never a defect.
+- **Opt-in documents are offered, not assumed.** In normal mode (not `--empty`), one `AskUserQuestion` (multiSelect) offers the opt-in documents the playbook allows on this type — `vision.md` (where the contract is `opt-in`, e.g. a change), `use-cases.md`, `ui-design.md`:
+
+  ```
+  Context (print before asking):
+  - Where: /lazy-spec.create-asset · Step 4 — Resolve the start doc + icon; target <spec_path>/<folder>/<slug>/
+  - Found: start doc <file>:<doc_type> <plus mandatory vision.md:vision when the type carries it>; playbook <playbook-ref> allows opt-in <vision.md | use-cases.md | ui-design.md, …>
+  - Why asking: opt-in documents are the operator's call — the playbook allows them, nothing requires them
+  - Answers: each selected doc joins the scaffold now with its `spec_doc_type` from the playbook; an unselected one stays opt-in for a later launch checkbox, its absence never a defect. Not re-asked
+  AskUserQuestion (multiSelect): header "Opt-in docs", question "Which optional documents should `<slug>` (`<asset-type>`) on <product> be scaffolded with?", one option per allowed doc with a one-line description of what it is for.
+  ```
+
+  Selected ones join the doc set with their `spec_doc_type` values from the playbook; declined ones stay opt-in for later launch checkboxes, their absence never a defect.
 
 Every document not named by `start_doc`, the mandatory channel, or the operator's selection stays out — plan and report documents are authored later, by the tool the coordinator dispatches, once there is work to plan or journal.
 

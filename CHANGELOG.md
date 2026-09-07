@@ -4,6 +4,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.2.0 — 2026-09-07 UTC
+
+- Fixed cross-plugin resolution on consumer installs — the daemon now exports every installed plugin's newest cached version (dev trees still take priority, versions compared numerically), so routines find sibling plugins without needing a dev vault present.
+- Every `AskUserQuestion` a skill raises now leads with a context block — where it's asking, what it found, why it can't decide alone, what each answer does — before the question itself; also fixes several skills (`lazy-core.doctor`, `lazy-core.slim-context`, `lazy-guard.allow-mcp`, `lazy-log.clean`, and others) that couldn't call `AskUserQuestion` at all due to a missing tool declaration.
+- `/lazy-core.agent-models` now pins the new `lazy-spec.catalog-coordinator` agent to `sonnet` by default, so it doesn't prompt for a model choice.
+- New `routine-ensure-filter` CLI verb lets a sibling plugin seed a frontmatter filter predicate into an existing routine — only filling in absent keys, never touching an operator's own settings, and reporting rather than creating an unregistered routine.
+
 
 ### 9.1.1 — 2026-09-06 UTC
 
@@ -600,6 +607,22 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 7.4.0 — 2026-09-07 UTC
+
+- Fixed `# Gates` accumulating a duplicate "flipped" record on every gate flip — the reason for a flip now lives only in the run log, so the section holds just the launch checkboxes.
+- Fixed checkbox-callout hints and attribution collapsing into the checkbox line in Obsidian's task view — a blank quote line now separates them so the whole line renders.
+- New `deferred` spec stage lets a document (e.g. one freshly created by `lazy-spec.sync-with-code`) sit aside until a `Review` checkbox promotes it to draft, without the coordinator touching it in the meantime.
+- Level gates for optional documents (`design.md`, `ui-design.md`, `tech.md`) now correctly close when the document is simply absent, not only when it's approved.
+- Folder icons are now driven by document type alone — dropped the separate "all gates done" and per-drift-state icons.
+- `spawn-product` no longer requires the catalog root's vision gate to be closed first.
+- **Breaking:** `lazy-spec.sync-with-code` no longer touches the product tech doc — `tech.md` is fully hand-written now; the skill only ever surfaces user-visible behavior candidates for the design doc.
+- Fixed a coordinator wake bug where a dependency-ready or release crossing landing with no other trigger on the same tick could be silently dropped instead of waking dependents.
+- The two tech document templates (`system-tech`, `vault-tech`) now carry verbatim canonical text with attribution in every section comment (arc42, IEEE 1016, ISO 25010).
+- New `lazy-spec.catalog-coordinator` agent handles product- and repo-level system documents (vision/design/tech), separate from the asset-level coordinator.
+- `lazy-spec.install` now seeds the request inbox into the spec catalog's wiki scope automatically, without asking.
+- Every question a `lazy-spec.*` skill raises now shows a context block — what's being asked and why — before the question itself.
+- Fixed gate dispatch, upstream ticks, and inline icon repaint failing on a consumer install with no dev plugin directories — sibling-plugin resolution now falls back to the installed plugin cache, picking the newest cached version.
+
 
 ### 7.3.1 — 2026-09-05 UTC
 
@@ -804,6 +827,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-obsidian
 
+### 5.1.0 — 2026-09-07 UTC
+
+- Icon painting now stays inside declared vault roots (`paint_roots`, defaulting to the specs directory) instead of repainting the whole vault.
+- Fixed icon repaint dropping a note's existing icon (or its colour entirely) when a state rule supplies only a colour and borrows the icon from the note itself.
+- Fixed sibling-plugin icon rules being invisible outside a dev checkout — icon registries from other installed plugins are now picked up from the plugin cache on a normal (consumer) install too.
+- `lazy-obsidian.audit`'s drift fix-loop drops the `waive` option, which never actually persisted anything.
+
 
 ### 5.0.3 — 2026-09-03 UTC
 
@@ -971,6 +1001,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-diagram
 
+### 1.2.0 — 2026-09-07 UTC
+
+- New context block printed before every question `lazy-diagram.audit`, `lazy-diagram.draw`, and `lazy-diagram.install` ask — states what's being decided, why, and what each answer does.
+- Fixed `lazy-diagram.draw`'s kind/format confirmation question, which could fail to fire because `AskUserQuestion` wasn't declared as an allowed tool.
+
 
 ### 1.1.9 — 2026-09-02 UTC
 
@@ -1028,6 +1063,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.4.0 — 2026-09-07 UTC
+
+- Review-state icon matchers (awaiting operator, in process, approved, approved with concerns) no longer replace a note's own type icon — only the colour changes as a document moves through review.
+- `lazy-review.configure` and `lazy-review.install` now print a context block (what's being asked, why, and what each answer does) before every question, instead of a bare prompt.
+- Fixed inline icon repaint after a review commit silently failing to find the `lazycortex-obsidian` plugin when no daemon export was present — it now also falls back to the local plugin cache.
 
 
 ### 6.3.1 — 2026-09-05 UTC
@@ -1160,6 +1201,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 1.1.0 — 2026-09-07 UTC
+
+- Fixed `lazy-observe.install` failing to locate the `lazycortex-core` CLI on a plain marketplace install (outside a dev checkout) — it now also checks the plugin cache for the sibling's newest installed version.
+- Fixed `lazy-observe.install` and `lazy-observe.uninstall` missing `AskUserQuestion` from their permitted tools, which could block their interactive prompts; those prompts now also explain what was found and why they're asking before each question.
+
 
 ### 1.0.0 — 2026-09-02 UTC
 
@@ -1263,6 +1309,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.4.0 — 2026-09-07 UTC
+
+- Research aspect: mandatory opening read expanded from product `design.md`/`tech.md` to all existing system documents (`vision.md`, `use-cases.md`, `design.md`, `ui-design.md`, `tech.md`) at both the product level and the content-root level, so specialist experts arrive with fuller upstream context before writing.
+- `lazy-experts.install`'s expert-class prompt now prints a context block (what's already on record, why it's asking, what each choice does) before asking which domains to register.
 
 
 ### 1.3.0 — 2026-09-05 UTC
@@ -1378,6 +1429,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.3.0 — 2026-09-07 UTC
+
+- `lazy-python.check-style` and `lazy-python.install` now print a context block (what's being asked, what was found, why, and what each answer does) before every question they raise, and `check-style` no longer risks a missing-tool error when it asks about editing a test.
 
 
 ### 4.2.1 — 2026-09-06 UTC
@@ -1539,6 +1594,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 2.3.0 — 2026-09-07 UTC
+
+- `lazy-wiki.configure` now asks fewer questions — a scope covering the spec catalog skips the exclude question, the review-skip filter is always seeded, and a new `wiki.domains` entry takes the shipped dictionary path and output directory without asking.
+- Questions raised by the wiki wizards (`configure`, `doctor`, `domains`, `install`, `relink`, `structure`) now print an explanatory context block — what's being asked, what was found, why the skill can't decide alone — before the question itself.
+- Fixed cross-plugin resolution for installs from the marketplace cache — `lazy-wiki`'s dispatch, mirror, and axes tooling previously only found sibling plugins in a dev checkout and silently gave up otherwise.
 
 
 ### 2.2.1 — 2026-09-02 UTC

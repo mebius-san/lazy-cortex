@@ -30,7 +30,7 @@ Authors product / feature / change / bug (and operator-defined) specs as Markdow
 - `lazy-spec.flip-gate` — The single channel for flipping one asset gate (`spec_design_done` … `spec_released`); flips unconditionally once confirmed (refuses only a cancelled asset) — interactive confirm, or `--auto`.
 - `lazy-spec.gate-tick` (worker) — Script-only md-scan worker: polls an asset's active expert job for a terminal marker and structurally checks the folder-note. Dispatched by the `lazy-spec.gate-tick` routine.
 - `spec.coordinator` (agent, `lazy-spec.coordinator-watch` git-watch routine) — Decides gate readiness, promotes doc stages, and dispatches launch-checkbox / cascade jobs, woken on a commit that reaches the daemon's own checkout; see `lazy-spec.coordination-playbook.md`.
-- `lazy-spec.set-stage` — Change one authored doc's `spec_stage` (`empty | draft | approved | rejected | cancelled`), mirror the `spec/<stage>` tag, and log to the folder-note `# History` section.
+- `lazy-spec.set-stage` — Change one authored doc's `spec_stage` (`empty | draft | approved | rejected | cancelled | deferred`), mirror the `spec/<stage>` tag, and log to the folder-note `# History` section.
 - `lazy-spec.rebase-pins` — Rebase pinned specs back to the repo's default branch after a source branch is merged or deleted; propose `spec_released` flips.
 
 ## Request processing

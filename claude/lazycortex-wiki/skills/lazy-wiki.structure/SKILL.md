@@ -34,7 +34,14 @@ Outcome: `loaded` or `no-section`.
 
 Parse the invocation: `/lazy-wiki.structure rebuild` or `/lazy-wiki.structure query [<path>]`. `<path>` is a repo-relative directory (or file) path; omitted means "top-level only" — the root-level bullets of the map, not the whole tree.
 
-Neither keyword given → `AskUserQuestion`: *"Rebuild the structure map from the tree, or query a slice of it?"* with options `rebuild` / `query`; if `query`, follow up asking for the path (blank allowed).
+Neither keyword given → ask.
+
+Context (print before asking):
+- Where: /lazy-wiki.structure · Phase 2 — Resolve mode and target; target `docs/structure.md`
+- Found: the invocation carried no mode; map `<present|absent>`; `depth_profiles` classes on record `<n>`
+- Why asking: the mode is the caller's intent, and `rebuild` rewrites and commits a tracked file
+- Answers: `rebuild` — Phase 3 walks the tracked tree, rewrites `docs/structure.md`, commits it; `query` — Phase 4 returns one slice and writes nothing, then asks for the path; not persisted, asked on every mode-less invocation
+AskUserQuestion: header "Structure mode", question "Rebuild the structure map `docs/structure.md` from the tracked tree, or query a slice of it?", options `rebuild` / `query` with those descriptions. On `query`, follow up — header "Query path", question "Repo-relative path to slice out of `docs/structure.md` (blank for the top level)?", free text (blank allowed).
 
 Outcome: `resolved: <rebuild|query>`.
 

@@ -97,6 +97,57 @@ _CORE_PLUGIN_NAME = "lazycortex-core"
 _CORE_BIN_SEGMENT = "bin"
 
 
+def _version_sort_key(name: str) -> tuple[int, ...]:
+  """
+  Build a numeric sort key for a plugin-cache version directory name.
+
+  Args:
+    name: Version directory name as it appears in the plugin cache.
+
+  Returns:
+    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
+  """
+  out: list[int] = []
+  for part in name.split("."):
+    digits = "".join(c for c in part if c.isdigit())
+    out.append(int(digits) if digits else 0)
+  return tuple(out)
+
+
+def _cached_sibling_root(name: str) -> Path | None:
+  """
+  Locate a sibling plugin's newest cached install next to this plugin's own cached install.
+
+  A cached install lives at `<cache>/<registry>/<plugin>/<version>/`, so when this file runs from
+  one, the cache root is four levels above `bin/` and every sibling's versions sit under it. A dev
+  source tree has no version level above `bin/`, so the walk finds nothing there — the dev layout
+  is served by the daemon's env export and each caller's own dev fallback.
+
+  Args:
+    name: Sibling plugin name, which is also its cache directory and CLI name.
+
+  Returns:
+    The sibling's highest cached version directory, or None outside a cached install or when no
+    version of the sibling is cached.
+  """
+  own = Path(__file__).resolve()
+  # guard: not a cached install — a dev checkout has no version directory above bin/
+  if not own.parents[1].name.replace(".", "").isdigit():
+    return None
+  # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
+  try:
+    cache = own.parents[4]
+  except IndexError:
+    return None
+  versions = [
+    version
+    for registry in cache.iterdir() if (registry / name).is_dir()
+    for version in (registry / name).iterdir()
+    if version.is_dir() and version.name.replace(".", "").isdigit()
+  ]
+  return max(versions, key = lambda v: _version_sort_key(v.name)) if versions else None
+
+
 def _resolve_core_cli() -> Path:
   """
   Locate the `lazycortex-core` CLI binary this module dispatches `remote-mirror` to.
@@ -105,7 +156,8 @@ def _resolve_core_cli() -> Path:
   spawns, per the inter-plugin boundary contract's § 1c CLI-subprocess pattern — then falls
   back to the dev-vault sibling layout (`claude/lazycortex-core/bin/` next to this plugin's
   own `claude/lazycortex-wiki/`), so the resolver also works from a plain shell or a test run
-  inside this repo, where the daemon never exported the env var.
+  inside this repo, where the daemon never exported the env var — and finally to the plugin
+  cache this plugin itself runs from, for a consumer install's own sessions.
 
   Returns:
     Resolved binary usable as a subprocess argument.
@@ -128,7 +180,13 @@ def _resolve_core_cli() -> Path:
   if sibling.is_file():
     return sibling
 
-  # neither lookup found a binary — name what was searched so a misconfigured runner is diagnosable
+  # plugin-cache fallback — a consumer install running from the cache with no daemon export
+  cached_root = _cached_sibling_root(_CORE_PLUGIN_NAME)
+  cached = None if cached_root is None else cached_root / _CORE_BIN_SEGMENT / _CORE_PLUGIN_NAME
+  if cached is not None and cached.is_file():
+    return cached
+
+  # no lookup found a binary — name what was searched so a misconfigured runner is diagnosable
   searched = [ dir_path for dir_path in env_dirs if dir_path ] or [ "<unset>" ]
   raise RuntimeError(
     f"lazycortex-core CLI not resolvable: no {_CORE_BIN_SEGMENT}/{_CORE_PLUGIN_NAME} under any "

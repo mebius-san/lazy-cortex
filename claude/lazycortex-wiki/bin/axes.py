@@ -80,6 +80,23 @@ class _K:
   ERROR = "error"
 
 
+def _version_sort_key(name: str) -> tuple[int, ...]:
+  """
+  Build a numeric sort key for a plugin-cache version directory name.
+
+  Args:
+    name: Version directory name as it appears in the plugin cache.
+
+  Returns:
+    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
+  """
+  out: list[int] = []
+  for part in name.split("."):
+    digits = "".join(c for c in part if c.isdigit())
+    out.append(int(digits) if digits else 0)
+  return tuple(out)
+
+
 def _resolve_core_cli() -> Path:
   """
   Locate the `lazycortex-core` CLI binary this module dispatches settings reads/writes to.
@@ -93,7 +110,7 @@ def _resolve_core_cli() -> Path:
   plain interactive install-time session (no daemon, no dev-vault checkout) exports neither of
   the first two. Mirrors `mirror.py`'s `_resolve_core_cli` in this same plugin for the first two
   stages, and `coordinator_dispatch.py`'s own `_resolve_core_cli` in `lazycortex-review` for the
-  cache-glob stage (same plain-string, not semver-aware, newest-first sort).
+  cache-glob stage (numeric version order, so `10.0.0` outranks `9.1.1`).
 
   Returns:
     Resolved binary usable as a subprocess argument.
@@ -139,7 +156,7 @@ def _resolve_core_cli() -> Path:
     ]
     all_versions = [ v for pd in plugin_dirs for v in pd.iterdir() if v.is_dir() ]
     if all_versions:
-      latest = sorted(all_versions, key = lambda v: v.name, reverse = True)[0]
+      latest = max(all_versions, key = lambda v: _version_sort_key(v.name))
       cli = latest / _K.BIN_SEGMENT / _K.CORE_PLUGIN_NAME
       if cli.is_file():
         return cli

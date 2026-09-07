@@ -1,7 +1,7 @@
 ---
 name: lazy-log.clean
 description: "Run when the operator asks to tidy `./.logs/claude/` — stray or misnamed run-log folders, clusters of anonymous `task-N` dirs, logs left behind by skills that no longer exist. Read-first and interactive: classifies every folder against the live artifact names and offers merge / distill-to-memory / delete / leave before anything is touched."
-allowed-tools: Read, Glob, Grep, Bash(mkdir -p *), Bash(date *), Bash(python3 *), Bash(ls *), Bash(stat *), Bash(find *), Bash(mv *), Bash(rmdir *), Bash(rm -rf .logs/claude/*), Bash(git rev-parse*), Agent
+allowed-tools: Read, Glob, Grep, Bash(mkdir -p *), Bash(date *), Bash(python3 *), Bash(ls *), Bash(stat *), Bash(find *), Bash(mv *), Bash(rmdir *), Bash(rm -rf .logs/claude/*), Bash(git rev-parse*), AskUserQuestion, Agent
 ---
 # Run-Log Housekeeping
 
@@ -71,10 +71,18 @@ Outcome line: `enumerated <total>: waivered=<w>, canonical=<a>, rename=<b>, patt
 Filter `canonical` bucket for folders whose `newest` log file is older than 30 days (compare against `date -u +%Y-%m-%d`).
 
 - If the filtered list is empty, outcome line: `none-stale`. Move to Step 4.
-- Otherwise, for each stale folder issue **one** `AskUserQuestion`:
+- Otherwise, for each stale folder print the context block, then issue **one** `AskUserQuestion`; each iteration fills the block from that folder:
 
-  - question: ``Folder `<name>` has logs from <oldest> to <newest>. Newest is <N> days old. What do you want to do?``
-  - options:
+```
+Context (print before asking):
+- Where: /lazy-log.clean · Step 3 — Stale-canonical age check; target ./.logs/claude/<name>/
+- Found: canonical folder `<name>` — <file_count> logs, <oldest> → <newest>; newest is <N> days old (threshold 30)
+- Why asking: the artifact still exists, so the folder is live — whether its old logs are worth keeping is the operator's call
+- Answers: `keep` — untouched, re-asked on the next run while it stays stale; `archive-then-delete` — substantive logs distilled to memory in Step 8, folder deleted in Step 9; `delete` — folder deleted in Step 9 without distilling
+AskUserQuestion: header "Stale log folder", question "Log folder ./.logs/claude/<name>/ has <file_count> logs from <oldest> to <newest>, newest <N> days old — keep, archive then delete, or delete it?", options with descriptions.
+```
+
+  - options, each with a `description` restating its Answers line:
     - `keep` — leave folder untouched
     - `archive-then-delete` — distill substantive logs to memory in Step 8, then delete the folder in Step 9
     - `delete` — delete in Step 9 without distilling
@@ -83,11 +91,18 @@ Append each chosen action to the corresponding intent list. Outcome line: `stale
 
 ## Step 4: Rename-candidate review
 
-For each `orphan-rename-candidate` (paired with its canonical match `target`), issue **one** `AskUserQuestion`:
+For each `orphan-rename-candidate` (paired with its canonical match `target`), print the context block, then issue **one** `AskUserQuestion`; each iteration fills the block from that folder:
 
-- question: ``Folder `<name>` looks like a renamed/typo'd version of canonical `<target>` (similarity <ratio>). Action?``
-- description includes `<file_count>` files, oldest/newest dates, and a one-line preview of each top-3 log's `## Result` heading if available.
-- options:
+```
+Context (print before asking):
+- Where: /lazy-log.clean · Step 4 — Rename-candidate review; target ./.logs/claude/<name>/ → ./.logs/claude/<target>/
+- Found: `<name>` is not a canonical name; closest canonical `<target>` (similarity <ratio>); <file_count> logs, <oldest> → <newest>; `## Result` preview of up to three logs: <one line each, or none>
+- Why asking: a near-match may be a renamed skill or an unrelated name — only the operator knows
+- Answers: `merge` — logs moved into `<target>/` and the emptied source removed in Step 9, never re-asked; `distill-then-delete` — distilled to memory in Step 8, deleted in Step 9; `delete` — deleted in Step 9 without distilling; `leave` — untouched, re-asked on the next run
+AskUserQuestion: header "Rename candidate", question "Merge log folder ./.logs/claude/<name>/ into canonical ./.logs/claude/<target>/ (similarity <ratio>), or distill, delete, or leave it?", options with descriptions.
+```
+
+- options, each with a `description` restating its Answers line:
   - `merge` — `mv <source>/*.md <target>/` then `rmdir <source>` (in Step 9)
   - `distill-then-delete` — distill in Step 8, delete in Step 9
   - `delete` — delete in Step 9 without distilling
@@ -97,10 +112,18 @@ Append to intent lists. Outcome line: `rename-decided <count>` or `no-rename-can
 
 ## Step 5: Pattern-clustered orphan review
 
-Group the `orphan-pattern` bucket by the regex that matched. For each cluster, issue **one** `AskUserQuestion`:
+Group the `orphan-pattern` bucket by the regex that matched. For each cluster, print the context block, then issue **one** `AskUserQuestion`; each iteration fills the block from that cluster:
 
-- question: ``<count> folders matching `<pattern>` (`<example1>`, `<example2>`, …) — these are anonymous subagent runs. Action?``
-- options:
+```
+Context (print before asking):
+- Where: /lazy-log.clean · Step 5 — Pattern-clustered orphan review; target <count> folders under ./.logs/claude/ matching `<pattern>`
+- Found: `<example1>`, `<example2>`, … — anonymous subagent run dirs; <total files> logs, <oldest> → <newest> across the cluster
+- Why asking: these dirs map to no artifact, but deletion is irreversible and the operator may want their content distilled first
+- Answers: `delete-all` — every folder in the cluster deleted in Step 9; `distill-then-delete-all` — substantive logs distilled in Step 8, all deleted in Step 9; `leave-all` — untouched, re-asked on the next run; `per-folder` — one Step 7 prompt per folder in this cluster
+AskUserQuestion: header "Orphan cluster", question "<count> log folders under ./.logs/claude/ match `<pattern>` (`<example1>`, `<example2>`, …) — delete all, distill then delete all, leave all, or decide per folder?", options with descriptions.
+```
+
+- options, each with a `description` restating its Answers line:
   - `delete-all` — schedule every folder in the cluster for deletion in Step 9
   - `distill-then-delete-all` — distill substantive logs in Step 8, delete in Step 9
   - `leave-all` — no action
@@ -110,11 +133,18 @@ Append to intent lists. Outcome line: `cluster-decided <cluster_count>` or `no-p
 
 ## Step 6: Waivered-bucket review
 
-For each folder in the `waivered` bucket, issue **one** `AskUserQuestion`:
+For each folder in the `waivered` bucket, print the context block, then issue **one** `AskUserQuestion`; each iteration fills the block from that folder:
 
-- question: ``Folder `<name>` (<file_count> logs, <oldest> → <newest>) maps to a current artifact carrying `logging-waiver: "<reason>"`. The artifact still exists — logging just got turned off. Old logs are residue. Action?``
-- description: includes the waiver reason from Step 1's JSON and one-line previews of up to three logs' `## Result` sections.
-- options:
+```
+Context (print before asking):
+- Where: /lazy-log.clean · Step 6 — Waivered-bucket review; target ./.logs/claude/<name>/
+- Found: `<name>` maps to a live artifact carrying `logging-waiver: "<reason>"` (from Step 1's JSON); <file_count> logs, <oldest> → <newest>; `## Result` preview of up to three logs: <one line each, or none>
+- Why asking: the artifact still exists and only its logging was switched off — the logs are residue, but deletion is irreversible
+- Answers: `delete` — deleted in Step 9; `distill-then-delete` — distilled in Step 8, deleted in Step 9; `leave` — untouched, re-asked on the next run; `delete-all-waivered` — (first prompt only) every remaining waivered folder scheduled for deletion, no further Step 6 prompts
+AskUserQuestion: header "Waivered logs", question "Log folder ./.logs/claude/<name>/ belongs to an artifact whose logging is waived (\"<reason>\") — delete, distill then delete, leave, or delete every waivered folder?", options with descriptions.
+```
+
+- options, each with a `description` restating its Answers line:
   - `delete` (Recommended) — schedule for deletion in Step 9
   - `distill-then-delete` — distill in Step 8, delete in Step 9
   - `leave` — no action
@@ -124,11 +154,18 @@ Append to intent lists. Outcome line: `waivered-decided <count>` or `no-waivered
 
 ## Step 7: Other orphan review
 
-For each folder in the `orphan-other` bucket (including any "per-folder" fall-throughs from Step 5), issue **one** `AskUserQuestion`:
+For each folder in the `orphan-other` bucket (including any "per-folder" fall-throughs from Step 5), print the context block, then issue **one** `AskUserQuestion`; each iteration fills the block from that folder:
 
-- question: ``Folder `<name>` (<file_count> logs, <oldest> → <newest>) does not match any canonical name. Action?``
-- description includes one-line previews of up to three logs' `## Result` sections.
-- options:
+```
+Context (print before asking):
+- Where: /lazy-log.clean · Step 7 — Other orphan review; target ./.logs/claude/<name>/
+- Found: `<name>` matches no canonical name, no waiver, no known pattern; <file_count> logs, <oldest> → <newest>; `## Result` preview of up to three logs: <one line each, or none>
+- Why asking: the folder may be a retired artifact worth distilling or plain noise — only the operator knows
+- Answers: `distill-then-delete` — distilled in Step 8, deleted in Step 9; `delete` — deleted in Step 9; `leave` — untouched, re-asked on the next run
+AskUserQuestion: header "Orphan logs", question "Log folder ./.logs/claude/<name>/ matches no live skill, agent, or command — distill then delete, delete, or leave it?", options with descriptions.
+```
+
+- options, each with a `description` restating its Answers line:
   - `distill-then-delete` — distill in Step 8, delete in Step 9
   - `delete` — delete in Step 9
   - `leave` — no action

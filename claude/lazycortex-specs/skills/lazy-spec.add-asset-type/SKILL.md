@@ -38,7 +38,7 @@ Signature: `<product> [<type-name>]`.
 
 ## Wizard contract
 
-Every `AskUserQuestion` this skill issues is a single question (one question per call, wait for the answer, then ask the next) authored as a full-context block per the Wizard-question explanation standard in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` — stem (name the field, what it controls, where it takes effect) + why-it-matters + per-option copy with a concrete example + a trailing `See:` reference pointer. Never ask a bare one-line question.
+Every `AskUserQuestion` this skill issues is a single question (one question per call, wait for the answer, then ask the next) preceded by a context block the agent prints to the operator — where (this skill, the step, the field under `products[<key>].asset_types.<name>`), found (what Step 1 resolved and what earlier steps captured), why asking (the one reason the field is not derivable), answers (what each option writes, and that it is never re-asked) — then the call with a self-contained `question` naming the product and type, a short `header`, and a `description` per option. Per-option copy keeps the concrete example and tradeoff from the Wizard-question explanation standard in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md`; the `See:` pointer closes the context block. Never ask a bare one-line question.
 
 ## Step 1 — Resolve the product
 
@@ -61,35 +61,108 @@ Outcome: `resolved`.
 
 If `<type-name>` was passed as an argument, validate it against `^[a-z][a-z0-9-]*$`, confirm it is not already a key in the product's own `asset_types` (refuse and stop if it is — suggest editing the existing declaration instead), and skip the question (outcome `taken-from-arg`). A name that collides with a SHIPPED type is not a refusal — it is a per-field override of that type for this product, and the wizard says so plainly before continuing.
 
-Otherwise `AskUserQuestion` for the type's key. Stem: the name is the value written into every instance's `spec_asset_type` frontmatter key AND the key written into `products[<key>].asset_types.<name>`; `lazy-spec.create-asset <product> <name> <slug>` scaffolds instances of it, `lazy-spec.request-classify` recognises it as a request class, and the coordinator resolves an asset's law through it. Why-it-matters: the name is the stable identity of the type across config, notes, and dependency tokens — renaming later means rewriting `spec_asset_type` on every instance. Offer concrete example labels (e.g. `characters`, `scenes`, `chapters`) plus an "other (type your own)" path; validate the chosen string against `^[a-z][a-z0-9-]*$` and re-ask on failure or collision. See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`.
+Otherwise ask for the type's key:
 
-Then `AskUserQuestion` whether the type is standalone or an alias. Stem: an alias type (`asset_types.<name>.alias_of: <base>`) borrows exactly ONE thing from the base — the base's playbook, and only when it declares no `playbook` of its own; its folder, icon, colour, start document and default tools stay entirely its own, so an alias is a full type that happens to be coordinated like its base. Why-it-matters: this decides whether the type gets a law of its own to maintain (Step 8) or rides the base's. Offer "standalone (own playbook)" as the first option, then each legal base: the shipped types (`feature` / `change` / `bug` / `content` / `research`) and every already-declared type that does NOT itself carry `alias_of` — aliases never chain. Capture `<alias-base>` when an alias is chosen.
+```
+Context (print before asking):
+- Where: /lazy-spec.add-asset-type · Step 2 — Ask the type name; target products[<product>].asset_types
+- Found: no <type-name> argument; the product already declares <its own asset_types keys, or "none"> over the shipped feature / change / bug / content / research
+- Why asking: the name is the stable identity of the type — written into every instance's `spec_asset_type` and into `products[<key>].asset_types.<name>`; `lazy-spec.create-asset <product> <name> <slug>` scaffolds by it, `lazy-spec.request-classify` routes by it, the coordinator resolves the asset's law through it; renaming later means rewriting `spec_asset_type` on every instance
+- Answers: `<example>` (e.g. `characters`, `scenes`, `chapters`) — that key is declared in Step 7, never re-asked; `other (type your own)` — a key matching `^[a-z][a-z0-9-]*$`; a regex failure or a collision re-asks. See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`
+AskUserQuestion: header "Type name", question "What is the key of the new asset type on product <product>?", options: the example labels plus `other (type your own)`, each with a description.
+```
+
+Then ask whether the type is standalone or an alias:
+
+```
+Context (print before asking):
+- Where: /lazy-spec.add-asset-type · Step 2 — Ask the type name; target products[<product>].asset_types.<name>.alias_of
+- Found: legal bases in scope — the shipped feature / change / bug / content / research plus <every product-declared type that carries no alias_of>; aliases never chain
+- Why asking: an alias borrows exactly ONE thing from its base — the base's playbook, and only when the alias declares no `playbook` of its own; folder, icon, colour, start document and default tools stay the alias's own. This decides whether the type gets a law of its own to maintain (Step 8) or rides the base's
+- Answers: `standalone (own playbook)` — no `alias_of` written, Step 8 asks for the playbook; `<base>` — Step 7 writes `alias_of: <base>` and Step 8 is skipped (`skipped-alias`). Never re-asked
+AskUserQuestion: header "Alias or standalone", question "Is `<name>` on <product> a standalone type with its own playbook, or an alias of an existing type?", options: `standalone (own playbook)` first, then one per legal base, each with a description.
+```
+
+Capture `<alias-base>` when an alias is chosen.
 
 Outcome: `named` or `taken-from-arg` (append `alias-of-<base>` when an alias base was captured).
 
 ## Step 3 — Ask the icon + color
 
-`AskUserQuestion` for the required icon. Stem: the icon is the iconize identifier (a Lucide name like `LiUsers`, or a literal emoji) written into `products[<key>].asset_types.<name>.icon`; `lazy-spec.create-asset` injects it into every instance's status folder-note as `iconize_icon`, and the Obsidian iconize system paints it on the asset folder. Why-it-matters: the icon is how the operator visually distinguishes assets of this type in the file explorer, and an alias never inherits its base's paint — a type without an icon is incomplete. Offer a few concrete suggestions plus an "other (type your own)" path. **The skill MUST refuse to finish if no icon is provided** — if the operator declines every option and gives no value, abort with a message stating an icon is required and do NOT write anything. See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`.
+Ask for the required icon:
 
-Then `AskUserQuestion` for the optional color. Stem: an optional hex color (e.g. `#7E57C2`) written into `asset_types.<name>.color` and mirrored into each instance's managed `iconize_color`; it tints the icon. Why-it-matters: purely cosmetic — omit it to inherit the default icon color. Offer a couple of example hex values plus "none (skip color)" and an "other (type your own)" path. Capture `<color>` only when a real hex is given; treat "none" as absent.
+```
+Context (print before asking):
+- Where: /lazy-spec.add-asset-type · Step 3 — Ask the icon + color; target products[<product>].asset_types.<name>.icon
+- Found: no icon on record for `<name>`; <when an alias: base <alias-base> paints <base-icon>, which is NOT inherited>
+- Why asking: the icon is how the operator tells assets of this type apart in the file explorer — `lazy-spec.create-asset` injects it into every instance's status folder-note as `iconize_icon` and iconize paints it on the folder; an alias never inherits its base's paint, and a type without an icon is incomplete
+- Answers: `<suggestion>` (a Lucide name like `LiUsers`, or a literal emoji) — written to the declaration in Step 7, never re-asked; `other (type your own)` — an iconize identifier; declining every option with no value aborts the run (`missing-icon`), nothing written. See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`
+AskUserQuestion: header "Icon", question "Which iconize icon should assets of type `<name>` on <product> carry?", options: a few concrete suggestions plus `other (type your own)`, each with a description.
+```
+
+**The skill MUST refuse to finish if no icon is provided** — if the operator declines every option and gives no value, abort with a message stating an icon is required and do NOT write anything.
+
+Then ask for the optional color:
+
+```
+Context (print before asking):
+- Where: /lazy-spec.add-asset-type · Step 3 — Ask the icon + color; target products[<product>].asset_types.<name>.color
+- Found: icon <icon> just chosen; no color on record
+- Why asking: purely cosmetic — a hex tints the icon through each instance's managed `iconize_color`; omitted, the icon keeps the default color
+- Answers: `<hex>` (e.g. `#7E57C2`) — written as `color` in Step 7; `none (skip color)` — key omitted; `other (type your own)` — a hex value. Never re-asked
+AskUserQuestion: header "Icon color", question "Tint the `<name>` icon on <product> with a hex color, or keep the default?", options: a couple of example hex values, `none (skip color)`, `other (type your own)`, each with a description.
+```
+
+Capture `<color>` only when a real hex is given; treat "none" as absent.
 
 Outcome: `iconed` (or abort `missing-icon` — never write).
 
 ## Step 4 — Ask the start document
 
-`AskUserQuestion` for the document an asset of this type starts from. Stem: `asset_types.<name>.start_doc` is a `"<file>:<doc_type>"` token — the filename the scaffold seeds and the `spec_doc_type` that document carries; `lazy-spec.create-asset` passes it straight through as the first `--doc` of the scaffold call, and the type playbook decides whether anything else is authored alongside it. Why-it-matters: there is NO default layout anywhere in the system — a type with no `start_doc` cannot be scaffolded at all, and the doc type decides which review class picks the document up and which stages it moves through. Offer `design.md:design` (the type is defined by a design, the common case), `bug.md:bug` (the type is defined by a report of something wrong), and an "other (type your own)" path for any other pair. Validate the typed value: exactly one `:`, a `.md` filename on the left, and a doc type on the right that is declared in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.doc-types.json` or in the product's own `doc_types` — re-ask on failure rather than writing an unresolvable token. See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`.
+Ask for the document an asset of this type starts from:
+
+```
+Context (print before asking):
+- Where: /lazy-spec.add-asset-type · Step 4 — Ask the start document; target products[<product>].asset_types.<name>.start_doc
+- Found: doc types declared in scope — the shipped set in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.doc-types.json` plus <the product's own doc_types, or "none">
+- Why asking: there is NO default layout anywhere in the system — a type with no `start_doc` cannot be scaffolded at all; `lazy-spec.create-asset` passes the `"<file>:<doc_type>"` token straight through as the first `--doc` of the scaffold call, and the doc type decides which review class picks the document up and which stages it moves through
+- Answers: `design.md:design` — the type is defined by a design (the common case); `bug.md:bug` — defined by a report of something wrong; `other (type your own)` — any `<file>.md:<doc_type>` pair with exactly one `:` and a declared doc type on the right; an unresolvable token re-asks. Written in Step 7, never re-asked. See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`
+AskUserQuestion: header "Start document", question "Which document does an asset of type `<name>` on <product> start from?", options `design.md:design`, `bug.md:bug`, `other (type your own)`, each with a description.
+```
+
+Validate the typed value: exactly one `:`, a `.md` filename on the left, and a doc type on the right that is declared in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.doc-types.json` or in the product's own `doc_types` — re-ask on failure rather than writing an unresolvable token.
 
 Outcome: `start-doc-set`.
 
 ## Step 5 — Ask the default tools
 
-`AskUserQuestion` (multi-select) for the tools an asset of this type implies before anyone has judged it. Stem: `asset_types.<name>.default_tools` is the list written into a fresh asset's `spec_tools` frontmatter key at scaffold time; each tool names a `tool_types` declaration whose playbook governs how that half of the work is done and reported. Why-it-matters: the three states are genuinely different — a non-empty list means "known from creation, no determination step"; an EMPTY list means "definitely none, this type builds nothing itself"; the key ABSENT means "not determined yet, the coordinator settles it after the design is approved". Offer one option per tool visible in scope (the shipped `code` / `data` / `test` / `docs` plus anything the product declares under `tool_types`, each with a one-line description of what it covers), plus an explicit "none — the coordinator determines the tools" option that leaves the key absent, and an explicit "none — this type never builds anything" option that writes an empty list. See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.tool-types.json`.
+Ask (multi-select) for the tools an asset of this type implies before anyone has judged it:
+
+```
+Context (print before asking):
+- Where: /lazy-spec.add-asset-type · Step 5 — Ask the default tools; target products[<product>].asset_types.<name>.default_tools
+- Found: tools visible in scope — the shipped code / data / test / docs plus <the product's own tool_types, or "none">; each names a `tool_types` declaration whose playbook governs how that half of the work is done and reported
+- Why asking: the list is written into a fresh asset's `spec_tools` at scaffold time, and the three states are genuinely different — a non-empty list means "known from creation, no determination step"; an EMPTY list means "definitely none, this type builds nothing itself"; the key ABSENT means "not determined yet, the coordinator settles it after the design is approved"
+- Answers: `<tool>` (one per visible tool, multi-select) — written as `default_tools: [...]` in Step 7; `none — the coordinator determines the tools` — key left absent; `none — this type never builds anything` — writes `[]`. Never re-asked. See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.tool-types.json`
+AskUserQuestion (multiSelect): header "Default tools", question "Which tools does every asset of type `<name>` on <product> imply at creation?", options: one per tool with a one-line description of what it covers, plus the two explicit `none` options with descriptions.
+```
 
 Outcome: `tools-preset:<N>`, `tools-empty`, or `tools-undetermined`.
 
 ## Step 6 — Ask the default path
 
-`AskUserQuestion` for the folder new assets of this type land in. Stem: `asset_types.<name>.default_path` is the folder under the product's `spec_path` that `lazy-spec.create-asset` scaffolds into when the caller names no folder of its own. Why-it-matters: it is a convenience for whoever creates the asset, NOT a fact of the type — type resolution reads `spec_asset_type` off the status folder-note and never a path, so an operator may put any single asset anywhere under `spec_path` (including inside another asset's folder) with `--path`, and nothing downstream breaks. Offer the pluralised form of the type name as the first option (e.g. `characters` for `character`), a sibling-of-an-existing-type option drawn from the product's already-declared types, and an "other (type your own)" path plus "none — use the type's own name". Capture `<default_path>` only when the operator names a folder; treat "none" as absent (the scaffold then falls back to the type's own name). See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`.
+Ask for the folder new assets of this type land in:
+
+```
+Context (print before asking):
+- Where: /lazy-spec.add-asset-type · Step 6 — Ask the default path; target products[<product>].asset_types.<name>.default_path
+- Found: folders the product's declared types already use — <type: default_path, …>
+- Why asking: the folder is a convenience for whoever creates the asset, NOT a fact of the type — type resolution reads `spec_asset_type` off the status folder-note and never a path, so an operator may put any single asset anywhere under `spec_path` (including inside another asset's folder) with `--path`, and nothing downstream breaks
+- Answers: `<plural of name>` (e.g. `characters` for `character`) — written as `default_path` in Step 7; `<folder of an existing type>` — new assets share that folder; `other (type your own)` — any folder under `spec_path`; `none — use the type's own name` — key omitted, the scaffold falls back to `<name>`. Never re-asked. See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.layout-protocol.md`
+AskUserQuestion: header "Default folder", question "Under which folder of <product>'s spec_path should new `<name>` assets land when the caller names none?", options: the pluralised type name first, a sibling-of-an-existing-type folder drawn from the product's declared types, `other (type your own)`, `none — use the type's own name`, each with a description.
+```
+
+Capture `<default_path>` only when the operator names a folder; treat "none" as absent (the scaffold then falls back to the type's own name).
 
 Outcome: `path-set` or `path-defaulted`.
 
@@ -117,7 +190,16 @@ The playbook is the type's law: the reference `spec.coordinator` loads on every 
 
 **Alias branch.** When Step 2 captured an alias base, SKIP this step entirely: the alias borrows the base's playbook by construction, and writing a `playbook` of its own would defeat the borrowing the operator just chose. Outcome `skipped-alias`.
 
-Otherwise `AskUserQuestion` for the playbook, offering the shipped type playbooks plus an own-playbook path:
+Otherwise ask for the playbook:
+
+```
+Context (print before asking):
+- Where: /lazy-spec.add-asset-type · Step 8 — Choose the type playbook; target products[<product>].asset_types.<name>.playbook
+- Found: Step 7 wrote the declaration without `playbook`; `<name>` is standalone (no alias_of), start doc <file>:<doc_type>, tools <preset | empty | undetermined>
+- Why asking: the playbook is the type's law — what `spec.coordinator` loads on every wake of an asset carrying `spec_asset_type: <name>`; without it the type is inert, and no shipped flow can be assumed to fit
+- Answers: a shipped reference — written verbatim as `playbook` (`shipped`); `own playbook (I will write it)` — a stub lands at `.claude/references/<name>-playbook.md` and its bare name is written (`stub-written`). Never re-asked
+AskUserQuestion: header "Type playbook", question "Which playbook should spec.coordinator work `<name>` assets on <product> under?", options: the shipped type playbooks plus the own-playbook path, each with the description below.
+```
 
 - **`lazycortex-specs:lazy-spec.feature-playbook`** — a capability defined design-first, with an architecture step inserted when the asset bears code and the tool set determined once the design is approved.
 - **`lazycortex-specs:lazy-spec.change-playbook`** — a modification of assets that already exist, defined as current-state versus target-state, whose approved design cascades into the assets it targets.

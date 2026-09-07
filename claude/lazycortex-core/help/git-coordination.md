@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Protect your repo's git index from Claude Code — pathspec-only commits by default, an optional staging lock for concurrent sessions, and the two skills to inspect and break it.
-last_regen: 2026-09-05
+last_regen: 2026-09-07
 diagram_spec:
   anchor: "Lock lifecycle"
   request: "State diagram of the lazy-core.git staging-window lock, scoped to the mutex row only (git.pathspec_enabled=false, git.mutex_enabled=true — the lock never exists on the default pathspec row). NO_LOCK → HELD (a hook or skill acquires .git/lazy-git.lock before touching the git index) → auto-released when the staging window closes (commit/reset empties the index) OR auto-broken by heuristics (dead PID / stale-and-idle / different host) → NO_LOCK. Show the manual break path via /lazy-core.git-unlock as an alternative exit from HELD, guarded by /lazy-core.git-status inspection first."
@@ -9,7 +9,7 @@ diagram_spec:
 source_skills:
   - lazy-core.git-status
   - lazy-core.git-unlock
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 ---
 # git staging coordination
 
@@ -38,7 +38,7 @@ Before any of that diagnosis runs, the hook also self-heals a different kind of 
 
 **`/lazy-core.git-status`** is a pure read-only inspector, useful only on the mutex row. It reads `.git/lazy-git.lock` and reports the current holder's session ID and PID, how long the lock has been held, when the index was last touched, whether the holder process is still alive on this host, and whether the automatic break-the-lock heuristics would fire right now. On the default pathspec row it reports "Lock: N/A" and explains no staging window is ever opened. Running it is always safe — it never writes, deletes, or modifies any state.
 
-**`/lazy-core.git-unlock`** is the manual break-glass for the mutex row. It runs the same inspection internally, presents the holder details in a confirmation prompt, and force-deletes `.git/lazy-git.lock` on your approval. The lock file lives under `.git/` and is never tracked by git, so this has no effect on your working tree or staged changes. On the pathspec row it reports the same "no staging window" state and stops without asking anything.
+**`/lazy-core.git-unlock`** is the manual break-glass for the mutex row. It runs the same inspection internally, then prints the holder details — session, PID, age, host, branch, liveness, whether the auto-break heuristics would already qualify it — before asking you to confirm the break. Approve and it force-deletes `.git/lazy-git.lock`; decline and nothing changes. The lock file lives under `.git/` and is never tracked by git, so this has no effect on your working tree or staged changes. On the pathspec row it reports the same "no staging window" state and stops without asking anything.
 
 ## How they work together
 

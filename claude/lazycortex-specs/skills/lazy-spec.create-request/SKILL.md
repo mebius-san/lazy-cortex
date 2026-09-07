@@ -34,19 +34,35 @@ The user provides:
 
 If the raw idea was not supplied with the invocation, ask via `AskUserQuestion`:
 
-> What is the request? Briefly state the idea in your own words.
+```
+Context (print before asking):
+- Where: /lazy-spec.create-request · Step 0 — Confirm intent + collect raw idea; target <vault-root>/requests/
+- Found: the invocation carried no idea text <and no title hint>
+- Why asking: a request is the operator's own words — nothing on disk supplies them
+- Answers: free text via `Other` — becomes the verbatim first paragraph of the request body; no answer aborts (cannot create an empty request)
+AskUserQuestion: header "Request", question "What is the request for the <vault-root>/requests/ inbox? Briefly state the idea in your own words.", one `Other` free-text input.
+```
 
-Use the "Other" input. Accept whatever the user types as the seed input — including vague text. Refinement happens in Step 2.
+Accept whatever the user types as the seed input — including vague text. Refinement happens in Step 2.
 
 ### 1. Resolve slug
 
-Generate a kebab-case slug from the raw idea (3–6 words, lowercase, hyphen-separated). Confirm with the user via `AskUserQuestion` offering: the generated slug, a shorter variant, a longer variant, and "let me type one" (Other).
+Generate a kebab-case slug from the raw idea (3–6 words, lowercase, hyphen-separated). Confirm with the user via `AskUserQuestion`:
+
+```
+Context (print before asking):
+- Where: /lazy-spec.create-request · Step 1 — Resolve slug; target <vault-root>/requests/<slug>.md
+- Found: raw idea "<first line>"; generated slug <slug>; <no file of that name yet | <slug>.md exists, a numeric suffix will be appended>
+- Why asking: the slug is the file's permanent identity and the wording is the operator's
+- Answers: `<slug>` — used as generated; `<shorter>` / `<longer>` — that variant becomes the filename; `let me type one` — free text via `Other`. Fixed at write, never re-asked
+AskUserQuestion: header "Slug", question "Which filename should the request '<first line>' take under requests/?", options: the generated slug, a shorter variant, a longer variant, `let me type one` (Other), each with a description.
+```
 
 If the confirmed slug already exists at `<vault-root>/requests/<slug>.md`, append `-2`, `-3`, … until unique. Slug is the file's identity.
 
 ### 2. Wizard refinement (3–5 questions)
 
-Ask 3–5 targeted questions via `AskUserQuestion` (one tool call per question, never batched, per global wizard rule). Pick from the question pool below per relevance to the raw idea — do NOT ask all of them mechanically:
+Ask 3–5 targeted questions via `AskUserQuestion` (one tool call per question, never batched, per global wizard rule). Every question prints its context first: where (`/lazy-spec.create-request · Step 2 — Wizard refinement`, target `<vault-root>/requests/<slug>.md`), found (the raw idea and the answers collected so far, quoted), why asking (the body must be clearer than the first phrasing and this topic is still open), answers (each option's one-line reading — the answer becomes a short paragraph under `## Clarified`; never re-asked); `question` names the request and the topic, `header` is the topic. Pick from the question pool below per relevance to the raw idea — do NOT ask all of them mechanically:
 
 - **Scope**: which part of the system / product does this touch?
 - **Outcome**: what will the user see or be able to do that they cannot today?

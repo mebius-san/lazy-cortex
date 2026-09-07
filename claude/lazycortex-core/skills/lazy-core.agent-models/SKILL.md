@@ -135,11 +135,18 @@ If a batch is empty, skip it and move to the next.
 
 ### Per-batch prompt
 
-For each non-empty batch, fire one `AskUserQuestion`:
+For each non-empty batch, print the context block, then fire one `AskUserQuestion`. Each iteration fills the block from that batch:
 
-- **question**: `Batch <N>/<total>: <batch-name> — <count> agent(s). Apply suggested tiers?`
-- **description**: Render a compact table — one row per entry: `<dispatch> → <suggested-tier>  (→ <destination>)`. Below the table, summarize: `Accept = plan all <count> writes now. Review each = drop into per-agent wizard for this batch only. Skip for now = leave undecided; re-prompts on next run.`
-- **options** (exactly four — `AskUserQuestion` caps at 4):
+```
+Context (print before asking):
+- Where: /lazy-core.agent-models · Step 6 — Offer entries in three ordered batches; batch <N>/<total> (<batch-name>), target <destination file(s) from Step 5>
+- Found: <count> discovered agent(s) with no `agent_models` entry in either scope — one row per entry: `<dispatch> → <suggested-tier>  (→ <destination>)`, daemon-dispatchable rows marked `(→ project — daemon-dispatchable)`
+- Why asking: a model tier is spend and quality policy the wizard never writes without an operator decision (batch 1 tiers come from `default-tiers.json`, batches 2–3 from the Step 7 heuristic)
+- Answers: `accept all suggestions` — plan all <count> writes at the suggested tiers, written in Step 8, never re-asked; `review each individually` — one Step 7 prompt per agent in this batch, suggested tier carried forward; `mass-set to default` — plan every entry as `default`, written in Step 8, never re-asked; `skip this batch for now` — nothing written, the same batch re-prompts on the next run
+AskUserQuestion: header "Batch <N>/<total>", question "Batch <N>/<total>: <batch-name> — apply the suggested model tiers to these <count> agent(s) for <repo-root>?", options with descriptions.
+```
+
+- **options** (exactly four — `AskUserQuestion` caps at 4), each carrying a `description` that restates its Answers line:
   1. `accept all suggestions` *(Recommended)*
   2. `review each individually` — defer this batch's entries to Step 7's per-agent wizard. Suggested tier carries forward.
   3. `mass-set to default` — record every entry in the batch as **planned** with tier `default`. Useful when a batch isn't worth tier-tuning right now but you want it out of the wizard.
@@ -165,20 +172,26 @@ Step 7 is interactive-only — a non-interactive run never enters it. Steps 8–
 
 ## Step 7: Per-agent wizard loop (only for `review each individually` entries)
 
-For each entry tagged `review-bound` in Step 6 (and only those), fire a single `AskUserQuestion`:
+For each entry tagged `review-bound` in Step 6 (and only those), print the context block, then fire a single `AskUserQuestion`. Each iteration fills the block from that entry:
 
-- **question**: `` `<dispatch-string>` — assign model tier? ``
-- **description**: ``` **Group:** <group> **Source:** <path or "(built-in)"> **Description:** <agent's frontmatter `description:` field, or "(no description)"> **Will write to:** <resolved destination path> (<scopeMode>) **Suggested tier:** <suggested-tier>
+```
+Context (print before asking):
+- Where: /lazy-core.agent-models · Step 7 — Per-agent wizard loop; target <resolved destination path> (<scopeMode>)
+- Found: `<dispatch-string>` — group <group>, source <path or "(built-in)">, description "<agent's frontmatter description, or (no description)>"; no `agent_models` entry in either scope; suggested tier <suggested-tier> (<template | heuristic>)
+- Why asking: the operator routed this batch to per-agent review in Step 6 — the tier is a spend decision the wizard does not make alone
+- Answers: `add as <suggested>` — plan the entry at the suggested tier, written in Step 8, never re-asked; `add as default` — plan `default` (agent frontmatter / harness default decides), never re-asked; `add as <neighbor>` — plan the next-closest tier, never re-asked; `skip` — nothing written, re-prompts on the next run
+AskUserQuestion: header "Model tier", question "Which model tier should `<dispatch-string>` run on, written to <resolved destination path>?", options with descriptions.
+```
 
-  Suggested tier resolution order:
-  1. `templateTier` from `default-tiers.json` if this dispatch string is in the template (always wins).
-  2. Heuristic fallback:
-     - _builtin: Explore→haiku, Plan→opus, general-purpose→default, statusline-setup→haiku.
-     - *log*/*distill*/*tag*/*timeline* + description mentions rewriter/formatter/distill/prose/mechanical → haiku.
-     - *review*/*audit*/*plan*/*design* → opus.
-     - Otherwise → sonnet.
-  ```
-- **options** (exactly four — `AskUserQuestion` caps at 4):
+Suggested tier resolution order:
+1. `templateTier` from `default-tiers.json` if this dispatch string is in the template (always wins).
+2. Heuristic fallback:
+   - _builtin: Explore→haiku, Plan→opus, general-purpose→default, statusline-setup→haiku.
+   - *log*/*distill*/*tag*/*timeline* + description mentions rewriter/formatter/distill/prose/mechanical → haiku.
+   - *review*/*audit*/*plan*/*design* → opus.
+   - Otherwise → sonnet.
+
+- **options** (exactly four — `AskUserQuestion` caps at 4), each carrying a `description` that restates its Answers line:
   1. `add as <suggested>` *(Recommended)*
   2. `add as default` — fall back to agent frontmatter / harness default; use when this agent doesn't need a project-specific tier.
   3. `add as <neighbor>` — the next-closest tier to the suggestion, picked deterministically:

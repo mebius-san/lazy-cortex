@@ -20,16 +20,20 @@ Thin Claude wrapper over the gate-flip primitive `bin/flip_gate.py`. The gate mo
 
 ### 1. Resolve the asset
 
-Map the input to exactly one asset directory. If the input is ambiguous (matches more than one product or asset), prompt the operator to pick via `AskUserQuestion` (options = the candidate asset directories). If nothing resolves, refuse with a message naming the input.
+Map the input to exactly one asset directory. If the input is ambiguous (matches more than one product or asset), prompt the operator to pick via `AskUserQuestion` (options = the candidate asset directories) — context first: where (`/lazy-spec.flip-gate · Step 1 — Resolve the asset`), found (the candidate asset directories `<input>` matched), why asking (the flip targets exactly one asset), answers (one option per directory — the flip proceeds on it; nothing persisted); header "Asset", question "Which asset does `<input>` mean for flipping `<gate>`?", each option's description its product and category. If nothing resolves, refuse with a message naming the input.
 
 ### 2. Confirm the flip
 
-Unless `--auto` was passed, ask a single `AskUserQuestion` to confirm. Author the question as a full-context block per the wizard-question standard in `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.config-protocol.md` → Wizard-question explanation standard:
+Unless `--auto` was passed, ask a single `AskUserQuestion` to confirm:
 
-- **Stem** — name the gate and the asset, state that flipping it advances the asset one notch along the S0..S5 ladder (or regresses it when `--off`), and state that the primitive performs the mutation unconditionally once confirmed — it does not itself check whether the gate's usual readiness condition holds.
-- **Why it matters** — flipping a gate is the recorded progression signal; a human-signal gate (`spec_develop_done` / `spec_tests_passing` / `spec_released`) asserts that external work (deploy / green tests / merge) actually happened.
-- **Options** — `yes` (run the flip) and `no` (no-op, leave the asset unchanged), each with a one-sentence consequence.
-- **Pointer** — `See: ${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md` and `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md`.
+```
+Context (print before asking):
+- Where: /lazy-spec.flip-gate · Step 2 — Confirm the flip; target <asset-dir>/<slug>.md
+- Found: <gate> currently <true | false>; the other gates <the four booleans>; spec_cancelled false
+- Why asking: flipping a gate is the recorded progression signal, and the primitive performs the mutation unconditionally once confirmed — it does not itself check whether the gate's usual readiness condition holds; a human-signal gate (`spec_develop_done` / `spec_tests_passing` / `spec_released`) asserts that external work (deploy / green tests / merge) actually happened, and this confirmation is the human's own check
+- Answers: `yes` — runs the flip now, the asset advances one notch along the S0..S5 ladder (or regresses when `--off`), the folder-note's `# History` records it; `no` — no-op, asset unchanged (`skipped-per-user-choice`). See: `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.lifecycle-protocol.md`, `${CLAUDE_PLUGIN_ROOT}/references/lazy-spec.coordination-playbook.md`
+AskUserQuestion: header "Flip <gate>", question "Flip <gate> to <true | false> on <product>/<category>/<slug>?", options `yes` / `no`, each with a one-sentence consequence.
+```
 
 On `no` → exit no-op (outcome `skipped-per-user-choice`). On `yes` → continue.
 

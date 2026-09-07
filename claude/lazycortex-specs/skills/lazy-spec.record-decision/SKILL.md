@@ -26,6 +26,15 @@ This skill has 6 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 Ask via `AskUserQuestion`, one question, four options:
 
+```
+Context (print before asking):
+- Where: /lazy-spec.record-decision · Step 1 — Choose the operation; target the decisions registry of <the asset | product | project the invocation named, or "not named yet">
+- Found: <the target path or D-NNN id the invocation carried, or "no target named yet">
+- Why asking: the four `decide` operations write different things and the invocation did not name one
+- Answers: one of the four below — Step 2 then resolves its target; nothing is written until Step 4 runs the primitive
+AskUserQuestion: header "Operation", question "Which decisions-registry operation should run<, for <target>>?", options `add` / `supersede <id>` / `obsolete <id>` / `promote <living-doc>` with the descriptions below.
+```
+
 - `add` — a new entry in an asset's, product's, or the project's `decisions.md`.
 - `supersede <id>` — a new entry that also marks an older one `superseded-by`.
 - `obsolete <id>` — marks an existing entry `obsolete — <reason>`.
@@ -33,7 +42,7 @@ Ask via `AskUserQuestion`, one question, four options:
 
 ## Step 2 — Resolve the target
 
-- **`add` / `supersede` / `obsolete`** — resolve the `decisions.md` file this call targets: a status folder-note path, an asset directory, a product root, a product key plus category/slug (the same way `lazy-spec.flip-gate` resolves an asset), or the spec content-root for a project-wide decision. Resolution order mirrors the placement ladder: asset → product → project. Build `<decisions.md>` = `<asset_dir>/decisions.md` (asset-level), `<spec_path>/decisions.md` (product-level), or `<content-root>/decisions.md` (project-level — a decision about the system pair or a cross-product concern). The file need not exist yet — the first record lazily creates it. If the input is ambiguous, prompt via `AskUserQuestion` with the candidate paths.
+- **`add` / `supersede` / `obsolete`** — resolve the `decisions.md` file this call targets: a status folder-note path, an asset directory, a product root, a product key plus category/slug (the same way `lazy-spec.flip-gate` resolves an asset), or the spec content-root for a project-wide decision. Resolution order mirrors the placement ladder: asset → product → project. Build `<decisions.md>` = `<asset_dir>/decisions.md` (asset-level), `<spec_path>/decisions.md` (product-level), or `<content-root>/decisions.md` (project-level — a decision about the system pair or a cross-product concern). The file need not exist yet — the first record lazily creates it. If the input is ambiguous, prompt via `AskUserQuestion` with the candidate paths — context first: where (`/lazy-spec.record-decision · Step 2 — Resolve the target`), found (the candidate `decisions.md` paths the input matched, each with its level: asset / product / project), why asking (the placement ladder resolves the input to several files), answers (one option per candidate path — the record lands in that file, created lazily if absent; never re-asked); header "Target registry", question "Which decisions.md should `<op>` write to for input `<input>`?".
 - **`promote`** — resolve the **living document** path directly. Do NOT pre-filter by role or by the owning asset's cancelled/halted/released flags — the primitive is the sole judge; a plan, a report, or a halted/cancelled/released asset's doc produces a `refused` result, surfaced verbatim in Step 4. Never work around a refusal.
 
 ## Step 3 — Collect the record fields
@@ -43,7 +52,7 @@ Ask via `AskUserQuestion`, one question, four options:
 - **`obsolete`** — the record id (`D-NNN`) and a reason string.
 - **`promote`** — nothing further; the doc path from Step 2 is the only input.
 
-Before collecting an `add` or `supersede` thesis, restate the three-test weight bar from `spec.decisions.md` in one line and ask the operator to confirm a genuine fork exists — a foregone conclusion is not worth a record.
+Before collecting an `add` or `supersede` thesis, restate the three-test weight bar from `spec.decisions.md` in one line and ask the operator to confirm a genuine fork exists — a foregone conclusion is not worth a record. Context first: where (`/lazy-spec.record-decision · Step 3 — Collect the record fields`, target `<decisions.md>`), found (the thesis as stated so far), why asking (only the operator knows whether a real alternative existed and reversal is expensive), answers (`yes, a real fork` — continue collecting `--why` / `--rejected`; `no` — stop, nothing written); header "Weight test", question "Is `<thesis>` a genuine fork — a real alternative existed, reversal is expensive, the why is unrecoverable from the artifact?".
 
 ## Step 4 — Run the primitive
 

@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Associative Q&A over the wiki graph — /lazy-wiki.query runs in dispatcher mode (seeker + gatherer subagents) when the Agent tool is available, and agentless mode otherwise.
-last_regen: 2026-08-27
+last_regen: 2026-09-07
 diagram_spec:
   anchor: "How the query pipeline works"
   request: "Sequence diagram showing /lazy-wiki.query dispatching one seeker per scope in parallel to read topics.md and return entry points, then dispatching a single gatherer to traverse See-also links depth-first and return a synthesised answer block back to the skill, which presents the answer and entry-point seed to the user."
@@ -49,7 +49,7 @@ If no scope has a topic index on disk, or if no entry points are found, the skil
 
 - **Multiple scopes.** If your project has several wiki scopes (e.g. one for source, one for docs), dispatcher mode runs a seeker per scope in parallel; agentless mode reads each scope's index in turn. Run `/lazy-wiki.configure` to add, edit, or remove scopes and their `topics_index` paths.
 - **Index out of date.** Both modes draw entry points only from `topics.md`. If a recently added node hasn't been indexed yet, it won't appear as an entry point. Run `/lazy-wiki.relink` to bring the index up to date, or wait for the next scheduled relink routine. `/lazy-wiki.relink` is the daemon-free way to do this in-session: it classifies and links every changed node, rebuilds `topics.md` once, and commits the result under your identity — useful when you don't run the runtime daemon, or want to force a refresh right before a query.
-- **Cross-repo links.** If your wiki scopes span multiple repositories, traversal resolves `@<repo-key>/…` links via the `repos` registry in your wiki settings. Add or update repo entries via `/lazy-wiki.configure`.
+- **Content from another repository.** A See-also link written as `@<repo-key>/…` is a retired cross-repo notation — the gatherer treats any link starting with `@` as dead and reports it unresolved rather than guessing at a target. To bring another repository's markdown into a scope so it participates in traversal normally, mirror it instead: `/lazy-wiki.configure mirror` clones the source repo and syncs its markdown into the scope under a local `mirror_path`, where it becomes an ordinary local node with ordinary local See-also links. `/lazy-wiki.doctor` flags any surviving `@<repo-key>/…` link as `dangling-at-prefix` and tells you whether to rewrite it to the mirrored node's local path or drop it.
 - **Running inside an expert job or a subagent without fan-out.** These contexts have no `Agent` tool, so `/lazy-wiki.query` automatically falls back to agentless mode — nothing to configure. It's the same lookup, just without the isolated seeker/gatherer contexts, because there's no downstream context to protect.
 - **Deciding whether a question is covered.** The `lazy-wiki.navigation` rule that ships with the plugin carries a `## Coverage` section listing each scope's `paths` globs; `/lazy-wiki.configure` rewrites that section whenever a scope is created or edited. That's what lets any agent working in the repo tell — without opening the wiki — whether your question falls inside a scope the wiki curates. When it does, the rule requires `/lazy-wiki.query` to run before Grep, Glob, or opening a file directly; grepping the scope blind, opening nodes one by one to find the relevant one, and answering from memory of an earlier session are each called out as the violation the rule forbids. Outside a covered scope, work continues normally.
 

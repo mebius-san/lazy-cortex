@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Go from a bare repo to a fully-wired Obsidian vault — tag pages, Iconize sync, diagram glue, click-to-zoom — one chained install.
-last_regen: 2026-09-02
+last_regen: 2026-09-07
 diagram_spec:
   anchor: "Journey at a glance"
   request: "Sequence diagram showing the vault bootstrap journey: user runs /lazy-obsidian.install, which installs Dataview, chains into /lazy-obsidian.iconize-install (installs folder-notes, obsidian-icon-folder, iconize-reloader, scaffolds icon-map and repaint routine), then itself syncs and enables its CSS snippets (mermaid-fit.css, ascii-fit.css, callouts.css) in appearance.json, and finally chains into /lazy-obsidian.diagram-install (installs mermaid-popup for click-to-zoom), ending with the user reloading Obsidian and verifying."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-obsidian.iconize-install
   - lazy-obsidian.diagram-install
   - lazy-obsidian.gen-tag-pages
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: 0e0562d0fc4bb9457ff9d14758e688f4eac27c87
 ---
 # How do I wire up a fresh vault from scratch?
 
@@ -34,7 +34,9 @@ After this walkthrough your vault has:
   **iconize-reloader** plugin installed and configured with the opinionated
   settings that enable frontmatter-driven icon painting.
 - An icon-map scaffold at `.claude/iconize/obsidian-icon-map.json` ready for
-  you to populate with role/path-to-icon rules via `/lazy-obsidian.iconize-config`.
+  you to populate with role/path-to-icon rules via `/lazy-obsidian.iconize-config`,
+  seeded with a `paint_roots` scope so icon painting stays confined to your
+  spec content root until you widen it.
 - The `lazy-obsidian.repaint` routine registered (when the repo runs the
   lazycortex daemon), so icons reconcile after every commit.
 - `mermaid-fit.css`, `ascii-fit.css`, and `callouts.css` installed in
@@ -122,6 +124,17 @@ are added silently, keys only in your file are kept silently, and only a
 same-key value conflict prompts you. A schema-version mismatch triggers an
 automatic in-place migration when the transform chain is complete.
 
+On a fresh install, the icon-map also gets a top-level `paint_roots` list — the
+repo-relative directory prefixes the worker is allowed to paint inside.
+Outside those roots the worker neither reads nor writes a note's icon keys, so
+the rest of your repo keeps whatever it already has. The seeded value comes
+from `spec.vault_root` in `.claude/lazy.settings.json` (falling back to
+`specs` when that setting is absent), never a hardcoded template default, and
+only when the key doesn't already exist — an icon-map you already authored a
+`paint_roots` list into is never widened, narrowed, or overwritten by a re-run.
+An icon-map that predates this key keeps painting the whole vault, exactly as
+before.
+
 **Repaint routine** — when the repo runs the lazycortex daemon, the chain
 registers the `lazy-obsidian.repaint` routine, which repaints icons after each
 commit; without a daemon this step reports `no-daemon` and moves on.
@@ -196,6 +209,8 @@ single `/lazy-obsidian.install` invocation. Scan it for:
   Appearance → CSS snippets) before the snippets take effect mid-session.
 - Any **failed:** outcome for `mermaid-popup` — note the reason and re-run
   `/lazy-obsidian.update-plugin mermaid-popup` when the network is available.
+- A `paint-roots-seeded=<vault_root>` annotation on the icon-map line (Step 3)
+  — confirms which directory prefix icon painting is scoped to on this run.
 
 ### Step 7 — Reload Obsidian and verify
 
@@ -204,9 +219,12 @@ plugins and enabled snippets take effect.
 
 Verify the result:
 
-1. **Iconize** — in the file explorer, open any note, add `iconize_icon: LiInfo`
-   to its frontmatter, save. The icon should appear next to the file name
-   immediately.
+1. **Iconize** — in the file explorer, open any note under your seeded
+   `paint_roots` scope (the spec content root, by default `specs/`), add
+   `iconize_icon: LiInfo` to its frontmatter, save. The icon should appear
+   next to the file name immediately. A note outside that scope is left alone
+   by design — widen `paint_roots` in the icon-map first if you need painting
+   elsewhere.
 2. **mermaid-fit** — open a note containing a mermaid fence; the rendered SVG
    should fit the reading-pane width without overflowing.
 3. **mermaid-popup** — click a rendered mermaid diagram; it should open in a
@@ -236,6 +254,13 @@ is the canonical way to edit the registry without hand-editing JSON. Once rules
 are in place, run `/lazy-obsidian.iconize-sync reconcile` to apply them across
 all matched notes; Iconize and `iconize-reloader` repaint from the frontmatter
 the worker writes.
+
+**Widen where icons are allowed to paint.** The seeded `paint_roots` list
+keeps icon painting scoped to your spec content root. If your notes live
+elsewhere too, edit `paint_roots` directly in
+`.claude/iconize/obsidian-icon-map.json` — it's a structural key, not a
+registry entry, so `/lazy-obsidian.iconize-config` doesn't manage it. An empty
+or absent list opens the whole vault back up.
 
 **Install a single plugin out-of-band.** If you need to refresh one vault
 plugin independently (e.g. after the community registry ships a new version),

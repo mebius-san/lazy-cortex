@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Insert new diagrams and refresh existing ones — dispatcher picks kind and format from your prose, writer agents render against shipped templates and style schemes.
-last_regen: 2026-08-24
+last_regen: 2026-09-07
 diagram_spec:
   anchor: "How draw and fix route a request"
   request: "Flow showing the dispatch path: user invokes draw or fix → dispatcher validates inputs and resolves kind/format → format-compatibility check → writer agent selected (mermaid or ASCII) → byte-compare → fence written or skipped. Include the split-into-N and skipped-below-threshold outcomes as exit branches."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-diagram.fix
   - lazy-diagram.draw-mermaid
   - lazy-diagram.draw-ascii
-source_sha: 66a330545971fd9e6f80ffe0b2dfe3cc68461294
+source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 ---
 # Insert and refresh diagrams in your documentation
 
@@ -25,6 +25,8 @@ Two skills cover the two main operations: `/lazy-diagram.draw` creates a new fen
 `/lazy-diagram.draw` takes a `target_file`, an `anchor_section` heading, and a free-form `request` describing what the diagram should depict. It validates that both the file and the heading exist, then works through kind and format resolution before touching the file.
 
 Kind resolution follows a ranked heuristic over your request text. Phrases about services exchanging messages resolve to a sequence diagram; state lifecycle transitions resolve to a state diagram; entity relationships with foreign keys resolve to an ERD; deployment topology with distinct components resolves to an architecture diagram; and so on across more than a dozen supported kinds. When two kinds compete, the dispatcher picks the one whose upper-bound fits the request without splitting. If the request is too thin to satisfy a kind's lower bound, the outcome is `skipped-below-threshold` and no fence is written — prose alone is the better artifact.
+
+When the heuristic cannot settle on one confident pick — two kinds tie, or you pinned only one of `kind` / `format` and the other axis still has more than one plausible value — the dispatcher stops and asks you directly, rather than guessing: a single question naming each candidate `(kind, format)` pair, with the heuristic's top match marked as the recommended option. Your answer applies to that one draw call only — nothing is persisted, so re-running the same request later asks again unless you pin `kind=` / `format=` to skip the ambiguity outright.
 
 Format resolution runs after kind: Mermaid is the default when a Mermaid template exists for the kind. ASCII is selected when the request explicitly asks for plain-text or terminal output, or when the kind is `fs-tree` (directory trees), or when only an ASCII template exists for that kind. The dispatcher never silently switches format — if the pinned combination has no template it fails fast with `failed:format-not-supported-for-kind`.
 

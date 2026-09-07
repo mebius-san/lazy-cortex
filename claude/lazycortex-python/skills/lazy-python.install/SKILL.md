@@ -45,7 +45,7 @@ Two classes of file, two policies. Which applies follows from who owns the bytes
 
 **Install-managed mirrors** — the three plugin rules, the `chk-py` / `tst-py` wrappers, and the scaffold template: files copied or rendered verbatim out of the plugin. The plugin owns them end to end; a consumer who wants different content authors **their own** rule file (or registers a `_local` scaffold entry), so a target that differs from the shipped source is a stale copy by construction. Absent → copy (`installed`); byte-identical → nothing (`unchanged`); different → overwrite from the source (`refreshed`). No diff preview, no merge, no question. A no-longer-shipped rule (orphan) is left in place silently (`kept-orphan`) — this skill never deletes consumer files. The verdict comes from a byte comparison plus a post-write re-check, never from reading the two files and judging.
 
-**Consumer-owned config** — `pyproject.toml`, the `docs/guidelines/*.md` overlays, `.gitignore`, `lazy.settings.json`: files the consumer routinely edits, where this skill only contributes sections. Add what is missing (always silent), leave what is there byte-for-byte. A direct contradiction — the consumer set a checker key to a value that opposes a required one — is the ONLY case that asks. `AskUserQuestion` naming the file, quoting the region, showing a unified diff; options `merge-shipped` / `keep-local`. "Conflict" means you cannot determine what should survive, **not** merely that the bytes differ.
+**Consumer-owned config** — `pyproject.toml`, the `docs/guidelines/*.md` overlays, `.gitignore`, `lazy.settings.json`: files the consumer routinely edits, where this skill only contributes sections. Add what is missing (always silent), leave what is there byte-for-byte. A direct contradiction — the consumer set a checker key to a value that opposes a required one — is the ONLY case that asks. "Conflict" means you cannot determine what should survive, **not** merely that the bytes differ. The site that hits one prints the four context items before the call, filled from the run: **Where** — `/lazy-python.install · Step <N> — <title>`; target the conflicting file's path. **Found** — the consumer's region quoted, the shipped value it opposes, and a unified diff between them. **Why asking** — local and shipped contradict each other and the skill cannot tell which should survive. **Answers** — `merge-shipped` — the shipped value replaces the consumer's in that region now, nothing else in the file moves, not re-asked while the values agree; `keep-local` — the file stays byte-for-byte, the region is reported `kept-local`, nothing is persisted so the next run asks again while the contradiction persists. Then `AskUserQuestion`: header `"<file basename> conflict"`, question `"<file path> sets <key> to <local value>; lazycortex-python requires <shipped value>. Which survives?"`, options `merge-shipped` / `keep-local` with those descriptions.
 
 ## Step 1: Mirror plugin rules into `.claude/rules/`
 
@@ -154,7 +154,18 @@ The phase reads the current value and probes the candidate scripts (`cli/env`, `
 - `env-source-already-set` — a value is on record → nothing written (never overwritten).
 - `env-source-no-candidate` — no bootstrap script found → nothing written.
 - `env-source-recorded: <path>` — exactly one candidate found (or a disambiguated choice supplied) → recorded silently.
-- `env-source-multiple: <a>,<b>[,…]` — several candidates found → the phase wrote nothing. `AskUserQuestion` naming the file, listing each candidate plus a `skip` option. On a chosen candidate, re-run phase6 with it so the value is recorded:
+- `env-source-multiple: <a>,<b>[,…]` — several candidates found → the phase wrote nothing. Ask which to record:
+
+  ```
+  Context (print before asking):
+  - Where: /lazy-python.install · Step 7 — Record python.env_source when a project env script is present; target <consumer>/.claude/lazy.settings.json
+  - Found: python.env_source not on record; phase6 found <N> candidate bootstrap scripts: <a>, <b>[, …]
+  - Why asking: chk-py / tst-py source exactly one script after the venv activates, and nothing distinguishes the candidates
+  - Answers: `<candidate>` — recorded as python.env_source now, sourced by every chk-py / tst-py run, never re-asked; `skip` — nothing written, outcome env-source-skipped-per-user-choice, asked again on the next run while several candidates remain
+  AskUserQuestion: header "env_source", question "Which script should chk-py / tst-py source as python.env_source in <consumer>/.claude/lazy.settings.json?", one option per candidate plus `skip`, each with the description above.
+  ```
+
+  On a chosen candidate, re-run phase6 with it so the value is recorded:
 
   ```
   Bash(LAZY_PYTHON_ENV_SOURCE=<chosen> python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase6 ${CLAUDE_PROJECT_DIR})

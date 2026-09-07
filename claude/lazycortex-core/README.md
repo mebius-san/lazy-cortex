@@ -1,6 +1,6 @@
 ---
 iconize_icon: LiInfo
-iconize_color: "#93c5fd"
+iconize_color: "#fde68a"
 ---
 # lazycortex-core
 
@@ -137,7 +137,7 @@ Step-by-step walkthroughs, troubleshooting decision-tree, and FAQ for the scenar
 | `lazy-core.reference-writing.md` | Authoring contract for reference docs (protocols, schemas, contracts) under references/ at any scope. |
 | `lazy-core.rule-writing.md` | Authoring contract for rule files. Mandatory frontmatter (description + paths scope OR always_loaded waiver), size budget, dot-namespace filename, no large code blocks, artifact-reference integrity, no narrative padding. |
 | `lazy-core.scaffold.md` | Registry of authoring templates for any new artifact a plugin registers. |
-| `lazy-core.skill-writing.md` | Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, no-dirty-tree clause, the optional Failure-modes section, and the mandatory `Agent` member of a restricting `allowed-tools` list. |
+| `lazy-core.skill-writing.md` | Authoring contract for skills, commands, and runnable scripts. Covers Execution-Discipline preamble, no-Optional headings, outcome vocabulary, narrative-padding ban, waiver mechanism, parallel-scan coordinator pattern, no-dirty-tree clause, the optional Failure-modes section, the mandatory `Agent` member of a restricting `allowed-tools` list, and the context block every `AskUserQuestion` site carries. |
 | `lazy-guard.security.md` | Security constraints that the lazy-guard.* scanners and pre-commit hooks enforce — credential safety, secret blocking everywhere, and public-repo readiness. |
 | `lazy-log.logging.md` | Logging conventions for skills, agents, and commands. |
 

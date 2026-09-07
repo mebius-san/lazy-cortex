@@ -8,7 +8,7 @@ A plugin that knows the meaning of its own frontmatter ships that knowledge as a
 ## 1. File location and discovery
 
 - Path: `claude/<plugin>/references/<ns>.iconize-registry.json` — `<ns>` is the plugin's canonical namespace (`lazy-spec`, `lazy-review`, `lazy-wiki`, …). A plugin may ship several registry files (one per namespace).
-- Discovery: the worker walks the plugin roots in `$LAZYCORTEX_PLUGIN_DIRS` (exported by the lazycortex-core runtime daemon) and reads every `references/*.iconize-registry.json`. Outside a daemon context it falls back to the dev-vault sibling layout `<vault>/claude/*`.
+- Discovery: the worker walks the plugin roots in `$LAZYCORTEX_PLUGIN_DIRS` (exported by the lazycortex-core runtime daemon) and reads every `references/*.iconize-registry.json`. Outside a daemon context it falls back to the dev-vault sibling layout `<vault>/claude/*`, then — when the worker itself runs from the plugin cache — to the newest cached version of every installed plugin.
 - Best-effort, always: an absent plugin contributes no rules; an unreadable or malformed registry is skipped with a stderr diagnostic; nothing ever blocks a commit or a run.
 
 ## 2. File schema
@@ -47,6 +47,14 @@ A registry matcher whose `priority` is missing, non-integer, or outside 100–59
 
 The key consequence: precedence is by meaning, not by plugin. Review's `in-process` (band 3) yields to specs' `spec_halted` (band 1) on the same file; a halted asset stays red even while under review.
 
+## 3a. The icon is the type; state changes only the colour
+
+A note's **icon** says what the note IS — its asset type, its document type, its role. Every **state** a matcher can key on — a review phase, a `review_result`, a `spec_stage`, a `spec_state`, an upstream status, a gate — may change only its **colour**. A state matcher therefore never resolves a literal `iconName`: it writes `"{{frontmatter.iconize_icon}}"`, borrowing whatever icon the note already carries, and pairs it with the colour that state deserves. A literal icon name in a `resolve` block is legal only when that literal IS the type's own icon, in which case every matcher for that type carries the same literal and they differ only in colour — the three `spec_role: request` matchers of `lazy-spec.iconize-registry.json` are the shipped example: one `LiMail`, three statuses, three colours.
+
+The reason is that a folder full of notes reads as a shape first and a colour second. Repainting the icon by state destroys the only stable signal a reader has for what each note is, and it destroys it exactly when the folder is busiest. Colour carries state perfectly well and costs nothing.
+
+A note claimed by a state matcher before anything has written its `iconize_icon` interpolates the token to nothing. The worker treats that as "this rule has no icon of its own", keeps the note's existing key exactly as it stands, and still paints the colour — the repaint is never skipped and the key is never blanked (`iconize_sync._build_entry` / `_resolve_icon_pair`). Which icon a note gets in the first place is the scaffolding writer's business, not a matcher's.
+
 ## 4. Layer composition and ordering
 
 The worker folds all discovered registries under the personal map into one matcher list and evaluates it first-match-wins in this order:
@@ -68,6 +76,7 @@ A registry matcher's `callback: <id>` resolves against the vault's `.claude/call
 Reviewing a registry (in code review or `lazy-obsidian.audit`) means checking:
 
 - every matcher's `priority` sits inside the band its signal class belongs to (table above) — a transient process at 550 or a blocker at 250 is a finding;
+- no state matcher resolves a literal `iconName` (§ 3a) — a literal is legal only as a type's own icon, carried identically by every matcher of that type;
 - no two matchers of the same registry can claim the same file at the same priority;
 - `when` predicates key on the plugin's own frontmatter/callbacks, not on vault-specific paths — consumer content roots are configurable, so `path_glob` on a hardcoded root is a finding;
 - colors are lowercase `#rgb` / `#rrggbb`; icon names pass the worker's `--validate-entry` shapes;

@@ -39,7 +39,7 @@ Every file this skill creates or updates follows three cases — no per-file "in
 
 1. **Absent or unchanged** — target missing, or byte-identical to the shipped / last-known version → write the new version silently. State `installed` / `unchanged`.
 2. **Locally changed but cleanly mergeable** — target diverged from shipped, but the shipped delta applies without contradicting local edits (new sections / keys / entries added, every local-only chunk left untouched) → merge silently. State `merged`.
-3. **Genuine conflict** — the same region (a key, a line, a block) was changed both locally and in the shipped version in ways that cannot be reconciled automatically → the ONLY case that asks. `AskUserQuestion` naming the file, quoting the conflicting region, and showing a unified diff; options `merge-shipped` / `keep-local`.
+3. **Genuine conflict** — the same region (a key, a line, a block) was changed both locally and in the shipped version in ways that cannot be reconciled automatically → the ONLY case that asks. The asking site prints its context first — where (`/lazy-review.install · Step <N>` and the target file), found (the conflicting region quoted as a unified diff, both sides), why asking (local and shipped changed the same region; nothing can tell which should survive), answers (`merge-shipped` — shipped wins for that region, local edits elsewhere kept, state `merged`; `keep-local` — local wins for that region, the non-conflicting shipped delta still applied, state `kept-local`; the answer is not persisted and is asked again on the next conflicting update) — then `AskUserQuestion` with the file named in the question and the two options carrying those consequences as descriptions.
 
 "Conflict" means you cannot determine what should survive — not merely "the bytes differ". No contradiction → no question. A no-longer-shipped file (orphan) is left in place silently (`kept-orphan`); this skill never deletes consumer files.
 
@@ -125,7 +125,16 @@ The review loop's own callouts — the banner `[!note] #review/<state-tag>`, the
 | `review-callouts.css` snippet | `<vault>/.obsidian/snippets/review-callouts.css` | `${CLAUDE_PLUGIN_ROOT}/templates/obsidian/snippets/review-callouts.css` |
 
 1. **Locate the vault.** Repo root is `git rev-parse --show-toplevel` (fall back to cwd); vault is `<repo-root>/.obsidian`. If it does not exist, this repo is not an Obsidian vault — state **no-vault** and continue to Step 6. Otherwise `mkdir -p <vault>/snippets`.
-2. **Sync the snippet** per the File-sync policy above: absent or byte-identical → `cp` silently (**installed** / **unchanged**); locally changed with the shipped delta applying to disjoint regions → merge silently (**merged**); same region changed incompatibly on both sides → the only case that asks, via `AskUserQuestion` showing the conflicting hunk with options `merge-shipped` / `keep-local` (**merged** / **kept-local**).
+2. **Sync the snippet** per the File-sync policy above: absent or byte-identical → `cp` silently (**installed** / **unchanged**); locally changed with the shipped delta applying to disjoint regions → merge silently (**merged**); same region changed incompatibly on both sides → the only case that asks (**merged** / **kept-local**):
+
+   ```
+   Context (print before asking):
+   - Where: /lazy-review.install · Step 5.6 — Install the review-callouts CSS snippet; target <vault>/snippets/review-callouts.css
+   - Found: local and shipped both changed the same region — the conflicting hunk(s), both sides, quoted as a unified diff
+   - Why asking: you customized the snippet where the shipped version changed; nothing can tell which should survive
+   - Answers: `merge-shipped` — shipped version written for that region, your non-conflicting edits kept (**merged**); `keep-local` — your version kept for that region, the rest of the shipped delta still applied (**kept-local**); not persisted, asked again on the next conflicting update
+   AskUserQuestion: header "Snippet conflict", question "review-callouts.css in <vault>/snippets/ — conflicting edits in the same region. Which version wins for that region?", options `merge-shipped` — "shipped wins for the conflicting region; your edits elsewhere are kept", `keep-local` — "your edits win; the rest of the upstream change still applies".
+   ```
 3. **Enable it in `<vault>/appearance.json`.** Read the file (treat missing or unparseable as `{}`), ensure `enabledCssSnippets` exists as an array, and append `"review-callouts"` when absent. Write only when the array changed. Do NOT add the entry when the snippet file is not on disk — a stale registration points at nothing; state **deferred** in that case. Outcome otherwise: **enabled** (added this run) or **already-enabled**.
 
 Obsidian does not watch `appearance.json` mid-session, so when the outcome is **enabled** the Report tells the operator to reload Obsidian (or click ↻ next to the snippet in Settings → Appearance → CSS snippets).

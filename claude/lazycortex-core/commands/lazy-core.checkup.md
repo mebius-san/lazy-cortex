@@ -61,7 +61,16 @@ Outcome word: `presented`.
 
 ## Phase 4 — Prompt next action
 
-Call `AskUserQuestion` with `multiSelect: true`, header `Fix-flows`, and these options:
+```
+Context (print before asking):
+- Where: /lazy-core.checkup · Phase 4 — Prompt next action; target consumer config of `<repo>`
+- Found: the Phase 3 table — <n> findings (<f> FAIL, <w> WARN, <i> INFO) across <s> sections
+- Why asking: both fix-flows mutate consumer config; the read-only pass never does, so the operator picks what runs
+- Answers: `Run lazy-core.slim-context` — consumer-config rewrites now, under that skill's own confirmations; `Run lazy-core.doctor fix loop` — interactive per-finding fix/waive over consumer config; `Nothing — done` — no mutation, straight to the log. Nothing persisted by this command; asked every run
+AskUserQuestion: multiSelect true, header "Fix-flows", question "Which fix-flows should run now against the consumer config of `<repo>`, given the <n> findings above?", options as listed with the descriptions above.
+```
+
+Options, in dispatch order:
 
 1. `Run lazy-core.slim-context` — consumer-config rewrites
 2. `Run lazy-core.doctor fix loop` — interactive per-finding fix/waive over consumer config

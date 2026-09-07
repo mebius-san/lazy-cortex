@@ -37,7 +37,16 @@ Outcome: `verified`.
 
 Every class entry carries a `class` identity token — a short unique slug (`design`, `request`, `meeting-notes`) tooling addresses the entry by; globs stay routing-only. Read-first: an entry the operator means to extend is found by its token. For a new class, derive the token from the document kind and confirm it in the same question as the globs; refuse a token another entry already carries.
 
-If `review.classes` already holds the class (matched by token), reuse its `paths` silently (read-first). Otherwise `AskUserQuestion`: *"What glob(s) does this class match, and what identity token names it?"* — operator types a comma-separated glob list (e.g. `requests/*.md, docs/specs/*.md`) and a slug. Split globs on commas and trim.
+If `review.classes` already holds the class (matched by token), reuse its `paths` silently (read-first). Otherwise:
+
+```
+Context (print before asking):
+- Where: /lazy-review.configure · Phase 2 — Collect class paths; target `.claude/lazy.settings.json[review.classes]` in <repo-root>
+- Found: no class entry for `<token>`; tokens already on record: <list, or none>
+- Why asking: which globs enter the review loop, and the slug tooling addresses the class by, are project config nothing can derive
+- Answers: free text `<globs>, <token>` — globs split on commas and trimmed into `paths`, slug into `class`; persisted in Phase 5; never re-asked while the entry exists; a token already on record re-asks
+AskUserQuestion: header "Class paths", question "Which glob(s) does the new review class in <repo-root> match (comma-separated, e.g. `requests/*.md, docs/specs/*.md`), and what identity token names it (e.g. `design`)?", free text via an "Other" answer.
+```
 
 Outcome: `collected` (asked) or `read-from-record` (reused a persisted class's paths).
 
@@ -47,7 +56,16 @@ Main writers and section writers are collected separately. Each question block i
 
 ### 3a — Main writers
 
-If `experts.main` is already populated — reuse it silently (read-first). Otherwise `AskUserQuestion` (multi-select over the expert registry in the root `experts:` catalog; preserve order): *"Who are the document's main writers (several allowed; they run as a chain)?"*
+If `experts.main` is already populated — reuse it silently (read-first). Otherwise:
+
+```
+Context (print before asking):
+- Where: Phase 3a — Main writers; target `review.classes[<token>].experts.main`
+- Found: `experts.main` absent for `<token>`; registry experts in the root `experts:` catalog: <names>
+- Why asking: which experts author this document kind is project config
+- Answers: each selected expert — appended in selection order as `{"name", "repo": ".", "role": "main"}`; persisted in Phase 5; never re-asked while populated
+AskUserQuestion: header "Main writers", question "Which registered experts are the main writers of `<token>` documents (several allowed; they run as a chain, in the order picked)?", multi-select over the registry, each option's description from the catalog entry.
+```
 
 Add to the in-memory settings: `experts.main = [{"name": ..., "repo": ".", "role": "main"}]` (one object per selected expert profile; `role` is a free-form string the agent receives in `request.json.role`).
 
@@ -55,18 +73,72 @@ Add to the in-memory settings: `experts.main = [{"name": ..., "repo": ".", "role
 
 If section writers (`experts.validation` / `experts.terminal`) are already recorded for this class — reuse them silently and skip the loop (read-first). Otherwise loop over sections — every iteration strictly through separate `AskUserQuestion` calls:
 
-1. `AskUserQuestion`: *"Add another section?"* Options: "Add", "Done".
+1. Ask whether to add a section:
+
+   ```
+   Context (print before asking):
+   - Where: Phase 3b — Sections; target `review.classes[<token>].experts.validation` / `.terminal`
+   - Found: sections collected so far this run: <section-ids, or none>
+   - Why asking: how many post-approve sections the class carries is project config
+   - Answers: `Add` — collect one more section (steps a–f), nothing written yet; `Done` — exit the loop; all sections are persisted in Phase 5; re-asked after every added section
+   AskUserQuestion: header "Sections", question "Add another post-approve section to the `<token>` class?", options `Add` — "define one more validation or terminal section", `Done` — "no more sections".
+   ```
 2. On "Done" — exit the loop.
 3. On "Add":
-   a. `AskUserQuestion`: *"Which type is this section?"* Options:
-      - **`validation`** — post-approve check; a section with content blocks finalize (revert-to-main); erased at finalization.
-      - **`terminal`** — post-approve operator choice; does not block finalize; survives finalization.
-   b. `AskUserQuestion` (free text): *"Enter the section-id (stable identifier, format `^[a-z][a-z0-9_-]*$`, e.g. `final_check` or `routing`)"*. Validate in place against `^[a-z][a-z0-9_-]*$`; re-ask on a mismatch. Check section-id uniqueness within the class (across both umbrellas — `validation` and `terminal`); re-ask on a duplicate.
-   c. `AskUserQuestion` (free text): *"H1 heading for this section (any string, e.g. `Final check` or `Routing`)"*.
-   d. `AskUserQuestion`: *"Where does the section sit relative to the operator's free body?"* Options:
-      - **`top`** — the section renders ABOVE the free body (after the banner/status).
-      - **`bottom`** — the section renders BELOW the free body (before `# History`).
-   e. `AskUserQuestion` (single-select over the registry): *"Who writes into this section?"*
+   a. Section type:
+
+      ```
+      Context (print before asking):
+      - Where: Phase 3b — section type; target `experts.<umbrella>` of `<token>`
+      - Found: section <n> of this class; umbrellas already in use: <validation / terminal / none>
+      - Why asking: whether the section blocks finalization is a class-design decision
+      - Answers: `validation` — stored under `experts.validation`; `terminal` — stored under `experts.terminal`; persisted in Phase 5; never re-asked for this section
+      AskUserQuestion: header "Section type", question "Is the new section on the `<token>` class a `validation` or a `terminal` section?", options:
+      - `validation` — post-approve check; a section with content blocks finalize (revert-to-main); erased at finalization.
+      - `terminal` — post-approve operator choice; does not block finalize; survives finalization.
+      ```
+   b. Section-id. Validate in place against `^[a-z][a-z0-9_-]*$`; re-ask on a mismatch. Check section-id uniqueness within the class (across both umbrellas — `validation` and `terminal`); re-ask on a duplicate.
+
+      ```
+      Context (print before asking):
+      - Where: Phase 3b — section-id; target `experts.<umbrella>.<section-id>`
+      - Found: ids already taken on `<token>` (both umbrellas): <list, or none>
+      - Why asking: the stable identifier tooling addresses the section by cannot be derived
+      - Answers: free text — becomes the key under `experts.<umbrella>`; a mismatch or duplicate re-asks; persisted in Phase 5
+      AskUserQuestion: header "Section id", question "Section-id for the new `<umbrella>` section on `<token>` (stable identifier, format `^[a-z][a-z0-9_-]*$`, e.g. `final_check` or `routing`)?", free text via an "Other" answer.
+      ```
+   c. H1 heading:
+
+      ```
+      Context (print before asking):
+      - Where: Phase 3b — heading; target `experts.<umbrella>.<section-id>.section`
+      - Found: section-id `<section-id>` accepted; no heading on record
+      - Why asking: the heading is the rendered title of the section in every `<token>` document
+      - Answers: free text, any string — stored verbatim as `section`; persisted in Phase 5
+      AskUserQuestion: header "Section heading", question "H1 heading for section `<section-id>` of the `<token>` class (any string, e.g. `Final check` or `Routing`)?", free text via an "Other" answer.
+      ```
+   d. Position:
+
+      ```
+      Context (print before asking):
+      - Where: Phase 3b — position; target `experts.<umbrella>.<section-id>.position`
+      - Found: heading `<heading>` recorded; no position on record
+      - Why asking: where the section renders relative to the operator's free body is layout the class owns
+      - Answers: `top` — `position: top`; `bottom` — `position: bottom`; persisted in Phase 5
+      AskUserQuestion: header "Section position", question "Where does section `<section-id>` (`<heading>`) sit relative to the operator's free body in `<token>` documents?", options:
+      - `top` — the section renders ABOVE the free body (after the banner/status).
+      - `bottom` — the section renders BELOW the free body (before `# History`).
+      ```
+   e. Writer:
+
+      ```
+      Context (print before asking):
+      - Where: Phase 3b — section writer; target `experts.<umbrella>.<section-id>.name`
+      - Found: registry experts: <names>; main writers of `<token>`: <names>
+      - Why asking: which expert owns this section is project config
+      - Answers: the selected expert — stored as `name` with `repo: "."` and `role: <umbrella>`; persisted in Phase 5; never re-asked for this section
+      AskUserQuestion: header "Section writer", question "Which registered expert writes into section `<section-id>` (`<heading>`) of the `<token>` class?", single-select over the registry, each option's description from the catalog entry.
+      ```
    f. Add to the in-memory settings: `experts.<umbrella>.<section-id> = {"name": ..., "repo": ".", "role": <umbrella>, "section": <heading from step c>, "position": <top|bottom>}` (`role` defaults to the umbrella name — `validation` or `terminal`; operators running specialized persona routing may replace it with any other string — the agent receives it in `request.json.role`).
 4. Goto 1.
 
@@ -78,7 +150,22 @@ A class entry may carry an optional `protocols` list — plugin-namespaced refer
 
 ## Phase 4 — Pick edit_marker_style
 
-If `review.edit_marker_style` is already recorded — reuse it silently (read-first). Otherwise `AskUserQuestion`: four options — `simple`, `diff`, `criticmarkup`, `html`. Write the chosen value into `review.edit_marker_style`.
+If `review.edit_marker_style` is already recorded — reuse it silently (read-first). Otherwise:
+
+```
+Context (print before asking):
+- Where: /lazy-review.configure · Phase 4 — Pick edit_marker_style; target `.claude/lazy.settings.json[review.edit_marker_style]` in <repo-root>
+- Found: `review.edit_marker_style` absent
+- Why asking: how main writers mark prose edits inside reviewed documents is a vault-wide operator preference
+- Answers: the chosen name is written to `review.edit_marker_style` in Phase 5, applies to every class, and is pinned per document at review entry; never re-asked while set
+AskUserQuestion: header "Edit markers", question "Which edit-marker style should expert edits use in reviewed documents of <repo-root>?", options:
+- `simple` — inline `~~del~~`, `==add==`, `%%note%%`.
+- `diff` — every mutation inside a fenced diff block with `-` / `+` line prefixes.
+- `criticmarkup` — inline `{++add++}`, `{--del--}`, `{~~old~>new~~}`, `{>>note<<}`.
+- `html` — inline `<ins>`, `<del>`, `<mark>`, `<!-- note -->`.
+```
+
+Write the chosen value into `review.edit_marker_style`.
 
 Outcome: `picked` (asked) or `read-from-record` (reused the persisted style).
 

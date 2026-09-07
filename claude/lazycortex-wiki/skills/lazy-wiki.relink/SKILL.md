@@ -30,7 +30,14 @@ This skill has 8 ordered steps. The executing agent MUST NOT skip, merge, reorde
 
 ## Step 1 — Resolve scope + compute plan
 
-If no `<scope-id>` was passed, list the configured scopes (`Bash(lazycortex-wiki resolve-scope . --repo <repo-root>)` is per-path, not a lister — instead read `.claude/lazy.settings.json[wiki.scopes]` keys) and ask the operator which to relink via `AskUserQuestion`.
+If no `<scope-id>` was passed, list the configured scopes (`Bash(lazycortex-wiki resolve-scope . --repo <repo-root>)` is per-path, not a lister — instead read `.claude/lazy.settings.json[wiki.scopes]` keys) and ask the operator which to relink.
+
+Context (print before asking):
+- Where: /lazy-wiki.relink · Step 1 — Resolve scope + compute plan; target `.claude/lazy.settings.json[wiki.scopes]`
+- Found: the invocation carried no scope id; configured scopes `<id: paths, …>`
+- Why asking: which scope to relink is the operator's; each scope is its own plan and its own commit
+- Answers: one option per scope id — that scope's plan is computed, its nodes classified, linked, and committed under the operator identity; not persisted, asked whenever the id is omitted
+AskUserQuestion: header "Relink scope", question "Which configured wiki scope should be relinked now (`<ids>`)?", options one per scope id (description: its `paths`).
 
 Compute `<repo-root>` via `Bash(git rev-parse --show-toplevel)`.
 

@@ -1,7 +1,7 @@
 ---
 name: lazy-observe.uninstall
 description: "Run when the operator asks to stop shipping metrics from this host, remove the lazycortex-observe service, or clean up before switching to a different observer. DESTRUCTIVE — it unloads a supervised launchd/systemd unit; the WAL, log, and operator-private-state deletions each ask first, and answers under `${XDG_CONFIG_HOME:-~/.config}/lazycortex/` are kept by default. Idempotent — a clean host is a silent no-op."
-allowed-tools: Read, Glob, Bash(rm *), Bash(launchctl *), Bash(systemctl *), Bash(test *), Bash(date *), Bash(uname *), Bash(python3 *), Agent
+allowed-tools: Read, Glob, Bash(rm *), Bash(launchctl *), Bash(systemctl *), Bash(test *), Bash(date *), Bash(uname *), Bash(python3 *), AskUserQuestion, Agent
 ---
 # Uninstall lazy-observe
 
@@ -51,9 +51,18 @@ Outcome: `removed` (with file count) / `absent`.
 
 ## Step 4 — Remove WAL + log directories
 
-This is a destructive deletion, so it KEEPS its confirmation. Ask via `AskUserQuestion`: keep or delete the WAL directory at `${XDG_DATA_HOME:-~/.local/share}/lazycortex/observe/wal/`? Default `keep` — WAL preserves not-yet-shipped samples, and reinstalling the same agent will pick them up.
+This is a destructive deletion, so it KEEPS its confirmation. One question per directory that exists — first the WAL directory at `${XDG_DATA_HOME:-~/.local/share}/lazycortex/observe/wal/`, then the log directory (`~/Library/Logs/lazycortex-observe/` on darwin, `${XDG_STATE_HOME:-~/.local/state}/lazycortex/observe/logs/` on linux) — each filling the block with its own path:
 
-Same for log directory (`~/Library/Logs/lazycortex-observe/` on darwin, `${XDG_STATE_HOME:-~/.local/state}/lazycortex/observe/logs/` on linux).
+```
+Context (print before asking):
+- Where: /lazy-observe.uninstall · Step 4 — Remove WAL + log directories; target <dir>
+- Found: <dir> present; service <unloaded|absent> (Step 2), rendered configs <removed|absent> (Step 3)
+- Why asking: deletion is irreversible — the WAL holds samples not yet shipped to the observer, the log directory the shipper's history
+- Answers: `keep` (default) — <dir> stays; reinstalling the same agent picks the WAL up; `delete` — <dir> is removed now and its contents are gone
+AskUserQuestion: header "<WAL|Log> directory", question "Keep or delete <dir>?", options `keep` / `delete` with those descriptions.
+```
+
+Default `keep` — WAL preserves not-yet-shipped samples, and reinstalling the same agent will pick them up.
 
 An already-absent directory needs no question — state `absent` silently. Ask only when there is something to delete.
 
@@ -61,7 +70,18 @@ Outcome: `removed` / `kept-per-user-choice` / `absent`.
 
 ## Step 5 — Offer to wipe answer file + token
 
-This is a destructive deletion of operator-private state, so it KEEPS its confirmation. `AskUserQuestion` — keep or delete the operator-private state at `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml` and `${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.token`? Default `keep` — these are the only place URL/auth choices live, and a future install picks them up automatically.
+This is a destructive deletion of operator-private state, so it KEEPS its confirmation:
+
+```
+Context (print before asking):
+- Where: /lazy-observe.uninstall · Step 5 — Offer to wipe answer file + token; target ${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml and observe.token
+- Found: observe.toml <present|absent>, observe.token <present|absent>; service <unloaded|absent> (Step 2), rendered configs <removed|absent> (Step 3)
+- Why asking: these files are the only place the remote_write URL and auth choices live; wiping them makes the next install ask everything again
+- Answers: `keep` (default) — both files stay; a future /lazy-observe.install reuses them silently; `delete` — both removed now (`rm -f`); the next install asks agent kind, URL, and auth afresh
+AskUserQuestion: header "Answer file + token", question "Keep or delete the operator-private observe answers at ${XDG_CONFIG_HOME:-~/.config}/lazycortex/observe.toml and observe.token?", options `keep` / `delete` with those descriptions.
+```
+
+Default `keep` — these are the only place URL/auth choices live, and a future install picks them up automatically.
 
 An already-absent answer file / token needs no question — state `absent` silently. If the operator chooses to delete the token file, do it via `rm -f` (the file may already be 0600).
 

@@ -38,7 +38,16 @@ Outcome: `clean`, `drift: <N>`, or `no-manifest`.
 
 ## Phase 2 — Report + fix loop
 
-Collect all findings. Present a grouped report with `PASS` / `WARN` / `FAIL` prefixes. For each `WARN`, ask (one `AskUserQuestion`): **fix** / **waive** / **skip**. Drift fixes route through `/lazy-obsidian.capture` or `/lazy-obsidian.deploy` per the operator's pick; this skill never resolves drift by hand.
+Collect all findings. Present a grouped report with `PASS` / `WARN` / `FAIL` prefixes. For each `WARN`, one `AskUserQuestion`, its context filled per finding:
+
+```
+Context (print before asking):
+- Where: /lazy-obsidian.audit · Phase 2 — Report + fix loop; target <repo_root>/.obsidian/ vs <repo_root>/.obsidian.manifest.json
+- Found: <the WARN line verbatim — the drifted entry with its live and manifest values, or the warning>
+- Why asking: only the operator knows which side is right — the live vault or the manifest
+- Answers: `fix` — drift routes through `/lazy-obsidian.capture` (the vault is right, record it) or `/lazy-obsidian.deploy` (the manifest is right, restore it) per the operator's pick, never resolved by hand here; `skip` — left as is, nothing written, shown again on the next audit
+AskUserQuestion: header "Drift", question "<entry> differs between the live vault and the manifest at <repo_root> — fix or skip?", options `fix`, `skip` with those descriptions.
+```
 
 ## Phase 3 — Log the run
 

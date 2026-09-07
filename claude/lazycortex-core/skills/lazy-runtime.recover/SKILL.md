@@ -62,17 +62,21 @@ Branch on `reason`.
 
 ### Reason = `uncommitted_changes` — dirt cleanup wizard
 
-Ask via `AskUserQuestion`:
+```
+Context (print before asking):
+- Where: /lazy-runtime.recover · Step 2 — Choose recovery mode; target working tree of <repo-root>
+- Found: `daemon_halted.reason = uncommitted_changes`, triggered by `<triggered_by>` (expert `<expert>`, job `<job_id>` when set); dirty paths: <dirty_paths lines>
+- Why asking: the dirt is a routine's or expert's output — only the operator knows whether it is work to keep or noise to drop, and `discard` is irreversible
+- Answers: `commit` — `git add -A && git commit -m <message>` in Step 3, one follow-up asks for the message; `stash` — `git stash push -u` in Step 3, restore by hand later; `discard` — `git checkout -- . && git clean -fd` in Step 3, irreversible; `abort` — nothing changes, daemon stays halted, re-asked on the next run
+AskUserQuestion: header "Cleanup mode", question "How should the uncommitted changes that `<triggered_by>` left in <repo-root> be cleaned up before the daemon resumes?", options with descriptions.
+```
 
-> The working tree has uncommitted changes (see Step 1's dirty paths). How should I clean up before resuming?
-> - **commit** — `git add -A && git commit -m <message>`. Captures every dirty path. You provide the message.
-> - **stash** — `git stash push -u`. Tucks dirt into a stash you can restore later by hand.
-> - **discard** — `git checkout -- . && git clean -fd`. Throws away every dirty change. Irreversible.
-> - **abort** — leave everything as-is and exit. Daemon stays halted.
+- **commit** — `git add -A && git commit -m <message>`. Captures every dirty path. You provide the message.
+- **stash** — `git stash push -u`. Tucks dirt into a stash you can restore later by hand.
+- **discard** — `git checkout -- . && git clean -fd`. Throws away every dirty change. Irreversible.
+- **abort** — leave everything as-is and exit. Daemon stays halted.
 
-If `commit`: ask one follow-up via `AskUserQuestion`:
-
-> Commit message? Default: `<triggered_by>: recover from halt`.
+If `commit`: ask one follow-up via `AskUserQuestion`. Context (print before asking) — Where: same step, target `<repo-root>`; Found: the dirty paths above; Why asking: the operator is the commit author; Answers: free-form message used by Step 3's commit, default `<triggered_by>: recover from halt`. Header "Commit message", question "Commit message for the recovery commit in <repo-root>? (default: `<triggered_by>: recover from halt`)".
 
 Outcome: `commit`, `stash`, `discard`, or `aborted`.
 
@@ -88,11 +92,19 @@ Print the matching guidance block first:
 - `routine_config_invalid` — "The `routines.<triggered_by>` entry in `.claude/lazy.settings.json` (or its `.local.json` overlay) does not match its type's schema, so the daemon dropped it and stopped. Read the schema error in the routine's incident — `Bash(lazycortex-core error-list)`, or the newest `.logs/lazy-core/runtime/<date>.jsonl` record whose `name` is `<triggered_by>` — then fix the entry by hand or re-register it via `/lazy-routine.register --force`. Per-type required and optional fields: `${CLAUDE_PLUGIN_ROOT}/references/lazy-core.runtime-schema.md` § 8."
 - `rate_limit` — "The subscription rate-limit window closed (`resets_at` in Step 1 says when it reopens, epoch seconds). Nothing is broken and no git repair is needed: the daemon lifts this halt itself once the window reopens. Resume early only if you want the queue moving again right away — the pump's pre-spawn flag check still refuses to spawn while the host-local flag at `${XDG_CACHE_HOME:-$HOME/.cache}/lazycortex/rate-limit/` holds a live record, so an early resume burns no tokens."
 
-Then ask via `AskUserQuestion`:
+Then ask:
 
-> Have you resolved the situation? Confirming runs no git commands itself — it just clears the halt block so the next daemon tick can re-evaluate.
-> - **resume** — operator confirms repair done; halt block will be cleared. Working tree must be clean (the daemon re-verifies on next tick).
-> - **abort** — leave halt in place and exit.
+```
+Context (print before asking):
+- Where: /lazy-runtime.recover · Step 2 — Choose recovery mode; target <repo-root>/.runtime/state.json[daemon_halted]
+- Found: `reason = <reason>`, triggered by `<triggered_by>`<; resets_at <epoch> when reason is rate_limit>; the guidance above names the repair
+- Why asking: the skill runs no git or settings commands for this family — only the operator can say the external repair is done
+- Answers: `resume` — halt block cleared atomically in Step 4; the daemon re-verifies the tree on its next tick and re-halts if the cause persists; `abort` — halt stays, nothing written, re-run after repairing
+AskUserQuestion: header "Resume daemon", question "Has the `<reason>` halt in <repo-root> been repaired externally — clear the halt block so the daemon resumes?", options with descriptions.
+```
+
+- **resume** — operator confirms repair done; halt block will be cleared. Working tree must be clean (the daemon re-verifies on next tick).
+- **abort** — leave halt in place and exit.
 
 Outcome: `manual-fix` or `aborted`.
 

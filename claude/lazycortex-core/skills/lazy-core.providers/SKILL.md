@@ -66,10 +66,21 @@ Outcome: `listed (N entries)` or `skipped — mode is <other>`.
 
 Only when mode = `remove`.
 
-1. If no name was given in Step 1, and the registry has more than one entry, ask via `AskUserQuestion` which one to remove (options = provider names). A single-entry registry with no name given is unambiguous — use it.
+1. If no name was given in Step 1, and the registry has more than one entry, ask which one to remove. Context (print before asking) — Where: `/lazy-core.providers · Step 4 — Mode: remove`, target `.claude/lazy.settings.local.json[providers]`; Found: the registry's entries, one line each `<name> — <base_url> [tracked|local]`; Why asking: `remove` was invoked without a name; Answers: one option per provider name — the chosen one goes to the confirmation in item 4, nothing written yet. `AskUserQuestion`: header "Which provider", question "Which provider should be removed from .claude/lazy.settings.local.json?", options = provider names, each described by its `base_url`. A single-entry registry with no name given is unambiguous — use it.
 2. Name not found in the merged map → FAIL: provider `<name>` is not registered.
 3. **Reference check** — load the merged `experts` section (`load_section(path, 'experts')`) and scan every entry's `provider` field for a match. Any hit is informational, never blocking: report `WARN: expert <key> still references provider <name>` for each (both placeholders substituted, not literal).
-4. Confirm via `AskUserQuestion`: "Remove provider `<name>`?" — options `remove` / `cancel`. `cancel` → outcome `aborted`, skip Steps 5–6, go to Step 7 (skipped).
+4. Confirm:
+
+```
+Context (print before asking):
+- Where: /lazy-core.providers · Step 4 — Mode: remove; target .claude/lazy.settings.local.json[providers.<name>]
+- Found: `<name>` — `<base_url>` (token_env=`<token_env>`) [<tracked|local>]; experts still referencing it: <list, or none>
+- Why asking: removing the entry breaks every expert still pointing at it at dispatch time
+- Answers: `remove` — entry dropped from the local overlay in Step 7, never re-asked; `cancel` — nothing written, run ends with outcome `aborted`
+AskUserQuestion: header "Remove provider", question "Remove provider `<name>` (`<base_url>`) from .claude/lazy.settings.local.json?", options with descriptions.
+```
+
+   `cancel` → outcome `aborted`, skip Steps 5–6, go to Step 7 (skipped).
 5. On `remove` → record the removal for Step 7.
 
 Outcome: `removal-confirmed`, `aborted`, or `skipped — mode is <other>`.
@@ -78,9 +89,28 @@ Outcome: `removal-confirmed`, `aborted`, or `skipped — mode is <other>`.
 
 Only when mode = `add` or `update`.
 
-1. If no name was given in Step 1, ask for it via `AskUserQuestion` (free-form text).
-2. `add` with a name already in the merged map → ask via `AskUserQuestion` whether to switch to `update` for that name or pick a different name; `update` with a name absent from the map → same choice, offered as "register it as new" or "pick a different name".
-3. Ask one question at a time, pre-filling each field's current value as the default when in `update` on an existing entry:
+1. If no name was given in Step 1, ask for it. Context (print before asking) — Where: `/lazy-core.providers · Step 5 — Mode: add/update wizard`, target `.claude/lazy.settings.local.json[providers]`; Found: registered names `<list, or none>`; Why asking: `<add|update>` was invoked without a name; Answers: free-form text becomes the entry key, validated in Step 6, written in Step 7. `AskUserQuestion`: header "Provider name", question "Which provider name should this `<add|update>` target in .claude/lazy.settings.local.json?" (free-form text).
+2. `add` with a name already in the merged map, or `update` with a name absent from it:
+
+```
+Context (print before asking):
+- Where: /lazy-core.providers · Step 5 — Mode: add/update wizard; target .claude/lazy.settings.local.json[providers.<name>]
+- Found: mode `<add|update>`, but `<name>` is <already registered — `<base_url>` [tracked|local] | not registered>
+- Why asking: the mode and the registry disagree — creating or overwriting silently would hide a typo
+- Answers: `<switch to update | register it as new>` — wizard continues in the other mode for `<name>` (fields pre-filled from the existing entry on update), nothing written yet; `pick a different name` — item 1 re-asked for a new name, nothing written yet
+AskUserQuestion: header "Name conflict", question "Provider `<name>` is <already registered | not registered> in .claude/lazy.settings.local.json — <switch to update | register it as new>, or pick a different name?", options with descriptions.
+```
+
+3. Ask one question at a time, pre-filling each field's current value as the default when in `update` on an existing entry. One context block, filled per field:
+
+```
+Context (print before asking):
+- Where: /lazy-core.providers · Step 5 — Mode: add/update wizard; target .claude/lazy.settings.local.json[providers.<name>.<field>]
+- Found: current value `<value, or (unset)>`
+- Why asking: an endpoint, its credential variable, and its model names are machine facts nothing on disk can derive
+- Answers: free-form text — becomes the field's value in the candidate entry, validated in Step 6, written in Step 7 only if every check passes; asked again on every `update`
+AskUserQuestion: header "<field>", question "<field> for provider `<name>` in .claude/lazy.settings.local.json? (current: <value, or unset>)" plus the field's note below, free-form text.
+```
    - **base_url** — the endpoint's base URL. Note in the question body: the current `claude` CLI rejects non-`claude-*` model names against a public `ANTHROPIC_BASE_URL` before any network call (localhost is exempt) — a provider that isn't `api.anthropic.com` and isn't a local proxy (`http://localhost:<port>` / `http://127.0.0.1:<port>`) will fail to spawn regardless of what this wizard writes.
    - **token_env** — the environment variable name carrying the credential (never the credential itself).
    - **fable**, **opus**, **sonnet**, **haiku** — one model-name string each, in that order.

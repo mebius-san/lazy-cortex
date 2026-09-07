@@ -55,9 +55,31 @@ For `missing`: print "Job `<job_id>` not found for expert `<expert_name>`." and 
 
 For `already-cancelled`: print "Job `<job_id>` is already cancelled; bundle kept at `.experts/.jobs/<expert_name>/<job_id>/`." and exit with outcome `already-cancelled`.
 
-For `pending`: call `AskUserQuestion`: "Job `<job_id>` is pending — if the daemon is executing it, its executor process will be stopped immediately. Cancel?" (Yes/No). If No → exit with outcome `user-aborted`.
+For `pending`, ask:
 
-For `done`: call `AskUserQuestion`: "Job `<job_id>` is already done. Mark it cancelled anyway? (The bundle stays on disk either way.)" (Yes/No). If No → exit with outcome `user-aborted`.
+```
+Context (print before asking):
+- Where: /lazy-expert.cancel-job · Step 3 — Confirm cancellation; target `.experts/.jobs/<expert_name>/<job_id>/`
+- Found: directory exists, no DONE marker; <PID marker present — the daemon has claimed it | no PID marker — still queued>
+- Why asking: cancelling kills a live executor (SIGTERM → SIGKILL) and releases the dedup key — not reversible
+- Answers: `Yes` — executor stopped now, READY removed, CANCELLED placed; bundle stays on disk, a same-key dispatch creates a new job; `No` — nothing signalled, no markers changed, outcome `user-aborted`
+AskUserQuestion: header "Cancel job", question "Cancel pending job `<job_id>` of expert `<expert_name>`? If the daemon is executing it, its executor process is stopped immediately.", options `Yes` / `No` with the descriptions above.
+```
+
+If No → exit with outcome `user-aborted`.
+
+For `done`, ask:
+
+```
+Context (print before asking):
+- Where: /lazy-expert.cancel-job · Step 3 — Confirm cancellation; target `.experts/.jobs/<expert_name>/<job_id>/`
+- Found: DONE marker present — the job already finished
+- Why asking: marking a finished job cancelled releases its dedup key so the same work can be re-dispatched; whether the finished result should stand is the operator's call
+- Answers: `Yes` — CANCELLED placed on the finished bundle, nothing to kill, bundle stays on disk; `No` — job stays done, outcome `user-aborted`
+AskUserQuestion: header "Cancel done job", question "Job `<job_id>` of expert `<expert_name>` is already done — mark it cancelled anyway? The bundle stays on disk either way.", options `Yes` / `No` with the descriptions above.
+```
+
+If No → exit with outcome `user-aborted`.
 
 Outcome: `confirmed`, `user-aborted`, `already-cancelled`, or `absent`.
 

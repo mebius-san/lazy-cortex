@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Control the full lifecycle of a document under review — opt in, track state, pause, and seal the result in one auditable commit chain.
-last_regen: 2026-09-03
+last_regen: 2026-09-07
 diagram_spec:
   anchor: "Document lifecycle"
   request: "State diagram of a document moving through the review loop: not-active → active (via start or submit) → stopped (via stop, resumable) → active again (via start) → finalized (via finalize); status is a read-only probe at any active state"

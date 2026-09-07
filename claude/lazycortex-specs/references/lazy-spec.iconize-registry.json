@@ -26,7 +26,7 @@
         "frontmatter.spec_upstream_status": "orphaned"
       },
       "resolve": {
-        "iconName": "LiUnlink",
+        "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#fdba74"
       },
       "priority": 430
@@ -36,7 +36,7 @@
         "frontmatter.spec_upstream_status": "drifted"
       },
       "resolve": {
-        "iconName": "LiRefreshCcw",
+        "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#fdba74"
       },
       "priority": 425
@@ -46,7 +46,7 @@
         "frontmatter.spec_upstream_status": "new"
       },
       "resolve": {
-        "iconName": "LiInbox",
+        "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#fdba74"
       },
       "priority": 420
@@ -100,7 +100,7 @@
         "frontmatter.spec_upstream_status": "in-review"
       },
       "resolve": {
-        "iconName": "LiFileClock",
+        "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#93c5fd"
       },
       "priority": 320
@@ -110,7 +110,7 @@
         "frontmatter.spec_stage": "draft"
       },
       "resolve": {
-        "iconName": "LiFileEdit",
+        "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#fde68a"
       },
       "priority": 260
@@ -120,7 +120,7 @@
         "frontmatter.spec_stage": "rejected"
       },
       "resolve": {
-        "iconName": "LiFileX",
+        "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#fca5a5"
       },
       "priority": 255
@@ -130,7 +130,7 @@
         "frontmatter.spec_stage": "approved"
       },
       "resolve": {
-        "iconName": "LiFileCheck2",
+        "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#86efac"
       },
       "priority": 250
@@ -140,10 +140,20 @@
         "frontmatter.spec_stage": "cancelled"
       },
       "resolve": {
-        "iconName": "LiFileMinus",
+        "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#94a3b8"
       },
       "priority": 245
+    },
+    {
+      "when": {
+        "frontmatter.spec_stage": "deferred"
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#94a3b8"
+      },
+      "priority": 244
     },
     {
       "when": {
@@ -161,7 +171,7 @@
         "frontmatter.spec_upstream_status": "invalid"
       },
       "resolve": {
-        "iconName": "LiFileX",
+        "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#94a3b8"
       },
       "priority": 240
@@ -182,7 +192,7 @@
         "frontmatter.spec_upstream_status": "postponed"
       },
       "resolve": {
-        "iconName": "LiPause",
+        "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#94a3b8"
       },
       "priority": 230
@@ -204,7 +214,7 @@
         "frontmatter.request_status": "accepted"
       },
       "resolve": {
-        "iconName": "LiMailCheck",
+        "iconName": "LiMail",
         "iconColor": "#86efac"
       },
       "priority": 226
@@ -215,7 +225,7 @@
         "frontmatter.request_status": "rejected"
       },
       "resolve": {
-        "iconName": "LiMailX",
+        "iconName": "LiMail",
         "iconColor": "#fca5a5"
       },
       "priority": 224
@@ -225,7 +235,7 @@
         "frontmatter.spec_upstream_status": "processed"
       },
       "resolve": {
-        "iconName": "LiBadgeCheck",
+        "iconName": "{{frontmatter.iconize_icon}}",
         "iconColor": "#86efac"
       },
       "priority": 220

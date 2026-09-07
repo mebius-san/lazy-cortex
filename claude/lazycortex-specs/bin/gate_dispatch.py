@@ -222,7 +222,8 @@ def _resolve_core_cli(repo: Path) -> Path:
 
   Two-stage lookup, per the § 1c inter-plugin boundary contract:
 
-    1. Walk `$LAZYCORTEX_PLUGIN_DIRS` for `<dir>/bin/lazycortex-core`.
+    1. `spec_paths.resolve_plugin_cli` — `$LAZYCORTEX_PLUGIN_DIRS`, then the plugin cache
+       this plugin is itself installed from.
     2. Dev-fallback to `<repo>/claude/lazycortex-core/bin/lazycortex-core` —
        this dev vault carries lazycortex-core's own source tree, so a
        session running the plugins straight from `claude/*` (not from an
@@ -237,15 +238,11 @@ def _resolve_core_cli(repo: Path) -> Path:
   Raises:
     RuntimeError: When both lookup stages fail to find a binary.
   """
-  # Stage 1 — env-declared plugin dirs (set by the daemon for every subprocess routine).
-  dirs = os.environ.get(_PLUGIN_DIRS_ENV, "").split(os.pathsep)
-  for plugin_dir in dirs:
-    # guard: empty path segment (from a trailing/double pathsep) — skip it
-    if not plugin_dir:
-      continue
-    cli = Path(plugin_dir) / _BIN_DIR / _CORE_CLI_NAME
-    if cli.is_file():
-      return cli
+  # Stage 1 — env-declared plugin dirs (set by the daemon for every subprocess routine), then the
+  # plugin cache a consumer install runs from.
+  cli = spec_paths.resolve_plugin_cli(_CORE_CLI_NAME)
+  if cli is not None:
+    return cli
 
   # Stage 2 — dev-vault-only fallback, deliberate per the task brief — this repo IS
   # lazycortex-core's own source tree, so a session with no plugin cache on the env path
@@ -259,7 +256,7 @@ def _resolve_core_cli(repo: Path) -> Path:
 
   # neither stage found a binary — nothing left to try
   raise RuntimeError(
-      f"lazycortex-core CLI not resolvable: ${_PLUGIN_DIRS_ENV} yields no match "
+      f"lazycortex-core CLI not resolvable: ${_PLUGIN_DIRS_ENV} and the plugin cache yield no match "
       f"and {fallback} is absent from this repo"
   )
 

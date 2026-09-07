@@ -135,6 +135,7 @@ class MapKey:
     SCHEMA_VERSION: The schema-generation integer the document declares.
     MIN_HOOK_VERSION: The minimum worker hook version the document requires.
     MATCHERS: The ordered list of matcher entries the document carries.
+    PAINT_ROOTS: The directory prefixes outside of which no note is read or written.
     REGISTRIES: The named lookup tables referenced by resolve specs.
     STAGE_COLORS: The stage-to-color registry referenced by resolve specs.
     WHEN: The predicate block selecting which files a matcher or overlay applies to.
@@ -157,6 +158,16 @@ class MapKey:
   # Named registries, including a dedicated stage-to-color table, let a resolve block look values up
   # by a shared key instead of repeating literal names across matchers.
 
+  # Domain(obsidian.icon-resolution):
+  # # Painting is confined to the areas of the vault the operator opened to it
+  # A vault holds far more material than the part whose look the operator wants decided by rules, and a
+  # rule keyed on frontmatter would otherwise reach every note in the vault that happens to carry the
+  # same fields. The document may therefore declare which areas of the vault are open to painting at
+  # all; a note outside them is passed over entirely, neither consulted against any rule nor written to,
+  # so whatever icon it carries stays exactly as whoever put it there left it. A document that declares
+  # nothing leaves the whole vault open, which is how vaults authored before the declaration existed
+  # keep behaving exactly as they did.
+
   # Contract:
   # Overlays are applied in descending PRIORITY order; the highest-priority overlay whose own WHEN
   # predicate matches wins over every lower-priority overlay.
@@ -164,6 +175,7 @@ class MapKey:
   SCHEMA_VERSION = "schema_version"
   MIN_HOOK_VERSION = "min_hook_version"
   MATCHERS = "matchers"
+  PAINT_ROOTS = "paint_roots"
   REGISTRIES = "registries"
   STAGE_COLORS = "stage_colors"
   WHEN = "when"

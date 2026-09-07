@@ -28,6 +28,57 @@ if TYPE_CHECKING:
 # the inter-plugin boundary contract for the full pattern.
 
 # ----------------------------------------------------------------------------------------
+def _version_sort_key(name: str) -> tuple[int, ...]:
+  """
+  Build a numeric sort key for a plugin-cache version directory name.
+
+  Args:
+    name: Version directory name as it appears in the plugin cache.
+
+  Returns:
+    A tuple of integers so `10.0.0` ranks above `9.1.1`; digit-free components contribute `0`.
+  """
+  out: list[int] = []
+  for part in name.split("."):
+    digits = "".join(c for c in part if c.isdigit())
+    out.append(int(digits) if digits else 0)
+  return tuple(out)
+
+
+def _cached_sibling_root(name: str) -> Path | None:
+  """
+  Locate a sibling plugin's newest cached install next to this plugin's own cached install.
+
+  A cached install lives at `<cache>/<registry>/<plugin>/<version>/`, so when this file runs from
+  one, the cache root is four levels above `bin/` and every sibling's versions sit under it. A dev
+  source tree has no version level above `bin/`, so the walk finds nothing there — the dev layout
+  is served by the daemon's env export and each caller's own dev fallback.
+
+  Args:
+    name: Sibling plugin name, which is also its cache directory and CLI name.
+
+  Returns:
+    The sibling's highest cached version directory, or None outside a cached install or when no
+    version of the sibling is cached.
+  """
+  own = Path(__file__).resolve()
+  # guard: not a cached install — a dev checkout has no version directory above bin/
+  if not own.parents[1].name.replace(".", "").isdigit():
+    return None
+  # the cache root sits four levels above bin/: cache/<registry>/<plugin>/<version>/bin
+  try:
+    cache = own.parents[4]
+  except IndexError:
+    return None
+  versions = [
+    version
+    for registry in cache.iterdir() if (registry / name).is_dir()
+    for version in (registry / name).iterdir()
+    if version.is_dir() and version.name.replace(".", "").isdigit()
+  ]
+  return max(versions, key = lambda v: _version_sort_key(v.name)) if versions else None
+
+
 class CoreDispatch:
   """
   Thin §1c bridge between lazycortex-wiki and lazycortex-core's CLI.
@@ -421,13 +472,14 @@ class CoreDispatch:
 
     Walks `$LAZYCORTEX_PLUGIN_DIRS` — set by the daemon for every subprocess
     routine it spawns — for `<dir>/bin/lazycortex-core`, matching the shape
-    `runtime_daemon.resolve_routine_command` uses on the daemon side.
+    `runtime_daemon.resolve_routine_command` uses on the daemon side, then falls
+    back to the plugin cache this plugin itself runs from.
 
     Returns:
       Resolved `Path` to a usable `lazycortex-core` binary.
 
     Raises:
-      RuntimeError: When the environment names no directory carrying the binary.
+      RuntimeError: When neither the environment nor the plugin cache carries the binary.
     """
 
     # Domain(plugin.boundaries):
@@ -436,8 +488,9 @@ class CoreDispatch:
     # list of directories where the enabled plugins live. Under that guarantee the neighbour's address is taken
     # from that list alone and nothing else is consulted: the entries are tried in the order given, and the
     # first one that actually carries the published command wins. An empty list means the job was started
-    # outside the runtime — a fault in how the run was set up, not a reason to look somewhere else. The wider
-    # ladder of sources a resolver needs when it must also serve a hand-run install is described where that
+    # outside the runtime; the one other place looked at is the installed-plugin cache this plugin itself
+    # runs from, where the neighbour's newest installed version carries the command. The wider ladder of
+    # sources a resolver needs when it must also serve a development checkout is described where that
     # resolver lives, and is not repeated here.
 
     # take the first directory that actually carries the binary — order is the caller's priority
@@ -450,14 +503,23 @@ class CoreDispatch:
       if cli.is_file():
         return cli
 
-    # the environment is the only sanctioned discovery channel — see dev.plugin-boundaries § 1c;
-    # name what was searched so a misconfigured runner is diagnosable from the message alone
+    # plugin-cache fallback — a consumer install's own session has no daemon export to walk
+    cached_root = _cached_sibling_root(CoreDispatch._CORE_PLUGIN_NAME)
+    cached = None if cached_root is None else (
+      cached_root / CoreDispatch._BIN_SEGMENT / CoreDispatch._CORE_PLUGIN_NAME
+    )
+    if cached is not None and cached.is_file():
+      return cached
+
+    # the environment and the plugin cache are the only sanctioned discovery channels — see
+    # dev.plugin-boundaries § 1c; name what was searched so a misconfigured runner is diagnosable
+    # from the message alone
     searched = [d for d in env_dirs if d] or ["<unset>"]
     raise RuntimeError(
       f"lazycortex-core CLI not resolvable: no "
       f"{CoreDispatch._BIN_SEGMENT}/{CoreDispatch._CORE_PLUGIN_NAME} under any directory named by "
-      f"${CoreDispatch._ENV_PLUGIN_DIRS} (searched: {', '.join(searched)}). "
+      f"${CoreDispatch._ENV_PLUGIN_DIRS} (searched: {', '.join(searched)}) and no cached sibling. "
       f"This worker runs as a daemon subprocess, which exports that variable; "
-      f"running it from a plain shell requires exporting "
+      f"running it from a plain shell outside a cached install requires exporting "
       f"${CoreDispatch._ENV_PLUGIN_DIRS} to the enabled plugin directories first."
     )
