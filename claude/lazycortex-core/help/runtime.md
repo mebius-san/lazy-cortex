@@ -12,6 +12,7 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.tick
   - lazy-core.daemon-authoring
+  - lazy-core.runtime-schema
 source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 ---
 # Runtime daemon — routine management and recovery

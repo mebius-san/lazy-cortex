@@ -7,6 +7,7 @@ diagram_spec:
   request: "Flow diagram showing the requests block pipeline: spec.coordinator, in its routing mode, orchestrates — it calls lazy-spec.request-classify (returns a class token), then lazy-spec.request-find-candidates (returns a ranked candidate list), then writes only structural routing fields (verb, target, product/path/tools/targets/drop) into the routing decision — no per-target prose. Show an operator confirmation step, then a single lazy-spec.request-apply node that branches internally into attach (folds the request onto an existing entity's primary doc) or spawn (scaffolds a new entity's folder and status note only, documents seeded later per launch checkbox) — both paths converge into 'doc's own writer builds from source in its review job'."
 source_skills:
   - spec.coordinator
+  - lazy-spec.coordinator
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
 source_sha: 16bd72c56e7e50107f9be0af4e908569ddf14c1f
