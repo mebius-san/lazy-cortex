@@ -1,7 +1,3 @@
----
-iconize_icon: LiInfo
-iconize_color: "#86efac"
----
 # lazycortex-diagram
 
 Format-agnostic diagram engine: /lazy-diagram.draw dispatcher + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.

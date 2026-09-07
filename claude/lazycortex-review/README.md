@@ -1,7 +1,3 @@
----
-iconize_icon: LiInfo
-iconize_color: "#86efac"
----
 # lazycortex-review
 
 Coordinator-driven markdown document review loop: a closed set of Python primitive verbs (parse-note / set-key / paint-banner / collect-job), an LLM coordinator that owns every decision from a prose playbook, and a git-watch wake plus an interval postman that carry commits and finished expert jobs back into the loop.

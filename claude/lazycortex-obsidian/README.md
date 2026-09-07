@@ -1,7 +1,3 @@
----
-iconize_icon: LiInfo
-iconize_color: "#86efac"
----
 # lazycortex-obsidian
 
 Obsidian vault bootstrap and configuration management for Claude Code

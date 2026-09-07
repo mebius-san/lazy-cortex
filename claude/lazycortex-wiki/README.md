@@ -1,7 +1,3 @@
----
-iconize_icon: LiInfo
-iconize_color: "#86efac"
----
 # lazycortex-wiki
 
 Maintains a curated, LLM-navigable semantic wiki over a markdown+code base — summaries, hierarchical topic tags, and glossed See-also links, kept in sync via git-watch and weekly full-scan routines.

@@ -1,7 +1,3 @@
----
-iconize_icon: LiInfo
-iconize_color: "#86efac"
----
 # lazycortex-core
 
 Core skills, agents, and runtime daemon for Claude Code (expert runtime + agent-model routing + settings management)
