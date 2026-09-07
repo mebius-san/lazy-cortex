@@ -158,6 +158,17 @@
     {
       "when": {
         "frontmatter.spec_role": "status",
+        "frontmatter.spec_state": "deferred"
+      },
+      "resolve": {
+        "iconName": "{{frontmatter.iconize_icon}}",
+        "iconColor": "#94a3b8"
+      },
+      "priority": 242
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "status",
         "frontmatter.spec_cancelled": true
       },
       "resolve": {
@@ -261,6 +272,33 @@
         "iconColor": "#86efac"
       },
       "priority": 211
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "status"
+      },
+      "resolve": {
+        "callback": "spec-type-icon"
+      },
+      "priority": 150
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "product"
+      },
+      "resolve": {
+        "callback": "spec-type-icon"
+      },
+      "priority": 149
+    },
+    {
+      "when": {
+        "frontmatter.spec_role": "catalog"
+      },
+      "resolve": {
+        "callback": "spec-type-icon"
+      },
+      "priority": 148
     }
   ]
 }

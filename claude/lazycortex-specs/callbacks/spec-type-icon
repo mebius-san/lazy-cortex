@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""
+Iconize callback: report the icon and colour a spec note's own TYPE gives it.
+
+Invoked via stdin JSON `{"op": "resolve", "path": "<vault-relative>.md", "frontmatter": {...}}`.
+The registry's state matchers paint colour over a note while a state holds; nothing repaints it
+when the last of them stops matching, because the worker never strips a note no rule claims. This
+callback is what the base band resolves through, so a note no state wants any more answers with
+the pair its kind gives it — the same pair a fresh scaffold would have written.
+
+The answer is composed from the plugin's own type resolvers, in the product scope the note's path
+falls under: a catalog root from the shipped `catalog` entry, a product from its settings record
+with the shipped `product` entry behind it, an asset's status note from the type it declares, and
+a typed document from its document type. Anything else is declined.
+
+Any error, unreadable settings, or unrecognized shape returns `{}`. Never raises.
+"""
+
+from __future__ import annotations
+# waiver: the plugin's own flat `bin/` is not a package — the sibling resolvers this callback
+# composes are imported after the sys.path bootstrap below, which must run before them
+# pylint: disable=wrong-import-position,import-error
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+  pass
+
+
+# the resolvers live in this same plugin's `bin/`, one directory over — an in-plugin import, never
+# a reach into a sibling plugin's tree
+# waiver: filesystem path idiom — `bin` is this plugin's own fixed layout token
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+
+# waiver: these three imports must follow the sys.path bootstrap above, so they cannot sit with
+# the stdlib block; pcf reads the resulting layout as code between imports
+import asset_types
+import resolve_product
+import spec_doc_types
+
+
+class Key:
+  """
+  JSON keys exchanged with the iconize host, and the frontmatter keys read from its payload.
+
+  Attributes:
+    OP: Stdin payload key carrying the operation discriminator.
+    PATH: Stdin payload key carrying the note's vault-relative path.
+    FRONTMATTER: Stdin payload key carrying the note's parsed frontmatter mapping.
+    ICON_NAME: Stdout response key carrying the resolved icon name.
+    ICON_COLOR: Stdout response key carrying the resolved colour.
+    ROLE: Frontmatter key naming what the note is within the catalog.
+    ASSET_TYPE: Frontmatter key naming an asset's own type, read off its status note.
+    DOC_TYPE: Frontmatter key naming an authored document's type.
+    PRODUCT_ICON: Settings-record key by which a product names an icon of its own.
+  """
+
+  OP = "op"
+  PATH = "path"
+  FRONTMATTER = "frontmatter"
+  ICON_NAME = "iconName"
+  ICON_COLOR = "iconColor"
+  ROLE = "spec_role"
+  ASSET_TYPE = "spec_asset_type"
+  DOC_TYPE = "spec_doc_type"
+  PRODUCT_ICON = "icon"
+
+
+class Role:
+  """
+  The `spec_role` values this callback answers for; every other role is declined.
+
+  Attributes:
+    CATALOG: The content root's own level note, which belongs to no product.
+    PRODUCT: A product's level note.
+    STATUS: An asset's status folder-note.
+  """
+
+  CATALOG = "catalog"
+  PRODUCT = "product"
+  STATUS = "status"
+
+
+# the operation this callback answers; a `when` request is not its business
+RESOLVE_OP = "resolve"
+
+
+def _repo_root() -> Path:
+  """
+  Locate the repository root the callback was invoked in — the settings root, not the content root.
+
+  Returns:
+    The git top-level of the working directory, falling back to the working directory itself
+    when git cannot answer.
+  """
+  try:
+    proc = subprocess.run(
+      ["git", "rev-parse", "--show-toplevel"],
+      capture_output = True, text = True, check = True,
+    )
+    return Path(proc.stdout.strip())
+  except (OSError, subprocess.CalledProcessError):
+    # the callback inherits the worker's working directory, which is the repository it paints;
+    # the shipped file's own parents point into the plugin tree, never at that repository
+    return Path.cwd()
+
+
+def type_pair(root: Path, path: str, frontmatter: dict) -> tuple[str, str] | None:
+  """
+  Resolve the icon and colour the note's own kind gives it.
+
+  Args:
+    root: Vault root holding the settings the product scope is read from.
+    path: Note's vault-relative path, which decides whose product scope applies.
+    frontmatter: Note's parsed frontmatter mapping.
+
+  Returns:
+    An `(icon, colour)` pair, or None when nothing here declares this note's kind.
+  """
+  role = frontmatter.get(Key.ROLE)
+  product_key, record = resolve_product.resolve_product_by_path(root, path)
+  record = record if isinstance(record, dict) else {}
+
+  # the catalog root belongs to no product, so the shipped registry entry is its only source
+  if role == Role.CATALOG:
+    return asset_types.icon_color(Role.CATALOG, {})
+
+  # a product may name an icon of its own in its settings record; the colour stays the type's
+  if role == Role.PRODUCT:
+    pair = asset_types.icon_color(Role.PRODUCT, {})
+    # guard: an undeclared product type leaves the record's icon with no colour to pair with
+    if pair is None:
+      return None
+    return record.get(Key.PRODUCT_ICON) or pair[0], pair[1]
+
+  # an asset is painted by the type it declares, resolved inside its own product's scope so a
+  # product's own asset-type overrides are honoured exactly as a fresh scaffold honours them
+  if role == Role.STATUS:
+    return asset_types.icon_color(frontmatter.get(Key.ASSET_TYPE, ""), record)
+
+  # a typed document carries no role of its own; its document type is what says what it is
+  doc_type = frontmatter.get(Key.DOC_TYPE)
+  if doc_type:
+    return spec_doc_types.icon_color(root, doc_type, product_key)
+  return None
+
+
+def resolve(path: str, frontmatter: dict) -> dict:
+  """
+  Answer one resolve request with the note's type pair, or decline.
+
+  Args:
+    path: Note's vault-relative path.
+    frontmatter: Note's parsed frontmatter mapping.
+
+  Returns:
+    An icon entry as `{"iconName": ..., "iconColor": ...}`, or an empty mapping when this
+    callback has nothing to say about the note.
+  """
+  try:
+    pair = type_pair(_repo_root(), path, frontmatter)
+  # waiver: a callback never raises — an unreadable settings file, a malformed record, or any
+  # other resolver failure must read to the host as "no opinion", not as a broken matcher
+  # noinspection PyBroadException
+  # pylint: disable-next=broad-exception-caught
+  except Exception:  # noqa: BLE001
+    return {}
+  # guard: nothing declares this note's kind, or the declaration names no icon
+  if not pair or not pair[0]:
+    return {}
+  return { Key.ICON_NAME: pair[0], Key.ICON_COLOR: pair[1] }
+
+
+def main() -> int:
+  """
+  Run the iconize callback: answer the resolve request carried on stdin.
+
+  Returns:
+    Process exit code; always 0 on a completed run.
+  """
+  try:
+    payload = json.loads(sys.stdin.read() or "{}")
+  except (OSError, ValueError):
+    payload = {}
+  path = payload.get(Key.PATH, "")
+  frontmatter = payload.get(Key.FRONTMATTER) or {}
+
+  # only a resolve request naming an actual note with a frontmatter mapping gets an answer
+  entry: dict = {}
+  if payload.get(Key.OP) == RESOLVE_OP and isinstance(path, str) and path and isinstance(frontmatter, dict):
+    entry = resolve(path, frontmatter)
+
+  # the answer goes back to the host on stdout, an empty mapping meaning "no opinion"
+  sys.stdout.write(json.dumps(entry))
+  return 0
+
+
+if __name__ == "__main__":
+  sys.exit(main())

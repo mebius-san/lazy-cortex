@@ -71,6 +71,8 @@ The worker never strips icon keys from a note no matcher claims: sibling plugins
 
 A registry matcher's `callback: <id>` resolves against the vault's `.claude/callbacks/<id>` first — the operator overrides a shipped callback the same way an operator matcher beats a plugin matcher — falling back to the shipping plugin's own `claude/<plugin>/callbacks/<id>` (executable, stdin/stdout JSON per the iconize protocol), which is what makes registry callbacks work with zero vault setup. Personal-map matchers resolve from the vault directory only.
 
+Both callback ops carry the candidate's vault-relative `path`. A `when` callback receives `{op, path, frontmatter}` and answers `{"match": <bool>}`; a `resolve` callback receives `{op, path, frontmatter, icon_map}` and answers `{"iconName", "iconColor"?}` — or `{}` to decline, which leaves the note unclaimed exactly as an empty resolution does. The `path` is what lets a resolve callback answer from where the note sits (which product owns it, which content root it falls under) rather than from frontmatter alone.
+
 ## 6. Registry review checklist
 
 Reviewing a registry (in code review or `lazy-obsidian.audit`) means checking:

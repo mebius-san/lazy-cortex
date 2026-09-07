@@ -2345,7 +2345,8 @@ def _build_entry(resolve_spec: dict, icon_map: dict, frontmatter: dict, basename
   composition (overlays are sorted by descending priority, ties broken by declaration
   order via a stable sort), and a `{callback}` external resolution. The `path` argument
   is the full vault-relative path; it is required so overlay `when` blocks with
-  `path_glob` or other path-aware predicates evaluate correctly.
+  `path_glob` or other path-aware predicates evaluate correctly, and it is handed to a
+  `{callback}` resolution so the callback can answer from the note's location.
 
   Args:
     resolve_spec: Resolve block from a matcher entry.
@@ -2397,25 +2398,31 @@ def _build_entry(resolve_spec: dict, icon_map: dict, frontmatter: dict, basename
         return entry if IconKey.NAME in entry else None
     return base
   if MapKey.CALLBACK in resolve_spec:
-    return _callback_resolve(resolve_spec[MapKey.CALLBACK], frontmatter, icon_map)
+    return _callback_resolve(resolve_spec[MapKey.CALLBACK], frontmatter, icon_map, path)
   return None
 
 
-def _callback_resolve(callback_id: str, frontmatter: dict, icon_map: dict) -> dict | None:
+def _callback_resolve(callback_id: str, frontmatter: dict, icon_map: dict, path: str = "") -> dict | None:
   """
   Resolve an icon entry via an external callback.
+
+  The payload carries the candidate's vault-relative path alongside its frontmatter, so a
+  callback whose answer depends on where the note sits — which product owns it, which content
+  root it falls under — has the same locator a `when` callback is given.
 
   Args:
     callback_id: Filename of the callback under the callback directory.
     frontmatter: Parsed frontmatter mapping passed to the callback.
     icon_map: Parsed icon-map dict passed to the callback for registry lookups.
+    path: Vault-relative POSIX path of the candidate file, passed to the callback.
 
   Returns:
     Resolved icon entry as `{"iconName": ..., "iconColor"?: ...}`, or None when the
     callback declines to resolve.
   """
   r = _invoke_callback(callback_id,
-                       { CallbackKey.OP: "resolve", CallbackKey.FRONTMATTER: frontmatter,
+                       { CallbackKey.OP: "resolve", CallbackKey.PATH: path,
+                         CallbackKey.FRONTMATTER: frontmatter,
                          CallbackKey.ICON_MAP: icon_map })
   # guard: callback declined or returned no name
   if not r or not r.get(IconKey.NAME):

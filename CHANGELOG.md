@@ -607,6 +607,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 7.5.0 — 2026-09-07 UTC
+
+- New `deferred` asset state (grey) for assets whose documents are all parked with only pending Review rows — distinguished from `waits-operator` (orange), since parked work isn't an operator queue item.
+- Folder notes with no matching state now fall back to a type-based color instead of losing their icon.
+
 ### 7.4.0 — 2026-09-07 UTC
 
 - Fixed `# Gates` accumulating a duplicate "flipped" record on every gate flip — the reason for a flip now lives only in the run log, so the section holds just the launch checkboxes.
@@ -826,6 +831,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 5.1.1 — 2026-09-07 UTC
+
+- Icon-map `resolve` callbacks now receive the candidate note's vault-relative path alongside its frontmatter, letting a callback answer from where a note lives (which product or content root owns it) instead of frontmatter alone.
 
 ### 5.1.0 — 2026-09-07 UTC
 

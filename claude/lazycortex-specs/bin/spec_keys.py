@@ -214,6 +214,10 @@ class AssetState:
     IN_REVIEW: One of the asset's documents is in the review loop.
     IMPLEMENTATION: An implementation job is in flight, or `spec_develop_done` is still open.
     TESTING: A test run is under way, or `spec_tests_passing` is still open.
+    DEFERRED: Every stage-bearing sibling document sits at `spec_stage: deferred` and the only
+      launch rows hanging are those documents' own `Review <doc>` rows — a parked backlog, not
+      an operator anyone is waiting on. Judged ahead of `WAITS_OPERATOR`, whose hanging-checkbox
+      condition those `Review` rows would otherwise satisfy.
     WAITS_OPERATOR: A launch checkbox or a `[!question]` callout is hanging; automation stands.
     BLOCKED: An asset named in `spec_depends_on` has not reached the state this one needs.
     DONE: `spec_released` is true.
@@ -223,6 +227,7 @@ class AssetState:
   IN_REVIEW = "in-review"
   IMPLEMENTATION = "implementation"
   TESTING = "testing"
+  DEFERRED = "deferred"
   WAITS_OPERATOR = "waits-operator"
   BLOCKED = "blocked"
   DONE = "done"
@@ -234,6 +239,7 @@ ASSET_STATES = frozenset({
     AssetState.IN_REVIEW,
     AssetState.IMPLEMENTATION,
     AssetState.TESTING,
+    AssetState.DEFERRED,
     AssetState.WAITS_OPERATOR,
     AssetState.BLOCKED,
     AssetState.DONE,

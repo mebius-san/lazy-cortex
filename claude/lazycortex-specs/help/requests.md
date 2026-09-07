@@ -4,13 +4,13 @@ summary: Ingest free-form requests and route them into the spec tree: classify, 
 last_regen: 2026-09-07
 diagram_spec:
   anchor: "How the block flows"
-  request: "Flow diagram showing the requests block pipeline: spec.coordinator, in its routing mode, orchestrates — it calls lazy-spec.request-classify (returns a class token), then lazy-spec.request-find-candidates (returns a ranked candidate list), then writes only structural routing fields (verb, target, product/path/tools/targets/drop) into the routing decision — no per-target prose. Show an operator confirmation step, then a single lazy-spec.request-apply node that branches internally into attach (folds the request onto an existing entity's primary doc) or spawn (scaffolds a new entity's folder and status note only, documents seeded later per launch checkbox) — both paths converge into 'doc's own writer builds from source in its review job'."
+  request: "Flow diagram showing the requests block pipeline: the catalog-root routing coordinator orchestrates — it calls lazy-spec.request-classify (returns a class token), then lazy-spec.request-find-candidates (returns a ranked candidate list), then writes only structural routing fields (verb, target, product/path/tools/targets/drop) into the routing decision — no per-target prose. Show an operator confirmation step, then a single lazy-spec.request-apply node that branches internally into attach (folds the request onto an existing entity's primary doc) or spawn (scaffolds a new entity's folder and status note only, documents seeded later per launch checkbox) — both paths converge into 'doc's own writer builds from source in its review job'."
 source_skills:
   - spec.coordinator
   - lazy-spec.coordinator
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
-source_sha: 16bd72c56e7e50107f9be0af4e908569ddf14c1f
+source_sha: 349e60422166e7fd5411543ace245f516361b6c5
 ---
 # Requests
 
@@ -73,43 +73,40 @@ No document's prose is ever assembled from the routing decision itself. What act
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  specCoordinatorRoutingMode["spec.coordinator - routing mode"]
-  requestClassify["lazy-spec.request-classify"]
-  requestFindCandidates["lazy-spec.request-find-candidates"]
-  writeRoutingFields["Write structural routing fields - verb, target, product/path/tools/targets/drop"]
-  operatorConfirms{"Operator confirms routing decision?"}
-  requestDropped["Routing decision dropped"]
-  requestApply{"lazy-spec.request-apply - attach or spawn?"}
-  attachToPrimaryDoc["Attach - fold request onto existing entity's primary doc"]
-  spawnNewEntity["Spawn - scaffold new entity's folder and status note only"]
-  writerBuildsFromSource["Doc's own writer builds from source in its review job"]
+  routingCoordinatorOrchestrates["Catalog-root routing coordinator orchestrates"]
+  callRequestClassify["Calls lazy-spec.request-classify"]
+  callFindCandidates["Calls lazy-spec.request-find-candidates"]
+  writeRoutingFields["Writes structural routing fields - verb, target, product/path/tools/targets/drop"]
+  operatorConfirmsRouting["Operator confirms routing decision"]
+  requestApply{"lazy-spec.request-apply"}
+  attachEntity["Attach - fold request onto existing entity's primary doc"]
+  spawnEntity["Spawn - scaffold new entity's folder and status note only (docs seeded later per launch checkbox)"]
+  reviewJobBuildsDoc["Doc's own writer builds from source in its review job"]
 
-  specCoordinatorRoutingMode -->|invokes| requestClassify
-  requestClassify -->|class token| requestFindCandidates
-  requestFindCandidates -->|ranked candidate list| writeRoutingFields
-  writeRoutingFields -->|routing decision drafted| operatorConfirms
-  operatorConfirms -->|rejected| requestDropped
-  operatorConfirms -->|confirmed| requestApply
-  requestApply -->|attach| attachToPrimaryDoc
-  requestApply -->|spawn| spawnNewEntity
-  attachToPrimaryDoc -->|folded| writerBuildsFromSource
-  spawnNewEntity -->|documents seeded later per launch checkbox| writerBuildsFromSource
+  routingCoordinatorOrchestrates -->|calls| callRequestClassify
+  callRequestClassify -->|returns class token| callFindCandidates
+  callFindCandidates -->|returns ranked candidates| writeRoutingFields
+  writeRoutingFields -->|routing decision drafted| operatorConfirmsRouting
+  operatorConfirmsRouting -->|confirmed| requestApply
+  requestApply -->|attach| attachEntity
+  requestApply -->|spawn| spawnEntity
+  attachEntity -->|converges| reviewJobBuildsDoc
+  spawnEntity -->|converges| reviewJobBuildsDoc
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
   classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
-  classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
-  class specCoordinatorRoutingMode entry
-  class requestClassify action
-  class requestFindCandidates action
+
+  class routingCoordinatorOrchestrates entry
+  class callRequestClassify action
+  class callFindCandidates action
   class writeRoutingFields action
-  class operatorConfirms guard
+  class operatorConfirmsRouting guard
   class requestApply guard
-  class attachToPrimaryDoc action
-  class spawnNewEntity action
-  class writerBuildsFromSource success
-  class requestDropped error
+  class attachEntity action
+  class spawnEntity action
+  class reviewJobBuildsDoc success
 ```
 
 ## See also
