@@ -165,7 +165,7 @@ Ticking it is the operator saying "unpark this and pick it up again", so the ena
 
 This closes a gesture gap: re-opening review on an already-approved document from Obsidian alone had no route before — every other entry into review needed a Claude session.
 
-An asset whose every stage-bearing document is parked this way, hanging nothing but those documents' `Review` rows, reads as `spec_state: deferred` rather than `waits-operator` — the whole asset is a parked backlog, and the rows it holds are the way back in, not a queue anyone is standing in.
+An asset whose every stage-bearing document is parked this way reads as `spec_state: deferred` — the whole asset is a parked backlog, whatever rows its note happens to hang. One live document among the parked ones is enough to take the asset off that state and back onto the ordinary table.
 
 **`spec_draft` — the publication flag.** The coordinator sets `spec_draft: true` when it canonizes a fresh asset (a negative gate — absent or false means ready). It never clears automatically the moment `spec_released` closes: an approved-and-implemented asset is not necessarily one the operator wants a downstream consumer to see yet, since related work on the same product may still be in flight. Clearing it is an operator gesture — the `Publish` checkbox a type playbook hangs, or, on a profile that hangs none, the operator's own word (Chapter 17).
 
@@ -243,7 +243,7 @@ The value is whichever of these fits first, read top to bottom:
 
 | Value | The asset is |
 |---|---|
-| `deferred` | parked: every stage-bearing document sits at `spec_stage: deferred`, and the only rows hanging are those documents' own `Review <doc>` rows — no dispatch label, no open `[!question]`, not halted |
+| `deferred` | parked: every stage-bearing document of the asset sits at `spec_stage: deferred` — nothing else about the note is consulted |
 | `waits-operator` | holding a launch checkbox or a `[!question]` the operator has not ticked; automation is standing |
 | `blocked` | waiting on an asset named in `spec_depends_on` that has not reached the state this one needs |
 | `in-review` | carrying a sibling document with `review_active: true` |
@@ -252,7 +252,7 @@ The value is whichever of these fits first, read top to bottom:
 | `done` | past `spec_released` |
 | `draft` | none of the above — the design is still being written |
 
-The order is the point: an asset that is both waiting on a tick and holding an open gate reads as `waits-operator`, because that is the one a person can act on. `deferred` sits above it for the same reason read the other way — a fully parked asset hangs `Review` rows that satisfy the `waits-operator` condition without anyone actually waiting, and reading it as an operator's queue is exactly the wrong signal to paint.
+The order is the point: an asset that is both waiting on a tick and holding an open gate reads as `waits-operator`, because that is the one a person can act on. `deferred` sits above it because a fully parked asset hangs rows that would satisfy the `waits-operator` condition without anyone actually waiting, and reading a parked backlog as an operator's queue is exactly the wrong signal to paint. A partly parked asset — one live document beside parked ones — is not `deferred`; it reads from the rows below like any other, and its parked documents simply close nothing.
 
 `spec_halted` and `spec_cancelled` are NOT values of this key. They are their own frontmatter flags, and the registry paints them over whatever `spec_state` says — so the coordinator leaves the state token describing the work, not the freeze.
 

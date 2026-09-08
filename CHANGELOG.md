@@ -607,6 +607,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 7.5.1 — 2026-09-08 UTC
+
+- Fixed `deferred` asset-state detection to be judged by document stages alone — stray note lines or open questions no longer block it, and a single live document alongside deferred ones now correctly returns the asset to normal gate tracking instead of miscomputing its state.
+
 ### 7.5.0 — 2026-09-07 UTC
 
 - New `deferred` asset state (grey) for assets whose documents are all parked with only pending Review rows — distinguished from `waits-operator` (orange), since parked work isn't an operator queue item.

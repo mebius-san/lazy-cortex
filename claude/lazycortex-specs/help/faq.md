@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about products, assets, vision/design docs, gates, requests, decisions, coverage gaps, spec lookups, and the coordinator agent.
-last_regen: 2026-09-07
+last_regen: 2026-09-08
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,7 +31,7 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 6958353e842b5553d804e344c5da02e80456efd2
+source_sha: d93e157ad67a4c82b400d2eac84f6f4ade31545f
 ---
 # Frequently asked questions
 
@@ -129,7 +129,7 @@ Yes, automatically. A markdown attachment — a file carrying `spec_owner_doc` p
 
 A committed edit to a parked document still wakes its owning coordinator the same as any operator edit — the folder-note's gates and status brief stay current — but the document's own content is left alone. The only way out is `draft`: either tick the `Review <doc>` row the folder note grows in place of the usual `Write <doc>` checkbox (ticking it moves the document to `draft` and opens its review in one action), or run `/lazy-spec.set-stage <doc> draft` yourself. Asking for any other stage on a parked document — `approved`, `rejected`, `cancelled`, `empty` — is refused.
 
-When every stage-bearing document under an asset ends up parked this way — nothing left but `Review <doc>` rows waiting — the asset's own folder-note picks up a matching asset-level state, `spec_state: deferred`, and its folder paints grey instead of the orange `waits-operator` colour: a parked backlog reads differently at a glance from an asset that's genuinely waiting on you to act. This `spec_state` value is distinct from the per-document `spec_stage: deferred` described above — one is the asset's own derived status (what the coordinator and the icon registry read), the other is a single document's park state — and `/lazy-spec.doctor` treats both as legal, unrelated values.
+When every stage-bearing document under an asset ends up parked this way, the asset's own folder-note picks up a matching asset-level state, `spec_state: deferred` — decided purely from the documents' own stages, whatever else the note happens to hang (an open launch row, a pending question, or nothing at all) — and its folder paints grey instead of the orange `waits-operator` colour: a parked backlog reads differently at a glance from an asset that's genuinely waiting on you to act. One live (non-parked) document among the rest is enough to put the asset back on the ordinary state table, where the parked documents simply close nothing. This `spec_state` value is distinct from the per-document `spec_stage: deferred` described above — one is the asset's own derived status (what the coordinator and the icon registry read), the other is a single document's park state — and `/lazy-spec.doctor` treats both as legal, unrelated values.
 
 ---
 
