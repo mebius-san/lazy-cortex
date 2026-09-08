@@ -49,6 +49,7 @@ Render `repo[]` first, above the table — it is not per-expert, and a `fail` th
 
 - `fail` on inbox ownership — another checkout on this host drives the same physical inbox, so every file would be dispatched twice. This is not one of the fixes Step 3 applies: which checkout drives a shared inbox is the operator's decision. Print the finding and state that one of the two projects must stop naming a checkout on this host in its `daemon.run_here`, then re-run.
 - `fail` on sandbox `allowWrite` — a confined spawn is checked against the resolved path, so an entry reached through a symlink permits nothing where the data lives and every write there fails with `Operation not permitted`. The finding carries the repair: `lazycortex-core sandbox-sync --repo-root <repo>`. Offer it as a Step 3 fix; it adds the resolved locations and never drops a recorded entry.
+- `fail` on sandbox `allowUnsandboxedCommands` not recorded `false` — Claude Code's default lets a command the sandbox blocked be retried unsandboxed, subject only to the permission check a bare `Bash` allow passes, so a confined spawn could still write outside its scope on the second try. The same `sandbox-sync` call records the switch closed when it is absent; a recorded `true` is the checkout's decision and the finding stays until the operator flips it.
 - `warn` on sandbox `allowRead` — same cause on the read side; same repair.
 
 When `repo[]` is empty, print nothing for it.

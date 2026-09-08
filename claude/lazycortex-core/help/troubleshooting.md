@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-core skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-07
+last_regen: 2026-09-08
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Top-level router for the lazycortex-core troubleshooting entries: one root decision node asking which symptom group the reader is in, branching to ten group nodes and stopping there — no per-entry leaves. The groups are: install-or-setup (Python floor, plugin cache, settings writes, daemon supervisor and run_here map, scaffold registry, generic iteration loops, audit and doctor findings), agent-models (tier routing, scope flags, floor env, duplicate keys, seed data gaps), mcp-or-security (allow-mcp server resolution, mark-public gates, pre-commit hook), git-coordination (staging lock, pathspec discipline), expert-runtime (dispatch payloads, collect and cancel status, preflight validation, spawn timeouts, stream-idle watchdog re-spawns, unpinned models, plugin-path resolution, stale source paths at claim time), routines (register and unregister, name format, protocol offers), daemon-or-runtime (stale daemon, halts and recovery, remote-sync backoff, post-push hook), memory (persona marking, note frontmatter, index and reflect sources, worker import errors), log-clean (log dir resolution, commit recording), and migration (moving off the retired lazycortex-log plugin). Each group node names the section of this page the reader should jump to; the individual entry headings on the page are the leaves and are not repeated in the diagram."
@@ -38,7 +38,7 @@ source_skills:
   - lazy-runtime.preflight
   - lazy-runtime.recover
   - lazy-runtime.tick
-source_sha: 49c3acca48d76212bd8165bbd0df7bc23243faa9
+source_sha: 063baee10c75ba3794390ccf935191d3c564a350
 ---
 # Troubleshooting
 
@@ -670,9 +670,9 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 
 **Symptom**: `git status` suddenly reports staged content nobody staged, or a commit is refused by `lazy-core.git-guard` citing an unclean index — right after the working tree passed through a machine running Dropbox, iCloud Drive, or a similar sync client, with no session actually mid-commit. A file named `index (<name>'s conflicted copy <date>)` sits beside `.git/index` inside `.git/`.
 
-**Likely cause**: A cloud-sync client raced git's own rename-replace write of `.git/index` and resolved the conflict by keeping an older index under the live name while stashing the newer one — the version git actually wrote last, parked staging included — under a `... conflicted copy ...` filename. `git status` then reads the resurrected older index and reports content nobody staged. Both `lazy-core.git-guard`'s pre-flight and the runtime daemon's own pre-tick git sync heal this automatically before judging anything: they restore the newest conflicted copy over the live index and remove the litter, so the symptom is usually gone by the time you look. The heal only fires when no git operation is mid-flight (`index.lock` absent) and the newest copy is both strictly newer than the live index and carries a valid index signature — anything short of that is left untouched rather than guessed at.
+**Likely cause**: A cloud-sync client raced git's own rename-replace write of `.git/index` and resolved the conflict by keeping an older index under the live name while stashing the newer one — the version git actually wrote last, parked staging included — under a `... conflicted copy ...` filename. `git status` then reads the resurrected older index and reports content nobody staged. Both `lazy-core.git-guard`'s pre-flight and the runtime daemon's own pre-tick git sync heal this automatically before judging anything: they restore the newest conflicted copy over the live index and remove the litter, so the symptom is usually gone by the time you look. The heal judges by content against `HEAD`, not by file timestamp — an ordinary `git status` rewrites the live index and would make a resurrected stale copy look newest by mtime alone, so the guard instead restores the newest signature-valid copy only when that copy stages nothing beyond `HEAD` while the live index does stage something beyond it. When neither the copy nor the live index agrees with `HEAD`, both are genuinely different staged states nothing here can rank, so the guard leaves everything untouched (reported as `ambiguous`) rather than pick one by guesswork. The heal only fires when no git operation is mid-flight (`index.lock` absent).
 
-**Fix**: Retry the git command once — the guard heals on the next pre-flight and the phantom content disappears on its own. If it persists (an `index.lock` is stuck, or the newest copy fails the newer-than/signature check), run `lazycortex-core index-guard` from the repo root to heal by hand; it prints a report of what it restored and removed. Never hand-copy or delete the `... conflicted copy ...` file yourself — the guard's newest-wins comparison protects any legitimately parked staging that an out-of-order manual copy would silently drop.
+**Fix**: Retry the git command once — the guard heals on the next pre-flight and the phantom content disappears on its own. If it persists (an `index.lock` is stuck, the newest copy fails the signature check, or the report comes back `ambiguous`), run `lazycortex-core index-guard` from the repo root to heal by hand; it prints a report of what it restored and removed. Never hand-copy or delete the `... conflicted copy ...` file yourself — the guard's content-against-`HEAD` comparison protects any legitimately parked staging that a manual copy could otherwise clobber. On an `ambiguous` report, inspect both states by hand (`git diff --cached` against each index file) before deciding which one to keep.
 
 ---
 
@@ -763,6 +763,16 @@ Restart Claude Code, then re-run `/lazy-core.install`. For a cache problem, run 
 **Likely cause**: The sandbox allowlist that confines the expert's spawn names a directory reached through a symlink — commonly one of the external working directories `/lazy-core.install` links in at Step 12.5 — and confinement is checked against the resolved (real) path rather than the symlinked one, so the allowlist entry never actually matches what the spawn tries to reach.
 
 **Fix**: Run `/lazy-runtime.preflight` again — it now offers a `sandbox` fix for this case; accept it, or run `lazycortex-core sandbox-sync --repo-root "$PWD"` by hand to regenerate `.runtime/sandbox.settings.json` against resolved paths.
+
+---
+
+## `/lazy-core.audit` or `/lazy-runtime.preflight` fails on `allowUnsandboxedCommands`
+
+**Symptom**: `/lazy-core.audit`'s expert-runtime section (Agent D) or `/lazy-runtime.preflight` reports a FAIL finding like "sandbox `allowUnsandboxedCommands` is not recorded `false`, so a command the sandbox blocks is retried unsandboxed" against `.runtime/sandbox.settings.json`.
+
+**Likely cause**: Claude Code defaults `allowUnsandboxedCommands` to `true` when the key is absent from the sandbox file. Under that default, a command the sandbox blocks is silently retried without confinement, subject only to the ordinary permission check — which a bare `Bash` allow entry already passes — so a confined expert spawn could still write or delete outside its granted scope on the retry. `lazycortex-core sandbox-sync` now writes this key `false` whenever it is missing, but a checkout whose sandbox file predates this fix keeps the old absent (defaulting-to-`true`) state until the sync runs again.
+
+**Fix**: Run `lazycortex-core sandbox-sync --repo-root "$PWD"` — or accept the equivalent fix `/lazy-runtime.preflight` offers — to write `allowUnsandboxedCommands: false` into `.runtime/sandbox.settings.json`. If the finding persists because the key is recorded `true` on purpose, that is your own decision on record: the audit and preflight checks report it but never flip it back on your behalf — remove the key or set it to `false` yourself to clear the finding.
 
 ---
 

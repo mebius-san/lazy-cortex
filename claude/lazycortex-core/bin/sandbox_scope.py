@@ -207,12 +207,14 @@ def audit(repo: Path | str) -> dict:
   doc = _read(path)
   sandbox = doc.get(SandboxKey.SANDBOX)
   enabled = sandbox.get(SandboxKey.ENABLED) if isinstance(sandbox, dict) else None
+  unsandboxed = sandbox.get(SandboxKey.ALLOW_UNSANDBOXED) if isinstance(sandbox, dict) else None
 
   # what the caller reports: where the scope lives, what it grants, and what it fails to grant
   return {
     SandboxSyncKey.PATH: str(path),
     SandboxSyncKey.PRESENT: path.exists(),
     SandboxSyncKey.ENABLED: enabled if isinstance(enabled, bool) else None,
+    SandboxSyncKey.ALLOW_UNSANDBOXED: unsandboxed if isinstance(unsandboxed, bool) else None,
     SandboxSyncKey.MISSING_READ: missing_paths(_recorded(doc, SandboxKey.ALLOW_READ)),
     SandboxSyncKey.MISSING_WRITE: missing_paths(_recorded(doc, SandboxKey.ALLOW_WRITE)),
   }
@@ -227,8 +229,9 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
       of the checkout it works in can do nothing.
     - Whatever is writable is also readable, so the write scope is folded into the read
       allowlist as well.
-    - Recorded entries are never dropped or reordered, and a recorded confinement switch is
-      never overwritten — the file belongs to the checkout, and this only adds to it.
+    - Recorded entries are never dropped or reordered, and a recorded confinement switch or
+      unsandboxed-retry switch is never overwritten — the file belongs to the checkout, and
+      this only adds to it. An unrecorded retry switch is recorded closed.
     - The file is rewritten whenever the document to record differs from what is already on
       disk — including recording a previously absent confinement switch with no scope growth —
       and is left untouched otherwise.
@@ -269,6 +272,18 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
   # a recorded switch is the checkout's decision; only an unrecorded one is turned on here
   enabled = sandbox.get(SandboxKey.ENABLED)
   sandbox[SandboxKey.ENABLED] = enabled if isinstance(enabled, bool) else True
+
+  # Decision: the unsandboxed retry is closed here, not left to Claude Code's default of open —
+  # a command the sandbox blocks is otherwise retried with `dangerouslyDisableSandbox` and passes
+  # the permission check a checkout that allows bare `Bash` grants, so `rm -rf` outside the write
+  # scope fails once and succeeds on the second try; `dontAsk` has nothing to deny there. Same
+  # treatment as `enabled`: only an unrecorded value is written.
+
+  # the retry switch follows the confinement switch: a recorded value stays, an absent one closes
+  unsandboxed = sandbox.get(SandboxKey.ALLOW_UNSANDBOXED)
+  sandbox[SandboxKey.ALLOW_UNSANDBOXED] = unsandboxed if isinstance(unsandboxed, bool) else False
+
+  # the allowlists are the only fields rebuilt wholesale, from what was recorded plus what is new
   filesystem[SandboxKey.ALLOW_READ] = recorded_read + added_read
   filesystem[SandboxKey.ALLOW_WRITE] = recorded_write + added_write
   sandbox[SandboxKey.FILESYSTEM] = filesystem
@@ -286,6 +301,7 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
     SandboxSyncKey.PATH: str(path),
     SandboxSyncKey.PRESENT: present,
     SandboxSyncKey.ENABLED: sandbox[SandboxKey.ENABLED],
+    SandboxSyncKey.ALLOW_UNSANDBOXED: sandbox[SandboxKey.ALLOW_UNSANDBOXED],
     SandboxSyncKey.ADDED_READ: added_read,
     SandboxSyncKey.ADDED_WRITE: added_write,
     SandboxSyncKey.CHANGED: changed,

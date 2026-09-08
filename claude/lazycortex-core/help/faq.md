@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-09-07
+last_regen: 2026-09-08
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -32,7 +32,7 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: 49c3acca48d76212bd8165bbd0df7bc23243faa9
+source_sha: 063baee10c75ba3794390ccf935191d3c564a350
 ---
 # FAQ
 
@@ -216,6 +216,14 @@ experts:
 ```
 
 Only the named hooks run for that expert's spawns; every other lazycortex hook stays gated off.
+
+---
+
+## Why does the expert-spawn sandbox now record `allowUnsandboxedCommands: false`?
+
+A confined spawn is only as strong as what happens when the sandbox actually blocks something. Claude Code's own default for an absent `allowUnsandboxedCommands` key is `true`, and under that default a command the sandbox refuses on its first try is simply retried unsandboxed — subject only to the ordinary permission check, which the bare `Bash` allow entry every expert spawn already carries in `settings.local.json` passes without a prompt. In practice this meant a confined spawn could still write or delete outside its `allowWrite` scope on the second attempt, even though the first attempt was correctly blocked.
+
+`lazycortex-core sandbox-sync` now writes `allowUnsandboxedCommands: false` into `.runtime/sandbox.settings.json` whenever the key is absent, closing that retry path — it never touches a value already on record, so a `true` you (or an earlier install) set deliberately is left as your call, not silently reversed. `/lazy-core.audit` and `/lazy-runtime.preflight` both `[FAIL]` on a missing or `true` value now, and either finding points at the same fix: `lazycortex-core sandbox-sync --repo-root "$PWD"`.
 
 ---
 
@@ -426,7 +434,7 @@ The same index-health check also watches `pull`, `merge`, and `rebase`, not just
 
 That is a sync-displaced index healing itself, not a swap the git-guard hook needed to alarm on. A cloud-sync client (Dropbox, iCloud, Syncthing) can race git's own atomic rename of `.git/index`, lose, and resolve the "conflict" by leaving an older index under the real name while parking the version git actually wrote last beside it as `index (<owner>'s conflicted copy <date>)`. The resurrected old index is what makes `git status` show phantom staged content.
 
-`/lazy-core.install` registers a `lazy-core.index-guard` routine alongside the built-in expert pump and doctor tick — it runs every 5 minutes, independent of `daemon.enabled`, and `/lazy-runtime.tick` drives it on a checkout with no daemon exactly as it would any other routine. The git-guard hook also runs the same heal as a pre-flight check on every commit-related tool call. Either way, the heal restores the newest conflicted copy over the live index and deletes the litter, but only when that copy is strictly newer than the live file, carries a valid index signature, and no `index.lock` is present — a git operation mid-flight is left alone and retried on the next pass. The worktree, `HEAD`, and refs are never touched, and a repository with no conflicted copies is a silent no-op.
+`/lazy-core.install` registers a `lazy-core.index-guard` routine alongside the built-in expert pump and doctor tick — it runs every 5 minutes, independent of `daemon.enabled`, and `/lazy-runtime.tick` drives it on a checkout with no daemon exactly as it would any other routine. The git-guard hook also runs the same heal as a pre-flight check on every commit-related tool call. Either way, the heal decides by content against `HEAD`, never by file timestamp: it restores the newest conflicted copy over the live index only when that copy carries a valid index signature, differs from the live index, and stages nothing beyond `HEAD` (the copy is the one git actually wrote last, and a live index that disagrees with `HEAD` is the resurrected stale one). A copy that itself disagrees with `HEAD` while the live index also disagrees is two staged states nothing here can rank — both are left in place for the operator, reported `skipped: ambiguous`. No `index.lock` may be present either — a git operation mid-flight is left alone and retried on the next pass. The worktree, `HEAD`, and refs are never touched, and a repository with no conflicted copies is a silent no-op.
 
 Because the heal runs automatically on this cadence, you should rarely see the phantom state persist past a minute or two. If you want to trigger it immediately rather than wait for the next tick, run `/lazy-runtime.tick lazy-core.index-guard`. Separately, both the daemon and `/lazy-runtime.tick` now run their own git calls with `GIT_OPTIONAL_LOCKS=0`, so a background `git status` they perform no longer rewrites the shared index on every pass — fewer index rewrites means fewer chances for a sync client to race one in the first place.
 

@@ -846,7 +846,7 @@ print(os.path.basename(root) + '-' + hashlib.sha256(root.encode()).hexdigest()[:
 ```
 
   Hold the printed value as `<REPO_ID>` for 13b/13c. `<REPO_NAME>` (bare basename) is still used only for the human-readable systemd `Description`.
-- **dev-mode** = whether this repo IS a plugin-authoring vault. It is True when `Bash(find <repo-root>/claude -maxdepth 3 -path '*/.claude-plugin/plugin.json' -print -quit)` returns a path, else False. In dev-mode the shim prefers in-repo plugin sources under `<repo-root>/claude/*/` over the cache. Persist the derived value under the flat `daemon` section so Step 13.5's sandbox block lists the right plugin-source paths:
+- **dev-mode** = whether this repo IS a plugin-authoring vault. It is True when `Bash(find <repo-root>/claude -maxdepth 3 -path '*/.claude-plugin/plugin.json' -print -quit)` returns a path, else False. In dev-mode the shim prefers in-repo plugin sources under `<repo-root>/claude/*/` over the cache. Persist the derived value under the flat `daemon` section:
 
 ```bash
 PYTHONPATH=${CLAUDE_PLUGIN_ROOT}/bin python3 -c "
@@ -936,21 +936,21 @@ Both writes are clean, non-contradictory merges — apply the File-sync policy *
 
 The sandbox file is written by `lazycortex-core sandbox-sync`, never by hand. The sandbox compares the **resolved** path, so an allowlist entry reached through a symlink grants nothing where the data actually lives — the CLI records the resolved location of every entry plus the targets of the symlinks directly inside it (an external-dirs `Data` / `-Inbox` slot), which is exactly what a hand-written allowlist misses.
 
-Substitute `<repo-root>` with the absolute path of the current repo. Substitute `<plugin-source-N>` with one entry per plugin source directory a spawn will pass via `--plugin-dir`; `dev_mode` dictates whether these are in-repo `<repo-root>/claude/<plugin>/` paths or `~/.claude/plugins/cache/...` paths. Take the value Step 13a derived and persisted; when Step 13 stopped before 13a (any outcome other than **run-here**), derive it here with 13a's own probe — `Bash(find <repo-root>/claude -maxdepth 3 -path '*/.claude-plugin/plugin.json' -print -quit)` returning a path means True — and do not persist it, since no supervisor unit is being written.
+Substitute `<repo-root>` with the absolute path of the current repo. The plugin sources a spawn reads are granted through ONE entry, the LazyCortex marketplace's cache root `~/.claude/plugins/cache/lazycortex` — never a versioned `<plugin>/<version>` directory (it goes stale on every `/plugin update` and accumulates), and never another marketplace's or a third-party plugin's directory (those are not this skill's to grant). In dev-mode the in-repo `<repo-root>/claude/<plugin>/` sources are already covered by the repo root; the cache entry is still written, since a spawn loads the sibling plugins this repo does not author from the cache.
 
 ```bash
 lazycortex-core sandbox-sync --repo-root <repo-root> \
-  --allow-read <plugin-source-1> --allow-read <plugin-source-2>
+  --allow-read ~/.claude/plugins/cache/lazycortex
 ```
 
-The repo root is granted read+write implicitly. The call is idempotent: it appends only what is missing, never drops or reorders a recorded entry, and never overwrites a recorded `enabled`.
+The repo root is granted read+write implicitly. The call is idempotent: it appends only what is missing, never drops or reorders a recorded entry, and never overwrites a recorded `enabled` or `allowUnsandboxedCommands`. An unrecorded `allowUnsandboxedCommands` is written `false`: Claude Code defaults it to `true`, under which a command the sandbox blocks is retried unsandboxed and only meets the permission check — which Block 2's bare `Bash` allow passes — so a confined spawn could still delete outside its write scope on the second try.
 
 Block 2 — `<repo-root>/.claude/settings.local.json` (permission scope; loaded by every session in the checkout):
 
 ```json
 {
-  "additionalDirectories": ["<plugin-source-1>", "<plugin-source-2>", "..."],
   "permissions": {
+    "additionalDirectories": ["~/.claude/plugins/cache/lazycortex"],
     "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Skill", "Bash(lazycortex-core *)"],
     "deny":  ["Bash(find /*)", "Bash(find /Users/*)", "Bash(grep -r /*)", "Bash(grep -R /*)", "Bash(rg /*)", "Bash(rg --files /*)", "Bash(ls /Users/*)"]
   }
@@ -987,7 +987,7 @@ AskUserQuestion:
 `Read <repo-root>/.claude/settings.local.json` and apply Block 2 + migrate:
 
 5. **Missing or unparseable** → `Write` Block 2 verbatim. State **perms-created**.
-6. **Present** → union missing `permissions` / `additionalDirectories` scope in, silently (add only paths / tool names not already present; never drop existing). State **perms-merged**.
+6. **Present** → union missing `permissions` scope in, silently (add only paths / tool names not already present; never drop existing). `additionalDirectories` lives under `permissions`, where Claude Code reads it; a top-level `additionalDirectories` left by an earlier version of this step is moved under `permissions` in the same edit. State **perms-merged**.
 7. **Migration** — if this file carries a legacy top-level `sandbox` key (written by an earlier version of this step), REMOVE it: the sandbox now lives in the runtime file, and a `sandbox` here would confine the interactive session. State **migrated-local-sandbox**; **no-legacy-sandbox** when absent.
 
 Never replace an entire key with the recommended value. The consumer's existing files are authoritative for shape; this skill only adds missing scope (and removes the migrated `sandbox` key).

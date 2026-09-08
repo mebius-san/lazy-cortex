@@ -760,6 +760,7 @@ class SandboxKey:
   Attributes:
     SANDBOX: The top-level block that confines an expert spawn.
     ENABLED: The switch that turns the confinement on.
+    ALLOW_UNSANDBOXED: The switch that lets a blocked command be retried outside the confinement.
     FILESYSTEM: The block holding the path allowlists.
     ALLOW_READ: The allowlist of paths a confined spawn may read.
     ALLOW_WRITE: The allowlist of paths a confined spawn may write.
@@ -767,6 +768,7 @@ class SandboxKey:
 
   SANDBOX = "sandbox"
   ENABLED = "enabled"
+  ALLOW_UNSANDBOXED = "allowUnsandboxedCommands"
   FILESYSTEM = "filesystem"
   ALLOW_READ = "allowRead"
   ALLOW_WRITE = "allowWrite"
@@ -781,6 +783,7 @@ class SandboxSyncKey:
     PATH: Absolute location of the sandbox settings file the result describes.
     PRESENT: Whether that file existed before the call.
     ENABLED: The confinement switch as recorded in the file, or null when unrecorded.
+    ALLOW_UNSANDBOXED: The unsandboxed-retry switch as recorded in the file, or null when unrecorded.
     ADDED_READ: Read-allowlist entries the sync appended.
     ADDED_WRITE: Write-allowlist entries the sync appended.
     MISSING_READ: Resolved read targets no recorded entry covers.
@@ -791,6 +794,7 @@ class SandboxSyncKey:
   PATH = "path"
   PRESENT = "present"
   ENABLED = "enabled"
+  ALLOW_UNSANDBOXED = "allow_unsandboxed"
   ADDED_READ = "added_read"
   ADDED_WRITE = "added_write"
   MISSING_READ = "missing_read"

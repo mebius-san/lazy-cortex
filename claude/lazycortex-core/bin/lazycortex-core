@@ -4,6 +4,59 @@ import os, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Claude Code puts `<installPath>/bin` of every installed plugin on the session's PATH at
+# startup and never refreshes it, so after `/plugin update` a long-lived session — and every
+# headless spawn inheriting its environment — keeps resolving the bare `lazycortex-core` to the
+# version that was installed when the session began.
+# Decision: the stale-PATH problem is corrected here, inside the binary, not in its callers — a
+# cache-resident copy forwards to the newest cached version before dispatching. The alternative,
+# every skill resolving the installed version's path and invoking it absolutely, touches ~20
+# SKILL.md files across the marketplace and breaks the `Bash(lazycortex-core *)` allow pattern
+# consumers carry: an absolute-path invocation does not match it, so headless spawns under
+# `dontAsk` would be denied. A dev-vault copy never forwards — its source tree is the live one.
+_PLUGIN_CACHE_REL = ".claude/plugins/cache"
+_FORWARDED_ENV = "LAZYCORTEX_CORE_FORWARDED"
+
+
+def _cache_version_key(name: str) -> tuple:
+    """Numeric sort key for a plugin-cache version directory name (`9.10.0` above `9.9.0`)."""
+    out = []
+    for part in name.split("."):
+        digits = ""
+        for ch in part:
+            if not ch.isdigit():
+                break
+            digits += ch
+        out.append(int(digits) if digits else 0)
+    return tuple(out)
+
+
+def _newer_cached_cli() -> Path | None:
+    """Return the newest cached sibling version's CLI when this copy runs from an older one."""
+    here = Path(__file__).resolve().parent
+    if _PLUGIN_CACHE_REL not in here.as_posix():
+        return None
+    running = here.parent
+    versions = [v for v in running.parent.iterdir() if v.is_dir()]
+    if not versions:
+        return None
+    latest = max(versions, key=lambda v: _cache_version_key(v.name))
+    if latest == running:
+        return None
+    cli = latest / "bin" / "lazycortex-core"
+    return cli if cli.is_file() else None
+
+
+def _forward_if_stale() -> None:
+    """Re-exec into the newest cached version, once; a forwarded process never forwards again."""
+    if os.environ.get(_FORWARDED_ENV):
+        return
+    newer = _newer_cached_cli()
+    if newer is None:
+        return
+    os.environ[_FORWARDED_ENV] = "1"
+    os.execv(sys.executable, [sys.executable, str(newer), *sys.argv[1:]])
+
 USAGE = ("usage: lazycortex-core <subcommand> [args...]\n"
          "Subcommands: expert-pump-once, doctor-tick, runtime-tick, runtime, resume, memory-reflect-all, dispatch-job, collect-job, consume-job, cancel-job, lookup-expert, scaffold, file-sync, remote-mirror, safe-pull, error-record, error-list, settings-get, settings-set, routine-ensure-filter, permission-allow, add-protocols, detect-scope, daemon-pause, daemon-resume, daemon-list, metrics-alloc-port, metrics-scrape-file, sandbox-sync, sandbox-audit, index-guard")
 
@@ -649,7 +702,7 @@ def _cmd_sandbox_audit(argv: list[str]) -> int:
     """Report which resolved locations the recorded sandbox scope fails to grant.
 
     Read-only companion to ``sandbox-sync``: prints
-    ``{"path", "present", "enabled", "missing_read", "missing_write"}``. A
+    ``{"path", "present", "enabled", "allow_unsandboxed", "missing_read", "missing_write"}``. A
     non-empty ``missing_write`` means confined spawns will fail every write
     through that symlink with ``Operation not permitted``. Exits 0 either way —
     the verdict travels in the JSON.
@@ -664,6 +717,7 @@ def _cmd_sandbox_audit(argv: list[str]) -> int:
 
 
 def main() -> int:
+    _forward_if_stale()
     if len(sys.argv) < 2:
         print(USAGE, file=sys.stderr); return 2
     sub = sys.argv[1]

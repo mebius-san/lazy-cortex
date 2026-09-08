@@ -4,6 +4,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.2.1 — 2026-09-08 UTC
+
+- **Breaking / security fix**: a command refused by the sandbox could previously retry unsandboxed and succeed; the sandbox lockout is now enforced correctly even when the setting was absent, closing that hole.
+- Fixed the CLI running a stale cached binary after `/plugin update` in long-lived sessions — it now forwards to the newest cached version instead of whatever was on `PATH` at session start.
+- Fixed index-guard skipping recovery of a corrupted git index (now compares content against `HEAD` instead of relying on file mtime), and consolidated granted directory/read permissions to a single shared cache root instead of one per plugin version.
+- Fixed `git add` being blocked during a merge/rebase/cherry-pick, which made it impossible to resolve conflicts — resolving conflicted paths now works as expected.
+
 ### 9.2.0 — 2026-09-07 UTC
 
 - Fixed cross-plugin resolution on consumer installs — the daemon now exports every installed plugin's newest cached version (dev trees still take priority, versions compared numerically), so routines find sibling plugins without needing a dev vault present.

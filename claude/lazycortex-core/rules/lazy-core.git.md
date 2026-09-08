@@ -19,7 +19,7 @@ The operator and every Claude session on a checkout share **one git index**; a b
 
 **The index is not yours.** It belongs to the operator (parked adds, a half-assembled review); its contents are none of your business, and you leave nothing in it.
 
-- **New file** → `git add -N <path>` (registers the path, stages no content). Nothing else may `git add`.
+- **New file** → `git add -N <path>` (registers the path, stages no content). Nothing else may `git add` — except a conflict resolution mid merge / rebase / cherry-pick: `git add <path>` passes when every named path is an unmerged index entry (`git ls-files --unmerged`), because git has no other verb for recording a resolved conflict. A non-conflicted path stays denied even then.
 - **Rename / delete** → Bash `mv` / `rm` in the worktree. Never `git mv` / `git rm` — both auto-stage.
 - **Commit** → always explicit paths: `git commit -m "..." -- <path> <path>`. Never bare, never `-a` / `-am` / `-i`, never `.` / `:/` / a directory pathspec.
 - **MCP `git_add` / `git_commit`** cannot carry a pathspec — unusable here; use Bash.

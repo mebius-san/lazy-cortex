@@ -9,8 +9,10 @@ conflicted copy — the version git actually wrote last, parked operator staging
 onto `.git/index`, and removes the conflicted-copy litter afterwards.
 
 The heal is file-level and conservative: it runs only when no `index.lock` is present (no git
-operation in flight), only when the newest copy is strictly newer than the live index, and only
-when that copy carries the index signature. Anything else leaves the repository untouched.
+operation in flight), and only when the newest copy carries the index signature and agrees with
+`HEAD` while the live index does not. File timestamps play no part — an ordinary `git status`
+rewrites the live index and would make a resurrected stale one look newest. Two candidates that
+both disagree with `HEAD` cannot be ranked, so they are left in place for the operator.
 """
 from __future__ import annotations
 
@@ -61,23 +63,44 @@ def _git_common_dir(repo_root: Path) -> Path | None:
   return (repo_root / probe.stdout.strip()).resolve()
 
 
+def _matches_head(repo_root: Path, index_file: Path) -> bool:
+  """
+  Report whether an index file stages nothing beyond what `HEAD` already holds.
+
+  Args:
+    repo_root: Absolute path to the repository root.
+    index_file: Absolute path to the index file to judge, live or conflicted copy.
+
+  Returns:
+    True when `git diff --cached` against `HEAD` is empty for that index; False when it stages
+    changes, when the file is unreadable as an index, or when the repository has no `HEAD`.
+  """
+  probe = subprocess.run(
+    [ "git", "-c", "core.hooksPath=/dev/null", "diff", "--cached", "--quiet" ],
+    cwd = repo_root, check = False, capture_output = True,
+    env = { **os.environ, "GIT_INDEX_FILE": str(index_file) },
+  )
+  return probe.returncode == 0
+
+
 def guard_index(repo_root: Path) -> dict:
   """
-  Restore the newest conflicted copy of `.git/index` when it is newer than the live file, and
-  remove the conflicted-copy litter.
+  Restore the newest conflicted copy of `.git/index` when it, and not the live file, agrees with
+  `HEAD`, and remove the conflicted-copy litter.
 
   Guarantees:
-    - The live index is replaced only by a strictly newer conflicted copy that carries the git
-      index signature, and never while `index.lock` exists.
+    - The live index is replaced only by a signature-valid conflicted copy that agrees with
+      `HEAD`, never by timestamp, and never while `index.lock` exists.
     - The worktree, HEAD, and refs are never touched.
-    - Conflicted copies are removed only after the newest one was restored or proved stale.
+    - Conflicted copies are removed only after the newest one was restored or proved litter; when
+      neither candidate agrees with `HEAD`, every copy stays for the operator.
 
   Args:
     repo_root: Absolute path to the repository root.
 
   Returns:
     A report dict: `restored` (bool), `removed` (count of copies deleted), and `skipped`
-    (None, or the reason the heal did not run: `no-git`, `index-lock`).
+    (None, or the reason the heal did not run: `no-git`, `index-lock`, `ambiguous`).
   """
   git_dir = _git_common_dir(repo_root)
   # guard: not a repository — nothing to heal
@@ -94,23 +117,32 @@ def guard_index(repo_root: Path) -> dict:
   if (git_dir / _INDEX_LOCK_NAME).exists():
     return { "restored": False, "removed": 0, "skipped": "index-lock" }
 
-  # restore only a strictly newer, signature-valid copy — the version git wrote last that the
-  # sync client displaced; an older copy is litter from an already-resolved incident
+  # a signature-valid copy whose bytes differ from the live index is the one candidate; identical
+  # bytes or garbage are litter, with nothing to restore
   index = git_dir / _INDEX_NAME
   newest = copies[-1]
-  restored = False
-  if (
+  candidate = (
     index.exists()
-    and newest.stat().st_mtime > index.stat().st_mtime
     and newest.read_bytes()[:4] == _INDEX_SIGNATURE
-  ):
-    # copy-then-rename: the live index is never observable half-written
-    staging = git_dir / _STAGING_NAME
-    shutil.copy2(newest, staging)
-    os.replace(staging, index)
-    restored = True
+    and newest.read_bytes() != index.read_bytes()
+  )
+  restored = False
+  if candidate:
+    copy_matches = _matches_head(repo_root, newest)
+    # guard: neither candidate agrees with HEAD — two staged states nothing here can rank, so the
+    # copies stay in place and the operator decides
+    if not copy_matches and not _matches_head(repo_root, index):
+      return { "restored": False, "removed": 0, "skipped": "ambiguous" }
+    # the copy git wrote last agrees with HEAD; a live index that does not is the resurrected
+    # stale one, and a live index that also does is equivalent, so the copy wins either way
+    if copy_matches:
+      # copy-then-rename: the live index is never observable half-written
+      staging = git_dir / _STAGING_NAME
+      shutil.copy2(newest, staging)
+      os.replace(staging, index)
+      restored = True
 
-  # every copy is settled now — restored, or proved stale by the newest-wins comparison
+  # every copy is settled now — restored, or proved litter against HEAD
   removed = 0
   for copy in copies:
     copy.unlink(missing_ok = True)

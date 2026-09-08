@@ -574,10 +574,14 @@ def _pathspec_violation(repo: Path, segment: git_cmdline.GitSegment) -> str | No
   # it, not this one's. A publish mirror or a sibling clone is not this operator's index.
   if segment.repo_dir is not None and not _targets_this_repo(repo, segment.repo_dir):
     return None
-  # guard: an `add` is legal only as intent-to-add — staging content claims the operator's index
   # waiver: git CLI vocabulary, not a domain constant
   if segment.verb == "add":
-    return None if not git_cmdline.adds_content(segment) else _DENY_ADD
+    # guard: an `add` is legal as intent-to-add, or — mid merge / rebase / cherry-pick — when
+    # every path it names is an unmerged entry: `git add` is git's only verb for recording a
+    # resolved conflict, so denying it strands the operation; any other path still parks content
+    if not git_cmdline.adds_content(segment) or _resolves_conflicts_only(repo, segment):
+      return None
+    return _DENY_ADD
   # guard: both verbs stage as a side effect
   if segment.verb in _AUTO_STAGING_VERBS:
     return _DENY_AUTO_STAGING
@@ -695,6 +699,33 @@ def _git_dir(cwd: Path) -> Path | None:
     return None
   p = Path(r.stdout.strip())
   return p if p.is_absolute() else (cwd / p).resolve()
+
+
+def _resolves_conflicts_only(repo: Path, segment: git_cmdline.GitSegment) -> bool:
+  """
+  Report whether a content-staging `git add` only records resolved conflicts of an operation in flight.
+
+  Args:
+    repo: Absolute path to the repository root.
+    segment: One parsed `git add` invocation.
+
+  Returns:
+    True when the repo is mid merge / rebase / cherry-pick / revert and every path the segment
+    names is currently an unmerged index entry; False otherwise, including for an `add` that
+    names no path at all.
+  """
+  git_dir = _git_dir(repo)
+  # guard: outside a transactional operation there are no conflicts to resolve
+  if git_dir is None or not _mid_operation(git_dir) or not segment.pathspecs:
+    return False
+  # waiver: git CLI vocabulary, not domain constants
+  r = _git_at(repo, "ls-files", "--unmerged")
+  # guard: git could not list the index — nothing is proven unmerged, so nothing passes
+  if r.returncode != 0:
+    return False
+  # `ls-files --unmerged` prints one `<mode> <sha> <stage>\t<path>` line per conflict stage
+  unmerged = { line.split("\t", 1)[1] for line in r.stdout.splitlines() if "\t" in line }
+  return all(os.path.normpath(p) in unmerged for p in segment.pathspecs)
 
 
 def _mid_operation(git_dir: Path) -> bool:

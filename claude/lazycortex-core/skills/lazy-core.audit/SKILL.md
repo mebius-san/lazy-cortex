@@ -460,6 +460,7 @@ print(json.dumps(audit(Path('.')), ensure_ascii=False))
 
 `present: false` → emit nothing (no sandbox file, so expert spawns run unconfined). `enabled: false` → emit nothing (confinement is off; the allowlist neither grants nor denies). Otherwise:
 
+- `[FAIL]` `allow_unsandboxed` is not `false` — `sandbox allowUnsandboxedCommands is not recorded false, so a command the sandbox blocks is retried unsandboxed | .runtime/sandbox.settings.json`; `fix: run lazycortex-core sandbox-sync --repo-root "$PWD"` when the key is absent (a recorded `true` is the operator's decision — report it, never flip it).
 - `[FAIL]` each entry of `missing_write` — `sandbox allowWrite does not cover <path>, which its own entries resolve to | .runtime/sandbox.settings.json`; `fix: run lazycortex-core sandbox-sync --repo-root "$PWD"`.
 - `[WARN]` each entry of `missing_read` — `sandbox allowRead does not cover <path> | .runtime/sandbox.settings.json`; same fix.
 

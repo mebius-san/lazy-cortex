@@ -386,13 +386,14 @@ def _sandbox_checks(repo: Path) -> list[dict]:
     repo: Repository root whose recorded sandbox scope is read.
 
   Returns:
-    One `fail` finding per uncovered write location and one `warn` per uncovered read
-    location; empty when the recorded scope reaches everything, or when no scope is recorded.
+    One `fail` finding when the unsandboxed-retry switch is not recorded closed, one `fail` per
+    uncovered write location and one `warn` per uncovered read location; empty when the recorded
+    scope reaches everything with the retry closed, or when no scope is recorded.
   """
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
   from sandbox_scope import audit
   # waiver: deferred / late-bound local import per the plugin import style (avoids import cycles / optional deps)
-  from constants import SandboxSyncKey
+  from constants import SandboxKey, SandboxSyncKey
   result = audit(repo)
   # guard: no sandbox file — spawns run unconfined, so no allowlist can be short
   if not result[SandboxSyncKey.PRESENT]:
@@ -401,7 +402,13 @@ def _sandbox_checks(repo: Path) -> list[dict]:
   if result[SandboxSyncKey.ENABLED] is False:
     return []
   fixes = f"run `lazycortex-core sandbox-sync --repo-root {repo}` to record it"
-  return [
+  # the retry hatch is a finding whenever it is not recorded closed — Claude Code defaults it to open
+  hatch = [] if result[SandboxSyncKey.ALLOW_UNSANDBOXED] is False else [
+    _finding(Level.FAIL, f"sandbox {SandboxKey.ALLOW_UNSANDBOXED} is not recorded as false — a command the "
+                         f"sandbox blocks is retried unsandboxed and only meets the permission check, so a "
+                         f"confined spawn can still write outside its scope on the second try; {fixes}")
+  ]
+  return hatch + [
     _finding(Level.FAIL, f"sandbox allowWrite does not cover '{p}' — a confined spawn is checked "
                          f"against the resolved path, so every write through that symlink fails; {fixes}")
     for p in result[SandboxSyncKey.MISSING_WRITE]
