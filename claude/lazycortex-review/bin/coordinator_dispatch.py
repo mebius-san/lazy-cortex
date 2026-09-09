@@ -172,26 +172,31 @@ def _load_settings(repo: Path) -> dict:
 
 def _bot_emails(settings: dict) -> set[str]:
   """
-  Collect every registered expert's `git_author.email` from the whole experts table.
+  Collect every registered `git_author.email` from the experts and the routines tables alike.
 
   Unlike `dispatcher.py`'s `_participating_bot_emails` (scoped to one review class's writer
   groups), this worker has no class context for a bare git-watch item — every registered
-  expert counts as a system identity here.
+  system identity counts here. A deterministic routine carries the same `git_author` block an
+  expert does and commits under it, so a routine's own commits are system-authored exactly as
+  an expert's are; reading only the experts table would classify them as operator edits and
+  wake this coordinator on every one of them.
 
   Args:
     settings: Parsed `lazy.settings.json` contents.
 
   Returns:
-    Set of non-empty `git_author.email` values across every registered expert.
+    Set of non-empty `git_author.email` values across every registered expert and routine.
   """
   emails: set[str] = set()
-  for name, entry in settings.get(JobKey.EXPERTS, {}).items():
-    # guard: the version sentinel and any malformed (non-dict) entry carry no email to collect
-    if name == JobKey.VERSION or not isinstance(entry, dict):
-      continue
-    email = (entry.get(JobKey.GIT_AUTHOR) or {}).get(JobKey.EMAIL, "")
-    if email:
-      emails.add(email)
+  # one loop over both registries — the entry shape (`git_author.email`) is identical in each
+  for block in (JobKey.EXPERTS, JobKey.ROUTINES):
+    for name, entry in settings.get(block, {}).items():
+      # guard: the version sentinel and any malformed (non-dict) entry carry no email to collect
+      if name == JobKey.VERSION or not isinstance(entry, dict):
+        continue
+      email = (entry.get(JobKey.GIT_AUTHOR) or {}).get(JobKey.EMAIL, "")
+      if email:
+        emails.add(email)
   return emails
 
 

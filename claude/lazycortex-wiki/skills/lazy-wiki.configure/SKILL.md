@@ -5,7 +5,7 @@ allowed-tools: Read, Edit, Write, AskUserQuestion, Skill, Bash(python3 *), Bash(
 ---
 # lazy-wiki.configure
 
-Interactive wizard. Creates or edits a scope entry in `lazy.settings.json[wiki.scopes]` for the current repo — or, invoked as `/lazy-wiki.configure domains`, the `wiki.domains` section that drives domain-spec generation (see **Domains branch** below) — or, invoked as `/lazy-wiki.configure mirror`, an existing scope's nested `mirror` block that mirrors a foreign repo's markdown into the vault (see **Mirror branch** below) — or, invoked as `/lazy-wiki.configure terms`, a scope of the `terms` section that drives the terms dictionary (see **Terms branch** below) — or, invoked as `/lazy-wiki.configure structure`, the `structure` section that drives the project-structure map (see **Structure branch** below) — or, invoked as `/lazy-wiki.configure vault`, the repository-wide keys of the `wiki` section itself: the axis vocabulary `wiki.tag_axes` every scope narrows from, and the exclusion list `wiki.exclude` every scope inherits (see **Vault branch** below). Each field is collected one question at a time via `AskUserQuestion`. This wizard only collects **genuine project config that cannot be derived** — the topics-index path, scope globs, exclude globs, and classification axes; the review-skip filter, the domain dictionary path, and the domain output directory are seeded from shipped defaults without a question. There is no install-scope question (the wizard always edits the current repo's `lazy.settings.json`) and no environment probe.
+Interactive wizard. Creates or edits a scope entry in `lazy.settings.json[wiki.scopes]` for the current repo — or, invoked as `/lazy-wiki.configure domains`, the `wiki.domains` section that drives domain-spec generation (see **Domains branch** below) — or, invoked as `/lazy-wiki.configure mirror`, an existing scope's nested `mirror` block that mirrors a foreign repo's markdown into the vault (see **Mirror branch** below) — or, invoked as `/lazy-wiki.configure terms`, a scope of the `terms` section that drives the terms dictionary (see **Terms branch** below) — or, invoked as `/lazy-wiki.configure structure`, the `structure` section that drives the project-structure map (see **Structure branch** below) — or, invoked as `/lazy-wiki.configure vault`, the repository-wide keys of the `wiki` section itself: the axis vocabulary `wiki.tag_axes` every scope narrows from, and the exclusion list `wiki.exclude` every scope inherits (see **Vault branch** below). Each field is collected one question at a time via `AskUserQuestion`. This wizard only collects **genuine project config that cannot be derived** — scope globs, exclude globs, and classification axes. Every path a file lands at is derived and merely announced: the topics index from the scope's own first glob, and the review-skip filter, terms dictionary, domain dictionary, and domain output directory from shipped defaults. Where a generated file sits is a preference an operator changes in edit mode on the day it matters, and asking it at setup, before there is anything in the tree to place it against, buys an answer nobody is equipped to give yet. There is no install-scope question (the wizard always edits the current repo's `lazy.settings.json`) and no environment probe.
 
 **Read-first.** Re-running for an existing scope `id` (or for an existing `wiki.domains` section) enters edit mode: each persisted value is read from `lazy.settings.json` first and shown as the current value; pressing Enter keeps it untouched. A field is re-asked only to let the operator change it — never to re-collect a value already on record.
 
@@ -103,16 +103,20 @@ Outcome: `collected`.
 
 ## Phase 6 — Collect topics_index
 
+**New mode does not ask**: derive the path from the scope's own first `paths` glob — its leading literal directory segments, plus `topics.md`. A scope covering `specs/**/*.md` derives `specs/topics.md`; one covering `docs/**/*.md` derives `docs/topics.md`; a glob with no literal directory prefix at all (`**/*.md`) derives `topics.md` at the repo root. The index belongs beside the material it indexes, which is the only place derivable without an answer. Print one line naming the derived path, outcome `derived`. Moving it is an edit-mode change or a hand edit of `lazy.settings.json`; the file is created on the first full scan either way, so nothing is written now.
+
+Edit mode asks:
+
 Context (print before asking):
 - Where: Phase 6 — Collect topics_index; target scope `<id>`
-- Found: new mode — no `topics_index` on record; edit mode — current: `<current topics_index>` (file `<present|absent>`)
-- Why asking: where the scope's topic catalog lives is a per-repo path choice; the file is created on the first scan, so nothing exists to detect
-- Answers: a repo-relative path — written to `wiki.scopes[<id>].topics_index`, the index built there by the first full scan; Enter (edit mode) — kept; re-asked only on the next edit run
-AskUserQuestion: header "Topics index path", question — new mode: "Path to wiki scope `<id>`'s `topics.md` index file, relative to the repo root (e.g. `wiki/docs-topics.md`)?"; edit mode: "Topics index path for scope `<id>` (current: `<current topics_index>`; Enter to keep)?"; free text.
+- Found: current: `<current topics_index>` (file `<present|absent>`)
+- Why asking: the path is on record and only the operator can decide to move the index
+- Answers: a repo-relative path — written to `wiki.scopes[<id>].topics_index`, the index rebuilt there by the next full scan; Enter — the current value kept; re-asked only on the next edit run
+AskUserQuestion (edit mode only): header "Topics index path", question "Topics index path for scope `<id>` (current: `<current topics_index>`; Enter to keep)?"; free text.
 
 Trim whitespace. Must be non-empty; re-ask if blank. The file need not exist yet — it is created on first full scan.
 
-Outcome: `collected`.
+Outcome: `derived` (new mode) / `collected` (edit mode).
 
 ## Phase 7 — Collect filter
 
@@ -403,16 +407,20 @@ Outcome: `collected`.
 
 ### Terms 3 — Collect dictionary file + create
 
+**New mode does not ask**: take the shipped default `docs/terms.md` — the project's own documentation tree, never the tree the dictionary serves. A dictionary written inside a served scope is material that scope then scans, which is why the wizard has to fence it out of every covering scope's `exclude_paths` below; `docs/` needs no fence. Print one line naming it, outcome `derived`. Moving it is an edit-mode change or a hand edit of `lazy.settings.json`.
+
+Edit mode asks:
+
 Context (print before asking):
 - Where: Terms 3 — Collect dictionary file + create; target `terms.scopes[<id>].file`
-- Found: new mode — none on record; edit mode — current `file`: `<current file>` (file `<present|absent>`)
-- Why asking: where the dictionary lives is a per-repo path with no default
-- Answers: a repo-relative path — written to `terms.scopes[<id>].file`; an absent file is created empty now, a present one is never touched or truncated; Enter (edit mode) — kept; re-asked only on the next edit run
-AskUserQuestion: header "Dictionary file", question — new mode: "Path of the dictionary file for terms scope `<id>` (repo-relative, e.g. `specs/terms.md`)?"; edit mode: "Dictionary path for terms scope `<id>` (current: `<current file>`; Enter to keep)?"; free text.
+- Found: current `file`: `<current file>` (file `<present|absent>`)
+- Why asking: the path is on record and only the operator can decide to move the dictionary
+- Answers: a repo-relative path — written to `terms.scopes[<id>].file`; an absent file is created empty now, a present one is never touched or truncated; Enter — the current value kept; re-asked only on the next edit run
+AskUserQuestion (edit mode only): header "Dictionary file", question "Dictionary path for terms scope `<id>` (current: `<current file>`; Enter to keep)?"; free text.
 
-Required, no default — re-ask until non-empty. Then `Bash(test -f <repo-root>/<file>)`; when absent, `Bash(mkdir -p <parent-dir>)` and `Write` an empty file. An existing file is never touched or truncated — a quiet recreation would destroy every term it holds.
+Trim whitespace; re-ask if blank. Then `Bash(test -f <repo-root>/<file>)`; when absent, `Bash(mkdir -p <parent-dir>)` and `Write` an empty file. An existing file is never touched or truncated — a quiet recreation would destroy every term it holds.
 
-Outcome: `collected` + `dictionary-<created|already-present>`.
+Outcome: `derived` (new mode) / `collected` (edit mode) + `dictionary-<created|already-present>`.
 
 ### Terms 4 — Collect source_exclude
 
@@ -456,6 +464,8 @@ Outcome: `collected`.
 Preserve every other key; write with `Write`.
 
 Then **protect the dictionary from the wiki curator**: for every `wiki.scopes` entry whose `paths` globs cover `<file>`, append `<file>` to that scope's `exclude_paths` when it is not already there. The dictionary carries no frontmatter by design, so it has none of the `wiki_role` self-defence `topics.md` has; without this entry the wiki curator appends a `# See also` block to it within a scan tick and the file stops being its own truth.
+
+**Any scope whose `exclude_paths` this step touched needs its rendered Coverage back in step.** The navigation rule's `## Coverage` is derived from `paths` / `exclude_paths`, so an entry added or dropped here leaves it stating an exclusion the settings no longer carry — and every session reads that rule, not the settings. When this step changed any scope's `exclude_paths`, refresh the section per the Phase 9 recipe (same locate / replace / commit rules), naming the terms scope in the commit subject instead of a wiki scope. Unchanged `exclude_paths` — nothing to refresh.
 
 **Remove.** Delete the `terms.scopes[<id>]` entry and drop from every `wiki.scopes` entry's `exclude_paths` the entries this wizard put there for that scope's dictionary. Then ask about the file.
 

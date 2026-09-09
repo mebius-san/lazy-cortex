@@ -41,6 +41,7 @@ _SUB_SEED_DOC = "seed-doc"
 _SUB_RENDER_CONTAINER_STATS = "render-container-stats"
 _SUB_COORDINATOR_DISPATCH = "coordinator-dispatch"
 _SUB_NOTE_SET_KEY = "note-set-key"
+_SUB_NOTE_DROP_KEY = "note-drop-key"
 _SUB_NOTE_CHECK = "note-check"
 _SUB_CATALOG_NOTE = "catalog-note"
 _SUB_REQUEST_DRAFT = "request-draft"
@@ -70,6 +71,8 @@ _USAGE = (
     "  coordinator-dispatch <asset_note> [--today YYYY-MM-DD]   wake spec.coordinator on activity\n"
     "  note-set-key <asset_dir> <key> <value> [--today YYYY-MM-DD]\n"
     "                                  validating frontmatter write from the coordinator's closed schema\n"
+    "  note-drop-key <asset_dir> <key> [--today YYYY-MM-DD]\n"
+    "                                  remove an unrecognized spec_* frontmatter key the schema rejects\n"
     "  note-check <asset_note>        structural check: frontmatter schema + required section roster\n"
     "  catalog-note backfill (<product> | --root) [--today YYYY-MM-DD]\n"
     "                                  bring a product's or the catalog root's level note up to schema\n"
@@ -159,6 +162,10 @@ def main(argv: list[str]) -> int:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import note_ops  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
     return note_ops.main_set_key(rest)
+  if sub == _SUB_NOTE_DROP_KEY:
+    # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
+    import note_ops  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy
+    return note_ops.main_drop_key(rest)
   if sub == _SUB_NOTE_CHECK:
     # waiver: lazy sibling import -- flat bin/ dir resolved via sys.path at runtime, not statically importable
     import note_ops  # type: ignore  # waiver: bare-name sibling, not resolvable by mypy

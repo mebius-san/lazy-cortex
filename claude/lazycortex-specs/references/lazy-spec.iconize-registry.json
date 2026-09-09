@@ -299,6 +299,15 @@
         "callback": "spec-type-icon"
       },
       "priority": 148
+    },
+    {
+      "when": {
+        "frontmatter_has": "spec_doc_type"
+      },
+      "resolve": {
+        "callback": "spec-type-icon"
+      },
+      "priority": 147
     }
   ]
 }

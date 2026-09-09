@@ -16,7 +16,7 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 74f5515593a4aa6587f57c7df78a2fa5a85ee56f
 ---
 # Troubleshooting
 

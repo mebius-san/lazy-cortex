@@ -172,6 +172,29 @@ class _SetKeyStatus:
   REFUSED = "refused"
 
 
+# ----------------------------------------------------------------------------------------
+class _DropKeyStatus:
+  """
+  `_ResultKey.STATUS` values `note_drop_key` returns.
+
+  Attributes:
+    DROPPED: The key was present and unrecognized, and the note was rewritten without it.
+    ABSENT: The note carries no such key — no write, no commit.
+    REFUSED: The key is recognized by the note schema, or belongs to another worker — no write.
+  """
+
+  DROPPED = "dropped"
+  ABSENT = "absent"
+  REFUSED = "refused"
+
+
+# The namespace prefix of every frontmatter key this plugin authors. A stray key outside it was
+# written by some other worker (`iconize_*`, `tags`, `wiki_*`), and removing one would silently
+# undo that worker's own state; only a `spec_*` key the note schema does not recognize is this
+# plugin's own litter to take back.
+_SPEC_KEY_PREFIX = "spec_"
+
+
 # The closed schema `note-set-key` may write — exactly the coordinator's own frontmatter-owned
 # keys per `lazy-spec.coordinator.md`'s verb table: the five gate booleans plus `spec_cancelled`, the
 # halt flag, the cascade-target and dependency-graph lists (`spec_targets`, `spec_depends_on`),
@@ -509,6 +532,93 @@ def note_set_key(asset_dir: Path, key: str, raw_value: str, *, today: str | None
   return {_ResultKey.STATUS: _SetKeyStatus.SET, "key": key, "value": value_str}
 
 
+def _drop_fm_key(fm_text: str, key: str) -> str:
+  """
+  Remove one key and everything it owns from a frontmatter block.
+
+  A block-form value continues on the lines below its key, so the removal takes the key's own
+  line plus every following line that is indented or a bullet — up to the next key line or the
+  closing fence.
+
+  Args:
+    fm_text: The note's frontmatter block, fences included.
+    key: The frontmatter key to remove.
+
+  Returns:
+    The block without that key; the block unchanged when it carries none.
+  """
+  lines = fm_text.split("\n")
+  kept: list[str] = []
+  dropping = False
+  for line in lines:
+    # a key's own line opens the removal and is itself dropped
+    if line.startswith(f"{key}:"):
+      dropping = True
+      continue
+    # guard: still inside the dropped key's block-form value — its continuation lines go too
+    if dropping and (line.startswith((" ", "\t", "-"))) and line.strip():
+      continue
+    dropping = False
+    kept.append(line)
+  return "\n".join(kept)
+
+
+def note_drop_key(asset_dir: Path, key: str, *, today: str | None = None) -> dict:
+  """
+  Remove one unrecognized `spec_*` frontmatter key from a folder-note.
+
+  This is the counterpart of `note_set_key` for litter rather than state: a key the note schema
+  does not recognize is what `note_check` reports as an "unknown-key" violation, and this verb is
+  the only door that takes one back off. Refuses (no file mutation) when the key IS recognized —
+  a recognized key holds state and changing it is `note_set_key`'s business — and when the key
+  lies outside this plugin's own `spec_` namespace, since another worker owns it. On a genuine
+  removal the frontmatter is rewritten, one `# History` line is appended, and the note is
+  committed under the `lazy-spec.note-set-key` bot identity.
+
+  Args:
+    asset_dir: The folder holding `<asset_dir.name>.md` — an asset's folder or a level's.
+    key: The frontmatter key to remove.
+    today: Optional ISO date pinned into the `# History` line.
+
+  Returns:
+    `{"status": "dropped", "key"}` on a removal, `{"status": "absent", "key"}` when the note
+    carries no such key, or `{"status": "refused", "key", "reason"}` when the key is recognized
+    or belongs to another worker.
+
+  Raises:
+    subprocess.CalledProcessError: When the commit of the rewritten note fails — propagated
+      from `_commit`.
+  """
+  # guard: a key outside this plugin's namespace belongs to another worker — never ours to remove,
+  # and this is asked FIRST because ownership outranks recognition: the schema recognizes several
+  # foreign keys precisely so their presence reads as legitimate, and answering "recognized" there
+  # would name the wrong reason for a refusal that is really about whose key it is
+  if not key.startswith(_SPEC_KEY_PREFIX):
+    return {_ResultKey.STATUS: _DropKeyStatus.REFUSED, _ResultKey.KEY: key,
+            _ResultKey.REASON: f"foreign key: {key}"}
+
+  # guard: a recognized key carries state, and state is set through `note_set_key`, never dropped
+  if key in _NOTE_SCHEMA:
+    return {_ResultKey.STATUS: _DropKeyStatus.REFUSED, _ResultKey.KEY: key,
+            _ResultKey.REASON: f"recognized key: {key}"}
+
+  # read the note's current frontmatter so the removal lands precisely
+  note = asset_dir / f"{asset_dir.name}.md"
+  text = note.read_text()
+  fm_values, fm_end = flip_gate._parse_frontmatter(text)
+  # guard: the note carries no such key — nothing to remove or commit
+  if key not in fm_values:
+    return {_ResultKey.STATUS: _DropKeyStatus.ABSENT, _ResultKey.KEY: key}
+
+  # strip the key, append the audit trail, and refresh the section explainers before writing
+  new_fm_text = _drop_fm_key(text[:fm_end], key)
+  hist = f"- {flip_gate._today(today)} — {_AUTHOR_NAME} · {key} dropped"
+  body = flip_gate._append_under_heading(text[fm_end:], Section.HISTORY, hist)
+  note.write_text(new_fm_text + note_explainers.ensure_explainers(body, note_explainers.lang_for_note(note)))
+  _commit(asset_dir, note, key, _DropKeyStatus.DROPPED)
+  return {_ResultKey.STATUS: _DropKeyStatus.DROPPED, _ResultKey.KEY: key}
+
+
 def _is_value_ok(raw: str, kind: str) -> bool:
   """
   Check whether a frontmatter key's raw same-line value matches its schema-declared shape.
@@ -698,6 +808,40 @@ def main_set_key(argv: list[str]) -> int:
   result = note_set_key(asset_dir, args.key, args.value, today = args.today)
   print(json.dumps(result))
   return 0 if result[_ResultKey.STATUS] != _SetKeyStatus.REFUSED else 1
+
+
+def main_drop_key(argv: list[str]) -> int:
+  """
+  Run `note-drop-key` from the command line, printing the result as JSON.
+
+  Args:
+    argv: Command-line arguments, excluding the program name and subcommand.
+
+  Returns:
+    Exit code: 0 on a removal or an absent key, 1 on a refusal, 2 when the note is missing.
+  """
+  # waiver: argparse CLI signature -- program name shown in --help / usage
+  parser = argparse.ArgumentParser(prog = "lazycortex-specs note-drop-key")
+  # waiver: argparse CLI signature -- positional argument name
+  parser.add_argument("asset_dir", type = Path)
+  # waiver: argparse CLI signature -- positional argument name
+  parser.add_argument("key")
+  # waiver: argparse CLI signature -- option flag + default
+  parser.add_argument("--today", default = None,
+                      # waiver: one-off human-facing message -- argparse help text
+                      help = "ISO date pinned into the emitted history line")
+  args = parser.parse_args(argv)
+  asset_dir: Path = args.asset_dir.resolve()
+  note = asset_dir / f"{asset_dir.name}.md"
+  # guard: the folder-note must exist
+  if not note.is_file():
+    sys.stderr.write(f"no status folder-note: {note}\n")
+    return 2
+
+  # run the removal and report the result the same way every other lazycortex-specs verb does
+  result = note_drop_key(asset_dir, args.key, today = args.today)
+  print(json.dumps(result))
+  return 0 if result[_ResultKey.STATUS] != _DropKeyStatus.REFUSED else 1
 
 
 def main_check(argv: list[str]) -> int:

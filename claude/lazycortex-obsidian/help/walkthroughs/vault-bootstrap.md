@@ -10,7 +10,7 @@ source_skills:
   - lazy-obsidian.iconize-install
   - lazy-obsidian.diagram-install
   - lazy-obsidian.gen-tag-pages
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 74f5515593a4aa6587f57c7df78a2fa5a85ee56f
 ---
 # How do I wire up a fresh vault from scratch?
 
@@ -137,11 +137,17 @@ before.
 
 **Repaint routine** — when the repo runs the lazycortex daemon, the chain
 registers the `lazy-obsidian.repaint` routine, which repaints icons after each
-commit; without a daemon this step reports `no-daemon` and moves on. On a
-re-run, if the registered routine's command, watch trigger, or `ignore_halt`
-flag no longer match what this install would register (an older version wrote
-it), the chain refreshes it in place — your tuned `interval_sec` is carried
-over, everything else resets to the shipped defaults.
+commit and carries its own bot identity (`git_author: lazy-obsidian.repaint`)
+directly on the routine entry, so sibling coordinators — lazycortex-review's
+review loop, for instance — never mistake a repaint commit for an operator
+edit and wake up on it; without a daemon this step reports `no-daemon` and
+moves on. On a re-run, if the registered routine's command, watch trigger,
+`ignore_halt` flag, or bot identity no longer match what this install would
+register (an older version wrote it), the chain refreshes it in place — your
+tuned `interval_sec` is carried over, everything else resets to the shipped
+defaults. If an older install also left a duplicate of that identity in
+`lazy.settings.json`'s `experts` table, this run prunes it — the routine's own
+identity is now the single record.
 
 **Gitignore entry** — Iconize's `data.json` at
 `.obsidian/plugins/obsidian-icon-folder/data.json` is appended to `.gitignore`
@@ -218,8 +224,9 @@ single `/lazy-obsidian.install` invocation. Scan it for:
   snippet entry a previous install wrote is now removed because the plugin no
   longer ships that file; nothing for you to do.
 - Any **refreshed** outcome on the repaint routine (Step 3) — a previous
-  install wrote an older shape of the routine and this run brought it current;
-  your `interval_sec` tuning was preserved.
+  install wrote an older shape of the routine (its command, watch trigger,
+  `ignore_halt` flag, or bot identity) and this run brought it current; your
+  `interval_sec` tuning was preserved.
 - Any **failed:** outcome for `mermaid-popup` — note the reason and re-run
   `/lazy-obsidian.update-plugin mermaid-popup` when the network is available.
 - A `paint-roots-seeded=<vault_root>` annotation on the icon-map line (Step 3)

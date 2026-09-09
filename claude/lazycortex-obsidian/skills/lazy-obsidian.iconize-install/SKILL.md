@@ -238,31 +238,26 @@ Answer its wizard with: `watch` = `new_commits`, `branch` = the repo's own defau
 `interval_sec` = `60`, `command` = `["lazycortex-obsidian", "reconcile-commit"]`, no `path_filter`
 and no `filter` — a matcher callback can key on a non-markdown file, so narrowing the trigger
 would silently drop repaints. Set `ignore_halt: true`: the routine must run precisely when a
-dirty tree has stopped everything else, since that dirt is what it clears.
+dirty tree has stopped everything else, since that dirt is what it clears. Set `git_author` to
+`{"name": "lazy-obsidian.repaint", "email": "lazy-obsidian.repaint@bot.invalid"}` — the identity
+the worker stamps on its own commits, and the one every consumer of system-vs-operator authorship
+reads, so a repaint never wakes a sibling coordinator as an operator edit.
 
 A registered routine is read back and compared against the answers above, per the File-sync
 policy's install-managed-value rule: this plugin composed every one of them, so a `command`,
-`watch`, or `ignore_halt` that differs is a value an older version of this step wrote, not a
-choice to preserve. Refresh it the way `lazy-spec.install` Step 5b refreshes its filter —
-unregister, then re-register — holding `interval_sec` from the recorded entry, which the operator
-does tune. Outcome: **registered** / **refreshed** / **already-present** / **no-daemon**.
+`watch`, `ignore_halt`, or `git_author` that differs is a value an older version of this step
+wrote, not a choice to preserve. Refresh it the way `lazy-spec.install` Step 5b refreshes its
+filter — unregister, then re-register — holding `interval_sec` from the recorded entry, which the
+operator does tune. Outcome: **registered** / **refreshed** / **already-present** / **no-daemon**.
 
-The routine's commits carry the bot identity `lazy-obsidian.repaint` /
-`lazy-obsidian.repaint@bot.invalid` (plus a `Lazy-Bot: lazy-obsidian.repaint` trailer). Sibling
-coordinators (lazycortex-review) recognise system authors by walking the `experts` entries in
-`lazy.settings.json`, so seed a minimal identity entry there — non-destructive, skip when the
-key already exists:
-
-```json
-"experts": {
-  "lazy-obsidian.repaint": {
-    "git_author": { "name": "lazy-obsidian.repaint", "email": "lazy-obsidian.repaint@bot.invalid" }
-  }
-}
-```
-
-Without it every repaint commit reads as an operator edit and needlessly wakes the review
-coordinator on documents under review. Outcome: **identity-seeded** / **identity-present**.
+Then prune the legacy duplicate of that identity. Earlier releases of this step also wrote the
+same `git_author` block into `experts["lazy-obsidian.repaint"]` in `lazy.settings.json`, because
+sibling coordinators read the experts table alone; they read the routine registry too now, so the
+duplicate is dead config — and an experts entry carrying no `agent` is a FAIL in core's expert
+preflight (`missing 'agent' reference`), which the entry can never satisfy: no agent serves it,
+it names an identity rather than a role. Delete the whole `experts["lazy-obsidian.repaint"]` key
+when it is present, leaving the routine's own `git_author` as the single record. Outcome:
+**identity-pruned** / **identity-absent**.
 
 Then paint what predates the routine. A git-watch routine records the current HEAD on its first
 tick and dispatches nothing for history, so every note committed before this moment would keep

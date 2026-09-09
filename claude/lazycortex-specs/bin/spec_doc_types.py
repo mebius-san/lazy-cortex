@@ -37,6 +37,8 @@ if str(_BIN) not in sys.path:
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import flip_gate  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
+import spec_keys  # noqa: E402
+# waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import spec_paths  # noqa: E402
 
 
@@ -127,6 +129,7 @@ _STATUS_ROLE = "status"
 _MD_SUFFIX = ".md"
 _TOUCHED = "touched"
 _SKIPPED = "skipped"
+_CLEANED = "cleaned"
 
 # The frontmatter anchors the new key lands against: below `spec_role` when the document has one
 # (a scalar key — the next line is free), otherwise above `tags` — a block-mapping key whose list
@@ -136,6 +139,10 @@ _FM_TAGS_ANCHOR_RE = re.compile(r"(?m)^tags\s*:.*$")
 
 # The opening frontmatter fence, used when a document carries neither anchor line.
 _FM_OPEN_FENCE = "---\n"
+
+# The `spec_doc_type` line itself, matched so the migration can take the key back off a level
+# note an earlier release typed. A scalar key, so the match ends at its own newline.
+_FM_DOC_TYPE_LINE_RE = re.compile(r"(?m)^spec_doc_type\s*:.*\n?")
 
 
 # Flag defaults applied to any declaration that omits them — a project type declaring only
@@ -268,10 +275,11 @@ def _derive_type(path: Path, role: str) -> str:
 
   Returns:
     The derived type name, or the empty string when the document is not a typed document
-    (the status folder-note, or a stranger carrying neither a role nor a type-named basename).
+    (a folder-note of any kind, or a stranger carrying neither a role nor a type-named basename).
   """
-  # guard: the status folder-note is a folder marker, not a typed document
-  if role == _STATUS_ROLE:
+  # guard: a folder-note is a folder marker, not a typed document — the status note of an asset
+  # and the level note of a product or of the catalog root alike
+  if role == _STATUS_ROLE or role in spec_keys.LEVEL_ROLES:
     return ""
 
   # Decision: derive from `spec_role`, not from the basename — the two agree for every role the
@@ -321,23 +329,38 @@ def _insert_type(fm_text: str, doc_type: str) -> tuple[str, int]:
   return _FM_OPEN_FENCE + line + "\n" + fm_text[len(_FM_OPEN_FENCE):], 1
 
 
+def _remove_type(fm_text: str) -> str:
+  """
+  Strip a `spec_doc_type` line out of a frontmatter block.
+
+  Args:
+    fm_text: The document's frontmatter block, fences included.
+
+  Returns:
+    The block without its `spec_doc_type` line; the block unchanged when it carries none.
+  """
+  return _FM_DOC_TYPE_LINE_RE.sub("", fm_text, count = 1)
+
+
 def backfill(repo: Path) -> dict:
   """
-  Walk the spec content-root and add `spec_doc_type` to every typed document missing it.
+  Reconcile every spec document's `spec_doc_type` key against what the file is.
 
-  A file that derives no type (status folder-note, group-note, an untyped stranger) is not a
-  candidate and is not counted at all.
+  A typed document missing the key gains it. A level note carrying one loses it: no level note
+  has a place for the key in its own schema. A file that is neither (status folder-note,
+  group-note, an untyped stranger) is not a candidate and is not counted at all.
 
   Guarantees:
-    - Running this twice in a row leaves the second run with `touched == 0` and every file
-      byte-identical: a document already carrying the key is counted `skipped`, never rewritten.
+    - Running this twice in a row leaves the second run reporting `touched == 0` and
+      `cleaned == 0`, with every file byte-identical.
     - No git command is ever run; every change is left in the worktree for the caller to commit.
 
   Args:
     repo: Absolute repository root (holds `.claude/lazy.settings.json`).
 
   Returns:
-    `{"touched": N, "skipped": M}` — `N` documents gained the key, `M` already carried it.
+    `{"touched": N, "skipped": M, "cleaned": K}` — `N` documents gained the key, `M` already
+    carried it, `K` level notes had a stale one taken back off.
   """
   # Contract: idempotent and commit-free — a second run touches nothing and leaves every file
   # byte-identical, and the migration never stages or commits what it wrote. Callers chain this
@@ -346,6 +369,7 @@ def backfill(repo: Path) -> dict:
   content_root = spec_paths.spec_content_root(spec_paths.find_settings_root(repo))
   touched = 0
   skipped = 0
+  cleaned = 0
   for dirpath, _dirnames, filenames in os.walk(content_root):
     for name in filenames:
       # guard: only markdown files carry spec frontmatter
@@ -355,7 +379,17 @@ def backfill(repo: Path) -> dict:
       text = path.read_text(encoding = _K.ENCODING)
       # waiver: sibling-module frontmatter parser -- the one parser every specs primitive shares
       fm_values, fm_end = flip_gate._parse_frontmatter(text)
-      doc_type = _derive_type(path, fm_values.get(_SPEC_ROLE, ""))
+      role = fm_values.get(_SPEC_ROLE, "")
+      # a level note is the one place the key was written against its own schema, so the
+      # migration that stopped deriving a type from the role also takes back what it wrote
+      if role in spec_keys.LEVEL_ROLES:
+        # guard: no stale key on this level note — nothing to take back
+        if _K.DOC_TYPE not in fm_values:
+          continue
+        path.write_text(_remove_type(text[:fm_end]) + text[fm_end:], encoding = _K.ENCODING)
+        cleaned += 1
+        continue
+      doc_type = _derive_type(path, role)
       # guard: nothing to derive a type from — not a candidate at all
       if not doc_type:
         continue
@@ -370,7 +404,7 @@ def backfill(repo: Path) -> dict:
         continue
       path.write_text(new_fm + text[fm_end:], encoding = _K.ENCODING)
       touched += 1
-  return { _TOUCHED: touched, _SKIPPED: skipped }
+  return { _TOUCHED: touched, _SKIPPED: skipped, _CLEANED: cleaned }
 
 
 def doc_type_of(path: Path) -> str:

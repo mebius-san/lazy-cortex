@@ -13,7 +13,7 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 8c88b306fa93ef776a16cdaadec55e16bbe0120a
 ---
 # Troubleshooting
 
@@ -99,11 +99,11 @@ source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 
 ## `/lazy-wiki.configure` keeps re-asking for the topics index path
 
-**Symptom**: The `topics.md` path prompt repeats or rejects your input without saving the scope.
+**Symptom**: Re-running `/lazy-wiki.configure` for an existing scope and blanking the topics-index prompt repeats without saving.
 
-**Likely cause**: A relative file path is required for `topics_index` — a blank entry is not accepted. The file itself doesn't need to exist yet; the wizard only rejects an empty answer.
+**Likely cause**: Creating a brand-new scope no longer asks this question at all — the index path is derived automatically from the scope's own first `paths` glob plus `topics.md` (a scope covering `specs/**/*.md` derives `specs/topics.md`; a glob with no literal directory prefix derives `topics.md` at the repo root). The prompt only appears in edit mode, when you are changing an existing scope's index location, and a blank entry there is not accepted.
 
-**Fix**: Enter a relative path for the scope's topic index, for example `wiki/docs-topics.md`. `/lazy-wiki.relink` creates the file on its first run if it doesn't already exist.
+**Fix**: Enter a relative path for the scope's topic index, for example `wiki/docs-topics.md`, or press Enter to keep the current value unchanged. `/lazy-wiki.relink` rebuilds the file at whatever path is on record if it doesn't already exist.
 
 ---
 
@@ -111,7 +111,7 @@ source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 
 **Symptom**: `/lazy-wiki.configure` finishes creating or editing a scope, but its Phase 9 outcome reads `absent` instead of `refreshed` or `unchanged` — the Coverage section was not touched.
 
-**Likely cause**: Phase 9 refreshes the `## Coverage` section of the installed `lazy-wiki.navigation` rule, which is what every session reads to decide whether a question must route through `/lazy-wiki.query`. `absent` means neither `<repo-root>/.claude/rules/lazy-wiki.navigation.md` nor `~/.claude/rules/lazy-wiki.navigation.md` exists — the rule itself was never installed, so sessions get no coverage trigger at all, regardless of how many scopes you've configured.
+**Likely cause**: Phase 9 refreshes the `## Coverage` section of the installed `lazy-wiki.navigation` rule, which is what every session reads to decide whether a question must route through `/lazy-wiki.query`. `absent` means neither `<repo-root>/.claude/rules/lazy-wiki.navigation.md` nor `~/.claude/rules/lazy-wiki.navigation.md` exists — the rule itself was never installed, so sessions get no coverage trigger at all, regardless of how many scopes you've configured. The same refresh — and the same `absent` outcome when the rule is missing — also fires from `/lazy-wiki.configure mirror` (a mirror's `mirror_path` glob joins the scope's `paths`) and from `/lazy-wiki.configure terms` whenever it adds or drops a dictionary-protection entry in a wiki scope's `exclude_paths`.
 
 **Fix**: Run `/lazy-wiki.install`, which syncs the `lazy-wiki.navigation` rule into place, then re-run `/lazy-wiki.configure` so Phase 9 can fill in the Coverage section for your configured scopes.
 

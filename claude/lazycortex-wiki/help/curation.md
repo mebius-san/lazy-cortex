@@ -30,7 +30,7 @@ The same curation logic runs autonomously when the runtime daemon is active. On 
 
 ## How it fits together
 
-You invoke `/lazy-wiki.relink [<scope-id>]`. If you omit the scope id, the skill lists the configured scopes and asks you which to process. Scopes are created and edited with `/lazy-wiki.configure` — see the paths, tag axes, and topics-index path you set there.
+You invoke `/lazy-wiki.relink [<scope-id>]`. If you omit the scope id, the skill lists the configured scopes and asks you which to process. Scopes are created and edited with `/lazy-wiki.configure` — see the paths and tag axes you set there, and the topics-index path it derived.
 
 The skill starts by running `relink-plan`, which inspects the `wiki_synced_sha` anchor stored in `topics.md` and returns three path lists — nodes to classify (new or modified), nodes to link (whose summary or neighbours changed), and nodes to drop (deleted since the anchor). The plan operates in one of three modes: `initial` (no anchor yet — process everything), `incremental` (delta from the anchor to HEAD), or `anchor-lost` (the anchor commit became unreachable; the plan falls back to a content-hash backstop). You do not need to choose the mode; the plan decides automatically.
 

@@ -823,13 +823,15 @@ Every authored catalog document carries a `spec_doc_type` frontmatter key naming
 Bash(lazycortex-specs doc-type backfill)
 ```
 
-It walks the spec content-root, derives each document's type from its `spec_role` (falling back to the filename stem when the document carries no role), and writes the key where it is missing. Report the returned `touched` / `skipped` counts.
+It walks the spec content-root, derives each document's type from its `spec_role` (falling back to the filename stem when the document carries no role), and writes the key where it is missing. Report the returned `touched` / `skipped` / `cleaned` counts.
 
-Idempotent by construction: a document already carrying the key is counted `skipped` and left byte-identical, so a fresh install reports zeros and a re-run after a bulk content import picks up only what is new. The status folder-note and any untyped stranger derive no type and are not candidates at all.
+Idempotent by construction: a document already carrying the key is counted `skipped` and left byte-identical, so a fresh install reports zeros and a re-run after a bulk content import picks up only what is new. No folder-note is a candidate — neither an asset's status note nor a level note of a product or of the catalog root — and neither is an untyped stranger.
+
+`cleaned` counts the level notes a stale key was taken back off. An earlier release derived a type from the `product` / `catalog` role and wrote `spec_doc_type: <role>` onto the level note itself, which no level-note schema has ever had room for: `note-check` reports it as `unknown-key` and `lazy-spec.doctor` FAILs on it. The same walk strips it wherever it is still recorded.
 
 **The backfill does not commit.** It leaves its writes in the worktree; committing them belongs to whoever is driving this install, in that repo's own commit.
 
-Outcome: `backfilled: <touched>/<skipped>` (`backfilled: 0/0` on a fresh install with no catalog yet).
+Outcome: `backfilled: <touched>/<skipped>/<cleaned>` (`backfilled: 0/0/0` on a fresh install with no catalog yet).
 
 ## Step 7d: Backfill `spec_asset_type` and rename the renamed document types
 

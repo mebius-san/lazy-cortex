@@ -2451,15 +2451,20 @@ def resolve_matchers(icon_map: dict, path: str, frontmatter: dict) -> list:
   """
 
   # Domain(obsidian.icon-resolution):
-  # # The first rule that applies decides, win or lose
-  # Rules are walked in their combined priority order, and the first one whose conditions all hold is the
-  # one consulted for this note — no lower-priority rule is ever tried afterward, even when the chosen
-  # rule fails to produce a usable icon. A rule that matches but cannot resolve a name therefore leaves
-  # the note unclaimed rather than falling through to the next candidate; a narrower, higher-priority rule
-  # that turns out empty always beats a broader rule underneath it.
+  # # The first rule that applies decides, and a rule that only paints keeps looking for the look
+  # Rules are walked in their combined priority order and the first one whose conditions all hold decides
+  # the note, with one exception: a rule that describes a passing state paints a colour over whatever the
+  # note already looks like, and says nothing about the look itself. Such a rule keeps its colour and the
+  # walk carries on beneath it, until a rule is found that does name a look — the note then wears that
+  # look in the colour its state gave it. Nothing lower is consulted once a rule has named a look, and a
+  # rule that matches but resolves to nothing at all still leaves the note unclaimed outright: that is a
+  # broken rule rather than a rule with nothing to say about appearance. When every rule that claimed the
+  # note only painted, the colour alone stands.
 
   # the basename is shared across every matcher tried below
   basename = _basename(path)
+  # a colour carried down from a state matcher that named no icon, awaiting the rule that names one
+  borrowed_color = ""
   # waiver: a genuine module-level rebind — the callback engine reads the active matcher's plugin root from here
   global _ACTIVE_CB_ROOT  # noqa: PLW0603  # pylint: disable=global-statement
   for matcher in icon_map.get(MapKey.MATCHERS, []):
@@ -2475,9 +2480,20 @@ def resolve_matchers(icon_map: dict, path: str, frontmatter: dict) -> list:
       # guard: matcher matched but resolution failed → return [] (no further matchers attempted)
       if not entry:
         return []
+      # guard: a state matcher that borrowed an icon this note does not carry yet resolved a colour
+      # and no name — it keeps the colour, and the walk goes on to the rule that owns the icon
+      if IconKey.NAME not in entry:
+        borrowed_color = borrowed_color or entry.get(IconKey.COLOR, "")
+        continue
+      # the state's colour outranks the one the naming rule carries — that is what a state rule is
+      if borrowed_color:
+        entry = { **entry, IconKey.COLOR: borrowed_color }
       return [ (normalize_path(path), entry) ]
     finally:
       _ACTIVE_CB_ROOT = None
+  # every rule that claimed the note only painted it; the colour stands on its own
+  if borrowed_color:
+    return [ (normalize_path(path), { IconKey.COLOR: borrowed_color }) ]
   return []
 
 

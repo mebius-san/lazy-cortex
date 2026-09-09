@@ -623,6 +623,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 7.6.0 — 2026-09-09 UTC
+
+- Typed documents (design, vision, tech, etc.) are now icon-painted correctly in Obsidian — previously only the three folder-marking notes had a matching rule, leaving every other document type unpainted.
+- New `note-drop-key` coordinator verb removes an unrecognized `spec_*` key from a folder note, closing a gap where an unknown key could only be reported, never fixed.
+- Doc-type backfill no longer mistypes level notes (product and catalog-root notes), and now strips a `spec_doc_type` key it had written on them in error on earlier runs.
+
 ### 7.5.2 — 2026-09-09 UTC
 
 - **Breaking:** The `upstream/` mirror tree now lives at the repository root instead of under the spec content-root — mirrored source units sit outside `specs/` (or your configured `spec.vault_root`) since they aren't vault content until a request accepts them in. Existing mirrors move location.
@@ -857,6 +863,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 5.2.0 — 2026-09-09 UTC
+
+- Fixed icon-status rules with no icon name (colour-only) swallowing the whole match — colour now falls through to the first rule that actually names an icon, instead of leaving the note stuck with a null icon.
+- `/lazy-obsidian.iconize-install` now sets the repaint routine's bot identity directly on the routine and prunes the legacy duplicate identity entry it used to leave in `experts`, which could permanently fail the expert preflight.
 
 ### 5.1.2 — 2026-09-09 UTC
 
@@ -1104,6 +1115,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Format-agnostic diagram engine: planner skill + per-format writer agents (mermaid, ascii, more later). Picks kind and format from request context, ships exemplar templates plus an authoring contract, and bundles a fixture-based regression suite.
 
 ## lazycortex-review
+
+### 6.4.2 — 2026-09-09 UTC
+
+- Fixed the review coordinator waking on a routine's own commits (e.g. icon repaint after a commit) — bot-identity detection now checks registered routines as well as experts.
 
 ### 6.4.1 — 2026-09-09 UTC
 
@@ -1656,6 +1671,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 2.3.2 — 2026-09-09 UTC
+
+- Setting up a wiki scope or terms dictionary no longer asks where its generated file should live — the topics index is derived from the scope's own first glob, and the terms dictionary defaults into the project's docs tree. Both stay changeable later in edit mode.
+- Fixed a bug where moving a terms dictionary through the terms wizard could leave the `lazy-wiki.navigation` rule's Coverage section listing a stale exclusion path.
 
 ### 2.3.1 — 2026-09-09 UTC
 

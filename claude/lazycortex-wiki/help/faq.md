@@ -13,7 +13,7 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 8c88b306fa93ef776a16cdaadec55e16bbe0120a
 ---
 # Frequently asked questions
 
@@ -21,7 +21,7 @@ source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 
 Yes. `/lazy-wiki.install` seeds the `wiki`, `structure`, and `terms` settings sections in `lazy.settings.json`, seeds agent model tiers for the curators, registers the `wiki.curator`, `wiki.terms-curator`, `wiki.structure-curator`, and `wiki.tag-curator` experts, and copies the navigation rule into your rules directory. Experts and the `lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`, `lazy-wiki.doctor-apply`, and `lazy-wiki.tag-normalize` routines are all registered unconditionally, whether or not your project runs the background daemon — a registered routine fires under `/lazy-runtime.tick` on a checkout with no daemon, so nothing here waits on a daemon decision. Nothing else in the plugin will work until the `wiki` section exists. The install is idempotent — running it again on an already-configured project is safe and will not overwrite values you have set.
 
-After install, run `/lazy-wiki.configure` to define at least one scope (the set of path globs the wiki covers, the tag axes it narrows to, and where to write the topics index). `/lazy-wiki.query` and `/lazy-wiki.relink` both require at least one configured scope to proceed.
+After install, run `/lazy-wiki.configure` to define at least one scope (the set of path globs the wiki covers and the tag axes it narrows to; the topics index is placed beside the covered material without asking). `/lazy-wiki.query` and `/lazy-wiki.relink` both require at least one configured scope to proceed.
 
 ---
 
@@ -191,7 +191,7 @@ One weekly run covers every configured scope. The `lazy-wiki.relink-weekly` rout
 
 It is one markdown file per configured "terms scope" — every `## <term>` heading in it is a concept the project has agreed on a single name for, and the body underneath is the definition. The point is that a concept never grows a second name: a writer consults the dictionary before coining a word, because after a document ships a synonym can no longer be recalled from it.
 
-Set one up with `/lazy-wiki.configure terms`. You are asked which documents the dictionary serves (a `paths` glob — a document under it may consult the dictionary), where the dictionary file itself lives (created empty if it does not exist yet), and `source_exclude` — the documents the dictionary still serves but never takes terms from (the dictionary file itself, and the tool-report/plan-document globs your project uses, so build journals don't pollute the dictionary with one-off wording). The wizard refuses an id whose `paths` overlap another terms scope's, since one document can only belong to one dictionary, and it registers a per-scope `lazy-wiki.terms-scan-<id>` routine (when the daemon is enabled) that dispatches the terms curator to fill the dictionary from finished documents automatically.
+Set one up with `/lazy-wiki.configure terms`. You are asked which documents the dictionary serves (a `paths` glob — a document under it may consult the dictionary) and `source_exclude` — the documents the dictionary still serves but never takes terms from (the dictionary file itself, and the tool-report/plan-document globs your project uses, so build journals don't pollute the dictionary with one-off wording). The dictionary file itself is not asked about: a first run takes the shipped default `docs/terms.md` and creates it empty, deliberately outside the tree the dictionary serves, so the scope scanning that tree never has to be fenced away from it. Moving it is an edit-mode run later. The wizard refuses an id whose `paths` overlap another terms scope's, since one document can only belong to one dictionary, and it registers a per-scope `lazy-wiki.terms-scan-<id>` routine (when the daemon is enabled) that dispatches the terms curator to fill the dictionary from finished documents automatically.
 
 The terms dictionary is a distinct file from the tag-values dictionary — a terms scope names concepts in prose, while `wiki.tags.dictionary` (`docs/tags.md` by default) canonises `wiki/<axis>/<value>` tags. They serve different curators and are never the same file.
 

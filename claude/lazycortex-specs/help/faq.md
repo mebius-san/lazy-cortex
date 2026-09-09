@@ -31,7 +31,7 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 729234b05d4141810d184b143e30745bfb03d131
 ---
 # Frequently asked questions
 
@@ -222,6 +222,20 @@ If the underlying repo record is missing or the remote's hostname isn't recogniz
 An older version of the plugin used a `gates:` dict, a `stage:` key, an `awaits_human:` field, or a `## Workflow` section on asset folder-notes. The current model uses five flat boolean fields directly on the folder-note frontmatter (`spec_design_done`, `spec_plan_done`, `spec_develop_done`, `spec_tests_passing`, `spec_released`) plus the `spec_cancelled` overlay. `lazy-spec.doctor` treats any of the old-model fields as a hard error rather than trying to migrate them — there is no migration path, only a strip.
 
 Re-run `/lazy-spec.doctor <product> --apply` — the fix loop offers to strip the obsolete fields per finding, with a confirmation before each write.
+
+---
+
+## `/lazy-spec.doctor` reports a `spec_doc_type` FAIL on a product or catalog folder-note. How do I clear it?
+
+A folder-note never carries `spec_doc_type` — not an asset's status note, not a product's or the catalog root's own level note. Both directions are the same finding: the key missing from an authored document, or the key present on a note that must not have one. Run `Bash(lazycortex-specs doc-type backfill)` (the primitive `/lazy-spec.install`'s Step 7c also calls during a fresh install) — it walks the spec content-root, writes the missing key onto authored documents that lack it, and strips a stray key off any level note that carries one, reporting `touched` / `skipped` / `cleaned` counts. A `cleaned` count above zero means the note was typed by an earlier release that derived a type from the `product` / `catalog` role and wrote it onto the level note itself, which no level-note schema has room for; the same backfill walk takes it back off. For a single note, `Bash(lazycortex-specs note-drop-key <note_dir> spec_doc_type)` does the same strip without touching the rest of the catalog — it's the exact verb `spec.coordinator` and `spec.catalog-coordinator` reach for themselves the moment their own structural check spots the stray key, so a level note under an active coordinator often clears itself before you ever need to run backfill or doctor again. The backfill leaves its writes in the worktree — committing them is yours to do.
+
+---
+
+## Why did an unrecognized `spec_*` key disappear from my folder-note's frontmatter on its own?
+
+`spec.coordinator` (for an asset's status note) and `spec.catalog-coordinator` (for a product or catalog-root level note) now clear it for you, the moment their own structural check reports the key as unrecognized. This closes a gap that used to leave the litter in place: the coordinator could see a stray key but had nothing in its toolset that could take it back off, so all it could do was name a "repair route" in `# Status brief` that fixed nothing on its own. It only ever removes a key that genuinely qualifies — one in the `spec_` namespace that the schema does not recognize — and refuses on a key the schema does know (that key carries real state, and state is set, never dropped) or on any key outside the `spec_` namespace at all, since another worker owns those.
+
+You don't need to run anything yourself: the cleanup lands as an ordinary commit the next time the coordinator wakes on that note. `/lazy-spec.doctor` still catches the same class of stray key on a note that isn't currently under an active coordinator wake — its report points you at the same fix.
 
 ---
 

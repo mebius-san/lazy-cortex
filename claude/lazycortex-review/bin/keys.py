@@ -192,6 +192,7 @@ class JobKey:
   Attributes:
     NAME: A writer / expert name field.
     EXPERTS: The experts catalog / group block.
+    ROUTINES: The routine registry block.
     ERROR: An error-message field.
     COMMIT_SHA: A commit-SHA field.
     FILE: A file-path field.
@@ -292,6 +293,7 @@ class JobKey:
 
   NAME = "name"
   EXPERTS = "experts"
+  ROUTINES = "routines"
   ERROR = "error"
   COMMIT_SHA = "commit_sha"
   FILE = "file"

@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Take one spec asset from a blank slate through all five readiness gates to a confirmed release.
-last_regen: 2026-09-07
+last_regen: 2026-09-09
 diagram_spec:
   anchor: "How the journey flows"
   request: "Sequence diagram showing the five-skill lifecycle of one asset: lazy-spec.create-asset scaffolds and authors the asset, lazy-spec.set-stage marks the design approved and then the plan approved, lazy-spec.flip-gate advances each gate (spec_design_done through spec_tests_passing), lazy-spec.sync-with-code reconciles code reality and proposes spec_develop_done, lazy-spec.rebase-pins rebases branch pins and proposes spec_released."
@@ -108,7 +108,7 @@ Once the implementation is written (in its own source-repo branch), run:
 /lazy-spec.sync-with-code <product>
 ```
 
-`lazy-spec.sync-with-code` fetches the source repo, walks commits since the last sync, and surfaces user-visible behavior changes for you to review before applying them to the design doc. It never touches the product tech doc — that document is hand-written, out of scope in both modes, and changes only through its own review; a code-level change with nothing to say to a user goes into the run log and nowhere else. It also inspects every asset folder-note and, when commits on the default branch objectively implement this asset AND `spec_plan_done` already reads `true`, proposes flipping `spec_develop_done` via one confirmation question. On yes, it invokes `lazy-spec.flip-gate` for you.
+`lazy-spec.sync-with-code` fetches the source repo, walks commits since the last sync, and surfaces user-visible behavior changes for you to review before applying them to the design doc. It never touches the product tech doc — that document is hand-written, out of scope in both modes, and changes only through its own review; a code-level change with nothing to say to a user goes into the run log and nowhere else. When an approved edit lands on a product design-doc section that already carries a diagram, sync redraws that diagram to match the new prose in the same pass — it never draws one where none existed. It also inspects every asset folder-note and, when commits on the default branch objectively implement this asset AND `spec_plan_done` already reads `true`, proposes flipping `spec_develop_done` via one confirmation question. On yes, it invokes `lazy-spec.flip-gate` for you.
 
 That `spec_plan_done` check is `sync-with-code`'s own readiness gate, not something the underlying `flip-gate` primitive enforces on its own. If Step 4 hasn't landed yet, sync doesn't propose the flip at all — it reports the asset as blocked on its code-plan gate instead. Finish Step 4, then re-run the sync to get the proposal.
 

@@ -14,7 +14,7 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 74f5515593a4aa6587f57c7df78a2fa5a85ee56f
 ---
 # Frequently asked questions
 
@@ -50,7 +50,13 @@ Nothing repaints inside your commit: no hook stages into your index behind your 
 
 ## I upgraded the plugin and my repaint routine still behaves the old way. Do I need to re-register it by hand?
 
-No — re-running `/lazy-obsidian.iconize-install` fixes it for you. The `lazy-obsidian.repaint` routine's `command`, `watch`, and `ignore_halt` fields are entirely composed by the plugin, so the skill now reads the registered routine back and compares it against what the current version would write; a mismatch (left over from an older plugin version) is refreshed silently — unregistered and re-registered — while your own `interval_sec` tuning is carried over untouched. The report line reads **refreshed** instead of the older **already-present** when this happens. No prompt, no manual `lazy-routine.unregister` / `lazy-routine.register` needed.
+No — re-running `/lazy-obsidian.iconize-install` fixes it for you. The `lazy-obsidian.repaint` routine's `command`, `watch`, `ignore_halt`, and `git_author` fields are entirely composed by the plugin, so the skill now reads the registered routine back and compares it against what the current version would write; a mismatch (left over from an older plugin version) is refreshed silently — unregistered and re-registered — while your own `interval_sec` tuning is carried over untouched. The report line reads **refreshed** instead of the older **already-present** when this happens. No prompt, no manual `lazy-routine.unregister` / `lazy-routine.register` needed.
+
+---
+
+## After upgrading, the `lazy-obsidian.repaint` entry disappeared from `experts` in my `lazy.settings.json`. Is that a bug?
+
+No — `/lazy-obsidian.iconize-install` removed it on purpose. Earlier plugin versions seeded the repaint routine's identity twice: once as the routine's own `git_author` (see the question above), and again as a duplicate `experts["lazy-obsidian.repaint"]` entry, because sibling coordinators used to recognize bot commits only by walking the `experts` table. They now read the routine registry too, so the duplicate is dead weight — and worse, an `experts` entry with no `agent` field permanently fails core's expert preflight, since nothing serves it as a role. Re-running `/lazy-obsidian.iconize-install` deletes that leftover key (report line **identity-pruned**) and leaves the routine's own `git_author` as the single record; a vault that never carried the duplicate reports **identity-absent** instead. Repaint commits are still recognized as bot commits either way — nothing about the previous question's behavior changes.
 
 ---
 

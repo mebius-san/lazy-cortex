@@ -1,7 +1,7 @@
 ---
 chapter_type: block
 summary: Mirror external design repos into your vault and keep a spec doc's visible source list matching its frontmatter.
-last_regen: 2026-09-07
+last_regen: 2026-09-09
 diagram_spec:
   anchor: "How an upstream unit becomes part of a spec"
   request: "flow diagram: upstream-run mirrors and diffs a unit from a foreign repo, an operator ticks its Take into work / Process update checkbox, a body-only request opens and freezes the unit to in-review, the request lands against an asset (recorded in spec_source_requests), and refresh-sources re-projects that attachment into the asset doc's visible Sources list"

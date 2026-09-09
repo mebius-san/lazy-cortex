@@ -25,7 +25,7 @@ source_skills:
   - lazy-spec.sync-with-code
   - lazy-spec.upstream-run
   - lazy-spec.doctor
-source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
+source_sha: 729234b05d4141810d184b143e30745bfb03d131
 ---
 # Troubleshooting
 
@@ -136,6 +136,16 @@ source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 **Likely cause**: The product folder's basename collides with the product-level `design.md` / `tech.md` / `decisions.md` files that live at the product root — a structural naming conflict the skill deliberately refuses to resolve on its own.
 
 **Fix**: Rename the product's folder (and its `spec_path` entry via `/lazy-spec.product-config` edit mode) to a leaf that isn't `design`, `tech`, or `decisions`, then re-run `/lazy-spec.doctor`.
+
+---
+
+## `/lazy-spec.doctor` FAILs a product's or the catalog root's level note with `unknown-key: spec_doc_type`
+
+**Symptom**: Agent D's `note-check` delegation reports a FAIL naming `unknown-key` on `spec_doc_type` for the product folder-note (`<spec_path>/<leaf>.md`) or the catalog root's own note — even though nothing was hand-edited.
+
+**Likely cause**: An older `lazycortex-specs doc-type backfill` run derived a type from the level note's own `product` / `catalog` role and wrote `spec_doc_type: <role>` onto it — a key no level-note schema has ever declared room for. Only the asset status note and the operator-zone group/category notes were excluded from typing before this was fixed; a level note slipped through and picked up a stray key that `note-check` now rejects.
+
+**Fix**: Two verbs clear this, and the finding names whichever fits. For the whole catalog in one pass, re-run `lazycortex-specs doc-type backfill` (or re-run `/lazy-spec.install`, whose Step 7c calls it) — reporting the count under a `cleaned` counter alongside `touched` / `skipped`. For a single note, run `lazycortex-specs note-drop-key <note_dir> spec_doc_type` directly — the same verb the coordinators reach for to clean up a stray key on their own wake, so a level note under an active coordinator usually self-heals before this doctor pass ever reports it. Re-run `/lazy-spec.doctor` afterward to confirm the FAIL clears.
 
 ---
 
