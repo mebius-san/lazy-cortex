@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from constants import JobFile, JobOutcome, JobResponseKey, JobStatus  # pylint: disable=import-error
+from constants import JobFile, JobMarker, JobOutcome, JobResponseKey, JobStatus  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -121,3 +121,39 @@ def read_response(jdir: Path) -> dict:
   except (OSError, json.JSONDecodeError):
     return {}
   return parsed if isinstance(parsed, dict) else {}
+
+
+def is_job_bundle(path: Path) -> bool:
+  """
+  Report whether a path under an expert's queue is one of its job bundles.
+
+  A bundle is recognised by anything a dispatch leaves in it: either payload file, or any
+  of the markers a job acquires as it runs. A directory carrying none of them was never a
+  job and is not one now.
+
+  Args:
+    path: Path to the directory being judged, as found under `.experts/.jobs/<expert>/`.
+
+  Returns:
+    `True` when the path is a directory holding a job payload or a job marker.
+  """
+
+  # Decision: the test is "did a dispatch leave anything here", not one signature file —
+  # payloads alone would reject a bundle reduced to its markers, and markers alone would reject
+  # one whose dispatch died before touching the first marker. Both shapes are real, and both
+  # must count. Every scanner of the queue asks this question, and each one answering it
+  # privately is how an empty `.claude` sidecar the harness drops beside a bundle came to be
+  # counted as a queued job that never drains.
+
+  # guard: a stray file beside the bundles is not a queue entry
+  if not path.is_dir():
+    return False
+
+  # any trace a dispatch leaves is proof enough; the directory needs to carry only one of them
+  return any(
+    (path / name).exists()
+    for name in (
+      JobFile.REQUEST, JobFile.CONFIG, JobFile.RESPONSE,
+      JobMarker.READY, JobMarker.PID, JobMarker.DONE, JobMarker.DEAD, JobMarker.CANCELLED,
+    )
+  )

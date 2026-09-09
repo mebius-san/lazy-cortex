@@ -21,7 +21,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from job_response import classify_response, read_response
+from job_response import classify_response, is_job_bundle, read_response
+# waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
+from lazy_install_phases import ensure_self_ignoring_dir
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
 from provider_env import resolve_provider
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
@@ -31,7 +33,7 @@ from constants import (
   HookName, IncidentActor, IncidentKey, IncidentKind, IncidentPhase, JobCollectKey, JobConfigKey,
   JobFile,
   JobIODir, JobMarker, JobRequestKey, JobResponseKey, JobStatus,
-  RoutineKey, RuntimeFile, SettingsFile, SettingsKey, WorkspaceMode,
+  RepoDir, RoutineKey, RuntimeFile, SettingsFile, SettingsKey, WorkspaceMode,
 )
 
 from typing import TYPE_CHECKING
@@ -151,6 +153,8 @@ def dispatch_job(
     - The expert's configured `provider` entry is resolved and validated before any job
       bundle is written, so a misconfigured provider fails the dispatch loudly rather than
       surfacing later inside the pump.
+    - The job queue's root, `<repo>/.experts/`, gains its own self-ignoring `.gitignore` on
+      first use, independent of any install phase having run.
 
   Notes:
     - Records a best-effort `unpinned_model` incident on the error ledger when the model
@@ -209,8 +213,8 @@ def dispatch_job(
     edir = Path(repo) / JOBS_BASE / expert
     if edir.exists():
       for jdir in edir.iterdir():
-        # guard: skip non-directory entries that may appear under the expert dir
-        if not jdir.is_dir():
+        # guard: only real bundles are queue entries
+        if not is_job_bundle(jdir):
           continue
         # guard: pre-READY bundles are not yet active
         if not (jdir / JobMarker.READY).exists():
@@ -259,6 +263,9 @@ def dispatch_job(
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     d.rename(d.with_name(f"{job_id}.dead-{stamp}"))
   d.mkdir(parents = True, exist_ok = True)
+  # the job queue's own root gains a self-ignoring .gitignore on first use — no install
+  # phase runs for a repo that only ever dispatches jobs
+  ensure_self_ignoring_dir(Path(repo) / RepoDir.EXPERTS)
 
   # auxiliary work files: `source` / `context` are manifests the pump copies when it claims
   # the job, so the expert starts from the tree as it stands then rather than as it stood at
@@ -396,7 +403,7 @@ def resolve_agent_model(repo: Path, agent_ref: str | None) -> str | None:
   if not agent_ref:
     return None
   # waiver: deferred import — avoid module-load cycle with lazy_settings
-  from lazy_settings import load_section
+  from lazy_settings import load_section, resolve_agent_model_tier
   groups = load_section(Path(repo) / SettingsFile.REL, SettingsKey.AGENT_MODELS)
   tier: str | None = None
   # flatten grouped agent_models; on cross-group collision the last entry wins
@@ -405,8 +412,9 @@ def resolve_agent_model(repo: Path, agent_ref: str | None) -> str | None:
     if not isinstance(entries, dict):
       continue
     if agent_ref in entries:
-      tier = entries[agent_ref]
-  # guard: sentinel / unknown tier — treat as no explicit pin
+      # unwrap bare pin / seed object to its effective tier; malformed resolves to None
+      tier = resolve_agent_model_tier(entries[agent_ref])
+  # guard: sentinel / unknown / malformed tier — treat as no explicit pin
   if tier not in _MODEL_TIERS:
     return None
   return tier
@@ -530,8 +538,8 @@ def list_jobs(
     if not edir.exists():
       continue
     for jdir in edir.iterdir():
-      # guard: skip stray files under the expert directory
-      if not jdir.is_dir():
+      # guard: only real bundles are queue entries
+      if not is_job_bundle(jdir):
         continue
       entry_status = _job_status(jdir)
       # guard: bundle in an unrecognised shape is dropped from the listing
@@ -865,8 +873,8 @@ def retire_completed_jobs(
   if not edir.exists():
     return retired
   for jdir in edir.iterdir():
-    # guard: skip non-directory entries that may appear under the expert dir
-    if not jdir.is_dir():
+    # guard: only real bundles are queue entries
+    if not is_job_bundle(jdir):
       continue
     # guard: only finished bundles are eligible — never retire an in-flight job
     if not (jdir / JobMarker.DONE).exists():
@@ -929,8 +937,8 @@ def completed_dedup_jobs(repo: Path, expert: str) -> list[dict]:
   if not edir.exists():
     return out
   for jdir in edir.iterdir():
-    # guard: skip non-directory entries that may appear under the expert dir
-    if not jdir.is_dir():
+    # guard: only real bundles are queue entries
+    if not is_job_bundle(jdir):
       continue
     # guard: only finished bundles are reconcilable
     if not (jdir / JobMarker.DONE).exists():

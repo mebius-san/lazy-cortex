@@ -100,7 +100,9 @@ Time-based throttles (cooldown files, mtime checks) and counter-based guards are
 
 ## 7. Transactional skip
 
-A hook that auto-commits MUST refuse to do so when the repo has any of: `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `REBASE_HEAD`, `rebase-merge/`, `rebase-apply/`, `BISECT_LOG`. Auto-commit during these flows interferes with the user's interactive operation and can corrupt the in-progress merge/rebase state.
+A hook that auto-commits MUST refuse to do so when the repo has any of: `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `rebase-merge/`, `rebase-apply/`, `BISECT_LOG`. Auto-commit during these flows interferes with the user's interactive operation and can corrupt the in-progress merge/rebase state.
+
+`REBASE_HEAD` is deliberately not on that list. Git writes it to record the commit a rebase stopped at, and never removes it once the rebase concludes, so it outlives the transaction it names — a single leftover would silence every auto-commit in that repository forever. `rebase-merge/` and `rebase-apply/` are the directories git itself reads to decide a rebase is in flight, and git removes them when it ends.
 
 ## 8. Logging
 

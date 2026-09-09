@@ -28,6 +28,7 @@ from typing import Protocol
 
 import json
 import os
+import re
 import shutil
 import stat
 import sys
@@ -197,13 +198,24 @@ class Phase2Wrappers:
 
 # ----------------------------------------------------------------------------------------
 class Phase3Pyproject:
-  """Bootstrap consumer's `pyproject.toml` with checker-stack sections from the template.
+  """
+  Install phase that bootstraps the consumer's `pyproject.toml` with checker-stack sections
+  from the template.
 
-  Sections added: `[tool.pcf]`, `[tool.pcf.overrides]`, `[tool.toi]`, `[tool.pch]`,
-  `[tool.pytest.ini_options]`, `[tool.mypy]`, `[tool.pylint]`, `[tool.ruff]` (and any
-  nested keys, e.g. `[tool.ruff.lint]`). Existing top-level sections in the consumer's
-  pyproject.toml are NOT overwritten — the consumer's configuration always wins.
-  Idempotent — re-running is a no-op once every checker section is present.
+  Adds the `[tool.pcf]`, `[tool.pcf.overrides]`, `[tool.toi]`, `[tool.pch]`,
+  `[tool.pytest.ini_options]`, `[tool.mypy]`, `[tool.pylint]`, and `[tool.ruff]` sections
+  (and any nested sub-tables, e.g. `[tool.ruff.lint]`) that the consumer's file is missing,
+  and completes the missing sub-keys of any of those sections the consumer already has.
+
+  Guarantees:
+    - Never overwrites a sub-key the consumer has already set.
+    - Idempotent: re-running is a no-op once every checker section carries every
+      template sub-key.
+
+  Attributes:
+    consumer_dir: Root directory of the consumer repository being installed into.
+    target: Path to the consumer's `pyproject.toml` file.
+    template: Path to the plugin's template file supplying the checker-stack sections.
   """
 
   # Always-deployed checker sections. pch is added only when PyCharm is present —
@@ -212,6 +224,10 @@ class Phase3Pyproject:
   CHECKER_SECTIONS = ("pcf", "toi", "pytest", "mypy", "pylint", "ruff")
   OPTIONAL_SECTIONS = {"pch": "LAZY_PYTHON_ENABLE_PCH"}
 
+  # Matches a top-level `key = ...` line (no leading indent) starting a new key's block;
+  # an indented continuation line (array/table element) is not a new key.
+  _KEY_LINE = re.compile(r"^([A-Za-z0-9_-]+)\s*=")
+
   def __init__(self, *, consumer_dir: Path) -> None:
     self.consumer_dir: Path = consumer_dir
     self.target: Path = consumer_dir / "pyproject.toml"
@@ -219,7 +235,8 @@ class Phase3Pyproject:
 
   def run(self) -> int:
     """
-    Merge missing checker sections from the template into the consumer's `pyproject.toml`.
+    Merge missing checker sections and sub-keys from the template into the consumer's
+    `pyproject.toml`.
 
     Returns:
       0 on success.
@@ -231,6 +248,7 @@ class Phase3Pyproject:
       existing_text = self.target.read_text()
     else:
       existing_text = '[project]\nname = "consumer"\nversion = "0.1.0"\n'
+    original_text = existing_text
 
     # the consumer's own [tool] sections decide what still has to be merged in
     existing_data = tomllib.loads(existing_text)
@@ -243,11 +261,30 @@ class Phase3Pyproject:
     # Determine which wanted sections are MISSING under [tool] in the consumer file.
     missing = [s for s in wanted if s not in existing_tool]
 
-    # Idempotent no-op when every checker section is already present.
+    # A section already present may still be a partial write from an older install — complete
+    # its own missing sub-keys (never touching a sub-key the consumer already set), in place.
+    for section_name in wanted:
+      # guard: a wholly-missing section is handled by the whole-block append below
+      if section_name in missing:
+        continue
+      existing_section = existing_tool[section_name]
+      # guard: a non-mapping override (rare) has no sub-keys to complete — leave it alone
+      if not isinstance(existing_section, dict):
+        continue
+      template_keys = self._extract_own_keys(template_text, section_name)
+      missing_keys = [k for k in template_keys if k not in existing_section]
+      # guard: every template sub-key is already present — nothing to inject
+      if not missing_keys:
+        continue
+      injected = "\n".join(template_keys[k] for k in missing_keys)
+      existing_text = self._insert_after_header(existing_text, section_name, injected)
+
+    # Idempotent no-op when every checker section is present and none needed a sub-key completed.
     if not missing:
-      # a first run against a missing file still has to materialise the baseline stanza
-      if not self.target.exists():
-        self.target.write_text(existing_text)
+      # guard: nothing changed and the file already exists — leave it byte-identical
+      if existing_text == original_text and self.target.exists():
+        return 0
+      self.target.write_text(existing_text)
       return 0
 
     # Extract each missing section's raw text block from the template (preserves comments + formatting).
@@ -281,6 +318,70 @@ class Phase3Pyproject:
       if in_section:
         out.append(line)
     return "\n".join(out).rstrip()
+
+  @classmethod
+  def _extract_own_keys(cls, toml_text: str, top_name: str) -> dict[str, str]:
+    """
+    Map each key defined directly under `[tool.<top_name>]` to its raw source text, up to
+    the first nested `[tool.<top_name>.*]` sub-table.
+
+    Args:
+      toml_text: Full TOML document to scan.
+      top_name: Name of the top-level tool section whose own keys are extracted.
+
+    Returns:
+      An ordered mapping of key name to its raw text, including any multi-line array
+      continuations. A leading comment or blank line ahead of the first key is dropped.
+    """
+    header = f"[tool.{top_name}]"
+    out: dict[str, str] = {}
+    in_section = False
+    current_key: str | None = None
+    current_lines: list[str] = []
+    for line in toml_text.splitlines():
+      stripped = line.strip()
+      if stripped == header:
+        in_section = True
+        continue
+      # guard: not yet inside the target section — skip until the header line
+      if not in_section:
+        continue
+      # a nested sub-table or the next top-level section ends this section's own keys
+      if stripped.startswith("["):
+        break
+      match = cls._KEY_LINE.match(line)
+      if match:
+        if current_key is not None:
+          out[current_key] = "\n".join(current_lines).rstrip()
+        current_key = match.group(1)
+        current_lines = [line]
+      elif current_key is not None:
+        current_lines.append(line)
+    if current_key is not None:
+      out[current_key] = "\n".join(current_lines).rstrip()
+    return out
+
+  @classmethod
+  def _insert_after_header(cls, toml_text: str, top_name: str, injected: str) -> str:
+    """
+    Splice raw key lines into a TOML document directly after a top-level tool section's
+    header line.
+
+    Args:
+      toml_text: Full TOML document to splice into.
+      top_name: Name of the top-level tool section whose header is the insertion point.
+      injected: Raw key-line text to insert immediately after the header.
+
+    Returns:
+      `toml_text` with `injected` spliced in, or unchanged when the header is not found.
+    """
+    header = f"[tool.{top_name}]"
+    lines = toml_text.splitlines(keepends = True)
+    for i, line in enumerate(lines):
+      if line.strip() == header:
+        insert_at = i + 1
+        return "".join(lines[:insert_at]) + injected + "\n" + "".join(lines[insert_at:])
+    return toml_text
 
 
 # ----------------------------------------------------------------------------------------
@@ -462,8 +563,11 @@ class Phase7Expert:
   as from the check pipeline.
 
   Notes:
-    - An entry already on record is left untouched, whatever its shape.
-    - The entry is additive: every other expert and section is preserved verbatim.
+    - Registers a full entry when none exists on record; when an entry already exists, only
+      its install-managed fields (`agent`, `aspects`) are refreshed on drift, leaving every
+      other field, including operator-owned ones, untouched.
+    - The entry is additive: every other expert and section in the settings file is preserved
+      verbatim.
 
   Attributes:
     consumer_dir: Root directory of the consumer repository being installed into.
@@ -480,16 +584,20 @@ class Phase7Expert:
     },
   }
 
+  # Install-managed fields: this phase's own writing, refreshed on drift. `git_author`
+  # is the operator's to set once registered — it is seeded on first registration only.
+  MANAGED_FIELDS = ("agent", "aspects")
+
   def __init__(self, *, consumer_dir: Path) -> None:
     self.consumer_dir: Path = consumer_dir
     self.settings: Path = consumer_dir / ".claude/lazy.settings.json"
 
   def run(self) -> int:
     """
-    Register the reviewer expert when it is absent and emit an outcome word.
+    Ensure the reviewer expert entry exists and its install-managed fields are current.
 
     Returns:
-      0 always; the registration is additive and cannot fail the install.
+      0 always; the registration or refresh is additive and cannot fail the install.
     """
     data = self._load()
     experts = data.get("experts")
@@ -497,19 +605,32 @@ class Phase7Expert:
     if not isinstance(experts, dict):
       experts = {}
 
-    # guard: an entry on record is the operator's — never rewrite it
-    if self.EXPERT_KEY in experts:
+    # guard: no entry on record yet — register a full copy of the template
+    if self.EXPERT_KEY not in experts:
+      experts[self.EXPERT_KEY] = dict(self.EXPERT_ENTRY)
+      data["experts"] = experts
+      self._write(data)
+      print(f"expert-registered: {self.EXPERT_KEY}")
+      return 0
+
+    # an entry on record is compared field-by-field against the shipped form, not accepted whole
+    entry = experts[self.EXPERT_KEY]
+    # a malformed existing entry (not a mapping) is replaced by a fresh one to refresh into
+    if not isinstance(entry, dict):
+      entry = {}
+
+    # guard: every install-managed field already matches the shipped form — nothing to refresh
+    if all(entry.get(field) == self.EXPERT_ENTRY[field] for field in self.MANAGED_FIELDS):
       print("expert-already-registered")
       return 0
 
-    # register a copy of the template so later operator edits cannot reach the class constant
-    experts[self.EXPERT_KEY] = dict(self.EXPERT_ENTRY)
+    # correct only the plugin-owned fields; every other field (operator's own) stays as recorded
+    for field in self.MANAGED_FIELDS:
+      entry[field] = self.EXPERT_ENTRY[field]
+    experts[self.EXPERT_KEY] = entry
     data["experts"] = experts
-    self.settings.parent.mkdir(parents = True, exist_ok = True)
-    self.settings.write_text(json.dumps(data, indent = 2) + "\n", encoding = "utf-8")
-
-    # outcome word the install skill parses to report what this phase did
-    print(f"expert-registered: {self.EXPERT_KEY}")
+    self._write(data)
+    print(f"expert-refreshed: {self.EXPERT_KEY}")
     return 0
 
   def _load(self) -> dict:
@@ -523,6 +644,16 @@ class Phase7Expert:
     if not self.settings.exists():
       return {}
     return json.loads(self.settings.read_text(encoding = "utf-8") or "{}")
+
+  def _write(self, data: dict) -> None:
+    """
+    Persist `data` as the consumer's tracked settings file.
+
+    Args:
+      data: The full settings mapping to write.
+    """
+    self.settings.parent.mkdir(parents = True, exist_ok = True)
+    self.settings.write_text(json.dumps(data, indent = 2) + "\n", encoding = "utf-8")
 
 
 def main() -> int:

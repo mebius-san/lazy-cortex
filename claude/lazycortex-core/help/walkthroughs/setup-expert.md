@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Add a named expert role and dispatch your first async job — keep working while the daemon runs it, then collect the result.
-last_regen: 2026-09-08
+last_regen: 2026-09-09
 diagram_spec:
   anchor: "How the pieces fit"
   request: "Sequence diagram showing a user dispatching a job via /lazy-expert.dispatch-job, the daemon picking it up from the .experts/.jobs/ queue, the expert agent writing response.json + DONE marker, and the user collecting the result via /lazy-expert.collect-job. Nodes: User, Claude session, .experts/.jobs/ queue, daemon (runner), expert agent."
@@ -11,7 +11,7 @@ source_skills:
   - lazy-expert.dispatch-job
   - lazy-expert.list-jobs
   - lazy-expert.collect-job
-source_sha: 063baee10c75ba3794390ccf935191d3c564a350
+source_sha: d4ce013c331568c5c4815b553aaf9382f01eae69
 ---
 # Add a named expert and dispatch your first async job
 
@@ -36,7 +36,7 @@ After this walkthrough you have:
 
 Run `/lazy-core.install` in the repo you want the async team to work in. Alongside the rest of its bootstrap, the install skill:
 
-- Creates `.experts/` and registers every expert candidate it finds — any installed plugin's agent carrying `expert_protocol:` frontmatter is registered automatically in `lazy.settings.json[experts]`, no per-candidate prompt. Registration happens whether or not a background daemon runs anywhere — experts are dispatch-routing config used by interactive flows too.
+- Registers every expert candidate it finds — any installed plugin's agent carrying `expert_protocol:` frontmatter is registered automatically in `lazy.settings.json[experts]`, no per-candidate prompt. Registration happens whether or not a background daemon runs anywhere — experts are dispatch-routing config used by interactive flows too. The `.experts/` directory itself is not created by install — it materializes lazily the first time a job is actually dispatched (Step 2 below), along with its own self-ignoring `.gitignore`.
 - Registers the built-in routines, including the queue-draining `lazy-expert.pump`, in `lazy.settings.json[routines]` — again unconditionally. The daemon is never required for the queue itself to exist.
 - Seeds `lazy.settings.json[daemon]` with `enabled: false` as the default. A project only gets a background daemon **supervisor** once you explicitly set that flag to `true` in the tracked settings and re-run `/lazy-core.install` — at which point the skill asks the one remaining question, `daemon.run_here` (a per-machine "does this checkout drive the daemon" map), and installs the supervisor (launchd on macOS, systemd on Linux) once you confirm.
 - Does **not** seed `daemon.token_env`. Whenever the daemon process actually runs — the supervisor or the manual shim, never `/lazy-runtime.tick` — it refuses to start under the machine's ambient login and instead requires an explicit token, named by this key. Setting it is on you; see the queue-draining bullet below.

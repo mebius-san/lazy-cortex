@@ -717,7 +717,7 @@ Context (print before asking):
 - Where: /lazy-core.doctor · Phase 4 — Fix L7 Sandbox scope; target the gitignored sandbox-scope state of `<repo>`
 - Found: D13 — <N> location(s) the expert-spawn allowlist resolves to lie outside the sandbox scope: <comma-joined paths>
 - Why asking: confined spawns fail every write there with `Operation not permitted`; recording widens where spawned experts may write
-- Answers: `Record` — `sandbox_scope.sync` appends the missing locations now (receipt `changed=… added_write=…`), never drops an entry, nothing to commit; `Skip` — untouched, D13 reappears next run
+- Answers: `Record` — `sandbox_scope.sync` appends the missing locations now (receipt `changed=… added_write=…`), drops only dead version-pinned cache grants, nothing to commit; `Skip` — untouched, D13 reappears next run
 AskUserQuestion: header "Record sandbox paths", question "The expert-spawn sandbox of `<repo>` does not cover <N> location(s) its own allowlist resolves to (<comma-joined paths>). Confined spawns fail every write there with `Operation not permitted`. Record them?", options `Record` / `Skip` with the descriptions above.
 ```
 
@@ -730,7 +730,7 @@ r = sync(Path('.'))
 print(f\"changed={r['changed']} added_write={r['added_write']}\")
 ")
 ```
-Report the receipt verbatim. The file is gitignored daemon state, so there is nothing to commit. The sync appends only what is missing and never drops a recorded entry.
+Report the receipt verbatim. The file is gitignored daemon state, so there is nothing to commit. The sync appends what is missing and drops exactly one class of entry: a version-pinned read grant under the plugin cache root whose directory no longer exists (reported as `removed_read`). Every other recorded entry survives, including one whose path is missing — a grant outside the cache may name a location the operator has yet to create.
 
 For any finding surfaced by a delegated audit (Guard / Logging), direct the user to run that sibling skill for fixes. Doctor never auto-fixes issues owned by sibling audits.
 

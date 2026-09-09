@@ -683,9 +683,10 @@ def _cmd_sandbox_sync(argv: list[str]) -> int:
     symlinks, plus the targets of the symlinks directly inside it: macOS checks
     the resolved path, so an unresolved entry grants nothing where the data lives.
 
-    Output JSON: ``{"path", "present", "enabled", "added_read", "added_write", "changed"}``.
-    A recorded ``enabled`` is never overwritten — a ``false`` comes back in the
-    result for the caller to act on.
+    Output JSON: ``{"path", "present", "enabled", "added_read", "added_write",
+    "removed_read", "changed"}``. A recorded ``enabled`` is never overwritten —
+    a ``false`` comes back in the result for the caller to act on. ``removed_read``
+    names any recorded read grant for a plugin-cache version no longer on disk.
     """
     import argparse, json
     from sandbox_scope import sync

@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "bin"))
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
-from lazy_settings import load_section  # noqa: E402
+from lazy_settings import load_section, resolve_agent_model_tier  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
 import hook_gate  # noqa: E402
 # waiver: deferred sibling import follows the sys.path.insert above (ruff E402 by design); resolved at runtime via sys.path
@@ -119,8 +119,11 @@ def build_flat_map(cfg: dict) -> dict:
   Flatten the grouped `agent_models` configuration into a single dispatch-string lookup.
 
   Keys inside every group are already full dispatch strings — grouping is organizational only.
-  On cross-group collisions the last entry wins and a warning is emitted to stderr. Malformed
-  groups (non-dict values) are silently skipped.
+  Each entry value is either a bare tier string (the operator's pin) or a seed object
+  (`{"tier": ..., "seeded_from": ...}`) recording where the value came from; both unwrap to
+  the same effective tier. On cross-group collisions the last entry wins and a warning is
+  emitted to stderr. Malformed groups (non-dict values) and malformed entries (a seed object
+  with no string `tier`) are silently skipped.
 
   Args:
     cfg: Configuration dict as returned by `load_config`, expected to contain an `agent_models`
@@ -140,14 +143,19 @@ def build_flat_map(cfg: dict) -> dict:
     if not isinstance(entries, dict):
       continue
     for key, val in entries.items():
+      # unwrap bare pin / seed object to its effective tier
+      tier = resolve_agent_model_tier(val)
+      # guard: malformed entry (no string `tier`) — skip silently
+      if tier is None:
+        continue
       # warn on cross-group collision before overwriting
-      if key in out and out[key] != val:
+      if key in out and out[key] != tier:
         print(
           f"[lazy-core.model-router] duplicate key {key!r} "
-          f"across groups; using {val!r}",
+          f"across groups; using {tier!r}",
           file = sys.stderr,
         )
-      out[key] = val
+      out[key] = tier
   return out
 
 

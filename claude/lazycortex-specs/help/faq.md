@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about products, assets, vision/design docs, gates, requests, decisions, coverage gaps, spec lookups, and the coordinator agent.
-last_regen: 2026-09-08
+last_regen: 2026-09-09
 no_diagram: true
 source_skills:
   - lazy-spec.install
@@ -31,7 +31,7 @@ source_skills:
   - lazy-spec.request-classify
   - lazy-spec.request-find-candidates
   - lazy-spec.resolve-dependency
-source_sha: d93e157ad67a4c82b400d2eac84f6f4ade31545f
+source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 ---
 # Frequently asked questions
 

@@ -329,12 +329,35 @@ def _ensure_dirs(repo: Path) -> list[str]:
   return created
 
 
+def _merge_defaults(existing: dict, defaults: dict, added: list[str], prefix: str = "") -> None:
+  """
+  Merge `defaults` into `existing` in place, completing every missing key at any depth.
+
+  Args:
+    existing: The settings mapping being merged into, mutated in place.
+    defaults: The shipped defaults to merge in.
+    added: Collects the dotted path of every key this merge writes.
+    prefix: Dotted path of `existing` within the settings root, for `added` labels.
+  """
+  for key, value in defaults.items():
+    path = f"{prefix}.{key}" if prefix else key
+    # guard: absent at this depth — write the default whole, dict or scalar alike
+    if key not in existing:
+      existing[key] = value
+      added.append(path)
+      continue
+    # a value present at this depth on both sides recurses; anything else is the consumer's own
+    if isinstance(value, dict) and isinstance(existing[key], dict):
+      _merge_defaults(existing[key], value, added, path)
+
+
 def _ensure_settings(repo: Path) -> dict:
   """
   Merge the default lazy-review settings into `repo`'s `.claude` settings file.
 
-  Existing top-level and nested keys are left untouched; only missing keys are added.
-  Retired registrations from an earlier schema are then removed.
+  Existing keys are left untouched at every depth; only missing keys are added, including
+  sub-fields of an entry that already exists but was only partially written by an earlier
+  install. Retired registrations from an earlier schema are then removed.
 
   Returns:
     A dict with the settings file path, the list of keys that were added, and the
@@ -352,17 +375,7 @@ def _ensure_settings(repo: Path) -> dict:
   # the merge and before the migration strips what it derives from.
   defaults = _default_settings(repo, existing)
   added: list[str] = []
-  for top_key, top_value in defaults.items():
-    if top_key not in existing:
-      existing[top_key] = top_value
-      added.append(top_key)
-      continue
-    # Merge nested defaults conservatively.
-    if isinstance(top_value, dict) and isinstance(existing[top_key], dict):
-      for k, v in top_value.items():
-        if k not in existing[top_key]:
-          existing[top_key][k] = v
-          added.append(f"{top_key}.{k}")
+  _merge_defaults(existing, defaults, added)
   migrated = _migrate(existing)
   settings_path.write_text(json.dumps(existing, indent=2) + "\n")
   return {"settings_path": str(settings_path), "added_keys": added, "migrated": migrated}

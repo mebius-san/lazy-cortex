@@ -24,6 +24,13 @@ if TYPE_CHECKING:
   pass
 
 
+# home-relative root of the LazyCortex marketplace's plugin cache; same value as
+# runtime_daemon.PLUGIN_CACHE_REL — not imported from there to avoid pulling in the daemon's
+# whole dependency graph for one path constant.
+_PLUGIN_CACHE_REL = ".claude/plugins/cache"
+_PLUGIN_CACHE_REGISTRY = "lazycortex"
+
+
 def _expand(path: str | Path) -> str:
   """
   Return one allowlist entry in the absolute literal form the sandbox compares against.
@@ -77,6 +84,28 @@ def _link_targets(base: str) -> list[str]:
   # ponytail: immediate children only — a deeper symlink needs its parent declared as its own entry
   return [ os.path.realpath(os.path.join(base, name)) for name in names
            if os.path.islink(os.path.join(base, name)) ]
+
+
+def _dead_cache_entries(entries: list[str]) -> list[str]:
+  """
+  List the recorded read entries that name a plugin-cache location no longer on disk.
+
+  Notes:
+    - Scoped to the LazyCortex marketplace's own plugin cache: a recorded entry outside it is
+      never reported here, however stale its target, since a checkout may have recorded it
+      for a reason this module cannot see. A version-pinned cache entry carries no such
+      reason — it is only ever a byproduct of a past plugin update.
+
+  Args:
+    entries: Recorded read-allowlist entries, in any form.
+
+  Returns:
+    The entries (as recorded, not expanded) whose expanded path sits under the plugin cache
+    root and does not exist on disk; order-stable, empty when none qualify.
+  """
+  cache_root = _expand(Path.home() / _PLUGIN_CACHE_REL / _PLUGIN_CACHE_REGISTRY)
+  return [ e for e in entries
+           if _is_covered_by(_expand(e), cache_root) and not os.path.isdir(_expand(e)) ]
 
 
 def resolve_scope(entries: list[str]) -> list[str]:
@@ -229,9 +258,12 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
       of the checkout it works in can do nothing.
     - Whatever is writable is also readable, so the write scope is folded into the read
       allowlist as well.
-    - Recorded entries are never dropped or reordered, and a recorded confinement switch or
-      unsandboxed-retry switch is never overwritten — the file belongs to the checkout, and
-      this only adds to it. An unrecorded retry switch is recorded closed.
+    - Recorded entries are never dropped or reordered, with one exception: a recorded read
+      grant under the LazyCortex plugin cache root whose directory no longer exists is a dead
+      version pin left behind by a past plugin update, and is pruned. A recorded confinement
+      switch or unsandboxed-retry switch is never overwritten — the file belongs to the
+      checkout, and this only adds to it (and prunes the plugin-cache dead weight). An
+      unrecorded retry switch is recorded closed.
     - The file is rewritten whenever the document to record differs from what is already on
       disk — including recording a previously absent confinement switch with no scope growth —
       and is left untouched otherwise.
@@ -243,8 +275,8 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
 
   Returns:
     A result dict carrying `SandboxSyncKey` fields: the file location, whether it existed,
-    the confinement switch after the call, the entries appended to each allowlist, and
-    whether the file was rewritten.
+    the confinement switch after the call, the entries appended to each allowlist, the read
+    entries pruned as dead plugin-cache versions, and whether the file was rewritten.
   """
   # what the checkout records today, snapshot before anything is written
   path = settings_path(repo)
@@ -283,8 +315,12 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
   unsandboxed = sandbox.get(SandboxKey.ALLOW_UNSANDBOXED)
   sandbox[SandboxKey.ALLOW_UNSANDBOXED] = unsandboxed if isinstance(unsandboxed, bool) else False
 
-  # the allowlists are the only fields rebuilt wholesale, from what was recorded plus what is new
-  filesystem[SandboxKey.ALLOW_READ] = recorded_read + added_read
+  # the allowlists are the only fields rebuilt wholesale, from what was recorded plus what is new;
+  # a dead plugin-cache version pin is then dropped from the read side only — write is untouched,
+  # and a pin still granted through write stays out of read despite the write-implies-read fold-in
+  read_list = recorded_read + added_read
+  removed_read = _dead_cache_entries(read_list)
+  filesystem[SandboxKey.ALLOW_READ] = [ e for e in read_list if e not in removed_read ]
   filesystem[SandboxKey.ALLOW_WRITE] = recorded_write + added_write
   sandbox[SandboxKey.FILESYSTEM] = filesystem
   doc[SandboxKey.SANDBOX] = sandbox
@@ -296,7 +332,8 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
     # waiver: stdlib encoding idiom
     path.write_text(json.dumps(doc, indent = 2, ensure_ascii = False) + "\n", encoding = "utf-8")
 
-  # what the caller reports: where the scope lives, what it grants now, and what this pass added
+  # what the caller reports: where the scope lives, what it grants now, and what this pass
+  # added and pruned
   return {
     SandboxSyncKey.PATH: str(path),
     SandboxSyncKey.PRESENT: present,
@@ -304,5 +341,6 @@ def sync(repo: Path | str, *, read: list[str] | None = None, write: list[str] | 
     SandboxSyncKey.ALLOW_UNSANDBOXED: sandbox[SandboxKey.ALLOW_UNSANDBOXED],
     SandboxSyncKey.ADDED_READ: added_read,
     SandboxSyncKey.ADDED_WRITE: added_write,
+    SandboxSyncKey.REMOVED_READ: removed_read,
     SandboxSyncKey.CHANGED: changed,
   }

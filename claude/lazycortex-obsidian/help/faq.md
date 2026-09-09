@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about vault setup, Iconize, diagram render glue, the vault manifest, plugin updates, and tag pages for lazycortex-obsidian.
-last_regen: 2026-09-07
+last_regen: 2026-09-09
 no_diagram: true
 source_skills:
   - lazy-obsidian.install
@@ -14,7 +14,7 @@ source_skills:
   - lazy-obsidian.audit
   - lazy-obsidian.capture
   - lazy-obsidian.deploy
-source_sha: 0e0562d0fc4bb9457ff9d14758e688f4eac27c87
+source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 ---
 # Frequently asked questions
 
@@ -45,6 +45,12 @@ Icons are painted by Iconize reading `iconize_icon` and `iconize_color` from eac
 ## Why does the icon frontmatter land in a separate commit after the one I just made?
 
 Nothing repaints inside your commit: no hook stages into your index behind your back. Icons follow each note as it is written (the PostToolUse hook), and after a commit lands, the `lazy-obsidian.repaint` daemon routine repaints the affected directories and commits the result itself. If you want the fresh frontmatter folded into the commit you are about to make, run `/lazy-obsidian.iconize-sync reconcile` (or `reconcile-dirty`) before staging, then commit as usual.
+
+---
+
+## I upgraded the plugin and my repaint routine still behaves the old way. Do I need to re-register it by hand?
+
+No — re-running `/lazy-obsidian.iconize-install` fixes it for you. The `lazy-obsidian.repaint` routine's `command`, `watch`, and `ignore_halt` fields are entirely composed by the plugin, so the skill now reads the registered routine back and compares it against what the current version would write; a mismatch (left over from an older plugin version) is refreshed silently — unregistered and re-registered — while your own `interval_sec` tuning is carried over untouched. The report line reads **refreshed** instead of the older **already-present** when this happens. No prompt, no manual `lazy-routine.unregister` / `lazy-routine.register` needed.
 
 ---
 
@@ -126,7 +132,7 @@ Either the id is misspelled, or you are trying to install a plugin that ships bu
 
 ## I ran `/plugin update lazycortex-obsidian@lazycortex`. Do I need to do anything else?
 
-Yes. The plugin update refreshes the plugin cache but does not automatically re-sync rule templates, CSS snippets, or the icon-map template into your consumer repos. Re-run `/lazy-obsidian.install` in each project to pick up any updated templates — including the CSS snippets, since `/lazy-obsidian.install`'s shared snippet step is the one writer of `appearance.json`'s enabled-snippets array. If only the `mermaid-popup` override changed, running `/lazy-obsidian.diagram-install` on its own is sufficient for that part.
+Yes. The plugin update refreshes the plugin cache but does not automatically re-sync rule templates, CSS snippets, or the icon-map template into your consumer repos. Re-run `/lazy-obsidian.install` in each project to pick up any updated templates — including the CSS snippets, since `/lazy-obsidian.install`'s shared snippet step is the one writer of `appearance.json`'s enabled-snippets array. That step also drops any `enabledCssSnippets` entry naming a snippet this plugin used to ship and no longer does — the dead file was removed from the vault but the array entry stayed, so a stale pointer no longer lingers after an upgrade that retires a snippet; the report line reads **retired: `<name>`** when that happens. If only the `mermaid-popup` override changed, running `/lazy-obsidian.diagram-install` on its own is sufficient for that part.
 
 ---
 

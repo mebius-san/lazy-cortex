@@ -1,15 +1,15 @@
 ---
 chapter_type: block
 summary: Bootstrap lazycortex-review in a repo, define document review classes, and validate configuration with a read-only audit.
-last_regen: 2026-09-07
+last_regen: 2026-09-09
 diagram_spec:
   anchor: "How install, configure, and audit fit together"
-  request: "Show the three-step setup flow: /lazy-review.install seeds settings and dirs, /lazy-review.configure adds review classes via wizard, /lazy-review.audit validates the result. Include the daemon.enabled gate that controls whether the lazy-review.coordinator-watch and lazy-review.collect routines are registered."
+  request: "Show the three-step setup flow: /lazy-review.install seeds settings, dirs, and the routine trio (registered unconditionally, independent of daemon.enabled); /lazy-review.configure adds review classes via wizard; /lazy-review.audit validates the result."
 source_skills:
   - lazy-review.install
   - lazy-review.configure
   - lazy-review.audit
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 ---
 # Install and configure lazycortex-review
 
@@ -43,53 +43,41 @@ You can run configure multiple times to register additional document classes. Ea
 - **Register the CLI allow-pattern after a settings reset** — re-run `/lazy-review.install`. It adds `Bash(lazycortex-review *)` to `settings.local.json` only if the pattern is absent; re-running is safe.
 - **Review callouts still look alike after install** — in a vault, `/lazy-review.install` writes `appearance.json` on its own but Obsidian doesn't watch that file mid-session; reload the vault, or click the reload icon next to `review-callouts` in Settings → Appearance → CSS snippets.
 - **Repo has no `.obsidian/` directory** — install skips the callout-styling step entirely; review still works, the callouts just render with Obsidian's default look.
+- **Snippet conflict during an unattended install** — when a hand-edited `review-callouts.css` conflicts with the shipped update, `/lazy-review.install` normally asks which side wins. Running it non-interactively (for example via `/lazy-core.autosetup`) skips that question instead of stalling: it keeps your local region, still applies the rest of the shipped delta, and names the file so you can resolve the conflict later by running `/lazy-review.install` yourself.
 
 ## How install, configure, and audit fit together
 
 ```mermaid
 %%{init: {'themeVariables':{'background':'transparent','lineColor':'#000','textColor':'#000','edgeLabelBackground':'#fff'},'themeCSS':'.edgeLabel{background-color:transparent!important}.edgeLabel p{background-color:transparent!important}','flowchart':{'diagramPadding':5,'useMaxWidth':true}}}%%
 flowchart LR
-  runInstall[Run /lazy-review.install]
-  seedSettingsAndDirs[Seed settings and dirs]
-  runConfigure[Run /lazy-review.configure]
-  addReviewClasses[Add review classes via wizard]
-  daemonEnabledGate{daemon.enabled?}
-  registerScanRoutine[Register the two review routines]
-  skipScanRegistration[Skip routine registration]
-  runAudit[Run /lazy-review.audit]
-  auditValid{Audit validates result?}
-  setupComplete[Setup complete]
-  auditFailed[Audit reports errors]
+  runLazyReviewInstall["/lazy-review.install"]
+  seedSettingsAndDirs["Seed settings, dirs, routine trio (unconditional)"]
+  runLazyReviewConfigure["/lazy-review.configure"]
+  addReviewClasses["Add review classes via wizard"]
+  runLazyReviewAudit["/lazy-review.audit"]
+  reportPass["Report PASS"]
+  reportFail["Report WARN/FAIL"]
 
-  runInstall -->|seeds| seedSettingsAndDirs
-  seedSettingsAndDirs -->|next| runConfigure
-  runConfigure -->|wizard| addReviewClasses
-  addReviewClasses -->|check| daemonEnabledGate
-  daemonEnabledGate -->|enabled| registerScanRoutine
-  daemonEnabledGate -->|disabled| skipScanRegistration
-  registerScanRoutine -->|next| runAudit
-  skipScanRegistration -->|next| runAudit
-  runAudit -->|check| auditValid
-  auditValid -->|valid| setupComplete
-  auditValid -->|invalid| auditFailed
+  runLazyReviewInstall -->|bootstrap| seedSettingsAndDirs
+  seedSettingsAndDirs -->|next| runLazyReviewConfigure
+  runLazyReviewConfigure -->|wizard| addReviewClasses
+  addReviewClasses -->|next| runLazyReviewAudit
+  runLazyReviewAudit -->|valid config| reportPass
+  runLazyReviewAudit -->|invalid config| reportFail
 
   classDef entry fill:#1e3a5f,stroke:#4a90e2,color:#fff
-  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef action fill:#1e5f3a,stroke:#4ae290,color:#fff
+  classDef guard fill:#5f4a1e,stroke:#e2a14a,color:#fff
   classDef success fill:#0d4d2a,stroke:#4ae290,color:#fff,stroke-width:2px
   classDef error fill:#5f1e1e,stroke:#e24a4a,color:#fff,stroke-width:2px
 
-  class runInstall entry
+  class runLazyReviewInstall entry
   class seedSettingsAndDirs action
-  class runConfigure action
+  class runLazyReviewConfigure action
   class addReviewClasses action
-  class daemonEnabledGate guard
-  class registerScanRoutine action
-  class skipScanRegistration action
-  class runAudit action
-  class auditValid guard
-  class setupComplete success
-  class auditFailed error
+  class runLazyReviewAudit guard
+  class reportPass success
+  class reportFail error
 ```
 
 ## See also

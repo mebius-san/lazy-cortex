@@ -786,6 +786,7 @@ class SandboxSyncKey:
     ALLOW_UNSANDBOXED: The unsandboxed-retry switch as recorded in the file, or null when unrecorded.
     ADDED_READ: Read-allowlist entries the sync appended.
     ADDED_WRITE: Write-allowlist entries the sync appended.
+    REMOVED_READ: Read-allowlist entries the sync pruned as dead plugin-cache versions.
     MISSING_READ: Resolved read targets no recorded entry covers.
     MISSING_WRITE: Resolved write targets no recorded entry covers.
     CHANGED: Whether the sync rewrote the file.
@@ -797,6 +798,7 @@ class SandboxSyncKey:
   ALLOW_UNSANDBOXED = "allow_unsandboxed"
   ADDED_READ = "added_read"
   ADDED_WRITE = "added_write"
+  REMOVED_READ = "removed_read"
   MISSING_READ = "missing_read"
   MISSING_WRITE = "missing_write"
   CHANGED = "changed"

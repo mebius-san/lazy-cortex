@@ -113,43 +113,81 @@ def remove_gitignore_lines(repo: Path | str, lines: list[str]) -> str:
   return "removed"
 
 
+def ensure_self_ignoring_dir(directory: Path | str) -> str:
+  """
+  Create `directory` if absent and drop a self-ignoring `.gitignore` into it.
+
+  Marks an auto-created service directory (`.logs/`, `.runtime/`, `.experts/`, a worktree
+  root) as ignored by git without adding any entry to the consumer's tracked root
+  `.gitignore`.
+
+  Guarantees:
+    - An existing `.gitignore` inside `directory`, whatever it contains, is left byte-for-byte
+      untouched.
+    - Idempotent: repeated calls after the first materialisation make no further changes.
+
+  Args:
+    directory: Path to the service directory the `.gitignore` protects.
+
+  Returns:
+    `"created"` when the directory and/or a new `.gitignore` were materialised,
+    `"already-present"` when both already existed.
+  """
+  directory = Path(directory)
+  dir_existed = directory.is_dir()
+  directory.mkdir(parents = True, exist_ok = True)
+  # waiver: filesystem filename idiom, not a domain constant
+  gi = directory / ".gitignore"
+  # guard: an existing file — operator content or a prior run — is never touched
+  if gi.exists():
+    # waiver: install-phase outcome token, not a reusable domain key
+    return "already-present" if dir_existed else "created"
+  gi.write_text("*\n", encoding = "utf-8")
+  # waiver: install-phase outcome token, not a reusable domain key
+  return "created"
+
+
 # ---------- bootstrap phases ----------
 
 def bootstrap_logs_dir(repo: Path | str) -> str:
   """
-  Create `.logs/` and `.runtime/` at the repository root and list both in `.gitignore`.
+  Create `.logs/` and `.runtime/` at the repository root, each self-ignoring.
 
   `.logs/` holds the runtime journal (daemon output, recall logs, commit-recorder feed).
-  `.runtime/` holds non-log daemon state — currently `state.json`, which carries the
-  `last_run`, `git_watch`, and `daemon_halted` blocks. Missing directories are created;
-  missing `.gitignore` lines are appended; existing entries are left untouched.
-  Idempotent.
+  `.runtime/` holds non-log daemon state — currently `state.json`, carrying the `last_run`,
+  `git_watch`, and `daemon_halted` blocks.
+
+  Guarantees:
+    - Each directory gains its own self-ignoring `.gitignore` unless one already exists there.
+    - Any root-`.gitignore` lines appended by an earlier version of this phase are left in
+      place, unchanged.
+    - Idempotent.
 
   Args:
     repo: Path to the repository root.
 
   Returns:
-    `"bootstrapped"` when at least one directory was created or at least one `.gitignore`
-    line was appended, `"already-present"` when both directories and both `.gitignore`
-    lines already existed.
+    `"bootstrapped"` when at least one directory or `.gitignore` was materialised,
+    `"already-present"` when both directories and both local `.gitignore` files already
+    existed.
   """
   repo = Path(repo)
 
-  # create each runtime directory, tracking whether the call materialised something new
-  dir_created_any = False
+  # create each runtime directory and its own self-ignoring .gitignore, tracking
+  # whether the call materialised anything new
+  materialised_any = False
   for name in (".logs", ".runtime"):
-    d = repo / name
-    existed = d.is_dir()
-    d.mkdir(exist_ok = True)
-    if not existed:
-      dir_created_any = True
+    # waiver: install-phase outcome token, not a reusable domain key
+    if ensure_self_ignoring_dir(repo / name) == "created":
+      materialised_any = True
 
-  # both runtime directories carry state git must never see
+  # legacy root-.gitignore lines from earlier versions of this phase stay as they are —
+  # the operator's call, never removed
   gi_outcome = ensure_gitignore_lines(repo, [ ".logs/", ".runtime/" ])
 
-  # any materialisation at all — a fresh directory or a fresh ignore line — counts as a bootstrap
-  # waiver: install-phase outcome token, not a reusable domain key
-  if dir_created_any or gi_outcome == "updated":
+  # any materialisation at all — a fresh directory, a fresh local .gitignore, or a fresh
+  # root-.gitignore line — counts as a bootstrap
+  if materialised_any or gi_outcome == "updated":
     # waiver: install-phase outcome token, not a reusable domain key
     return "bootstrapped"
   # waiver: install-phase outcome token, not a reusable domain key

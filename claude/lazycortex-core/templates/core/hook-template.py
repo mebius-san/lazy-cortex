@@ -70,9 +70,17 @@ def _is_real_event(root: str) -> bool:
 # § 7 TRANSACTIONAL SKIP — never auto-commit during merge/rebase/cherry-pick.
 # Contract: lazy-core.hook-writing § 7.
 # ----------------------------------------------------------------------------------------
+
+# Decision: `REBASE_HEAD` is excluded, `rebase-merge` / `rebase-apply` are trusted instead — git
+# writes REBASE_HEAD to record the commit a rebase stopped at and never removes it once the rebase
+# concludes, so it outlives the transaction it names and a single leftover would silence the hook
+# in that repository forever. The two directories are what git itself reads to decide a rebase is
+# in flight, and they are removed when it ends.
+
+# the marker set a transaction is recognised by, probed against the repository's git directory
 _TRANSACTIONAL_MARKERS = (
   "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
-  "REBASE_HEAD", "rebase-merge", "rebase-apply", "BISECT_LOG",
+  "rebase-merge", "rebase-apply", "BISECT_LOG",
 )
 
 

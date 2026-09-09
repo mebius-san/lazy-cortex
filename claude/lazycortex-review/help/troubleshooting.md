@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-review skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-07
+last_regen: 2026-09-09
 diagram_spec:
   anchor: "Diagnostic flowchart"
   request: "Decision tree routing on observed symptom. Top-level branches: install/bootstrap failures (settings missing, permission error, malformed JSON), configure failures (audit FAIL after wizard, section-id loop), start/submit problems (file not opted in, no-op on re-run when unexpected), status reporting nothing useful, stop/resume confusion, finalize blocked or partial, audit FAIL findings. Each leaf names the troubleshooting entry that resolves it."
@@ -15,7 +15,7 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 ---
 # Troubleshooting
 
@@ -56,6 +56,16 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 **Likely cause**: Either this repo has no `.obsidian/` vault (install reports `no-vault` and skips styling entirely — review still works, just unstyled), or the snippet was enabled in `appearance.json` while Obsidian was already running and the app has not picked up the change.
 
 **Fix**: If the repo has a vault, reload it, or click the reload icon next to `review-callouts` in Settings → Appearance → CSS snippets. If there is no `.obsidian/` directory, there is nothing to fix — the callouts work identically, just without the distinct styling.
+
+---
+
+## `/lazy-review.install` keeps my old review-callouts snippet after an unattended install run
+
+**Symptom**: After running install through an unattended flow (for example a cross-repo rollout that drives install with no one at the keyboard), the `review-callouts.css` snippet in the vault still has your old customisation instead of the newer shipped version, and the report names the file as `kept-local-unattended`.
+
+**Likely cause**: Your local copy of `review-callouts.css` and the shipped update touch the same region, which normally makes Step 5.6 ask you which version should win. An unattended run has nobody to ask, so it resolves the conflict deterministically by keeping your local region and applying the rest of the shipped delta, rather than stalling forever.
+
+**Fix**: Run `/lazy-review.install` yourself, interactively, in this repo. It detects the same conflict and this time asks you to pick `merge-shipped` (shipped wins for the conflicting region) or `keep-local` (your edits win); either way the non-conflicting part of the shipped update still lands.
 
 ---
 

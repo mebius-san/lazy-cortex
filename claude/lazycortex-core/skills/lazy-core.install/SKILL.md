@@ -52,7 +52,7 @@ This skill is **idempotent and quiet on re-run**. Every choice it makes is persi
 
 ## File-sync policy (applies to every file this skill writes)
 
-Two classes of file, two policies. Which applies follows from who owns the bytes, never from how large the diff is.
+Two classes of file and, inside the second, one class of value. Which policy applies follows from who owns the bytes, never from how large the diff is.
 
 ### Install-managed mirrors — overwrite on drift
 
@@ -70,9 +70,23 @@ Sole exception: `lazy-core.scaffold.md` wraps a consumer-owned `## Registry` blo
 
 ### Consumer-owned config — union in, ask only on contradiction
 
-Files the consumer authors, where this skill contributes keys or sections: `settings.json`, `lazy.settings.json`, `.gitignore`, the sandbox and permission files, `pyproject.toml`-shaped config. Add what is missing, leave what is there byte-for-byte.
+Files the consumer authors, where this skill contributes keys or sections: `settings.json`, `lazy.settings.json`, `.gitignore`, the sandbox and permission files, `pyproject.toml`-shaped config. Add what is missing, leave what is there byte-for-byte — except the values this plugin wrote itself, which the section below governs.
 
 A **genuine conflict** — an existing value that directly opposes a required one (e.g. `sandbox.enabled: false` against a required `true`) — is the only case that asks. The raising step prints the four context items before the call (`lazy-core.skill-writing` § 11): **where** — `/lazy-core.install · Step <N> — <title>` and the target file path; **found** — the conflicting region quoted, with a unified diff of local against shipped; **why asking** — the local value contradicts the required one and the skill cannot tell which should survive; **answers** — `merge-shipped` writes the required value into the file now, `keep-local` leaves the file untouched and the step states its conflict outcome; nothing beyond the file itself is persisted, so the question returns on the next run while the contradiction stands. The call: `header` a short label, `question` naming the file and the key, options `merge-shipped` / `keep-local`, each with a description of its effect. "Conflict" means you cannot determine what should survive, not merely that the bytes differ.
+
+### Install-managed values — compare content, refresh on drift
+
+Inside a consumer-owned file, some values are the plugin's own writing: a routine's `paths` mask and `filter` block, an expert entry's `agent` and `aspects` pointers, the writer slots and role roster a review class seeds, a registration this skill created and still owns. The consumer owns the file; the plugin owns those values. A step that wrote such a value is the step that keeps it current.
+
+1. **Absent** → write the shipped form. State `installed`.
+2. **Matches the shipped form** → nothing. State `unchanged`.
+3. **Differs from the shipped form** → rewrite the plugin-owned keys to it, silently. State `refreshed`.
+
+**Presence is not currency.** A step that returns on `if <key> in <section>` accepts whatever a past version of this plugin wrote and can never correct it: the shipped default moves, the recorded value does not, and the consumer keeps a stale mask, a retired pointer, or a role set the plugin no longer composes. Every step that seeds a value MUST re-read what is on record and compare it against what it would write today. This holds at every depth — a section present with its own keys missing is a partial write to complete, not an entry to accept.
+
+A stale shipped default is **not** a genuine conflict: the question of what should survive has an answer, and it is the shipped form. The conflict question is reached only when the recorded value is neither the shipped form nor derivable from the repo — a slot naming a role that exists in neither the shipped set nor the consumer's own `experts` registry.
+
+**Where the consumer is meant to override**, the value records that it was seeded (`{"tier": …, "seeded_from": …}` in `agent_models`) and a bare recorded value is the operator's pin. Refresh reaches the seeded form only; an operator's own value is `kept-local` and never rewritten. A value with no such provenance marker is plugin-owned by default — the marker exists to carve out the operator's, not the reverse.
 
 ## Step 0: Verify Python ≥ 3.12 (floor)
 
@@ -215,11 +229,27 @@ Pull tier values from `${CLAUDE_PLUGIN_ROOT}/skills/lazy-core.agent-models/defau
 
 If `default-tiers.json` is missing or unparseable → FAIL with `default-tiers.json missing or invalid at <path>; reinstall lazycortex-core`. Don't fall back to hardcoded values — silent drift between this seed and the wizard's "accept all template defaults" batch is exactly what the SOT is meant to prevent.
 
+### Entry shape — a seed says so, a pin does not
+
+An entry this step writes is a **seed**, and it records that it is one:
+
+```json
+"Explore": {"tier": "haiku", "seeded_from": "haiku"}
+```
+
+`seeded_from` holds the shipped default that was in force when the entry was written. A bare string (`"Explore": "opus"`) is the **operator's pin** — written by hand or by the wizard, never by this step, and never rewritten by it.
+
+The two fields together say whether a seed is still untouched: `tier == seeded_from` means nobody has edited it since it was seeded, so a moved shipped default may replace it. `tier != seeded_from` means the operator edited a seeded entry — it is a pin from that moment on, and the marker only records where it started.
+
 Per-key semantics (write back only if anything changed):
 
-- **absent** in `agent_models._builtin` → add the entry with the JSON's tier. State **added**.
-- **equal** → leave untouched. State **unchanged**.
-- **different** → leave the user's value untouched. State **kept-local** (report user's value alongside the JSON's).
+- **absent** in `agent_models._builtin` → add the seed entry with the JSON's tier in both fields. State **added**.
+- **seed, `tier` equals the JSON's** → leave untouched. State **unchanged**.
+- **seed, untouched (`tier == seeded_from`), JSON's default has moved** → rewrite both fields to the JSON's tier, silently. State **refreshed** (report the old tier alongside the new). This is the install-managed-value rule from the File-sync policy: a stale shipped default is not the operator's choice and not a conflict.
+- **seed, edited (`tier != seeded_from`)** → leave untouched. State **kept-local**.
+- **bare string** → the operator's pin. Leave untouched. State **kept-local**.
+
+**Migrating a pre-provenance entry.** A bare string predating this shape is ambiguous. Resolve it once, in this step: read the shipped default's history for that key (`git log -p` over `default-tiers.json` in the plugin's own checkout when it is available; otherwise the current default alone). A bare value equal to the current default, or to any value that default previously held, was a seed — convert it to the seed shape and apply the rules above. Any other value was never a shipped default, so it is the operator's — leave it bare. When the history is unreachable, only the current-default match converts; the rest stay bare and stay `kept-local`, which errs toward the operator.
 
 Never touch `_user` or `_project` entries — those slots are filled interactively by `lazy-core.agent-models`.
 
@@ -260,6 +290,8 @@ Make the two `lazy-core.git-guard` behaviours visible and tunable in the consume
 
 Ensure the section exists with `"_version": 1`, then apply per-key semantics — **absent** → write the default, **present** → leave the operator's value untouched (`kept-local`, report the value):
 
+These three are **operator-owned switches**, not install-managed values: absent-only is the correct policy here and stays. The distinction matters because the File-sync policy's refresh rule looks identical at the call site — the test is whether the plugin or the operator owns the value's meaning. A flag the operator flips to change behaviour is theirs; a pointer, mask, or roster this skill composed is the plugin's.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | Master kill-switch for the whole hook. |
@@ -272,7 +304,7 @@ Report outcome: `git.<key> = <value> (<added|kept-local>)`, or `skipped-user-sco
 
 ## Step 7: Bootstrap .logs/, .runtime/, lazy.settings.local.json gitignore, and .lazyignore
 
-Create `.logs/` and `.runtime/` at the repo root, ensure `.gitignore` covers both, ensure `.gitignore` also lists `.claude/lazy.settings.local.json` (the gitignored personal overlay companion to the tracked `lazy.settings.json`), and seed a default `.lazyignore` at the repo root when one is absent.
+Create `.logs/` and `.runtime/` at the repo root, each carrying its own self-ignoring `.gitignore` (so a renamed or newly-added service directory never depends on the consumer's tracked root `.gitignore` being revisited), ensure `.gitignore` also lists `.claude/lazy.settings.local.json` (the gitignored personal overlay companion to the tracked `lazy.settings.json`), and seed a default `.lazyignore` at the repo root when one is absent.
 
 - `.logs/` — gitignored runtime journal (daemon output, recall logs, commit-recorder feed).
 - `.runtime/` — gitignored non-log daemon state (currently `state.json` carrying `last_run` / `git_watch` / `daemon_halted`).
@@ -416,10 +448,12 @@ State **created** if written; **already-present** if it existed.
 
 ### Ensure `.gitignore` entries
 
-Read `<repo-root>/.gitignore` (or treat as empty if missing). Ensure it contains the following line:
+`.experts/` does not exist yet at this point in a fresh install — it materializes lazily, the first time `dispatch_job` creates a job bundle, and drops its own self-ignoring `.gitignore` into itself right then (independent of this skill ever having run). This substep is belt-and-suspenders for a repo that already has an `.experts/` tree from before that runtime change shipped: read `<repo-root>/.gitignore` (or treat as empty if missing) and ensure it contains the following line:
 - `.experts/`
 
 `.logs/` and `.runtime/` are owned by Step 7's `bootstrap_logs_dir` helper and need no entry here. The whole `.experts/` tree is runtime scratch (job queue, subprocess locks) — ignore the directory, not just `.experts/.jobs/`. If a legacy narrower `.experts/.jobs/` line is present, replace it with `.experts/`; if no `.experts/` line is present, append it with `Edit` (or `Write` if the file was missing). State **updated** if appended or replaced; **already-present** if `.experts/` was already there.
+
+`.memory/` carries no such entry, root or local — it is tracked in git by design (Step 10.5), the one service directory that is never gitignored.
 
 ## Step 10.5: Bootstrap .memory/ directory
 
@@ -506,9 +540,15 @@ Skill(skill: "lazycortex-core:lazy-core.agent-models-seed", args: "prefix=lazyco
 
 ### 2. Filter already-registered candidates
 
-Load the `experts` section of `<repo-root>/.claude/lazy.settings.json` (via `lazy_settings.load_tracked_section`). Derive each candidate's **expert key** per § 3 first, then skip any candidate whose key already appears in the section (besides `_version`). A candidate still registered under the pre-canon key (its `agent_name` verbatim) is NOT re-registered here — renaming an existing key is `lazy-core.doctor` Phase 2.55's job, not the installer's.
+Load the `experts` section of `<repo-root>/.claude/lazy.settings.json` (via `lazy_settings.load_tracked_section`). Derive each candidate's **expert key** per § 3 first, then compare — never merely test for presence:
 
-If all candidates are filtered out, state **all-already-registered** and proceed to Step 12.
+- **Key absent** → a candidate to write in § 4. State **to-register**.
+- **Key present, its install-managed fields matching what § 3 would derive** → nothing. State **already-registered**.
+- **Key present, an install-managed field missing or differing** → complete or correct that field in place, silently, leaving every other field of the entry alone. State **refreshed**. Install-managed here means the fields § 3 derives — `agent` and `git_author`; a field the operator owns (`model`, `workspace`, `merge`, `can_commit_in_repo`, `arguments`) is never touched.
+
+A present key whose entry is missing `agent` or points at an agent this plugin no longer ships is exactly the case the File-sync policy's install-managed-value rule covers: it was written by an older version of this step and nothing else will ever fix it. A candidate still registered under the pre-canon key (its `agent_name` verbatim) is NOT re-registered here — renaming an existing key is `lazy-core.doctor` Phase 2.55's job, not the installer's.
+
+If no candidate is left to register or refresh, state **all-already-registered** and proceed to Step 12.
 
 ### 3. Derive each entry — no questions
 
@@ -943,7 +983,7 @@ lazycortex-core sandbox-sync --repo-root <repo-root> \
   --allow-read ~/.claude/plugins/cache/lazycortex
 ```
 
-The repo root is granted read+write implicitly. The call is idempotent: it appends only what is missing, never drops or reorders a recorded entry, and never overwrites a recorded `enabled` or `allowUnsandboxedCommands`. An unrecorded `allowUnsandboxedCommands` is written `false`: Claude Code defaults it to `true`, under which a command the sandbox blocks is retried unsandboxed and only meets the permission check — which Block 2's bare `Bash` allow passes — so a confined spawn could still delete outside its write scope on the second try.
+The repo root is granted read+write implicitly. The call is idempotent: it appends only what is missing, never overwrites a recorded `enabled` or `allowUnsandboxedCommands`, and never drops or reorders a recorded entry — with one exception: a recorded read grant that names a version-pinned `<plugin>/<version>` directory under the plugin cache root and whose directory no longer exists on disk (a dead pin left behind by a past `/plugin update`) is pruned. The write allowlist is never pruned, and a read entry outside the plugin cache root stays even when its path is missing. An unrecorded `allowUnsandboxedCommands` is written `false`: Claude Code defaults it to `true`, under which a command the sandbox blocks is retried unsandboxed and only meets the permission check — which Block 2's bare `Bash` allow passes — so a confined spawn could still delete outside its write scope on the second try.
 
 Block 2 — `<repo-root>/.claude/settings.local.json` (permission scope; loaded by every session in the checkout):
 
@@ -966,7 +1006,7 @@ Tilde-form (`~/...`) is acceptable for paths the operator wants portable across 
 Run the `sandbox-sync` call above and read its JSON result:
 
 1. `changed: true` and `present: false` → State **sandbox-created**.
-2. `changed: true` and `present: true` → State **sandbox-merged** (`added_read` / `added_write` name what was appended).
+2. `changed: true` and `present: true` → State **sandbox-merged** (`added_read` / `added_write` name what was appended, `removed_read` names any dead plugin-cache version pin pruned).
 3. `changed: false` → State **sandbox-unchanged**.
 4. `enabled: false` → the checkout has confinement recorded as off, which contradicts the required `true`; the CLI left it alone. Raise one `AskUserQuestion` per the consumer-owned-config policy and state **sandbox-conflict** when the operator keeps it off:
 

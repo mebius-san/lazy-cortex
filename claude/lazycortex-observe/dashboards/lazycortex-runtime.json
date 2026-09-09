@@ -148,7 +148,7 @@
     {
       "type": "table",
       "title": "Daemons ($period)",
-      "description": "One row per runtime daemon: liveness, halt state, problem jobs now, errors and tokens over the selected period. Cost is an estimate: tokens priced at Anthropic list rates per model family (fable/mythos $10, opus $5, sonnet-5 $2, sonnet-4 $3, haiku $1 per 1M input; output 5x, cache read 0.1x, cache write 1.25x). Models outside those families count as $0.",
+      "description": "One row per runtime daemon: liveness, halt state, the expert queue standing on disk right now (queued + active jobs across every expert of that repo), problem jobs now, errors and tokens over the selected period. Cost is an estimate: tokens priced at Anthropic list rates per model family (fable/mythos $10, opus $5, sonnet-5 $2, sonnet-4 $3, haiku $1 per 1M input; output 5x, cache read 0.1x, cache write 1.25x). Models outside those families count as $0.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -164,6 +164,13 @@
           "expr": "(max by (repo) (lazycortex_runtime_dirty_tree{repo=~\"$repo\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})) + 2 * (max by (repo) (lazycortex_runtime_daemon_halted{repo=~\"$repo\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})) + 4 * (max by (repo) (lazycortex_runtime_daemon_paused{repo=~\"$repo\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"}))",
           "legendFormat": "",
           "refId": "B",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (repo) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=~\"queued|active\"}) or 0 * max by (repo) (lazycortex_runtime_build_info{repo=~\"$repo\"})",
+          "legendFormat": "",
+          "refId": "Q",
           "instant": true,
           "format": "table"
         },
@@ -274,11 +281,12 @@
             "indexByName": {
               "repo": 0,
               "Value #B": 1,
-              "Value #C": 2,
-              "Value #D": 3,
-              "Value #E": 4,
-              "Value #H": 5,
-              "Value #I": 6
+              "Value #Q": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5,
+              "Value #H": 6,
+              "Value #I": 7
             },
             "renameByName": {
               "repo": "Daemon",
@@ -287,7 +295,8 @@
               "Value #D": "Dead",
               "Value #E": "Errors",
               "Value #H": "Busy time",
-              "Value #I": "Cost"
+              "Value #I": "Cost",
+              "Value #Q": "Queue"
             }
           }
         }
@@ -363,6 +372,22 @@
               {
                 "id": "custom.width",
                 "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Queue"
+            },
+            "properties": [
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 70
               }
             ]
           },
@@ -1458,8 +1483,8 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 14,
+        "w": 24,
         "x": 0,
         "y": 29
       },
@@ -1482,82 +1507,14 @@
           "displayMode": "table",
           "placement": "bottom",
           "calcs": [
-            "lastNotNull"
-          ]
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Problem jobs (failed / deferred / dead, $period)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 29
-      },
-      "timeFrom": "$period",
-      "targets": [
-        {
-          "expr": "sum by (expert, repo, state) (lazycortex_runtime_queue_depth{repo=~\"$repo\",state=~\"failed|deferred|dead\"})",
-          "legendFormat": "{{expert}} / {{repo}} \u00b7 {{state}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": ".*dead.*"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "red"
-                }
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byRegexp",
-              "options": ".*failed.*"
-            },
-            "properties": [
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "orange"
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull"
+            "last"
           ]
         }
       }
     },
     {
       "type": "table",
-      "title": "Tokens by routine \u00d7 expert ($period)",
+      "title": "Tokens by expert ($period)",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1566,39 +1523,39 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 43
       },
       "targets": [
         {
-          "expr": "sum by (routine, repo, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"input\"}[$period]))",
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"input\"}[$period]))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "sum by (routine, repo, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"output\"}[$period]))",
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"output\"}[$period]))",
           "legendFormat": "",
           "refId": "B",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "sum by (routine, repo, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_read\"}[$period]))",
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_read\"}[$period]))",
           "legendFormat": "",
           "refId": "C",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "sum by (routine, repo, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_write\"}[$period]))",
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\",kind=\"cache_write\"}[$period]))",
           "legendFormat": "",
           "refId": "D",
           "instant": true,
           "format": "table"
         },
         {
-          "expr": "sum by (routine, repo, expert) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period])) > 0",
+          "expr": "sum by (expert, repo) (increase(lazycortex_runtime_tokens_total{repo=~\"$repo\"}[$period])) > 0",
           "legendFormat": "",
           "refId": "E",
           "instant": true,
@@ -1616,20 +1573,19 @@
             "excludeByName": {
               "Time": true,
               "exported_repo": true,
-              "model": true
+              "model": true,
+              "routine": true
             },
             "indexByName": {
-              "routine": 0,
+              "expert": 0,
               "repo": 1,
-              "expert": 2,
-              "Value #A": 3,
-              "Value #B": 4,
-              "Value #C": 5,
-              "Value #D": 6,
-              "Value #E": 7
+              "Value #A": 2,
+              "Value #B": 3,
+              "Value #C": 4,
+              "Value #D": 5,
+              "Value #E": 6
             },
             "renameByName": {
-              "routine": "Routine",
               "repo": "Repo",
               "expert": "Expert",
               "Value #A": "Input",
@@ -1697,7 +1653,7 @@
     },
     {
       "type": "piechart",
-      "title": "Tokens by expert ($period)",
+      "title": "Tokens share by expert ($period)",
       "description": "Requires the metrics.py fix that exports the expert label on lazycortex_runtime_tokens_total; shows No data until then.",
       "datasource": {
         "type": "prometheus",
@@ -1707,7 +1663,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 47
+        "y": 53
       },
       "targets": [
         {
@@ -1754,7 +1710,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 47
+        "y": 53
       },
       "targets": [
         {
@@ -1801,7 +1757,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 55
+        "y": 61
       },
       "targets": [
         {
@@ -1848,7 +1804,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 55
+        "y": 61
       },
       "targets": [
         {

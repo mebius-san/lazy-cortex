@@ -4,6 +4,15 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-core
 
+### 9.2.2 — 2026-09-09 UTC
+
+- Service directories created during bootstrap now carry their own `.gitignore`, and the runtime pump ignores bootstrap artifacts instead of queuing them as jobs.
+- Agent-model tier assignments now track provenance, prune dead grants, and auto-complete incomplete records.
+- Fixed `lazy-core.install` / `lazy-core.agent-models` to compare the actual content of install-managed values instead of just checking whether the key exists, so reruns correctly detect and repair drifted settings.
+- Fixed `lazy-runtime.doctor` retrying stale work forever — a job whose target document was deleted, deferred, or already reviewed now goes straight to permanent-fail instead of being retried hourly, and a job whose dispatch died before its marker was written is now recovered instead of silently lost.
+- Fixed a stuck job queue: an abandoned dispatch that never wrote a job marker is now detected and cleared instead of hanging forever across metrics, the pump, and the doctor.
+- Fixed a stuck `REBASE_HEAD` file permanently blocking commits and hook auto-commits; cancelled jobs no longer show up as queued on the runtime dashboard.
+
 ### 9.2.1 — 2026-09-08 UTC
 
 - **Breaking / security fix**: a command refused by the sandbox could previously retry unsandboxed and succeed; the sandbox lockout is now enforced correctly even when the setting was absent, closing that hole.
@@ -614,6 +623,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-specs
 
+### 7.5.2 — 2026-09-09 UTC
+
+- **Breaking:** The `upstream/` mirror tree now lives at the repository root instead of under the spec content-root — mirrored source units sit outside `specs/` (or your configured `spec.vault_root`) since they aren't vault content until a request accepts them in. Existing mirrors move location.
+- `lazy-spec.install` now silently repairs a stale `terminal.routing` writer slot on the `requests/*.md` review class instead of asking, fixing installs where `lazy-core.autosetup` skipped the question and left the `# Routing` section never written.
+- The plugin manifest now declares the `spec.coordinator` and `spec.catalog-coordinator` experts it provides, so the agent-model tier installer can correctly provision and prune their model grants.
+
 ### 7.5.1 — 2026-09-08 UTC
 
 - Fixed `deferred` asset-state detection to be judged by document stages alone — stray note lines or open questions no longer block it, and a single live document alongside deferred ones now correctly returns the asset to normal gate tracking instead of miscomputing its state.
@@ -842,6 +857,12 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial release.
 
 ## lazycortex-obsidian
+
+### 5.1.2 — 2026-09-09 UTC
+
+- `lazy-obsidian.iconize-install` now verifies the registered repaint routine's content, not just its presence — a routine left over from an older install (drifted `command`, `watch`, or `ignore_halt`) is refreshed in place instead of silently kept stale.
+- Unattended installs (e.g. via `lazy-core.autosetup`) no longer stall on a CSS-snippet merge conflict during `lazy-obsidian.install` — local edits are kept and reported instead of leaving the run stuck on `needs-interactive`.
+- `lazy-obsidian.install` now retires dead `enabledCssSnippets` entries left in `appearance.json` when a snippet this plugin used to ship is no longer shipped.
 
 ### 5.1.1 — 2026-09-07 UTC
 
@@ -1084,6 +1105,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-review
 
+### 6.4.1 — 2026-09-09 UTC
+
+- Fixed: re-running install now completes missing settings at any nesting depth, not just the top two levels — a partially-written entry from an earlier install gets its missing sub-fields backfilled.
+- Unattended installs no longer stall forever on a CSS-snippet conflict question — the update applies with local edits kept for the conflicting region, and the file is flagged for a later manual resolve.
+
 ### 6.4.0 — 2026-09-07 UTC
 
 - Review-state icon matchers (awaiting operator, in process, approved, approved with concerns) no longer replace a note's own type icon — only the colour changes as a document moves through review.
@@ -1221,6 +1247,13 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 
 ## lazycortex-observe
 
+### 1.2.0 — 2026-09-09 UTC
+
+- Fixed the Open jobs dashboard legend showing a stale "last known" value for series that stopped reporting mid-window (e.g. a cancelled queue still reading as active) — it now reflects that the series has gone quiet.
+- Daemons table gained a Queue column: a live snapshot of queued + active jobs per repo across all experts, not a period total.
+- Open jobs chart is now one full-width timeseries with a readable legend; the separate Problem jobs chart was removed.
+- Token breakdown table now groups by expert × repo instead of routine × expert; the matching donut is renamed "Tokens share by expert".
+
 ### 1.1.0 — 2026-09-07 UTC
 
 - Fixed `lazy-observe.install` failing to locate the `lazycortex-core` CLI on a plain marketplace install (outside a dev checkout) — it now also checks the plugin cache for the sibling's newest installed version.
@@ -1329,6 +1362,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - Initial scaffold. Ship lazycortex-core runtime metrics to a Prometheus-compatible observer (Grafana Alloy or OpenTelemetry Collector) — vendor-neutral, observer-server-blind, headless-portable.
 
 ## lazycortex-experts
+
+### 1.4.1 — 2026-09-09 UTC
+
+- `/lazy-experts.install` now seeds a `docs-writer` role for every technical expert class, and backfills the isolated-workspace setting on existing `developer`/`data-writer`/`docs-writer`/`tester` experts that were missing it — previously only set on first creation.
+- System-expert completeness checks now read each installed plugin's own manifest instead of a hardcoded table, so newly registered system experts are detected without an update to this skill.
 
 ### 1.4.0 — 2026-09-07 UTC
 
@@ -1449,6 +1487,10 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `lazy-experts.install` skill and `lazy-experts.help` command are included: `install` registers the plugin's agents and aspects into the active project; `help` surfaces available experts and usage patterns.
 
 ## lazycortex-python
+
+### 4.3.1 — 2026-09-09 UTC
+
+- Re-running `/lazy-python.install` now heals a partially-set `pyproject.toml` checker section (fills in missing sub-keys, not just whole missing sections) and refreshes a drifted `python.code-reviewer` expert registration instead of leaving it stale.
 
 ### 4.3.0 — 2026-09-07 UTC
 
@@ -1614,6 +1656,11 @@ User-visible changes per plugin release. Each plugin in this marketplace is vers
 - `chk` and `tst` now work from a bare terminal (no `CLAUDE_PLUGIN_*` environment variables required); the fallback venv is created inside the project's own `.venv/` (augment-not-wipe) and `.venv/` is gitignored automatically on install; the scaffold step now reliably delivers `python-template.py` into the consumer project via `lazy-core.scaffold-sync`.
 
 ## lazycortex-wiki
+
+### 2.3.1 — 2026-09-09 UTC
+
+- Fixed a bug in `/lazy-wiki.install` where the navigation rule's Coverage section could be left as a stale empty placeholder forever on a fresh install — the skip check wrongly keyed off the mirror's `unchanged` state instead of comparing against the actual rendered scopes.
+- The plugin manifest now declares the experts lazycortex-wiki provides (`wiki.curator`, `wiki.terms-curator`, `wiki.structure-curator`, `wiki.tag-curator`, `wiki.domain-writer`), so lazycortex-core's grant-pruning no longer risks treating them as orphaned.
 
 ### 2.3.0 — 2026-09-07 UTC
 

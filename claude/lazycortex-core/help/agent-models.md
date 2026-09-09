@@ -1,13 +1,13 @@
 ---
 chapter_type: block
 summary: Assign model tiers to every agent, prune dead entries, and register non-Anthropic provider endpoints for expert jobs to spawn against.
-last_regen: 2026-09-07
+last_regen: 2026-09-09
 no_diagram: true
 source_skills:
   - lazy-core.agent-models
   - lazy-core.agent-models-seed
   - lazy-core.providers
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 ---
 # Per-agent model routing
 
@@ -31,7 +31,7 @@ A related registry sits next to the wizard. `/lazy-core.providers` manages named
 
 ## How it fits together
 
-Run `/lazy-core.agent-models`. The skill loads the `agent_models` sections from both your global `~/.claude/lazy.settings.json` and the project `./.claude/lazy.settings.json`, merges them into a single lookup, and discovers every dispatchable agent across your vault — Claude Code built-ins (`Explore`, `Plan`, `general-purpose`, `statusline-setup`), globally-authored agents under `~/.claude/agents/`, project-local agents under `./.claude/agents/`, and plugin-shipped agents from the plugin cache. Any agent whose dispatch string already appears in the merged lookup — including those explicitly set to `default` — is considered decided and stays out of the wizard.
+Run `/lazy-core.agent-models`. The skill loads the `agent_models` sections from both your global `~/.claude/lazy.settings.json` and the project `./.claude/lazy.settings.json`, merges them into a single lookup, and discovers every dispatchable agent across your vault — Claude Code built-ins (`Explore`, `Plan`, `general-purpose`, `statusline-setup`), globally-authored agents under `~/.claude/agents/`, project-local agents under `./.claude/agents/`, and plugin-shipped agents from the plugin cache. Any agent whose dispatch string already appears in the merged lookup — including those explicitly set to `default` — is considered decided and stays out of the wizard. An entry can look like either a bare tier string or a small object recording the tier plus the shipped default it was seeded from — install writes the object form, this wizard always writes bare strings when you make a choice here — but both forms count as decided the same way, so an install-seeded entry never resurfaces in the wizard just because it isn't a plain string.
 
 Plugin-shipped agents are filtered by install scope before they ever reach the missing list. The plugin cache on your machine is shared across every project, so the wizard only counts an agent from a plugin installed at user (global) scope, or installed at project scope for this exact repo. An agent belonging to a plugin some other project installed locally never surfaces here — so it can't get stuck popping up as "needs interactive" in every unrelated repo you happen to run this wizard in.
 
@@ -43,7 +43,7 @@ After the prompts, the skill writes each entry to its structurally correct file.
 
 One override cuts across all of that: if an agent is dispatchable by the runtime daemon — it is wired as an expert's `agent` in `lazy.settings.json`, or it is the built-in doctor dispatch — its entry always lands in the project settings file, regardless of group or `--scope`. The daemon reads `agent_models` from project scope only, so a globally-routed entry would be invisible to headless dispatches; the wizard writes where the stricter resolver actually looks, and flags the affected entries in the batch prompt so you know why they are routed that way.
 
-Before writing anything new, the wizard also prunes stale tiers. If a plugin-namespaced entry (`<plugin>:<agent>`) still sits in either settings file but the plugin no longer ships that agent — you updated the plugin and it dropped an agent, or removed one yourself — the wizard deletes the dead entry automatically, in both interactive and unattended runs. No prompt, no confirmation: a tier for an agent that provably doesn't exist anymore is dead config, not a decision you made. The only thing the wizard won't touch on its own is an expert in `lazy.settings.json` still pointing its `agent` field at that removed dispatch — that comes back as a warning in the report instead, so you can fix the expert config yourself.
+Before writing anything new, the wizard also prunes stale tiers, under either of two proofs. First: a plugin-namespaced entry (`<plugin>:<agent>`) still sits in either settings file, the plugin itself is still installed, but its newest version no longer ships that agent — you updated the plugin and it dropped an agent, or removed one yourself. Second: the plugin behind the entry is gone from *every* registered marketplace catalog, not merely uninstalled from this repo — a plugin you disabled or uninstalled here but that another marketplace still lists keeps its entries, since you might reinstall it; one that stands nowhere at all can never resolve again, so there is nothing left to keep the entry for. Either proof deletes the dead entry automatically, in both interactive and unattended runs, and the report names which proof retired it. No prompt, no confirmation: a tier for an agent that provably doesn't exist anymore is dead config, not a decision you made. The only thing the wizard won't touch on its own is an expert in `lazy.settings.json` still pointing its `agent` field at that removed dispatch — that comes back as a warning in the report instead, so you can fix the expert config yourself.
 
 The `lazy-core.model-router` PreToolUse hook is the runtime counterpart. It fires before every `Agent` dispatch, reads the `agent_models` section, matches the dispatch string, and injects the configured tier silently. Agents with no entry, or entries set to `default`, fall through to Claude Code's built-in model default. No restart is needed after the wizard writes new entries — the hook picks them up on the next dispatch.
 
@@ -73,7 +73,7 @@ Assigning a provider to a specific expert is a separate, content-level decision 
 
 **After an automated rollout.** If a repo was brought current by `lazy-core.autosetup` rather than by you running the install chain by hand, expect only the curated-default agents to already have tiers. Run `/lazy-core.agent-models` yourself afterward to finish routing the rest — it picks up exactly where the automated run left off.
 
-**After removing a plugin agent.** Nothing to do by hand — the next run of `/lazy-core.agent-models` prunes that agent's now-dead tier automatically and lists it in the report as pruned. If the report also warns that an expert still references the removed agent, update that expert's `agent` field yourself; the wizard reports the warning but will not edit your expert config.
+**After removing a plugin agent.** Nothing to do by hand — the next run of `/lazy-core.agent-models` prunes that agent's now-dead tier automatically and lists it in the report as pruned, naming which of the two proofs retired it (the agent dropped from a still-installed plugin, or the plugin itself gone from every marketplace). If the report also warns that an expert still references the removed agent, update that expert's `agent` field yourself; the wizard reports the warning but will not edit your expert config. Uninstalling a plugin that another marketplace still lists does not prune its entries — you might reinstall it, so its tiers wait until the plugin is truly gone.
 
 **Working across multiple projects.** If the same plugin is installed project-locally in more than one repo, its agents only surface in the wizard for the repo where that install happened — the install-scope filter keeps a project-scoped plugin's agents from bleeding into an unrelated repo's wizard run. Installing the plugin at user (global) scope instead makes its agents visible everywhere in one pass.
 

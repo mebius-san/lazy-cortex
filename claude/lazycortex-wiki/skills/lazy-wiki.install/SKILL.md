@@ -112,7 +112,9 @@ Target files outside the `lazy-wiki` namespace (other plugins, user-authored rul
 
 The shipped rule carries an empty `## Coverage` section, so a `refreshed` navigation rule has just lost the scope list the previous copy held. It is derived state — rebuild it rather than preserving it.
 
-Skip when the mirror reported `unchanged` (the section is already current) or when `lazy.settings.json[wiki.scopes]` is empty (nothing to render; `/lazy-wiki.configure` fills it in later). Otherwise replace everything between the `## Coverage` heading and the next `##` with one bullet per scope, in id order, in exactly the shape `/lazy-wiki.configure` Phase 9 defines — that phase is the authority for the bullet format, and a second run must produce the same section rather than a longer one.
+Skip only when `lazy.settings.json[wiki.scopes]` is empty (nothing to render; `/lazy-wiki.configure` fills it in later), or when the section already reads exactly as the render below would produce it. Otherwise replace everything between the `## Coverage` heading and the next `##` with one bullet per scope, in id order, in exactly the shape `/lazy-wiki.configure` Phase 9 defines — that phase is the authority for the bullet format, and a second run must produce the same section rather than a longer one.
+
+**Never key the skip on the mirror's `unchanged`.** `unchanged` means the consumer's copy is byte-identical to the shipped source, and the shipped source is the one that carries the placeholder — so that test skips the render in precisely the state that needs it, and a first install keeps the placeholder forever while its scopes exist. The section is derived from `wiki.scopes`; compare it against what those scopes render to, and against nothing else. The consequence of getting this backwards is silent: the always-loaded `lazy-wiki.navigation` rule states a MANDATORY "query before Grep" duty and then names no glob it applies to, so every session reads a rule that binds it to nothing.
 
 Outcome (one line per rule): `<name>.md: <state>`, plus the receipt's `counts` line verbatim and `coverage: <rendered|unchanged|no-scopes>`.
 
@@ -135,7 +137,7 @@ The stamp is `2` because a section seeded here is already in the post-hoist shap
 
 `tag_axes` is the repository-wide axis vocabulary every scope narrows from — seeded empty here and filled by Step 6 (`doc-kind`) and `/lazy-wiki.configure vault`. `exclude` is the glob list unioned into every scope's `exclude_paths`; it seeds with `docs/structure.md` and nothing else — the project-structure map carries no frontmatter to defend itself, so without the entry the curator appends a `# See also` block to it. The generated domain-spec tree needs no entry: it is derived from `wiki.domains.output` and excluded from every scope structurally.
 
-Both keys carry the same absent-only semantics as the section itself: when `wiki` is already present but lacks one of them, add just that key and leave every existing value byte-for-byte.
+Both keys are completed at every depth, never merely checked for at the top: when `wiki` is already present but lacks one of them, add just that key and leave every existing value byte-for-byte. A section carrying only `{"_version": …}` is a partial write to finish, not an entry to accept — `settings-get` returns exactly that stub for a section that was never written, so a top-level presence test cannot tell the two apart and reports a seeded section either way.
 
 Ensure the `structure` key exists. If absent, add:
 
@@ -148,6 +150,8 @@ Ensure the `structure` key exists. If absent, add:
 ```
 
 `exclude` seeds with `docs/structure.md` itself and nothing else — the one mandatory entry (`lazy-wiki.structure`'s `rebuild` mode would otherwise describe the map inside the map). `depth_profiles` seeds empty; classes are per-repo and there is no configure wizard yet, so an operator adds them by hand-editing this key.
+
+`exclude` is mandatory and is completed on a present section exactly as the `wiki` keys above are: a `structure` section holding only `_version` is the stub `settings-get` returns for an unwritten section, and accepting it leaves the map describing itself.
 
 Ensure the `terms` key exists. If absent, add:
 
@@ -463,9 +467,11 @@ Outcome: `cli-allow-added` or `cli-allow-already-present`.
 
 - Read back the written `lazy.settings.json` and confirm it parses.
 - Confirm `wiki`, `structure`, `terms`, and `agent_models.lazycortex` are present, that `wiki.exclude` carries `docs/structure.md`, and that `wiki.tag_axes` includes `doc-kind` — the last one holds on a fresh install too, since the vocabulary is the repository's and does not wait for a scope. Do NOT expect `doc-kind` in any scope's own `tag_axes`: a scope list is a narrowing, and an absent or empty one means the scope uses the whole vocabulary.
-- Confirm `experts.wiki.curator`, `experts.wiki.terms-curator`, `experts.wiki.structure-curator`, and `experts.wiki.tag-curator` are present (all always registered; the terms, structure, and tag curators carry `can_commit_in_repo: true`). Do NOT expect any `routines.wiki.terms-scan-*` or `routines.wiki.structure-scan*` key — those families belong to `/lazy-wiki.configure terms` / `/lazy-wiki.configure structure`. Confirm `routines.wiki.scan`, `routines.wiki.scan-deletes`, `routines.wiki.relink-weekly`, `routines.lazy-wiki.doctor-apply`, and `routines.lazy-wiki.tag-normalize` are present, that `lazy-wiki.scan` / `lazy-wiki.relink-weekly` carry `lazycortex-core:lazy-core.markdown-style` in their `protocols`, and that `lazy-wiki.tag-normalize` carries `lazycortex-wiki:lazy-wiki.tag-curator-protocol` in its `protocols`.
-- When `wiki.domains` is configured: confirm `experts.wiki.domain-writer` is present, along with `routines.wiki.domain-scan` / `routines.wiki.domain-full` with the markdown-style protocol. When `wiki.domains` is absent, do NOT expect any of them.
-- For every scope with a `mirror` block, confirm `routines.wiki.mirror-sync.<scope-id>` is present. When no scope carries one, do NOT expect any.
+- Confirm `experts.wiki.curator`, `experts.wiki.terms-curator`, `experts.wiki.structure-curator`, and `experts.wiki.tag-curator` are present (all always registered; the terms, structure, and tag curators carry `can_commit_in_repo: true`). Do NOT expect any `routines.lazy-wiki.terms-scan-*` or `routines.lazy-wiki.structure-scan*` key — those families belong to `/lazy-wiki.configure terms` / `/lazy-wiki.configure structure`. Confirm `routines.lazy-wiki.scan`, `routines.lazy-wiki.scan-deletes`, `routines.lazy-wiki.relink-weekly`, `routines.lazy-wiki.doctor-apply`, and `routines.lazy-wiki.tag-normalize` are present, that `lazy-wiki.scan` / `lazy-wiki.relink-weekly` carry `lazycortex-core:lazy-core.markdown-style` in their `protocols`, and that `lazy-wiki.tag-normalize` carries `lazycortex-wiki:lazy-wiki.tag-curator-protocol` in its `protocols`.
+- When `wiki.domains` is configured: confirm `experts.wiki.domain-writer` is present, along with `routines.lazy-wiki.domain-scan` / `routines.lazy-wiki.domain-full` with the markdown-style protocol. When `wiki.domains` is absent, do NOT expect any of them.
+- For every scope with a `mirror` block, confirm `routines.lazy-wiki.mirror-sync.<scope-id>` is present. When no scope carries one, do NOT expect any.
+
+Routine keys carry the plugin namespace and expert keys do not, per `lazy-core.hygiene` § Runtime-registry keys — `routines.lazy-wiki.scan` beside `experts.wiki.curator`. Verifying a routine under the expert form reports every routine missing on a healthy install.
 - Report to the user:
   - Scope detected.
   - Plugin version + commit synced from `installed_plugins.json`.

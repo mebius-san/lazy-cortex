@@ -1,10 +1,10 @@
 ---
 chapter_type: troubleshooting
 summary: Symptoms, causes, and fixes for lazycortex-python install, audit, style checks, the guideline-review gate, and writer agents.
-last_regen: 2026-09-07
+last_regen: 2026-09-09
 diagram_spec:
   anchor: "Diagnostic flowchart"
-  request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-locate-plugin-post-bump); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
+  request: "Decision-tree routing install/audit/check-style/review/writer failures: top-level branch on skill invoked (install vs audit vs check-style vs review vs docstring-writer vs test-writer); install branch splits on phase (source-not-found, rule-read-only, wrapper-template-missing, pyproject-absent, pch-no-inspect-sh, scaffold-sync-fails, env-source-multiple-candidates, wrapper-cannot-resolve-active-install); audit branch splits on check number (check-crash, check1 drift, check2 broken-pointer, check3 artifact-missing, check4 placeholder, check10 invalid-json, check11 venv-degraded, check12 domain-groups-dictionary-missing); check-style branch splits on step (step3-manual-vs-chk, step5-test-gate, step6-violations-persist); pcf branch splits on new-violations-after-upgrade: (a) D2/D5/D7/D9 firing on previously-passing docstrings because project-neutral defaults dropped a project's implicit Generation Rules / Value Ranges / _field_filters conventions, needing [tool.pcf] extra_docstring_sections / d2_exempt_marker_attrs / private_name_allowlist declared; (b) check_language flagging comments/docstrings written outside [tool.pcf] allowed_languages (default english-only), needing translation, allowed_languages, or a # waiver:; (c) project_package autodetection resolving to nothing on an ambiguous src/ + root layout, misclassifying first-party imports, needing [tool.pcf] project_package declared explicitly; review branch splits on: chk-py-all-no-longer-runs-review (review left chk-py all as of 4.0.0 and needs its own chk-py review dispatch, mandatory at the end of a planned-work cycle) vs chk-py-review-base-ref-unresolvable (typo'd or unfetched --base ref, fetch or use git merge-base) vs chk-py-review-render-still-fails-with-FAIL-finding (fix the code, re-run — new scope key re-manifests); docstring-writer branch (step6-chk-violations); test-writer branch (step6-fails-flag, step7-tst-py-fails); each leaf names the fix action"
   kind_hint: decision-tree
 source_skills:
   - lazy-python.install
@@ -19,7 +19,7 @@ source_skills:
   - lazy-python.knowledge-sweep
   - lazy-python.domain-writer
   - lazy-python.contract-writer
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 ---
 # Troubleshooting
 
@@ -57,9 +57,9 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 
 **Symptom**: Running `chk-py` or `tst-py` from the terminal (or via `/lazy-python.check-style`) fails immediately with a message like "cannot locate the lazycortex-python plugin" — even though the wrappers are present in `cli/`.
 
-**Likely cause**: The wrappers deployed in `cli/` contain absolute paths to the plugin's binaries that were resolved at install time. After a plugin version bump, those paths point at a now-superseded cache directory. A `/plugin update` refreshes the plugin's templates but does not redeploy the per-repo `cli/` wrappers — that step requires re-running `/lazy-python.install`. The same symptom can appear if the plugin is uninstalled or disabled between the original install and the current session.
+**Likely cause**: The wrapper scripts deployed in `cli/` are self-resolving, path-agnostic scripts — `/lazy-python.install` Phase 2 copies the template verbatim (no path substitution), and each wrapper resolves the active `lazycortex-python` install at the moment it runs: first a dev-vault sibling checkout, then `$LAZYCORTEX_PLUGIN_DIRS` (for daemon-spawned processes), then Claude Code's own `installed_plugins.json`. This error fires only when none of those three resolve — most often because the plugin genuinely is not installed or not enabled for the current session, or `installed_plugins.json` is missing or unreadable. A wrapper deployed by an older, pre-redesign version of the plugin instead baked in an absolute, version-pinned path that went stale on every `/plugin update`; that failure mode does not occur for wrappers deployed by the current install.
 
-**Fix**: Ensure `lazycortex-python@lazycortex` is installed and enabled, then re-run `/lazy-python.install`. Phase 2 redeploys both wrappers with paths that resolve against the current plugin cache, making them operational again.
+**Fix**: Confirm `lazycortex-python@lazycortex` is installed and enabled (`enabledPlugins` in `~/.claude/settings.json`), then retry. If the plugin is enabled and the error persists, re-run `/lazy-python.install` — Phase 2 redeploys both wrappers unconditionally from the current template, which also replaces any leftover pre-redesign wrapper still carrying a stale baked-in path.
 
 ---
 
@@ -223,9 +223,9 @@ Re-run `chk-py all -q` after saving; the newly-declared config keys restore the 
 
 **Symptom**: Check 4 exits `FAIL` reporting that `cli/chk-py` or `cli/tst-py` still contains a `{{CHK_BIN_PATH}}` or `{{TST_BIN_PATH}}` literal — the template was copied but the path substitution never ran.
 
-**Likely cause**: Phase 2 of the install was interrupted after copying the wrapper template but before completing the substitution and `chmod +x` steps.
+**Likely cause**: The current wrapper template is self-resolving and path-agnostic — `/lazy-python.install` Phase 2 now copies it verbatim, with no substitution step at all, so a wrapper it deploys can never contain a `{{..._BIN_PATH}}` literal. This finding only fires against a wrapper deployed by an older, pre-redesign version of the plugin (one whose Phase 2 did substitute a path into the template) whose install was interrupted after the copy but before the substitution completed, and the repo has not re-run install since upgrading past that redesign.
 
-**Fix**: Re-run `/lazy-python.install`. Phase 2 redeploys both wrappers from scratch, performing substitution and setting the executable bit. The step is idempotent.
+**Fix**: Re-run `/lazy-python.install`. Phase 2 redeploys both wrappers unconditionally from the current, path-agnostic template, replacing any stale pre-redesign copy outright — no substitution step to complete.
 
 ---
 

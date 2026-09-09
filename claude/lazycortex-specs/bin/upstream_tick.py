@@ -76,7 +76,7 @@ class _K:
     DEFAULT_MAX_UNITS: Fallback `max_units_per_tick`.
     DEFAULT_MAX_TEXT_BYTES: Fallback `max_text_file_bytes`.
     DEFAULT_FAILURE_THRESHOLD: Fallback `fetch_failure_threshold`.
-    UPSTREAM_ROOT: Content-root-relative segment upstream mirrors live under.
+    UPSTREAM_ROOT: Repository-root-relative segment upstream mirrors live under.
     RUNTIME_CLONE_ROOT: Repo-relative dir holding one gitignored clone per `<repo-key>`.
     CURSOR_FILE: Repo-relative path of the fetch-phase continuation cursor.
     SOURCE_DIR: Unit-relative dir holding the current mirror.
@@ -745,12 +745,12 @@ def _filter_invalid_units(
   return accepted, refused
 
 
-def _vault_existing_units(content_root: Path, repo_key: str, mount: str) -> set[str]:
+def _vault_existing_units(repo: Path, repo_key: str, mount: str) -> set[str]:
   """
   Enumerate unit directories already present in the vault for one mount, from a prior tick.
 
   Args:
-    content_root: Spec content-root.
+    repo: Repository root.
     repo_key: The source's key.
     mount: The mount name.
 
@@ -758,7 +758,7 @@ def _vault_existing_units(content_root: Path, repo_key: str, mount: str) -> set[
     Set of unit-path strings whose folder-note already exists under
     `upstream/<repo-key>/<mount>/`.
   """
-  base = content_root / _K.UPSTREAM_ROOT / repo_key / mount
+  base = repo / _K.UPSTREAM_ROOT / repo_key / mount
   # guard: nothing landed under this mount yet
   if not base.is_dir():
     return set()
@@ -791,7 +791,7 @@ def _plan_all_sources(repo: Path, cfg: dict) -> dict[str, tuple[list[str], str |
 
 
 def _ordered_units(
-    repo: Path, cfg: dict, content_root: Path, tree_by_source: dict[str, tuple[list[str], str | None]],
+    repo: Path, cfg: dict, tree_by_source: dict[str, tuple[list[str], str | None]],
 ) -> tuple[list[tuple[str, str, str]], set[tuple[str, str]], dict[str, list[tuple[str, str, str]]]]:
   """
   Build the deterministic, tick-stable list of every unit to consider, per `lazy-spec.config-protocol`
@@ -799,9 +799,8 @@ def _ordered_units(
   directories already exist in the vault.
 
   Args:
-    repo: Repository root (unused directly — kept for signature symmetry with the vault scan).
+    repo: Repository root.
     cfg: Parsed `spec.upstream` section.
-    content_root: Spec content-root.
     tree_by_source: This tick's already-planned `{repo_key: (tree_paths, error)}`, from
       `_plan_all_sources` — never re-fetched here.
 
@@ -814,7 +813,6 @@ def _ordered_units(
     `{repo_key: [(mount, unit_path, reason), ...]}` for every freshly-matched candidate this
     tick refused for a vault-unsafe name (§ 3) — never enumerated into `ordered` at all.
   """
-  del repo
   out: list[tuple[str, str, str]] = []
   refused_mounts: set[tuple[str, str]] = set()
   invalid_names: dict[str, list[tuple[str, str, str]]] = {}
@@ -833,7 +831,7 @@ def _ordered_units(
         # guard: overlapping units — refuse the whole mount, not the tick
         if _has_overlap(matched):
           refused_mounts.add((repo_key, mount))
-      existing = _vault_existing_units(content_root, repo_key, mount)
+      existing = _vault_existing_units(repo, repo_key, mount)
       matched, refused = _filter_invalid_units(matched, existing)
       if refused:
         invalid_names.setdefault(repo_key, []).extend(
@@ -884,20 +882,20 @@ def _plan_source_tree(
   return [item[_PlanKey.PATH] for item in result.get(_PlanKey.PLAN, [])], None
 
 
-def _unit_dir(content_root: Path, repo_key: str, mount: str, unit_path: str) -> Path:
+def _unit_dir(repo: Path, repo_key: str, mount: str, unit_path: str) -> Path:
   """
   Resolve one unit's own directory under the vault.
 
   Args:
-    content_root: Spec content-root.
+    repo: Repository root.
     repo_key: The source's key.
     mount: The mount name.
     unit_path: Unit path, relative to the mount's `source_path`.
 
   Returns:
-    `<content_root>/upstream/<repo-key>/<mount>/<unit_path>`.
+    `<repo>/upstream/<repo-key>/<mount>/<unit_path>`.
   """
-  return content_root / _K.UPSTREAM_ROOT / repo_key / mount / unit_path
+  return repo / _K.UPSTREAM_ROOT / repo_key / mount / unit_path
 
 
 def _sha256_file(path: Path) -> str:
@@ -1680,8 +1678,8 @@ def _render_request_body(
 
   Args:
     unit_path: The unit's own directory, repo-relative (`_dispatch_request`'s own
-      `str(unit_dir.resolve().relative_to(repo))`) — carries the `spec.vault_root` segment, so
-      `unit_path/source/` and `unit_path/processed/` are real Read targets from the repo root.
+      `str(unit_dir.resolve().relative_to(repo))`) — so `unit_path/source/` and
+      `unit_path/processed/` are real Read targets from the repo root.
     note_wikilink: The unit note's own repo-relative wikilink target.
     reason: `UpstreamStatus.NEW` or `UpstreamStatus.DRIFTED` — why this request was opened.
     revision: Source commit SHA the diffed `source/` was synced from.
@@ -2099,7 +2097,7 @@ def _advance_unit(
     was undone this tick — it never materialized (no `source/`, no note, § draft-gate).
   """
   # resolve this unit's on-disk layout before anything else needs it
-  unit_dir = _unit_dir(content_root, repo_key, mount, unit_path)
+  unit_dir = _unit_dir(repo, repo_key, mount, unit_path)
   title = unit_path.rsplit("/", 1)[-1]
   note_path = unit_dir / f"{title}{_K.MD_SUFFIX}"
   source_dir = unit_dir / _K.SOURCE_DIR
@@ -2274,18 +2272,18 @@ def _save_cursor(repo: Path, cursor: int) -> None:
   path.write_text(json.dumps({ _CURSOR_KEY: cursor }))
 
 
-def _source_note_path(content_root: Path, repo_key: str) -> Path:
+def _source_note_path(repo: Path, repo_key: str) -> Path:
   """
   Resolve one configured source's own repo-level folder-note (§ 5).
 
   Args:
-    content_root: Spec content-root.
+    repo: Repository root.
     repo_key: The source's key.
 
   Returns:
-    `<content_root>/upstream/<repo-key>/<repo-key>.md`.
+    `<repo>/upstream/<repo-key>/<repo-key>.md`.
   """
-  return content_root / _K.UPSTREAM_ROOT / repo_key / f"{repo_key}{_K.MD_SUFFIX}"
+  return repo / _K.UPSTREAM_ROOT / repo_key / f"{repo_key}{_K.MD_SUFFIX}"
 
 
 # One-line description under the root catalog note's title, per vault authoring language.
@@ -2295,19 +2293,18 @@ _ROOT_NOTE_EXPLAINERS = {
 }
 
 
-def _ensure_root_note(repo: Path, content_root: Path) -> Path | None:
+def _ensure_root_note(repo: Path) -> Path | None:
   """
   Seed the root upstream catalog folder-note once, so the `upstream/` folder carries its icon.
 
   Args:
     repo: Repository root.
-    content_root: Spec content-root.
 
   Returns:
-    The created `<content_root>/upstream/upstream.md` path, or `None` when the note already
+    The created `<repo>/upstream/upstream.md` path, or `None` when the note already
     exists — an existing note is operator territory and is never rewritten.
   """
-  note_path = content_root / _K.UPSTREAM_ROOT / f"{_K.UPSTREAM_ROOT}{_K.MD_SUFFIX}"
+  note_path = repo / _K.UPSTREAM_ROOT / f"{_K.UPSTREAM_ROOT}{_K.MD_SUFFIX}"
   # guard: write-once — an existing note is operator-owned, byte-identical after this call
   if note_path.is_file():
     return None
@@ -2432,7 +2429,7 @@ def _render_source_note(
 
 
 def _update_source_note(
-    repo: Path, content_root: Path, repo_key: str, error: str | None, threshold: int, today: str,
+    repo: Path, repo_key: str, error: str | None, threshold: int, today: str,
     *, invalid: list[tuple[str, str, str]] | None = None, refused_mounts: list[str] | None = None,
     extra_paths: list[Path] | None = None,
 ) -> bool:
@@ -2448,7 +2445,6 @@ def _update_source_note(
 
   Args:
     repo: Repository root.
-    content_root: Spec content-root.
     repo_key: The source's key.
     error: This tick's own fetch/plan error for this source, or `None` on success.
     threshold: The source's configured `fetch_failure_threshold`.
@@ -2462,7 +2458,7 @@ def _update_source_note(
   Returns:
     `True` when the note changed and was committed this tick; `False` otherwise.
   """
-  note_path = _source_note_path(content_root, repo_key)
+  note_path = _source_note_path(repo, repo_key)
   existing_fm, _existing_body = _read_note(note_path)
 
   # frontmatter scalars round-trip as strings (flip_gate._parse_frontmatter's own contract) —
@@ -2522,21 +2518,21 @@ def run(repo: Path) -> dict:
 
   # one plan per source, then the deterministic union that walk consumes
   tree_by_source = _plan_all_sources(repo, cfg)
-  ordered, refused_mounts, invalid_names = _ordered_units(repo, cfg, content_root, tree_by_source)
+  ordered, refused_mounts, invalid_names = _ordered_units(repo, cfg, tree_by_source)
   errors = sorted({
       f"{repo_key}: {error}" for repo_key, (_paths, error) in tree_by_source.items() if error is not None
   })
 
   # the root upstream catalog note is seeded once alongside the first configured source —
   # write-once, then operator-owned; it rides the first source note's own commit below
-  root_note = _ensure_root_note(repo, content_root) if tree_by_source else None
+  root_note = _ensure_root_note(repo) if tree_by_source else None
 
   # every configured source gets its own repo-level note kept current — independent of
   # max_units_per_tick and of whether it has any matched units yet (§ 5)
   today = flip_gate._today(None)
   for repo_key, (_paths, error) in tree_by_source.items():
     _update_source_note(
-        repo, content_root, repo_key, error, failure_threshold, today,
+        repo, repo_key, error, failure_threshold, today,
         invalid = invalid_names.get(repo_key, []),
         refused_mounts = sorted(
             mount_name for source_key, mount_name in refused_mounts if source_key == repo_key
@@ -2657,7 +2653,7 @@ def _material_unit_dirs(mount_base: Path) -> dict[str, Path]:
   `source/` or `processed/` child — regardless of whether it also carries a note.
 
   Args:
-    mount_base: `<content_root>/upstream/<repo-key>/<mount>/`.
+    mount_base: `<repo>/upstream/<repo-key>/<mount>/`.
 
   Returns:
     `{unit_path: unit_dir}`, `unit_path` POSIX-relative to `mount_base`; empty when the mount
@@ -2852,8 +2848,8 @@ def doctor_scan(repo: Path) -> dict:
   if not repo_keys:
     return { "configured": False, "findings": [] }
 
-  # resolve the vault-relative walk root once, for every check below
-  upstream_root = spec_paths.spec_content_root(repo) / _K.UPSTREAM_ROOT
+  # resolve the repo-relative walk root once, for every check below
+  upstream_root = repo / _K.UPSTREAM_ROOT
   findings: list[dict] = []
 
   # subtrees on disk with no matching config entry (§ 12: a subtree on disk with no matching config entry)

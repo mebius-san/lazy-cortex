@@ -1,6 +1,6 @@
 {
   "name": "lazycortex-specs",
-  "version": "7.5.1",
+  "version": "7.5.2",
   "description": "Specification and design skills for Claude Code",
   "author": {
     "name": "Mebius-san"
@@ -9,5 +9,9 @@
     "lazycortex-core",
     "lazycortex-diagram",
     "lazycortex-review"
+  ],
+  "provides_experts": [
+    "spec.coordinator",
+    "spec.catalog-coordinator"
   ]
 }

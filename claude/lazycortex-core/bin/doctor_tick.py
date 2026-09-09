@@ -36,7 +36,10 @@ import subprocess
 import time
 from pathlib import Path
 
-from constants import HaltKey, HaltReason, IncidentKey, JobArtifact, JobFile, JobMarker, SettingsFile, SettingsKey
+from constants import (HaltKey, HaltReason, IncidentKey, JobArtifact, JobConfigKey, JobFile, JobMarker,
+                       SettingsFile, SettingsKey)
+from frontmatter_parser import parse_frontmatter
+from job_response import is_job_bundle
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -73,8 +76,8 @@ def _dead_jobs_needing_doctor(repo: Path) -> list[dict]:
     if not edir.is_dir():
       continue
     for jdir in sorted(edir.iterdir()):
-      # guard: skip non-directory entries under an expert
-      if not jdir.is_dir():
+      # guard: only real bundles are queue entries
+      if not is_job_bundle(jdir):
         continue
       # guard: skip jobs that are not marked DEAD
       if not (jdir / JobMarker.DEAD).exists():
@@ -211,6 +214,68 @@ def _read_tail(path: Path, lines: int = 50) -> str:
   return "\n".join(parts[-lines:])
 
 
+def _source_state(repo: Path, config_json: dict | None) -> list[dict]:
+  """
+  Describe the current state of the documents a dead job was dispatched to work on.
+
+  Notes:
+    - A path recorded at dispatch that no longer resolves is reported rather than skipped.
+
+  Args:
+    repo: Repository root the recorded paths are relative to.
+    config_json: The bundle's parsed config payload, or `None` when it could not be read.
+
+  Returns:
+    One entry per recorded source path, each carrying the path as recorded, whether it still
+    exists, and its parsed frontmatter when it has any. Empty when no paths were recorded.
+  """
+
+  # Decision: the sources come from the bundle's own `source_paths`, which the runtime writes
+  # itself, rather than from a target key inside the caller's request payload — the request is a
+  # consumer's shape and core must not learn its field names to read it. This is the only thing in
+  # the doctor's context describing the work as it stands now, and without it a stale job passes
+  # every attempt band and gets retried into a document the operator already moved past.
+
+  # guard: an unreadable config leaves nothing to describe, and a missing key is not an error
+  paths = (config_json or {}).get(JobConfigKey.SOURCE_PATHS)
+  if not isinstance(paths, list):
+    return []
+
+  # each recorded path is reported as it stands now, whether or not it survived
+  out: list[dict] = []
+  for rel in paths:
+    # guard: a non-string entry is not a path this can resolve
+    if not isinstance(rel, str):
+      continue
+    # a path that no longer resolves is the strongest signal the work was abandoned
+    target = repo / rel
+    exists = target.is_file()
+    # waiver: one-off doctor-context-schema field names, not reusable domain keys
+    out.append({
+      "path": rel,
+      "exists": exists,
+      "frontmatter": _read_frontmatter(target) if exists else None,
+    })
+  return out
+
+
+def _read_frontmatter(path: Path) -> dict | None:
+  """
+  Parse a document's frontmatter, tolerating a file that cannot be read or has none.
+
+  Args:
+    path: Path to the document being read.
+
+  Returns:
+    The parsed frontmatter mapping, or `None` when the file is unreadable or carries none.
+  """
+  try:
+    parsed = parse_frontmatter(path.read_text())
+  except OSError:
+    return None
+  return parsed or None
+
+
 def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict:
   """
   Build the context snapshot the doctor agent will read from its job source directory.
@@ -254,6 +319,8 @@ def _build_context(repo: Path, halt: dict | None, dead_jobs: list[dict]) -> dict
       e["attempts"] = 0
     # waiver: one-off doctor-context-schema field name and inline tail-length literal, not domain constants
     e["transcript_tail"] = _read_tail(jdir / JobArtifact.TRANSCRIPT, 30)
+    # waiver: one-off doctor-context-schema field name, not a reusable domain key
+    e["source_state"] = _source_state(repo, e["config_json"])
     # waiver: one-off doctor-context-schema field name, not a reusable domain key
     context["dead_jobs"].append(e)
   # capture a small slice of recent commit history for situational awareness

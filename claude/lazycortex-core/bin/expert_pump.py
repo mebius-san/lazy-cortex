@@ -36,7 +36,7 @@ from reference_resolver import resolve, ReferenceError  # pylint: disable=redefi
 # `ImportError: cannot import name X from constants`. Binding the import at module load
 # means the lookup happens ONCE per process lifetime, not per job.
 from runtime_daemon import _check_working_tree, is_cache_root
-from job_response import classify_response, outcome_tokens, read_response
+from job_response import classify_response, is_job_bundle, outcome_tokens, read_response
 from worktree_tasks import WorktreeStartError, WorktreeTaskManager
 from provider_env import ProviderKey, build_spawn_env, resolve_token
 import rate_limit_flag
@@ -120,6 +120,82 @@ _STARTUP_CRASH_SEC = 5
 _HUNG_JOB_SEC = 3600
 
 
+def _marker_mtime(jdir: Path, marker: str) -> float | None:
+  """
+  Read the modification time of a job marker, or report its absence.
+
+  Args:
+    jdir: Path to the job directory the marker belongs to.
+    marker: Filename of the marker being read.
+
+  Returns:
+    The marker's modification time, or `None` when the marker is not there.
+  """
+  path = jdir / marker
+  # guard: an unarmed or unclaimed bundle simply has no such marker to time
+  if not path.exists():
+    return None
+  return path.stat().st_mtime
+
+
+def _is_abandoned_bundle(jdir: Path) -> bool:
+  """
+  Report whether a job bundle was left behind by a dispatch that never armed it.
+
+  Args:
+    jdir: Path to the job directory being judged.
+
+  Returns:
+    `True` when the bundle carries none of the markers a dispatched job acquires.
+  """
+
+  # Decision: absence of every marker is the signature, rather than absence of READY alone —
+  # a dispatch writes the request and the config first and touches READY last, so a bundle with
+  # no marker at all is one whose dispatch died in that window. The pump would otherwise skip it
+  # forever as "still being assembled", the collector would never reap it (it reaps only the
+  # terminal markers), and it would sit in the queue depth as work that never drains.
+
+  # any marker at all means the dispatch completed and some other branch owns the bundle
+  return not any(
+    (jdir / m).exists()
+    for m in (JobMarker.READY, JobMarker.PID, JobMarker.DONE, JobMarker.DEAD, JobMarker.CANCELLED)
+  )
+
+
+def _mark_dead(repo: Path, expert: str, jdir: Path, blob: dict) -> int:
+  """
+  Bury a job bundle: write its forensic record, mark it dead, and open an incident.
+
+  Notes:
+    - Records a `job_dead` incident in the error ledger keyed on the bundle.
+
+  Args:
+    repo: Repository root whose logs and error ledger receive the death.
+    expert: Name of the expert that owned the bundle.
+    jdir: Path to the job directory being buried.
+    blob: Forensic payload composed by `_build_dead_json` before this call.
+
+  Returns:
+    One, so a caller can add the result straight to its marked count.
+  """
+  # the record lands before the marker so nothing can observe a death without its forensics
+  (jdir / JobMarker.DEAD_CANDIDATE).unlink(missing_ok = True)
+  (jdir / JobArtifact.DEAD_JSON).write_text(json.dumps(blob, indent = 2))
+  (jdir / JobMarker.DEAD).touch()
+  _append_jobs_log(repo, expert, jdir.name, JobLogOutcome.DEAD)
+
+  # the incident carries the forensic label forward so triage reads the cause without the file
+  # waiver: small internal subkey, not a reusable domain key
+  cause = blob.get("likely_cause", "unknown")
+  error_ledger.record(repo, {
+    IncidentKey.INCIDENT: f"job:{expert}/{jdir.name}", IncidentKey.PHASE: IncidentPhase.OPENED,
+    IncidentKey.KIND: IncidentKind.JOB_DEAD, IncidentKey.CAUSE: cause, IncidentKey.ACTOR: IncidentActor.PUMP,
+    IncidentKey.EXPERT: expert, IncidentKey.JOB_ID: jdir.name, IncidentKey.DETAIL: f"job DEAD: {cause}",
+    IncidentKey.REFS: { "jdir": str(jdir), "dead_json": str(jdir / JobArtifact.DEAD_JSON) },
+  })
+  return 1
+
+
 def _build_dead_json(jdir: Path, expert: str, job_id: str, marked_at: float) -> dict:
   """
   Compose the forensic payload describing a job that was marked dead.
@@ -132,10 +208,14 @@ def _build_dead_json(jdir: Path, expert: str, job_id: str, marked_at: float) -> 
 
   Returns:
     A dict carrying queue and claim timestamps, the original PID, an optional dedup key,
-    the list of partial output files, and a heuristic likely-cause label.
+    the list of partial output files, and a heuristic likely-cause label. The two timestamps
+    are `None` for a bundle whose dispatch died before it was ever armed or claimed, and the
+    durations derived from them are `None` with them.
   """
-  queued_at = (jdir / JobMarker.READY).stat().st_mtime
-  claimed_at = (jdir / JobMarker.PID).stat().st_mtime
+
+  # a bundle abandoned mid-dispatch carries neither marker, so both timestamps stay open
+  queued_at = _marker_mtime(jdir, JobMarker.READY)
+  claimed_at = _marker_mtime(jdir, JobMarker.PID)
 
   # the claimant PID as recorded at claim time; -1 when the marker is gone or garbled
   try:
@@ -158,10 +238,17 @@ def _build_dead_json(jdir: Path, expert: str, job_id: str, marked_at: float) -> 
   )
 
   # time the claimant survived after claiming, floored at zero against clock skew
-  duration_alive_sec = max(0.0, marked_at - claimed_at)
+  duration_alive_sec = None if claimed_at is None else max(0.0, marked_at - claimed_at)
+
+  # how long the bundle waited between arming and claim, open when either end is missing
+  duration_queued_sec = (
+    None if queued_at is None or claimed_at is None else max(0.0, claimed_at - queued_at)
+  )
 
   # classify by duration + output presence — informative label, not a contract
-  if duration_alive_sec < _STARTUP_CRASH_SEC and not partial_output:
+  if duration_alive_sec is None:
+    likely_cause = "dispatch_never_armed"
+  elif duration_alive_sec < _STARTUP_CRASH_SEC and not partial_output:
     likely_cause = "crashed_at_startup"
   elif duration_alive_sec > _HUNG_JOB_SEC and not partial_output:
     likely_cause = "long_running_killed_or_hung"
@@ -181,7 +268,7 @@ def _build_dead_json(jdir: Path, expert: str, job_id: str, marked_at: float) -> 
     "original_pid": original_pid,
     "queued_at": queued_at,
     "claimed_at": claimed_at,
-    "duration_queued_sec": max(0.0, claimed_at - queued_at),
+    "duration_queued_sec": duration_queued_sec,
     "duration_alive_sec": duration_alive_sec,
     "partial_output": partial_output,
     "likely_cause": likely_cause,
@@ -242,8 +329,15 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
     if not edir.is_dir():
       continue
     for jdir in edir.iterdir():
-      # guard: skip non-directory entries
-      if not jdir.is_dir():
+      # guard: only real bundles are queue entries
+      if not is_job_bundle(jdir):
+        continue
+      # a bundle carrying no marker at all is an abandoned dispatch rather than one still being
+      # assembled: nothing will ever arm it, so it is buried once it outlives the same grace a
+      # stuck claim gets, which puts it in front of the doctor and inside the collector's reach
+      if _is_abandoned_bundle(jdir):
+        if time.time() - jdir.stat().st_mtime >= grace_sec:
+          marked += _mark_dead(repo, edir.name, jdir, _build_dead_json(jdir, edir.name, jdir.name, time.time()))
         continue
       # guard: job never reached READY — still being assembled
       if not (jdir / JobMarker.READY).exists():
@@ -297,19 +391,7 @@ def _detect_dead_jobs(repo: Path, *, grace_sec: float = 0.0) -> int:
         _finalize_orphaned_job(jdir)
         _append_jobs_log(repo, edir.name, jdir.name, _classify_finished(jdir))
         continue
-      candidate.unlink(missing_ok = True)
-      (jdir / JobArtifact.DEAD_JSON).write_text(json.dumps(blob, indent = 2))
-      (jdir / JobMarker.DEAD).touch()
-      _append_jobs_log(repo, edir.name, jdir.name, JobLogOutcome.DEAD)
-      # waiver: small internal subkey, not a reusable domain key
-      cause = blob.get("likely_cause", "unknown")
-      error_ledger.record(repo, {
-        IncidentKey.INCIDENT: f"job:{edir.name}/{jdir.name}", IncidentKey.PHASE: IncidentPhase.OPENED,
-        IncidentKey.KIND: IncidentKind.JOB_DEAD, IncidentKey.CAUSE: cause, IncidentKey.ACTOR: IncidentActor.PUMP,
-        IncidentKey.EXPERT: edir.name, IncidentKey.JOB_ID: jdir.name, IncidentKey.DETAIL: f"job DEAD: {cause}",
-        IncidentKey.REFS: { "jdir": str(jdir), "dead_json": str(jdir / JobArtifact.DEAD_JSON) },
-      })
-      marked += 1
+      marked += _mark_dead(repo, edir.name, jdir, blob)
 
   # the tick summary carries this count so a checkout burying jobs every tick is visible in
   # the daemon log without reading the job tree
@@ -589,8 +671,8 @@ def pump(repo: Path) -> dict:
     expert_count += 1
     name = edir.name
     for jdir in sorted(edir.iterdir()):
-      # guard: skip non-directory entries
-      if not jdir.is_dir():
+      # guard: only real bundles are queue entries
+      if not is_job_bundle(jdir):
         continue
       cleaned += _maybe_cleanup(jdir, cleanup_done_after, cleanup_fail_after, cleanup_dead_after)
       ready_marker = jdir / JobMarker.READY

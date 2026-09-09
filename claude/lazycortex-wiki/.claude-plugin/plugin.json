@@ -1,11 +1,18 @@
 {
   "name": "lazycortex-wiki",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Maintains a curated, LLM-navigable semantic wiki over a markdown+code base — summaries, hierarchical topic tags, and glossed See-also links, kept in sync via git-watch and weekly full-scan routines.",
   "author": {
     "name": "Mebius-san"
   },
   "dependencies": [
     "lazycortex-core"
+  ],
+  "provides_experts": [
+    "wiki.curator",
+    "wiki.terms-curator",
+    "wiki.structure-curator",
+    "wiki.tag-curator",
+    "wiki.domain-writer"
   ]
 }

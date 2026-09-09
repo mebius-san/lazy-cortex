@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, configuring, and running the lazycortex-review document-review loop.
-last_regen: 2026-09-07
+last_regen: 2026-09-09
 no_diagram: true
 source_skills:
   - lazy-review.install
@@ -12,7 +12,7 @@ source_skills:
   - lazy-review.stop
   - lazy-review.finalize
   - lazy-review.audit
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 ---
 # Frequently asked questions
 
@@ -42,6 +42,14 @@ The runtime writes operator-private state into `.experts/` (job queue, trackers,
 .experts/
 .logs/lazy-review/
 ```
+
+---
+
+## What happens if my vault's `review-callouts.css` conflicts with a shipped update?
+
+`/lazy-review.install` syncs the `review-callouts.css` snippet into `<vault>/.obsidian/snippets/` non-destructively: a missing or byte-identical snippet is written silently, and a local edit that lands in a different region than the shipped change merges silently too. Only a genuine conflict — the same region edited both locally and in the shipped version — asks, offering `merge-shipped` (the shipped version wins for that region, your other edits are kept) or `keep-local` (your version wins for that region, the rest of the shipped delta still applies).
+
+When install runs through a path with no operator to ask — an unattended rollout across several repos, for example — it cannot stall on that question. It keeps your local region, applies the rest of the shipped delta, and names the file so you know to resolve it. Re-run `/lazy-review.install` yourself afterwards (interactively) to answer the conflict directly.
 
 ---
 

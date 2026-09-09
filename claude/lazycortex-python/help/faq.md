@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about installing, running, and customising lazycortex-python across style, docstrings, knowledge markers, tests, and the checker stack.
-last_regen: 2026-09-07
+last_regen: 2026-09-09
 no_diagram: true
 source_skills:
   - lazy-python.install
@@ -21,7 +21,7 @@ source_skills:
   - review.py
   - lazy-python.coding-guidelines
   - lazy-python.checking-guidelines
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 ---
 # Frequently asked questions
 
@@ -261,7 +261,9 @@ Run `/lazy-python.audit` Check 5 to confirm which of the six always-on sections 
 
 ## `/lazy-python.install` mentions registering a "code-reviewer expert". What is that for?
 
-Step 7.6 registers `lazy-python.code-reviewer` as an expert in `.claude/lazy.settings.json`, additively and only if nothing is on record yet. This makes the review phase dispatchable two ways: directly (as `chk-py review` already names the agent) and through the expert runtime, the same dispatch path other plugins use for background or queued work. If the entry is already on record — you configured it yourself, or a previous install already added it — this step leaves it untouched; your own expert configuration is always authoritative.
+Step 7.6 registers `lazy-python.code-reviewer` as an expert in `.claude/lazy.settings.json`. This makes the review phase dispatchable two ways: directly (as `chk-py review` already names the agent) and through the expert runtime, the same dispatch path other plugins use for background or queued work.
+
+The entry never overwrites a value you configured yourself, but it does complete or correct the two install-managed fields — `agent` and `aspects` — when a previous install left them out or an update changed the agent this plugin ships. A key merely being present on record is not proof the entry is whole: an entry that is `{}`, or one whose `agent` name has gone stale, resolves to nothing at dispatch time, so a re-run repairs exactly those two fields rather than treating "already on record" as "already correct". Everything else you set on the entry — anything beyond `agent` / `aspects` — is left untouched either way. The outcome you see is `expert-registered` (added from scratch), `expert-refreshed` (an install-managed field was completed or corrected), or `expert-already-registered` (the entry was already whole).
 
 ---
 

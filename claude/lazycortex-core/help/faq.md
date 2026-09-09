@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Non-obvious answers on install, LLM providers, the runtime daemon and experts, routines, scaffolding, git staging, and MCP permissions.
-last_regen: 2026-09-08
+last_regen: 2026-09-09
 no_diagram: true
 source_skills:
   - lazy-core.install
@@ -32,7 +32,7 @@ source_skills:
   - lazy-expert.cancel-job
   - lazy-expert.list-jobs
   - lazy-memory.write
-source_sha: 063baee10c75ba3794390ccf935191d3c564a350
+source_sha: d4ce013c331568c5c4815b553aaf9382f01eae69
 ---
 # FAQ
 
@@ -55,6 +55,20 @@ No. `/lazy-core.setup` runs a settings migration as its first step (Step 0) befo
 ## Do I need to re-run `/lazy-core.install` after a plugin update?
 
 Yes. `/plugin update` refreshes the plugin cache but does not re-sync rule files into `.claude/rules/`. Your project keeps running the old rule content until you explicitly re-run `/lazy-core.install` (or `/lazy-core.setup`, which includes it). The re-run itself is silent: rule files are plugin-owned mirrors, so the install skill byte-compares each one and overwrites whatever has fallen behind, without asking. If you want different content in a rule, write your own rule file rather than editing the mirror — an edited mirror is indistinguishable from a stale one and gets replaced. A rule the plugin no longer ships is left in place, never deleted.
+
+---
+
+## Why did `/lazy-core.install` change a value in `lazy.settings.json` I already had, without asking?
+
+Because that value is one the plugin wrote for you in the first place, and a newer version of it now writes something different. Inside files you own — `lazy.settings.json`, `settings.json`, the sandbox and permission files — most keys are yours: `/lazy-core.install` adds what's missing and leaves what's there byte-for-byte. A narrower set of values are ones this skill (or a sibling install skill it dispatches, like `lazy-core.agent-models-seed`) composed on your behalf and still owns — an agent-model tier it seeded, an expert entry's `agent` and `git_author` pointers. For those, presence on disk is not proof they're current: a step that only checked "is the key there?" would leave a stale pointer in place forever, even after the shipped default it was written from moves. So every step that seeds one of these values re-reads what's on record and compares it against what it would write today — absent gets written, matching is left alone, and a value that still matches what was originally seeded is refreshed to the new shipped form, silently.
+
+The one case this never touches is your own edit. Agent-model entries carry this distinction explicitly: an entry the plugin seeded is recorded as `{"tier": ..., "seeded_from": ...}`, while a bare tier string is always your pin — written by hand or by `/lazy-core.agent-models`'s own wizard, and never rewritten by anything else. The moment you change a seeded entry's `tier` away from its `seeded_from`, it stops being install-managed and is reported `kept-local` on every future run. Registering an expert works the same way: a candidate already registered under its canonical key has its `agent` and `git_author` fields corrected in place if they've drifted from what the plugin would derive today, but every field you own on that entry (`model`, `workspace`, `merge`, `arguments`) is left exactly as you set it.
+
+---
+
+## My sandbox's recorded read paths shrank after a `/plugin update` — is that a bug?
+
+No. `lazycortex-core sandbox-sync` — run by `/lazy-core.install` and offered by `/lazy-core.doctor`'s D13 fix — is normally append-only: it adds missing paths and never drops or reorders a recorded entry, so anything you added by hand stays. The one exception is a recorded read grant that names a version-pinned `<plugin>/<version>` directory under the plugin cache root whose directory no longer exists on disk — a dead pin left behind once a `/plugin update` moved that plugin to a newer cache version. Those are pruned and reported as `removed_read` in the sync's receipt. Nothing else is ever pruned: a write-scope entry always stays, and a read entry outside the plugin cache root stays even when its path is currently missing, since you may simply not have created it yet.
 
 ---
 
@@ -102,11 +116,13 @@ The same split applies to `lazy.settings.json[daemon].metrics`: the `enabled` fl
 
 Always use `/lazy-core.agent-models`. The skill enforces structural routing rules that hand-edits routinely miss: `_user.*` group entries belong in the global `~/.claude/lazy.settings.json`, `_project.*` entries belong in the project `.claude/lazy.settings.json`, and plugin-domain groups follow the plugin's install scope. Writing an entry to the wrong file produces a split-brain config that `lazy-core.audit` will flag as a finding. The skill also reads `default-tiers.json` to surface curated tier suggestions for every known LazyCortex agent, and it is idempotent — a second run on a fully-configured vault returns "nothing to do" immediately. If you want to see what it would write without touching anything, pass `--dry-run`.
 
+Every entry the wizard writes is a bare tier string — your pin, never touched by anything else again. An entry an install skill seeded on its own, before you ever ran the wizard, looks different on disk: `{"tier": "sonnet", "seeded_from": "sonnet"}`, recording the shipped default that was in force when it was seeded. That distinction only matters if a plugin's shipped default later moves — a seed still matching its own `seeded_from` may be silently refreshed to the new value by a later `/lazy-core.install` re-run, while a bare string never is, and neither is a seed you've already edited (its `tier` no longer equals `seeded_from`).
+
 The only time hand-editing `lazy.settings.json` is appropriate is when you are deliberately overriding a tier for a single project (using `/lazy-core.agent-models --scope=project`) and you want to inspect or revert the exact entry afterward. Even then, use the skill for the write and only read the file to verify.
 
 When `/lazy-core.agent-models` runs as part of a non-interactive rollout chain (no wizard, no user channel), only the curated batch behaves the same as an interactive run: entries whose dispatch string is a key in `default-tiers.json` still auto-apply at their template tier, because a plugin-shipped default is a recorded decision, not a guess. Everything else — agents with no curated default — is left missing and reported `needs-interactive`; a normal interactive run of the skill picks those up afterward.
 
-The skill also prunes automatically: any configured entry whose plugin agent file has since been deleted (the plugin is still installed, but its cache no longer has that agent stem) is removed with no prompt, in both interactive and non-interactive runs — a tier for a deleted agent is dead config, not a decision. If a pruned dispatch string is still referenced by an expert's `agent` field, the skill leaves that expert entry alone and reports a warning instead of guessing; you decide whether to repoint or remove it.
+The skill also prunes automatically, on two separate proofs. First, any configured entry whose plugin agent file has since been deleted (the plugin is still installed, but its cache no longer has that agent stem) is removed with no prompt — a tier for a deleted agent is dead config, not a decision. Second, an entry is pruned the same way when the owning plugin itself has been retired rather than merely uninstalled: its name is absent both from your installed-plugins list and from every registered marketplace's catalog, so there is no path back to reinstalling it and no way the entry could ever resolve again. A plugin you simply uninstalled — but that still stands in its marketplace — keeps its entries, since reinstalling it would make the config apply again. Both proofs apply in interactive and non-interactive runs alike. If a pruned dispatch string is still referenced by an expert's `agent` field, the skill leaves that expert entry alone and reports a warning instead of guessing; you decide whether to repoint or remove it.
 
 ---
 
@@ -353,7 +369,7 @@ Note that `/lazy-core.audit` uses a lower floor of Python 3.12 for its own runti
 
 ## Does `/lazy-core.install` write my agent-model tiers and templates for me, or do I have to run something separately?
 
-Both happen automatically as part of install, through two skills you never invoke directly. `lazy-core.agent-models-seed` is dispatched by every plugin's own install skill to seed that plugin's curated model tiers (haiku/sonnet/opus) into `agent_models.lazycortex` in `lazy.settings.json`, reading the tier values from `lazycortex-core`'s own `default-tiers.json`. It never overwrites a tier you already set by hand — an existing value is left alone and reported `kept-local`. `lazy-core.scaffold-sync` is dispatched the same way to copy a plugin's authoring templates into your `.claude/templates/<group>/` directories and register their path globs in `lazy-core.scaffold.md`, overwriting a stale copy of a plugin-owned template on every re-run (a template you want to customize belongs in a `_local` entry instead — see the next question — not a hand-edited copy of the plugin's own file).
+Both happen automatically as part of install, through two skills you never invoke directly. `lazy-core.agent-models-seed` is dispatched by every plugin's own install skill to seed that plugin's curated model tiers (haiku/sonnet/opus) into `agent_models.lazycortex` in `lazy.settings.json`, reading the tier values from `lazycortex-core`'s own `default-tiers.json`. Every entry it writes is a seed, recorded as `{"tier": ..., "seeded_from": ...}` rather than a bare string, so a later re-run can tell whether the entry is still what it seeded. It never touches a bare string (your own pin) or a seed you've since edited (`tier` no longer equals `seeded_from`) — both are reported `kept-local`. An untouched seed whose shipped default has since moved is rewritten to the new default and reported `refreshed`, since nobody's decision is being overridden there — only the shipped recommendation changed. `lazy-core.scaffold-sync` is dispatched the same way to copy a plugin's authoring templates into your `.claude/templates/<group>/` directories and register their path globs in `lazy-core.scaffold.md`, overwriting a stale copy of a plugin-owned template on every re-run (a template you want to customize belongs in a `_local` entry instead — see the next question — not a hand-edited copy of the plugin's own file).
 
 Both are idempotent and silent when there is nothing new to seed. If either fails because `lazycortex-core` itself is not installed or its `default-tiers.json`/CLI is missing, the reporting install skill surfaces that as a step failure rather than continuing silently.
 

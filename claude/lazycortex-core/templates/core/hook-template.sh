@@ -70,9 +70,12 @@ if [ ! -d "$ROOT/<expected-marker-dir>" ]; then
 fi
 
 # § 7 — TRANSACTIONAL SKIP — never auto-commit during merge/rebase/cherry-pick.
+# REBASE_HEAD is deliberately absent: git records the commit a rebase stopped at there and never
+# removes it when the rebase concludes, so a leftover would silence this hook forever. The
+# rebase-merge / rebase-apply directories are what git itself reads, and they do get removed.
 GIT_DIR="$(git -C "$ROOT" rev-parse --git-dir)"
 case "$GIT_DIR" in /*) : ;; *) GIT_DIR="$ROOT/$GIT_DIR" ;; esac
-for marker in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD REBASE_HEAD \
+for marker in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD \
               rebase-merge rebase-apply BISECT_LOG; do
     if [ -e "$GIT_DIR/$marker" ]; then
         exit 0

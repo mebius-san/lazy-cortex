@@ -33,7 +33,7 @@ from constants import (  # pylint: disable=import-error
   MetricStateKey,
 )
 # waiver: bare-name sibling import (flat bin/), resolved at runtime via sys.path; not statically resolvable
-from job_response import classify_response, read_response  # pylint: disable=import-error
+from job_response import classify_response, is_job_bundle, read_response  # pylint: disable=import-error
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -993,8 +993,8 @@ def set_queue_depth_from_filesystem(repo_root: Path) -> None:
     if not _LABEL_VALUE_RE.match(expert):
       continue
     for job_dir in expert_dir.iterdir():
-      # guard: skip non-directory entries inside an expert dir
-      if not job_dir.is_dir():
+      # guard: only real bundles are queue entries — a harness sidecar dropped beside them is not
+      if not is_job_bundle(job_dir):
         continue
       state = _classify_job_state(job_dir)
       counts[(expert, state)] = counts.get((expert, state), 0) + 1
@@ -1014,9 +1014,10 @@ def _classify_job_state(job_dir: Path) -> str:
   Classify an expert job directory into the closed-set state label.
 
   Mirrors `expert_runtime._job_status` so the metric matches the runtime's own
-  view of each job. Possible return values: `queued`, `active`, `dead`, `done`,
-  `deferred`, `failed`. The filesystem signatures consulted are:
+  view of each job. Possible return values: `cancelled`, `queued`, `active`,
+  `dead`, `done`, `deferred`, `failed`. The filesystem signatures consulted are:
 
+  - CANCELLED marker present                             → cancelled
   - DEAD marker present                                  → dead
   - DONE marker + response reporting a finished outcome  → done
   - DONE marker + response reporting `deferred`          → deferred
@@ -1031,6 +1032,11 @@ def _classify_job_state(job_dir: Path) -> str:
   Returns:
     The closed-set state label for the job.
   """
+  # guard: cancellation is a terminal operator decision and outranks every other marker —
+  # a cancelled bundle keeps its READY, so without this branch it reads as pending work the
+  # pump will never take, and the queue depth reports a backlog that does not exist
+  if (job_dir / JobMarker.CANCELLED).exists():
+    return JobStatus.CANCELLED
   # guard: DEAD outranks every other marker — a job the runtime abandoned is nothing else
   if (job_dir / JobMarker.DEAD).exists():
     return JobStatus.DEAD

@@ -36,7 +36,7 @@ from pathlib import Path
 
 from expert_pump import build_expert_argv, _normalize_mcp_config, _normalize_setting_sources, _VALID_SETTING_SOURCES
 from expert_runtime import resolve_agent_model
-from lazy_settings import load_section
+from lazy_settings import load_section, resolve_agent_model_tier
 import rate_limit_flag
 # waiver: ReferenceError is reference_resolver's domain exception, not the builtin
 from reference_resolver import resolve, ReferenceError  # pylint: disable=redefined-builtin
@@ -600,8 +600,8 @@ def _model_is_known(repo: Path, model: str) -> bool:
     model: The expert's pinned `model` value.
 
   Returns:
-    True when the value is a known tier or appears as a value in any `agent_models`
-    group; False otherwise.
+    True when the value is a known tier or appears as the effective tier of any
+    `agent_models` entry (bare pin or seed object); False otherwise.
   """
   # guard: value is one of the well-known tiers — accept without reading settings
   if model in _MODEL_TIERS:
@@ -611,7 +611,9 @@ def _model_is_known(repo: Path, model: str) -> bool:
     # guard: skip non-dict group values (the _version sentinel, etc.)
     if not isinstance(entries, dict):
       continue
-    if model in entries.values():
+    # unwrap each entry (bare pin or seed object) to its effective tier before comparing;
+    # `seeded_from` is bookkeeping and must never make a model count as known
+    if any(resolve_agent_model_tier(val) == model for val in entries.values()):
       return True
   return False
 

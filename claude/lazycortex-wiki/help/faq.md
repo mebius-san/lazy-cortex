@@ -1,7 +1,7 @@
 ---
 chapter_type: faq
 summary: Answers to common questions about setting up scopes, running relinks, mirroring foreign repos, querying the wiki, the terms dictionary, the structure map, the domain-spec tree, and the tag-values canon.
-last_regen: 2026-09-07
+last_regen: 2026-09-09
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,13 +13,13 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 5fcbdd05ba8f7b53d2a1781f6bc628c2c6208637
+source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 ---
 # Frequently asked questions
 
 ## Do I need to run `/lazy-wiki.install` before anything else?
 
-Yes. `/lazy-wiki.install` seeds the `wiki` settings section in `lazy.settings.json`, seeds agent model tiers for the wiki curator, registers the `wiki.curator`, `wiki.terms-curator`, `wiki.structure-curator`, and `wiki.tag-curator` experts, and copies the navigation rule into your rules directory. If your project uses the background daemon (or hasn't decided yet), it also registers the `lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`, `lazy-wiki.doctor-apply`, and `lazy-wiki.tag-normalize` routines; if the daemon is explicitly disabled for the project, the routines are skipped and only the curator experts and settings are installed. Nothing else in the plugin will work until the `wiki` section exists. The install is idempotent — running it again on an already-configured project is safe and will not overwrite values you have set.
+Yes. `/lazy-wiki.install` seeds the `wiki`, `structure`, and `terms` settings sections in `lazy.settings.json`, seeds agent model tiers for the curators, registers the `wiki.curator`, `wiki.terms-curator`, `wiki.structure-curator`, and `wiki.tag-curator` experts, and copies the navigation rule into your rules directory. Experts and the `lazy-wiki.scan`, `lazy-wiki.scan-deletes`, `lazy-wiki.relink-weekly`, `lazy-wiki.doctor-apply`, and `lazy-wiki.tag-normalize` routines are all registered unconditionally, whether or not your project runs the background daemon — a registered routine fires under `/lazy-runtime.tick` on a checkout with no daemon, so nothing here waits on a daemon decision. Nothing else in the plugin will work until the `wiki` section exists. The install is idempotent — running it again on an already-configured project is safe and will not overwrite values you have set.
 
 After install, run `/lazy-wiki.configure` to define at least one scope (the set of path globs the wiki covers, the tag axes it narrows to, and where to write the topics index). `/lazy-wiki.query` and `/lazy-wiki.relink` both require at least one configured scope to proceed.
 

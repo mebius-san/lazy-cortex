@@ -122,7 +122,7 @@ Seed one composed expert entry per (class × role) pair from the **class map** b
 
 | Class kind | Classes | Roles seeded | Cross-cutting aspects (appended after the domain aspect) |
 |---|---|---|---|
-| technical | `claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, and any future class not listed as fiction | `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `debugger`, `reviewer`, `tester` | `lazy-experts.discipline-aspect`, `lazy-experts.research-aspect`, `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, `lazy-experts.structure-aspect`, `lazy-memory.persona-aspect` |
+| technical | `claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, and any future class not listed as fiction | `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `debugger`, `reviewer`, `tester` | `lazy-experts.discipline-aspect`, `lazy-experts.research-aspect`, `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, `lazy-experts.structure-aspect`, `lazy-memory.persona-aspect` |
 | fiction | `sci-fi`, `fantasy` | `fiction-writer` | `lazy-experts.discipline-aspect`, `lazy-experts.research-aspect`, `lazy-memory.persona-aspect` |
 
 `data-writer` seeds with every technical class — writing data files against an approved design is a general genre, not a game-dev particularity.
@@ -182,7 +182,11 @@ The composed entry's shape:
 
 The `git_author.name` is the expert key with the `.` separator and any `-` replaced by spaces, title-cased (e.g. `claude-plugin.designer` → `Claude Plugin Designer`, `game.interpreter` → `Game Interpreter`). The email pins the canonical local domain so commits attributed to the expert are visibly distinct from operator commits.
 
-`workspace: branch` is seeded ONLY when `<role>` is `developer`, `data-writer`, `docs-writer`, or `tester` — the acceptance-cycle classes `lazycortex-specs.optional-plan-and-auto-implementation.md` describes run their launch-checkbox job and every continuation on a job-scoped branch (`lazy-core.runtime-schema.md` § Workspace). Every other role stays on `workspace: main` (the field omitted entirely) — same as today. This is a seed proposal only: the per-key semantics in Apply below apply here too, a developer/tester expert that already exists keeps whatever `workspace` (or its absence) the operator left it at.
+`workspace: branch` is seeded ONLY when `<role>` is `developer`, `data-writer`, `docs-writer`, or `tester` — the acceptance-cycle classes `lazycortex-specs.optional-plan-and-auto-implementation.md` describes run their launch-checkbox job and every continuation on a job-scoped branch (`lazy-core.runtime-schema.md` § Workspace). Every other role stays on `workspace: main`, which the schema expresses as the field being absent; the literal `"main"` is never written.
+
+**The four roles get the key on every run, not only at creation.** An existing entry for one of those roles with no `workspace` is missing an install-managed value, not carrying an operator's choice — absence is indistinguishable from the default, so there is nothing of the operator's to preserve. Write `workspace: "branch"` in and state `refreshed`. An entry that already carries the key keeps whatever value it holds, in either direction: `"main"` written by hand is a deliberate opt-out and stays. Without this backfill the role set that runs isolated drifts per repository, which is the state ten consumer repos are in — three roles in five of them, four in one, one role in four.
+
+`merge` (`auto` / `ask`) is deliberately not seeded. It defaults to `ask`, it is read only by the spec coordinator's own prompt logic, and `ask` is the right pairing for an isolated workspace; writing it would only restate the default.
 
 `can_commit_in_repo: true` is seeded for every **writing role** — `designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `debugger`, `tester` — and omitted for `interpreter`, `reviewer`, and `fiction-writer`. The writing roles land their work as files in the working tree: a launch-checkbox job's doc writer (architect, planner) writes its document in place and the coordinator only opens review on it via `submit` on the job-done wake (`lazy-spec.coordination-playbook.md` Chapter 6); the acceptance-cycle roles commit on their job-scoped branch; designer additionally serves the change-cascade's in-place edits (`lazy-spec.install` § 6e); debugger fixes code in the tree. Without the flag, `expert_pump` extends the spawn prompt with a no-commit clause, and the job's document never reaches the tracked tree — it strands in the job's own `result/`, which the coordinator can only flag as undelivered. The non-writing roles deliver through the review payload channel (interpreter, fiction-writer) or deliver findings without editing at all (reviewer), so they stay without commit rights.
 
@@ -191,7 +195,7 @@ The `git_author.name` is the expert key with the `.` separator and any `-` repla
 Ensure `experts` exists as an object with `_version: 1` (create if absent — never overwrite). For each composed entry, per-key semantics matching Step 4:
 
 - **absent** → add the entry verbatim. State `added`.
-- **present** (any shape) → leave every field the operator owns untouched. State `kept-local`. Do NOT overwrite a differing `agent` ref, `git_author`, `workspace`, or the domain aspect — operators may have customized. The one exception is the mandatory cross-cutting aspects, below.
+- **present** (any shape) → leave every field the operator owns untouched. State `kept-local`. Do NOT overwrite a differing `agent` ref, `git_author`, `workspace`, or the domain aspect — operators may have customized. Two exceptions complete what an older run left out rather than overriding anything: the mandatory cross-cutting aspects below, and a `workspace` key absent from one of the four isolated roles (above). Both are gaps, not choices — a differing value is a choice and stays.
 
 ### Complete the mandatory cross-cutting aspects
 
@@ -215,27 +219,28 @@ The completion pass above replaces the counting this step used to do for `resear
 
 Report-only completeness check for the **system entries** from Step 3 — experts that sibling plugins register via their own install skills. This skill NEVER seeds or edits them (the owning plugin's install is the sole writer); it only detects gaps so a plugin update that shipped a new system expert doesn't go unnoticed.
 
-### The system-expert registry
+### The system-expert registry — read from the manifests, never from a table here
 
-| Owning plugin | Expert keys it registers | Fix |
-|---|---|---|
-| `lazycortex-core` | `runtime.doctor` | `/lazy-core.install` |
-| `lazycortex-review` | `review.doc_doctor` | `/lazy-review.install` |
-| `lazycortex-specs` | `spec.coordinator` | `/lazy-spec.install` |
-| `lazycortex-wiki` | `wiki.curator` | `/lazy-wiki.install` |
+Each plugin declares the expert keys its own install registers, in its `.claude-plugin/plugin.json`:
 
-The registry is closed-set: when a sibling plugin ships a new system expert, this table extends in the same edit that ships it.
+```json
+"provides_experts": ["wiki.curator", "wiki.terms-curator", "wiki.tag-curator", "wiki.structure-curator", "wiki.domain-writer"]
+```
+
+Build the registry at run time: for every installed plugin, read `provides_experts` from its manifest (the newest cached version, or the dev-vault source when this repo ships it) and take the union, remembering which plugin declared each key. The plugin's own install skill is the fix for any key it declares.
+
+A hardcoded table here would name only the roles that existed when someone last edited this step, so every role added since reads as `unknown` — a false alarm on a healthy install and silence on a real absence. `lazy-core.hygiene` § Dynamic content forbids exactly that; the manifest is the machine-readable source it requires. A plugin with no `provides_experts` key declares no system experts, which is a valid answer and not a finding.
 
 ### The check
 
-For each registry row, resolve whether the owning plugin is enabled at the current scope: `Bash(lazycortex-core detect-scope <plugin>@lazycortex)` — treat `project`/`user` as enabled, `not-installed` as disabled (skip the row, state `skipped: <plugin> not installed`).
+For each declared key, resolve whether the declaring plugin is enabled at the current scope: `Bash(lazycortex-core detect-scope <plugin>@lazycortex)` — treat `project`/`user` as enabled, `not-installed` as disabled (skip its keys, state `skipped: <plugin> not installed`).
 
-For each enabled plugin's expert keys, check presence in the loaded `experts` section:
+For each enabled plugin's declared keys, check presence in the loaded `experts` section:
 
 - **present** → state `system: <key> (present)`.
-- **missing** → state `system: <key> (missing — run <fix> to register, or ignore if the feature is deliberately unconfigured)`. Do NOT seed it yourself.
+- **missing** → state `system: <key> (missing — run /<plugin-namespace>.install to register, or ignore if the feature is deliberately unconfigured)`. Do NOT seed it yourself.
 
-Additionally, list any system entry (from the Step 3 partition) whose key is absent from the registry table as `system: <key> (unknown — not in the registry; registered by a plugin this table doesn't know yet)`. Informational only.
+Additionally, list any system entry (from the Step 3 partition) whose key no installed plugin declares as `system: <key> (unknown — declared by no installed plugin's manifest)`. Informational only; a key left by a plugin the operator removed lands here legitimately.
 
 Outcome: `system-experts: complete` or `system-experts: <N> missing`.
 

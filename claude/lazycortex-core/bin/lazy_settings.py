@@ -63,6 +63,35 @@ CURRENT_VERSIONS = {
 }
 
 
+def resolve_agent_model_tier(value: object) -> str | None:
+  """
+  Unwrap one `agent_models` entry value to its effective tier string.
+
+  An entry is either a bare string (the operator's pin) or a seed object
+  `{"tier": ..., "seeded_from": ...}` recording where the value came from —
+  `seeded_from` is install-step bookkeeping and never itself a tier. Both
+  shapes resolve to the same effective tier; a malformed object (no `tier`
+  key, or a non-string `tier`) resolves to no tier at all.
+
+  Args:
+    value: One `agent_models[<group>][<key>]` entry as read from settings.
+
+  Returns:
+    The tier string, or `None` when `value` is neither a string nor a
+    seed object with a string `tier`.
+  """
+  # guard: bare-string pin — the value is already the tier
+  if isinstance(value, str):
+    return value
+  # guard: not a seed object — nothing to unwrap
+  if not isinstance(value, dict):
+    return None
+  # waiver: 'tier' names the seed-object field per the documented agent_models entry shape;
+  # a one-member constants container for a single call site is not worth the indirection
+  tier = value.get("tier")
+  return tier if isinstance(tier, str) else None
+
+
 def _migrations(section_key: str) -> dict[int, Callable[[dict], dict]]:
   """
   Return the migration ladder for a given section key.

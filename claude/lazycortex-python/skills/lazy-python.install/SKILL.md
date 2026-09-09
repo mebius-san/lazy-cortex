@@ -65,7 +65,7 @@ Outcome per rule: `installed` (absent → copied) / `unchanged` (byte-identical)
 
 ## Step 2: Deploy chk-py and tst-py wrappers into `cli/` and ensure `.venv/` gitignored
 
-Read `${CLAUDE_PLUGIN_ROOT}/templates/chk-wrapper.sh` and `tst-wrapper.sh`, substitute `{{CHK_BIN_PATH}}` and `{{TST_BIN_PATH}}` with absolute paths to `${CLAUDE_PLUGIN_ROOT}/bin/chk` and `${CLAUDE_PLUGIN_ROOT}/bin/tst` respectively, write the rendered scripts to `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py`, and `chmod +x` each. Then ensure the consumer's `.gitignore` contains a `.venv/` line — the fallback venv (`_ensure_venv.sh` probe 4) is created in the repo root at `<consumer>/.venv`, so it must be ignored. The phase reads `<consumer>/.gitignore` (creating it if absent) and appends `.venv/` only when no `.venv` / `.venv/` line is already present — idempotent.
+Copy `${CLAUDE_PLUGIN_ROOT}/templates/chk-wrapper.sh` and `tst-wrapper.sh` verbatim to `<consumer>/cli/chk-py` and `<consumer>/cli/tst-py`, and `chmod +x` each. **Substitute nothing.** The templates are path-agnostic by design: they resolve the active plugin install at exec time, so the wrapper keeps working after the next `/plugin update`. Baking an absolute path — which necessarily carries a plugin version — into the consumer's tracked `cli/` pins them to a directory that the next update deletes. Then ensure the consumer's `.gitignore` contains a `.venv/` line — the fallback venv (`_ensure_venv.sh` probe 4) is created in the repo root at `<consumer>/.venv`, so it must be ignored. The phase reads `<consumer>/.gitignore` (creating it if absent) and appends `.venv/` only when no `.venv` / `.venv/` line is already present — idempotent.
 
 After this step `./cli/chk-py` and `./cli/tst-py` are callable from the terminal. The `-py` suffix is fixed — it lets per-language wrappers from other plugins coexist without name collisions. Adding `cli` to `$PATH` is the consumer's call.
 
@@ -179,7 +179,7 @@ Outcome: `env-source-already-set` / `env-source-no-candidate` / `env-source-reco
 
 ## Step 7.5: Seed agent-model tiers
 
-Seed the `agent_models.lazycortex` group with this plugin's shipped subagents (`lazy-python.docstring-writer`, `lazy-python.test-writer`, `lazy-python.code-reviewer`) by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-python:`-prefix filter, and the non-destructive per-key semantics (absent→add, equal→unchanged, different→kept-local). No inline tier logic here. Scope is `project` — lazycortex-python is per-repo tooling (see "Decisions are remembered" above), so the primitive targets `<repo-root>/.claude/lazy.settings.json`.
+Seed the `agent_models.lazycortex` group with every subagent this plugin ships, by dispatching the shared primitive — it owns the `default-tiers.json` locate, the `lazycortex-python:`-prefix filter, and the per-key semantics. No inline tier logic here, and no list of agent names here either: the prefix filter over the SOT is what enumerates them, so an agent added to the plugin is seeded without this step being edited. Scope is `project` — lazycortex-python is per-repo tooling (see "Decisions are remembered" above), so the primitive targets `<repo-root>/.claude/lazy.settings.json`.
 
 Dispatch:
 
@@ -196,7 +196,9 @@ Outcome: `seeded` (any entry added) or `unchanged`.
 
 ## Step 7.6: Register the code-reviewer expert
 
-Register `lazy-python.code-reviewer` as an expert in `<consumer>/.claude/lazy.settings.json` so the review phase is dispatchable from the expert runtime as well as from `chk-py review`. The entry is additive and never overwrites one already on record — the operator's expert config is authoritative.
+Register `lazy-python.code-reviewer` as an expert in `<consumer>/.claude/lazy.settings.json` so the review phase is dispatchable from the expert runtime as well as from `chk-py review`.
+
+The entry never overwrites a value the operator set, and it completes the install-managed fields an older run left out — `agent` and `aspects` point at artifacts this plugin ships, so a stale or missing pointer is the plugin's to correct, per the File-sync policy's install-managed-value rule. A key merely being present is not proof the entry is whole: an entry that is `{}`, or one whose `agent` names an agent this plugin no longer ships, resolves to nothing at dispatch time.
 
 Run:
 
@@ -204,7 +206,7 @@ Run:
 Bash(python3 ${CLAUDE_PLUGIN_ROOT}/skills/lazy-python.install/bin/install_phases.py phase7 ${CLAUDE_PROJECT_DIR})
 ```
 
-Outcome: `expert-registered: python.code-reviewer` (added) or `expert-already-registered` (left untouched).
+Outcome: `expert-registered: python.code-reviewer` (added), `expert-refreshed: python.code-reviewer` (install-managed field completed or corrected), or `expert-already-registered` (entry whole, left untouched).
 
 ## Step 8: Log the run
 

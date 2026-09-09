@@ -1,7 +1,7 @@
 ---
 chapter_type: walkthrough
 summary: Go from a bare repo to a fully-wired Obsidian vault — tag pages, Iconize sync, diagram glue, click-to-zoom — one chained install.
-last_regen: 2026-09-07
+last_regen: 2026-09-09
 diagram_spec:
   anchor: "Journey at a glance"
   request: "Sequence diagram showing the vault bootstrap journey: user runs /lazy-obsidian.install, which installs Dataview, chains into /lazy-obsidian.iconize-install (installs folder-notes, obsidian-icon-folder, iconize-reloader, scaffolds icon-map and repaint routine), then itself syncs and enables its CSS snippets (mermaid-fit.css, ascii-fit.css, callouts.css) in appearance.json, and finally chains into /lazy-obsidian.diagram-install (installs mermaid-popup for click-to-zoom), ending with the user reloading Obsidian and verifying."
@@ -10,7 +10,7 @@ source_skills:
   - lazy-obsidian.iconize-install
   - lazy-obsidian.diagram-install
   - lazy-obsidian.gen-tag-pages
-source_sha: 0e0562d0fc4bb9457ff9d14758e688f4eac27c87
+source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 ---
 # How do I wire up a fresh vault from scratch?
 
@@ -137,7 +137,11 @@ before.
 
 **Repaint routine** — when the repo runs the lazycortex daemon, the chain
 registers the `lazy-obsidian.repaint` routine, which repaints icons after each
-commit; without a daemon this step reports `no-daemon` and moves on.
+commit; without a daemon this step reports `no-daemon` and moves on. On a
+re-run, if the registered routine's command, watch trigger, or `ignore_halt`
+flag no longer match what this install would register (an older version wrote
+it), the chain refreshes it in place — your tuned `interval_sec` is carried
+over, everything else resets to the shipped defaults.
 
 **Gitignore entry** — Iconize's `data.json` at
 `.obsidian/plugins/obsidian-icon-folder/data.json` is appended to `.gitignore`
@@ -170,7 +174,10 @@ regions; only a same-region conflict prompts you.
 After the snippets land, the base install enables all three in
 `appearance.json` under `enabledCssSnippets` — this is the one writer of that
 array. `/lazy-obsidian.diagram-install` only declares the two diagram-fit
-snippets it depends on; it does not install or enable them itself.
+snippets it depends on; it does not install or enable them itself. On a re-run
+after a plugin update that withdraws a snippet, the install also drops that
+snippet's now-dead entry from the array — you'll see it called out as
+**retired** in the Step 6 report.
 
 **Verification gate:** if the report shows any snippet outcome of `deferred`
 (snippet file absent — can happen if a conflict earlier in the run was
@@ -207,6 +214,12 @@ single `/lazy-obsidian.install` invocation. Scan it for:
 - Any **enabled** outcome from the snippet sync step (Step 4) — this means you
   need to **reload Obsidian** (or click ↻ next to each snippet in Settings →
   Appearance → CSS snippets) before the snippets take effect mid-session.
+- Any **retired:`<name>`** outcome from the snippet sync step (Step 4) — a
+  snippet entry a previous install wrote is now removed because the plugin no
+  longer ships that file; nothing for you to do.
+- Any **refreshed** outcome on the repaint routine (Step 3) — a previous
+  install wrote an older shape of the routine and this run brought it current;
+  your `interval_sec` tuning was preserved.
 - Any **failed:** outcome for `mermaid-popup` — note the reason and re-run
   `/lazy-obsidian.update-plugin mermaid-popup` when the network is available.
 - A `paint-roots-seeded=<vault_root>` annotation on the icon-map line (Step 3)
@@ -238,8 +251,9 @@ plugin settings for Iconize and confirm the frontmatter field names are
 ## After you're done
 
 The install is idempotent — re-run `/lazy-obsidian.install` any time to pick
-up template changes after a plugin update, or to bring a newly cloned repo up
-to the same baseline.
+up template changes after a plugin update, bring a newly cloned repo up to the
+same baseline, or reconcile an older run's repaint routine and snippet array
+to the current shape.
 
 **Generate your first tag pages.** The template scaffolded in Step 1 doesn't
 populate `Tags/` by itself. Ask Claude to regenerate tag pages (e.g.

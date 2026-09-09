@@ -251,8 +251,8 @@ def clear_dead_job(jdir: Path) -> None:
   """
   Prepare a failed job directory for retry by removing per-attempt artifacts.
 
-  The READY marker and the cumulative attempt counter survive so the next pump tick
-  re-picks the job with prior failure history intact.
+  The bundle is left armed and the cumulative attempt counter survives, so the next pump
+  tick re-picks the job with prior failure history intact.
 
   Args:
     jdir: Absolute path to the job directory to reset.
@@ -264,6 +264,15 @@ def clear_dead_job(jdir: Path) -> None:
       (jdir / name).unlink()
     except FileNotFoundError:
       pass
+
+  # Decision: READY is placed rather than merely left alone — retry means the pump can pick the
+  # job up, and a bundle whose dispatch died before arming it has no marker to preserve. Without
+  # this the caller is told the retry succeeded while the bundle stays invisible to the pump, gets
+  # buried again on the next scan, and comes back to the doctor forever. For an armed bundle the
+  # touch is a no-op refresh.
+
+  # the bundle leaves this call claimable, which is the whole meaning of a retry
+  (jdir / JobMarker.READY).touch()
   # job dirs always live at <repo>/.experts/.jobs/<expert>/<job> — derive the repo root
   # waiver: inline numeric literal (parents-index depth), not a domain constant
   error_ledger.record(jdir.parents[3], {

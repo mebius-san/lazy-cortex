@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes across lazycortex-wiki skills — symptoms, likely causes, and fixes.
-last_regen: 2026-09-07
+last_regen: 2026-09-09
 no_diagram: true
 source_skills:
   - lazy-wiki.install
@@ -13,7 +13,7 @@ source_skills:
   - lazy-wiki.terms
   - lazy-wiki.domains
   - lazy-wiki.domain-sync
-source_sha: 5fcbdd05ba8f7b53d2a1781f6bc628c2c6208637
+source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 ---
 # Troubleshooting
 
@@ -51,7 +51,7 @@ source_sha: 5fcbdd05ba8f7b53d2a1781f6bc628c2c6208637
 
 **Symptom**: `/lazy-wiki.install` completes, but nodes never get curated on their own after a commit — the wiki only updates when you run `/lazy-wiki.relink` by hand.
 
-**Likely cause**: The three wiki routines — one that reacts to changed files, one that prunes links to deleted files, and one that does a weekly full rescan — are registered unconditionally by install, exactly like the curator experts themselves. What's actually missing is a daemon to fire them: a registered routine only ticks on its own once the project's background daemon is running and supervising this checkout.
+**Likely cause**: Install registers five wiki routines unconditionally, exactly like the curator experts themselves: one that reacts to changed files, one that prunes links to deleted files, one that does a weekly full rescan, one that runs a daily deterministic sanitizer over the doctor's fixable findings, and one that consolidates tag values weekly. What's actually missing is a daemon to fire them: a registered routine only ticks on its own once the project's background daemon is running and supervising this checkout.
 
 **Fix**: Tick the routines by hand right away with `/lazy-runtime.tick`, or make it durable by setting `daemon.enabled` and `daemon.run_here` in the tracked `lazy.settings.json` and re-running `/lazy-core.install` to install a supervisor. Until then, `/lazy-wiki.relink <scope-id>` still brings one scope fully up to date on demand.
 

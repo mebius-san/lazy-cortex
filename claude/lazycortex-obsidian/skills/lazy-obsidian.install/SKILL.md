@@ -126,6 +126,8 @@ This file is **not** an install-managed mirror, and Step 3's overwrite-on-drift 
 
 No comparison, no merge, no prompt, ever. Once the file exists it belongs to the vault, and a plugin update that changes the shipped default does not reach it. No orphan detection is needed — the plugin owns exactly one template file under this name.
 
+This is a genuine seed and stays absent-only; the File-sync policy's refresh rule for install-managed values does not reach it. The test that separates the two is ownership after the write, not the shape of the check: this file has no `_local` override path, so the copy in the vault IS the operator's editing surface. A value with an override path elsewhere, or one the operator is never expected to touch, is the plugin's and gets refreshed.
+
 A vault still carrying the pre-namespace name (`obsidian.tag-page-template.md`) is not this step's business: renaming a consumer file that drifted from the naming canon belongs to `lazy-core.doctor` / `lazy-core.autosetup`, which own that canonicalisation for every plugin at once. This step only ever seeds the canonical name.
 
 ### Agent availability
@@ -178,6 +180,8 @@ These are quiet-sync artifacts — no per-file install prompt, no drift overwrit
 
 Use `Read` + `Write` so the merge stays visible. "Conflict" means same region changed incompatibly on both sides — not merely "bytes differ".
 
+**Under a no-questions run** (`lazy-core.autosetup` and anything else driving this skill without an operator channel), keep the local region, apply the rest of the shipped delta, and state **kept-local-unattended**, naming the file. A question nobody can answer must still leave a determinate outcome; reporting `needs-interactive` on every unattended run is not one.
+
 Outcome: per-snippet status word from `installed` / `unchanged` / `merged` / `kept-local`. Record for Step 7.
 
 ### Enable in appearance.json
@@ -188,12 +192,14 @@ Read `<vault>/appearance.json`. If missing or unparseable, treat its contents as
 - For each snippet `<name>` synced above:
   - If `<vault>/snippets/<name>.css` does not exist on disk, do NOT add the entry — pointing `enabledCssSnippets` at a missing file is dead config. Record per-snippet outcome **deferred** in this case. (The sync above always writes the file unless a conflict was kept-local in a way that removed it — normally the file is present.)
   - Otherwise, if the array does NOT contain `"<name>"`, append it.
+- Drop any entry naming a snippet **this plugin used to ship and no longer does** — the file is gone from `<vault>/snippets/` and the name is not in the enumeration above, yet it sits in the array pointing at nothing. Removal is limited to that case: an entry naming a snippet from another source, or one whose file exists, is the vault's and stays. Record the removal as **retired: `<name>`**.
 - Atomic write (`appearance.json.tmp` → `mv`) only when the array changed.
 
 Per-snippet outcome:
 - `enabled` — added to the array this run.
 - `already-enabled` — entry was already present.
 - `deferred` — snippet file absent on disk; refused to register a stale entry.
+- `retired` — a dead entry for a snippet this plugin withdrew was removed.
 
 Reload note: Obsidian does not watch `appearance.json` for changes mid-session. Step 7 tells the user to reload Obsidian (or click ↻ next to each snippet in Settings → Appearance → CSS snippets) when any snippet's outcome this step was **enabled**.
 

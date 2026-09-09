@@ -67,7 +67,9 @@ user = load_section(Path.home() / '.claude/lazy.settings.json', 'agent_models')
 
 `load_section` handles missing files and applies any pending migrations — no manual "treat as empty" branching needed.
 
-Build an in-memory merged view: `projectConfig` wins per-group over `userConfig`. Flatten to `{dispatch_string: value}` for lookup in Step 4. Skip any top-level key whose value is not a dict (e.g. `_version: int`) — only group sub-dicts carry dispatch mappings. (Filter by shape, not by name, because `_user` / `_project` / `_builtin` are legitimate group-name keys that share the underscore prefix.)
+**Two entry shapes.** A value is either a bare tier string — the operator's pin — or a seed object `{"tier": …, "seeded_from": …}` written by an install step, where `seeded_from` is the shipped default in force when it was seeded (`lazy-core.install` Step 6 defines the shape). Read the effective tier from `tier` when the value is an object, from the string itself otherwise; treat the two identically everywhere below except where a step says otherwise. This wizard's own writes are operator decisions, so they are always bare strings.
+
+Build an in-memory merged view: `projectConfig` wins per-group over `userConfig`. Flatten to `{dispatch_string: effective_tier}` for lookup in Step 4, keeping the raw value beside it for Step 8. Skip any top-level key whose value is not a dict (e.g. `_version: int`) — only group sub-dicts carry dispatch mappings. (Filter by shape, not by name, because `_user` / `_project` / `_builtin` are legitimate group-name keys that share the underscore prefix.)
 
 **Do not write in this step.** Writes happen in Step 8 only for scopes that actually receive new entries.
 
@@ -86,7 +88,12 @@ For each, record: dispatch string, target group, plugin name (if applicable), so
 
 **Missing.** For each discovered agent, if its dispatch string is absent from the flat map from Step 2, add it to the missing list. Entries explicitly set to `"default"` in either scope count as decided — exclude them.
 
-**Stale.** Walk every configured entry (both scope files, every group) whose key is plugin-namespaced (`<plugin>:<stem>`). The entry is stale iff the plugin is present in `~/.claude/plugins/installed_plugins.json` AND its newest cache dir has no `agents/<stem>.md` — i.e. the agent provably existed under that plugin's dispatch convention and was deleted. Record `(source file, group, dispatch)` in the stale list. Keys that are not plugin-namespaced (built-ins, `_user`/`_project` stems, skill-shaped dispatches) and keys of plugins that are not installed locally are never flagged — absence can't be proven for them.
+**Stale.** Walk every configured entry (both scope files, every group) whose key is plugin-namespaced (`<plugin>:<stem>`). An entry is stale under either of two proofs:
+
+1. **The agent was deleted.** The plugin is present in `~/.claude/plugins/installed_plugins.json` AND its newest cache dir has no `agents/<stem>.md` — the agent provably existed under that plugin's dispatch convention and is gone.
+2. **The plugin was retired.** The plugin appears in NEITHER `installed_plugins.json` NOR any registered marketplace's catalog (`~/.claude/plugins/marketplaces/*/.claude-plugin/marketplace.json`, the `plugins[].name` values). A plugin the operator merely uninstalled still stands in its marketplace and is left alone; one that stands nowhere no longer exists to be reinstalled, so its keys can never resolve again.
+
+Record `(source file, group, dispatch)` in the stale list. Keys that are not plugin-namespaced (built-ins, `_user`/`_project` stems, skill-shaped dispatches) are never flagged — absence can't be proven for them. Neither can it for an uninstalled plugin its marketplace still offers, which is why proof 2 requires both absences and not just the first.
 
 If both lists are empty → skip Steps 5–8, go to Step 9 with outcome `nothing to do`.
 
@@ -212,12 +219,12 @@ One `AskUserQuestion` at a time. Wait for each answer before the next prompt.
 
 ## Step 8: Write back
 
-**Prune first.** For each stale entry from Step 4, load the section from the file that holds it, delete the key (drop a group sub-dict that becomes empty, except the `_version` metadata), and persist via `save_section`. Pruning is mechanical — the agent file's absence is objective — so it applies in interactive AND non-interactive runs without a prompt; every removal is reported in Step 9. If a pruned dispatch is still referenced as `experts.<name>.agent`, do NOT touch the expert entry — report it as `WARN: expert <name> references deleted agent <dispatch>`.
+**Prune first.** For each stale entry from Step 4, load the section from the file that holds it, delete the key (drop a group sub-dict that becomes empty, except the `_version` metadata), and persist via `save_section`. Pruning is mechanical — both staleness proofs rest on what is on disk, not on judgement — so it applies in interactive AND non-interactive runs without a prompt; every removal is reported in Step 9, naming which proof retired it. If a pruned dispatch is still referenced as `experts.<name>.agent`, do NOT touch the expert entry — report it as `WARN: expert <name> references deleted agent <dispatch>`.
 
 Then group the planned writes from Steps 6 and 7 by destination file. For each destination that has at least one planned entry:
 
 1. Load the current section from the destination file via `load_section` (handles missing file transparently — no separate existence check needed).
-2. Apply all planned entries for this destination to the loaded section dict (creating missing group sub-keys on demand, preserving all existing keys — never overwrite; this loop only writes *missing* entries).
+2. Apply all planned entries for this destination to the loaded section dict (creating missing group sub-keys on demand, preserving all existing keys — never overwrite; this loop only writes *missing* entries). Every entry it writes is a bare tier string: a value the operator chose in this wizard is a pin, and a pin carries no `seeded_from`. Writing one over a seed object replaces the object outright, which is the intended effect — the operator has spoken.
 3. Persist via `save_section`:
 
 ```

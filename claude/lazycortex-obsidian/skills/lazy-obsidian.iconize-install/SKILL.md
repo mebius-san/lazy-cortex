@@ -240,8 +240,12 @@ and no `filter` — a matcher callback can key on a non-markdown file, so narrow
 would silently drop repaints. Set `ignore_halt: true`: the routine must run precisely when a
 dirty tree has stopped everything else, since that dirt is what it clears.
 
-If the routine is already registered, leave it. Outcome: **registered** / **already-present** /
-**no-daemon**.
+A registered routine is read back and compared against the answers above, per the File-sync
+policy's install-managed-value rule: this plugin composed every one of them, so a `command`,
+`watch`, or `ignore_halt` that differs is a value an older version of this step wrote, not a
+choice to preserve. Refresh it the way `lazy-spec.install` Step 5b refreshes its filter —
+unregister, then re-register — holding `interval_sec` from the recorded entry, which the operator
+does tune. Outcome: **registered** / **refreshed** / **already-present** / **no-daemon**.
 
 The routine's commits carry the bot identity `lazy-obsidian.repaint` /
 `lazy-obsidian.repaint@bot.invalid` (plus a `Lazy-Bot: lazy-obsidian.repaint` trailer). Sibling

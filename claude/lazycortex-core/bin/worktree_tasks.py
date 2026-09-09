@@ -16,6 +16,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from lazy_install_phases import ensure_self_ignoring_dir
+
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
   pass
@@ -85,6 +87,10 @@ class WorktreeTaskManager:
     (`origin/<base>` when a remote tracking ref exists, else the local base branch). A
     continuation names the branch a prior dispatch already created and reuses it as-is.
 
+    Guarantees:
+      - The worktree root directory gains its own self-ignoring `.gitignore` before any
+        worktree is added beneath it.
+
     Args:
       job_id: Job identifier; names the worktree directory.
       branch: Branch the worktree checks out, created when absent.
@@ -98,7 +104,9 @@ class WorktreeTaskManager:
     wt = self.path_for(job_id)
     # waiver: git CLI vocabulary, not a domain constant
     branch_exists = self._git("rev-parse", "--verify", "--quiet", branch).returncode == 0
-    self._root.mkdir(parents = True, exist_ok = True)
+    # the worktree root itself must never reach the primary checkout's tracked tree — each
+    # job directory beneath it is its own linked worktree with its own git bookkeeping
+    ensure_self_ignoring_dir(self._root)
     if branch_exists:
       # continuation: the branch already carries the job's earlier commits — reuse it
       # waiver: git CLI vocabulary, not a domain constant
@@ -151,16 +159,45 @@ class WorktreeTaskManager:
         continue
       os.symlink(src.resolve(), dst)
 
+  def _untracked(self, wt: Path) -> set[str]:
+    """
+    Return the untracked top-level paths git reports for a worktree.
+
+    Includes paths a pre-existing `.gitignore` (repo-local or the operator's global one)
+    already excludes — `--ignored=matching` surfaces those as `!!` alongside the plain `??`
+    untracked entries, so a bootstrap artefact that happens to match a global ignore rule
+    (e.g. `*.tmp`) is still seen and still lands in the worktree-local `.gitignore` the
+    caller writes from the before/after diff.
+
+    Args:
+      wt: Path to the worktree directory to inspect.
+
+    Returns:
+      One entry per untracked or ignored file or directory, the raw porcelain path token
+      with its two-character status code and the following space stripped — an untracked
+      directory reports itself as one entry, not the files inside it.
+    """
+    # waiver: git CLI vocabulary, not a domain constant
+    status = self._git("status", "--porcelain", "--untracked-files=normal", "--ignored=matching", cwd = wt)
+    # waiver: git porcelain prefix width, not a domain constant
+    return { line[3:] for line in status.stdout.splitlines() if line[:3] in ("?? ", "!! ") }
+
   def bootstrap(self, wt: Path, cmd: str | None) -> str | None:
     """
     Run the operator's bootstrap command inside a freshly created worktree.
 
-    The command rebuilds the gitignored execution environment a worktree does not materialise.
-    It runs on every creation — a continuation's worktree was removed after the previous run,
-    so it bootstraps anew. Everything it creates must be gitignored: the post-job check reads
-    `git status --porcelain`, so an un-ignored artifact fails the job. No own timeout: the
-    daemon's per-routine timeout bounds the pump run this call is part of, the same bound the
-    spawn itself lives under.
+    Rebuilds the gitignored execution environment a worktree does not materialise. Runs on
+    every creation — a continuation's worktree was removed after the previous run, so it
+    bootstraps anew.
+
+    Guarantees:
+      - Whatever new untracked paths the command produces are recorded into the worktree's
+        own `.gitignore`, which also lists itself alongside them; nothing is written when
+        the command created nothing untracked.
+
+    Notes:
+      - No own timeout: bounded by the daemon's per-routine timeout that already bounds the
+        pump run this call is part of, the same bound the spawn itself lives under.
 
     Args:
       wt: Path to the worktree directory to bootstrap.
@@ -172,6 +209,7 @@ class WorktreeTaskManager:
     # guard: no bootstrap configured — the worktree runs on tracked files alone
     if not cmd:
       return None
+    before = self._untracked(wt)
     proc = subprocess.run(
       # waiver: shell invocation idiom shared with the post-push hook, not a domain constant
       [ "sh", "-c", cmd ], cwd = str(wt),
@@ -180,6 +218,14 @@ class WorktreeTaskManager:
     # guard: bootstrap failed — the caller fails the job rather than spawning into a broken env
     if proc.returncode != 0:
       return f"bootstrap exited {proc.returncode}: {(proc.stderr or proc.stdout).strip()[-300:]}"
+    created = sorted(self._untracked(wt) - before)
+    # guard: the command created nothing untracked — no .gitignore needed
+    if not created:
+      return None
+    # the file itself is also new and untracked — list it alongside what it records so the
+    # cleanliness check the caller runs afterwards never sees it as dirt
+    # waiver: filesystem filename idiom + stdlib encoding idiom, not domain constants
+    (wt / ".gitignore").write_text("".join(f"{p}\n" for p in [ *created, ".gitignore" ]), encoding = "utf-8")
     return None
 
   def remove(self, wt: Path) -> None:

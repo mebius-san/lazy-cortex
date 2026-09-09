@@ -1,7 +1,7 @@
 ---
 chapter_type: troubleshooting
 summary: Common failure modes during lazycortex-experts setup — symptoms, likely causes, and fixes.
-last_regen: 2026-09-07
+last_regen: 2026-09-09
 no_diagram: true
 source_skills:
   - lazy-experts.install
@@ -17,7 +17,7 @@ source_skills:
   - lazy-experts.debugger
   - lazy-experts.reviewer
   - lazy-experts.tester
-source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
+source_sha: 4fc1434f9297bd2173e9a38ba45d75f8d68a26f8
 ---
 # Troubleshooting
 
@@ -53,9 +53,9 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 
 ## Only `fiction-writer` got seeded for my sci-fi or fantasy class
 
-**Symptom**: You picked `sci-fi` (or `fantasy`) when `/lazy-experts.install` asked which classes to register, but only one expert entry appeared — `sci-fi.fiction-writer` (or `fantasy.fiction-writer`) — with no interpreter, designer, system-designer, architect, planner, use-case-writer, ui-designer, developer, data-writer, debugger, reviewer, or tester for that class.
+**Symptom**: You picked `sci-fi` (or `fantasy`) when `/lazy-experts.install` asked which classes to register, but only one expert entry appeared — `sci-fi.fiction-writer` (or `fantasy.fiction-writer`) — with no interpreter, designer, system-designer, architect, planner, use-case-writer, ui-designer, developer, data-writer, docs-writer, debugger, reviewer, or tester for that class.
 
-**Likely cause**: This is the intended behaviour, not a bug. The class map seeds roles differently by class kind: technical classes (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, and any future non-fiction class) get all twelve engineering roles — `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `debugger`, `reviewer`, `tester`; fiction classes (`sci-fi`, `fantasy`) get only `fiction-writer`, because the other roles assume an engineering lifecycle (design specs, code architecture, implementation plans, code review) that doesn't apply to literary work. `data-writer` is seeded with every technical class, not only `game-dev` — writing data files against an approved design is a general genre, not a game-dev particularity. Fiction classes also never receive `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, or `lazy-experts.structure-aspect` — those three assume a technical repository, which a scene has nothing to do with.
+**Likely cause**: This is the intended behaviour, not a bug. The class map seeds roles differently by class kind: technical classes (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`, and any future non-fiction class) get all thirteen engineering roles — `interpreter`, `designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `debugger`, `reviewer`, `tester`; fiction classes (`sci-fi`, `fantasy`) get only `fiction-writer`, because the other roles assume an engineering lifecycle (design specs, code architecture, implementation plans, code review, user-facing docs) that doesn't apply to literary work. `data-writer` is seeded with every technical class, not only `game-dev` — writing data files against an approved design is a general genre, not a game-dev particularity. Fiction classes also never receive `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, or `lazy-experts.structure-aspect` — those three assume a technical repository, which a scene has nothing to do with.
 
 **Fix**: Nothing to fix if you're working purely in a fiction domain — `fiction-writer` is the complete role set for `sci-fi`/`fantasy`. If your project also spans a technical domain (`claude-plugin`, `game-dev`, `dotfiles`, `obsidian-plugin`, `data-pipeline`, `software-product`), register at least one expert of that class by hand in `lazy.settings.json[experts]`, or clear the `experts` section and re-run `/lazy-experts.install` so it asks again and seeds both class kinds together.
 
@@ -65,9 +65,9 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 
 **Symptom**: The final report from `/lazy-experts.install` ends with a line like `system-experts: 2 missing`, followed by entries such as `system: review.doc_doctor (missing — run /lazy-review.install to register, or ignore if the feature is deliberately unconfigured)`.
 
-**Likely cause**: Every sibling plugin (`lazycortex-core`, `lazycortex-review`, `lazycortex-specs`, `lazycortex-wiki`) registers its own system expert (`runtime.doctor`, `review.doc_doctor`, `spec.coordinator`, `wiki.curator`) through its own install skill. `/lazy-experts.install` only checks whether those entries are present for sibling plugins that are enabled at the current scope — it reports a gap when a sibling plugin is enabled but has never run its own install.
+**Likely cause**: Every sibling plugin that ships a system expert declares the keys its own install skill registers in a `provides_experts` array in its own `.claude-plugin/plugin.json` — `lazy-experts.install` builds the check's registry at run time from every installed plugin's manifest, rather than from a hardcoded list, so a plugin that adds a new system expert later is picked up automatically without this skill needing an update. It only checks keys declared by sibling plugins that are enabled at the current scope, and reports a gap when a sibling plugin is enabled but has never run its own install.
 
-**Fix**: `/lazy-experts.install` never seeds these entries itself — the owning plugin's install is the sole writer. Run the fix command the report names for the missing entry (e.g. `/lazy-review.install`, `/lazy-core.install`, `/lazy-spec.install`, `/lazy-wiki.install`), or leave it alone if you deliberately haven't configured that plugin's feature yet.
+**Fix**: `/lazy-experts.install` never seeds these entries itself — the owning plugin's install is the sole writer. Run the fix command the report names for the missing entry (e.g. `/lazy-review.install`, `/lazy-core.install`, `/lazy-spec.install`, `/lazy-wiki.install`, `/lazy-python.install`), or leave it alone if you deliberately haven't configured that plugin's feature yet.
 
 ---
 
@@ -88,6 +88,16 @@ source_sha: 897f6d87fe9edd5d16025ec6ce485db31ca56f03
 **Likely cause**: `/lazy-experts.install` never touches a field an operator owns on an existing entry — `agent`, `git_author`, `workspace`, or the domain aspect stay exactly as they are. But two kinds of thing are treated as mandatory rather than as an operator choice: five cross-cutting aspects (`lazy-experts.discipline-aspect` and `lazy-experts.research-aspect` on every domain-class entry, plus `lazy-experts.tech-writing-aspect`, `lazy-experts.terms-aspect`, and `lazy-experts.structure-aspect` on technical-class entries specifically), and the `can_commit_in_repo` flag on every writing-role entry (`designer`, `system-designer`, `architect`, `planner`, `use-case-writer`, `ui-designer`, `developer`, `data-writer`, `docs-writer`, `debugger`, `tester`). An entry seeded before one of these shipped (or hand-authored without it) isn't customized with respect to it — it's incomplete. Every re-run appends whatever's still missing from the mandatory aspect list, and seeds `can_commit_in_repo: true` on any writing-role entry that carries no such key at all, without touching anything else on the entry.
 
 **Fix**: Nothing to fix — this is `/lazy-experts.install` keeping an older or hand-authored entry current with the mandatory list, not an error. If you deliberately want an expert without one of the five aspects (e.g. a technical expert that should never load `lazy-experts.terms-aspect`), there's no opt-out marker for it: the aspect gets re-appended on every future run — remove it by hand after each run if you need to keep it off. `can_commit_in_repo` is different: an explicit `false` you set yourself is an operator choice the skill leaves untouched, exactly like a customized `workspace` — only a *missing* key gets completed to `true`.
+
+---
+
+## Report lists `experts.<key> (refreshed: workspace)` for entries that already existed
+
+**Symptom**: The report includes a line like `experts.game.developer (refreshed: workspace)` for an expert entry that already existed in `lazy.settings.json` before this run — you didn't touch that entry's `workspace` field.
+
+**Likely cause**: `workspace: "branch"` is seeded on every entry for the `developer`, `data-writer`, `docs-writer`, and `tester` roles — the acceptance-cycle roles that run their launch-checkbox job and every continuation on a job-scoped branch, so their work never lands directly on `main`. A missing `workspace` key on one of these four roles is indistinguishable from a deliberate `"main"` choice, so `/lazy-experts.install` treats the absent key as an incomplete entry (predating this backfill, or hand-authored without it) rather than an operator preference, and writes `workspace: "branch"` in.
+
+**Fix**: Nothing to fix — this brings an older or hand-authored entry in line with every other developer/data-writer/docs-writer/tester expert, which all run isolated by default. If you deliberately want one of these four roles to keep working directly on `main`, set `"workspace": "main"` explicitly on that entry — an explicit value, in either direction, is an operator choice the skill leaves untouched on every future run.
 
 ---
 
